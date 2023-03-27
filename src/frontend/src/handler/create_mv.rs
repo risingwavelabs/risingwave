@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::PbTable;
@@ -87,7 +88,11 @@ pub fn gen_create_mv_plan(
 
     let bound = {
         let mut binder = Binder::new_for_stream(session);
-        binder.bind_query(query)?
+        let bound = binder.bind_query(query)?;
+        // FIXME: We should record the views into mv's dependent relations to to refine the drop
+        // check and recursive rename of the views.
+        let _views = binder.shared_views().keys().cloned().collect_vec();
+        bound
     };
 
     let col_names = get_column_names(&bound, session, columns)?;

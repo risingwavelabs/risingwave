@@ -36,13 +36,6 @@ pub enum CastContext {
     Explicit,
 }
 
-impl CastSig {
-    /// Returns a string describing the cast.
-    pub fn to_string_no_return(&self) -> String {
-        format!("cast({:?}->{:?})", self.from_type, self.to_type).to_lowercase()
-    }
-}
-
 pub type CastMap = BTreeMap<(DataTypeName, DataTypeName), CastContext>;
 
 pub fn cast_sigs() -> impl Iterator<Item = CastSig> {

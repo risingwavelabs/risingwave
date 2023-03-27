@@ -52,6 +52,10 @@ use crate::task::AtomicU64Ref;
 /// enum is not supported in const generic.
 // TODO: Use enum to replace this once [feature(adt_const_params)](https://github.com/rust-lang/rust/issues/95174) get completed.
 pub type JoinTypePrimitive = u8;
+
+/// Evict the cache every n rows.
+const EVICT_EVERY_N_ROWS: u32 = 1024;
+
 #[allow(non_snake_case, non_upper_case_globals)]
 pub mod JoinType {
     use super::JoinTypePrimitive;
@@ -242,6 +246,8 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     metrics: Arc<StreamingMetrics>,
     /// The maximum size of the chunk produced by executor at a time
     chunk_size: usize,
+    /// Count the messages received, clear to 0 when counted to `EVICT_EVERY_N_MESSAGES`
+    cnt_rows_received: u32,
 
     /// watermark column index -> `BufferedWatermarks`
     watermark_buffers: BTreeMap<usize, BufferedWatermarks<SideTypePrimitive>>,
@@ -603,6 +609,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             append_only_optimize,
             metrics,
             chunk_size,
+            cnt_rows_received: 0,
             watermark_buffers,
         }
     }
@@ -662,6 +669,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         chunk,
                         self.append_only_optimize,
                         self.chunk_size,
+                        &mut self.cnt_rows_received,
                     ) {
                         left_time += left_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -687,6 +695,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         chunk,
                         self.append_only_optimize,
                         self.chunk_size,
+                        &mut self.cnt_rows_received,
                     ) {
                         right_time += right_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -704,7 +713,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
                     // Update the vnode bitmap for state tables of both sides if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        self.side_l.ht.update_vnode_bitmap(vnode_bitmap.clone());
+                        if self.side_l.ht.update_vnode_bitmap(vnode_bitmap.clone()) {
+                            self.watermark_buffers
+                                .values_mut()
+                                .for_each(|buffers| buffers.clear());
+                        }
                         self.side_r.ht.update_vnode_bitmap(vnode_bitmap);
                     }
 
@@ -748,12 +761,21 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         // `commit` them here.
         self.side_l.ht.flush(epoch).await?;
         self.side_r.ht.flush(epoch).await?;
-
-        // We need to manually evict the cache to the target capacity.
-        self.side_l.ht.evict();
-        self.side_r.ht.evict();
-
         Ok(())
+    }
+
+    // We need to manually evict the cache.
+    fn evict_cache(
+        side_update: &mut JoinSide<K, S>,
+        side_match: &mut JoinSide<K, S>,
+        cnt_rows_received: &mut u32,
+    ) {
+        *cnt_rows_received += 1;
+        if *cnt_rows_received == EVICT_EVERY_N_ROWS {
+            side_update.ht.evict();
+            side_match.ht.evict();
+            *cnt_rows_received = 0;
+        }
     }
 
     fn handle_watermark(
@@ -846,6 +868,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         chunk: StreamChunk,
         append_only_optimize: bool,
         chunk_size: usize,
+        cnt_rows_received: &'a mut u32,
     ) {
         let chunk = chunk.compact();
 
@@ -866,6 +889,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
         let keys = K::build(&side_update.join_key_indices, chunk.data_chunk())?;
         for ((op, row), key) in chunk.rows().zip_eq_debug(keys.iter()) {
+            Self::evict_cache(side_update, side_match, cnt_rows_received);
+
             let matched_rows: Option<HashValueType> =
                 Self::hash_eq_match(key, &mut side_match.ht).await?;
             match op {
@@ -1032,8 +1057,7 @@ mod tests {
     use risingwave_common::hash::{Key128, Key64};
     use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::expr::{new_binary_expr, InputRefExpression};
-    use risingwave_pb::expr::expr_node::Type;
+    use risingwave_expr::expr::build_from_pretty;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
@@ -1086,15 +1110,7 @@ mod tests {
     }
 
     fn create_cond() -> BoxedExpression {
-        let left_expr = InputRefExpression::new(DataType::Int64, 1);
-        let right_expr = InputRefExpression::new(DataType::Int64, 3);
-        new_binary_expr(
-            Type::LessThan,
-            DataType::Boolean,
-            Box::new(left_expr),
-            Box::new(right_expr),
-        )
-        .unwrap()
+        build_from_pretty("(less_than:boolean $1:int8 $3:int8)")
     }
 
     async fn create_executor<const T: JoinTypePrimitive>(

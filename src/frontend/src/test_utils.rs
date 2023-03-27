@@ -73,15 +73,15 @@ impl SessionManager<PgResponseStream> for LocalFrontend {
     }
 
     fn cancel_queries_in_session(&self, _session_id: SessionId) {
-        todo!()
+        unreachable!()
     }
 
     fn cancel_creating_jobs_in_session(&self, _session_id: SessionId) {
-        todo!()
+        unreachable!()
     }
 
     fn end_session(&self, _session: &Self::Session) {
-        todo!()
+        unreachable!()
     }
 }
 
@@ -294,7 +294,7 @@ impl CatalogWriter for MockCatalogWriter {
     }
 
     async fn create_function(&self, _function: PbFunction) -> Result<()> {
-        todo!()
+        unreachable!()
     }
 
     async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()> {
@@ -321,7 +321,7 @@ impl CatalogWriter for MockCatalogWriter {
     }
 
     async fn drop_view(&self, _view_id: u32) -> Result<()> {
-        todo!()
+        unreachable!()
     }
 
     async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
@@ -383,7 +383,7 @@ impl CatalogWriter for MockCatalogWriter {
     }
 
     async fn drop_function(&self, _function_id: FunctionId) -> Result<()> {
-        todo!()
+        unreachable!()
     }
 
     async fn drop_database(&self, database_id: u32) -> Result<()> {
@@ -395,6 +395,25 @@ impl CatalogWriter for MockCatalogWriter {
         let database_id = self.drop_schema_id(schema_id);
         self.catalog.write().drop_schema(database_id, schema_id);
         Ok(())
+    }
+
+    async fn alter_table_name(&self, table_id: u32, table_name: &str) -> Result<()> {
+        self.catalog
+            .write()
+            .alter_table_name_by_id(&table_id.into(), table_name);
+        Ok(())
+    }
+
+    async fn alter_view_name(&self, _view_id: u32, _view_name: &str) -> Result<()> {
+        unreachable!()
+    }
+
+    async fn alter_index_name(&self, _index_id: u32, _index_name: &str) -> Result<()> {
+        unreachable!()
+    }
+
+    async fn alter_sink_name(&self, _sink_id: u32, _sink_name: &str) -> Result<()> {
+        unreachable!()
     }
 }
 

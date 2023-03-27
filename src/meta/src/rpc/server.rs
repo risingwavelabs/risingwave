@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use either::Either;
 use etcd_client::ConnectOptions;
+use futures::future::join_all;
 use risingwave_common::config::MetaBackend;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
@@ -130,10 +131,16 @@ pub async fn rpc_serve(
                     .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
             let meta_store = Arc::new(EtcdMetaStore::new(client));
 
+            // `with_keep_alive` option will break the long connection in election client.
+            let mut election_options = ConnectOptions::default();
+            if let Some((username, password)) = &credentials {
+                election_options = election_options.with_user(username, password)
+            }
+
             let election_client = Arc::new(
                 EtcdElectionClient::new(
                     endpoints,
-                    Some(options),
+                    Some(election_options),
                     auth_enabled,
                     address_info.advertise_addr.clone(),
                 )
@@ -572,20 +579,28 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     }
 
     let shutdown_all = async move {
+        let mut handles = Vec::with_capacity(sub_tasks.len());
+
         for (join_handle, shutdown_sender) in sub_tasks {
             if let Err(_err) = shutdown_sender.send(()) {
                 continue;
             }
-            // The barrier manager can't be shutdown gracefully if it's under recovering, try to
-            // abort it using timeout.
-            match tokio::time::timeout(Duration::from_secs(1), join_handle).await {
-                Ok(Err(err)) => {
-                    tracing::warn!("Failed to join shutdown: {:?}", err);
+
+            handles.push(join_handle);
+        }
+
+        // The barrier manager can't be shutdown gracefully if it's under recovering, try to
+        // abort it using timeout.
+        match tokio::time::timeout(Duration::from_secs(1), join_all(handles)).await {
+            Ok(results) => {
+                for result in results {
+                    if let Err(err) = result {
+                        tracing::warn!("Failed to join shutdown: {:?}", err);
+                    }
                 }
-                Err(e) => {
-                    tracing::warn!("Join shutdown timeout: {:?}", e);
-                }
-                _ => {}
+            }
+            Err(e) => {
+                tracing::warn!("Join shutdown timeout: {:?}", e);
             }
         }
     };

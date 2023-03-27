@@ -32,7 +32,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
-use super::agg_common::AggExecutorArgs;
+use super::agg_common::{AggExecutorArgs, GroupAggExecutorExtraArgs};
 use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggStateStorage, ChunkBuilder, DistinctDeduplicater,
     OnlyOutputIfHasInput,
@@ -46,15 +46,15 @@ use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::aggregation::{
     apply_change_to_chunk_builder, apply_change_to_result_table, generate_agg_schema, AggCall,
-    AggGroup,
+    AggGroup as GenericAggGroup,
 };
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{BoxedMessageStream, Message};
 use crate::task::AtomicU64Ref;
 
-type BoxedAggGroup<S> = Box<AggGroup<S, OnlyOutputIfHasInput>>;
-type AggGroupCache<K, S> = ExecutorCache<K, BoxedAggGroup<S>, PrecomputedBuildHasher>;
+type AggGroup<S> = GenericAggGroup<S, OnlyOutputIfHasInput>;
+type AggGroupCache<K, S> = ExecutorCache<K, AggGroup<S>, PrecomputedBuildHasher>;
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -193,14 +193,12 @@ impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
 }
 
 impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
-    pub fn new(args: AggExecutorArgs<S>) -> StreamResult<Self> {
-        let extra_args = args.extra.unwrap();
-
+    pub fn new(args: AggExecutorArgs<S, GroupAggExecutorExtraArgs>) -> StreamResult<Self> {
         let input_info = args.input.info();
         let schema = generate_agg_schema(
             args.input.as_ref(),
             &args.agg_calls,
-            Some(&extra_args.group_key_indices),
+            Some(&args.extra.group_key_indices),
         );
         Ok(Self {
             input: args.input,
@@ -214,7 +212,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 },
                 input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
-                group_key_indices: extra_args.group_key_indices,
+                group_key_indices: args.extra.group_key_indices,
                 agg_calls: args.agg_calls,
                 row_count_index: args.row_count_index,
                 storages: args.storages,
@@ -222,9 +220,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 distinct_dedup_tables: args.distinct_dedup_tables,
                 watermark_epoch: args.watermark_epoch,
                 extreme_cache_size: args.extreme_cache_size,
-                chunk_size: extra_args.chunk_size,
+                chunk_size: args.extra.chunk_size,
                 emit_on_window_close: false,
-                metrics: extra_args.metrics,
+                metrics: args.extra.metrics,
             },
         })
     }
@@ -272,19 +270,17 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     Some(async {
                         // Create `AggGroup` for the current group if not exists. This will
                         // fetch previous agg result from the result table.
-                        let agg_group = Box::new(
-                            AggGroup::create(
-                                Some(key.deserialize(group_key_types)?),
-                                &this.agg_calls,
-                                &this.storages,
-                                &this.result_table,
-                                &this.input_pk_indices,
-                                this.row_count_index,
-                                this.extreme_cache_size,
-                                &this.input_schema,
-                            )
-                            .await?,
-                        );
+                        let agg_group = AggGroup::create(
+                            Some(key.deserialize(group_key_types)?),
+                            &this.agg_calls,
+                            &this.storages,
+                            &this.result_table,
+                            &this.input_pk_indices,
+                            this.row_count_index,
+                            this.extreme_cache_size,
+                            &this.input_schema,
+                        )
+                        .await?;
                         Ok::<_, StreamExecutorError>((key.clone(), agg_group))
                     })
                 }
@@ -362,7 +358,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // Apply chunk to each of the state (per agg_call), for each group.
         for (key, visibility) in group_visibilities {
-            let agg_group = vars.agg_group_cache.get_mut(&key).unwrap().as_mut();
+            let agg_group = vars.agg_group_cache.get_mut(&key).unwrap();
             let visibilities = call_visibilities
                 .iter()
                 .map(Option::as_ref)
@@ -434,8 +430,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             let agg_group = vars
                 .agg_group_cache
                 .get_mut(key)
-                .expect("changed group must have corresponding AggGroup")
-                .as_mut();
+                .expect("changed group must have corresponding AggGroup");
             agg_group.flush_state_if_needed(&mut this.storages).await?;
         }
 
@@ -660,7 +655,7 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
-    use crate::executor::agg_common::{AggExecutorArgs, AggExecutorArgsExtra};
+    use crate::executor::agg_common::{AggExecutorArgs, GroupAggExecutorExtraArgs};
     use crate::executor::aggregation::{AggArgs, AggCall};
     use crate::executor::monitor::StreamingMetrics;
     use crate::executor::test_utils::agg_executor::{
@@ -719,12 +714,11 @@ mod tests {
             distinct_dedup_tables: Default::default(),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
 
-            extra: Some(AggExecutorArgsExtra {
+            extra: GroupAggExecutorExtraArgs {
                 group_key_indices,
-
-                metrics: Arc::new(StreamingMetrics::unused()),
                 chunk_size: 1024,
-            }),
+                metrics: Arc::new(StreamingMetrics::unused()),
+            },
         })
         .unwrap()
         .boxed()

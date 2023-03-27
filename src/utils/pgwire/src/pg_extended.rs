@@ -625,9 +625,7 @@ mod tests {
     use pg_interval::Interval;
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use postgres_types::private::BytesMut;
-    use risingwave_common::types::{
-        DataType, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
-    };
+    use risingwave_common::types::{DataType, Date, Time, Timestamp};
     use tokio_postgres::types::{ToSql, Type};
 
     use crate::pg_extended::PreparedStatement;
@@ -815,15 +813,9 @@ mod tests {
         );
 
         let raw_params = vec![
-            NaiveDateWrapper::from_ymd_uncheck(2021, 1, 1)
-                .0
-                .to_string()
-                .into(),
-            NaiveTimeWrapper::from_hms_uncheck(12, 0, 0)
-                .0
-                .to_string()
-                .into(),
-            NaiveDateTimeWrapper::from_timestamp_uncheck(1610000000, 0)
+            Date::from_ymd_uncheck(2021, 1, 1).0.to_string().into(),
+            Time::from_hms_uncheck(12, 0, 0).0.to_string().into(),
+            Timestamp::from_timestamp_uncheck(1610000000, 0)
                 .0
                 .to_string()
                 .into(),
@@ -922,15 +914,15 @@ mod tests {
 
         // Test DATE, TIME, TIMESTAMP type.
         let mut raw_params = vec![BytesMut::new(); 3];
-        NaiveDateWrapper::from_ymd_uncheck(2021, 1, 1)
+        Date::from_ymd_uncheck(2021, 1, 1)
             .0
             .to_sql(&place_hodler, &mut raw_params[0])
             .unwrap();
-        NaiveTimeWrapper::from_hms_uncheck(12, 0, 0)
+        Time::from_hms_uncheck(12, 0, 0)
             .0
             .to_sql(&place_hodler, &mut raw_params[1])
             .unwrap();
-        NaiveDateTimeWrapper::from_timestamp_uncheck(1610000000, 0)
+        Timestamp::from_timestamp_uncheck(1610000000, 0)
             .0
             .to_sql(&place_hodler, &mut raw_params[2])
             .unwrap();
@@ -953,7 +945,7 @@ mod tests {
 
         // Test TIMESTAMPTZ, INTERVAL type.
         let mut raw_params = vec![BytesMut::new(); 2];
-        DateTime::<Utc>::from_utc(NaiveDateTimeWrapper::from_timestamp_uncheck(1200, 0).0, Utc)
+        DateTime::<Utc>::from_utc(Timestamp::from_timestamp_uncheck(1200, 0).0, Utc)
             .to_sql(&place_hodler, &mut raw_params[0])
             .unwrap();
         let interval = Interval::new(1, 1, 24000000);

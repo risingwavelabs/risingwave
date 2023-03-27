@@ -47,8 +47,8 @@ implement_using_to_sql! {
     { i16,Int16  },
     { i32,Int32  },
     { &str,Varchar },
-    { crate::types::OrderedF32,Float32 },
-    { crate::types::OrderedF64,Float64 },
+    { crate::types::F32,Float32 },
+    { crate::types::F64,Float64 },
     { bool,Boolean },
     { &[u8],Bytea }
 }
@@ -90,9 +90,9 @@ impl ToBinary for ScalarRefImpl<'_> {
             ScalarRefImpl::Bool(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Decimal(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Interval(v) => v.to_binary_with_type(ty),
-            ScalarRefImpl::NaiveDate(v) => v.to_binary_with_type(ty),
-            ScalarRefImpl::NaiveDateTime(v) => v.to_binary_with_type(ty),
-            ScalarRefImpl::NaiveTime(v) => v.to_binary_with_type(ty),
+            ScalarRefImpl::Date(v) => v.to_binary_with_type(ty),
+            ScalarRefImpl::Timestamp(v) => v.to_binary_with_type(ty),
+            ScalarRefImpl::Time(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Bytea(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Jsonb(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Struct(_) => todo!(),

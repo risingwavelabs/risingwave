@@ -57,11 +57,10 @@ impl DebeziumJsonParser {
     #[allow(clippy::unused_async)]
     pub async fn parse_inner(
         &self,
-        payload: &[u8],
+        mut payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        let mut payload_mut = payload.to_vec();
-        let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
+        let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
         let payload = event
@@ -97,11 +96,11 @@ impl DebeziumJsonParser {
                 writer.update(|column| {
                     let before = simd_json_parse_value(
                         &column.data_type,
-                        before.get(column.name.to_ascii_lowercase().as_str()),
+                        before.get(column.name_in_lower_case.as_str()),
                     )?;
                     let after = simd_json_parse_value(
                         &column.data_type,
-                        after.get(column.name.to_ascii_lowercase().as_str()),
+                        after.get(column.name_in_lower_case.as_str()),
                     )?;
 
                     Ok((before, after))
@@ -120,7 +119,7 @@ impl DebeziumJsonParser {
                 writer.insert(|column| {
                     simd_json_parse_value(
                         &column.data_type,
-                        after.get(column.name.to_ascii_lowercase().as_str()),
+                        after.get(column.name_in_lower_case.as_str()),
                     )
                     .map_err(Into::into)
                 })
@@ -138,7 +137,7 @@ impl DebeziumJsonParser {
                 writer.delete(|column| {
                     simd_json_parse_value(
                         &column.data_type,
-                        before.get(column.name.to_ascii_lowercase().as_str()),
+                        before.get(column.name_in_lower_case.as_str()),
                     )
                     .map_err(Into::into)
                 })
@@ -160,9 +159,7 @@ mod tests {
     use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::row::{OwnedRow, Row};
-    use risingwave_common::types::{
-        DataType, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, Scalar, ScalarImpl,
-    };
+    use risingwave_common::types::{DataType, Date, Scalar, ScalarImpl, Time, Timestamp};
     use serde_json::Value;
 
     use super::*;
@@ -216,7 +213,7 @@ mod tests {
     async fn parse_one(
         parser: DebeziumJsonParser,
         columns: Vec<SourceColumnDesc>,
-        payload: &[u8],
+        payload: Vec<u8>,
     ) -> Vec<(Op, OwnedRow)> {
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
         {
@@ -238,7 +235,10 @@ mod tests {
 
         let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
 
-        let [(_op, row)]: [_; 1] = parse_one(parser, columns, data).await.try_into().unwrap();
+        let [(_op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
+            .await
+            .try_into()
+            .unwrap();
 
         assert!(row[0].eq(&Some(ScalarImpl::Int64(111))));
         assert!(row[1].eq(&Some(ScalarImpl::Bool(true))));
@@ -248,22 +248,18 @@ mod tests {
         assert!(row[5].eq(&Some(ScalarImpl::Float64((-111.11111).into()))));
         assert!(row[6].eq(&Some(ScalarImpl::Decimal("-111.11".parse().unwrap()))));
         assert!(row[7].eq(&Some(ScalarImpl::Utf8("yes please".into()))));
-        assert!(row[8].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
+        assert!(row[8].eq(&Some(ScalarImpl::Date(Date::new(
             NaiveDate::from_ymd_opt(1000, 1, 1).unwrap()
         )))));
-        assert!(row[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
+        assert!(row[9].eq(&Some(ScalarImpl::Time(Time::new(
             NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap()
         )))));
-        assert!(
-            row[10].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
-                "1970-01-01T00:00:00".parse().unwrap()
-            ))))
-        );
-        assert!(
-            row[11].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
-                "1970-01-01T00:00:01".parse().unwrap()
-            ))))
-        );
+        assert!(row[10].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
+            "1970-01-01T00:00:00".parse().unwrap()
+        )))));
+        assert!(row[11].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
+            "1970-01-01T00:00:01".parse().unwrap()
+        )))));
         assert_json_eq(&row[12], "{\"k1\": \"v1\", \"k2\": 11}");
     }
 
@@ -273,7 +269,10 @@ mod tests {
 
         let columns = get_test2_columns();
         let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
-        let [(op, row)]: [_; 1] = parse_one(parser, columns, data).await.try_into().unwrap();
+        let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
+            .await
+            .try_into()
+            .unwrap();
         assert_eq!(op, Op::Insert);
 
         assert!(row[0].eq(&Some(ScalarImpl::Int64(111))));
@@ -284,22 +283,18 @@ mod tests {
         assert!(row[5].eq(&Some(ScalarImpl::Float64((-111.11111).into()))));
         assert!(row[6].eq(&Some(ScalarImpl::Decimal("-111.11".parse().unwrap()))));
         assert!(row[7].eq(&Some(ScalarImpl::Utf8("yes please".into()))));
-        assert!(row[8].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
+        assert!(row[8].eq(&Some(ScalarImpl::Date(Date::new(
             NaiveDate::from_ymd_opt(1000, 1, 1).unwrap()
         )))));
-        assert!(row[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
+        assert!(row[9].eq(&Some(ScalarImpl::Time(Time::new(
             NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap()
         )))));
-        assert!(
-            row[10].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
-                "1970-01-01T00:00:00".parse().unwrap()
-            ))))
-        );
-        assert!(
-            row[11].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
-                "1970-01-01T00:00:01".parse().unwrap()
-            ))))
-        );
+        assert!(row[10].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
+            "1970-01-01T00:00:00".parse().unwrap()
+        )))));
+        assert!(row[11].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
+            "1970-01-01T00:00:01".parse().unwrap()
+        )))));
         assert_json_eq(&row[12], "{\"k1\": \"v1\", \"k2\": 11}");
     }
 
@@ -309,7 +304,10 @@ mod tests {
 
         let columns = get_test2_columns();
         let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
-        let [(op, row)]: [_; 1] = parse_one(parser, columns, data).await.try_into().unwrap();
+        let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
+            .await
+            .try_into()
+            .unwrap();
 
         assert_eq!(op, Op::Delete);
 
@@ -321,22 +319,18 @@ mod tests {
         assert!(row[5].eq(&Some(ScalarImpl::Float64((333.33333).into()))));
         assert!(row[6].eq(&Some(ScalarImpl::Decimal("333.33".parse().unwrap()))));
         assert!(row[7].eq(&Some(ScalarImpl::Utf8("no thanks".into()))));
-        assert!(row[8].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
+        assert!(row[8].eq(&Some(ScalarImpl::Date(Date::new(
             NaiveDate::from_ymd_opt(9999, 12, 31).unwrap()
         )))));
-        assert!(row[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
+        assert!(row[9].eq(&Some(ScalarImpl::Time(Time::new(
             NaiveTime::from_hms_micro_opt(23, 59, 59, 0).unwrap()
         )))));
-        assert!(
-            row[10].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
-                "5138-11-16T09:46:39".parse().unwrap()
-            ))))
-        );
-        assert!(
-            row[11].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
-                "2038-01-09T03:14:07".parse().unwrap()
-            ))))
-        );
+        assert!(row[10].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
+            "5138-11-16T09:46:39".parse().unwrap()
+        )))));
+        assert!(row[11].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
+            "2038-01-09T03:14:07".parse().unwrap()
+        )))));
         assert_json_eq(&row[12], "{\"k1\":\"v1_updated\",\"k2\":33}");
     }
 
@@ -347,8 +341,10 @@ mod tests {
         let columns = get_test2_columns();
 
         let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
-        let [(op1, row1), (op2, row2)]: [_; 2] =
-            parse_one(parser, columns, data).await.try_into().unwrap();
+        let [(op1, row1), (op2, row2)]: [_; 2] = parse_one(parser, columns, data.to_vec())
+            .await
+            .try_into()
+            .unwrap();
 
         assert_eq!(op1, Op::UpdateDelete);
         assert_eq!(op2, Op::UpdateInsert);
@@ -361,26 +357,18 @@ mod tests {
         assert!(row1[5].eq(&Some(ScalarImpl::Float64((-111.11111).into()))));
         assert!(row1[6].eq(&Some(ScalarImpl::Decimal("-111.11".parse().unwrap()))));
         assert!(row1[7].eq(&Some(ScalarImpl::Utf8("yes please".into()))));
-        assert!(
-            row1[8].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
-                NaiveDate::from_ymd_opt(1000, 1, 1).unwrap()
-            ))))
-        );
-        assert!(
-            row1[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
-                NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap()
-            ))))
-        );
-        assert!(
-            row1[10].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
-                "1970-01-01T00:00:00".parse().unwrap()
-            ))))
-        );
-        assert!(
-            row1[11].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
-                "1970-01-01T00:00:01".parse().unwrap()
-            ))))
-        );
+        assert!(row1[8].eq(&Some(ScalarImpl::Date(Date::new(
+            NaiveDate::from_ymd_opt(1000, 1, 1).unwrap()
+        )))));
+        assert!(row1[9].eq(&Some(ScalarImpl::Time(Time::new(
+            NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap()
+        )))));
+        assert!(row1[10].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
+            "1970-01-01T00:00:00".parse().unwrap()
+        )))));
+        assert!(row1[11].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
+            "1970-01-01T00:00:01".parse().unwrap()
+        )))));
         assert_json_eq(&row1[12], "{\"k1\": \"v1\", \"k2\": 11}");
 
         assert!(row2[0].eq(&Some(ScalarImpl::Int64(111))));
@@ -391,26 +379,18 @@ mod tests {
         assert!(row2[5].eq(&Some(ScalarImpl::Float64((333.33333).into()))));
         assert!(row2[6].eq(&Some(ScalarImpl::Decimal("333.33".parse().unwrap()))));
         assert!(row2[7].eq(&Some(ScalarImpl::Utf8("no thanks".into()))));
-        assert!(
-            row2[8].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
-                NaiveDate::from_ymd_opt(9999, 12, 31).unwrap()
-            ))))
-        );
-        assert!(
-            row2[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
-                NaiveTime::from_hms_micro_opt(23, 59, 59, 0).unwrap()
-            ))))
-        );
-        assert!(
-            row2[10].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
-                "5138-11-16T09:46:39".parse().unwrap()
-            ))))
-        );
-        assert!(
-            row2[11].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
-                "2038-01-09T03:14:07".parse().unwrap()
-            ))))
-        );
+        assert!(row2[8].eq(&Some(ScalarImpl::Date(Date::new(
+            NaiveDate::from_ymd_opt(9999, 12, 31).unwrap()
+        )))));
+        assert!(row2[9].eq(&Some(ScalarImpl::Time(Time::new(
+            NaiveTime::from_hms_micro_opt(23, 59, 59, 0).unwrap()
+        )))));
+        assert!(row2[10].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
+            "5138-11-16T09:46:39".parse().unwrap()
+        )))));
+        assert!(row2[11].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
+            "2038-01-09T03:14:07".parse().unwrap()
+        )))));
         assert_json_eq(&row2[12], "{\"k1\": \"v1_updated\", \"k2\": 33}");
     }
 
@@ -429,35 +409,50 @@ mod tests {
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
         // i64 overflow
         let data0 = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"before"},{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":true,"field":"table"},{"type":"int64","optional":false,"field":"server_id"},{"type":"string","optional":true,"field":"gtid"},{"type":"string","optional":false,"field":"file"},{"type":"int64","optional":false,"field":"pos"},{"type":"int32","optional":false,"field":"row"},{"type":"int64","optional":true,"field":"thread"},{"type":"string","optional":true,"field":"query"}],"optional":false,"name":"io.debezium.connector.mysql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"RW_CDC_test.orders.test.orders.Envelope"},"payload":{"before":null,"after":{"O_KEY":9223372036854775808,"O_BOOL":1,"O_TINY":33,"O_INT":444,"O_REAL":555.0,"O_DOUBLE":666.0},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678158055000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":637,"row":0,"thread":4,"query":null},"op":"c","ts_ms":1678158055464,"transaction":null}}"#;
-        if let Err(e) = parser.parse_inner(data0, builder.row_writer()).await {
+        if let Err(e) = parser
+            .parse_inner(data0.to_vec(), builder.row_writer())
+            .await
+        {
             println!("{:?}", e.to_string());
         } else {
             panic!("the test case is expected fail");
         }
         // bool incorrect value
         let data1 = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"before"},{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":true,"field":"table"},{"type":"int64","optional":false,"field":"server_id"},{"type":"string","optional":true,"field":"gtid"},{"type":"string","optional":false,"field":"file"},{"type":"int64","optional":false,"field":"pos"},{"type":"int32","optional":false,"field":"row"},{"type":"int64","optional":true,"field":"thread"},{"type":"string","optional":true,"field":"query"}],"optional":false,"name":"io.debezium.connector.mysql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"RW_CDC_test.orders.test.orders.Envelope"},"payload":{"before":null,"after":{"O_KEY":111,"O_BOOL":2,"O_TINY":33,"O_INT":444,"O_REAL":555.0,"O_DOUBLE":666.0},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678158055000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":637,"row":0,"thread":4,"query":null},"op":"c","ts_ms":1678158055464,"transaction":null}}"#;
-        if let Err(e) = parser.parse_inner(data1, builder.row_writer()).await {
+        if let Err(e) = parser
+            .parse_inner(data1.to_vec(), builder.row_writer())
+            .await
+        {
             println!("{:?}", e.to_string());
         } else {
             panic!("the test case is expected failed");
         }
         // i16 overflow
         let data2 = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"before"},{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":true,"field":"table"},{"type":"int64","optional":false,"field":"server_id"},{"type":"string","optional":true,"field":"gtid"},{"type":"string","optional":false,"field":"file"},{"type":"int64","optional":false,"field":"pos"},{"type":"int32","optional":false,"field":"row"},{"type":"int64","optional":true,"field":"thread"},{"type":"string","optional":true,"field":"query"}],"optional":false,"name":"io.debezium.connector.mysql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"RW_CDC_test.orders.test.orders.Envelope"},"payload":{"before":null,"after":{"O_KEY":111,"O_BOOL":1,"O_TINY":32768,"O_INT":444,"O_REAL":555.0,"O_DOUBLE":666.0},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678158055000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":637,"row":0,"thread":4,"query":null},"op":"c","ts_ms":1678158055464,"transaction":null}}"#;
-        if let Err(e) = parser.parse_inner(data2, builder.row_writer()).await {
+        if let Err(e) = parser
+            .parse_inner(data2.to_vec(), builder.row_writer())
+            .await
+        {
             println!("{:?}", e.to_string());
         } else {
             panic!("the test case is expected to fail");
         }
         // i32 overflow
         let data3 = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"before"},{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":true,"field":"table"},{"type":"int64","optional":false,"field":"server_id"},{"type":"string","optional":true,"field":"gtid"},{"type":"string","optional":false,"field":"file"},{"type":"int64","optional":false,"field":"pos"},{"type":"int32","optional":false,"field":"row"},{"type":"int64","optional":true,"field":"thread"},{"type":"string","optional":true,"field":"query"}],"optional":false,"name":"io.debezium.connector.mysql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"RW_CDC_test.orders.test.orders.Envelope"},"payload":{"before":null,"after":{"O_KEY":111,"O_BOOL":1,"O_TINY":33,"O_INT":2147483648,"O_REAL":555.0,"O_DOUBLE":666.0},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678158055000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":637,"row":0,"thread":4,"query":null},"op":"c","ts_ms":1678158055464,"transaction":null}}"#;
-        if let Err(e) = parser.parse_inner(data3, builder.row_writer()).await {
+        if let Err(e) = parser
+            .parse_inner(data3.to_vec(), builder.row_writer())
+            .await
+        {
             println!("{:?}", e.to_string());
         } else {
             panic!("the test case is expected to fail");
         }
         // float32 overflow
         let data4 = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"before"},{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":true,"field":"table"},{"type":"int64","optional":false,"field":"server_id"},{"type":"string","optional":true,"field":"gtid"},{"type":"string","optional":false,"field":"file"},{"type":"int64","optional":false,"field":"pos"},{"type":"int32","optional":false,"field":"row"},{"type":"int64","optional":true,"field":"thread"},{"type":"string","optional":true,"field":"query"}],"optional":false,"name":"io.debezium.connector.mysql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"RW_CDC_test.orders.test.orders.Envelope"},"payload":{"before":null,"after":{"O_KEY":111,"O_BOOL":1,"O_TINY":33,"O_INT":444,"O_REAL":3.80282347E38,"O_DOUBLE":666.0},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678158055000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":637,"row":0,"thread":4,"query":null},"op":"c","ts_ms":1678158055464,"transaction":null}}"#;
-        if let Err(e) = parser.parse_inner(data4, builder.row_writer()).await {
+        if let Err(e) = parser
+            .parse_inner(data4.to_vec(), builder.row_writer())
+            .await
+        {
             println!("{:?}", e.to_string());
         } else {
             panic!("the test case is expected to fail");
@@ -477,7 +472,10 @@ mod tests {
         let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
         let data = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_DOUBLE"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"before"},{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_DOUBLE"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":true,"field":"table"},{"type":"int64","optional":false,"field":"server_id"},{"type":"string","optional":true,"field":"gtid"},{"type":"string","optional":false,"field":"file"},{"type":"int64","optional":false,"field":"pos"},{"type":"int32","optional":false,"field":"row"},{"type":"int64","optional":true,"field":"thread"},{"type":"string","optional":true,"field":"query"}],"optional":false,"name":"io.debezium.connector.mysql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"RW_CDC_test.orders.test.orders.Envelope"},"payload":{"before":null,"after":{"O_DOUBLE":1.797695E308},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678174483000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":563,"row":0,"thread":3,"query":null},"op":"c","ts_ms":1678174483866,"transaction":null}}"#;
-        if let Err(e) = parser.parse_inner(data, builder.row_writer()).await {
+        if let Err(e) = parser
+            .parse_inner(data.to_vec(), builder.row_writer())
+            .await
+        {
             println!("{:?}", e.to_string());
         } else {
             panic!("the test case is expected to fail");
@@ -499,7 +497,10 @@ mod tests {
 
         let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
 
-        let [(_op, row)]: [_; 1] = parse_one(parser, columns, data).await.try_into().unwrap();
+        let [(_op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
+            .await
+            .try_into()
+            .unwrap();
 
         assert!(row[0].eq(&Some(ScalarImpl::Int32(101))));
         assert!(row[1].eq(&Some(ScalarImpl::Utf8("scooter".into()))));
@@ -520,7 +521,10 @@ mod tests {
 
         let columns = get_test1_columns();
         let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
-        let [(op, row)]: [_; 1] = parse_one(parser, columns, data).await.try_into().unwrap();
+        let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
+            .await
+            .try_into()
+            .unwrap();
         assert_eq!(op, Op::Insert);
 
         assert!(row[0].eq(&Some(ScalarImpl::Int32(102))));
@@ -542,7 +546,10 @@ mod tests {
 
         let columns = get_test1_columns();
         let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
-        let [(op, row)]: [_; 1] = parse_one(parser, columns, data).await.try_into().unwrap();
+        let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
+            .await
+            .try_into()
+            .unwrap();
 
         assert_eq!(op, Op::Delete);
 
@@ -571,8 +578,10 @@ mod tests {
         let columns = get_test1_columns();
 
         let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
-        let [(op1, row1), (op2, row2)]: [_; 2] =
-            parse_one(parser, columns, data).await.try_into().unwrap();
+        let [(op1, row1), (op2, row2)]: [_; 2] = parse_one(parser, columns, data.to_vec())
+            .await
+            .try_into()
+            .unwrap();
 
         assert_eq!(op1, Op::UpdateDelete);
         assert_eq!(op2, Op::UpdateInsert);
@@ -605,7 +614,7 @@ mod tests {
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
         let writer = builder.row_writer();
-        if let Err(e) = parser.parse_inner(data, writer).await {
+        if let Err(e) = parser.parse_inner(data.to_vec(), writer).await {
             println!("{:?}", e.to_string());
         } else {
             panic!("the test case is expected to be failed");

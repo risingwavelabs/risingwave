@@ -15,7 +15,7 @@
 use anyhow::Context;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
@@ -69,6 +69,13 @@ pub async fn handle_alter_table_column(
 
         table.clone()
     };
+
+    // TODO(yuhao): alter table with generated columns.
+    if original_catalog.has_generated_column() {
+        return Err(RwError::from(ErrorCode::BindError(
+            "Alter a table with generated column has not been implemented.".to_string(),
+        )));
+    }
 
     // Retrieve the original table definition and parse it to AST.
     let [mut definition]: [_; 1] = Parser::parse_sql(&original_catalog.definition)

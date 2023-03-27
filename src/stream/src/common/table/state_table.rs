@@ -47,6 +47,7 @@ use risingwave_storage::StateStore;
 use tracing::trace;
 
 use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
+use crate::cache::cache_may_stale;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 /// This num is arbitrary and we may want to improve this choice in the future.
@@ -577,7 +578,7 @@ where
 
     /// Update the vnode bitmap of the state table, returns the previous vnode bitmap.
     #[must_use = "the executor should decide whether to manipulate the cache based on the previous vnode bitmap"]
-    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
+    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> (Arc<Bitmap>, bool) {
         assert!(
             !self.is_dirty(),
             "vnode bitmap should only be updated when state table is clean"
@@ -590,9 +591,16 @@ where
         }
         assert_eq!(self.vnodes.len(), new_vnodes.len());
 
-        self.state_clean_watermark = None;
+        let cache_may_stale = cache_may_stale(&self.vnodes, &new_vnodes);
 
-        std::mem::replace(&mut self.vnodes, new_vnodes)
+        if cache_may_stale {
+            self.state_clean_watermark = None;
+        }
+
+        (
+            std::mem::replace(&mut self.vnodes, new_vnodes),
+            cache_may_stale,
+        )
     }
 }
 
@@ -793,22 +801,28 @@ where
         } else {
             Some(self.pk_serde.prefix(1))
         };
-        let range_end_suffix = watermark.map(|watermark| {
+        let watermark_suffix = watermark.map(|watermark| {
             serialize_pk(
                 row::once(Some(watermark)),
                 prefix_serializer.as_ref().unwrap(),
             )
         });
-        if let Some(range_end_suffix) = range_end_suffix {
-            let range_begin_suffix = vec![];
-            trace!(table_id = %self.table_id, range_end = ?range_end_suffix, vnodes = ?{
+        if let Some(watermark_suffix) = watermark_suffix {
+            // We either serialize null into `0u8`, data into `(1u8 || scalar)`, or serialize null
+            // into `1u8`, data into `(0u8 || scalar)`. We do not want to delete null
+            // here, so `range_begin_suffix` cannot be `vec![]` when null is represented as `0u8`.
+            let range_begin_suffix = watermark_suffix
+                .first()
+                .map(|bit| vec![*bit])
+                .unwrap_or_default();
+            trace!(table_id = %self.table_id, watermark = ?watermark_suffix, vnodes = ?{
                 self.vnodes.iter_vnodes().collect_vec()
             }, "delete range");
             for vnode in self.vnodes.iter_vnodes() {
                 let mut range_begin = vnode.to_be_bytes().to_vec();
                 let mut range_end = range_begin.clone();
                 range_begin.extend(&range_begin_suffix);
-                range_end.extend(&range_end_suffix);
+                range_end.extend(&watermark_suffix);
                 delete_ranges.push((Bytes::from(range_begin), Bytes::from(range_end)));
             }
         }

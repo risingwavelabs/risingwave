@@ -19,7 +19,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
-use super::agg_common::AggExecutorArgs;
+use super::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
 use super::aggregation::{
     agg_call_filter_res, apply_change_to_result_table, iter_table_storage, AggStateStorage,
     AlwaysOutput, DistinctDeduplicater,
@@ -127,7 +127,7 @@ impl<S: StateStore> Executor for GlobalSimpleAggExecutor<S> {
 }
 
 impl<S: StateStore> GlobalSimpleAggExecutor<S> {
-    pub fn new(args: AggExecutorArgs<S>) -> StreamResult<Self> {
+    pub fn new(args: AggExecutorArgs<S, SimpleAggExecutorExtraArgs>) -> StreamResult<Self> {
         let input_info = args.input.info();
         let schema = generate_agg_schema(args.input.as_ref(), &args.agg_calls, None);
         Ok(Self {

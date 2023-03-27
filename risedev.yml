@@ -207,6 +207,7 @@ profile:
 
   3etcd-3meta:
     steps:
+      - use: minio
       - use: etcd
         unsafe-no-fsync: true
         port: 2388
@@ -234,9 +235,11 @@ profile:
         port: 25690
         dashboard-port: 25691
         exporter-port: 21250
+      - use: compactor
 
   3etcd-3meta-1cn-1fe:
     steps:
+      - use: minio
       - use: etcd
         unsafe-no-fsync: true
         port: 2388
@@ -264,6 +267,7 @@ profile:
         port: 25690
         dashboard-port: 25691
         exporter-port: 21250
+      - use: compactor
       - use: compute-node
       - use: frontend
 
@@ -876,6 +880,9 @@ template:
     # Frontend used by this Prometheus instance
     provide-frontend: "frontend*"
 
+    # Connector-node used by this Prometheus instance
+    provide-connector-node: "connector*"
+
   frontend:
     # Advertise address of frontend
     address: "127.0.0.1"
@@ -935,6 +942,9 @@ template:
 
     # Connector node listen port
     port: 50051
+
+    # Prometheus exporter listen port
+    exporter-port: 50052
 
     # Id of this instance
     id: connector-${port}
