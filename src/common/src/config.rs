@@ -588,7 +588,7 @@ mod default {
         }
 
         pub fn split_check_size_limit() -> u64 {
-            2 * 1024 * 1024 * 1024 // 4GB
+            4 * 1024 * 1024 * 1024 // 4GB
         }
     }
 

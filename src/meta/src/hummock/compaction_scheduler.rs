@@ -504,12 +504,21 @@ where
             if table_size < table_split_limit {
                 continue;
             }
+
+            // do not split a large table and a small table because it would increase IOPS of small
+            // table.
+            if parent_group_id != default_group_id && parent_group_id != mv_group_id {
+                let rest_group_size = parent_group_size - table_size;
+                if rest_group_size < table_size && rest_group_size < table_split_limit {
+                    continue;
+                }
+            }
             for group in &group_infos {
                 if group.group_id == mv_group_id
                     || group.group_id == default_group_id
                     || group.group_id == parent_group_id
                     || group.group_size + table_size > group_split_limit
-                    // do not move state-table to a large group
+                    // do not move state-table from a small group to a large group
                     || group.group_size + table_size * 2 > parent_group_size
                 {
                     continue;
@@ -531,6 +540,7 @@ where
                         "move state table [{}] from group-{} to group-{:?} success",
                         table_id, parent_group_id, target_compact_group_id
                     );
+                    return;
                 }
                 Err(e) => info!(
                     "failed to move state table [{}] from group-{} to group-{:?} because {:?}",
