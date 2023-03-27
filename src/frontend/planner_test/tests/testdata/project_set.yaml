@@ -143,13 +143,12 @@
       (select unnest(x) as unnest from t);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: Unnest($0) = Unnest($0), output: [Unnest($0)] }
-      ├─BatchExchange { order: [], dist: HashShard(Unnest($0)) }
-      | └─BatchProject { exprs: [Unnest($0)] }
-      |   └─BatchProjectSet { select_list: [Unnest($0)] }
-      |     └─BatchScan { table: t, columns: [t.x, t._row_id], distribution: UpstreamHashShard(t._row_id) }
-      └─BatchExchange { order: [], dist: HashShard(Unnest($0)) }
-        └─BatchProject { exprs: [Unnest($0)] }
+    └─BatchProject { exprs: [Unnest($0)] }
+      └─BatchHashJoin { type: Inner, predicate: Unnest($0) = Unnest($0), output: all }
+        ├─BatchExchange { order: [], dist: HashShard(Unnest($0)) }
+        | └─BatchProjectSet { select_list: [Unnest($0)] }
+        |   └─BatchScan { table: t, columns: [t.x, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+        └─BatchExchange { order: [], dist: HashShard(Unnest($0)) }
           └─BatchProjectSet { select_list: [Unnest($0)] }
             └─BatchScan { table: t, columns: [t.x, t._row_id], distribution: UpstreamHashShard(t._row_id) }
   stream_plan: |

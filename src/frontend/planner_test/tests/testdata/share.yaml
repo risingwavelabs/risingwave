@@ -24,13 +24,12 @@
     BatchSimpleAgg { aggs: [sum0(count)] }
     └─BatchExchange { order: [], dist: Single }
       └─BatchSimpleAgg { aggs: [count] }
-        └─BatchHashJoin { type: Inner, predicate: id = id, output: [] }
-          ├─BatchExchange { order: [], dist: HashShard(id) }
-          | └─BatchProject { exprs: [id] }
-          |   └─BatchFilter { predicate: (initial_bid = 1:Int32) }
-          |     └─BatchSource { source: "auction", columns: ["id", "item_name", "description", "initial_bid", "reserve", "date_time", "expires", "seller", "category", "extra", "_row_id"], filter: (None, None) }
-          └─BatchExchange { order: [], dist: HashShard(id) }
-            └─BatchProject { exprs: [id] }
+        └─BatchProject { exprs: [] }
+          └─BatchHashJoin { type: Inner, predicate: id = id, output: all }
+            ├─BatchExchange { order: [], dist: HashShard(id) }
+            | └─BatchFilter { predicate: (initial_bid = 1:Int32) }
+            |   └─BatchSource { source: "auction", columns: ["id", "item_name", "description", "initial_bid", "reserve", "date_time", "expires", "seller", "category", "extra", "_row_id"], filter: (None, None) }
+            └─BatchExchange { order: [], dist: HashShard(id) }
               └─BatchFilter { predicate: (initial_bid = 2:Int32) }
                 └─BatchSource { source: "auction", columns: ["id", "item_name", "description", "initial_bid", "reserve", "date_time", "expires", "seller", "category", "extra", "_row_id"], filter: (None, None) }
   stream_plan: |
@@ -88,18 +87,35 @@
         CountBids.starttime_c
     ) AS MaxBids
     ON AuctionBids.starttime = MaxBids.starttime_c AND AuctionBids.num >= MaxBids.maxn;
+  logical_plan: |
+    LogicalProject { exprs: [auction, count] }
+    └─LogicalJoin { type: Inner, on: (window_start = window_start) AND (count >= max(count)), output: all }
+      ├─LogicalProject { exprs: [auction, count, window_start] }
+      | └─LogicalAgg { group_key: [auction, window_start], aggs: [count] }
+      |   └─LogicalProject { exprs: [auction, window_start] }
+      |     └─LogicalHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: all }
+      |       └─LogicalFilter { predicate: IsNotNull(date_time) }
+      |         └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
+      └─LogicalProject { exprs: [max(count), window_start] }
+        └─LogicalAgg { group_key: [window_start], aggs: [max(count)] }
+          └─LogicalProject { exprs: [window_start, count] }
+            └─LogicalProject { exprs: [count, window_start] }
+              └─LogicalAgg { group_key: [auction, window_start], aggs: [count] }
+                └─LogicalProject { exprs: [auction, window_start] }
+                  └─LogicalHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: all }
+                    └─LogicalFilter { predicate: IsNotNull(date_time) }
+                      └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: window_start = window_start AND (count >= max(count)), output: [auction, count] }
-      ├─BatchExchange { order: [], dist: HashShard(window_start) }
-      | └─BatchProject { exprs: [auction, count, window_start] }
-      |   └─BatchHashAgg { group_key: [auction, window_start], aggs: [count] }
-      |     └─BatchHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start] }
-      |       └─BatchExchange { order: [], dist: HashShard(auction) }
-      |         └─BatchProject { exprs: [auction, date_time] }
-      |           └─BatchFilter { predicate: IsNotNull(date_time) }
-      |             └─BatchSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"], filter: (None, None) }
-      └─BatchProject { exprs: [max(count), window_start] }
+    └─BatchProject { exprs: [auction, count] }
+      └─BatchHashJoin { type: Inner, predicate: window_start = window_start AND (count >= max(count)), output: all }
+        ├─BatchExchange { order: [], dist: HashShard(window_start) }
+        | └─BatchHashAgg { group_key: [auction, window_start], aggs: [count] }
+        |   └─BatchHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start] }
+        |     └─BatchExchange { order: [], dist: HashShard(auction) }
+        |       └─BatchProject { exprs: [auction, date_time] }
+        |         └─BatchFilter { predicate: IsNotNull(date_time) }
+        |           └─BatchSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"], filter: (None, None) }
         └─BatchHashAgg { group_key: [window_start], aggs: [max(count)] }
           └─BatchExchange { order: [], dist: HashShard(window_start) }
             └─BatchHashAgg { group_key: [auction, window_start], aggs: [count] }

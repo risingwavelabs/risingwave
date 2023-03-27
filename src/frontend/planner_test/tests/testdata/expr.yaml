@@ -105,6 +105,13 @@
     create table t (v1 int);
     create table b (b1 int, b2 int);
     SELECT b2 from b where exists (select 2 from t where v1 in (3, 1.0, b1));
+  logical_plan: |
+    LogicalProject { exprs: [b.b2] }
+    └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
+      ├─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id] }
+      └─LogicalProject { exprs: [2:Int32] }
+        └─LogicalFilter { predicate: (In(t.v1::Decimal, 3:Int32::Decimal, 1.0:Decimal) OR (t.v1 = CorrelatedInputRef { index: 0, correlated_id: 1 })) }
+          └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   batch_plan: |
     BatchNestedLoopJoin { type: LeftSemi, predicate: (In(t.v1::Decimal, 3:Decimal, 1.0:Decimal) OR (t.v1 = b.b1)), output: [b.b2] }
     ├─BatchExchange { order: [], dist: Single }

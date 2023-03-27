@@ -354,17 +354,34 @@
         CountBids.starttime_c
     ) AS MaxBids
     ON AuctionBids.starttime = MaxBids.starttime_c AND AuctionBids.num >= MaxBids.maxn;
+  logical_plan: |
+    LogicalProject { exprs: [bid.auction, count] }
+    └─LogicalJoin { type: Inner, on: (window_start = window_start) AND (count >= max(count)), output: all }
+      ├─LogicalProject { exprs: [bid.auction, count, window_start] }
+      | └─LogicalAgg { group_key: [bid.auction, window_start], aggs: [count] }
+      |   └─LogicalProject { exprs: [bid.auction, window_start] }
+      |     └─LogicalHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: all }
+      |       └─LogicalFilter { predicate: IsNotNull(bid.date_time) }
+      |         └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
+      └─LogicalProject { exprs: [max(count), window_start] }
+        └─LogicalAgg { group_key: [window_start], aggs: [max(count)] }
+          └─LogicalProject { exprs: [window_start, count] }
+            └─LogicalProject { exprs: [count, window_start] }
+              └─LogicalAgg { group_key: [bid.auction, window_start], aggs: [count] }
+                └─LogicalProject { exprs: [bid.auction, window_start] }
+                  └─LogicalHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: all }
+                    └─LogicalFilter { predicate: IsNotNull(bid.date_time) }
+                      └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: window_start = window_start AND (count >= max(count)), output: [bid.auction, count] }
-      ├─BatchExchange { order: [], dist: HashShard(window_start) }
-      | └─BatchProject { exprs: [bid.auction, count, window_start] }
-      |   └─BatchHashAgg { group_key: [bid.auction, window_start], aggs: [count] }
-      |     └─BatchHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start] }
-      |       └─BatchExchange { order: [], dist: HashShard(bid.auction) }
-      |         └─BatchFilter { predicate: IsNotNull(bid.date_time) }
-      |           └─BatchScan { table: bid, columns: [bid.auction, bid.date_time], distribution: SomeShard }
-      └─BatchProject { exprs: [max(count), window_start] }
+    └─BatchProject { exprs: [bid.auction, count] }
+      └─BatchHashJoin { type: Inner, predicate: window_start = window_start AND (count >= max(count)), output: all }
+        ├─BatchExchange { order: [], dist: HashShard(window_start) }
+        | └─BatchHashAgg { group_key: [bid.auction, window_start], aggs: [count] }
+        |   └─BatchHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start] }
+        |     └─BatchExchange { order: [], dist: HashShard(bid.auction) }
+        |       └─BatchFilter { predicate: IsNotNull(bid.date_time) }
+        |         └─BatchScan { table: bid, columns: [bid.auction, bid.date_time], distribution: SomeShard }
         └─BatchHashAgg { group_key: [window_start], aggs: [max(count)] }
           └─BatchExchange { order: [], dist: HashShard(window_start) }
             └─BatchHashAgg { group_key: [bid.auction, window_start], aggs: [count] }

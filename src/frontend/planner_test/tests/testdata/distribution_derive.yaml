@@ -835,12 +835,21 @@
       group by k1
     )
     select A.v, B.num as Bv from Ak1 as A join B using(k1)
+  logical_plan: |
+    LogicalProject { exprs: [ak1.v, count] }
+    └─LogicalJoin { type: Inner, on: (ak1.k1 = a.k1), output: all }
+      ├─LogicalScan { table: ak1, columns: [ak1.k1, ak1.k2, ak1.k3, ak1.v, ak1.a._row_id] }
+      └─LogicalShare { id = 4 }
+        └─LogicalProject { exprs: [count, a.k1] }
+          └─LogicalAgg { group_key: [a.k1], aggs: [count] }
+            └─LogicalProject { exprs: [a.k1] }
+              └─LogicalScan { table: a, columns: [a.k1, a.k2, a.k3, a.v, a._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: ak1.k1 = a.k1, output: [ak1.v, count] }
-      ├─BatchExchange { order: [], dist: HashShard(ak1.k1) }
-      | └─BatchScan { table: ak1, columns: [ak1.k1, ak1.v], distribution: UpstreamHashShard(ak1.k1) }
-      └─BatchProject { exprs: [count, a.k1] }
+    └─BatchProject { exprs: [ak1.v, count] }
+      └─BatchHashJoin { type: Inner, predicate: ak1.k1 = a.k1, output: all }
+        ├─BatchExchange { order: [], dist: HashShard(ak1.k1) }
+        | └─BatchScan { table: ak1, columns: [ak1.k1, ak1.v], distribution: UpstreamHashShard(ak1.k1) }
         └─BatchHashAgg { group_key: [a.k1], aggs: [count] }
           └─BatchExchange { order: [], dist: HashShard(a.k1) }
             └─BatchScan { table: a, columns: [a.k1], distribution: SomeShard }
@@ -896,11 +905,20 @@
       group by k1
     )
     select A.v, B.num as Bv from B join Ak1 as A using(k1)
+  logical_plan: |
+    LogicalProject { exprs: [ak1.v, count] }
+    └─LogicalJoin { type: Inner, on: (a.k1 = ak1.k1), output: all }
+      ├─LogicalShare { id = 4 }
+      | └─LogicalProject { exprs: [count, a.k1] }
+      |   └─LogicalAgg { group_key: [a.k1], aggs: [count] }
+      |     └─LogicalProject { exprs: [a.k1] }
+      |       └─LogicalScan { table: a, columns: [a.k1, a.k2, a.k3, a.v, a._row_id] }
+      └─LogicalScan { table: ak1, columns: [ak1.k1, ak1.k2, ak1.k3, ak1.v, ak1.a._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: a.k1 = ak1.k1, output: [ak1.v, count] }
-      └─BatchExchange { order: [], dist: UpstreamHashShard(a.k1) }
-        └─BatchProject { exprs: [count, a.k1] }
+    └─BatchProject { exprs: [ak1.v, count] }
+      └─BatchLookupJoin { type: Inner, predicate: a.k1 = ak1.k1, output: all }
+        └─BatchExchange { order: [], dist: UpstreamHashShard(a.k1) }
           └─BatchHashAgg { group_key: [a.k1], aggs: [count] }
             └─BatchExchange { order: [], dist: HashShard(a.k1) }
               └─BatchScan { table: a, columns: [a.k1], distribution: SomeShard }
@@ -970,14 +988,26 @@
       group by k1
     )
     select A.num, B.num as Bv from A join B using(k1)
+  logical_plan: |
+    LogicalProject { exprs: [count, count] }
+    └─LogicalJoin { type: Inner, on: (a.k1 = b.k1), output: all }
+      ├─LogicalShare { id = 4 }
+      | └─LogicalProject { exprs: [count, a.k1] }
+      |   └─LogicalAgg { group_key: [a.k1], aggs: [count] }
+      |     └─LogicalProject { exprs: [a.k1] }
+      |       └─LogicalScan { table: a, columns: [a.k1, a.k2, a.k3, a.v, a._row_id] }
+      └─LogicalShare { id = 8 }
+        └─LogicalProject { exprs: [count, b.k1] }
+          └─LogicalAgg { group_key: [b.k1], aggs: [count] }
+            └─LogicalProject { exprs: [b.k1] }
+              └─LogicalScan { table: b, columns: [b.k1, b.k2, b.k3, b.v, b._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: a.k1 = b.k1, output: [count, count] }
-      ├─BatchProject { exprs: [count, a.k1] }
-      | └─BatchHashAgg { group_key: [a.k1], aggs: [count] }
-      |   └─BatchExchange { order: [], dist: HashShard(a.k1) }
-      |     └─BatchScan { table: a, columns: [a.k1], distribution: SomeShard }
-      └─BatchProject { exprs: [count, b.k1] }
+    └─BatchProject { exprs: [count, count] }
+      └─BatchHashJoin { type: Inner, predicate: a.k1 = b.k1, output: all }
+        ├─BatchHashAgg { group_key: [a.k1], aggs: [count] }
+        | └─BatchExchange { order: [], dist: HashShard(a.k1) }
+        |   └─BatchScan { table: a, columns: [a.k1], distribution: SomeShard }
         └─BatchHashAgg { group_key: [b.k1], aggs: [count] }
           └─BatchExchange { order: [], dist: HashShard(b.k1) }
             └─BatchScan { table: b, columns: [b.k1], distribution: SomeShard }
