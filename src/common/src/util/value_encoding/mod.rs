@@ -241,7 +241,7 @@ fn estimate_serialize_scalar_size(value: ScalarRefImpl<'_>) -> usize {
         ScalarRefImpl::Serial(_) => 8,
         ScalarRefImpl::Float32(_) => 4,
         ScalarRefImpl::Float64(_) => 8,
-        ScalarRefImpl::Utf8(v) => v.as_bytes().len(),
+        ScalarRefImpl::Utf8(v) => estimate_serialize_str_size(v.as_bytes()),
         ScalarRefImpl::Bytea(v) => estimate_serialize_str_size(v),
         ScalarRefImpl::Bool(_) => 1,
         ScalarRefImpl::Decimal(_) => estimate_serialize_decimal_size(),
@@ -266,7 +266,7 @@ fn serialize_struct(value: StructRef<'_>, buf: &mut impl BufMut) {
 }
 
 fn estimate_serialize_struct_size(s: StructRef<'_>) -> usize {
-    4 + s.estimate_serialize_size_inner()
+    s.estimate_serialize_size_inner()
 }
 fn serialize_list(value: ListRef<'_>, buf: &mut impl BufMut) {
     let values_ref = value.values_ref();
@@ -441,4 +441,63 @@ fn deserialize_decimal(data: &mut impl Buf) -> Result<Decimal> {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use crate::array::serial_array::Serial;
+    use crate::array::{ListValue, StructValue};
+    use crate::types::{
+        Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
+        ScalarImpl,
+    };
+    use crate::util::value_encoding::{estimate_serialize_datum_size, serialize_datum};
+
+    fn test_estimate_serialize_scalar_size(s: ScalarImpl) {
+        let d = Datum::from(s);
+        assert_eq!(estimate_serialize_datum_size(&d), serialize_datum(&d).len());
+    }
+
+    #[test]
+    fn test_estimate_size() {
+        let d: Datum = None;
+        assert_eq!(estimate_serialize_datum_size(&d), serialize_datum(&d).len());
+
+        test_estimate_serialize_scalar_size(ScalarImpl::Bool(true));
+        test_estimate_serialize_scalar_size(ScalarImpl::Int16(1));
+        test_estimate_serialize_scalar_size(ScalarImpl::Int32(1));
+        test_estimate_serialize_scalar_size(ScalarImpl::Int64(1));
+        test_estimate_serialize_scalar_size(ScalarImpl::Float32(1.0.into()));
+        test_estimate_serialize_scalar_size(ScalarImpl::Float64(1.0.into()));
+        test_estimate_serialize_scalar_size(ScalarImpl::Serial(Serial::from(i64::MIN)));
+
+        test_estimate_serialize_scalar_size(ScalarImpl::Utf8("abc".into()));
+        test_estimate_serialize_scalar_size(ScalarImpl::Utf8("".into()));
+        test_estimate_serialize_scalar_size(ScalarImpl::Decimal(Decimal::NegativeInf));
+        test_estimate_serialize_scalar_size(ScalarImpl::Decimal(Decimal::PositiveInf));
+        test_estimate_serialize_scalar_size(ScalarImpl::Decimal(Decimal::NaN));
+        test_estimate_serialize_scalar_size(ScalarImpl::Decimal(123123.into()));
+        test_estimate_serialize_scalar_size(ScalarImpl::Interval(
+            IntervalUnit::from_month_day_usec(7, 8, 9),
+        ));
+        test_estimate_serialize_scalar_size(ScalarImpl::NaiveDate(
+            NaiveDateWrapper::from_ymd_uncheck(2333, 3, 3),
+        ));
+        test_estimate_serialize_scalar_size(ScalarImpl::Bytea("\\x233".as_bytes().into()));
+        test_estimate_serialize_scalar_size(ScalarImpl::NaiveTime(
+            NaiveTimeWrapper::from_hms_uncheck(2, 3, 3),
+        ));
+        test_estimate_serialize_scalar_size(ScalarImpl::NaiveDateTime(
+            NaiveDateTimeWrapper::from_timestamp_uncheck(23333333, 2333),
+        ));
+        test_estimate_serialize_scalar_size(ScalarImpl::Interval(
+            IntervalUnit::from_month_day_usec(2, 3, 3333),
+        ));
+        // test_estimate_serialize_scalar_size(ScalarImpl::Jsonb(JsonbVal::dummy()));
+        test_estimate_serialize_scalar_size(ScalarImpl::Struct(StructValue::new(vec![
+            ScalarImpl::Int64(233).into(),
+            ScalarImpl::Float64(23.33.into()).into(),
+        ])));
+        test_estimate_serialize_scalar_size(ScalarImpl::List(ListValue::new(vec![
+            ScalarImpl::Int64(233).into(),
+            ScalarImpl::Int64(2333).into(),
+        ])));
+    }
+}
