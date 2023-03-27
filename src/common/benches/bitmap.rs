@@ -33,7 +33,7 @@ fn bench_bitmap(c: &mut Criterion) {
 fn bench_bitmap_iter(c: &mut Criterion) {
     const CHUNK_SIZE: usize = 1024;
     const N_CHUNKS: usize = 10_000;
-    fn make_iterators(bitmaps: &[Bitmap]) -> Vec<BitmapIter> {
+    fn make_iterators(bitmaps: &[Bitmap]) -> Vec<BitmapIter<'_>> {
         bitmaps.iter().map(|bitmap| bitmap.iter()).collect_vec()
     }
     fn bench_bitmap_iter(bench_id: &str, bitmap: Bitmap, c: &mut Criterion) {
