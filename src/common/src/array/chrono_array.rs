@@ -32,7 +32,7 @@ mod tests {
     use crate::util::iter_util::ZipEqFast;
 
     #[test]
-    fn test_naivedate_builder() {
+    fn test_date_builder() {
         let v = (0..1000).map(Date::with_days).map(|x| x.ok()).collect_vec();
         let mut builder = DateArrayBuilder::new(0);
         for i in &v {
@@ -44,7 +44,7 @@ mod tests {
     }
 
     #[test]
-    fn test_naivedate_array_to_protobuf() {
+    fn test_date_array_to_protobuf() {
         let input = vec![
             Date::with_days(12345).ok(),
             None,

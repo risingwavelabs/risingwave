@@ -233,7 +233,7 @@ mod tests {
     }
 
     #[test]
-    fn test_naivedate_protobuf_conversion() -> Result<()> {
+    fn test_date_protobuf_conversion() -> Result<()> {
         let cardinality = 2048;
         let mut builder = DateArrayBuilder::new(cardinality);
         for i in 0..cardinality {
@@ -246,7 +246,7 @@ mod tests {
         let col: Column = builder.finish().into();
         let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
-        let arr: &DateArray = new_col.array_ref().as_naivedate();
+        let arr: &DateArray = new_col.array_ref().as_date();
         arr.iter().enumerate().for_each(|(i, x)| {
             if i % 2 == 0 {
                 assert_eq!(Date::with_days(i as i32).ok().unwrap(), x.unwrap());
@@ -258,7 +258,7 @@ mod tests {
     }
 
     #[test]
-    fn test_naivetime_protobuf_conversion() -> Result<()> {
+    fn test_time_protobuf_conversion() -> Result<()> {
         let cardinality = 2048;
         let mut builder = TimeArrayBuilder::new(cardinality);
         for i in 0..cardinality {
@@ -271,7 +271,7 @@ mod tests {
         let col: Column = builder.finish().into();
         let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
-        let arr: &TimeArray = new_col.array_ref().as_naivetime();
+        let arr: &TimeArray = new_col.array_ref().as_time();
         arr.iter().enumerate().for_each(|(i, x)| {
             if i % 2 == 0 {
                 assert_eq!(
