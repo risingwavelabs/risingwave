@@ -504,7 +504,7 @@ mod tests {
             Some(ScalarImpl::Decimal(10.into())),
             Some(ScalarImpl::Interval(Default::default())),
             Some(ScalarImpl::NaiveDate(Default::default())),
-            Some(ScalarImpl::NaiveDateTime(Default::default())),
+            Some(ScalarImpl::Timestamp(Default::default())),
             Some(ScalarImpl::NaiveTime(Default::default())),
             Some(ScalarImpl::Struct(StructValue::new(vec![
                 Some(ScalarImpl::Int32(1)),
@@ -526,7 +526,7 @@ mod tests {
             Some(ScalarImpl::Decimal(10.into())),
             Some(ScalarImpl::Interval(Default::default())),
             Some(ScalarImpl::NaiveDate(Default::default())),
-            Some(ScalarImpl::NaiveDateTime(Default::default())),
+            Some(ScalarImpl::Timestamp(Default::default())),
             Some(ScalarImpl::NaiveTime(Default::default())),
             Some(ScalarImpl::Struct(StructValue::new(vec![
                 Some(ScalarImpl::Int32(1)),

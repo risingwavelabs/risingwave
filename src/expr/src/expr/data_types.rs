@@ -223,7 +223,7 @@ macro_rules! timestamp {
     ($macro:ident) => {
         $macro! {
             risingwave_common::types::DataType::Timestamp,
-            risingwave_common::array::NaiveDateTimeArray
+            risingwave_common::array::TimestampArray
         }
     };
 }

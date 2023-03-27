@@ -91,7 +91,7 @@ impl ToBinary for ScalarRefImpl<'_> {
             ScalarRefImpl::Decimal(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Interval(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::NaiveDate(v) => v.to_binary_with_type(ty),
-            ScalarRefImpl::NaiveDateTime(v) => v.to_binary_with_type(ty),
+            ScalarRefImpl::Timestamp(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::NaiveTime(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Bytea(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Jsonb(v) => v.to_binary_with_type(ty),

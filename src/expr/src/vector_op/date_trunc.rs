@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{Interval, NaiveDateTimeWrapper};
+use risingwave_common::types::{Interval, Timestamp};
 use risingwave_expr_macro::function;
 
 use super::timestamptz::{timestamp_at_time_zone, timestamptz_at_time_zone};
 use crate::{ExprError, Result};
 
 #[function("date_trunc(varchar, timestamp) -> timestamp")]
-pub fn date_trunc_timestamp(field: &str, ts: NaiveDateTimeWrapper) -> Result<NaiveDateTimeWrapper> {
+pub fn date_trunc_timestamp(field: &str, ts: Timestamp) -> Result<Timestamp> {
     Ok(match field.to_ascii_lowercase().as_str() {
         "microseconds" => ts.truncate_micros(),
         "milliseconds" => ts.truncate_millis(),

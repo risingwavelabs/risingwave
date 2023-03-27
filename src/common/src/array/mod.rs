@@ -45,7 +45,7 @@ use std::sync::Arc;
 pub use bool_array::{BoolArray, BoolArrayBuilder};
 pub use bytes_array::*;
 pub use chrono_array::{
-    NaiveDateArray, NaiveDateArrayBuilder, NaiveDateTimeArray, NaiveDateTimeArrayBuilder,
+    NaiveDateArray, NaiveDateArrayBuilder, TimestampArray, TimestampArrayBuilder,
     NaiveTimeArray, NaiveTimeArrayBuilder,
 };
 pub use column_proto_readers::*;
@@ -345,7 +345,7 @@ macro_rules! for_all_variants {
             { Decimal, decimal, DecimalArray, DecimalArrayBuilder },
             { Interval, interval, IntervalArray, IntervalArrayBuilder },
             { NaiveDate, naivedate, NaiveDateArray, NaiveDateArrayBuilder },
-            { NaiveDateTime, naivedatetime, NaiveDateTimeArray, NaiveDateTimeArrayBuilder },
+            { Timestamp, timestamp, TimestampArray, TimestampArrayBuilder },
             { NaiveTime, naivetime, NaiveTimeArray, NaiveTimeArrayBuilder },
             { Jsonb, jsonb, JsonbArray, JsonbArrayBuilder },
             { Serial, serial, SerialArray, SerialArrayBuilder },
@@ -688,7 +688,7 @@ impl ArrayImpl {
             }
             PbArrayType::Date => read_naive_date_array(array, cardinality)?,
             PbArrayType::Time => read_naive_time_array(array, cardinality)?,
-            PbArrayType::Timestamp => read_naive_date_time_array(array, cardinality)?,
+            PbArrayType::Timestamp => read_timestamp_array(array, cardinality)?,
             PbArrayType::Interval => read_interval_array(array, cardinality)?,
             PbArrayType::Jsonb => {
                 read_string_array::<JsonbArrayBuilder, JsonbValueReader>(array, cardinality)?

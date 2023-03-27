@@ -28,7 +28,7 @@ use crate::for_all_native_types;
 use crate::types::decimal::Decimal;
 use crate::types::interval::Interval;
 use crate::types::{
-    NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, NativeType, Scalar, ScalarRef,
+    Timestamp, NaiveDateWrapper, NaiveTimeWrapper, NativeType, Scalar, ScalarRef,
 };
 
 /// Physical type of array items which have fixed size.
@@ -123,7 +123,7 @@ impl_primitive_for_others! {
     { Interval, Interval, Interval },
     { NaiveDateWrapper, Date, NaiveDate },
     { NaiveTimeWrapper, Time, NaiveTime },
-    { NaiveDateTimeWrapper, Timestamp, NaiveDateTime }
+    { Timestamp, Timestamp, Timestamp }
 }
 
 /// `PrimitiveArray` is a collection of primitive types, such as `i32`, `f32`.

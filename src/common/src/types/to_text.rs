@@ -53,7 +53,7 @@ pub trait ToText {
     /// - `ScalarRefImpl::Bytea` -> `DataType::Bytea`
     /// - `ScalarRefImpl::NaiveDate` -> `DataType::Date`
     /// - `ScalarRefImpl::NaiveTime` -> `DataType::Time`
-    /// - `ScalarRefImpl::NaiveDateTime` -> `DataType::Timestamp`
+    /// - `ScalarRefImpl::Timestamp` -> `DataType::Timestamp`
     /// - `ScalarRefImpl::Interval` -> `DataType::Interval`
     /// - `ScalarRefImpl::List` -> `DataType::List`
     /// - `ScalarRefImpl::Struct` -> `DataType::Struct`

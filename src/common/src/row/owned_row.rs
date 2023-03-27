@@ -17,7 +17,7 @@ use std::ops::{self, Deref};
 use super::Row;
 use crate::collection::estimate_size::EstimateSize;
 use crate::types::{
-    DataType, Datum, DatumRef, Decimal, Interval, NaiveDateTimeWrapper, NaiveDateWrapper,
+    DataType, Datum, DatumRef, Decimal, Interval, Timestamp, NaiveDateWrapper,
     NaiveTimeWrapper, ScalarImpl, ToDatumRef,
 };
 use crate::util::iter_util::ZipEqDebug;
@@ -80,7 +80,7 @@ impl OwnedRow {
                     DataType::Boolean => x.parse::<bool>().unwrap().into(),
                     DataType::Date => x.parse::<NaiveDateWrapper>().unwrap().into(),
                     DataType::Time => x.parse::<NaiveTimeWrapper>().unwrap().into(),
-                    DataType::Timestamp => x.parse::<NaiveDateTimeWrapper>().unwrap().into(),
+                    DataType::Timestamp => x.parse::<Timestamp>().unwrap().into(),
                     DataType::Interval => x.parse::<Interval>().unwrap().into(),
                     DataType::Decimal => x.parse::<Decimal>().unwrap().into(),
                     _ => todo!(),

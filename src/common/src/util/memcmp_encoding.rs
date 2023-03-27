@@ -22,7 +22,7 @@ use crate::array::{ArrayImpl, DataChunk};
 use crate::error::Result;
 use crate::row::Row;
 use crate::types::{
-    DataType, Datum, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, F32,
+    DataType, Datum, Timestamp, NaiveDateWrapper, NaiveTimeWrapper, F32,
     F64, ScalarImpl, ToDatumRef,
 };
 use crate::util::sort_util::{ColumnOrder, OrderType};
@@ -141,7 +141,7 @@ fn calculate_encoded_size_inner(
             DataType::Float64 => size_of::<F64>(),
             DataType::Date => size_of::<NaiveDateWrapper>(),
             DataType::Time => size_of::<NaiveTimeWrapper>(),
-            DataType::Timestamp => size_of::<NaiveDateTimeWrapper>(),
+            DataType::Timestamp => size_of::<Timestamp>(),
             DataType::Timestamptz => size_of::<i64>(),
             DataType::Boolean => size_of::<u8>(),
             // Interval is serialized as (i32, i32, i64)

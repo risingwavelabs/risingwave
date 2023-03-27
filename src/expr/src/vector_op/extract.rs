@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use chrono::{Datelike, Timelike};
-use risingwave_common::types::{Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
+use risingwave_common::types::{Decimal, Timestamp, NaiveDateWrapper, NaiveTimeWrapper};
 use risingwave_expr_macro::function;
 
 use crate::{ExprError, Result};
@@ -58,7 +58,7 @@ pub fn extract_from_date(unit: &str, date: NaiveDateWrapper) -> Result<Decimal> 
 }
 
 #[function("extract(varchar, timestamp) -> decimal")]
-pub fn extract_from_timestamp(unit: &str, timestamp: NaiveDateTimeWrapper) -> Result<Decimal> {
+pub fn extract_from_timestamp(unit: &str, timestamp: Timestamp) -> Result<Decimal> {
     let time = timestamp.0;
 
     extract_date(time, unit)
@@ -99,7 +99,7 @@ mod tests {
 
     #[test]
     fn test_time() {
-        let time = NaiveDateTimeWrapper::new(
+        let time = Timestamp::new(
             NaiveDateTime::parse_from_str("2021-11-22 12:4:2", "%Y-%m-%d %H:%M:%S").unwrap(),
         );
         assert_eq!(extract_from_timestamp("HOUR", time).unwrap(), 12.into());

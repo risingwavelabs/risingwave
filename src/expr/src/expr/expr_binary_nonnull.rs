@@ -45,12 +45,12 @@ mod tests {
         test_binary_decimal::<BoolArray, _>(|x, y| x >= y, Type::GreaterThanOrEqual).await;
         test_binary_decimal::<BoolArray, _>(|x, y| x < y, Type::LessThan).await;
         test_binary_decimal::<BoolArray, _>(|x, y| x <= y, Type::LessThanOrEqual).await;
-        test_binary_interval::<NaiveDateTimeArray, _>(
+        test_binary_interval::<TimestampArray, _>(
             |x, y| date_interval_add(x, y).unwrap(),
             Type::Add,
         )
         .await;
-        test_binary_interval::<NaiveDateTimeArray, _>(
+        test_binary_interval::<TimestampArray, _>(
             |x, y| date_interval_sub(x, y).unwrap(),
             Type::Subtract,
         )

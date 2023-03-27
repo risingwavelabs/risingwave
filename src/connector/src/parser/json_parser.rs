@@ -222,7 +222,7 @@ mod tests {
             );
             assert_eq!(
                 row.datum_at(8).to_owned_datum(),
-                (Some(ScalarImpl::NaiveDateTime(
+                (Some(ScalarImpl::Timestamp(
                     str_to_timestamp("2021-01-01 16:06:12.269").unwrap()
                 )))
             );
@@ -364,7 +364,7 @@ mod tests {
 
         let expected = vec![
             Some(ScalarImpl::Struct(StructValue::new(vec![
-                Some(ScalarImpl::NaiveDateTime(
+                Some(ScalarImpl::Timestamp(
                     str_to_timestamp("2022-07-13 20:48:37.07").unwrap()
                 )),
                 Some(ScalarImpl::Utf8("1732524418112319151".into())),
@@ -372,7 +372,7 @@ mod tests {
                 Some(ScalarImpl::Utf8("English".into())),
             ]))),
             Some(ScalarImpl::Struct(StructValue::new(vec![
-                Some(ScalarImpl::NaiveDateTime(
+                Some(ScalarImpl::Timestamp(
                     str_to_timestamp("2018-01-29 12:19:11.07").unwrap()
                 )),
                 Some(ScalarImpl::Utf8("7772634297".into())),

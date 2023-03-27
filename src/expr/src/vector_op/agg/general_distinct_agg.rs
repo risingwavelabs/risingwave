@@ -168,7 +168,7 @@ impl_aggregator! { ListArray, List, ListArray, List }
 impl_aggregator! { IntervalArray, Interval, IntervalArray, Interval }
 impl_aggregator! { NaiveTimeArray, NaiveTime, NaiveTimeArray, NaiveTime }
 impl_aggregator! { NaiveDateArray, NaiveDate, NaiveDateArray, NaiveDate }
-impl_aggregator! { NaiveDateTimeArray, NaiveDateTime, NaiveDateTimeArray, NaiveDateTime }
+impl_aggregator! { TimestampArray, Timestamp, TimestampArray, Timestamp }
 
 // count
 impl_aggregator! { I16Array, Int16, I64Array, Int64 } // sum
@@ -183,7 +183,7 @@ impl_aggregator! { ListArray, List, I64Array, Int64 }
 impl_aggregator! { IntervalArray, Interval, I64Array, Int64 }
 impl_aggregator! { NaiveTimeArray, NaiveTime, I64Array, Int64 }
 impl_aggregator! { NaiveDateArray, NaiveDate, I64Array, Int64 }
-impl_aggregator! { NaiveDateTimeArray, NaiveDateTime, I64Array, Int64 }
+impl_aggregator! { TimestampArray, Timestamp, I64Array, Int64 }
 
 // sum
 impl_aggregator! { I64Array, Int64, DecimalArray, Decimal }

@@ -91,7 +91,7 @@ converts_generic! {
     { arrow_array::Decimal128Array, Decimal128(_, _), ArrayImpl::Decimal },
     { arrow_array::IntervalMonthDayNanoArray, Interval(MonthDayNano), ArrayImpl::Interval },
     { arrow_array::Date32Array, Date32, ArrayImpl::NaiveDate },
-    { arrow_array::TimestampNanosecondArray, Timestamp(Nanosecond, _), ArrayImpl::NaiveDateTime },
+    { arrow_array::TimestampNanosecondArray, Timestamp(Nanosecond, _), ArrayImpl::Timestamp },
     { arrow_array::Time64NanosecondArray, Time64(Nanosecond), ArrayImpl::NaiveTime },
     // { arrow_array::StructArray, Struct(_), ArrayImpl::Struct }, // TODO: convert struct
     { arrow_array::ListArray, List(_), ArrayImpl::List },
@@ -231,7 +231,7 @@ converts!(BytesArray, arrow_array::BinaryArray);
 converts!(Utf8Array, arrow_array::StringArray);
 converts!(NaiveDateArray, arrow_array::Date32Array, @map);
 converts!(NaiveTimeArray, arrow_array::Time64NanosecondArray, @map);
-converts!(NaiveDateTimeArray, arrow_array::TimestampNanosecondArray, @map);
+converts!(TimestampArray, arrow_array::TimestampNanosecondArray, @map);
 converts!(IntervalArray, arrow_array::IntervalMonthDayNanoArray, @map);
 
 /// Converts RisingWave value from and into Arrow value.
@@ -322,11 +322,11 @@ impl FromIntoArrow for NaiveTimeWrapper {
     }
 }
 
-impl FromIntoArrow for NaiveDateTimeWrapper {
+impl FromIntoArrow for Timestamp {
     type ArrowType = i64;
 
     fn from_arrow(value: Self::ArrowType) -> Self {
-        NaiveDateTimeWrapper(
+        Timestamp(
             NaiveDateTime::from_timestamp_opt(
                 (value / 1_000_000_000) as _,
                 (value % 1_000_000_000) as _,
@@ -432,7 +432,7 @@ impl From<&ListArray> for arrow_array::ListArray {
                     b.append_option(v.map(|d| d.into_arrow()))
                 })
             }
-            ArrayImpl::NaiveDateTime(a) => build(
+            ArrayImpl::Timestamp(a) => build(
                 array,
                 a,
                 TimestampNanosecondBuilder::with_capacity(a.len()),
@@ -566,13 +566,13 @@ mod tests {
 
     #[test]
     fn timestamp() {
-        let array = NaiveDateTimeArray::from_iter([
+        let array = TimestampArray::from_iter([
             None,
-            NaiveDateTimeWrapper::with_secs_nsecs(12345, 123456789).ok(),
-            NaiveDateTimeWrapper::with_secs_nsecs(1, 0).ok(),
+            Timestamp::with_secs_nsecs(12345, 123456789).ok(),
+            Timestamp::with_secs_nsecs(1, 0).ok(),
         ]);
         let arrow = arrow_array::TimestampNanosecondArray::from(&array);
-        assert_eq!(NaiveDateTimeArray::from(&arrow), array);
+        assert_eq!(TimestampArray::from(&arrow), array);
     }
 
     #[test]

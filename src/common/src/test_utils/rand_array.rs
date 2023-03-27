@@ -28,7 +28,7 @@ use rand::{Rng, SeedableRng};
 use crate::array::serial_array::Serial;
 use crate::array::{Array, ArrayBuilder, ArrayRef, JsonbVal, ListValue, StructValue};
 use crate::types::{
-    Decimal, Interval, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, NativeType,
+    Decimal, Interval, Timestamp, NaiveDateWrapper, NaiveTimeWrapper, NativeType,
     Scalar,
 };
 
@@ -102,9 +102,9 @@ impl RandValue for NaiveTimeWrapper {
     }
 }
 
-impl RandValue for NaiveDateTimeWrapper {
+impl RandValue for Timestamp {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
-        NaiveDateTimeWrapper::new(
+        Timestamp::new(
             NaiveDateWrapper::rand_value(rand)
                 .0
                 .and_time(NaiveTimeWrapper::rand_value(rand).0),

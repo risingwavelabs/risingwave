@@ -419,7 +419,7 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            watermark!(ScalarImpl::NaiveDateTime(
+            watermark!(ScalarImpl::Timestamp(
                 NaiveDateWrapper::from_ymd_uncheck(2022, 11, 7).and_hms_uncheck(0, 0, 0)
             ))
         );
@@ -442,7 +442,7 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            watermark!(ScalarImpl::NaiveDateTime(
+            watermark!(ScalarImpl::Timestamp(
                 NaiveDateWrapper::from_ymd_uncheck(2022, 11, 9).and_hms_uncheck(0, 0, 0)
             ))
         );
@@ -466,7 +466,7 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            watermark!(ScalarImpl::NaiveDateTime(
+            watermark!(ScalarImpl::Timestamp(
                 NaiveDateWrapper::from_ymd_uncheck(2022, 11, 9).and_hms_uncheck(0, 0, 0)
             ))
         );
@@ -485,7 +485,7 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            watermark!(ScalarImpl::NaiveDateTime(
+            watermark!(ScalarImpl::Timestamp(
                 NaiveDateWrapper::from_ymd_uncheck(2022, 11, 13).and_hms_uncheck(0, 0, 0)
             ))
         );

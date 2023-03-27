@@ -22,12 +22,12 @@ use risingwave_pb::data::PbArray;
 use crate::array::value_reader::{PrimitiveValueReader, VarSizedValueReader};
 use crate::array::{
     Array, ArrayBuilder, ArrayImpl, ArrayMeta, ArrayResult, BoolArray, IntervalArrayBuilder,
-    NaiveDateArrayBuilder, NaiveDateTimeArrayBuilder, NaiveTimeArrayBuilder, PrimitiveArrayBuilder,
+    NaiveDateArrayBuilder, TimestampArrayBuilder, NaiveTimeArrayBuilder, PrimitiveArrayBuilder,
     PrimitiveArrayItemType,
 };
 use crate::buffer::Bitmap;
 use crate::types::interval::Interval;
-use crate::types::{NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
+use crate::types::{Timestamp, NaiveDateWrapper, NaiveTimeWrapper};
 
 // TODO: Use techniques like apache arrow flight RPC to eliminate deserialization.
 // https://arrow.apache.org/docs/format/Flight.html
@@ -89,11 +89,11 @@ fn read_naive_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveTimeWrapper> 
     }
 }
 
-fn read_naive_date_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveDateTimeWrapper> {
+fn read_timestamp(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Timestamp> {
     cursor
         .read_i64::<BigEndian>()
-        .map_err(|e| anyhow!("Failed to read i64 from NaiveDateTime buffer: {}", e))
-        .and_then(|t| NaiveDateTimeWrapper::with_macros(t).map_err(|e| anyhow!("{}", e)))
+        .map_err(|e| anyhow!("Failed to read i64 from Timestamp buffer: {}", e))
+        .and_then(|t| Timestamp::with_macros(t).map_err(|e| anyhow!("{}", e)))
         .map_err(Into::into)
 }
 
@@ -148,7 +148,7 @@ read_one_value_array! {
     { Interval, IntervalArrayBuilder },
     { NaiveDate, NaiveDateArrayBuilder },
     { NaiveTime, NaiveTimeArrayBuilder },
-    { NaiveDateTime, NaiveDateTimeArrayBuilder }
+    { Timestamp, TimestampArrayBuilder }
 }
 
 fn read_offset(offset_cursor: &mut Cursor<&[u8]>) -> ArrayResult<i64> {

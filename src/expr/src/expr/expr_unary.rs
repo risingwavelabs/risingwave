@@ -27,7 +27,7 @@ mod tests {
     #[tokio::test]
     async fn test_unary() {
         test_unary_bool::<BoolArray, _>(|x| !x, PbType::Not).await;
-        test_unary_date::<NaiveDateTimeArray, _>(|x| try_cast(x).unwrap(), PbType::Cast).await;
+        test_unary_date::<TimestampArray, _>(|x| try_cast(x).unwrap(), PbType::Cast).await;
         test_str_to_int16::<I16Array, _>(|x| str_parse(x).unwrap()).await;
     }
 

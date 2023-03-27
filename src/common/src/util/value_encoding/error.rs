@@ -22,8 +22,8 @@ pub enum ValueEncodingError {
     InvalidUtf8(#[from] std::string::FromUtf8Error),
     #[error("Invalid NaiveDate value encoding: days: {0}")]
     InvalidNaiveDateEncoding(i32),
-    #[error("invalid NaiveDateTime value encoding: secs: {0} nsecs: {1}")]
-    InvalidNaiveDateTimeEncoding(i64, u32),
+    #[error("invalid Timestamp value encoding: secs: {0} nsecs: {1}")]
+    InvalidTimestampEncoding(i64, u32),
     #[error("invalid NaiveTime value encoding: secs: {0} nano: {1}")]
     InvalidNaiveTimeEncoding(u32, u32),
     #[error("Invalid null tag value encoding: {0}")]

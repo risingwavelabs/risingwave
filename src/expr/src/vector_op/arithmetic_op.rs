@@ -19,7 +19,7 @@ use chrono::{Duration, NaiveDateTime};
 use num_traits::real::Real;
 use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed, Zero};
 use risingwave_common::types::{
-    CheckedAdd, Decimal, Interval, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
+    CheckedAdd, Decimal, Interval, Timestamp, NaiveDateWrapper, NaiveTimeWrapper,
     F64,
 };
 use risingwave_expr_macro::function;
@@ -144,8 +144,8 @@ where
 
 #[function("subtract(timestamp, timestamp) -> interval")]
 pub fn timestamp_timestamp_sub(
-    l: NaiveDateTimeWrapper,
-    r: NaiveDateTimeWrapper,
+    l: Timestamp,
+    r: Timestamp,
 ) -> Result<Interval> {
     let tmp = l.0 - r.0; // this does not overflow or underflow
     let days = tmp.num_days();
@@ -163,13 +163,13 @@ pub fn date_date_sub(l: NaiveDateWrapper, r: NaiveDateWrapper) -> Result<i32> {
 #[function("add(interval, timestamp) -> timestamp")]
 pub fn interval_timestamp_add(
     l: Interval,
-    r: NaiveDateTimeWrapper,
-) -> Result<NaiveDateTimeWrapper> {
+    r: Timestamp,
+) -> Result<Timestamp> {
     r.checked_add(l).ok_or(ExprError::NumericOutOfRange)
 }
 
 #[function("add(interval, date) -> timestamp")]
-pub fn interval_date_add(l: Interval, r: NaiveDateWrapper) -> Result<NaiveDateTimeWrapper> {
+pub fn interval_date_add(l: Interval, r: NaiveDateWrapper) -> Result<Timestamp> {
     interval_timestamp_add(l, r.into())
 }
 
@@ -179,13 +179,13 @@ pub fn interval_time_add(l: Interval, r: NaiveTimeWrapper) -> Result<NaiveTimeWr
 }
 
 #[function("add(date, interval) -> timestamp")]
-pub fn date_interval_add(l: NaiveDateWrapper, r: Interval) -> Result<NaiveDateTimeWrapper> {
+pub fn date_interval_add(l: NaiveDateWrapper, r: Interval) -> Result<Timestamp> {
     interval_date_add(r, l)
 }
 
 #[function("subtract(date, interval) -> timestamp")]
-pub fn date_interval_sub(l: NaiveDateWrapper, r: Interval) -> Result<NaiveDateTimeWrapper> {
-    // TODO: implement `checked_sub` for `NaiveDateTimeWrapper` to handle the edge case of negation
+pub fn date_interval_sub(l: NaiveDateWrapper, r: Interval) -> Result<Timestamp> {
+    // TODO: implement `checked_sub` for `Timestamp` to handle the edge case of negation
     // overflowing.
     interval_date_add(r.checked_neg().ok_or(ExprError::NumericOutOfRange)?, l)
 }
@@ -217,17 +217,17 @@ pub fn date_int_sub(l: NaiveDateWrapper, r: i32) -> Result<NaiveDateWrapper> {
 
 #[function("add(timestamp, interval) -> timestamp")]
 pub fn timestamp_interval_add(
-    l: NaiveDateTimeWrapper,
+    l: Timestamp,
     r: Interval,
-) -> Result<NaiveDateTimeWrapper> {
+) -> Result<Timestamp> {
     interval_timestamp_add(r, l)
 }
 
 #[function("subtract(timestamp, interval) -> timestamp")]
 pub fn timestamp_interval_sub(
-    l: NaiveDateTimeWrapper,
+    l: Timestamp,
     r: Interval,
-) -> Result<NaiveDateTimeWrapper> {
+) -> Result<Timestamp> {
     interval_timestamp_add(r.checked_neg().ok_or(ExprError::NumericOutOfRange)?, l)
 }
 
@@ -278,13 +278,12 @@ pub fn int_interval_mul(l: impl TryInto<i32> + Debug, r: Interval) -> Result<Int
 }
 
 #[function("add(date, time) -> timestamp")]
-pub fn date_time_add(l: NaiveDateWrapper, r: NaiveTimeWrapper) -> Result<NaiveDateTimeWrapper> {
-    let date_time = NaiveDateTime::new(l.0, r.0);
-    Ok(NaiveDateTimeWrapper::new(date_time))
+pub fn date_time_add(l: NaiveDateWrapper, r: NaiveTimeWrapper) -> Result<Timestamp> {
+    Ok(Timestamp::new(NaiveDateTime::new(l.0, r.0)))
 }
 
 #[function("add(time, date) -> timestamp")]
-pub fn time_date_add(l: NaiveTimeWrapper, r: NaiveDateWrapper) -> Result<NaiveDateTimeWrapper> {
+pub fn time_date_add(l: NaiveTimeWrapper, r: NaiveDateWrapper) -> Result<Timestamp> {
     date_time_add(r, l)
 }
 
@@ -353,7 +352,7 @@ mod tests {
 
     use risingwave_common::types::test_utils::IntervalTestExt;
     use risingwave_common::types::{
-        Decimal, Interval, NaiveDateTimeWrapper, NaiveDateWrapper, F32, F64,
+        Decimal, Interval, Timestamp, NaiveDateWrapper, F32, F64,
     };
 
     use super::*;
@@ -446,7 +445,7 @@ mod tests {
                 Interval::from_month(12)
             )
             .unwrap(),
-            NaiveDateTimeWrapper::new(
+            Timestamp::new(
                 NaiveDateTime::parse_from_str("1995-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
             )
         );
@@ -456,7 +455,7 @@ mod tests {
                 NaiveDateWrapper::from_ymd_uncheck(1994, 1, 1)
             )
             .unwrap(),
-            NaiveDateTimeWrapper::new(
+            Timestamp::new(
                 NaiveDateTime::parse_from_str("1995-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
             )
         );
@@ -466,7 +465,7 @@ mod tests {
                 Interval::from_month(12)
             )
             .unwrap(),
-            NaiveDateTimeWrapper::new(
+            Timestamp::new(
                 NaiveDateTime::parse_from_str("1993-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
             )
         );

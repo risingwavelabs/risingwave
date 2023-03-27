@@ -14,7 +14,7 @@
 
 use num_traits::Zero;
 use risingwave_common::types::{
-    Interval, NaiveDateTimeWrapper, NaiveDateWrapper, USECS_PER_DAY, USECS_PER_MONTH,
+    Interval, Timestamp, NaiveDateWrapper, USECS_PER_DAY, USECS_PER_MONTH,
 };
 use risingwave_expr_macro::function;
 
@@ -29,18 +29,18 @@ fn interval_to_micro_second(t: Interval) -> i64 {
 pub fn tumble_start_date(
     timestamp: NaiveDateWrapper,
     window_size: Interval,
-) -> Result<NaiveDateTimeWrapper> {
+) -> Result<Timestamp> {
     tumble_start_date_time(timestamp.into(), window_size)
 }
 
 #[function("tumble_start(timestamp, interval) -> timestamp")]
 pub fn tumble_start_date_time(
-    timestamp: NaiveDateTimeWrapper,
+    timestamp: Timestamp,
     window_size: Interval,
-) -> Result<NaiveDateTimeWrapper> {
+) -> Result<Timestamp> {
     let timestamp_micro_second = timestamp.0.timestamp_micros();
     let window_start_micro_second = get_window_start(timestamp_micro_second, window_size)?;
-    Ok(NaiveDateTimeWrapper::from_timestamp_uncheck(
+    Ok(Timestamp::from_timestamp_uncheck(
         window_start_micro_second / 1_000_000,
         (window_start_micro_second % 1_000_000 * 1000) as u32,
     ))
@@ -67,21 +67,21 @@ pub fn tumble_start_offset_date(
     timestamp_date: NaiveDateWrapper,
     window_size: Interval,
     offset: Interval,
-) -> Result<NaiveDateTimeWrapper> {
+) -> Result<Timestamp> {
     tumble_start_offset_date_time(timestamp_date.into(), window_size, offset)
 }
 
 #[function("tumble_start(timestamp, interval, interval) -> timestamp")]
 pub fn tumble_start_offset_date_time(
-    time: NaiveDateTimeWrapper,
+    time: Timestamp,
     window_size: Interval,
     offset: Interval,
-) -> Result<NaiveDateTimeWrapper> {
+) -> Result<Timestamp> {
     let timestamp_micro_second = time.0.timestamp_micros();
     let window_start_micro_second =
         get_window_start_with_offset(timestamp_micro_second, window_size, offset)?;
 
-    Ok(NaiveDateTimeWrapper::from_timestamp_uncheck(
+    Ok(Timestamp::from_timestamp_uncheck(
         window_start_micro_second / 1_000_000,
         (window_start_micro_second % 1_000_000 * 1000) as u32,
     ))

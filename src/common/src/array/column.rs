@@ -127,12 +127,12 @@ mod tests {
     use super::*;
     use crate::array::{
         Array, ArrayBuilder, BoolArray, BoolArrayBuilder, DecimalArray, DecimalArrayBuilder,
-        I32Array, I32ArrayBuilder, NaiveDateArray, NaiveDateArrayBuilder, NaiveDateTimeArray,
-        NaiveDateTimeArrayBuilder, NaiveTimeArray, NaiveTimeArrayBuilder, Utf8Array,
+        I32Array, I32ArrayBuilder, NaiveDateArray, NaiveDateArrayBuilder, TimestampArray,
+        TimestampArrayBuilder, NaiveTimeArray, NaiveTimeArrayBuilder, Utf8Array,
         Utf8ArrayBuilder,
     };
     use crate::error::Result;
-    use crate::types::{Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
+    use crate::types::{Decimal, Timestamp, NaiveDateWrapper, NaiveTimeWrapper};
 
     // Convert a column to protobuf, then convert it back to column, and ensures the two are
     // identical.
@@ -292,13 +292,13 @@ mod tests {
     }
 
     #[test]
-    fn test_naivedatetime_protobuf_conversion() -> Result<()> {
+    fn test_timestamp_protobuf_conversion() -> Result<()> {
         let cardinality = 2048;
-        let mut builder = NaiveDateTimeArrayBuilder::new(cardinality);
+        let mut builder = TimestampArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
                 builder
-                    .append(NaiveDateTimeWrapper::with_secs_nsecs(i as i64, i as u32 * 1000).ok());
+                    .append(Timestamp::with_secs_nsecs(i as i64, i as u32 * 1000).ok());
             } else {
                 builder.append(None);
             }
@@ -306,11 +306,11 @@ mod tests {
         let col: Column = builder.finish().into();
         let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
-        let arr: &NaiveDateTimeArray = new_col.array_ref().as_naivedatetime();
+        let arr: &TimestampArray = new_col.array_ref().as_timestamp();
         arr.iter().enumerate().for_each(|(i, x)| {
             if i % 2 == 0 {
                 assert_eq!(
-                    NaiveDateTimeWrapper::with_secs_nsecs(i as i64, i as u32 * 1000)
+                    Timestamp::with_secs_nsecs(i as i64, i as u32 * 1000)
                         .ok()
                         .unwrap(),
                     x.unwrap()

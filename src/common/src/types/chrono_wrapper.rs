@@ -71,7 +71,7 @@ macro_rules! impl_chrono_wrapper {
 }
 
 impl_chrono_wrapper!(NaiveDateWrapper, NaiveDate);
-impl_chrono_wrapper!(NaiveDateTimeWrapper, NaiveDateTime);
+impl_chrono_wrapper!(Timestamp, NaiveDateTime);
 impl_chrono_wrapper!(NaiveTimeWrapper, NaiveTime);
 
 #[derive(Copy, Clone, Debug, Error)]
@@ -130,7 +130,7 @@ impl ToText for NaiveTimeWrapper {
     }
 }
 
-impl ToText for NaiveDateTimeWrapper {
+impl ToText for Timestamp {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
@@ -169,7 +169,7 @@ impl ToBinary for NaiveTimeWrapper {
     }
 }
 
-impl ToBinary for NaiveDateTimeWrapper {
+impl ToBinary for Timestamp {
     fn to_binary_with_type(&self, ty: &DataType) -> crate::error::Result<Option<Bytes>> {
         match ty {
             super::DataType::Timestamp => {
@@ -213,7 +213,7 @@ impl NaiveDateWrapper {
         Self::with_days(days).unwrap()
     }
 
-    pub fn and_hms_uncheck(self, hour: u32, min: u32, sec: u32) -> NaiveDateTimeWrapper {
+    pub fn and_hms_uncheck(self, hour: u32, min: u32, sec: u32) -> Timestamp {
         self.and_hms_micro_uncheck(hour, min, sec, 0)
     }
 
@@ -223,8 +223,8 @@ impl NaiveDateWrapper {
         min: u32,
         sec: u32,
         micro: u32,
-    ) -> NaiveDateTimeWrapper {
-        NaiveDateTimeWrapper::new(
+    ) -> Timestamp {
+        Timestamp::new(
             self.0
                 .and_time(NaiveTimeWrapper::from_hms_micro_uncheck(hour, min, sec, micro).0),
         )
@@ -278,15 +278,15 @@ impl NaiveTimeWrapper {
     }
 }
 
-impl NaiveDateTimeWrapper {
+impl Timestamp {
     pub fn with_secs_nsecs(secs: i64, nsecs: u32) -> Result<Self> {
-        Ok(NaiveDateTimeWrapper::new({
+        Ok(Timestamp::new({
             NaiveDateTime::from_timestamp_opt(secs, nsecs)
                 .ok_or_else(|| InvalidParamsError::datetime(secs, nsecs))?
         }))
     }
 
-    /// Although `NaiveDateTime` takes 12 bytes, we drop 4 bytes in protobuf encoding.
+    /// Although `Timestamp` takes 12 bytes, we drop 4 bytes in protobuf encoding.
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output
             .write(&(self.0.timestamp_micros()).to_be_bytes())
@@ -307,15 +307,15 @@ impl NaiveDateTimeWrapper {
     ///
     /// # Example
     /// ```
-    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// # use risingwave_common::types::Timestamp;
     /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
     /// assert_eq!(
-    ///     NaiveDateTimeWrapper::new(ts).truncate_micros().to_string(),
+    ///     Timestamp::new(ts).truncate_micros().to_string(),
     ///     "2001-05-16 20:38:40.123456"
     /// );
     /// ```
     pub fn truncate_micros(self) -> Self {
-        NaiveDateTimeWrapper::new(
+        Self::new(
             self.0
                 .with_nanosecond(self.0.nanosecond() / 1000 * 1000)
                 .unwrap(),
@@ -326,15 +326,15 @@ impl NaiveDateTimeWrapper {
     ///
     /// # Example
     /// ```
-    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// # use risingwave_common::types::Timestamp;
     /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
     /// assert_eq!(
-    ///     NaiveDateTimeWrapper::new(ts).truncate_millis().to_string(),
+    ///     Timestamp::new(ts).truncate_millis().to_string(),
     ///     "2001-05-16 20:38:40.123"
     /// );
     /// ```
     pub fn truncate_millis(self) -> Self {
-        NaiveDateTimeWrapper::new(
+        Self::new(
             self.0
                 .with_nanosecond(self.0.nanosecond() / 1_000_000 * 1_000_000)
                 .unwrap(),
@@ -345,25 +345,25 @@ impl NaiveDateTimeWrapper {
     ///
     /// # Example
     /// ```
-    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// # use risingwave_common::types::Timestamp;
     /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
     /// assert_eq!(
-    ///     NaiveDateTimeWrapper::new(ts).truncate_second().to_string(),
+    ///     Timestamp::new(ts).truncate_second().to_string(),
     ///     "2001-05-16 20:38:40"
     /// );
     /// ```
     pub fn truncate_second(self) -> Self {
-        NaiveDateTimeWrapper::new(self.0.with_nanosecond(0).unwrap())
+        Self::new(self.0.with_nanosecond(0).unwrap())
     }
 
     /// Truncate the timestamp to the precision of minutes.
     ///
     /// # Example
     /// ```
-    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// # use risingwave_common::types::Timestamp;
     /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
     /// assert_eq!(
-    ///     NaiveDateTimeWrapper::new(ts).truncate_minute().to_string(),
+    ///     Timestamp::new(ts).truncate_minute().to_string(),
     ///     "2001-05-16 20:38:00"
     /// );
     /// ```
@@ -375,10 +375,10 @@ impl NaiveDateTimeWrapper {
     ///
     /// # Example
     /// ```
-    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// # use risingwave_common::types::Timestamp;
     /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
     /// assert_eq!(
-    ///     NaiveDateTimeWrapper::new(ts).truncate_hour().to_string(),
+    ///     Timestamp::new(ts).truncate_hour().to_string(),
     ///     "2001-05-16 20:00:00"
     /// );
     /// ```
@@ -390,10 +390,10 @@ impl NaiveDateTimeWrapper {
     ///
     /// # Example
     /// ```
-    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// # use risingwave_common::types::Timestamp;
     /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
     /// assert_eq!(
-    ///     NaiveDateTimeWrapper::new(ts).truncate_day().to_string(),
+    ///     Timestamp::new(ts).truncate_day().to_string(),
     ///     "2001-05-16 00:00:00"
     /// );
     /// ```
@@ -405,10 +405,10 @@ impl NaiveDateTimeWrapper {
     ///
     /// # Example
     /// ```
-    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// # use risingwave_common::types::Timestamp;
     /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
     /// assert_eq!(
-    ///     NaiveDateTimeWrapper::new(ts).truncate_week().to_string(),
+    ///     Timestamp::new(ts).truncate_week().to_string(),
     ///     "2001-05-14 00:00:00"
     /// );
     /// ```
@@ -420,10 +420,10 @@ impl NaiveDateTimeWrapper {
     ///
     /// # Example
     /// ```
-    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// # use risingwave_common::types::Timestamp;
     /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
     /// assert_eq!(
-    ///     NaiveDateTimeWrapper::new(ts).truncate_month().to_string(),
+    ///     Timestamp::new(ts).truncate_month().to_string(),
     ///     "2001-05-01 00:00:00"
     /// );
     /// ```
@@ -435,10 +435,10 @@ impl NaiveDateTimeWrapper {
     ///
     /// # Example
     /// ```
-    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// # use risingwave_common::types::Timestamp;
     /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
     /// assert_eq!(
-    ///     NaiveDateTimeWrapper::new(ts).truncate_quarter().to_string(),
+    ///     Timestamp::new(ts).truncate_quarter().to_string(),
     ///     "2001-04-01 00:00:00"
     /// );
     /// ```
@@ -450,10 +450,10 @@ impl NaiveDateTimeWrapper {
     ///
     /// # Example
     /// ```
-    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// # use risingwave_common::types::Timestamp;
     /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
     /// assert_eq!(
-    ///     NaiveDateTimeWrapper::new(ts).truncate_year().to_string(),
+    ///     Timestamp::new(ts).truncate_year().to_string(),
     ///     "2001-01-01 00:00:00"
     /// );
     /// ```
@@ -465,10 +465,10 @@ impl NaiveDateTimeWrapper {
     ///
     /// # Example
     /// ```
-    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// # use risingwave_common::types::Timestamp;
     /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
     /// assert_eq!(
-    ///     NaiveDateTimeWrapper::new(ts).truncate_decade().to_string(),
+    ///     Timestamp::new(ts).truncate_decade().to_string(),
     ///     "2000-01-01 00:00:00"
     /// );
     /// ```
@@ -480,10 +480,10 @@ impl NaiveDateTimeWrapper {
     ///
     /// # Example
     /// ```
-    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// # use risingwave_common::types::Timestamp;
     /// let ts = "3202-05-16T20:38:40.123456789".parse().unwrap();
     /// assert_eq!(
-    ///     NaiveDateTimeWrapper::new(ts).truncate_century().to_string(),
+    ///     Timestamp::new(ts).truncate_century().to_string(),
     ///     "3201-01-01 00:00:00"
     /// );
     /// ```
@@ -495,10 +495,10 @@ impl NaiveDateTimeWrapper {
     ///
     /// # Example
     /// ```
-    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// # use risingwave_common::types::Timestamp;
     /// let ts = "3202-05-16T20:38:40.123456789".parse().unwrap();
     /// assert_eq!(
-    ///     NaiveDateTimeWrapper::new(ts)
+    ///     Timestamp::new(ts)
     ///         .truncate_millennium()
     ///         .to_string(),
     ///     "3001-01-01 00:00:00"
@@ -509,7 +509,7 @@ impl NaiveDateTimeWrapper {
     }
 }
 
-impl From<NaiveDateWrapper> for NaiveDateTimeWrapper {
+impl From<NaiveDateWrapper> for Timestamp {
     fn from(date: NaiveDateWrapper) -> Self {
         date.and_hms_uncheck(0, 0, 0)
     }
@@ -528,10 +528,10 @@ fn is_leap_year(year: i32) -> bool {
     year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
 }
 
-impl CheckedAdd<Interval> for NaiveDateTimeWrapper {
-    type Output = NaiveDateTimeWrapper;
+impl CheckedAdd<Interval> for Timestamp {
+    type Output = Timestamp;
 
-    fn checked_add(self, rhs: Interval) -> Option<NaiveDateTimeWrapper> {
+    fn checked_add(self, rhs: Interval) -> Option<Timestamp> {
         let mut date = self.0.date();
         if rhs.get_months() != 0 {
             // NaiveDate don't support add months. We need calculate manually
@@ -567,6 +567,6 @@ impl CheckedAdd<Interval> for NaiveDateTimeWrapper {
         datetime = datetime.checked_add_signed(Duration::days(rhs.get_days().into()))?;
         datetime = datetime.checked_add_signed(Duration::microseconds(rhs.get_usecs()))?;
 
-        Some(NaiveDateTimeWrapper::new(datetime))
+        Some(Timestamp::new(datetime))
     }
 }

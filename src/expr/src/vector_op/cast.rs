@@ -27,7 +27,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{
-    DataType, Decimal, Interval, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
+    DataType, Decimal, Interval, Timestamp, NaiveDateWrapper, NaiveTimeWrapper,
     F32, F64, ScalarImpl,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -68,8 +68,8 @@ pub fn str_to_time(elem: &str) -> Result<NaiveTimeWrapper> {
 }
 
 #[function("cast(varchar) -> timestamp")]
-pub fn str_to_timestamp(elem: &str) -> Result<NaiveDateTimeWrapper> {
-    Ok(NaiveDateTimeWrapper::new(parse_naive_datetime(elem)?))
+pub fn str_to_timestamp(elem: &str) -> Result<Timestamp> {
+    Ok(Timestamp::new(parse_naive_datetime(elem)?))
 }
 
 #[inline]
@@ -133,9 +133,9 @@ fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
 /// );
 /// ```
 #[inline]
-pub fn i64_to_timestamp(t: i64) -> Result<NaiveDateTimeWrapper> {
+pub fn i64_to_timestamp(t: i64) -> Result<Timestamp> {
     let us = i64_to_timestamptz(t)?;
-    Ok(NaiveDateTimeWrapper::from_timestamp_uncheck(
+    Ok(Timestamp::from_timestamp_uncheck(
         us / 1_000_000,
         (us % 1_000_000) as u32 * 1000,
     ))
@@ -372,13 +372,13 @@ define_jsonb_to_number! { f64, F64, "cast(jsonb) -> float64" }
 
 /// In `PostgreSQL`, casting from timestamp to date discards the time part.
 #[function("cast(timestamp) -> date")]
-pub fn timestamp_to_date(elem: NaiveDateTimeWrapper) -> NaiveDateWrapper {
+pub fn timestamp_to_date(elem: Timestamp) -> NaiveDateWrapper {
     NaiveDateWrapper(elem.0.date())
 }
 
 /// In `PostgreSQL`, casting from timestamp to time discards the date part.
 #[function("cast(timestamp) -> time")]
-pub fn timestamp_to_time(elem: NaiveDateTimeWrapper) -> NaiveTimeWrapper {
+pub fn timestamp_to_time(elem: Timestamp) -> NaiveTimeWrapper {
     NaiveTimeWrapper(elem.0.time())
 }
 
@@ -1018,9 +1018,9 @@ mod tests {
     #[test]
     fn test_timestamp() {
         assert_eq!(
-            try_cast::<_, NaiveDateTimeWrapper>(NaiveDateWrapper::from_ymd_uncheck(1994, 1, 1))
+            try_cast::<_, Timestamp>(NaiveDateWrapper::from_ymd_uncheck(1994, 1, 1))
                 .unwrap(),
-            NaiveDateTimeWrapper::new(
+            Timestamp::new(
                 NaiveDateTime::parse_from_str("1994-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
             )
         )

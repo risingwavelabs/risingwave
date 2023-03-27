@@ -225,20 +225,20 @@ impl<'a> ScalarRef<'a> for NaiveDateWrapper {
     }
 }
 
-/// Implement `Scalar` for `NaiveDateTimeWrapper`.
-impl Scalar for NaiveDateTimeWrapper {
-    type ScalarRefType<'a> = NaiveDateTimeWrapper;
+/// Implement `Scalar` for `Timestamp`.
+impl Scalar for Timestamp {
+    type ScalarRefType<'a> = Timestamp;
 
-    fn as_scalar_ref(&self) -> NaiveDateTimeWrapper {
+    fn as_scalar_ref(&self) -> Timestamp {
         *self
     }
 }
 
-/// Implement `ScalarRef` for `NaiveDateTimeWrapper`.
-impl<'a> ScalarRef<'a> for NaiveDateTimeWrapper {
-    type ScalarType = NaiveDateTimeWrapper;
+/// Implement `ScalarRef` for `Timestamp`.
+impl<'a> ScalarRef<'a> for Timestamp {
+    type ScalarType = Timestamp;
 
-    fn to_owned_scalar(&self) -> NaiveDateTimeWrapper {
+    fn to_owned_scalar(&self) -> Timestamp {
         *self
     }
 

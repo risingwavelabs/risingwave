@@ -19,7 +19,7 @@ use itertools::multizip;
 use num_traits::Zero;
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I32Array, IntervalArray,
-    NaiveDateTimeArray,
+    TimestampArray,
 };
 use risingwave_common::types::{CheckedAdd, IsNegative, Scalar, ScalarRef};
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -163,7 +163,7 @@ pub fn new_generate_series<const STOP_INCLUSIVE: bool>(
 
     match return_type {
         DataType::Timestamp => Ok(GenerateSeries::<
-            NaiveDateTimeArray,
+            TimestampArray,
             IntervalArray,
             STOP_INCLUSIVE,
         >::new(start, stop, step, chunk_size)
@@ -181,7 +181,7 @@ pub fn new_generate_series<const STOP_INCLUSIVE: bool>(
 #[cfg(test)]
 mod tests {
     use risingwave_common::types::test_utils::IntervalTestExt;
-    use risingwave_common::types::{DataType, Interval, NaiveDateTimeWrapper, ScalarImpl};
+    use risingwave_common::types::{DataType, Interval, Timestamp, ScalarImpl};
 
     use super::*;
     use crate::expr::{Expression, LiteralExpression};
@@ -233,8 +233,8 @@ mod tests {
     }
 
     async fn generate_time_series_test_case(
-        start: NaiveDateTimeWrapper,
-        stop: NaiveDateTimeWrapper,
+        start: Timestamp,
+        stop: Timestamp,
         step: Interval,
         expect_cnt: usize,
     ) {
@@ -242,7 +242,7 @@ mod tests {
             LiteralExpression::new(ty, Some(v)).boxed()
         }
 
-        let function = GenerateSeries::<NaiveDateTimeArray, IntervalArray, true>::new(
+        let function = GenerateSeries::<TimestampArray, IntervalArray, true>::new(
             to_lit_expr(DataType::Timestamp, start.into()),
             to_lit_expr(DataType::Timestamp, stop.into()),
             to_lit_expr(DataType::Interval, step.into()),
@@ -299,8 +299,8 @@ mod tests {
     }
 
     async fn time_range_test_case(
-        start: NaiveDateTimeWrapper,
-        stop: NaiveDateTimeWrapper,
+        start: Timestamp,
+        stop: Timestamp,
         step: Interval,
         expect_cnt: usize,
     ) {
@@ -308,7 +308,7 @@ mod tests {
             LiteralExpression::new(ty, Some(v)).boxed()
         }
 
-        let function = GenerateSeries::<NaiveDateTimeArray, IntervalArray, false>::new(
+        let function = GenerateSeries::<TimestampArray, IntervalArray, false>::new(
             to_lit_expr(DataType::Timestamp, start.into()),
             to_lit_expr(DataType::Timestamp, stop.into()),
             to_lit_expr(DataType::Interval, step.into()),

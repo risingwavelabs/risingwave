@@ -17,7 +17,7 @@ use std::fmt::Write;
 use chrono::{TimeZone, Utc};
 use chrono_tz::Tz;
 use num_traits::ToPrimitive;
-use risingwave_common::types::{NaiveDateTimeWrapper, F64};
+use risingwave_common::types::{Timestamp, F64};
 use risingwave_expr_macro::function;
 
 use crate::vector_op::cast::{str_to_timestamp, str_with_time_zone_to_timestamptz};
@@ -42,7 +42,7 @@ pub fn f64_sec_to_timestamptz(elem: F64) -> Result<i64> {
 }
 
 #[function("at_time_zone(timestamp, varchar) -> timestamptz")]
-pub fn timestamp_at_time_zone(input: NaiveDateTimeWrapper, time_zone: &str) -> Result<i64> {
+pub fn timestamp_at_time_zone(input: Timestamp, time_zone: &str) -> Result<i64> {
     let time_zone = lookup_time_zone(time_zone)?;
     // https://www.postgresql.org/docs/current/datetime-invalid-input.html
     // Special cases:
@@ -91,14 +91,14 @@ pub fn str_to_timestamptz(elem: &str, time_zone: &str) -> Result<i64> {
 }
 
 #[function("at_time_zone(timestamptz, varchar) -> timestamp")]
-pub fn timestamptz_at_time_zone(input: i64, time_zone: &str) -> Result<NaiveDateTimeWrapper> {
+pub fn timestamptz_at_time_zone(input: i64, time_zone: &str) -> Result<Timestamp> {
     let time_zone = lookup_time_zone(time_zone)?;
     let secs = input.div_euclid(1_000_000);
     let nsecs = input.rem_euclid(1_000_000) * 1000;
     let instant_utc = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
     let instant_local = instant_utc.with_timezone(&time_zone);
     let naive = instant_local.naive_local();
-    Ok(NaiveDateTimeWrapper(naive))
+    Ok(Timestamp(naive))
 }
 
 #[cfg(test)]

@@ -26,7 +26,7 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, BoolArray, BytesArray, DecimalArray,
     F32Array, F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray, NaiveDateArray,
-    NaiveDateTimeArray, NaiveTimeArray, StructArray, Utf8Array,
+    TimestampArray, NaiveTimeArray, StructArray, Utf8Array,
 };
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{DataType, Datum};
@@ -169,7 +169,7 @@ pub fn create_streaming_agg_impl(
                         Count,
                         timestamp,
                         int64,
-                        StreamingCountAgg::<NaiveDateTimeArray>
+                        StreamingCountAgg::<TimestampArray>
                     ),
                     (Count, time, int64, StreamingCountAgg::<NaiveTimeArray>),
                     (Count, struct_type, int64, StreamingCountAgg::<StructArray>),
@@ -217,7 +217,7 @@ pub fn create_streaming_agg_impl(
                         Min,
                         timestamp,
                         timestamp,
-                        StreamingMinAgg::<NaiveDateTimeArray>
+                        StreamingMinAgg::<TimestampArray>
                     ),
                     (Min, timestamptz, timestamptz, StreamingMinAgg::<I64Array>),
                     (Min, varchar, varchar, StreamingMinAgg::<Utf8Array>),
@@ -236,7 +236,7 @@ pub fn create_streaming_agg_impl(
                         Max,
                         timestamp,
                         timestamp,
-                        StreamingMaxAgg::<NaiveDateTimeArray>
+                        StreamingMaxAgg::<TimestampArray>
                     ),
                     (Max, timestamptz, timestamptz, StreamingMaxAgg::<I64Array>),
                     (Max, varchar, varchar, StreamingMaxAgg::<Utf8Array>),

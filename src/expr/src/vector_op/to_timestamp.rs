@@ -13,14 +13,14 @@
 // limitations under the License.
 
 use chrono::format::Parsed;
-use risingwave_common::types::NaiveDateTimeWrapper;
+use risingwave_common::types::Timestamp;
 
 // use risingwave_expr_macro::function;
 use super::to_char::{compile_pattern_to_chrono, ChronoPattern};
 use crate::Result;
 
 #[inline(always)]
-pub fn to_timestamp_const_tmpl(s: &str, tmpl: &ChronoPattern) -> Result<NaiveDateTimeWrapper> {
+pub fn to_timestamp_const_tmpl(s: &str, tmpl: &ChronoPattern) -> Result<Timestamp> {
     let mut parsed = Parsed::new();
     chrono::format::parse(&mut parsed, s, tmpl.borrow_items().iter())?;
 
@@ -61,13 +61,13 @@ pub fn to_timestamp_const_tmpl(s: &str, tmpl: &ChronoPattern) -> Result<NaiveDat
 
     // Seconds and nanoseconds can be omitted, so we don't need to assign default value for them.
 
-    Ok(NaiveDateTimeWrapper(
+    Ok(Timestamp(
         parsed.to_naive_datetime_with_offset(0)?,
     ))
 }
 
 // #[function("to_timestamp(varchar, varchar) -> timestamp")]
-pub fn to_timestamp(s: &str, tmpl: &str) -> Result<NaiveDateTimeWrapper> {
+pub fn to_timestamp(s: &str, tmpl: &str) -> Result<Timestamp> {
     let pattern = compile_pattern_to_chrono(tmpl);
     to_timestamp_const_tmpl(s, &pattern)
 }

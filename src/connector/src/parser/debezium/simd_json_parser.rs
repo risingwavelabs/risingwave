@@ -160,7 +160,7 @@ mod tests {
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::{
-        DataType, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, Scalar, ScalarImpl,
+        DataType, Timestamp, NaiveDateWrapper, NaiveTimeWrapper, Scalar, ScalarImpl,
     };
     use serde_json::Value;
 
@@ -257,12 +257,12 @@ mod tests {
             NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap()
         )))));
         assert!(
-            row[10].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
+            row[10].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
                 "1970-01-01T00:00:00".parse().unwrap()
             ))))
         );
         assert!(
-            row[11].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
+            row[11].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
                 "1970-01-01T00:00:01".parse().unwrap()
             ))))
         );
@@ -296,12 +296,12 @@ mod tests {
             NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap()
         )))));
         assert!(
-            row[10].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
+            row[10].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
                 "1970-01-01T00:00:00".parse().unwrap()
             ))))
         );
         assert!(
-            row[11].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
+            row[11].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
                 "1970-01-01T00:00:01".parse().unwrap()
             ))))
         );
@@ -336,12 +336,12 @@ mod tests {
             NaiveTime::from_hms_micro_opt(23, 59, 59, 0).unwrap()
         )))));
         assert!(
-            row[10].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
+            row[10].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
                 "5138-11-16T09:46:39".parse().unwrap()
             ))))
         );
         assert!(
-            row[11].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
+            row[11].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
                 "2038-01-09T03:14:07".parse().unwrap()
             ))))
         );
@@ -382,12 +382,12 @@ mod tests {
             ))))
         );
         assert!(
-            row1[10].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
+            row1[10].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
                 "1970-01-01T00:00:00".parse().unwrap()
             ))))
         );
         assert!(
-            row1[11].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
+            row1[11].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
                 "1970-01-01T00:00:01".parse().unwrap()
             ))))
         );
@@ -412,12 +412,12 @@ mod tests {
             ))))
         );
         assert!(
-            row2[10].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
+            row2[10].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
                 "5138-11-16T09:46:39".parse().unwrap()
             ))))
         );
         assert!(
-            row2[11].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
+            row2[11].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
                 "2038-01-09T03:14:07".parse().unwrap()
             ))))
         );

@@ -38,7 +38,7 @@ use crate::array::{
 use crate::collection::estimate_size::EstimateSize;
 use crate::row::{OwnedRow, RowDeserializer};
 use crate::types::{
-    DataType, Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, F32,
+    DataType, Decimal, Timestamp, NaiveDateWrapper, NaiveTimeWrapper, F32,
     F64, ScalarRef,
 };
 use crate::util::hash_util::Crc32FastBuilder;
@@ -398,7 +398,7 @@ impl HashKeySerDe<'_> for NaiveDateWrapper {
     }
 }
 
-impl HashKeySerDe<'_> for NaiveDateTimeWrapper {
+impl HashKeySerDe<'_> for Timestamp {
     type S = [u8; 12];
 
     fn serialize(self) -> Self::S {
@@ -413,7 +413,7 @@ impl HashKeySerDe<'_> for NaiveDateTimeWrapper {
         let value = Self::read_fixed_size_bytes::<R, 12>(source);
         let secs = i64::from_ne_bytes(value[0..8].try_into().unwrap());
         let nsecs = u32::from_ne_bytes(value[8..12].try_into().unwrap());
-        NaiveDateTimeWrapper::with_secs_nsecs(secs, nsecs).unwrap()
+        Timestamp::with_secs_nsecs(secs, nsecs).unwrap()
     }
 }
 
@@ -742,7 +742,7 @@ mod tests {
     use crate::array::column::Column;
     use crate::array::{
         BoolArray, DataChunk, DataChunkTestExt, DecimalArray, F32Array, F64Array, I16Array,
-        I32Array, I32ArrayBuilder, I64Array, NaiveDateArray, NaiveDateTimeArray, NaiveTimeArray,
+        I32Array, I32ArrayBuilder, I64Array, NaiveDateArray, TimestampArray, NaiveTimeArray,
         Utf8Array,
     };
     use crate::hash::{
@@ -776,7 +776,7 @@ mod tests {
                 seed + 9,
                 0.5,
             )),
-            Column::new(seed_rand_array_ref::<NaiveDateTimeArray>(
+            Column::new(seed_rand_array_ref::<TimestampArray>(
                 capacity,
                 seed + 10,
                 0.5,

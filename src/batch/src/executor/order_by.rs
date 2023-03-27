@@ -141,7 +141,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::{
-        DataType, Interval, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
+        DataType, Interval, Timestamp, NaiveDateWrapper, NaiveTimeWrapper,
         F32, Scalar,
     };
     use risingwave_common::util::sort_util::OrderType;
@@ -456,11 +456,11 @@ mod tests {
                 None,
                 Some(NaiveTimeWrapper::with_secs_nano(4, 56).unwrap()),
                 Some(NaiveTimeWrapper::with_secs_nano(7, 89).unwrap())] },
-                column! { NaiveDateTimeArray, [
-                Some(NaiveDateTimeWrapper::with_secs_nsecs(1, 23).unwrap()),
-                Some(NaiveDateTimeWrapper::with_secs_nsecs(4, 56).unwrap()),
-                Some(NaiveDateTimeWrapper::with_secs_nsecs(7, 89).unwrap()),
-                Some(NaiveDateTimeWrapper::with_secs_nsecs(4, 56).unwrap()),
+                column! { TimestampArray, [
+                Some(Timestamp::with_secs_nsecs(1, 23).unwrap()),
+                Some(Timestamp::with_secs_nsecs(4, 56).unwrap()),
+                Some(Timestamp::with_secs_nsecs(7, 89).unwrap()),
+                Some(Timestamp::with_secs_nsecs(4, 56).unwrap()),
                 None] },
                 column! { IntervalArray, [
                 None,
@@ -484,12 +484,12 @@ mod tests {
                 Some(NaiveTimeWrapper::with_secs_nano(7, 89).unwrap()),
                 None,
                 None] },
-                column! { NaiveDateTimeArray, [
-                Some(NaiveDateTimeWrapper::with_secs_nsecs(4, 56).unwrap()),
-                Some(NaiveDateTimeWrapper::with_secs_nsecs(4, 56).unwrap()),
+                column! { TimestampArray, [
+                Some(Timestamp::with_secs_nsecs(4, 56).unwrap()),
+                Some(Timestamp::with_secs_nsecs(4, 56).unwrap()),
                 None,
-                Some(NaiveDateTimeWrapper::with_secs_nsecs(1, 23).unwrap()),
-                Some(NaiveDateTimeWrapper::with_secs_nsecs(7, 89).unwrap())] },
+                Some(Timestamp::with_secs_nsecs(1, 23).unwrap()),
+                Some(Timestamp::with_secs_nsecs(7, 89).unwrap())] },
                 column! { IntervalArray, [
                 Some(Interval::from_month_day_usec(4, 5, 6)),
                 Some(Interval::from_month_day_usec(1, 2, 3)),
