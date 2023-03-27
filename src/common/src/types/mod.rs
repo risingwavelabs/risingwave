@@ -837,7 +837,7 @@ impl ScalarImpl {
         let without_null = if b.last() == Some(&0) {
             &b[..b.len() - 1]
         } else {
-            &b[..]
+            b
         };
         std::str::from_utf8(without_null)
     }
