@@ -116,7 +116,7 @@ impl PlanVisitor<()> for CollectTableIds {
             .insert(plan.logical().table_desc().table_id.table_id);
     }
 
-    fn visit_batch_source(&mut self, plan: &crate::optimizer::plan_node::BatchSource) -> () {
+    fn visit_batch_source(&mut self, plan: &crate::optimizer::plan_node::BatchSource) {
         if let Some(catalog) = plan.logical().source_catalog() {
             self.table_ids.insert(catalog.id);
         }
