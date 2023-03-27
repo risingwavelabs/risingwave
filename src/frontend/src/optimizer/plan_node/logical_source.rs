@@ -18,7 +18,6 @@ use std::ops::Bound;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::rc::Rc;
 
-use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::error::Result;
 use risingwave_connector::source::DataType;
@@ -115,10 +114,8 @@ impl LogicalSource {
                 let GeneratedColumnDesc { expr } = generated_column;
                 // TODO(yuhao): avoid this `from_expr_proto`.
                 let proj_expr = rewriter.rewrite_expr(ExprImpl::from_expr_proto(&expr.unwrap())?);
-                if proj_expr.return_type() != column_desc.data_type {
-                    bail!("Expression return type should match the type specified for the column");
-                }
-                exprs.push(proj_expr);
+                let casted_expr = proj_expr.cast_assign(column_desc.data_type)?;
+                exprs.push(casted_expr);
             } else {
                 let input_ref = InputRef {
                     data_type: ret_data_type,
