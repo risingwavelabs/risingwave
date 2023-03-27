@@ -27,8 +27,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{
-    DataType, Decimal, Interval, Timestamp, Date, Time,
-    F32, F64, ScalarImpl,
+    DataType, Date, Decimal, Interval, ScalarImpl, Time, Timestamp, F32, F64,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr_macro::{build_function, function};
@@ -1018,8 +1017,7 @@ mod tests {
     #[test]
     fn test_timestamp() {
         assert_eq!(
-            try_cast::<_, Timestamp>(Date::from_ymd_uncheck(1994, 1, 1))
-                .unwrap(),
+            try_cast::<_, Timestamp>(Date::from_ymd_uncheck(1994, 1, 1)).unwrap(),
             Timestamp::new(
                 NaiveDateTime::parse_from_str("1994-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
             )

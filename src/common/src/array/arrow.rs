@@ -427,11 +427,9 @@ impl From<&ListArray> for arrow_array::ListArray {
                 IntervalMonthDayNanoBuilder::with_capacity(a.len()),
                 |b, v| b.append_option(v.map(|d| d.into_arrow())),
             ),
-            ArrayImpl::Date(a) => {
-                build(array, a, Date32Builder::with_capacity(a.len()), |b, v| {
-                    b.append_option(v.map(|d| d.into_arrow()))
-                })
-            }
+            ArrayImpl::Date(a) => build(array, a, Date32Builder::with_capacity(a.len()), |b, v| {
+                b.append_option(v.map(|d| d.into_arrow()))
+            }),
             ArrayImpl::Timestamp(a) => build(
                 array,
                 a,
@@ -533,11 +531,7 @@ mod tests {
 
     #[test]
     fn f32() {
-        let array = F32Array::from_iter([
-            None,
-            Some(F32::from(-7.0)),
-            Some(F32::from(25.0)),
-        ]);
+        let array = F32Array::from_iter([None, Some(F32::from(-7.0)), Some(F32::from(25.0))]);
         let arrow = arrow_array::Float32Array::from(&array);
         assert_eq!(F32Array::from(&arrow), array);
     }

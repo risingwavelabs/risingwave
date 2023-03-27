@@ -24,9 +24,9 @@ use dyn_clone::DynClone;
 pub use foldable::*;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, BoolArray, BytesArray, DecimalArray,
-    F32Array, F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray, DateArray,
-    TimestampArray, TimeArray, StructArray, Utf8Array,
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, BoolArray, BytesArray, DateArray,
+    DecimalArray, F32Array, F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray,
+    StructArray, TimeArray, TimestampArray, Utf8Array,
 };
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{DataType, Datum};
@@ -165,12 +165,7 @@ pub fn create_streaming_agg_impl(
                     (Count, varchar, int64, StreamingCountAgg::<Utf8Array>),
                     (Count, interval, int64, StreamingCountAgg::<IntervalArray>),
                     (Count, date, int64, StreamingCountAgg::<DateArray>),
-                    (
-                        Count,
-                        timestamp,
-                        int64,
-                        StreamingCountAgg::<TimestampArray>
-                    ),
+                    (Count, timestamp, int64, StreamingCountAgg::<TimestampArray>),
                     (Count, time, int64, StreamingCountAgg::<TimeArray>),
                     (Count, struct_type, int64, StreamingCountAgg::<StructArray>),
                     (Count, list, int64, StreamingCountAgg::<ListArray>),
@@ -213,12 +208,7 @@ pub fn create_streaming_agg_impl(
                     (Min, interval, interval, StreamingMinAgg::<IntervalArray>),
                     (Min, time, time, StreamingMinAgg::<TimeArray>),
                     (Min, date, date, StreamingMinAgg::<DateArray>),
-                    (
-                        Min,
-                        timestamp,
-                        timestamp,
-                        StreamingMinAgg::<TimestampArray>
-                    ),
+                    (Min, timestamp, timestamp, StreamingMinAgg::<TimestampArray>),
                     (Min, timestamptz, timestamptz, StreamingMinAgg::<I64Array>),
                     (Min, varchar, varchar, StreamingMinAgg::<Utf8Array>),
                     (Min, bytea, bytea, StreamingMinAgg::<BytesArray>),
@@ -232,12 +222,7 @@ pub fn create_streaming_agg_impl(
                     (Max, interval, interval, StreamingMaxAgg::<IntervalArray>),
                     (Max, time, time, StreamingMaxAgg::<TimeArray>),
                     (Max, date, date, StreamingMaxAgg::<DateArray>),
-                    (
-                        Max,
-                        timestamp,
-                        timestamp,
-                        StreamingMaxAgg::<TimestampArray>
-                    ),
+                    (Max, timestamp, timestamp, StreamingMaxAgg::<TimestampArray>),
                     (Max, timestamptz, timestamptz, StreamingMaxAgg::<I64Array>),
                     (Max, varchar, varchar, StreamingMaxAgg::<Utf8Array>),
                     (Max, bytea, bytea, StreamingMaxAgg::<BytesArray>),

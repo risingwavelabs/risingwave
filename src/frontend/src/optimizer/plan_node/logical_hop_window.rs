@@ -84,16 +84,7 @@ impl LogicalHopWindow {
         LogicalHopWindow { base, core }
     }
 
-    pub fn into_parts(
-        self,
-    ) -> (
-        PlanRef,
-        InputRef,
-        Interval,
-        Interval,
-        Interval,
-        Vec<usize>,
-    ) {
+    pub fn into_parts(self) -> (PlanRef, InputRef, Interval, Interval, Interval, Vec<usize>) {
         self.core.into_parts()
     }
 

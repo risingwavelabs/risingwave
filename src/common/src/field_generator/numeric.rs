@@ -22,7 +22,7 @@ use rand::{Rng, SeedableRng};
 use serde_json::json;
 
 use crate::field_generator::{NumericFieldRandomGenerator, NumericFieldSequenceGenerator};
-use crate::types::{Datum, F32, F64, Scalar};
+use crate::types::{Datum, Scalar, F32, F64};
 
 trait NumericType
 where

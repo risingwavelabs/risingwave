@@ -22,7 +22,7 @@ use serde_json::{json, Value};
 use tracing::debug;
 
 use super::DEFAULT_MAX_PAST;
-use crate::types::{Datum, Timestamp, Scalar};
+use crate::types::{Datum, Scalar, Timestamp};
 
 #[derive(Debug)]
 enum LocalNow {

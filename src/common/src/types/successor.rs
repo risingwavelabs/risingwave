@@ -14,7 +14,7 @@
 
 use chrono::Duration;
 
-use super::{Timestamp, Date, ScalarImpl};
+use super::{Date, ScalarImpl, Timestamp};
 
 /// A successor is a term that comes right after a particular value. Suppose n is a number (where n
 /// belongs to any whole number), then the successor of n is 'n+1'. The other terminologies used for
@@ -57,9 +57,7 @@ impl Successor for Timestamp {
 
 impl Successor for Date {
     fn successor(&self) -> Option<Self> {
-        self.0
-            .checked_add_signed(Duration::days(1))
-            .map(Date)
+        self.0.checked_add_signed(Duration::days(1)).map(Date)
     }
 }
 

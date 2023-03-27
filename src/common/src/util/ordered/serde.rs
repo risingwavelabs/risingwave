@@ -112,9 +112,8 @@ mod tests {
     use std::str::FromStr;
 
     use super::*;
-    use crate::types::chrono_wrapper;
-    use crate::types::interval;
     use crate::types::ScalarImpl::*;
+    use crate::types::{chrono_wrapper, interval};
 
     #[test]
     fn test_ordered_row_serializer() {
@@ -170,10 +169,7 @@ mod tests {
 
             let schema = vec![DataType::Varchar, DataType::Decimal];
             let serde = OrderedRowSerde::new(schema, order_types);
-            let row1 = OwnedRow::new(vec![
-                Some(Utf8("abc".into())),
-                Some(Decimal(Decimal::NaN)),
-            ]);
+            let row1 = OwnedRow::new(vec![Some(Utf8("abc".into())), Some(Decimal(Decimal::NaN))]);
             let row2 = OwnedRow::new(vec![
                 Some(Utf8("abd".into())),
                 Some(Decimal(Decimal::PositiveInf)),
@@ -296,9 +292,7 @@ mod tests {
 
             {
                 // ts
-                let row = OwnedRow::new(vec![Some(Timestamp(
-                    Default::default(),
-                ))]);
+                let row = OwnedRow::new(vec![Some(Timestamp(Default::default()))]);
                 let mut row_bytes = vec![];
                 serde.serialize(&row, &mut row_bytes);
                 let encoding_data_size = memcmp_encoding::calculate_encoded_size(
@@ -330,9 +324,7 @@ mod tests {
 
             {
                 // interval
-                let row = OwnedRow::new(vec![Some(Interval(
-                    interval::Interval::default(),
-                ))]);
+                let row = OwnedRow::new(vec![Some(Interval(interval::Interval::default()))]);
                 let mut row_bytes = vec![];
                 serde.serialize(&row, &mut row_bytes);
                 let encoding_data_size = memcmp_encoding::calculate_encoded_size(

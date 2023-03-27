@@ -29,8 +29,8 @@ use crate::catalog::ColumnId;
 use crate::row::{Row, RowDeserializer as BasicDeserializer};
 use crate::types::struct_type::StructType;
 use crate::types::{
-    DataType, Datum, Decimal, Interval, Timestamp, Date,
-    Time, F32, F64, ScalarImpl, ScalarRefImpl, ToDatumRef,
+    DataType, Date, Datum, Decimal, Interval, ScalarImpl, ScalarRefImpl, Time, Timestamp,
+    ToDatumRef, F32, F64,
 };
 
 pub mod error;
@@ -430,8 +430,7 @@ fn deserialize_timestamp(data: &mut impl Buf) -> Result<Timestamp> {
 
 fn deserialize_naivedate(data: &mut impl Buf) -> Result<Date> {
     let days = data.get_i32_le();
-    Date::with_days(days)
-        .map_err(|_e| ValueEncodingError::InvalidDateEncoding(days))
+    Date::with_days(days).map_err(|_e| ValueEncodingError::InvalidDateEncoding(days))
 }
 
 fn deserialize_decimal(data: &mut impl Buf) -> Result<Decimal> {

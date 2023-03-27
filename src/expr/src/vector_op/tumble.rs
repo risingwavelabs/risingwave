@@ -13,9 +13,7 @@
 // limitations under the License.
 
 use num_traits::Zero;
-use risingwave_common::types::{
-    Interval, Timestamp, Date, USECS_PER_DAY, USECS_PER_MONTH,
-};
+use risingwave_common::types::{Date, Interval, Timestamp, USECS_PER_DAY, USECS_PER_MONTH};
 use risingwave_expr_macro::function;
 
 use crate::Result;
@@ -26,18 +24,12 @@ fn interval_to_micro_second(t: Interval) -> i64 {
 }
 
 #[function("tumble_start(date, interval) -> timestamp")]
-pub fn tumble_start_date(
-    timestamp: Date,
-    window_size: Interval,
-) -> Result<Timestamp> {
+pub fn tumble_start_date(timestamp: Date, window_size: Interval) -> Result<Timestamp> {
     tumble_start_date_time(timestamp.into(), window_size)
 }
 
 #[function("tumble_start(timestamp, interval) -> timestamp")]
-pub fn tumble_start_date_time(
-    timestamp: Timestamp,
-    window_size: Interval,
-) -> Result<Timestamp> {
+pub fn tumble_start_date_time(timestamp: Timestamp, window_size: Interval) -> Result<Timestamp> {
     let timestamp_micro_second = timestamp.0.timestamp_micros();
     let window_start_micro_second = get_window_start(timestamp_micro_second, window_size)?;
     Ok(Timestamp::from_timestamp_uncheck(
@@ -47,10 +39,7 @@ pub fn tumble_start_date_time(
 }
 
 #[function("tumble_start(timestamptz, interval) -> timestamptz")]
-pub fn tumble_start_timestamptz(
-    timestamp_micro_second: i64,
-    window_size: Interval,
-) -> Result<i64> {
+pub fn tumble_start_timestamptz(timestamp_micro_second: i64, window_size: Interval) -> Result<i64> {
     let timestamp_micro_second = timestamp_micro_second;
     let window_size = window_size;
     get_window_start(timestamp_micro_second, window_size)
@@ -118,7 +107,7 @@ pub fn tumble_start_offset_timestamptz(
 mod tests {
     use chrono::{Datelike, Timelike};
     use risingwave_common::types::test_utils::IntervalTestExt;
-    use risingwave_common::types::{Interval, Date};
+    use risingwave_common::types::{Date, Interval};
 
     use super::tumble_start_offset_date_time;
     use crate::vector_op::tumble::{

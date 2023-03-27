@@ -21,7 +21,7 @@ pub type IntervalArrayBuilder = PrimitiveArrayBuilder<Interval>;
 #[cfg(test)]
 mod tests {
     use super::IntervalArray;
-    use crate::array::interval_array::{IntervalArrayBuilder, Interval};
+    use crate::array::interval_array::{Interval, IntervalArrayBuilder};
     use crate::array::{Array, ArrayBuilder};
     use crate::types::interval::test_utils::IntervalTestExt;
 

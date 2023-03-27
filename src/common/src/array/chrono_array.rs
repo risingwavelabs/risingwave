@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::{PrimitiveArray, PrimitiveArrayBuilder};
-use crate::types::{Timestamp, Date, Time};
+use crate::types::{Date, Time, Timestamp};
 
 pub type DateArray = PrimitiveArray<Date>;
 pub type TimeArray = PrimitiveArray<Time>;
@@ -33,10 +33,7 @@ mod tests {
 
     #[test]
     fn test_naivedate_builder() {
-        let v = (0..1000)
-            .map(Date::with_days)
-            .map(|x| x.ok())
-            .collect_vec();
+        let v = (0..1000).map(Date::with_days).map(|x| x.ok()).collect_vec();
         let mut builder = DateArrayBuilder::new(0);
         for i in &v {
             builder.append(*i);

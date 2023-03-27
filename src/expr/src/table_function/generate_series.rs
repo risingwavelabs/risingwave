@@ -18,8 +18,7 @@ use anyhow::anyhow;
 use itertools::multizip;
 use num_traits::Zero;
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I32Array, IntervalArray,
-    TimestampArray,
+    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I32Array, IntervalArray, TimestampArray,
 };
 use risingwave_common::types::{CheckedAdd, IsNegative, Scalar, ScalarRef};
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -162,12 +161,12 @@ pub fn new_generate_series<const STOP_INCLUSIVE: bool>(
     let [start, stop, step]: [_; 3] = args.try_into().unwrap();
 
     match return_type {
-        DataType::Timestamp => Ok(GenerateSeries::<
-            TimestampArray,
-            IntervalArray,
-            STOP_INCLUSIVE,
-        >::new(start, stop, step, chunk_size)
-        .boxed()),
+        DataType::Timestamp => Ok(
+            GenerateSeries::<TimestampArray, IntervalArray, STOP_INCLUSIVE>::new(
+                start, stop, step, chunk_size,
+            )
+            .boxed(),
+        ),
         DataType::Int32 => Ok(GenerateSeries::<I32Array, I32Array, STOP_INCLUSIVE>::new(
             start, stop, step, chunk_size,
         )
@@ -181,7 +180,7 @@ pub fn new_generate_series<const STOP_INCLUSIVE: bool>(
 #[cfg(test)]
 mod tests {
     use risingwave_common::types::test_utils::IntervalTestExt;
-    use risingwave_common::types::{DataType, Interval, Timestamp, ScalarImpl};
+    use risingwave_common::types::{DataType, Interval, ScalarImpl, Timestamp};
 
     use super::*;
     use crate::expr::{Expression, LiteralExpression};

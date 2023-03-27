@@ -119,16 +119,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for HopWindow<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
-    pub fn into_parts(
-        self,
-    ) -> (
-        PlanRef,
-        InputRef,
-        Interval,
-        Interval,
-        Interval,
-        Vec<usize>,
-    ) {
+    pub fn into_parts(self) -> (PlanRef, InputRef, Interval, Interval, Interval, Vec<usize>) {
         (
             self.input,
             self.time_col,

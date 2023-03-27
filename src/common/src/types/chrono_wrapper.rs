@@ -217,13 +217,7 @@ impl Date {
         self.and_hms_micro_uncheck(hour, min, sec, 0)
     }
 
-    pub fn and_hms_micro_uncheck(
-        self,
-        hour: u32,
-        min: u32,
-        sec: u32,
-        micro: u32,
-    ) -> Timestamp {
+    pub fn and_hms_micro_uncheck(self, hour: u32, min: u32, sec: u32, micro: u32) -> Timestamp {
         Timestamp::new(
             self.0
                 .and_time(Time::from_hms_micro_uncheck(hour, min, sec, micro).0),
@@ -498,9 +492,7 @@ impl Timestamp {
     /// # use risingwave_common::types::Timestamp;
     /// let ts = "3202-05-16T20:38:40.123456789".parse().unwrap();
     /// assert_eq!(
-    ///     Timestamp::new(ts)
-    ///         .truncate_millennium()
-    ///         .to_string(),
+    ///     Timestamp::new(ts).truncate_millennium().to_string(),
     ///     "3001-01-01 00:00:00"
     /// );
     /// ```

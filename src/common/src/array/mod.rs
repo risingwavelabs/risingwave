@@ -45,8 +45,7 @@ use std::sync::Arc;
 pub use bool_array::{BoolArray, BoolArrayBuilder};
 pub use bytes_array::*;
 pub use chrono_array::{
-    DateArray, DateArrayBuilder, TimestampArray, TimestampArrayBuilder,
-    TimeArray, TimeArrayBuilder,
+    DateArray, DateArrayBuilder, TimeArray, TimeArrayBuilder, TimestampArray, TimestampArrayBuilder,
 };
 pub use column_proto_readers::*;
 pub use data_chunk::{DataChunk, DataChunkTestExt};
@@ -673,12 +672,8 @@ impl ArrayImpl {
             PbArrayType::Serial => {
                 read_numeric_array::<Serial, SerialValueReader>(array, cardinality)?
             }
-            PbArrayType::Float32 => {
-                read_numeric_array::<F32, F32ValueReader>(array, cardinality)?
-            }
-            PbArrayType::Float64 => {
-                read_numeric_array::<F64, F64ValueReader>(array, cardinality)?
-            }
+            PbArrayType::Float32 => read_numeric_array::<F32, F32ValueReader>(array, cardinality)?,
+            PbArrayType::Float64 => read_numeric_array::<F64, F64ValueReader>(array, cardinality)?,
             PbArrayType::Bool => read_bool_array(array, cardinality)?,
             PbArrayType::Utf8 => {
                 read_string_array::<Utf8ArrayBuilder, Utf8ValueReader>(array, cardinality)?

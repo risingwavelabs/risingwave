@@ -21,10 +21,7 @@ use crate::array::serial_array::Serial;
 use crate::array::{ArrayImpl, DataChunk};
 use crate::error::Result;
 use crate::row::Row;
-use crate::types::{
-    DataType, Datum, Timestamp, Date, Time, F32,
-    F64, ScalarImpl, ToDatumRef,
-};
+use crate::types::{DataType, Date, Datum, ScalarImpl, Time, Timestamp, ToDatumRef, F32, F64};
 use crate::util::sort_util::{ColumnOrder, OrderType};
 
 // NULL > any non-NULL value by default
@@ -240,7 +237,7 @@ mod tests {
     use super::*;
     use crate::array::{DataChunk, ListValue, StructValue};
     use crate::row::OwnedRow;
-    use crate::types::{DataType, F32, ScalarImpl};
+    use crate::types::{DataType, ScalarImpl, F32};
     use crate::util::sort_util::{ColumnOrder, OrderType};
 
     #[test]

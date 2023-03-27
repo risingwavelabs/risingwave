@@ -21,13 +21,13 @@ use risingwave_pb::data::PbArray;
 
 use crate::array::value_reader::{PrimitiveValueReader, VarSizedValueReader};
 use crate::array::{
-    Array, ArrayBuilder, ArrayImpl, ArrayMeta, ArrayResult, BoolArray, IntervalArrayBuilder,
-    DateArrayBuilder, TimestampArrayBuilder, TimeArrayBuilder, PrimitiveArrayBuilder,
-    PrimitiveArrayItemType,
+    Array, ArrayBuilder, ArrayImpl, ArrayMeta, ArrayResult, BoolArray, DateArrayBuilder,
+    IntervalArrayBuilder, PrimitiveArrayBuilder, PrimitiveArrayItemType, TimeArrayBuilder,
+    TimestampArrayBuilder,
 };
 use crate::buffer::Bitmap;
 use crate::types::interval::Interval;
-use crate::types::{Timestamp, Date, Time};
+use crate::types::{Date, Time, Timestamp};
 
 // TODO: Use techniques like apache arrow flight RPC to eliminate deserialization.
 // https://arrow.apache.org/docs/format/Flight.html

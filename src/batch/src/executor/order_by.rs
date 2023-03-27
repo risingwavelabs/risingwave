@@ -140,10 +140,7 @@ mod tests {
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_common::types::{
-        DataType, Interval, Timestamp, Date, Time,
-        F32, Scalar,
-    };
+    use risingwave_common::types::{DataType, Date, Interval, Scalar, Time, Timestamp, F32};
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
@@ -583,10 +580,7 @@ mod tests {
                         ]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
-                        val: &StructValue::new(vec![
-                            None,
-                            Some(F32::from(3.4).to_scalar_value()),
-                        ]),
+                        val: &StructValue::new(vec![None, Some(F32::from(3.4).to_scalar_value())]),
                     }));
                     struct_builder.finish().into()
                 },
@@ -652,10 +646,7 @@ mod tests {
                         val: &StructValue::new(vec![Some("c".into()), None]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
-                        val: &StructValue::new(vec![
-                            None,
-                            Some(F32::from(3.4).to_scalar_value()),
-                        ]),
+                        val: &StructValue::new(vec![None, Some(F32::from(3.4).to_scalar_value())]),
                     }));
                     struct_builder.finish().into()
                 },

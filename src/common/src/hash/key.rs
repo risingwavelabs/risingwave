@@ -37,10 +37,7 @@ use crate::array::{
 };
 use crate::collection::estimate_size::EstimateSize;
 use crate::row::{OwnedRow, RowDeserializer};
-use crate::types::{
-    DataType, Decimal, Timestamp, Date, Time, F32,
-    F64, ScalarRef,
-};
+use crate::types::{DataType, Date, Decimal, ScalarRef, Time, Timestamp, F32, F64};
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::iter_util::ZipEqFast;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum_into};
@@ -741,9 +738,8 @@ mod tests {
     use crate::array;
     use crate::array::column::Column;
     use crate::array::{
-        BoolArray, DataChunk, DataChunkTestExt, DecimalArray, F32Array, F64Array, I16Array,
-        I32Array, I32ArrayBuilder, I64Array, DateArray, TimestampArray, TimeArray,
-        Utf8Array,
+        BoolArray, DataChunk, DataChunkTestExt, DateArray, DecimalArray, F32Array, F64Array,
+        I16Array, I32Array, I32ArrayBuilder, I64Array, TimeArray, TimestampArray, Utf8Array,
     };
     use crate::hash::{
         HashKey, Key128, Key16, Key256, Key32, Key64, KeySerialized, PrecomputedBuildHasher,
@@ -766,16 +762,8 @@ mod tests {
             Column::new(seed_rand_array_ref::<F64Array>(capacity, seed + 5, 0.5)),
             Column::new(seed_rand_array_ref::<DecimalArray>(capacity, seed + 6, 0.5)),
             Column::new(seed_rand_array_ref::<Utf8Array>(capacity, seed + 7, 0.5)),
-            Column::new(seed_rand_array_ref::<DateArray>(
-                capacity,
-                seed + 8,
-                0.5,
-            )),
-            Column::new(seed_rand_array_ref::<TimeArray>(
-                capacity,
-                seed + 9,
-                0.5,
-            )),
+            Column::new(seed_rand_array_ref::<DateArray>(capacity, seed + 8, 0.5)),
+            Column::new(seed_rand_array_ref::<TimeArray>(capacity, seed + 9, 0.5)),
             Column::new(seed_rand_array_ref::<TimestampArray>(
                 capacity,
                 seed + 10,

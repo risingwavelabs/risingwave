@@ -54,9 +54,7 @@ use std::rc::Rc;
 use itertools::Itertools;
 use risingwave_common::array::serial_array::Serial;
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::{
-    DataType, Decimal, Interval, Timestamp, Date, Time,
-};
+use risingwave_common::types::{DataType, Date, Decimal, Interval, Time, Timestamp};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
 

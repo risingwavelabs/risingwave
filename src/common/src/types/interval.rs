@@ -1151,16 +1151,8 @@ impl Interval {
                 let months = num.checked_mul(12)?.try_into().ok()?;
                 Some(Interval::from_month_day_usec(months, 0, 0))
             }
-            Month => Some(Interval::from_month_day_usec(
-                num.try_into().ok()?,
-                0,
-                0,
-            )),
-            Day => Some(Interval::from_month_day_usec(
-                0,
-                num.try_into().ok()?,
-                0,
-            )),
+            Month => Some(Interval::from_month_day_usec(num.try_into().ok()?, 0, 0)),
+            Day => Some(Interval::from_month_day_usec(0, num.try_into().ok()?, 0)),
             Hour => {
                 let usecs = num.checked_mul(3600 * USECS_PER_SEC)?;
                 Some(Interval::from_month_day_usec(0, 0, usecs))
@@ -1268,9 +1260,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             interval,
-            Interval::from_month(14)
-                + Interval::from_days(3)
-                + Interval::from_millis(1000)
+            Interval::from_month(14) + Interval::from_days(3) + Interval::from_millis(1000)
         );
 
         let interval = "1 year 2 months 3 days 00:00:00.001"
@@ -1278,9 +1268,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             interval,
-            Interval::from_month(14)
-                + Interval::from_days(3)
-                + Interval::from_millis(1)
+            Interval::from_month(14) + Interval::from_days(3) + Interval::from_millis(1)
         );
 
         let interval = "1 year 2 months 3 days 00:59:59.005"
@@ -1298,49 +1286,33 @@ mod tests {
         let interval = "1 year 2 months 3 days 01".parse::<Interval>().unwrap();
         assert_eq!(
             interval,
-            Interval::from_month(14)
-                + Interval::from_days(3)
-                + Interval::from_millis(1000)
+            Interval::from_month(14) + Interval::from_days(3) + Interval::from_millis(1000)
         );
 
         let interval = "1 year 2 months 3 days 1:".parse::<Interval>().unwrap();
         assert_eq!(
             interval,
-            Interval::from_month(14)
-                + Interval::from_days(3)
-                + Interval::from_minutes(60)
+            Interval::from_month(14) + Interval::from_days(3) + Interval::from_minutes(60)
         );
 
-        let interval = "1 year 2 months 3 days 1:2"
-            .parse::<Interval>()
-            .unwrap();
+        let interval = "1 year 2 months 3 days 1:2".parse::<Interval>().unwrap();
         assert_eq!(
             interval,
-            Interval::from_month(14)
-                + Interval::from_days(3)
-                + Interval::from_minutes(62)
+            Interval::from_month(14) + Interval::from_days(3) + Interval::from_minutes(62)
         );
 
-        let interval = "1 year 2 months 3 days 1:2:"
-            .parse::<Interval>()
-            .unwrap();
+        let interval = "1 year 2 months 3 days 1:2:".parse::<Interval>().unwrap();
         assert_eq!(
             interval,
-            Interval::from_month(14)
-                + Interval::from_days(3)
-                + Interval::from_minutes(62)
+            Interval::from_month(14) + Interval::from_days(3) + Interval::from_minutes(62)
         );
     }
 
     #[test]
     fn test_to_string() {
         assert_eq!(
-            Interval::from_month_day_usec(
-                -14,
-                3,
-                (11 * 3600 + 45 * 60 + 14) * USECS_PER_SEC + 233
-            )
-            .to_string(),
+            Interval::from_month_day_usec(-14, 3, (11 * 3600 + 45 * 60 + 14) * USECS_PER_SEC + 233)
+                .to_string(),
             "-1 years -2 mons +3 days 11:45:14.000233"
         );
         assert_eq!(

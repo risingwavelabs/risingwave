@@ -50,9 +50,7 @@ pub mod to_text;
 mod ordered_float;
 
 use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
-pub use chrono_wrapper::{
-    Timestamp, Date, Time, UNIX_EPOCH_DAYS,
-};
+pub use chrono_wrapper::{Date, Time, Timestamp, UNIX_EPOCH_DAYS};
 pub use decimal::Decimal;
 pub use interval::*;
 use itertools::Itertools;
@@ -404,9 +402,7 @@ impl DataType {
             DataType::Bytea => ScalarImpl::Bytea("".to_string().into_bytes().into()),
             DataType::Date => ScalarImpl::Date(Date(NaiveDate::MIN)),
             DataType::Time => ScalarImpl::Time(Time::from_hms_uncheck(0, 0, 0)),
-            DataType::Timestamp => {
-                ScalarImpl::Timestamp(Timestamp(NaiveDateTime::MIN))
-            }
+            DataType::Timestamp => ScalarImpl::Timestamp(Timestamp(NaiveDateTime::MIN)),
             // FIXME(yuhao): Add a timestamptz scalar.
             DataType::Timestamptz => ScalarImpl::Int64(i64::MIN),
             DataType::Decimal => ScalarImpl::Decimal(Decimal::NegativeInf),
@@ -891,11 +887,9 @@ impl ScalarImpl {
             DataType::Time => Self::Time(Time::from_str(str).map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
             })?),
-            DataType::Timestamp => {
-                Self::Timestamp(Timestamp::from_str(str).map_err(|_| {
-                    ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-                })?)
-            }
+            DataType::Timestamp => Self::Timestamp(Timestamp::from_str(str).map_err(|_| {
+                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
+            })?),
             DataType::Timestamptz => Self::Int64(
                 chrono::DateTime::<chrono::Utc>::from_str(str)
                     .map_err(|_| {
@@ -1102,8 +1096,7 @@ impl ScalarImpl {
             Ty::Timestamptz => Self::Int64(i64::deserialize(de)?),
             Ty::Date => Self::Date({
                 let days = i32::deserialize(de)?;
-                Date::with_days(days)
-                    .map_err(|e| memcomparable::Error::Message(format!("{e}")))?
+                Date::with_days(days).map_err(|e| memcomparable::Error::Message(format!("{e}")))?
             }),
             Ty::Jsonb => Self::Jsonb(JsonbVal::memcmp_deserialize(de)?),
             Ty::Struct(t) => StructValue::memcmp_deserialize(&t.fields, de)?.to_scalar_value(),
@@ -1281,9 +1274,7 @@ mod tests {
                     DataType::Time,
                 ),
                 DataTypeName::Timestamp => (
-                    ScalarImpl::Timestamp(Timestamp::from_timestamp_uncheck(
-                        23333333, 2333,
-                    )),
+                    ScalarImpl::Timestamp(Timestamp::from_timestamp_uncheck(23333333, 2333)),
                     DataType::Timestamp,
                 ),
                 DataTypeName::Timestamptz => (ScalarImpl::Int64(233333333), DataType::Timestamptz),

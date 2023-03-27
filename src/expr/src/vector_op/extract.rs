@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use chrono::{Datelike, Timelike};
-use risingwave_common::types::{Decimal, Timestamp, Date, Time};
+use risingwave_common::types::{Date, Decimal, Time, Timestamp};
 use risingwave_expr_macro::function;
 
 use crate::{ExprError, Result};
@@ -88,8 +88,7 @@ mod tests {
 
     #[test]
     fn test_date() {
-        let date =
-            Date::new(NaiveDate::parse_from_str("2021-11-22", "%Y-%m-%d").unwrap());
+        let date = Date::new(NaiveDate::parse_from_str("2021-11-22", "%Y-%m-%d").unwrap());
         assert_eq!(extract_from_date("DAY", date).unwrap(), 22.into());
         assert_eq!(extract_from_date("MONTH", date).unwrap(), 11.into());
         assert_eq!(extract_from_date("YEAR", date).unwrap(), 2021.into());

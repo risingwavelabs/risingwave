@@ -18,10 +18,7 @@ use std::fmt::Debug;
 use chrono::{Duration, NaiveDateTime};
 use num_traits::real::Real;
 use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed, Zero};
-use risingwave_common::types::{
-    CheckedAdd, Decimal, Interval, Timestamp, Date, Time,
-    F64,
-};
+use risingwave_common::types::{CheckedAdd, Date, Decimal, Interval, Time, Timestamp, F64};
 use risingwave_expr_macro::function;
 
 use crate::{ExprError, Result};
@@ -143,10 +140,7 @@ where
 }
 
 #[function("subtract(timestamp, timestamp) -> interval")]
-pub fn timestamp_timestamp_sub(
-    l: Timestamp,
-    r: Timestamp,
-) -> Result<Interval> {
+pub fn timestamp_timestamp_sub(l: Timestamp, r: Timestamp) -> Result<Interval> {
     let tmp = l.0 - r.0; // this does not overflow or underflow
     let days = tmp.num_days();
     let usecs = (tmp - Duration::days(tmp.num_days()))
@@ -161,10 +155,7 @@ pub fn date_date_sub(l: Date, r: Date) -> Result<i32> {
 }
 
 #[function("add(interval, timestamp) -> timestamp")]
-pub fn interval_timestamp_add(
-    l: Interval,
-    r: Timestamp,
-) -> Result<Timestamp> {
+pub fn interval_timestamp_add(l: Interval, r: Timestamp) -> Result<Timestamp> {
     r.checked_add(l).ok_or(ExprError::NumericOutOfRange)
 }
 
@@ -216,18 +207,12 @@ pub fn date_int_sub(l: Date, r: i32) -> Result<Date> {
 }
 
 #[function("add(timestamp, interval) -> timestamp")]
-pub fn timestamp_interval_add(
-    l: Timestamp,
-    r: Interval,
-) -> Result<Timestamp> {
+pub fn timestamp_interval_add(l: Timestamp, r: Interval) -> Result<Timestamp> {
     interval_timestamp_add(r, l)
 }
 
 #[function("subtract(timestamp, interval) -> timestamp")]
-pub fn timestamp_interval_sub(
-    l: Timestamp,
-    r: Interval,
-) -> Result<Timestamp> {
+pub fn timestamp_interval_sub(l: Timestamp, r: Interval) -> Result<Timestamp> {
     interval_timestamp_add(r.checked_neg().ok_or(ExprError::NumericOutOfRange)?, l)
 }
 
@@ -247,11 +232,7 @@ pub fn interval_timestamptz_add(l: Interval, r: i64) -> Result<i64> {
 }
 
 #[inline(always)]
-fn timestamptz_interval_inner(
-    l: i64,
-    r: Interval,
-    f: fn(i64, i64) -> Option<i64>,
-) -> Result<i64> {
+fn timestamptz_interval_inner(l: i64, r: Interval, f: fn(i64, i64) -> Option<i64>) -> Result<i64> {
     // Without session TimeZone, we cannot add month/day in local time. See #5826.
     if r.get_months() != 0 || r.get_days() != 0 {
         return Err(ExprError::UnsupportedFunction(
@@ -351,9 +332,7 @@ mod tests {
     use std::str::FromStr;
 
     use risingwave_common::types::test_utils::IntervalTestExt;
-    use risingwave_common::types::{
-        Decimal, Interval, Timestamp, Date, F32, F64,
-    };
+    use risingwave_common::types::{Date, Decimal, Interval, Timestamp, F32, F64};
 
     use super::*;
 
@@ -415,56 +394,36 @@ mod tests {
             general_mod::<Decimal, f32, Decimal>(dec("0.0"), 1f32).unwrap(),
             dec("0.0")
         );
-        assert!(
-            general_add::<i32, F32, F64>(-1i32, 1f32.into())
-                .unwrap()
-                .is_zero()
-        );
-        assert!(
-            general_sub::<i32, F32, F64>(1i32, 1f32.into())
-                .unwrap()
-                .is_zero()
-        );
-        assert!(
-            general_mul::<i32, F32, F64>(0i32, 1f32.into())
-                .unwrap()
-                .is_zero()
-        );
-        assert!(
-            general_div::<i32, F32, F64>(0i32, 1f32.into())
-                .unwrap()
-                .is_zero()
-        );
+        assert!(general_add::<i32, F32, F64>(-1i32, 1f32.into())
+            .unwrap()
+            .is_zero());
+        assert!(general_sub::<i32, F32, F64>(1i32, 1f32.into())
+            .unwrap()
+            .is_zero());
+        assert!(general_mul::<i32, F32, F64>(0i32, 1f32.into())
+            .unwrap()
+            .is_zero());
+        assert!(general_div::<i32, F32, F64>(0i32, 1f32.into())
+            .unwrap()
+            .is_zero());
+        assert_eq!(general_neg::<F32>(1f32.into()).unwrap(), F32::from(-1f32));
         assert_eq!(
-            general_neg::<F32>(1f32.into()).unwrap(),
-            F32::from(-1f32)
-        );
-        assert_eq!(
-            date_interval_add(
-                Date::from_ymd_uncheck(1994, 1, 1),
-                Interval::from_month(12)
-            )
-            .unwrap(),
+            date_interval_add(Date::from_ymd_uncheck(1994, 1, 1), Interval::from_month(12))
+                .unwrap(),
             Timestamp::new(
                 NaiveDateTime::parse_from_str("1995-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
             )
         );
         assert_eq!(
-            interval_date_add(
-                Interval::from_month(12),
-                Date::from_ymd_uncheck(1994, 1, 1)
-            )
-            .unwrap(),
+            interval_date_add(Interval::from_month(12), Date::from_ymd_uncheck(1994, 1, 1))
+                .unwrap(),
             Timestamp::new(
                 NaiveDateTime::parse_from_str("1995-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
             )
         );
         assert_eq!(
-            date_interval_sub(
-                Date::from_ymd_uncheck(1994, 1, 1),
-                Interval::from_month(12)
-            )
-            .unwrap(),
+            date_interval_sub(Date::from_ymd_uncheck(1994, 1, 1), Interval::from_month(12))
+                .unwrap(),
             Timestamp::new(
                 NaiveDateTime::parse_from_str("1993-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
             )

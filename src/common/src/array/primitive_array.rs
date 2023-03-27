@@ -27,9 +27,7 @@ use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::for_all_native_types;
 use crate::types::decimal::Decimal;
 use crate::types::interval::Interval;
-use crate::types::{
-    Timestamp, Date, Time, NativeType, Scalar, ScalarRef,
-};
+use crate::types::{Date, NativeType, Scalar, ScalarRef, Time, Timestamp};
 
 /// Physical type of array items which have fixed size.
 pub trait PrimitiveArrayItemType

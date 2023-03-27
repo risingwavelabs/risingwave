@@ -625,9 +625,7 @@ mod tests {
     use pg_interval::Interval;
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use postgres_types::private::BytesMut;
-    use risingwave_common::types::{
-        DataType, Timestamp, Date, Time,
-    };
+    use risingwave_common::types::{DataType, Date, Time, Timestamp};
     use tokio_postgres::types::{ToSql, Type};
 
     use crate::pg_extended::PreparedStatement;
@@ -815,14 +813,8 @@ mod tests {
         );
 
         let raw_params = vec![
-            Date::from_ymd_uncheck(2021, 1, 1)
-                .0
-                .to_string()
-                .into(),
-            Time::from_hms_uncheck(12, 0, 0)
-                .0
-                .to_string()
-                .into(),
+            Date::from_ymd_uncheck(2021, 1, 1).0.to_string().into(),
+            Time::from_hms_uncheck(12, 0, 0).0.to_string().into(),
             Timestamp::from_timestamp_uncheck(1610000000, 0)
                 .0
                 .to_string()

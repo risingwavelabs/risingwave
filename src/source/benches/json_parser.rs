@@ -16,7 +16,7 @@ use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use rand::distributions::Alphanumeric;
 use rand::prelude::*;
 use risingwave_common::catalog::ColumnId;
-use risingwave_common::types::{DataType, Timestamp, Date};
+use risingwave_common::types::{DataType, Date, Timestamp};
 use risingwave_connector::parser::{JsonParser, SourceStreamChunkBuilder};
 use risingwave_connector::source::SourceColumnDesc;
 

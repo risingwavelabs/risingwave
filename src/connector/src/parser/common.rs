@@ -15,9 +15,7 @@
 use anyhow::{anyhow, Result};
 use num_traits::FromPrimitive;
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::types::{
-    DataType, Datum, Decimal, Date, Time, ScalarImpl,
-};
+use risingwave_common::types::{DataType, Date, Datum, Decimal, ScalarImpl, Time};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::vector_op::cast::{
     i64_to_timestamp, i64_to_timestamptz, str_to_date, str_to_time, str_to_timestamp,

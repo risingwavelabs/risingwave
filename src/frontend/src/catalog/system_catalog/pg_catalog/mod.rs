@@ -67,7 +67,7 @@ pub use pg_views::*;
 use risingwave_common::array::ListValue;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{Timestamp, ScalarImpl};
+use risingwave_common::types::{ScalarImpl, Timestamp};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::user::grant_privilege::{Action, Object};

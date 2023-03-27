@@ -126,13 +126,12 @@ mod tests {
 
     use super::*;
     use crate::array::{
-        Array, ArrayBuilder, BoolArray, BoolArrayBuilder, DecimalArray, DecimalArrayBuilder,
-        I32Array, I32ArrayBuilder, DateArray, DateArrayBuilder, TimestampArray,
-        TimestampArrayBuilder, TimeArray, TimeArrayBuilder, Utf8Array,
-        Utf8ArrayBuilder,
+        Array, ArrayBuilder, BoolArray, BoolArrayBuilder, DateArray, DateArrayBuilder,
+        DecimalArray, DecimalArrayBuilder, I32Array, I32ArrayBuilder, TimeArray, TimeArrayBuilder,
+        TimestampArray, TimestampArrayBuilder, Utf8Array, Utf8ArrayBuilder,
     };
     use crate::error::Result;
-    use crate::types::{Decimal, Timestamp, Date, Time};
+    use crate::types::{Date, Decimal, Time, Timestamp};
 
     // Convert a column to protobuf, then convert it back to column, and ensures the two are
     // identical.
@@ -250,10 +249,7 @@ mod tests {
         let arr: &DateArray = new_col.array_ref().as_naivedate();
         arr.iter().enumerate().for_each(|(i, x)| {
             if i % 2 == 0 {
-                assert_eq!(
-                    Date::with_days(i as i32).ok().unwrap(),
-                    x.unwrap()
-                );
+                assert_eq!(Date::with_days(i as i32).ok().unwrap(), x.unwrap());
             } else {
                 assert!(x.is_none());
             }
@@ -297,8 +293,7 @@ mod tests {
         let mut builder = TimestampArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
-                builder
-                    .append(Timestamp::with_secs_nsecs(i as i64, i as u32 * 1000).ok());
+                builder.append(Timestamp::with_secs_nsecs(i as i64, i as u32 * 1000).ok());
             } else {
                 builder.append(None);
             }
