@@ -67,11 +67,89 @@ impl<R: Row> Record<R> {
             }
             Record::Update { old_row, new_row } => StreamChunk::from_rows(
                 &[
-                    (Op::Delete, old_row.to_owned_row()),
-                    (Op::Insert, new_row.to_owned_row()),
+                    (Op::UpdateDelete, old_row.to_owned_row()),
+                    (Op::UpdateInsert, new_row.to_owned_row()),
                 ],
                 data_types,
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::row::OwnedRow;
+    use crate::test_prelude::StreamChunkTestExt;
+
+    #[test]
+    fn test_into_rows() {
+        let record = Record::Insert {
+            new_row: OwnedRow::new(vec![Some(1.into())]),
+        };
+        let rows: Vec<_> = record.into_rows().collect();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0, Op::Insert);
+        assert_eq!(rows[0].1, OwnedRow::new(vec![Some(1.into())]));
+
+        let record = Record::Delete {
+            old_row: OwnedRow::new(vec![Some(1.into())]),
+        };
+        let rows: Vec<_> = record.into_rows().collect();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0, Op::Delete);
+        assert_eq!(rows[0].1, OwnedRow::new(vec![Some(1.into())]));
+
+        let record = Record::Update {
+            old_row: OwnedRow::new(vec![Some(1.into())]),
+            new_row: OwnedRow::new(vec![Some(2.into())]),
+        };
+        let rows: Vec<_> = record.into_rows().collect();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].0, Op::UpdateDelete);
+        assert_eq!(rows[0].1, OwnedRow::new(vec![Some(1.into())]));
+        assert_eq!(rows[1].0, Op::UpdateInsert);
+        assert_eq!(rows[1].1, OwnedRow::new(vec![Some(2.into())]));
+    }
+
+    #[test]
+    fn test_to_stream_chunk() {
+        let record = Record::Insert {
+            new_row: OwnedRow::new(vec![Some(1i64.into())]),
+        };
+        let chunk = record.to_stream_chunk(&[DataType::Int64]);
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I
+                + 1"
+            )
+        );
+
+        let record = Record::Delete {
+            old_row: OwnedRow::new(vec![Some(1i64.into())]),
+        };
+        let chunk = record.to_stream_chunk(&[DataType::Int64]);
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I
+                - 1"
+            )
+        );
+
+        let record = Record::Update {
+            old_row: OwnedRow::new(vec![Some(1i64.into())]),
+            new_row: OwnedRow::new(vec![Some(2i64.into())]),
+        };
+        let chunk = record.to_stream_chunk(&[DataType::Int64]);
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I
+                - 1
+                + 2"
+            )
+        );
     }
 }
