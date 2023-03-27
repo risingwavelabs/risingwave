@@ -18,9 +18,11 @@ use std::ops::Bound;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::rc::Rc;
 
+use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::error::Result;
 use risingwave_connector::source::DataType;
+use risingwave_pb::plan_common::GeneratedColumnDesc;
 
 use super::stream_watermark_filter::StreamWatermarkFilter;
 use super::{
@@ -29,12 +31,12 @@ use super::{
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::ColumnId;
-use crate::expr::{Expr, ExprImpl, ExprType};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::utils::{ColIndexMapping, Condition};
+use crate::utils::{ColIndexMapping, Condition, IndexRewriter};
 use crate::TableCatalog;
 
 /// For kafka source, we attach a hidden column [`KAFKA_TIMESTAMP_COLUMN_NAME`] to it, so that we
@@ -80,6 +82,79 @@ impl LogicalSource {
             base,
             core,
             kafka_timestamp_range,
+        }
+    }
+
+    pub fn gen_optional_generated_column_project_exprs(
+        column_descs: Vec<ColumnDesc>,
+    ) -> Result<Option<Vec<ExprImpl>>> {
+        if !column_descs.iter().any(|c| c.generated_column.is_some()) {
+            return Ok(None);
+        }
+
+        let col_mapping = {
+            let mut mapping = vec![None; column_descs.len()];
+            let mut cur = 0;
+            for (idx, column_desc) in column_descs.iter().enumerate() {
+                if column_desc.generated_column.is_none() {
+                    mapping[idx] = Some(cur);
+                    cur += 1;
+                } else {
+                    mapping[idx] = None;
+                }
+            }
+            ColIndexMapping::new(mapping)
+        };
+
+        let mut rewriter = IndexRewriter::new(col_mapping);
+        let mut exprs = Vec::with_capacity(column_descs.len());
+        let mut cur = 0;
+        for column_desc in column_descs {
+            let ret_data_type = column_desc.data_type.clone();
+            if let Some(generated_column) = column_desc.generated_column {
+                let GeneratedColumnDesc { expr } = generated_column;
+                // TODO(yuhao): avoid this `from_expr_proto`.
+                let proj_expr = rewriter.rewrite_expr(ExprImpl::from_expr_proto(&expr.unwrap())?);
+                if proj_expr.return_type() != column_desc.data_type {
+                    bail!("Expression return type should match the type specified for the column");
+                }
+                exprs.push(proj_expr);
+            } else {
+                let input_ref = InputRef {
+                    data_type: ret_data_type,
+                    index: cur,
+                };
+                cur += 1;
+                exprs.push(ExprImpl::InputRef(Box::new(input_ref)));
+            }
+        }
+
+        Ok(Some(exprs))
+    }
+
+    pub fn create(
+        source_catalog: Option<Rc<SourceCatalog>>,
+        column_descs: Vec<ColumnDesc>,
+        pk_col_ids: Vec<ColumnId>,
+        row_id_index: Option<usize>,
+        gen_row_id: bool,
+        for_table: bool,
+        ctx: OptimizerContextRef,
+    ) -> Result<PlanRef> {
+        let source = Self::new(
+            source_catalog,
+            column_descs.clone(),
+            pk_col_ids,
+            row_id_index,
+            gen_row_id,
+            for_table,
+            ctx,
+        );
+        let exprs = Self::gen_optional_generated_column_project_exprs(column_descs)?;
+        if let Some(exprs) = exprs {
+            Ok(LogicalProject::new(source.into(), exprs).into())
+        } else {
+            Ok(source.into())
         }
     }
 

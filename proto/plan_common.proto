@@ -4,6 +4,7 @@ package plan_common;
 
 import "common.proto";
 import "data.proto";
+import "expr.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
@@ -26,11 +27,17 @@ message ColumnDesc {
   // For example, when the type is created from a protobuf schema file,
   // this field will store the message name.
   string type_name = 5;
+  // Optional description for the generated column.
+  GeneratedColumnDesc generated_column = 6;
 }
 
 message ColumnCatalog {
   ColumnDesc column_desc = 1;
   bool is_hidden = 2;
+}
+
+message GeneratedColumnDesc {
+  expr.ExprNode expr = 1;
 }
 
 message StorageTableDesc {
