@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::array::{ArrayError, ArrayResult, NULL_VAL_FOR_HASH};
 use crate::error::{BoxedError, ErrorCode};
+use crate::util::iter_util::ZipEqDebug;
 
 mod native_type;
 mod ops;
@@ -909,14 +910,33 @@ impl ScalarImpl {
                 ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
             })?),
             DataType::List { datatype } => {
-                let str = str.trim_start_matches('{').trim_end_matches('}');
+                // TODO: support nested list
+                if !(str.starts_with('{') && str.ends_with('}')) {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "Invalid param string: {str}",
+                    ))
+                    .into());
+                }
                 let mut values = vec![];
-                for s in str.split(',') {
+                for s in str[1..str.len() - 1].split(',') {
                     values.push(Some(Self::from_text(s.trim().as_bytes(), datatype)?));
                 }
                 Self::List(ListValue::new(values))
             }
-            DataType::Bytea | DataType::Struct(_) => {
+            DataType::Struct(s) => {
+                if !(str.starts_with('{') && str.ends_with('}')) {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "Invalid param string: {str}",
+                    ))
+                    .into());
+                }
+                let mut fields = Vec::with_capacity(s.fields.len());
+                for (s, ty) in str[1..str.len() - 1].split(',').zip_eq_debug(&s.fields) {
+                    fields.push(Some(Self::from_text(s.trim().as_bytes(), ty)?));
+                }
+                ScalarImpl::Struct(StructValue::new(fields))
+            }
+            DataType::Bytea => {
                 return Err(ErrorCode::NotSupported(
                     format!("param type: {}", data_type),
                     "".to_string(),
