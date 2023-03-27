@@ -160,6 +160,12 @@ statement ok
 DROP VIEW v2;
 
 statement ok
+DROP MATERIALIZED VIEW mv4;
+
+statement ok
+DROP SOURCE src1;
+
+statement ok
 DROP MATERIALIZED VIEW mv3;
 
 statement ok
