@@ -62,6 +62,7 @@ mod chain;
 mod dispatch;
 pub mod dml;
 mod dynamic_filter;
+mod eowc_buffer;
 mod error;
 mod expand;
 mod filter;

@@ -14,7 +14,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
-use std::ops::Bound;
 use std::ptr::NonNull;
 use std::sync::Arc;
 
@@ -22,14 +21,13 @@ use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use iter_chunks::IterChunks;
 use itertools::Itertools;
+use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
-use risingwave_common::hash::{HashKey, PrecomputedBuildHasher, VnodeBitmapExt};
-use risingwave_common::row;
+use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use super::agg_common::{AggExecutorArgs, GroupAggExecutorExtraArgs};
@@ -37,6 +35,7 @@ use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggStateStorage, ChunkBuilder, DistinctDeduplicater,
     OnlyOutputIfHasInput,
 };
+use super::eowc_buffer::EowcBuffer;
 use super::{
     expect_first_barrier, ActorContextRef, Executor, ExecutorInfo, PkIndicesRef,
     StreamExecutorResult, Watermark,
@@ -100,6 +99,7 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     /// State table for the previous result of all agg calls.
     /// The outputs of all managed agg states are collected and stored in this
     /// table when `flush_data` is called.
+    /// Also serves as EOWC buffer table.
     result_table: StateTable<S>,
 
     /// State tables for deduplicating rows on distinct key for distinct agg calls.
@@ -116,6 +116,9 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     chunk_size: usize,
 
     /// Should emit on window close according to watermark?
+    /// XXX(rc): If you wanna try make this a generic parameter, please be aware that
+    /// it may waste you several hours fighting against rust compiler. If lucky, you
+    /// will work out a solution, but that will be a very ugly one.
     emit_on_window_close: bool,
 
     metrics: Arc<StreamingMetrics>,
@@ -150,6 +153,9 @@ struct ExecutionVars<K: HashKey, S: StateStore> {
 
     /// Stream chunk builder.
     chunk_builder: ChunkBuilder,
+
+    /// Buffer for emit-on-window-close semantics.
+    eowc_buffer: Option<EowcBuffer<S>>,
 }
 
 struct ExecutionStats {
@@ -459,11 +465,21 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         const MAX_CONCURRENT_TASKS: usize = 100;
         let mut futs_batches = IterChunks::chunks(futs_of_all_groups, MAX_CONCURRENT_TASKS);
         while let Some(futs) = futs_batches.next() {
-            let changes = futures::future::try_join_all(futs).await?;
-            for change in changes.into_iter().flatten() {
-                apply_change_to_result_table(&change, &mut this.result_table);
-                if !this.emit_on_window_close {
-                    // For emit-on-updates, directly yield the change.
+            let changes = futures::future::try_join_all(futs)
+                .await?
+                .into_iter()
+                .flatten();
+            if this.emit_on_window_close {
+                let eowc_buffer = vars.eowc_buffer.as_mut().unwrap();
+                for change in changes {
+                    // For emit-on-window-close, write change to EOWC buffer.
+                    eowc_buffer.apply_change(&change, &mut this.result_table);
+                }
+            } else {
+                for change in changes {
+                    // For emit-on-updates, write change to result table and directly yield the
+                    // change.
+                    apply_change_to_result_table(&change, &mut this.result_table);
                     if let Some(chunk) =
                         apply_change_to_chunk_builder(&change, &mut vars.chunk_builder)
                     {
@@ -474,38 +490,18 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         }
 
         // Emit result rows under the watermark.
-        if this.emit_on_window_close && window_watermark.is_some() {
-            let pk_range = (
-                Bound::<row::Empty>::Unbounded,
-                Bound::Included([window_watermark.clone()]), // TODO(): include or exclude?
-            );
-
-            let streams = futures::future::try_join_all(
-                this.result_table.vnode_bitmap().iter_vnodes().map(|vnode| {
-                    this.result_table.iter_with_pk_range(
-                        &pk_range,
-                        vnode,
-                        PrefetchOptions::new_for_exhaust_iter(),
-                    )
-                }),
-            )
-            .await?
-            .into_iter()
-            .map(Box::pin);
-
+        if this.emit_on_window_close && let Some(watermark) = window_watermark.as_ref() {
+            let eowc_buffer = vars.eowc_buffer.as_mut().unwrap();
             #[for_await]
-            for row in stream::select_all(streams) {
+            for row in eowc_buffer.consume(watermark.clone(), &mut this.result_table) {
                 let row = row?;
                 if let Some(chunk) = apply_change_to_chunk_builder(
-                    &AggChange::Insert { new_row: row },
+                    &Record::Insert { new_row: row },
                     &mut vars.chunk_builder,
                 ) {
                     yield chunk;
                 }
             }
-
-            // State cleaning mechanism will clean these rows from result table later when
-            // committing state tables.
         }
 
         // Yield the remaining rows in chunk builder.
@@ -523,7 +519,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 // Update watermark of state tables, for state cleaning.
                 this.all_state_tables_except_result_mut()
                     .for_each(|table| table.update_watermark(watermark.clone(), false));
-                this.result_table.update_watermark(watermark, true);
+                // Must clean state eagerly for EOWC.
+                this.result_table
+                    .update_watermark(watermark, this.emit_on_window_close);
             }
             // Commit all state tables.
             futures::future::try_join_all(
@@ -557,6 +555,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             distinct_dedup: DistinctDeduplicater::new(&this.agg_calls, &this.watermark_epoch),
             buffered_watermarks: vec![None; this.group_key_indices.len()],
             chunk_builder: ChunkBuilder::new(this.chunk_size, &this.info.schema.data_types()),
+            eowc_buffer: if this.emit_on_window_close {
+                Some(EowcBuffer::new())
+            } else {
+                None
+            },
         };
 
         // TODO(rc): use something like a `ColumnMapping` type
