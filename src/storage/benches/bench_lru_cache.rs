@@ -24,6 +24,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use moka::future::Cache;
 use rand::rngs::SmallRng;
 use rand::{RngCore, SeedableRng};
+use risingwave_common::cache::CachePriority;
 use risingwave_storage::hummock::{HummockError, HummockResult, LruCache};
 use tokio::runtime::{Builder, Runtime};
 
@@ -104,7 +105,7 @@ impl CacheBase for LruCacheImpl {
         let latency = self.fake_io_latency;
         let entry = self
             .inner
-            .lookup_with_request_dedup(h, key, true, || async move {
+            .lookup_with_request_dedup(h, key, CachePriority::High, || async move {
                 get_fake_block(sst_object_id, block_idx, latency)
                     .await
                     .map(|block| (Arc::new(block), 1))

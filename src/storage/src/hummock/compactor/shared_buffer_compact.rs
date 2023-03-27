@@ -19,6 +19,7 @@ use bytes::Bytes;
 use futures::future::try_join_all;
 use futures::{stream, StreamExt, TryFutureExt};
 use itertools::Itertools;
+use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
@@ -256,7 +257,7 @@ impl SharedBufferCompactRunner {
             options,
             super::TaskConfig {
                 key_range,
-                cache_policy: CachePolicy::Fill(true),
+                cache_policy: CachePolicy::Fill(CachePriority::High),
                 gc_delete_keys: GC_DELETE_KEYS_FOR_FLUSH,
                 watermark: GC_WATERMARK_FOR_FLUSH,
                 stats_target_table_ids: None,

@@ -20,6 +20,7 @@ mod test {
     use std::task::Poll;
 
     use futures::{pin_mut, FutureExt};
+    use risingwave_common::cache::CachePriority;
     use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 
     use crate::hummock::iterator::test_utils::{
@@ -173,12 +174,12 @@ mod test {
             OrderedMergeIteratorInner<SstableIterator>,
         > = HummockIteratorUnion::First(UnorderedMergeIteratorInner::new(vec![
             SstableIterator::create(
-                cache.insert(table0.id, table0.id, 1, table0, true),
+                cache.insert(table0.id, table0.id, 1, table0, CachePriority::High),
                 sstable_store.clone(),
                 read_options.clone(),
             ),
             SstableIterator::create(
-                cache.insert(table1.id, table1.id, 1, table1, true),
+                cache.insert(table1.id, table1.id, 1, table1, CachePriority::High),
                 sstable_store.clone(),
                 read_options.clone(),
             ),
@@ -280,7 +281,7 @@ mod test {
                     non_overlapped_sstable.id,
                     1,
                     non_overlapped_sstable,
-                    true,
+                    CachePriority::High,
                 ),
                 sstable_store.clone(),
                 read_options.clone(),
@@ -291,7 +292,7 @@ mod test {
                     overlapped_new_sstable.id,
                     1,
                     overlapped_new_sstable,
-                    true,
+                    CachePriority::High,
                 ),
                 sstable_store.clone(),
                 read_options.clone(),
@@ -302,7 +303,7 @@ mod test {
                     overlapped_old_sstable.id,
                     1,
                     overlapped_old_sstable,
-                    true,
+                    CachePriority::High,
                 ),
                 sstable_store.clone(),
                 read_options.clone(),

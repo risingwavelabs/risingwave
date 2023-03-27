@@ -16,6 +16,7 @@ use std::cmp::Ordering::{Equal, Less};
 use std::future::Future;
 use std::sync::Arc;
 
+use risingwave_common::cache::CachePriority;
 use risingwave_hummock_sdk::key::FullKey;
 
 use crate::hummock::iterator::{Backward, HummockIterator};
@@ -67,7 +68,7 @@ impl BackwardSstableIterator {
                 .get(
                     self.sst.value(),
                     idx as usize,
-                    crate::hummock::CachePolicy::Fill(true),
+                    crate::hummock::CachePolicy::Fill(CachePriority::High),
                     &mut self.stats,
                 )
                 .await?;
@@ -197,7 +198,7 @@ mod tests {
         // path.
         assert!(sstable.meta.block_metas.len() > 10);
         let cache = create_small_table_cache();
-        let handle = cache.insert(0, 0, 1, Box::new(sstable), true);
+        let handle = cache.insert(0, 0, 1, Box::new(sstable), CachePriority::High);
         let mut sstable_iter = BackwardSstableIterator::new(handle, sstable_store);
         let mut cnt = TEST_KEYS_COUNT;
         sstable_iter.rewind().await.unwrap();
@@ -224,7 +225,7 @@ mod tests {
         // path.
         assert!(sstable.meta.block_metas.len() > 10);
         let cache = create_small_table_cache();
-        let handle = cache.insert(0, 0, 1, Box::new(sstable), true);
+        let handle = cache.insert(0, 0, 1, Box::new(sstable), CachePriority::High);
         let mut sstable_iter = BackwardSstableIterator::new(handle, sstable_store);
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();

@@ -50,6 +50,12 @@ impl<T: Eq + Send + Hash> LruKey for T {}
 pub trait LruValue: Send + Sync {}
 impl<T: Send + Sync> LruValue for T {}
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum CachePriority {
+    High,
+    Low,
+}
+
 /// An entry is a variable length heap-allocated structure.
 /// Entries are referenced by cache and/or by any external entity.
 /// The cache keeps all its entries in a hash table. Some elements
@@ -508,7 +514,7 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
         hash: u64,
         charge: usize,
         value: T,
-        high_priority: bool,
+        priority: CachePriority,
         last_reference_list: &mut Vec<(K, T)>,
     ) -> *mut LruHandle<K, T> {
         self.evict_from_lru(charge, last_reference_list);
@@ -519,7 +525,9 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
         } else {
             Box::new(LruHandle::new(key, value, hash, charge))
         };
-        handle.set_high_priority(high_priority);
+        if priority == CachePriority::High {
+            handle.set_high_priority(true);
+        }
         let ptr = Box::into_raw(handle);
         let old = self.table.insert(hash, ptr);
         if !old.is_null() {
@@ -757,7 +765,7 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
         hash: u64,
         charge: usize,
         value: T,
-        high_priority: bool,
+        priority: CachePriority,
     ) -> CacheableEntry<K, T> {
         let mut to_delete = vec![];
         // Drop the entries outside lock to avoid deadlock.
@@ -765,7 +773,7 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
         let handle = unsafe {
             let mut shard = self.shards[self.shard(hash)].lock();
             let pending_request = shard.write_request.remove(&key);
-            let ptr = shard.insert(key, hash, charge, value, high_priority, &mut to_delete);
+            let ptr = shard.insert(key, hash, charge, value, priority, &mut to_delete);
             debug_assert!(!ptr.is_null());
             if let Some(mut que) = pending_request {
                 (*ptr).add_multi_refs(que.len() as u32);
@@ -925,7 +933,7 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
         self: &Arc<Self>,
         hash: u64,
         key: K,
-        high_priority: bool,
+        priority: CachePriority,
         fetch_value: F,
     ) -> LookupResponse<K, T, E>
     where
@@ -950,7 +958,7 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
                     };
                     let (value, charge) = fetch_value.await?;
                     let key2 = guard.mark_success();
-                    let entry = this.insert(key2, hash, charge, value, high_priority);
+                    let entry = this.insert(key2, hash, charge, value, priority);
                     Ok(entry)
                 });
                 LookupResponse::Miss(join_handle)
@@ -1063,7 +1071,7 @@ mod tests {
                     offset: block_offset,
                     sst,
                 },
-                false,
+                CachePriority::High,
             );
         }
         assert_eq!(256, cache.get_memory_usage());
@@ -1105,7 +1113,7 @@ mod tests {
         cache: &mut LruCacheShard<String, String>,
         key: &str,
         value: &str,
-        high: bool,
+        priority: CachePriority,
     ) {
         let mut free_list = vec![];
         unsafe {
@@ -1114,7 +1122,7 @@ mod tests {
                 0,
                 value.len(),
                 value.to_string(),
-                high,
+                priority,
                 &mut free_list,
             );
             cache.release(handle);
@@ -1123,7 +1131,7 @@ mod tests {
     }
 
     fn insert(cache: &mut LruCacheShard<String, String>, key: &str, value: &str) {
-        insert_priority(cache, key, value, false);
+        insert_priority(cache, key, value, CachePriority::Low);
     }
 
     #[test]
@@ -1154,17 +1162,17 @@ mod tests {
         validate_lru_list(&mut cache, vec!["y", "e", "z", "d", "u"]);
         insert(&mut cache, "v", "v");
         validate_lru_list(&mut cache, vec!["e", "z", "d", "u", "v"]);
-        insert_priority(&mut cache, "x", "x", true);
+        insert_priority(&mut cache, "x", "x", CachePriority::High);
         validate_lru_list(&mut cache, vec!["z", "d", "u", "v", "x"]);
         assert!(lookup(&mut cache, "d"));
         validate_lru_list(&mut cache, vec!["z", "u", "v", "d", "x"]);
         insert(&mut cache, "y", "y");
         validate_lru_list(&mut cache, vec!["u", "v", "d", "y", "x"]);
-        insert_priority(&mut cache, "z", "z", true);
+        insert_priority(&mut cache, "z", "z", CachePriority::High);
         validate_lru_list(&mut cache, vec!["v", "d", "y", "x", "z"]);
         insert(&mut cache, "u", "u");
         validate_lru_list(&mut cache, vec!["d", "y", "u", "x", "z"]);
-        insert_priority(&mut cache, "v", "v", true);
+        insert_priority(&mut cache, "v", "v", CachePriority::High);
         validate_lru_list(&mut cache, vec!["y", "u", "x", "z", "v"]);
     }
 
@@ -1192,7 +1200,7 @@ mod tests {
                 0,
                 2,
                 "bb".to_string(),
-                false,
+                CachePriority::High,
                 &mut free_list,
             );
             assert_eq!(cache.usage.load(Ordering::Relaxed), 6);
@@ -1222,7 +1230,7 @@ mod tests {
                 0,
                 1,
                 "old_value".to_string(),
-                false,
+                CachePriority::High,
                 &mut to_delete,
             );
             let old_entry = cache.lookup(0, &"key".to_string());
@@ -1236,7 +1244,7 @@ mod tests {
                 0,
                 1,
                 "new_value".to_string(),
-                false,
+                CachePriority::Low,
                 &mut to_delete,
             );
             assert!(!(*old_entry).is_in_cache());
@@ -1283,7 +1291,7 @@ mod tests {
                 0,
                 1,
                 "old_value".to_string(),
-                false,
+                CachePriority::High,
                 &mut to_delete,
             );
             cache.release(insert_handle);
@@ -1297,7 +1305,7 @@ mod tests {
                 0,
                 1,
                 "new_value".to_string(),
-                false,
+                CachePriority::High,
                 &mut to_delete,
             );
             assert!(!(*old_entry).is_in_cache());
@@ -1350,7 +1358,7 @@ mod tests {
         match ret2 {
             LookupResult::WaitPendingRequest(mut recv) => {
                 assert!(matches!(recv.try_recv(), Err(TryRecvError::Empty)));
-                cache.insert("b".to_string(), 0, 1, "v2".to_string(), false);
+                cache.insert("b".to_string(), 0, 1, "v2".to_string(), CachePriority::Low);
                 recv.try_recv().unwrap();
                 assert!(
                     matches!(cache.lookup_for_request(0, "b".to_string()), LookupResult::Cached(v) if v.value().eq("v2"))
@@ -1380,15 +1388,33 @@ mod tests {
         let cache = Arc::new(LruCache::with_event_listener(0, 2, 0, listener.clone()));
 
         // full-fill cache
-        let h = cache.insert("k1".to_string(), 0, 1, "v1".to_string(), false);
+        let h = cache.insert(
+            "k1".to_string(),
+            0,
+            1,
+            "v1".to_string(),
+            CachePriority::High,
+        );
         drop(h);
-        let h = cache.insert("k2".to_string(), 0, 1, "v2".to_string(), false);
+        let h = cache.insert(
+            "k2".to_string(),
+            0,
+            1,
+            "v2".to_string(),
+            CachePriority::High,
+        );
         drop(h);
         assert_eq!(cache.get_memory_usage(), 2);
         assert!(listener.released.lock().is_empty());
 
         // test evict
-        let h = cache.insert("k3".to_string(), 0, 1, "v3".to_string(), false);
+        let h = cache.insert(
+            "k3".to_string(),
+            0,
+            1,
+            "v3".to_string(),
+            CachePriority::High,
+        );
         drop(h);
         assert_eq!(cache.get_memory_usage(), 2);
         assert!(listener.released.lock().remove("k1").is_some());
@@ -1399,22 +1425,22 @@ mod tests {
         assert!(listener.released.lock().remove("k2").is_some());
 
         // test refill
-        let h = cache.insert("k4".to_string(), 0, 1, "v4".to_string(), false);
+        let h = cache.insert("k4".to_string(), 0, 1, "v4".to_string(), CachePriority::Low);
         drop(h);
         assert_eq!(cache.get_memory_usage(), 2);
         assert!(listener.released.lock().is_empty());
 
         // test release after full
         // 1. full-fill cache but not release
-        let h1 = cache.insert("k5".to_string(), 0, 1, "v5".to_string(), false);
+        let h1 = cache.insert("k5".to_string(), 0, 1, "v5".to_string(), CachePriority::Low);
         assert_eq!(cache.get_memory_usage(), 2);
         assert!(listener.released.lock().remove("k3").is_some());
-        let h2 = cache.insert("k6".to_string(), 0, 1, "v6".to_string(), false);
+        let h2 = cache.insert("k6".to_string(), 0, 1, "v6".to_string(), CachePriority::Low);
         assert_eq!(cache.get_memory_usage(), 2);
         assert!(listener.released.lock().remove("k4").is_some());
 
         // 2. insert one more entry after cache is full, cache will be oversized
-        let h3 = cache.insert("k7".to_string(), 0, 1, "v7".to_string(), false);
+        let h3 = cache.insert("k7".to_string(), 0, 1, "v7".to_string(), CachePriority::Low);
         assert_eq!(cache.get_memory_usage(), 3);
         assert!(listener.released.lock().is_empty());
 
@@ -1462,7 +1488,7 @@ mod tests {
         let polled2 = polled.clone();
         let f = Box::pin(async move {
             cache2
-                .lookup_with_request_dedup(1, 2, false, || async move {
+                .lookup_with_request_dedup(1, 2, CachePriority::High, || async move {
                     polled2.store(true, Ordering::Release);
                     recv.await.map(|_| (1, 1))
                 })

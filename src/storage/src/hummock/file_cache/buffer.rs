@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use parking_lot::RwLock;
-use risingwave_common::cache::LruCache;
+use risingwave_common::cache::{CachePriority, LruCache};
 
 use super::LRU_SHARD_BITS;
 use crate::hummock::{TieredCacheEntryHolder, TieredCacheKey, TieredCacheValue};
@@ -81,7 +81,8 @@ where
 
     pub fn insert(&self, hash: u64, key: K, charge: usize, value: V) {
         let core = self.core.read();
-        core.active_buffer.insert(key, hash, charge, value, true);
+        core.active_buffer
+            .insert(key, hash, charge, value, CachePriority::High);
     }
 
     pub fn get(&self, hash: u64, key: &K) -> Option<TieredCacheEntryHolder<K, V>> {

@@ -18,7 +18,9 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use futures::Future;
-use risingwave_common::cache::{CacheableEntry, LookupResponse, LruCache, LruCacheEventListener};
+use risingwave_common::cache::{
+    CachePriority, CacheableEntry, LookupResponse, LruCache, LruCacheEventListener,
+};
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use tokio::sync::oneshot::Receiver;
 use tokio::task::JoinHandle;
@@ -175,14 +177,14 @@ impl BlockCache {
         object_id: HummockSstableObjectId,
         block_idx: u64,
         block: Box<Block>,
-        high_priority: bool,
+        priority: CachePriority,
     ) -> BlockHolder {
         BlockHolder::from_cached_block(self.inner.insert(
             (object_id, block_idx),
             Self::hash(object_id, block_idx),
             block.capacity(),
             block,
-            high_priority,
+            priority,
         ))
     }
 
@@ -190,7 +192,7 @@ impl BlockCache {
         &self,
         object_id: HummockSstableObjectId,
         block_idx: u64,
-        high_priority: bool,
+        priority: CachePriority,
         mut fetch_block: F,
     ) -> BlockResponse
     where
@@ -199,19 +201,16 @@ impl BlockCache {
     {
         let h = Self::hash(object_id, block_idx);
         let key = (object_id, block_idx);
-        match self.inner.lookup_with_request_dedup::<_, HummockError, _>(
-            h,
-            key,
-            high_priority,
-            || {
+        match self
+            .inner
+            .lookup_with_request_dedup::<_, HummockError, _>(h, key, priority, || {
                 let f = fetch_block();
                 async move {
                     let block = f.await?;
                     let len = block.capacity();
                     Ok((block, len))
                 }
-            },
-        ) {
+            }) {
             LookupResponse::Invalid => unreachable!(),
             LookupResponse::Cached(entry) => {
                 BlockResponse::Block(BlockHolder::from_cached_block(entry))

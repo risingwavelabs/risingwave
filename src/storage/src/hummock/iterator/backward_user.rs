@@ -296,6 +296,7 @@ mod tests {
 
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
+    use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::key::prev_key;
 
@@ -341,9 +342,27 @@ mod tests {
         )
         .await;
         let cache = create_small_table_cache();
-        let handle0 = cache.insert(table0.id, table0.id, 1, Box::new(table0), true);
-        let handle1 = cache.insert(table1.id, table1.id, 1, Box::new(table1), true);
-        let handle2 = cache.insert(table2.id, table2.id, 1, Box::new(table2), true);
+        let handle0 = cache.insert(
+            table0.id,
+            table0.id,
+            1,
+            Box::new(table0),
+            CachePriority::High,
+        );
+        let handle1 = cache.insert(
+            table1.id,
+            table1.id,
+            1,
+            Box::new(table1),
+            CachePriority::High,
+        );
+        let handle2 = cache.insert(
+            table2.id,
+            table2.id,
+            1,
+            Box::new(table2),
+            CachePriority::High,
+        );
 
         let backward_iters = vec![
             BackwardSstableIterator::new(handle1, sstable_store.clone()),
@@ -397,9 +416,27 @@ mod tests {
         )
         .await;
         let cache = create_small_table_cache();
-        let handle0 = cache.insert(table0.id, table0.id, 1, Box::new(table0), true);
-        let handle1 = cache.insert(table1.id, table1.id, 1, Box::new(table1), true);
-        let handle2 = cache.insert(table2.id, table2.id, 1, Box::new(table2), true);
+        let handle0 = cache.insert(
+            table0.id,
+            table0.id,
+            1,
+            Box::new(table0),
+            CachePriority::High,
+        );
+        let handle1 = cache.insert(
+            table1.id,
+            table1.id,
+            1,
+            Box::new(table1),
+            CachePriority::High,
+        );
+        let handle2 = cache.insert(
+            table2.id,
+            table2.id,
+            1,
+            Box::new(table2),
+            CachePriority::High,
+        );
         let backward_iters = vec![
             BackwardSstableIterator::new(handle0, sstable_store.clone()),
             BackwardSstableIterator::new(handle1, sstable_store.clone()),
@@ -464,11 +501,23 @@ mod tests {
         let cache = create_small_table_cache();
         let backward_iters = vec![
             BackwardSstableIterator::new(
-                cache.insert(table0.id, table0.id, 1, Box::new(table0), true),
+                cache.insert(
+                    table0.id,
+                    table0.id,
+                    1,
+                    Box::new(table0),
+                    CachePriority::High,
+                ),
                 sstable_store.clone(),
             ),
             BackwardSstableIterator::new(
-                cache.insert(table1.id, table1.id, 1, Box::new(table1), true),
+                cache.insert(
+                    table1.id,
+                    table1.id,
+                    1,
+                    Box::new(table1),
+                    CachePriority::High,
+                ),
                 sstable_store,
             ),
         ];
@@ -515,7 +564,13 @@ mod tests {
         let sstable =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let cache = create_small_table_cache();
-        let handle = cache.insert(sstable.id, sstable.id, 1, Box::new(sstable), true);
+        let handle = cache.insert(
+            sstable.id,
+            sstable.id,
+            1,
+            Box::new(sstable),
+            CachePriority::High,
+        );
         let backward_iters = vec![BackwardSstableIterator::new(handle, sstable_store)];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
 
@@ -594,7 +649,13 @@ mod tests {
         let sstable =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let cache = create_small_table_cache();
-        let handle = cache.insert(sstable.id, sstable.id, 1, Box::new(sstable), true);
+        let handle = cache.insert(
+            sstable.id,
+            sstable.id,
+            1,
+            Box::new(sstable),
+            CachePriority::High,
+        );
         let backward_iters = vec![BackwardSstableIterator::new(handle, sstable_store)];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
 
@@ -675,7 +736,13 @@ mod tests {
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let cache = create_small_table_cache();
         let backward_iters = vec![BackwardSstableIterator::new(
-            cache.insert(sstable.id, sstable.id, 1, Box::new(sstable), true),
+            cache.insert(
+                sstable.id,
+                sstable.id,
+                1,
+                Box::new(sstable),
+                CachePriority::High,
+            ),
             sstable_store,
         )];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
@@ -754,7 +821,13 @@ mod tests {
         let sstable =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let cache = create_small_table_cache();
-        let handle = cache.insert(sstable.id, sstable.id, 1, Box::new(sstable), true);
+        let handle = cache.insert(
+            sstable.id,
+            sstable.id,
+            1,
+            Box::new(sstable),
+            CachePriority::High,
+        );
 
         let backward_iters = vec![BackwardSstableIterator::new(handle, sstable_store)];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
@@ -852,7 +925,13 @@ mod tests {
             _ => unimplemented!(),
         };
         let cache = create_small_table_cache();
-        let handle = cache.insert(sstable.id, sstable.id, 1, Box::new(sstable), true);
+        let handle = cache.insert(
+            sstable.id,
+            sstable.id,
+            1,
+            Box::new(sstable),
+            CachePriority::High,
+        );
         let backward_iters = vec![BackwardSstableIterator::new(handle, sstable_store)];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
         let mut bui = BackwardUserIterator::for_test(bmi, (start_bound, end_bound));
@@ -1093,7 +1172,13 @@ mod tests {
         .await;
 
         let cache = create_small_table_cache();
-        let handle0 = cache.insert(table0.id, table0.id, 1, Box::new(table0), true);
+        let handle0 = cache.insert(
+            table0.id,
+            table0.id,
+            1,
+            Box::new(table0),
+            CachePriority::High,
+        );
 
         let backward_iters = vec![BackwardSstableIterator::new(handle0, sstable_store)];
 

@@ -14,6 +14,7 @@
 
 #[cfg(test)]
 mod test {
+    use risingwave_common::cache::CachePriority;
 
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable_base, iterator_test_key_of,
@@ -53,15 +54,33 @@ mod test {
         let cache = create_small_table_cache();
         let iters = vec![
             BackwardSstableIterator::new(
-                cache.insert(table0.id, table0.id, 1, Box::new(table0), true),
+                cache.insert(
+                    table0.id,
+                    table0.id,
+                    1,
+                    Box::new(table0),
+                    CachePriority::High,
+                ),
                 sstable_store.clone(),
             ),
             BackwardSstableIterator::new(
-                cache.insert(table1.id, table1.id, 1, Box::new(table1), true),
+                cache.insert(
+                    table1.id,
+                    table1.id,
+                    1,
+                    Box::new(table1),
+                    CachePriority::High,
+                ),
                 sstable_store.clone(),
             ),
             BackwardSstableIterator::new(
-                cache.insert(table2.id, table2.id, 1, Box::new(table2), true),
+                cache.insert(
+                    table2.id,
+                    table2.id,
+                    1,
+                    Box::new(table2),
+                    CachePriority::High,
+                ),
                 sstable_store,
             ),
         ];
@@ -116,15 +135,33 @@ mod test {
         let cache = create_small_table_cache();
         let iters = vec![
             BackwardSstableIterator::new(
-                cache.insert(table0.id, table0.id, 1, Box::new(table0), true),
+                cache.insert(
+                    table0.id,
+                    table0.id,
+                    1,
+                    Box::new(table0),
+                    CachePriority::High,
+                ),
                 sstable_store.clone(),
             ),
             BackwardSstableIterator::new(
-                cache.insert(table1.id, table1.id, 1, Box::new(table1), true),
+                cache.insert(
+                    table1.id,
+                    table1.id,
+                    1,
+                    Box::new(table1),
+                    CachePriority::High,
+                ),
                 sstable_store.clone(),
             ),
             BackwardSstableIterator::new(
-                cache.insert(table2.id, table2.id, 1, Box::new(table2), true),
+                cache.insert(
+                    table2.id,
+                    table2.id,
+                    1,
+                    Box::new(table2),
+                    CachePriority::High,
+                ),
                 sstable_store,
             ),
         ];
@@ -193,11 +230,23 @@ mod test {
         let cache = create_small_table_cache();
         let iters = vec![
             BackwardSstableIterator::new(
-                cache.insert(table1.id, table1.id, 1, Box::new(table1), true),
+                cache.insert(
+                    table1.id,
+                    table1.id,
+                    1,
+                    Box::new(table1),
+                    CachePriority::High,
+                ),
                 sstable_store.clone(),
             ),
             BackwardSstableIterator::new(
-                cache.insert(table0.id, table0.id, 1, Box::new(table0), true),
+                cache.insert(
+                    table0.id,
+                    table0.id,
+                    1,
+                    Box::new(table0),
+                    CachePriority::High,
+                ),
                 sstable_store,
             ),
         ];

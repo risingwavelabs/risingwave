@@ -18,6 +18,7 @@ use std::future::Future;
 use std::ops::Bound::*;
 use std::sync::Arc;
 
+use risingwave_common::cache::CachePriority;
 use risingwave_hummock_sdk::key::FullKey;
 
 use super::super::{HummockResult, HummockValue};
@@ -58,7 +59,7 @@ impl BlockFetcher {
                     .get(
                         sst,
                         block_idx,
-                        crate::hummock::CachePolicy::Fill(true),
+                        crate::hummock::CachePolicy::Fill(CachePriority::High),
                         stats,
                     )
                     .await
@@ -111,7 +112,12 @@ impl PrefetchContext {
             self.prefetched_blocks.push_back((
                 idx,
                 sstable_store
-                    .get_block_response(sst, idx, crate::hummock::CachePolicy::Fill(true), stats)
+                    .get_block_response(
+                        sst,
+                        idx,
+                        crate::hummock::CachePolicy::Fill(CachePriority::High),
+                        stats,
+                    )
                     .await?,
             ));
         }
@@ -129,7 +135,7 @@ impl PrefetchContext {
                     .get_block_response(
                         sst,
                         next_prefetch_idx,
-                        crate::hummock::CachePolicy::Fill(true),
+                        crate::hummock::CachePolicy::Fill(CachePriority::High),
                         stats,
                     )
                     .await?,
@@ -394,7 +400,7 @@ mod tests {
         assert!(sstable.meta.block_metas.len() > 10);
 
         let cache = create_small_table_cache();
-        let handle = cache.insert(0, 0, 1, Box::new(sstable), true);
+        let handle = cache.insert(0, 0, 1, Box::new(sstable), CachePriority::High);
         inner_test_forward_iterator(sstable_store.clone(), handle).await;
     }
 
@@ -408,7 +414,7 @@ mod tests {
         // path.
         assert!(sstable.meta.block_metas.len() > 10);
         let cache = create_small_table_cache();
-        let handle = cache.insert(0, 0, 1, Box::new(sstable), true);
+        let handle = cache.insert(0, 0, 1, Box::new(sstable), CachePriority::High);
 
         let mut sstable_iter = SstableIterator::create(
             handle,

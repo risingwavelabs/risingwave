@@ -16,7 +16,7 @@ use std::collections::hash_map::RandomState;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use risingwave_common::cache::LruCache;
+use risingwave_common::cache::{CachePriority, LruCache};
 use risingwave_common::util::iter_util::ZipEqFast;
 use tokio::sync::Notify;
 
@@ -110,7 +110,7 @@ where
                         hash,
                         utils::align_up(self.store.block_size(), encoded_value_len),
                         slot,
-                        true,
+                        CachePriority::High,
                     );
                     bytes += utils::align_up(self.store.block_size(), encoded_value_len);
                 }

@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
+use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
@@ -206,7 +207,7 @@ pub async fn gen_merge_iterator_interleave_test_sstable_iters(
             key_count,
         )
         .await;
-        let handle = cache.insert(table.id, table.id, 1, Box::new(table), false);
+        let handle = cache.insert(table.id, table.id, 1, Box::new(table), CachePriority::High);
         result.push(SstableIterator::create(
             handle,
             sstable_store.clone(),
