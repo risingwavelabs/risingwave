@@ -278,7 +278,7 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{OrderedF32, OrderedF64};
+    use crate::types::{F32, F64};
 
     fn helper_test_builder<T: PrimitiveArrayItemType>(data: Vec<Option<T>>) -> PrimitiveArray<T> {
         let mut builder = PrimitiveArrayBuilder::<T>::new(data.len());
@@ -326,7 +326,7 @@ mod tests {
 
     #[test]
     fn test_f32_builder() {
-        let arr = helper_test_builder::<OrderedF32>(
+        let arr = helper_test_builder::<F32>(
             (0..1000)
                 .map(|x| {
                     if x % 2 == 0 {
@@ -344,7 +344,7 @@ mod tests {
 
     #[test]
     fn test_f64_builder() {
-        let arr = helper_test_builder::<OrderedF64>(
+        let arr = helper_test_builder::<F64>(
             (0..1000)
                 .map(|x| {
                     if x % 2 == 0 {

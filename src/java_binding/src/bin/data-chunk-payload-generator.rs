@@ -17,7 +17,7 @@ use std::io::Write;
 use prost::Message;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, OrderedF32, OrderedF64, ScalarImpl};
+use risingwave_common::types::{DataType, F32, F64, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 
 fn build_row(index: usize) -> OwnedRow {
@@ -25,8 +25,8 @@ fn build_row(index: usize) -> OwnedRow {
     row_value.push(Some(ScalarImpl::Int16(index as i16)));
     row_value.push(Some(ScalarImpl::Int32(index as i32)));
     row_value.push(Some(ScalarImpl::Int64(index as i64)));
-    row_value.push(Some(ScalarImpl::Float32(OrderedF32::from(index as f32))));
-    row_value.push(Some(ScalarImpl::Float64(OrderedF64::from(index as f64))));
+    row_value.push(Some(ScalarImpl::Float32(F32::from(index as f32))));
+    row_value.push(Some(ScalarImpl::Float64(F64::from(index as f64))));
     row_value.push(Some(ScalarImpl::Bool(index % 3 == 0)));
     row_value.push(Some(ScalarImpl::Utf8(
         format!("{}", index).repeat((index % 10) + 1).into(),

@@ -30,7 +30,7 @@ use crate::row::{Row, RowDeserializer as BasicDeserializer};
 use crate::types::struct_type::StructType;
 use crate::types::{
     DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
-    NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarImpl, ScalarRefImpl, ToDatumRef,
+    NaiveTimeWrapper, F32, F64, ScalarImpl, ScalarRefImpl, ToDatumRef,
 };
 
 pub mod error;
@@ -342,8 +342,8 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         DataType::Int32 => ScalarImpl::Int32(data.get_i32_le()),
         DataType::Int64 => ScalarImpl::Int64(data.get_i64_le()),
         DataType::Serial => ScalarImpl::Serial(Serial::from(data.get_i64_le())),
-        DataType::Float32 => ScalarImpl::Float32(OrderedF32::from(data.get_f32_le())),
-        DataType::Float64 => ScalarImpl::Float64(OrderedF64::from(data.get_f64_le())),
+        DataType::Float32 => ScalarImpl::Float32(F32::from(data.get_f32_le())),
+        DataType::Float64 => ScalarImpl::Float64(F64::from(data.get_f64_le())),
         DataType::Varchar => ScalarImpl::Utf8(deserialize_str(data)?),
         DataType::Boolean => ScalarImpl::Bool(deserialize_bool(data)?),
         DataType::Decimal => ScalarImpl::Decimal(deserialize_decimal(data)?),

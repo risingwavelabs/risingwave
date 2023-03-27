@@ -142,7 +142,7 @@ mod tests {
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::{
         DataType, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
-        OrderedF32, Scalar,
+        F32, Scalar,
     };
     use risingwave_common::util::sort_util::OrderType;
 
@@ -564,13 +564,13 @@ mod tests {
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
                             Some("abcd".into()),
-                            Some(OrderedF32::from(-1.2).to_scalar_value()),
+                            Some(F32::from(-1.2).to_scalar_value()),
                         ]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
                             Some("c".into()),
-                            Some(OrderedF32::from(0.0).to_scalar_value()),
+                            Some(F32::from(0.0).to_scalar_value()),
                         ]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
@@ -579,13 +579,13 @@ mod tests {
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
                             Some("c".into()),
-                            Some(OrderedF32::from(0.0).to_scalar_value()),
+                            Some(F32::from(0.0).to_scalar_value()),
                         ]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
                             None,
-                            Some(OrderedF32::from(3.4).to_scalar_value()),
+                            Some(F32::from(3.4).to_scalar_value()),
                         ]),
                     }));
                     struct_builder.finish().into()
@@ -633,19 +633,19 @@ mod tests {
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
                             Some("abcd".into()),
-                            Some(OrderedF32::from(-1.2).to_scalar_value()),
+                            Some(F32::from(-1.2).to_scalar_value()),
                         ]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
                             Some("c".into()),
-                            Some(OrderedF32::from(0.0).to_scalar_value()),
+                            Some(F32::from(0.0).to_scalar_value()),
                         ]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
                             Some("c".into()),
-                            Some(OrderedF32::from(0.0).to_scalar_value()),
+                            Some(F32::from(0.0).to_scalar_value()),
                         ]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
@@ -654,7 +654,7 @@ mod tests {
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
                             None,
-                            Some(OrderedF32::from(3.4).to_scalar_value()),
+                            Some(F32::from(3.4).to_scalar_value()),
                         ]),
                     }));
                     struct_builder.finish().into()

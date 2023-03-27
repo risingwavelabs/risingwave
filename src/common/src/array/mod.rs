@@ -74,14 +74,14 @@ pub type ArrayResult<T> = std::result::Result<T, ArrayError>;
 pub type I64Array = PrimitiveArray<i64>;
 pub type I32Array = PrimitiveArray<i32>;
 pub type I16Array = PrimitiveArray<i16>;
-pub type F64Array = PrimitiveArray<OrderedF64>;
-pub type F32Array = PrimitiveArray<OrderedF32>;
+pub type F64Array = PrimitiveArray<F64>;
+pub type F32Array = PrimitiveArray<F32>;
 
 pub type I64ArrayBuilder = PrimitiveArrayBuilder<i64>;
 pub type I32ArrayBuilder = PrimitiveArrayBuilder<i32>;
 pub type I16ArrayBuilder = PrimitiveArrayBuilder<i16>;
-pub type F64ArrayBuilder = PrimitiveArrayBuilder<OrderedF64>;
-pub type F32ArrayBuilder = PrimitiveArrayBuilder<OrderedF32>;
+pub type F64ArrayBuilder = PrimitiveArrayBuilder<F64>;
+pub type F32ArrayBuilder = PrimitiveArrayBuilder<F32>;
 
 /// The hash source for `None` values when hashing an item.
 pub(crate) const NULL_VAL_FOR_HASH: u32 = 0xfffffff0;
@@ -674,10 +674,10 @@ impl ArrayImpl {
                 read_numeric_array::<Serial, SerialValueReader>(array, cardinality)?
             }
             PbArrayType::Float32 => {
-                read_numeric_array::<OrderedF32, F32ValueReader>(array, cardinality)?
+                read_numeric_array::<F32, F32ValueReader>(array, cardinality)?
             }
             PbArrayType::Float64 => {
-                read_numeric_array::<OrderedF64, F64ValueReader>(array, cardinality)?
+                read_numeric_array::<F64, F64ValueReader>(array, cardinality)?
             }
             PbArrayType::Bool => read_bool_array(array, cardinality)?,
             PbArrayType::Utf8 => {

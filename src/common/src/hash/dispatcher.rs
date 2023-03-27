@@ -82,7 +82,7 @@ fn hash_key_size(data_type: &DataType) -> HashKeySize {
 
     use crate::types::{
         Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
-        OrderedF32, OrderedF64,
+        F32, F64,
     };
 
     match data_type {
@@ -92,8 +92,8 @@ fn hash_key_size(data_type: &DataType) -> HashKeySize {
         DataType::Int32 => HashKeySize::Fixed(size_of::<i32>()),
         DataType::Int64 => HashKeySize::Fixed(size_of::<i64>()),
         DataType::Serial => HashKeySize::Fixed(size_of::<Serial>()),
-        DataType::Float32 => HashKeySize::Fixed(size_of::<OrderedF32>()),
-        DataType::Float64 => HashKeySize::Fixed(size_of::<OrderedF64>()),
+        DataType::Float32 => HashKeySize::Fixed(size_of::<F32>()),
+        DataType::Float64 => HashKeySize::Fixed(size_of::<F64>()),
         DataType::Decimal => HashKeySize::Fixed(size_of::<Decimal>()),
         DataType::Date => HashKeySize::Fixed(size_of::<NaiveDateWrapper>()),
         DataType::Time => HashKeySize::Fixed(size_of::<NaiveTimeWrapper>()),

@@ -500,7 +500,7 @@ mod tests {
     use more_asserts::assert_gt;
 
     use super::*;
-    use crate::types::{OrderedF32, OrderedF64};
+    use crate::types::{F32, F64};
     use crate::{array, try_match_expand};
 
     // Empty struct is allowed in postgres.
@@ -602,11 +602,11 @@ mod tests {
     #[test]
     fn test_serialize_deserialize() {
         let value = StructValue::new(vec![
-            Some(OrderedF32::from(3.2).to_scalar_value()),
+            Some(F32::from(3.2).to_scalar_value()),
             Some("abcde".into()),
             Some(
                 StructValue::new(vec![
-                    Some(OrderedF64::from(1.3).to_scalar_value()),
+                    Some(F64::from(1.3).to_scalar_value()),
                     Some("a".into()),
                     None,
                     Some(StructValue::new(vec![]).to_scalar_value()),

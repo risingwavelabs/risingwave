@@ -47,8 +47,8 @@ implement_using_to_sql! {
     { i16,Int16  },
     { i32,Int32  },
     { &str,Varchar },
-    { crate::types::OrderedF32,Float32 },
-    { crate::types::OrderedF64,Float64 },
+    { crate::types::F32,Float32 },
+    { crate::types::F64,Float64 },
     { bool,Boolean },
     { &[u8],Bytea }
 }

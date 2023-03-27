@@ -27,7 +27,7 @@ use risingwave_common::array::*;
 use risingwave_common::types::test_utils::IntervalUnitTestExt;
 use risingwave_common::types::{
     DataType, DataTypeName, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
-    NaiveTimeWrapper, OrderedF32, OrderedF64,
+    NaiveTimeWrapper, F32, F64,
 };
 use risingwave_expr::expr::*;
 use risingwave_expr::sig::agg::agg_func_sigs;
@@ -50,8 +50,8 @@ fn bench_expr(c: &mut Criterion) {
             I16Array::from_iter((1..=CHUNK_SIZE).map(|_| 1)).into(),
             I32Array::from_iter((1..=CHUNK_SIZE).map(|_| 1)).into(),
             I64Array::from_iter((1..=CHUNK_SIZE).map(|_| 1)).into(),
-            F32Array::from_iter((1..=CHUNK_SIZE).map(|i| OrderedF32::from(i as f32))).into(),
-            F64Array::from_iter((1..=CHUNK_SIZE).map(|i| OrderedF64::from(i as f64))).into(),
+            F32Array::from_iter((1..=CHUNK_SIZE).map(|i| F32::from(i as f32))).into(),
+            F64Array::from_iter((1..=CHUNK_SIZE).map(|i| F64::from(i as f64))).into(),
             DecimalArray::from_iter((1..=CHUNK_SIZE).map(Decimal::from)).into(),
             NaiveDateArray::from_iter((1..=CHUNK_SIZE).map(|_| NaiveDateWrapper::default())).into(),
             NaiveTimeArray::from_iter((1..=CHUNK_SIZE).map(|_| NaiveTimeWrapper::default())).into(),

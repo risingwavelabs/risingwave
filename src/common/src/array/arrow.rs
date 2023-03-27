@@ -242,7 +242,7 @@ trait FromIntoArrow {
     fn into_arrow(self) -> Self::ArrowType;
 }
 
-impl FromIntoArrow for OrderedF32 {
+impl FromIntoArrow for F32 {
     type ArrowType = f32;
 
     fn from_arrow(value: Self::ArrowType) -> Self {
@@ -254,7 +254,7 @@ impl FromIntoArrow for OrderedF32 {
     }
 }
 
-impl FromIntoArrow for OrderedF64 {
+impl FromIntoArrow for F64 {
     type ArrowType = f64;
 
     fn from_arrow(value: Self::ArrowType) -> Self {
@@ -535,8 +535,8 @@ mod tests {
     fn f32() {
         let array = F32Array::from_iter([
             None,
-            Some(OrderedF32::from(-7.0)),
-            Some(OrderedF32::from(25.0)),
+            Some(F32::from(-7.0)),
+            Some(F32::from(25.0)),
         ]);
         let arrow = arrow_array::Float32Array::from(&array);
         assert_eq!(F32Array::from(&arrow), array);

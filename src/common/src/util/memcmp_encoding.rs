@@ -22,8 +22,8 @@ use crate::array::{ArrayImpl, DataChunk};
 use crate::error::Result;
 use crate::row::Row;
 use crate::types::{
-    DataType, Datum, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, OrderedF32,
-    OrderedF64, ScalarImpl, ToDatumRef,
+    DataType, Datum, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, F32,
+    F64, ScalarImpl, ToDatumRef,
 };
 use crate::util::sort_util::{ColumnOrder, OrderType};
 
@@ -137,8 +137,8 @@ fn calculate_encoded_size_inner(
             DataType::Int32 => size_of::<i32>(),
             DataType::Int64 => size_of::<i64>(),
             DataType::Serial => size_of::<Serial>(),
-            DataType::Float32 => size_of::<OrderedF32>(),
-            DataType::Float64 => size_of::<OrderedF64>(),
+            DataType::Float32 => size_of::<F32>(),
+            DataType::Float64 => size_of::<F64>(),
             DataType::Date => size_of::<NaiveDateWrapper>(),
             DataType::Time => size_of::<NaiveTimeWrapper>(),
             DataType::Timestamp => size_of::<NaiveDateTimeWrapper>(),
@@ -240,7 +240,7 @@ mod tests {
     use super::*;
     use crate::array::{DataChunk, ListValue, StructValue};
     use crate::row::OwnedRow;
-    use crate::types::{DataType, OrderedF32, ScalarImpl};
+    use crate::types::{DataType, F32, ScalarImpl};
     use crate::util::sort_util::{ColumnOrder, OrderType};
 
     #[test]
@@ -447,11 +447,11 @@ mod tests {
         use num_traits::*;
         use rand::seq::SliceRandom;
 
-        fn serialize(f: OrderedF32) -> Vec<u8> {
+        fn serialize(f: F32) -> Vec<u8> {
             encode_value(&Some(ScalarImpl::from(f)), OrderType::default()).unwrap()
         }
 
-        fn deserialize(data: Vec<u8>) -> OrderedF32 {
+        fn deserialize(data: Vec<u8>) -> F32 {
             decode_value(&DataType::Float32, &data, OrderType::default())
                 .unwrap()
                 .unwrap()
@@ -460,21 +460,21 @@ mod tests {
 
         let floats = vec![
             // -inf
-            OrderedF32::neg_infinity(),
+            F32::neg_infinity(),
             // -1
-            OrderedF32::one().neg(),
+            F32::one().neg(),
             // 0, -0 should be treated the same
-            OrderedF32::zero(),
-            OrderedF32::neg_zero(),
-            OrderedF32::zero(),
+            F32::zero(),
+            F32::neg_zero(),
+            F32::zero(),
             // 1
-            OrderedF32::one(),
+            F32::one(),
             // inf
-            OrderedF32::infinity(),
+            F32::infinity(),
             // nan, -nan should be treated the same
-            OrderedF32::nan(),
-            OrderedF32::nan().neg(),
-            OrderedF32::nan(),
+            F32::nan(),
+            F32::nan().neg(),
+            F32::nan(),
         ];
         assert!(floats.is_sorted());
 

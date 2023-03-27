@@ -38,8 +38,8 @@ use crate::array::{
 use crate::collection::estimate_size::EstimateSize;
 use crate::row::{OwnedRow, RowDeserializer};
 use crate::types::{
-    DataType, Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, OrderedF32,
-    OrderedF64, ScalarRef,
+    DataType, Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, F32,
+    F64, ScalarRef,
 };
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::iter_util::ZipEqFast;
@@ -313,7 +313,7 @@ impl HashKeySerDe<'_> for i64 {
     }
 }
 
-impl HashKeySerDe<'_> for OrderedF32 {
+impl HashKeySerDe<'_> for F32 {
     type S = [u8; 4];
 
     fn serialize(self) -> Self::S {
@@ -326,7 +326,7 @@ impl HashKeySerDe<'_> for OrderedF32 {
     }
 }
 
-impl HashKeySerDe<'_> for OrderedF64 {
+impl HashKeySerDe<'_> for F64 {
     type S = [u8; 8];
 
     fn serialize(self) -> Self::S {

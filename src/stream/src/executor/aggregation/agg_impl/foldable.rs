@@ -430,7 +430,7 @@ impl_fold_agg! { F64Array, Float64, F32Array }
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::I64Array;
-    use risingwave_common::types::OrderedF64;
+    use risingwave_common::types::F64;
     use risingwave_common::{array, array_nonnull};
 
     use super::*;
@@ -503,7 +503,7 @@ mod tests {
                 .map(|(c, v)| {
                     (
                         if c == '+' { Op::Insert } else { Op::Delete },
-                        Some(OrderedF64::from(v)),
+                        Some(F64::from(v)),
                     )
                 })
                 .unzip();
@@ -516,7 +516,7 @@ mod tests {
             .unwrap();
             assert_eq!(
                 agg.get_output().unwrap().unwrap().as_float64(),
-                &OrderedF64::from(expected)
+                &F64::from(expected)
             );
         }
     }

@@ -72,8 +72,8 @@ use crate::array::{
 };
 use crate::error::Result as RwResult;
 
-pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
-pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
+pub type F32 = ordered_float::OrderedFloat<f32>;
+pub type F64 = ordered_float::OrderedFloat<f64>;
 
 /// `EnumDiscriminants` will generate a `DataTypeName` enum with the same variants,
 /// but without data fields.
@@ -276,8 +276,8 @@ impl DataType {
             DataType::Int32 => PrimitiveArrayBuilder::<i32>::new(capacity).into(),
             DataType::Int64 => PrimitiveArrayBuilder::<i64>::new(capacity).into(),
             DataType::Serial => PrimitiveArrayBuilder::<Serial>::new(capacity).into(),
-            DataType::Float32 => PrimitiveArrayBuilder::<OrderedF32>::new(capacity).into(),
-            DataType::Float64 => PrimitiveArrayBuilder::<OrderedF64>::new(capacity).into(),
+            DataType::Float32 => PrimitiveArrayBuilder::<F32>::new(capacity).into(),
+            DataType::Float64 => PrimitiveArrayBuilder::<F64>::new(capacity).into(),
             DataType::Decimal => DecimalArrayBuilder::new(capacity).into(),
             DataType::Date => NaiveDateArrayBuilder::new(capacity).into(),
             DataType::Varchar => Utf8ArrayBuilder::new(capacity).into(),
@@ -397,8 +397,8 @@ impl DataType {
             DataType::Int32 => ScalarImpl::Int32(i32::MIN),
             DataType::Int64 => ScalarImpl::Int64(i64::MIN),
             DataType::Serial => ScalarImpl::Serial(Serial::from(i64::MIN)),
-            DataType::Float32 => ScalarImpl::Float32(OrderedF32::neg_infinity()),
-            DataType::Float64 => ScalarImpl::Float64(OrderedF64::neg_infinity()),
+            DataType::Float32 => ScalarImpl::Float32(F32::neg_infinity()),
+            DataType::Float64 => ScalarImpl::Float64(F64::neg_infinity()),
             DataType::Boolean => ScalarImpl::Bool(false),
             DataType::Varchar => ScalarImpl::Utf8("".into()),
             DataType::Bytea => ScalarImpl::Bytea("".to_string().into_bytes().into()),
@@ -504,8 +504,8 @@ macro_rules! for_all_scalar_variants {
             { Int32, int32, i32, i32 },
             { Int64, int64, i64, i64 },
             { Serial, serial, Serial, Serial },
-            { Float32, float32, OrderedF32, OrderedF32 },
-            { Float64, float64, OrderedF64, OrderedF64 },
+            { Float32, float32, F32, F32 },
+            { Float64, float64, F64, F64 },
             { Utf8, utf8, Box<str>, &'scalar str },
             { Bool, bool, bool, bool },
             { Decimal, decimal, Decimal, Decimal  },
@@ -636,8 +636,8 @@ macro_rules! for_all_native_types {
             { i32, Int32 },
             { i64, Int64 },
             { Serial, Serial },
-            { $crate::types::OrderedF32, Float32 },
-            { $crate::types::OrderedF64, Float64 }
+            { $crate::types::F32, Float32 },
+            { $crate::types::F64, Float64 }
         }
     };
 }

@@ -20,7 +20,7 @@ use num_traits::real::Real;
 use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed, Zero};
 use risingwave_common::types::{
     CheckedAdd, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
-    OrderedF64,
+    F64,
 };
 use risingwave_expr_macro::function;
 
@@ -123,7 +123,7 @@ pub fn decimal_abs(decimal: Decimal) -> Result<Decimal> {
 }
 
 #[function("pow(float64, float64) -> float64")]
-pub fn pow_f64(l: OrderedF64, r: OrderedF64) -> Result<OrderedF64> {
+pub fn pow_f64(l: F64, r: F64) -> Result<F64> {
     let res = l.powf(r);
     if res.is_infinite() {
         Err(ExprError::NumericOutOfRange)
@@ -322,7 +322,7 @@ pub fn time_interval_add(l: NaiveTimeWrapper, r: IntervalUnit) -> Result<NaiveTi
 #[function("divide(interval, *number) -> interval")]
 pub fn interval_float_div<T2>(l: IntervalUnit, r: T2) -> Result<IntervalUnit>
 where
-    T2: TryInto<OrderedF64> + Debug,
+    T2: TryInto<F64> + Debug,
 {
     l.div_float(r).ok_or(ExprError::NumericOutOfRange)
 }
@@ -332,7 +332,7 @@ where
 #[function("multiply(interval, decimal) -> interval")]
 pub fn interval_float_mul<T2>(l: IntervalUnit, r: T2) -> Result<IntervalUnit>
 where
-    T2: TryInto<OrderedF64> + Debug,
+    T2: TryInto<F64> + Debug,
 {
     l.mul_float(r).ok_or(ExprError::NumericOutOfRange)
 }
@@ -342,7 +342,7 @@ where
 #[function("multiply(decimal, interval) -> interval")]
 pub fn float_interval_mul<T1>(l: T1, r: IntervalUnit) -> Result<IntervalUnit>
 where
-    T1: TryInto<OrderedF64> + Debug,
+    T1: TryInto<F64> + Debug,
 {
     r.mul_float(l).ok_or(ExprError::NumericOutOfRange)
 }
@@ -353,7 +353,7 @@ mod tests {
 
     use risingwave_common::types::test_utils::IntervalUnitTestExt;
     use risingwave_common::types::{
-        Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, OrderedF32, OrderedF64,
+        Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, F32, F64,
     };
 
     use super::*;
@@ -417,28 +417,28 @@ mod tests {
             dec("0.0")
         );
         assert!(
-            general_add::<i32, OrderedF32, OrderedF64>(-1i32, 1f32.into())
+            general_add::<i32, F32, F64>(-1i32, 1f32.into())
                 .unwrap()
                 .is_zero()
         );
         assert!(
-            general_sub::<i32, OrderedF32, OrderedF64>(1i32, 1f32.into())
+            general_sub::<i32, F32, F64>(1i32, 1f32.into())
                 .unwrap()
                 .is_zero()
         );
         assert!(
-            general_mul::<i32, OrderedF32, OrderedF64>(0i32, 1f32.into())
+            general_mul::<i32, F32, F64>(0i32, 1f32.into())
                 .unwrap()
                 .is_zero()
         );
         assert!(
-            general_div::<i32, OrderedF32, OrderedF64>(0i32, 1f32.into())
+            general_div::<i32, F32, F64>(0i32, 1f32.into())
                 .unwrap()
                 .is_zero()
         );
         assert_eq!(
-            general_neg::<OrderedF32>(1f32.into()).unwrap(),
-            OrderedF32::from(-1f32)
+            general_neg::<F32>(1f32.into()).unwrap(),
+            F32::from(-1f32)
         );
         assert_eq!(
             date_interval_add(

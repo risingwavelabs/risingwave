@@ -20,7 +20,7 @@ use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{
-    DataType, Datum, IntervalUnit, NaiveDateWrapper, OrderedF32, OrderedF64, ScalarImpl,
+    DataType, Datum, IntervalUnit, NaiveDateWrapper, F32, F64, ScalarImpl,
 };
 use risingwave_pb::plan_common::ColumnDesc;
 
@@ -259,8 +259,8 @@ pub(crate) fn from_avro_value(value: Value, value_schema: &Schema) -> Result<Dat
         Value::String(s) => ScalarImpl::Utf8(s.into_boxed_str()),
         Value::Int(i) => ScalarImpl::Int32(i),
         Value::Long(i) => ScalarImpl::Int64(i),
-        Value::Float(f) => ScalarImpl::Float32(OrderedF32::from(f)),
-        Value::Double(f) => ScalarImpl::Float64(OrderedF64::from(f)),
+        Value::Float(f) => ScalarImpl::Float32(F32::from(f)),
+        Value::Double(f) => ScalarImpl::Float64(F64::from(f)),
         Value::Decimal(avro_decimal) => {
             let (precision, scale) = match value_schema {
                 Schema::Decimal {

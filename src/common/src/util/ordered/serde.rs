@@ -239,7 +239,7 @@ mod tests {
         use std::mem::size_of;
 
         use crate::types::interval::IntervalUnit;
-        use crate::types::OrderedF64;
+        use crate::types::F64;
 
         let order_types = vec![OrderType::ascending()];
         let schema = vec![DataType::Int16];
@@ -272,7 +272,7 @@ mod tests {
                     &row_bytes[..],
                 )
                 .unwrap();
-                let data_size = size_of::<OrderedF64>();
+                let data_size = size_of::<F64>();
                 assert_eq!(8, data_size);
                 assert_eq!(1 + data_size, encoding_data_size);
             }

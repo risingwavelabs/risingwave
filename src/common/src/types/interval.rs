@@ -165,7 +165,7 @@ impl IntervalUnit {
     /// Divides [`IntervalUnit`] by an integer/float with zero check.
     pub fn div_float<I>(&self, rhs: I) -> Option<Self>
     where
-        I: TryInto<OrderedF64>,
+        I: TryInto<F64>,
     {
         let rhs = rhs.try_into().ok()?;
         let rhs = rhs.0;
@@ -184,7 +184,7 @@ impl IntervalUnit {
     /// times [`IntervalUnit`] with an integer/float.
     pub fn mul_float<I>(&self, rhs: I) -> Option<Self>
     where
-        I: TryInto<OrderedF64>,
+        I: TryInto<F64>,
     {
         let rhs = rhs.try_into().ok()?;
         let rhs = rhs.0;
@@ -979,7 +979,7 @@ impl FromStr for DateTimeField {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum TimeStrToken {
-    Second(OrderedF64),
+    Second(F64),
     Num(i64),
     TimeUnit(DateTimeField),
 }
@@ -1106,7 +1106,7 @@ fn convert_hms(c: &mut Vec<String>, t: &mut Vec<TimeStrToken>) -> Option<()> {
                 t.push(TimeStrToken::TimeUnit(DateTimeField::Minute))
             }
             SECOND => {
-                let mut v: OrderedF64 = s.parse().ok()?;
+                let mut v: F64 = s.parse().ok()?;
                 // PostgreSQL allows '60.x' for seconds.
                 if !(0f64 <= *v && *v < 61f64) {
                     return None;

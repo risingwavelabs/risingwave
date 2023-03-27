@@ -161,8 +161,8 @@ macro_rules! implement_using_ryu {
 }
 
 implement_using_ryu! {
-    { crate::types::OrderedF32, Float32 },
-    { crate::types::OrderedF64, Float64 }
+    { crate::types::F32, Float32 },
+    { crate::types::F64, Float64 }
 }
 
 impl ToText for i64 {

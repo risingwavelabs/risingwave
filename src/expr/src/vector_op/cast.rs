@@ -28,7 +28,7 @@ use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
-    OrderedF32, OrderedF64, ScalarImpl,
+    F32, F64, ScalarImpl,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr_macro::{build_function, function};
@@ -303,14 +303,14 @@ pub fn to_i64<T: ToPrimitive + Debug>(elem: T) -> Result<i64> {
 #[function("cast(int64) -> float32")]
 #[function("cast(float64) -> float32")]
 #[function("cast(decimal) -> float32")]
-pub fn to_f32<T: ToPrimitive + Debug>(elem: T) -> Result<OrderedF32> {
+pub fn to_f32<T: ToPrimitive + Debug>(elem: T) -> Result<F32> {
     elem.to_f32()
         .map(Into::into)
         .ok_or(ExprError::CastOutOfRange("f32"))
 }
 
 #[function("cast(decimal) -> float64")]
-pub fn to_f64<T: ToPrimitive + Debug>(elem: T) -> Result<OrderedF64> {
+pub fn to_f64<T: ToPrimitive + Debug>(elem: T) -> Result<F64> {
     elem.to_f64()
         .map(Into::into)
         .ok_or(ExprError::CastOutOfRange("f64"))
@@ -367,8 +367,8 @@ macro_rules! define_jsonb_to_number {
 define_jsonb_to_number! { i16, "cast(jsonb) -> int16" }
 define_jsonb_to_number! { i32, "cast(jsonb) -> int32" }
 define_jsonb_to_number! { i64, "cast(jsonb) -> int64" }
-define_jsonb_to_number! { f32, OrderedF32, "cast(jsonb) -> float32" }
-define_jsonb_to_number! { f64, OrderedF64, "cast(jsonb) -> float64" }
+define_jsonb_to_number! { f32, F32, "cast(jsonb) -> float32" }
+define_jsonb_to_number! { f64, F64, "cast(jsonb) -> float64" }
 
 /// In `PostgreSQL`, casting from timestamp to date discards the time part.
 #[function("cast(timestamp) -> date")]
@@ -496,8 +496,8 @@ pub fn literal_parsing(
         DataType::Int64 => str_parse::<i64>(s)?.into(),
         DataType::Serial => return Err(None),
         DataType::Decimal => str_parse::<Decimal>(s)?.into(),
-        DataType::Float32 => str_parse::<OrderedF32>(s)?.into(),
-        DataType::Float64 => str_parse::<OrderedF64>(s)?.into(),
+        DataType::Float32 => str_parse::<F32>(s)?.into(),
+        DataType::Float64 => str_parse::<F64>(s)?.into(),
         DataType::Varchar => return Err(None),
         DataType::Date => str_to_date(s)?.into(),
         DataType::Timestamp => str_to_timestamp(s)?.into(),
@@ -770,11 +770,11 @@ mod tests {
         test!(general_to_text(i64::MIN), "-9223372036854775808");
         test!(general_to_text(i64::MAX), "9223372036854775807");
 
-        test!(general_to_text(OrderedF64::from(32.12)), "32.12");
-        test!(general_to_text(OrderedF64::from(-32.14)), "-32.14");
+        test!(general_to_text(F64::from(32.12)), "32.12");
+        test!(general_to_text(F64::from(-32.14)), "-32.14");
 
-        test!(general_to_text(OrderedF32::from(32.12_f32)), "32.12");
-        test!(general_to_text(OrderedF32::from(-32.14_f32)), "-32.14");
+        test!(general_to_text(F32::from(32.12_f32)), "32.12");
+        test!(general_to_text(F32::from(-32.14_f32)), "-32.14");
 
         test!(general_to_text(Decimal::from_f64(1.222).unwrap()), "1.222");
 
@@ -984,7 +984,7 @@ mod tests {
             struct_cast(
                 StructValue::new(vec![
                     Some("1".into()),
-                    Some(OrderedF32::from(0.0).to_scalar_value()),
+                    Some(F32::from(0.0).to_scalar_value()),
                 ])
                 .as_scalar_ref(),
                 &StructType::new(vec![
