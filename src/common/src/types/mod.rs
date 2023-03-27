@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::array::{ArrayError, ArrayResult, NULL_VAL_FOR_HASH};
 use crate::error::{BoxedError, ErrorCode};
+use crate::util::iter_util::ZipEqDebug;
 
 mod native_type;
 mod ops;
@@ -124,6 +125,7 @@ pub enum DataType {
     #[from_str(ignore)]
     Struct(Arc<StructType>),
     #[display("{datatype}[]")]
+    #[from_str(regex = r"(?i)^(?P<datatype>.+)\[\]$")]
     List { datatype: Box<DataType> },
     #[display("bytea")]
     #[from_str(regex = "(?i)^bytea$")]
@@ -832,16 +834,16 @@ impl ScalarImpl {
         Ok(res)
     }
 
-    pub fn cstr_to_str(b: &Bytes) -> Result<&str, Utf8Error> {
+    pub fn cstr_to_str(b: &[u8]) -> Result<&str, Utf8Error> {
         let without_null = if b.last() == Some(&0) {
             &b[..b.len() - 1]
         } else {
-            &b[..]
+            b
         };
         std::str::from_utf8(without_null)
     }
 
-    pub fn from_text(bytes: &Bytes, data_type: &DataType) -> RwResult<Self> {
+    pub fn from_text(bytes: &[u8], data_type: &DataType) -> RwResult<Self> {
         let str = Self::cstr_to_str(bytes).map_err(|_| {
             ErrorCode::InvalidInputSyntax(format!("Invalid param string: {:?}", bytes))
         })?;
@@ -907,7 +909,34 @@ impl ScalarImpl {
             DataType::Jsonb => Self::Jsonb(JsonbVal::from_str(str).map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
             })?),
-            DataType::Bytea | DataType::Struct(_) | DataType::List { .. } => {
+            DataType::List { datatype } => {
+                // TODO: support nested list
+                if !(str.starts_with('{') && str.ends_with('}')) {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "Invalid param string: {str}",
+                    ))
+                    .into());
+                }
+                let mut values = vec![];
+                for s in str[1..str.len() - 1].split(',') {
+                    values.push(Some(Self::from_text(s.trim().as_bytes(), datatype)?));
+                }
+                Self::List(ListValue::new(values))
+            }
+            DataType::Struct(s) => {
+                if !(str.starts_with('{') && str.ends_with('}')) {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "Invalid param string: {str}",
+                    ))
+                    .into());
+                }
+                let mut fields = Vec::with_capacity(s.fields.len());
+                for (s, ty) in str[1..str.len() - 1].split(',').zip_eq_debug(&s.fields) {
+                    fields.push(Some(Self::from_text(s.trim().as_bytes(), ty)?));
+                }
+                ScalarImpl::Struct(StructValue::new(fields))
+            }
+            DataType::Bytea => {
                 return Err(ErrorCode::NotSupported(
                     format!("param type: {}", data_type),
                     "".to_string(),

@@ -204,7 +204,7 @@ mod tests {
         assert_eq!(
             chunk_msg.into_chunk().unwrap().compact(),
             StreamChunk::from_pretty(
-                " TSZ
+                " I
                 + 1617235200001000"
             )
         );
@@ -233,7 +233,7 @@ mod tests {
         assert_eq!(
             chunk_msg.into_chunk().unwrap().compact(),
             StreamChunk::from_pretty(
-                " TSZ
+                " I
                 - 1617235200001000
                 + 1617235200002000"
             )
