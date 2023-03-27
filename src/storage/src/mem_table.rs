@@ -17,10 +17,12 @@ use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::ops::{Bound, RangeBounds};
+use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::value_encoding::ValueRowSerde;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
@@ -321,7 +323,7 @@ pub struct MemtableLocalStateStore<S: StateStoreWrite + StateStoreRead> {
 }
 
 impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
-    pub fn new(inner: S, option: NewLocalOptions) -> Self {
+    pub fn new(inner: S, option: NewLocalTableOptions) -> Self {
         Self {
             inner,
             mem_table: MemTable::new(option.is_consistent_op),
@@ -494,5 +496,9 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
             next_epoch,
             prev_epoch
         );
+    }
+
+    fn update_vnode_bitmap(&mut self, _new_vnodes: Arc<Bitmap>) {
+        // Do nothing.
     }
 }

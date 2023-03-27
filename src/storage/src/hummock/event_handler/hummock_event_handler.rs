@@ -492,121 +492,126 @@ impl HummockEventHandler {
                         });
                     }
                 },
-                Either::Right(event) => {
-                    match event {
-                        HummockEvent::BufferMayFlush => {
-                            self.uploader.may_flush();
-                        }
-                        HummockEvent::AwaitSyncEpoch {
-                            new_sync_epoch,
-                            sync_result_sender,
-                        } => {
-                            self.handle_await_sync_epoch(new_sync_epoch, sync_result_sender);
-                        }
-                        HummockEvent::Clear(notifier) => {
-                            self.handle_clear(notifier);
-                        }
-                        HummockEvent::Shutdown => {
-                            info!("buffer tracker shutdown");
-                            break;
-                        }
+                Either::Right(event) => match event {
+                    HummockEvent::BufferMayFlush => {
+                        self.uploader.may_flush();
+                    }
+                    HummockEvent::AwaitSyncEpoch {
+                        new_sync_epoch,
+                        sync_result_sender,
+                    } => {
+                        self.handle_await_sync_epoch(new_sync_epoch, sync_result_sender);
+                    }
+                    HummockEvent::Clear(notifier) => {
+                        self.handle_clear(notifier);
+                    }
+                    HummockEvent::Shutdown => {
+                        info!("buffer tracker shutdown");
+                        break;
+                    }
 
-                        HummockEvent::VersionUpdate(version_payload) => {
-                            self.handle_version_update(version_payload).await;
-                        }
+                    HummockEvent::VersionUpdate(version_payload) => {
+                        self.handle_version_update(version_payload).await;
+                    }
 
-                        HummockEvent::ImmToUploader(imm) => {
-                            self.uploader.add_imm(imm);
-                            self.uploader.may_flush();
-                        }
+                    HummockEvent::ImmToUploader(imm) => {
+                        self.uploader.add_imm(imm);
+                        self.uploader.may_flush();
+                    }
 
-                        HummockEvent::SealEpoch {
-                            epoch,
-                            is_checkpoint,
-                        } => {
-                            self.uploader.seal_epoch(epoch);
+                    HummockEvent::SealEpoch {
+                        epoch,
+                        is_checkpoint,
+                    } => {
+                        self.uploader.seal_epoch(epoch);
 
-                            if is_checkpoint {
-                                self.uploader.start_sync_epoch(epoch);
-                            } else {
-                                // start merging task on non-checkpoint epochs sealed
-                                self.uploader.start_merge_imms(epoch);
-                            }
+                        if is_checkpoint {
+                            self.uploader.start_sync_epoch(epoch);
+                        } else {
+                            // start merging task on non-checkpoint epochs sealed
+                            self.uploader.start_merge_imms(epoch);
                         }
-                        #[cfg(any(test, feature = "test"))]
-                        HummockEvent::FlushEvent(sender) => {
-                            let _ = sender.send(()).inspect_err(|e| {
-                                error!("unable to send flush result: {:?}", e);
-                            });
-                        }
+                    }
+                    #[cfg(any(test, feature = "test"))]
+                    HummockEvent::FlushEvent(sender) => {
+                        let _ = sender.send(()).inspect_err(|e| {
+                            error!("unable to send flush result: {:?}", e);
+                        });
+                    }
 
-                        HummockEvent::RegisterReadVersion {
+                    HummockEvent::RegisterReadVersion {
+                        table_id,
+                        is_singleton,
+                        vnodes,
+                        new_read_version_sender,
+                    } => {
+                        let pinned_version = self.pinned_version.load();
+                        let basic_read_version = Arc::new(RwLock::new(HummockReadVersion::new(
                             table_id,
-                            new_read_version_sender,
-                        } => {
-                            let pinned_version = self.pinned_version.load();
-                            let basic_read_version = Arc::new(RwLock::new(
-                                HummockReadVersion::new((**pinned_version).clone()),
-                            ));
+                            is_singleton,
+                            vnodes,
+                            (**pinned_version).clone(),
+                        )));
 
-                            let instance_id = self.generate_instance_id();
+                        let instance_id = self.generate_instance_id();
 
-                            info_in_release!(
-                                "new read version registered: table_id: {}, instance_id: {}",
-                                table_id,
-                                instance_id
-                            );
-
-                            {
-                                let mut read_version_mapping_guard =
-                                    self.read_version_mapping.write();
-
-                                read_version_mapping_guard
-                                    .entry(table_id)
-                                    .or_default()
-                                    .insert(instance_id, basic_read_version.clone());
-                            }
-
-                            match new_read_version_sender.send((
-                                basic_read_version,
-                                LocalInstanceGuard {
-                                    table_id,
-                                    instance_id,
-                                    event_sender: self.hummock_event_tx.clone(),
-                                },
-                            )) {
-                                Ok(_) => {}
-                                Err(_) => {
-                                    panic!("RegisterReadVersion send fail table_id {:?} instance_is {:?}", table_id, instance_id)
-                                }
-                            }
-                        }
-
-                        HummockEvent::DestroyReadVersion {
+                        info_in_release!(
+                            "new read version registered: table_id: {}, instance_id: {}",
                             table_id,
-                            instance_id,
-                        } => {
-                            info_in_release!(
-                                "read version deregister: table_id: {}, instance_id: {}",
-                                table_id,
-                                instance_id
-                            );
+                            instance_id
+                        );
+
+                        {
                             let mut read_version_mapping_guard = self.read_version_mapping.write();
-                            let entry = read_version_mapping_guard
-                                .get_mut(&table_id)
-                                .unwrap_or_else(|| {
-                                    panic!(
-                                        "DestroyHummockInstance table_id {} instance_id {} fail",
-                                        table_id, instance_id
-                                    )
-                                });
-                            entry.remove(&instance_id).unwrap_or_else(|| panic!("DestroyHummockInstance inexist instance table_id {} instance_id {}",  table_id, instance_id));
-                            if entry.is_empty() {
-                                read_version_mapping_guard.remove(&table_id);
+
+                            read_version_mapping_guard
+                                .entry(table_id)
+                                .or_default()
+                                .insert(instance_id, basic_read_version.clone());
+                        }
+
+                        match new_read_version_sender.send((
+                            basic_read_version,
+                            LocalInstanceGuard {
+                                table_id,
+                                instance_id,
+                                event_sender: self.hummock_event_tx.clone(),
+                            },
+                        )) {
+                            Ok(_) => {}
+                            Err(_) => {
+                                panic!(
+                                    "RegisterReadVersion send fail table_id {:?} instance_is {:?}",
+                                    table_id, instance_id
+                                )
                             }
                         }
                     }
-                }
+
+                    HummockEvent::DestroyReadVersion {
+                        table_id,
+                        instance_id,
+                    } => {
+                        info_in_release!(
+                            "read version deregister: table_id: {}, instance_id: {}",
+                            table_id,
+                            instance_id
+                        );
+                        let mut read_version_mapping_guard = self.read_version_mapping.write();
+                        let entry = read_version_mapping_guard
+                            .get_mut(&table_id)
+                            .unwrap_or_else(|| {
+                                panic!(
+                                    "DestroyHummockInstance table_id {} instance_id {} fail",
+                                    table_id, instance_id
+                                )
+                            });
+                        entry.remove(&instance_id).unwrap_or_else(|| panic!("DestroyHummockInstance inexist instance table_id {} instance_id {}",  table_id, instance_id));
+                        if entry.is_empty() {
+                            read_version_mapping_guard.remove(&table_id);
+                        }
+                    }
+                },
             };
         }
     }

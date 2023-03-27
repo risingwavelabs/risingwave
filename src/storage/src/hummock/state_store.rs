@@ -23,17 +23,15 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
-use risingwave_pb::hummock::SstableInfo;
 use tokio::sync::oneshot;
 use tracing::log::warn;
 
 use super::store::state_store::HummockStorageIterator;
-use super::store::version::CommittedVersion;
+use super::store::version::ReadVersionTuple;
 use super::utils::validate_safe_epoch;
 use super::HummockStorage;
 use crate::error::StorageResult;
 use crate::hummock::event_handler::HummockEvent;
-use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::store::state_store::LocalHummockStorage;
 use crate::hummock::store::version::read_filter_for_batch;
 use crate::hummock::{HummockEpoch, HummockError};
@@ -93,11 +91,11 @@ impl HummockStorage {
     async fn build_read_version_tuple_from_backup(
         &self,
         epoch: u64,
-    ) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
+    ) -> StorageResult<ReadVersionTuple> {
         match self.backup_reader.try_get_hummock_version(epoch).await {
             Ok(Some(backup_version)) => {
                 validate_safe_epoch(backup_version.safe_epoch(), epoch)?;
-                Ok((Vec::default(), Vec::default(), backup_version))
+                Ok((Vec::default(), Vec::default(), backup_version, None))
             }
             Ok(None) => Err(HummockError::read_backup_error(format!(
                 "backup include epoch {} not found",
@@ -113,32 +111,41 @@ impl HummockStorage {
         epoch: u64,
         table_id: TableId,
         key_range: &TableKeyRange,
-    ) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
+    ) -> StorageResult<ReadVersionTuple> {
         let pinned_version = self.pinned_version.load();
         validate_safe_epoch(pinned_version.safe_epoch(), epoch)?;
 
         // check epoch if lower mce
-        let read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion) =
-            if epoch <= pinned_version.max_committed_epoch() {
-                // read committed_version directly without build snapshot
-                (Vec::default(), Vec::default(), (**pinned_version).clone())
-            } else {
-                let read_version_vec = {
-                    let read_guard = self.read_version_mapping.read();
-                    read_guard
-                        .get(&table_id)
-                        .map(|v| v.values().cloned().collect_vec())
-                        .unwrap_or(Vec::new())
-                };
-
-                // When the system has just started and no state has been created, the memory state
-                // may be empty
-                if read_version_vec.is_empty() {
-                    (Vec::default(), Vec::default(), (**pinned_version).clone())
-                } else {
-                    read_filter_for_batch(epoch, table_id, key_range, read_version_vec)?
-                }
+        let read_version_tuple = if epoch <= pinned_version.max_committed_epoch() {
+            // read committed_version directly without build snapshot
+            (
+                Vec::default(),
+                Vec::default(),
+                (**pinned_version).clone(),
+                None,
+            )
+        } else {
+            let read_version_vec = {
+                let read_guard = self.read_version_mapping.read();
+                read_guard
+                    .get(&table_id)
+                    .map(|v| v.values().cloned().collect_vec())
+                    .unwrap_or(Vec::new())
             };
+
+            // When the system has just started and no state has been created, the memory state
+            // may be empty
+            if read_version_vec.is_empty() {
+                (
+                    Vec::default(),
+                    Vec::default(),
+                    (**pinned_version).clone(),
+                    None,
+                )
+            } else {
+                read_filter_for_batch(epoch, table_id, key_range, read_version_vec)?
+            }
+        };
 
         Ok(read_version_tuple)
     }

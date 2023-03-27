@@ -150,6 +150,17 @@ impl PinnedVersion {
         }
     }
 
+    pub fn l0_sublevels(&self, table_id: TableId) -> impl Iterator<Item = &Level> {
+        #[auto_enum(Iterator)]
+        match self.compaction_group_index.get(&table_id) {
+            Some(compaction_group_id) => {
+                let levels = self.levels_by_compaction_groups_id(*compaction_group_id);
+                levels.l0.as_ref().unwrap().sub_levels.iter().rev()
+            }
+            None => empty(),
+        }
+    }
+
     pub fn max_committed_epoch(&self) -> u64 {
         self.version.max_committed_epoch
     }

@@ -15,10 +15,12 @@
 use std::future::Future;
 use std::ops::Bound;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
 use futures::Stream;
+use risingwave_common::buffer::Bitmap;
 use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::error::StorageResult;
@@ -139,6 +141,10 @@ impl LocalStateStore for PanicStateStore {
 
     fn seal_current_epoch(&mut self, _next_epoch: u64) {
         panic!("should not operate on the panic state store!")
+    }
+
+    fn update_vnode_bitmap(&mut self, _new_vnodes: Arc<Bitmap>) {
+        // Do nothing.
     }
 }
 

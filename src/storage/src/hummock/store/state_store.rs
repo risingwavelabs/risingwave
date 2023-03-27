@@ -20,6 +20,7 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use minitrace::future::FutureExt;
 use parking_lot::RwLock;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockEpoch;
@@ -321,6 +322,7 @@ impl LocalStateStore for LocalHummockStorage {
             "local state store of table id {:?} is init for more than once",
             self.table_id
         );
+        self.read_version.write().rewind();
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64) {
@@ -335,6 +337,10 @@ impl LocalStateStore for LocalHummockStorage {
             next_epoch,
             prev_epoch
         );
+    }
+
+    fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) {
+        self.read_version.write().update_vnode_bitmap(new_vnodes);
     }
 }
 
@@ -428,7 +434,7 @@ impl LocalHummockStorage {
         memory_limiter: Arc<MemoryLimiter>,
         tracing: Arc<risingwave_tracing::RwTracingService>,
         write_limiter: WriteLimiterRef,
-        option: NewLocalOptions,
+        option: NewLocalTableOptions,
     ) -> Self {
         let stats = hummock_version_reader.stats().clone();
         Self {

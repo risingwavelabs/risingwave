@@ -235,7 +235,9 @@ impl HummockStorage {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.hummock_event_sender
             .send(HummockEvent::RegisterReadVersion {
-                table_id: option.table_id,
+                table_id: option.table_options.table_id,
+                is_singleton: option.is_singleton,
+                vnodes: option.vnodes,
                 new_read_version_sender: tx,
             })
             .unwrap();
@@ -249,7 +251,7 @@ impl HummockStorage {
             self.buffer_tracker.get_memory_limiter().clone(),
             self.tracing.clone(),
             self.write_limiter.clone(),
-            option,
+            option.table_options,
         )
     }
 

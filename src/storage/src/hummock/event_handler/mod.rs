@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::version_update_payload;
@@ -74,6 +75,8 @@ pub enum HummockEvent {
 
     RegisterReadVersion {
         table_id: TableId,
+        is_singleton: bool,
+        vnodes: Arc<Bitmap>,
         new_read_version_sender:
             oneshot::Sender<(Arc<RwLock<HummockReadVersion>>, LocalInstanceGuard)>,
     },
@@ -115,8 +118,13 @@ impl HummockEvent {
             ),
             HummockEvent::RegisterReadVersion {
                 table_id,
+                is_singleton,
+                vnodes,
                 new_read_version_sender: _,
-            } => format!("RegisterReadVersion table_id {:?}", table_id,),
+            } => format!(
+                "RegisterReadVersion table_id {:?} is_singleton {:?} vnodes {:?}",
+                table_id, is_singleton, vnodes,
+            ),
 
             HummockEvent::DestroyReadVersion {
                 table_id,

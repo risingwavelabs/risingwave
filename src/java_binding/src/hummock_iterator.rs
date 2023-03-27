@@ -111,7 +111,7 @@ impl HummockJavaBindingIterator {
                         prefetch_options: Default::default(),
                         cache_policy: CachePolicy::NotFill,
                     },
-                    (vec![], vec![], pin_version.clone()),
+                    (vec![], vec![], pin_version.clone(), None),
                 )
                 .await?;
             streams.push(stream);

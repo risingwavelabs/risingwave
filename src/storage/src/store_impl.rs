@@ -226,10 +226,12 @@ pub mod verify {
     use std::fmt::Debug;
     use std::future::Future;
     use std::ops::{Bound, Deref};
+    use std::sync::Arc;
 
     use bytes::Bytes;
     use futures::{pin_mut, TryStreamExt};
     use futures_async_stream::try_stream;
+    use risingwave_common::buffer::Bitmap;
     use risingwave_hummock_sdk::HummockReadEpoch;
     use tracing::log::warn;
 
@@ -480,6 +482,13 @@ pub mod verify {
             }
             ret
         }
+
+        fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) {
+            if let Some(expected) = &mut self.expected {
+                expected.update_vnode_bitmap(new_vnodes.clone());
+            }
+            self.actual.update_vnode_bitmap(new_vnodes);
+        }
     }
 
     impl<A: StateStore, E: StateStore> StateStore for VerifyStateStore<A, E> {
@@ -703,10 +712,12 @@ impl AsHummockTrait for SledStateStore {
 pub mod boxed_state_store {
     use std::future::Future;
     use std::ops::{Bound, Deref, DerefMut};
+    use std::sync::Arc;
 
     use bytes::Bytes;
     use futures::stream::BoxStream;
     use futures::StreamExt;
+    use risingwave_common::buffer::Bitmap;
     use risingwave_hummock_sdk::HummockReadEpoch;
 
     use crate::error::StorageResult;
@@ -795,6 +806,8 @@ pub mod boxed_state_store {
         fn init(&mut self, epoch: u64);
 
         fn seal_current_epoch(&mut self, next_epoch: u64);
+
+        fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>);
     }
 
     #[async_trait::async_trait]
@@ -853,6 +866,10 @@ pub mod boxed_state_store {
 
         fn seal_current_epoch(&mut self, next_epoch: u64) {
             self.seal_current_epoch(next_epoch)
+        }
+
+        fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) {
+            self.update_vnode_bitmap(new_vnodes);
         }
     }
 
@@ -917,6 +934,10 @@ pub mod boxed_state_store {
 
         fn seal_current_epoch(&mut self, next_epoch: u64) {
             self.deref_mut().seal_current_epoch(next_epoch)
+        }
+
+        fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) {
+            self.deref_mut().update_vnode_bitmap(new_vnodes);
         }
     }
 
