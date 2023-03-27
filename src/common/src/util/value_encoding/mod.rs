@@ -246,9 +246,9 @@ fn estimate_serialize_scalar_size(value: ScalarRefImpl<'_>) -> usize {
         ScalarRefImpl::Bool(_) => 1,
         ScalarRefImpl::Decimal(_) => estimate_serialize_decimal_size(),
         ScalarRefImpl::Interval(_) => estimate_serialize_interval_size(),
-        ScalarRefImpl::NaiveDate(_) => estimate_serialize_naivedate_size(),
-        ScalarRefImpl::NaiveDateTime(_) => estimate_serialize_naivedatetime_size(),
-        ScalarRefImpl::NaiveTime(_) => estimate_serialize_naivetime_size(),
+        ScalarRefImpl::Date(_) => estimate_serialize_date_size(),
+        ScalarRefImpl::Timestamp(_) => estimate_serialize_timestamp_size(),
+        ScalarRefImpl::Time(_) => estimate_serialize_time_size(),
         ScalarRefImpl::Jsonb(_) => 8,
         ScalarRefImpl::Struct(s) => estimate_serialize_struct_size(s),
         ScalarRefImpl::List(v) => estimate_serialize_list_size(v),
@@ -306,7 +306,7 @@ fn serialize_naivedate(days: i32, buf: &mut impl BufMut) {
     buf.put_i32_le(days);
 }
 
-fn estimate_serialize_naivedate_size() -> usize {
+fn estimate_serialize_date_size() -> usize {
     4
 }
 
@@ -315,7 +315,7 @@ fn serialize_timestamp(secs: i64, nsecs: u32, buf: &mut impl BufMut) {
     buf.put_u32_le(nsecs);
 }
 
-fn estimate_serialize_naivedatetime_size() -> usize {
+fn estimate_serialize_timestamp_size() -> usize {
     8 + 4
 }
 
@@ -324,7 +324,7 @@ fn serialize_naivetime(secs: u32, nano: u32, buf: &mut impl BufMut) {
     buf.put_u32_le(nano);
 }
 
-fn estimate_serialize_naivetime_size() -> usize {
+fn estimate_serialize_time_size() -> usize {
     4 + 4
 }
 
@@ -443,10 +443,7 @@ fn deserialize_decimal(data: &mut impl Buf) -> Result<Decimal> {
 mod tests {
     use crate::array::serial_array::Serial;
     use crate::array::{ListValue, StructValue};
-    use crate::types::{
-        Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
-        ScalarImpl,
-    };
+    use crate::types::{Date, Datum, Decimal, Interval, ScalarImpl, Time, Timestamp};
     use crate::util::value_encoding::{estimate_serialize_datum_size, serialize_datum};
 
     fn test_estimate_serialize_scalar_size(s: ScalarImpl) {
@@ -473,22 +470,18 @@ mod tests {
         test_estimate_serialize_scalar_size(ScalarImpl::Decimal(Decimal::PositiveInf));
         test_estimate_serialize_scalar_size(ScalarImpl::Decimal(Decimal::NaN));
         test_estimate_serialize_scalar_size(ScalarImpl::Decimal(123123.into()));
-        test_estimate_serialize_scalar_size(ScalarImpl::Interval(
-            IntervalUnit::from_month_day_usec(7, 8, 9),
-        ));
-        test_estimate_serialize_scalar_size(ScalarImpl::NaiveDate(
-            NaiveDateWrapper::from_ymd_uncheck(2333, 3, 3),
-        ));
+        test_estimate_serialize_scalar_size(ScalarImpl::Interval(Interval::from_month_day_usec(
+            7, 8, 9,
+        )));
+        test_estimate_serialize_scalar_size(ScalarImpl::Date(Date::from_ymd_uncheck(2333, 3, 3)));
         test_estimate_serialize_scalar_size(ScalarImpl::Bytea("\\x233".as_bytes().into()));
-        test_estimate_serialize_scalar_size(ScalarImpl::NaiveTime(
-            NaiveTimeWrapper::from_hms_uncheck(2, 3, 3),
+        test_estimate_serialize_scalar_size(ScalarImpl::Time(Time::from_hms_uncheck(2, 3, 3)));
+        test_estimate_serialize_scalar_size(ScalarImpl::Timestamp(
+            Timestamp::from_timestamp_uncheck(23333333, 2333),
         ));
-        test_estimate_serialize_scalar_size(ScalarImpl::NaiveDateTime(
-            NaiveDateTimeWrapper::from_timestamp_uncheck(23333333, 2333),
-        ));
-        test_estimate_serialize_scalar_size(ScalarImpl::Interval(
-            IntervalUnit::from_month_day_usec(2, 3, 3333),
-        ));
+        test_estimate_serialize_scalar_size(ScalarImpl::Interval(Interval::from_month_day_usec(
+            2, 3, 3333,
+        )));
         test_estimate_serialize_scalar_size(ScalarImpl::Struct(StructValue::new(vec![
             ScalarImpl::Int64(233).into(),
             ScalarImpl::Float64(23.33.into()).into(),
