@@ -671,7 +671,7 @@ mod tests {
              2 5.5 2 5.5
              2 8.4 2 5.5",
         );
-        let condition = build_from_pretty("(less_than:boolean 5:int4 #3:float4)");
+        let condition = build_from_pretty("(less_than:boolean 5:int4 $3:float4)");
 
         do_test(JoinType::Inner, Some(condition), false, expected).await;
     }
@@ -688,7 +688,7 @@ mod tests {
              5 9.1 . .
              . .   . .",
         );
-        let condition = build_from_pretty("(less_than:boolean 5:int4 #3:float4)");
+        let condition = build_from_pretty("(less_than:boolean 5:int4 $3:float4)");
 
         do_test(JoinType::LeftOuter, Some(condition), false, expected).await;
     }
@@ -701,7 +701,7 @@ mod tests {
              2 5.5
              2 8.4",
         );
-        let condition = build_from_pretty("(less_than:boolean 5:int4 #3:float4)");
+        let condition = build_from_pretty("(less_than:boolean 5:int4 $3:float4)");
 
         do_test(JoinType::LeftSemi, Some(condition), false, expected).await;
     }
@@ -715,7 +715,7 @@ mod tests {
             5 9.1
             . .",
         );
-        let condition = build_from_pretty("(less_than:boolean 5:int4 #3:float4)");
+        let condition = build_from_pretty("(less_than:boolean 5:int4 $3:float4)");
 
         do_test(JoinType::LeftAnti, Some(condition), false, expected).await;
     }

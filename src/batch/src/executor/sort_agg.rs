@@ -437,7 +437,7 @@ mod tests {
 
         let count_star = AggStateFactory::new(&prost)?.create_agg_state();
         let group_exprs: Vec<_> = (1..=2)
-            .map(|idx| build_from_pretty(format!("#{idx}:int4")))
+            .map(|idx| build_from_pretty(format!("${idx}:int4")))
             .collect();
 
         let sorted_groupers: Vec<_> = group_exprs
@@ -642,7 +642,7 @@ mod tests {
 
         let sum_agg = AggStateFactory::new(&prost)?.create_agg_state();
         let group_exprs: Vec<_> = (1..=2)
-            .map(|idx| build_from_pretty(format!("#{idx}:int4")))
+            .map(|idx| build_from_pretty(format!("${idx}:int4")))
             .collect();
 
         let sorted_groupers: Vec<_> = group_exprs
@@ -757,7 +757,7 @@ mod tests {
 
         let sum_agg = AggStateFactory::new(&prost)?.create_agg_state();
         let group_exprs: Vec<_> = (1..=2)
-            .map(|idx| build_from_pretty(format!("#{idx}:int4")))
+            .map(|idx| build_from_pretty(format!("${idx}:int4")))
             .collect();
 
         let sorted_groupers: Vec<_> = group_exprs

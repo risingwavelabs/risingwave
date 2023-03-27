@@ -586,7 +586,7 @@ mod tests {
             };
 
             Box::new(NestedLoopJoinExecutor::new(
-                build_from_pretty("(equal:boolean #0:int4 #2:int4)"),
+                build_from_pretty("(equal:boolean $0:int4 $2:int4)"),
                 join_type,
                 output_indices,
                 left_child,

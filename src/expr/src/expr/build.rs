@@ -125,10 +125,21 @@ pub(super) fn get_children_and_return_type(prost: &ExprNode) -> Result<(&[ExprNo
 /// # Example
 /// ```
 /// # use risingwave_expr::expr::build_from_pretty;
-/// build_from_pretty("42:int2");
-/// build_from_pretty("#0:int8");
-/// build_from_pretty("(add:int8 42:int2 #1:int8)");
-/// build_from_pretty("(add:int8 42:int2 (add:int8 42:int2 #1:int8))");
+/// build_from_pretty("42:int2"); // literal
+/// build_from_pretty("$0:int8"); // inputref
+/// build_from_pretty("(add:int8 42:int2 $1:int8)"); // function
+/// build_from_pretty("(add:int8 42:int2 (add:int8 42:int2 $1:int8))");
+/// ```
+///
+/// # Syntax
+///
+/// ```text
+/// <expr>      ::= <literal> | <input_ref> | <function>
+/// <literal>   ::= <value>:<type>
+/// <input_ref> ::= <index>:<type>
+/// <function>  ::= (<name>:<type> <expr>...)
+/// <name>      ::= [a-zA-Z_][a-zA-Z0-9_]*
+/// <index>     ::= $[0-9]+
 /// ```
 pub fn build_from_pretty(s: impl AsRef<str>) -> BoxedExpression {
     let tokens = lexer(s.as_ref());
@@ -215,7 +226,7 @@ fn lexer(input: &str) -> Vec<Token> {
             '(' => Token::LParen,
             ')' => Token::RParen,
             ':' => Token::Colon,
-            '#' => {
+            '$' => {
                 let mut number = String::new();
                 while let Some(c) = chars.peek() && c.is_ascii_digit() {
                     number.push(chars.next().unwrap());

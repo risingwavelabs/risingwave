@@ -43,8 +43,8 @@ fn create_nested_loop_join_executor(
     Box::new(NestedLoopJoinExecutor::new(
         build_from_pretty(
             "(equal:boolean
-                (modulus:int8 #0:int8 2:int8) 
-                (modulus:int8 #1:int8 3:int8))",
+                (modulus:int8 $0:int8 2:int8) 
+                (modulus:int8 $1:int8 3:int8))",
         ),
         join_type,
         output_indices,

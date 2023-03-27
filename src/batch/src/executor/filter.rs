@@ -169,7 +169,7 @@ mod tests {
 
         // Initialize filter executor
         let filter_executor = Box::new(FilterExecutor {
-            expr: build_from_pretty("(greater_than:boolean #0:int4[] {2}:int4[])"),
+            expr: build_from_pretty("(greater_than:boolean $0:int4[] {2}:int4[])"),
             child: Box::new(mock_executor),
             identity: "FilterExecutor".to_string(),
             chunk_size: CHUNK_SIZE,
@@ -227,7 +227,7 @@ mod tests {
              3 3",
         ));
         let filter_executor = Box::new(FilterExecutor {
-            expr: build_from_pretty("(equal:boolean #0:int4 #1:int4)"),
+            expr: build_from_pretty("(equal:boolean $0:int4 $1:int4)"),
             child: Box::new(mock_executor),
             identity: "FilterExecutor".to_string(),
             chunk_size: CHUNK_SIZE,

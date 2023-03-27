@@ -1984,7 +1984,7 @@ mod tests {
         }
 
         fn create_cond() -> BoxedExpression {
-            build_from_pretty("(less_than:boolean #1:float4 #3:float8)")
+            build_from_pretty("(less_than:boolean $1:float4 $3:float8)")
         }
 
         fn create_join_executor_with_chunk_size_and_executors(

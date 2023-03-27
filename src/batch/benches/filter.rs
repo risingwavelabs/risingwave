@@ -28,7 +28,7 @@ fn create_filter_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecutor 
     const CHUNK_SIZE: usize = 1024;
     let input = create_input(&[DataType::Int64], chunk_size, chunk_num);
     Box::new(FilterExecutor::new(
-        build_from_pretty("(equal:boolean (modulus:int8 #0:int8 2:int8) 0:int8)"),
+        build_from_pretty("(equal:boolean (modulus:int8 $0:int8 2:int8) 0:int8)"),
         input,
         "FilterBenchmark".to_string(),
         CHUNK_SIZE,

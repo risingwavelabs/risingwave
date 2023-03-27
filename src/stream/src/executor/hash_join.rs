@@ -1110,7 +1110,7 @@ mod tests {
     }
 
     fn create_cond() -> BoxedExpression {
-        build_from_pretty("(less_than:boolean #1:int8 #3:int8)")
+        build_from_pretty("(less_than:boolean $1:int8 $3:int8)")
     }
 
     async fn create_executor<const T: JoinTypePrimitive>(

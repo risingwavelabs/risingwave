@@ -224,7 +224,7 @@ mod tests {
         };
         let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);
 
-        let test_expr = build_from_pretty("(add:int8 #0:int8 #1:int8)");
+        let test_expr = build_from_pretty("(add:int8 $0:int8 $1:int8)");
 
         let project = Box::new(ProjectExecutor::new(
             ActorContext::create(123),
@@ -270,8 +270,8 @@ mod tests {
         };
         let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
 
-        let a_expr = build_from_pretty("(add:int8 #0:int8 1:int8)");
-        let b_expr = build_from_pretty("(subtract:int8 #0:int8 1:int8)");
+        let a_expr = build_from_pretty("(add:int8 $0:int8 1:int8)");
+        let b_expr = build_from_pretty("(subtract:int8 $0:int8 1:int8)");
 
         let project = Box::new(ProjectExecutor::new(
             ActorContext::create(123),

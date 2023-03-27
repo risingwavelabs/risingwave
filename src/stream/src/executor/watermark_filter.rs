@@ -334,7 +334,7 @@ mod tests {
             ],
         };
 
-        let watermark_expr = build_from_pretty("(subtract:timestamp #1:timestamp 1day:interval)");
+        let watermark_expr = build_from_pretty("(subtract:timestamp $1:timestamp 1day:interval)");
 
         let table = create_in_memory_state_table(
             mem_state,

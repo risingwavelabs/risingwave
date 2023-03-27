@@ -39,12 +39,12 @@ fn create_hash_join_executor(
     let left_input = gen_projected_data(
         left_chunk_size,
         left_chunk_num,
-        build_from_pretty("(modulus:int8 #0:int8 123:int8)"),
+        build_from_pretty("(modulus:int8 $0:int8 123:int8)"),
     );
     let right_input = gen_projected_data(
         right_chunk_size,
         right_chunk_num,
-        build_from_pretty("(modulus:int8 #0:int8 456:int8)"),
+        build_from_pretty("(modulus:int8 $0:int8 456:int8)"),
     );
 
     let mut left_child = Box::new(MockExecutor::new(field_n::<1>(DataType::Int64)));
@@ -59,7 +59,7 @@ fn create_hash_join_executor(
         _ => vec![0, 1],
     };
 
-    let cond = with_cond.then(|| build_from_pretty("(greater_than:int8 #0:int8 100:int8)"));
+    let cond = with_cond.then(|| build_from_pretty("(greater_than:int8 $0:int8 100:int8)"));
 
     Box::new(HashJoinExecutor::<hash::Key64>::new(
         join_type,

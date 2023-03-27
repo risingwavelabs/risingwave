@@ -233,7 +233,7 @@ mod tests {
         };
         let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);
 
-        let test_expr = build_from_pretty("(greater_than:boolean #0:int8 #1:int8)");
+        let test_expr = build_from_pretty("(greater_than:boolean $0:int8 $1:int8)");
 
         let filter = Box::new(FilterExecutor::new(
             ActorContext::create(123),
