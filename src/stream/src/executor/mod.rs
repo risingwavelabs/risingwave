@@ -366,6 +366,20 @@ impl Mutation {
     }
 
     fn to_protobuf(&self) -> PbMutation {
+        let actor_splits_to_protobuf = |actor_splits: &HashMap<ActorId, Vec<SplitImpl>>| {
+            actor_splits
+                .iter()
+                .map(|(&actor_id, splits)| {
+                    (
+                        actor_id,
+                        ConnectorSplits {
+                            splits: splits.clone().iter().map(ConnectorSplit::from).collect(),
+                        },
+                    )
+                })
+                .collect::<HashMap<_, _>>()
+        };
+
         match self {
             Mutation::Stop(actors) => PbMutation::Stop(StopMutation {
                 actors: actors.iter().copied().collect::<Vec<_>>(),
@@ -384,19 +398,13 @@ impl Mutation {
                     .map(|(&actor_id, bitmap)| (actor_id, bitmap.to_protobuf()))
                     .collect(),
                 dropped_actors: dropped_actors.iter().cloned().collect(),
-                actor_splits: actor_splits
-                    .iter()
-                    .map(|(&actor_id, splits)| {
-                        (
-                            actor_id,
-                            ConnectorSplits {
-                                splits: splits.clone().iter().map(ConnectorSplit::from).collect(),
-                            },
-                        )
-                    })
-                    .collect(),
+                actor_splits: actor_splits_to_protobuf(actor_splits),
             }),
-            Mutation::Add { adds, .. } => PbMutation::Add(AddMutation {
+            Mutation::Add {
+                adds,
+                added_actors,
+                splits,
+            } => PbMutation::Add(AddMutation {
                 actor_dispatchers: adds
                     .iter()
                     .map(|(&actor_id, dispatchers)| {
@@ -408,7 +416,8 @@ impl Mutation {
                         )
                     })
                     .collect(),
-                ..Default::default()
+                added_actors: added_actors.iter().copied().collect(),
+                actor_splits: actor_splits_to_protobuf(splits),
             }),
             Mutation::SourceChangeSplit(changes) => PbMutation::Splits(SourceChangeSplitMutation {
                 actor_splits: changes
