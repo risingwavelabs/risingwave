@@ -571,39 +571,31 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .map(
                 |(
                     index,
-                    (
-                        key_required_larger,
-                        key_required_smaller,
-                        generate_watermark,
-                        delta_expression,
-                    ),
+                    (key_required_larger, key_required_smaller, clean_state, delta_expression),
                 )| {
                     let output_indices = if key_required_larger < key_required_smaller {
-                        l_state_clean_columns.push((key_required_larger, index));
+                        if clean_state {
+                            l_state_clean_columns.push((key_required_larger, index));
+                        }
                         l2inequality_index[key_required_larger].push((index, false));
                         r2inequality_index[key_required_smaller - left_input_len]
                             .push((index, true));
-                        if generate_watermark {
-                            l2o_indexed
-                                .get_vec(&key_required_larger)
-                                .cloned()
-                                .unwrap_or_default()
-                        } else {
-                            vec![]
-                        }
+                        l2o_indexed
+                            .get_vec(&key_required_larger)
+                            .cloned()
+                            .unwrap_or_default()
                     } else {
-                        r_state_clean_columns.push((key_required_larger - left_input_len, index));
+                        if clean_state {
+                            r_state_clean_columns
+                                .push((key_required_larger - left_input_len, index));
+                        }
                         l2inequality_index[key_required_smaller].push((index, true));
                         r2inequality_index[key_required_larger - left_input_len]
                             .push((index, false));
-                        if generate_watermark {
-                            r2o_indexed
-                                .get_vec(&(key_required_larger - left_input_len))
-                                .cloned()
-                                .unwrap_or_default()
-                        } else {
-                            vec![]
-                        }
+                        r2o_indexed
+                            .get_vec(&(key_required_larger - left_input_len))
+                            .cloned()
+                            .unwrap_or_default()
                     };
                     (output_indices, delta_expression)
                 },

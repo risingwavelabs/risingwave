@@ -91,7 +91,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             inequality_pairs.push((
                 key_required_larger,
                 key_required_smaller,
-                inequality_pair.get_generate_watermark(),
+                inequality_pair.get_clean_state(),
                 if let Some(delta_expression) = inequality_pair.delta_expression.as_ref() {
                     let data_type = source_l.schema().fields
                         [min(key_required_larger, key_required_smaller)]

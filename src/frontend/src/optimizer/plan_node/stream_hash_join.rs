@@ -53,8 +53,8 @@ pub struct StreamHashJoin {
     /// It is true if input of both side is append-only
     is_append_only: bool,
 
-    is_interval_join: bool,
-    clean_state_conjunction_indices: Vec<usize>,
+    clean_left_state_conjunction_idx: Option<usize>,
+    clean_right_state_conjunction_idx: Option<usize>,
 }
 
 impl StreamHashJoin {
@@ -73,9 +73,10 @@ impl StreamHashJoin {
         );
 
         let mut inequality_pairs = vec![];
-        let mut clean_state_conjunction_indices = vec![];
+        let mut clean_left_state_conjunction_idx = None;
+        let mut clean_right_state_conjunction_idx = None;
 
-        let (watermark_columns, is_interval_join) = {
+        let watermark_columns = {
             let l2i = logical.l2i_col_mapping();
             let r2i = logical.r2i_col_mapping();
 
@@ -95,8 +96,6 @@ impl StreamHashJoin {
                 }
             }
             let (left_cols_num, original_inequality_pairs) = eq_join_predicate.inequality_pairs();
-            let mut band_condition_clean_left_state = false;
-            let mut band_condition_clean_right_state = false;
             for (
                 conjunction_idx,
                 InequalityInputPair {
@@ -129,35 +128,48 @@ impl StreamHashJoin {
                     continue;
                 }
 
-                clean_state_conjunction_indices.push(conjunction_idx);
-                let internal = if key_required_larger < key_required_smaller {
-                    band_condition_clean_left_state = true;
-                    l2i.try_map(key_required_larger)
+                let (internal, do_state_cleaning) = if key_required_larger < key_required_smaller {
+                    (
+                        l2i.try_map(key_required_larger),
+                        if !equal_condition_clean_state
+                            && clean_left_state_conjunction_idx.is_none()
+                        {
+                            clean_left_state_conjunction_idx = Some(conjunction_idx);
+                            true
+                        } else {
+                            false
+                        },
+                    )
                 } else {
-                    band_condition_clean_right_state = true;
-                    r2i.try_map(key_required_larger - left_cols_num)
+                    (
+                        r2i.try_map(key_required_larger - left_cols_num),
+                        if !equal_condition_clean_state
+                            && clean_right_state_conjunction_idx.is_none()
+                        {
+                            clean_right_state_conjunction_idx = Some(conjunction_idx);
+                            true
+                        } else {
+                            false
+                        },
+                    )
                 };
-                let generate_watermark = if let Some(internal) = internal && !watermark_columns.contains(internal) {
+                let mut is_valuable_inequality = do_state_cleaning;
+                if let Some(internal) = internal && !watermark_columns.contains(internal) {
                     watermark_columns.insert(internal);
-                    true
-                } else {
-                    false
-                };
-                inequality_pairs.push((
-                    generate_watermark,
-                    InequalityInputPair {
-                        key_required_larger,
-                        key_required_smaller,
-                        delta_expression,
-                    },
-                ));
+                    is_valuable_inequality = true;
+                }
+                if is_valuable_inequality {
+                    inequality_pairs.push((
+                        do_state_cleaning,
+                        InequalityInputPair {
+                            key_required_larger,
+                            key_required_smaller,
+                            delta_expression,
+                        },
+                    ));
+                }
             }
-            (
-                logical.i2o_col_mapping().rewrite_bitset(&watermark_columns),
-                !equal_condition_clean_state
-                    && band_condition_clean_left_state
-                    && band_condition_clean_right_state,
-            )
+            logical.i2o_col_mapping().rewrite_bitset(&watermark_columns)
         };
 
         // TODO: derive from input
@@ -177,8 +189,8 @@ impl StreamHashJoin {
             eq_join_predicate,
             inequality_pairs,
             is_append_only: append_only,
-            is_interval_join,
-            clean_state_conjunction_indices,
+            clean_left_state_conjunction_idx,
+            clean_right_state_conjunction_idx,
         }
     }
 
@@ -262,7 +274,9 @@ impl fmt::Display for StreamHashJoin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = if self.is_append_only {
             f.debug_struct("StreamAppendOnlyHashJoin")
-        } else if self.is_interval_join {
+        } else if self.clean_left_state_conjunction_idx.is_some()
+            && self.clean_right_state_conjunction_idx.is_some()
+        {
             f.debug_struct("StreamIntervalJoin")
         } else {
             f.debug_struct("StreamHashJoin")
@@ -282,17 +296,22 @@ impl fmt::Display for StreamHashJoin {
             },
         );
 
-        if !self.clean_state_conjunction_indices.is_empty() {
+        if let Some(conjunction_idx) = self.clean_left_state_conjunction_idx {
             builder.field(
-                "band_conditions_to_state_clean",
-                &self
-                    .clean_state_conjunction_indices
-                    .iter()
-                    .map(|conjunction_idx| ExprDisplay {
-                        expr: &self.eq_join_predicate().other_cond().conjunctions[*conjunction_idx],
-                        input_schema: &concat_schema,
-                    })
-                    .collect_vec(),
+                "conditions_to_clean_left_state_table",
+                &ExprDisplay {
+                    expr: &self.eq_join_predicate().other_cond().conjunctions[conjunction_idx],
+                    input_schema: &concat_schema,
+                },
+            );
+        }
+        if let Some(conjunction_idx) = self.clean_right_state_conjunction_idx {
+            builder.field(
+                "conditions_to_clean_right_state_table",
+                &ExprDisplay {
+                    expr: &self.eq_join_predicate().other_cond().conjunctions[conjunction_idx],
+                    input_schema: &concat_schema,
+                },
             );
         }
 
@@ -410,7 +429,7 @@ impl StreamNode for StreamHashJoin {
                 .iter()
                 .map(
                     |(
-                        generate_watermark,
+                        do_state_clean,
                         InequalityInputPair {
                             key_required_larger,
                             key_required_smaller,
@@ -420,7 +439,7 @@ impl StreamNode for StreamHashJoin {
                         PbInequalityPair {
                             key_required_larger: *key_required_larger as u32,
                             key_required_smaller: *key_required_smaller as u32,
-                            generate_watermark: *generate_watermark,
+                            clean_state: *do_state_clean,
                             delta_expression: delta_expression.as_ref().map(
                                 |(delta_type, delta)| DeltaExpression {
                                     delta_type: *delta_type as i32,

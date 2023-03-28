@@ -268,8 +268,8 @@ message InequalityPair {
   uint32 key_required_larger = 1;
   // Input index of less side of inequality.
   uint32 key_required_smaller = 2;
-  // Whether this band join should generate an internal watermark in `HashJoinExecutor`. (No if other equal or non-euqal conditions have generated an internal watermark in the same place.)
-  bool generate_watermark = 3;
+  // Whether this condition is used to clean state table of `HashJoinExecutor`.
+  bool clean_state = 3;
   // greater >= less + delta_expression, if `None`, it represents that greater >= less
   DeltaExpression delta_expression = 4;
 }
