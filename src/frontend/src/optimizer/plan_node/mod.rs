@@ -638,7 +638,6 @@ mod logical_now;
 mod logical_over_agg;
 mod logical_project;
 mod logical_project_set;
-mod logical_row_id_gen;
 mod logical_scan;
 mod logical_share;
 mod logical_source;
@@ -715,7 +714,6 @@ pub use logical_now::LogicalNow;
 pub use logical_over_agg::{LogicalOverAgg, PlanWindowFunction};
 pub use logical_project::LogicalProject;
 pub use logical_project_set::LogicalProjectSet;
-pub use logical_row_id_gen::LogicalRowIdGen;
 pub use logical_scan::LogicalScan;
 pub use logical_share::LogicalShare;
 pub use logical_source::LogicalSource;
@@ -795,7 +793,6 @@ macro_rules! for_all_plan_nodes {
             , { Logical, OverAgg }
             , { Logical, Share }
             , { Logical, Now }
-            , { Logical, RowIdGen}
             // , { Logical, Sort } we don't need a LogicalSort, just require the Order
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
@@ -878,7 +875,6 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, OverAgg }
             , { Logical, Share }
             , { Logical, Now }
-            , { Logical, RowIdGen}
             // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we don't support that, we don't need LogicalSort, just require the Order at the top of query
         }

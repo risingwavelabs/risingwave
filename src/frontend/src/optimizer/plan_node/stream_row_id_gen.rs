@@ -14,38 +14,43 @@
 
 use std::fmt;
 
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::{ExprRewritable, LogicalRowIdGen, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
-/// `StreamRowIdGen` holds a stream `PlanBase` and a `LogicalRowIdGen`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamRowIdGen {
     pub base: PlanBase,
-    logical: LogicalRowIdGen,
+    input: PlanRef,
+    row_id_index: usize,
 }
 
 impl StreamRowIdGen {
-    /// Create a `StreamRowIdGen` with intermediate `LogicalRowIdGen`
-    pub fn new(logical: LogicalRowIdGen) -> Self {
-        let distribution = if logical.input().append_only() {
+    pub fn new(input: PlanRef, row_id_index: usize) -> Self {
+        let distribution = if input.append_only() {
             // remove exchange for append only source
-            Distribution::HashShard(vec![logical.row_id_index()])
+            Distribution::HashShard(vec![row_id_index])
         } else {
-            logical.input().distribution().clone()
+            input.distribution().clone()
         };
+
         let base = PlanBase::new_stream(
-            logical.ctx(),
-            logical.schema().clone(),
-            logical.logical_pk().to_vec(),
-            logical.functional_dependency().clone(),
+            input.ctx(),
+            input.schema().clone(),
+            input.logical_pk().to_vec(),
+            input.functional_dependency().clone(),
             distribution,
-            logical.input().append_only(),
-            logical.input().watermark_columns().clone(),
+            input.append_only(),
+            input.watermark_columns().clone(),
         );
-        Self { base, logical }
+        Self {
+            base,
+            input,
+            row_id_index,
+        }
     }
 }
 
@@ -54,29 +59,29 @@ impl fmt::Display for StreamRowIdGen {
         write!(
             f,
             "StreamRowIdGen {{ row_id_index: {} }}",
-            self.logical.row_id_index()
+            self.row_id_index
         )
     }
 }
 
 impl PlanTreeNodeUnary for StreamRowIdGen {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        Self::new(input, self.row_id_index)
     }
 }
 
 impl_plan_tree_node_for_unary! {StreamRowIdGen}
 
 impl StreamNode for StreamRowIdGen {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
 
-        ProstStreamNode::RowIdGen(RowIdGenNode {
-            row_id_index: self.logical.row_id_index() as _,
+        PbNodeBody::RowIdGen(RowIdGenNode {
+            row_id_index: self.row_id_index as _,
         })
     }
 }
