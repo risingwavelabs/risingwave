@@ -36,10 +36,9 @@ use super::aggregation::{
     OnlyOutputIfHasInput,
 };
 use super::{
-    expect_first_barrier, ActorContextRef, ExecutorInfo, PkIndicesRef,
-    StreamExecutorResult, Watermark,
+    expect_first_barrier, ActorContextRef, ExecutorInfo, PkIndicesRef, StreamExecutorResult,
+    Watermark,
 };
-use crate::executor::Executor;
 use crate::cache::{cache_may_stale, new_with_hasher, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
@@ -47,7 +46,7 @@ use crate::executor::aggregation::{generate_agg_schema, AggCall, AggGroup as Gen
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::test_utils::agg_executor::{create_agg_state_storage, create_result_table};
-use crate::executor::{ActorContext, BoxedMessageStream, Message, PkIndices};
+use crate::executor::{ActorContext, BoxedMessageStream, Executor, Message, PkIndices};
 use crate::task::AtomicU64Ref;
 
 type AggGroup<S> = GenericAggGroup<S, OnlyOutputIfHasInput>;
@@ -657,8 +656,6 @@ pub async fn new_boxed_hash_agg_executor<S: StateStore>(
 
 #[cfg(test)]
 pub mod tests {
-    
-    
 
     use assert_matches::assert_matches;
     use futures::StreamExt;
@@ -666,7 +663,6 @@ pub mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Op, StreamChunk};
     use risingwave_common::catalog::{Field, Schema};
-    
     use risingwave_common::row::{AscentOwnedRow, OwnedRow, Row};
     use risingwave_common::types::DataType;
     use risingwave_common::util::iter_util::ZipEqDebug;
@@ -674,13 +670,10 @@ pub mod tests {
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
-    
     use crate::executor::aggregation::{AggArgs, AggCall};
     use crate::executor::hash_agg::new_boxed_hash_agg_executor;
-    
-    
     use crate::executor::test_utils::*;
-    use crate::executor::{Executor, Message, PkIndices};
+    use crate::executor::{Message, PkIndices};
 
     // --- Test HashAgg with in-memory StateStore ---
 
