@@ -747,6 +747,11 @@ where
                     .alter_sink_name(sink_id, new_name)
                     .await
             }
+            Relation::SourceId(source_id) => {
+                self.catalog_manager
+                    .alter_source_name(source_id, new_name)
+                    .await
+            }
         }
     }
 }

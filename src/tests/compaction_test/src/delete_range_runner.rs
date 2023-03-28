@@ -25,7 +25,9 @@ use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{load_config, RwConfig, NO_OVERRIDE};
+use risingwave_common::config::{
+    extract_storage_memory_config, load_config, RwConfig, NO_OVERRIDE,
+};
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::{
@@ -163,7 +165,12 @@ async fn compaction_test(
         ..Default::default()
     }
     .into();
-    let storage_opts = Arc::new(StorageOpts::from((&config, &system_params)));
+    let storage_memory_config = extract_storage_memory_config(&config);
+    let storage_opts = Arc::new(StorageOpts::from((
+        &config,
+        &system_params,
+        &storage_memory_config,
+    )));
     let state_store_metrics = Arc::new(HummockStateStoreMetrics::unused());
     let compactor_metrics = Arc::new(CompactorMetrics::unused());
     let object_store_metrics = Arc::new(ObjectStoreMetrics::unused());
@@ -176,8 +183,9 @@ async fn compaction_test(
     let sstable_store = Arc::new(SstableStore::new(
         Arc::new(remote_object_store),
         system_params.data_directory().to_string(),
-        config.storage.block_cache_capacity_mb * (1 << 20),
-        config.storage.meta_cache_capacity_mb * (1 << 20),
+        storage_memory_config.block_cache_capacity_mb * (1 << 20),
+        storage_memory_config.meta_cache_capacity_mb * (1 << 20),
+        0,
         TieredCache::none(),
     ));
 

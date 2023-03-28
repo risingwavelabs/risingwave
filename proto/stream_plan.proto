@@ -18,6 +18,8 @@ message AddMutation {
   }
   // New dispatchers for each actor.
   map<uint32, Dispatchers> actor_dispatchers = 1;
+  // All actors to be added (to the main connected component of the graph) in this update.
+  repeated uint32 added_actors = 3;
   // We may embed a source change split mutation here.
   // TODO: we may allow multiple mutations in a single barrier.
   map<uint32, source.ConnectorSplits> actor_splits = 2;

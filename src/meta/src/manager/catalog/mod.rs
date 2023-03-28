@@ -1139,6 +1139,41 @@ where
         Ok(version)
     }
 
+    pub async fn alter_source_name(
+        &self,
+        source_id: SourceId,
+        source_name: &str,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_source_id(source_id)?;
+
+        // 1. validate new source name.
+        let mut source = database_core.sources.get(&source_id).unwrap().clone();
+        database_core.check_relation_name_duplicated(&(
+            source.database_id,
+            source.schema_id,
+            source_name.to_string(),
+        ))?;
+
+        // 2. rename source and its definition.
+        let old_name = source.name.clone();
+        source.name = source_name.to_string();
+
+        // 3. update, commit and notify all relations that depend on this source.
+        self.alter_relation_name_refs_inner(
+            database_core,
+            source_id,
+            &old_name,
+            source_name,
+            vec![],
+            vec![],
+            vec![],
+            Some(source),
+        )
+        .await
+    }
+
     pub async fn alter_index_name(
         &self,
         index_id: IndexId,

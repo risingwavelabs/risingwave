@@ -277,6 +277,7 @@ where
             }
 
             Command::CreateStreamingJob {
+                table_fragments,
                 dispatchers,
                 init_split_assignment: split_assignment,
                 ..
@@ -292,12 +293,14 @@ where
                         )
                     })
                     .collect();
+                let added_actors = table_fragments.actor_ids();
                 let actor_splits = split_assignment
                     .values()
                     .flat_map(build_actor_connector_splits)
                     .collect();
                 Some(Mutation::Add(AddMutation {
                     actor_dispatchers,
+                    added_actors,
                     actor_splits,
                 }))
             }
