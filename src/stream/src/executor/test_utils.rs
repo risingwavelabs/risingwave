@@ -452,6 +452,9 @@ pub fn gen_data(num_of_chunks: usize, chunk_size: usize, data_types: &[DataType]
     for i in 0..num_of_chunks {
         let mut ops = Vec::new();
         let mut columns = Vec::new();
+        for j in 0..chunk_size {
+            ops.push(Op::Insert);
+        }
         for data_type in data_types {
             let mut data_gen =
                 FieldGeneratorImpl::with_number_random(data_type.clone(), None, None, SEED)
@@ -461,7 +464,6 @@ pub fn gen_data(num_of_chunks: usize, chunk_size: usize, data_types: &[DataType]
                 array_builder.append_datum(&data_gen.generate_datum(((i + 1) * (j + 1)) as u64));
             }
             columns.push(array_builder.finish().into());
-            ops.push(Op::Insert);
         }
         let chunk = StreamChunk::new(ops, columns, None);
         ret.push(chunk);
