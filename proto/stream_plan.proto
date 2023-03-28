@@ -429,7 +429,6 @@ message ArrangeNode {
   repeated uint32 distribution_key = 2;
   // Used for internal table states.
   catalog.Table table = 3;
-  
 }
 
 // Special node for shared state. LookupNode will join an arrangement with a stream.
