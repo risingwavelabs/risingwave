@@ -6102,6 +6102,7 @@ dependencies = [
  "madsim-tokio",
  "regex",
  "risingwave_common",
+ "risingwave_connector",
  "risingwave_frontend",
  "risingwave_hummock_sdk",
  "risingwave_object_store",
