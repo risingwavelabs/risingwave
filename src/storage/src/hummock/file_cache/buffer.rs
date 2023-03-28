@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use parking_lot::RwLock;
-use risingwave_common::cache::LruCache;
+use risingwave_common::cache::{CachePriority, LruCache};
 
 use super::LRU_SHARD_BITS;
 use crate::hummock::{TieredCacheEntryHolder, TieredCacheKey, TieredCacheValue};
@@ -73,15 +73,16 @@ where
         Self {
             capacity,
             core: Arc::new(RwLock::new(TwoLevelBufferCore {
-                active_buffer: Arc::new(LruCache::new(LRU_SHARD_BITS, capacity)),
-                frozen_buffer: Arc::new(LruCache::new(LRU_SHARD_BITS, capacity)),
+                active_buffer: Arc::new(LruCache::new(LRU_SHARD_BITS, capacity, 0)),
+                frozen_buffer: Arc::new(LruCache::new(LRU_SHARD_BITS, capacity, 0)),
             })),
         }
     }
 
     pub fn insert(&self, hash: u64, key: K, charge: usize, value: V) {
         let core = self.core.read();
-        core.active_buffer.insert(key, hash, charge, value);
+        core.active_buffer
+            .insert(key, hash, charge, value, CachePriority::High);
     }
 
     pub fn get(&self, hash: u64, key: &K) -> Option<TieredCacheEntryHolder<K, V>> {
@@ -114,7 +115,7 @@ where
     }
 
     pub fn rotate(&self) -> Buffer<K, V> {
-        let mut buffer = Arc::new(LruCache::new(LRU_SHARD_BITS, self.capacity));
+        let mut buffer = Arc::new(LruCache::new(LRU_SHARD_BITS, self.capacity, 0));
         let mut core = self.core.write();
         std::mem::swap(&mut buffer, &mut core.active_buffer);
         std::mem::swap(&mut buffer, &mut core.frozen_buffer);

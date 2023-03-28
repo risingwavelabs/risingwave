@@ -99,6 +99,9 @@ pub struct MetaMetrics {
     /// compaction
     pub compact_pending_bytes: IntGaugeVec,
     pub compact_level_compression_ratio: GenericGaugeVec<AtomicF64>,
+
+    /// The number of compactor CPU need to be scale.
+    pub scale_compactor_core_num: IntGauge,
 }
 
 impl MetaMetrics {
@@ -273,6 +276,12 @@ impl MetaMetrics {
             registry,
         )
         .unwrap();
+        let scale_compactor_core_num = register_int_gauge_with_registry!(
+            "storage_compactor_suggest_core_count",
+            "num of CPU to be scale to meet compaction need",
+            registry
+        )
+        .unwrap();
 
         let meta_type = register_int_gauge_vec_with_registry!(
             "meta_num",
@@ -330,6 +339,7 @@ impl MetaMetrics {
             meta_type,
             compact_pending_bytes,
             compact_level_compression_ratio,
+            scale_compactor_core_num,
         }
     }
 

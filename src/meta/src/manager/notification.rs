@@ -19,8 +19,11 @@ use std::sync::Arc;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::hummock::CompactTask;
+use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse, SubscribeType};
+use risingwave_pb::meta::{
+    MetaSnapshot, Relation, RelationGroup, SubscribeResponse, SubscribeType,
+};
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::sync::Mutex;
 use tonic::Status;
@@ -170,14 +173,65 @@ where
             .await
     }
 
+    pub async fn notify_frontend_relation_info(
+        &self,
+        operation: Operation,
+        relation_info: RelationInfo,
+    ) -> NotificationVersion {
+        self.notify_with_version(
+            SubscribeType::Frontend.into(),
+            operation,
+            Info::RelationGroup(RelationGroup {
+                relations: vec![Relation {
+                    relation_info: relation_info.into(),
+                }],
+            }),
+        )
+        .await
+    }
+
     pub async fn notify_hummock(&self, operation: Operation, info: Info) -> NotificationVersion {
         self.notify_with_version(SubscribeType::Hummock.into(), operation, info)
             .await
     }
 
+    pub async fn notify_hummock_relation_info(
+        &self,
+        operation: Operation,
+        relation_info: RelationInfo,
+    ) -> NotificationVersion {
+        self.notify_with_version(
+            SubscribeType::Hummock.into(),
+            operation,
+            Info::RelationGroup(RelationGroup {
+                relations: vec![Relation {
+                    relation_info: relation_info.into(),
+                }],
+            }),
+        )
+        .await
+    }
+
     pub async fn notify_compactor(&self, operation: Operation, info: Info) -> NotificationVersion {
         self.notify_with_version(SubscribeType::Compactor.into(), operation, info)
             .await
+    }
+
+    pub async fn notify_compactor_relation_info(
+        &self,
+        operation: Operation,
+        relation_info: RelationInfo,
+    ) -> NotificationVersion {
+        self.notify_with_version(
+            SubscribeType::Compactor.into(),
+            operation,
+            Info::RelationGroup(RelationGroup {
+                relations: vec![Relation {
+                    relation_info: relation_info.into(),
+                }],
+            }),
+        )
+        .await
     }
 
     pub async fn notify_compute(&self, operation: Operation, info: Info) -> NotificationVersion {

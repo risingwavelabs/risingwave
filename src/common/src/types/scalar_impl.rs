@@ -181,42 +181,20 @@ impl<'a> ScalarRef<'a> for Decimal {
     }
 }
 
-/// Implement `Scalar` for `IntervalUnit`.
-impl Scalar for IntervalUnit {
-    type ScalarRefType<'a> = IntervalUnit;
+/// Implement `Scalar` for `Interval`.
+impl Scalar for Interval {
+    type ScalarRefType<'a> = Interval;
 
-    fn as_scalar_ref(&self) -> IntervalUnit {
+    fn as_scalar_ref(&self) -> Interval {
         *self
     }
 }
 
-/// Implement `ScalarRef` for `IntervalUnit`.
-impl<'a> ScalarRef<'a> for IntervalUnit {
-    type ScalarType = IntervalUnit;
+/// Implement `ScalarRef` for `Interval`.
+impl<'a> ScalarRef<'a> for Interval {
+    type ScalarType = Interval;
 
-    fn to_owned_scalar(&self) -> IntervalUnit {
-        *self
-    }
-
-    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.hash(state)
-    }
-}
-
-/// Implement `Scalar` for `NaiveDateWrapper`.
-impl Scalar for NaiveDateWrapper {
-    type ScalarRefType<'a> = NaiveDateWrapper;
-
-    fn as_scalar_ref(&self) -> NaiveDateWrapper {
-        *self
-    }
-}
-
-/// Implement `ScalarRef` for `NaiveDateWrapper`.
-impl<'a> ScalarRef<'a> for NaiveDateWrapper {
-    type ScalarType = NaiveDateWrapper;
-
-    fn to_owned_scalar(&self) -> NaiveDateWrapper {
+    fn to_owned_scalar(&self) -> Interval {
         *self
     }
 
@@ -225,20 +203,20 @@ impl<'a> ScalarRef<'a> for NaiveDateWrapper {
     }
 }
 
-/// Implement `Scalar` for `NaiveDateTimeWrapper`.
-impl Scalar for NaiveDateTimeWrapper {
-    type ScalarRefType<'a> = NaiveDateTimeWrapper;
+/// Implement `Scalar` for `Date`.
+impl Scalar for Date {
+    type ScalarRefType<'a> = Date;
 
-    fn as_scalar_ref(&self) -> NaiveDateTimeWrapper {
+    fn as_scalar_ref(&self) -> Date {
         *self
     }
 }
 
-/// Implement `ScalarRef` for `NaiveDateTimeWrapper`.
-impl<'a> ScalarRef<'a> for NaiveDateTimeWrapper {
-    type ScalarType = NaiveDateTimeWrapper;
+/// Implement `ScalarRef` for `Date`.
+impl<'a> ScalarRef<'a> for Date {
+    type ScalarType = Date;
 
-    fn to_owned_scalar(&self) -> NaiveDateTimeWrapper {
+    fn to_owned_scalar(&self) -> Date {
         *self
     }
 
@@ -247,20 +225,42 @@ impl<'a> ScalarRef<'a> for NaiveDateTimeWrapper {
     }
 }
 
-/// Implement `Scalar` for `NaiveTimeWrapper`.
-impl Scalar for NaiveTimeWrapper {
-    type ScalarRefType<'a> = NaiveTimeWrapper;
+/// Implement `Scalar` for `Timestamp`.
+impl Scalar for Timestamp {
+    type ScalarRefType<'a> = Timestamp;
 
-    fn as_scalar_ref(&self) -> NaiveTimeWrapper {
+    fn as_scalar_ref(&self) -> Timestamp {
         *self
     }
 }
 
-/// Implement `ScalarRef` for `NaiveTimeWrapper`.
-impl<'a> ScalarRef<'a> for NaiveTimeWrapper {
-    type ScalarType = NaiveTimeWrapper;
+/// Implement `ScalarRef` for `Timestamp`.
+impl<'a> ScalarRef<'a> for Timestamp {
+    type ScalarType = Timestamp;
 
-    fn to_owned_scalar(&self) -> NaiveTimeWrapper {
+    fn to_owned_scalar(&self) -> Timestamp {
+        *self
+    }
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash(state)
+    }
+}
+
+/// Implement `Scalar` for `Time`.
+impl Scalar for Time {
+    type ScalarRefType<'a> = Time;
+
+    fn as_scalar_ref(&self) -> Time {
+        *self
+    }
+}
+
+/// Implement `ScalarRef` for `Time`.
+impl<'a> ScalarRef<'a> for Time {
+    type ScalarType = Time;
+
+    fn to_owned_scalar(&self) -> Time {
         *self
     }
 

@@ -520,10 +520,16 @@ def section_cluster_node(panels):
             [
                 panels.target(
                     f"sum(rate({metric('process_cpu_seconds_total')}[$__rate_interval])) by (job,instance)",
-                    "{{job}} @ {{instance}}",
-                )
+                    "cpu - {{job}} @ {{instance}}",
+                ),
+
+                panels.target(
+                    f"sum(rate({metric('process_cpu_seconds_total')}[$__rate_interval])) by (job,instance) / avg({metric('process_cpu_core_num')}) by (job,instance)",
+                    "cpu usage -{{job}} @ {{instance}}",
+                ),
             ],
         ),
+
         panels.timeseries_count(
             "Meta Cluster",
             "",
@@ -559,6 +565,16 @@ def section_compaction(outer_panels):
                         panels.target(
                             f"sum({metric('storage_level_total_file_size')}) by (instance, level_index)",
                             "L{{level_index}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "scale compactor core count",
+                    "compactor core resource need to scale out",
+                    [
+                        panels.target(
+                            f"sum({metric('storage_compactor_suggest_core_count')})",
+                            "suggest-core-count"
                         ),
                     ],
                 ),
@@ -1362,11 +1378,7 @@ def section_streaming_actors(outer_panels):
                         ),
                         panels.target(
                             f"rate({metric('stream_join_insert_cache_miss_count')}[$__rate_interval])",
-                            "cache miss when insert {{actor_id}} {{side}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_join_may_exist_true_count')}[$__rate_interval])",
-                            "may_exist true when insert {{actor_id}} {{side}}",
+                            "cache miss when insert{{actor_id}} {{side}}",
                         ),
                     ],
                 ),
@@ -1563,7 +1575,6 @@ def section_batch_exchange(outer_panels):
             ],
         ),
     ]
-
 
 def section_frontend(outer_panels):
     panels = outer_panels.sub_panel()
@@ -2598,6 +2609,26 @@ def section_memory_manager(outer_panels):
         ),
     ]
 
+def section_connector_node(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed(
+            "Connector Node",
+            [
+                panels.timeseries_rowsps(
+                    "Connector Source Throughput(rows)",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('connector_source_rows_received')}[$__interval])",
+                            "{{source_type}} @ {{source_id}}",
+                        ),
+                    ],
+                ),
+            ],
+        )
+    ]
+
 templating = Templating()
 if namespace_filter_enabled:
     templating = Templating(
@@ -2655,5 +2686,6 @@ dashboard = Dashboard(
         *section_grpc_hummock_meta_client(panels),
         *section_frontend(panels),
         *section_memory_manager(panels),
+        *section_connector_node(panels),
     ],
 ).auto_panel_ids()

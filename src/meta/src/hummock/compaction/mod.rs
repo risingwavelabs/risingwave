@@ -33,7 +33,9 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{CompactTask, CompactionConfig, InputLevel, KeyRange, LevelType};
+use risingwave_pb::hummock::{
+    CompactTask, CompactionConfig, GetScaleCompactorResponse, InputLevel, KeyRange, LevelType,
+};
 
 pub use crate::hummock::compaction::level_selector::{
     default_level_selector, DynamicLevelSelector, DynamicLevelSelectorCore, LevelSelector,
@@ -43,6 +45,10 @@ use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlap
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 use crate::rpc::metrics::MetaMetrics;
+
+// we assume that every core could compact data with 50MB/s, and when there has been 32GB data
+// waiting to compact, a new compactor-node with 8-core could consume this data with in 2 minutes.
+const COMPACTION_BYTES_PER_CORE: u64 = 4 * 1024 * 1024 * 1024;
 
 pub struct CompactStatus {
     pub(crate) compaction_group_id: CompactionGroupId,
@@ -218,6 +224,20 @@ impl CompactStatus {
     pub fn compaction_group_id(&self) -> CompactionGroupId {
         self.compaction_group_id
     }
+
+    pub fn get_compaction_info(
+        &self,
+        levels: &Levels,
+        compaction_config: Arc<CompactionConfig>,
+    ) -> ScaleCompactorInfo {
+        let dynamic_core = DynamicLevelSelectorCore::new(compaction_config);
+        let waiting_compaction_bytes = dynamic_core.compact_pending_bytes_needed(levels);
+        ScaleCompactorInfo {
+            running_cores: 0,
+            total_cores: 0,
+            waiting_compaction_bytes,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -303,6 +323,40 @@ pub trait CompactionPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput>;
+}
+
+#[derive(Default, Clone, Debug)]
+pub struct ScaleCompactorInfo {
+    pub running_cores: u64,
+    pub total_cores: u64,
+    pub waiting_compaction_bytes: u64,
+}
+
+impl ScaleCompactorInfo {
+    pub fn add(&mut self, other: &ScaleCompactorInfo) {
+        self.running_cores += other.running_cores;
+        self.total_cores += other.total_cores;
+        self.waiting_compaction_bytes += other.waiting_compaction_bytes;
+    }
+
+    pub fn scale_out_cores(&self) -> u64 {
+        let mut scale_cores = self.waiting_compaction_bytes / COMPACTION_BYTES_PER_CORE;
+        if self.running_cores < self.total_cores {
+            scale_cores = scale_cores.saturating_sub(self.total_cores - self.running_cores);
+        }
+        scale_cores
+    }
+}
+
+impl From<ScaleCompactorInfo> for GetScaleCompactorResponse {
+    fn from(info: ScaleCompactorInfo) -> Self {
+        GetScaleCompactorResponse {
+            suggest_cores: info.total_cores,
+            running_cores: info.running_cores,
+            total_cores: info.total_cores,
+            waiting_compaction_bytes: info.waiting_compaction_bytes,
+        }
+    }
 }
 
 pub fn create_compaction_task(

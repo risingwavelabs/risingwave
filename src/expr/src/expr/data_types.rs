@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// We may remove the entire file once procedual macros are ready for aggregations.
+#![allow(unused_imports)]
+
 //! Macros containing all necessary information for a logical type.
 //!
 //! Each type macro will call the `$macro` with multiple parameters:
@@ -172,7 +175,7 @@ macro_rules! date {
     ($macro:ident) => {
         $macro! {
             risingwave_common::types::DataType::Date,
-            risingwave_common::array::NaiveDateArray
+            risingwave_common::array::DateArray
         }
     };
 }
@@ -208,7 +211,7 @@ macro_rules! time {
     ($macro:ident) => {
         $macro! {
             risingwave_common::types::DataType::Time,
-            risingwave_common::array::NaiveTimeArray
+            risingwave_common::array::TimeArray
         }
     };
 }
@@ -220,7 +223,7 @@ macro_rules! timestamp {
     ($macro:ident) => {
         $macro! {
             risingwave_common::types::DataType::Timestamp,
-            risingwave_common::array::NaiveDateTimeArray
+            risingwave_common::array::TimestampArray
         }
     };
 }

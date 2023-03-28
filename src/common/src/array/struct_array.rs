@@ -29,6 +29,7 @@ use crate::types::to_text::ToText;
 use crate::types::{hash_datum, DataType, Datum, DatumRef, Scalar, ScalarRefImpl, ToDatumRef};
 use crate::util::iter_util::ZipEqFast;
 use crate::util::memcmp_encoding;
+use crate::util::value_encoding::estimate_serialize_datum_size;
 
 #[derive(Debug)]
 pub struct StructArrayBuilder {
@@ -251,9 +252,9 @@ impl StructArray {
         &self.children_type
     }
 
-    // returns a vector containing a reference to the arrayimpl.
-    pub fn field_arrays(&self) -> Vec<&ArrayImpl> {
-        self.children.iter().map(|f| &(**f)).collect()
+    /// Returns an iterator over the field array.
+    pub fn fields(&self) -> impl ExactSizeIterator<Item = &ArrayImpl> {
+        self.children.iter().map(|f| &(**f))
     }
 
     pub fn field_at(&self, index: usize) -> ArrayRef {
@@ -395,6 +396,14 @@ impl<'a> StructRef<'a> {
             }
         })
     }
+
+    pub fn estimate_serialize_size_inner(&self) -> usize {
+        iter_fields_ref!(self, it, {
+            it.fold(0, |acc, datum_ref| {
+                acc + estimate_serialize_datum_size(datum_ref)
+            })
+        })
+    }
 }
 
 impl PartialEq for StructRef<'_> {
@@ -491,7 +500,7 @@ mod tests {
     use more_asserts::assert_gt;
 
     use super::*;
-    use crate::types::{OrderedF32, OrderedF64};
+    use crate::types::{F32, F64};
     use crate::{array, try_match_expand};
 
     // Empty struct is allowed in postgres.
@@ -593,11 +602,11 @@ mod tests {
     #[test]
     fn test_serialize_deserialize() {
         let value = StructValue::new(vec![
-            Some(OrderedF32::from(3.2).to_scalar_value()),
+            Some(F32::from(3.2).to_scalar_value()),
             Some("abcde".into()),
             Some(
                 StructValue::new(vec![
-                    Some(OrderedF64::from(1.3).to_scalar_value()),
+                    Some(F64::from(1.3).to_scalar_value()),
                     Some("a".into()),
                     None,
                     Some(StructValue::new(vec![]).to_scalar_value()),

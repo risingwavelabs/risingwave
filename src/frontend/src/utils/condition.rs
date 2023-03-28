@@ -28,7 +28,7 @@ use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 use crate::expr::{
     factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
     try_get_bool_constant, ExprDisplay, ExprImpl, ExprMutator, ExprRewriter, ExprType, ExprVisitor,
-    FunctionCall, InputRef,
+    FunctionCall, InequalityInputPair, InputRef,
 };
 use crate::utils::condition::cast_compare::{ResultForCmp, ResultForEq};
 
@@ -239,6 +239,35 @@ impl Condition {
                 conjunctions: others,
             },
         )
+    }
+
+    /// For [`EqJoinPredicate`], extract inequality conditions which connect left columns and right
+    /// columns from other conditions.
+    ///
+    /// The inequality conditions are transformed into `(left_col_id, right_col_id, offset)` pairs.
+    ///
+    /// [`EqJoinPredicate`]: crate::optimizer::plan_node::EqJoinPredicate
+    pub(crate) fn extract_inequality_keys(
+        &self,
+        left_col_num: usize,
+        right_col_num: usize,
+    ) -> Vec<(usize, InequalityInputPair)> {
+        let left_bit_map = FixedBitSet::from_iter(0..left_col_num);
+        let right_bit_map = FixedBitSet::from_iter(left_col_num..left_col_num + right_col_num);
+
+        self.conjunctions
+            .iter()
+            .enumerate()
+            .filter_map(|(conjunction_idx, expr)| {
+                let input_bits = expr.collect_input_refs(left_col_num + right_col_num);
+                if input_bits.is_disjoint(&left_bit_map) || input_bits.is_disjoint(&right_bit_map) {
+                    None
+                } else {
+                    expr.as_input_comparison_cond()
+                        .map(|inequality_pair| (conjunction_idx, inequality_pair))
+                }
+            })
+            .collect_vec()
     }
 
     /// Split the condition expressions into 2 groups: those referencing `columns` and others which

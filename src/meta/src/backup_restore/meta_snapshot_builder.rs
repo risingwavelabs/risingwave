@@ -111,7 +111,6 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
         let system_param = SystemParams::get_at_snapshot::<S>(&meta_store_snapshot)
             .await?
             .ok_or_else(|| anyhow!("system params not found in meta store"))?;
-
         self.snapshot.metadata = ClusterMetadata {
             default_cf,
             hummock_version,

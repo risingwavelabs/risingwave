@@ -53,7 +53,6 @@ pub struct StreamingMetrics {
     pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
     pub join_total_lookup_count: GenericCounterVec<AtomicU64>,
     pub join_insert_cache_miss_count: GenericCounterVec<AtomicU64>,
-    pub join_may_exist_true_count: GenericCounterVec<AtomicU64>,
     pub join_actor_input_waiting_duration_ns: GenericCounterVec<AtomicU64>,
     pub join_match_duration_ns: GenericCounterVec<AtomicU64>,
     pub join_barrier_align_duration: HistogramVec,
@@ -275,7 +274,7 @@ impl StreamingMetrics {
 
         let join_lookup_miss_count = register_int_counter_vec_with_registry!(
             "stream_join_lookup_miss_count",
-            "Join executor lookup miss count",
+            "Join executor lookup miss duration",
             &["actor_id", "side"],
             registry
         )
@@ -283,7 +282,7 @@ impl StreamingMetrics {
 
         let join_total_lookup_count = register_int_counter_vec_with_registry!(
             "stream_join_lookup_total_count",
-            "Join executor lookup total count",
+            "Join executor lookup total operation",
             &["actor_id", "side"],
             registry
         )
@@ -291,15 +290,7 @@ impl StreamingMetrics {
 
         let join_insert_cache_miss_count = register_int_counter_vec_with_registry!(
             "stream_join_insert_cache_miss_count",
-            "Count of cache miss when insert rows in join executor",
-            &["actor_id", "side"],
-            registry
-        )
-        .unwrap();
-
-        let join_may_exist_true_count = register_int_counter_vec_with_registry!(
-            "stream_join_may_exist_true_count",
-            "Count of may_exist's true returns of when insert rows in join executor",
+            "Join executor cache miss when insert operation",
             &["actor_id", "side"],
             registry
         )
@@ -486,7 +477,6 @@ impl StreamingMetrics {
             join_lookup_miss_count,
             join_total_lookup_count,
             join_insert_cache_miss_count,
-            join_may_exist_true_count,
             join_actor_input_waiting_duration_ns,
             join_match_duration_ns,
             join_barrier_align_duration,

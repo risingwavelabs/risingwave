@@ -43,11 +43,11 @@
   error_msg: 'sql parser error: WITH TIES cannot be specified without ORDER BY clause'
 - input: select * from (select 1 from 1);
   error_msg: |-
-    sql parser error: Expected identifier, found: 1
+    sql parser error: Expected identifier, found: 1 at line:1, column:31
     Near "from (select 1 from 1"
 - input: select * from (select * from tumble(t, x, interval '10' minutes))
   error_msg: |-
-    sql parser error: Expected ), found: minutes
+    sql parser error: Expected ), found: minutes at line:1, column:62
     Near "(t, x, interval '10'"
 - input: SELECT 1, FROM t
   error_msg: 'sql parser error: syntax error at or near "FROM"'
@@ -74,7 +74,7 @@
   error_msg: 'sql parser error: precision for type float must be less than 54 bits'
 - input: SELECT 1::int(2)
   error_msg: |-
-    sql parser error: Expected end of statement, found: (
+    sql parser error: Expected end of statement, found: ( at line:1, column:14
     Near "SELECT 1::int"
 - input: select id1, a1, id2, a2 from stream as S join version FOR SYSTEM_TIME AS OF NOW() AS V on id1= id2
   formatted_sql: SELECT id1, a1, id2, a2 FROM stream AS S JOIN version FOR SYSTEM_TIME AS OF NOW() AS V ON id1 = id2

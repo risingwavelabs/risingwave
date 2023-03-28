@@ -29,6 +29,7 @@ use crate::row::Row;
 use crate::types::to_text::ToText;
 use crate::types::{hash_datum, DataType, Datum, DatumRef, Scalar, ScalarRefImpl, ToDatumRef};
 use crate::util::memcmp_encoding;
+use crate::util::value_encoding::estimate_serialize_datum_size;
 
 #[derive(Debug)]
 pub struct ListArrayBuilder {
@@ -156,7 +157,7 @@ pub struct ListArray {
     bitmap: Bitmap,
     pub(super) offsets: Vec<u32>,
     pub(super) value: Box<ArrayImpl>,
-    value_type: DataType,
+    pub(super) value_type: DataType,
 }
 
 impl Array for ListArray {
@@ -443,6 +444,15 @@ impl<'a> ListRef<'a> {
             for datum_ref in it {
                 hash_datum(datum_ref, state);
             }
+        })
+    }
+
+    /// estimate the serialized size with value encoding
+    pub fn estimate_serialize_size_inner(&self) -> usize {
+        iter_elems_ref!(self, it, {
+            it.fold(0, |acc, datum_ref| {
+                acc + estimate_serialize_datum_size(datum_ref)
+            })
         })
     }
 }

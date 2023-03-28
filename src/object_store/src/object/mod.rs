@@ -857,6 +857,15 @@ pub async fn parse_remote_object_store(
                     .monitored(metrics),
             )
         }
+        azblob if azblob.starts_with("azblob://") => {
+            let azblob = azblob.strip_prefix("azblob://").unwrap();
+            let (container_name, root) = azblob.split_once('@').unwrap();
+            ObjectStoreImpl::Opendal(
+                OpendalObjectStore::new_azblob_engine(container_name.to_string(), root.to_string())
+                    .unwrap()
+                    .monitored(metrics),
+            )
+        }
         fs if fs.starts_with("fs://") => {
             let fs = fs.strip_prefix("fs://").unwrap();
             let (_, root) = fs.split_once('@').unwrap();
