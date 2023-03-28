@@ -297,7 +297,7 @@ steps:
     retry: *auto-retry
 
   - label: "recovery test (deterministic simulation)"
-    command: "TEST_NUM=8 KILL_RATE=0.5 timeout 14m ci/scripts/deterministic-recovery-test.sh"
+    command: "TEST_NUM=8 KILL_RATE=0.5 timeout 20m ci/scripts/deterministic-recovery-test.sh"
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache

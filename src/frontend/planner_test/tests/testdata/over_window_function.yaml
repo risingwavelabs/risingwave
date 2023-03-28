@@ -104,7 +104,7 @@
           └─BatchFilter { predicate: (t.x > t.y) }
             └─BatchScan { table: t, columns: [t.x, t.y, t._row_id], distribution: UpstreamHashShard(t._row_id) }
   stream_plan: |
-    StreamMaterialize { columns: [x, y, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check" }
+    StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: "no check" }
     └─StreamExchange { dist: HashShard(t._row_id) }
       └─StreamProject { exprs: [t.x, t.y, t._row_id] }
         └─StreamGroupTopN { order: "[t.x ASC]", limit: 2, offset: 0, group_key: [1] }
@@ -132,7 +132,7 @@
         └─BatchExchange { order: [], dist: HashShard(t.y) }
           └─BatchScan { table: t, columns: [t.x, t.y, t._row_id], distribution: UpstreamHashShard(t._row_id) }
   stream_plan: |
-    StreamMaterialize { columns: [x, y, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check" }
+    StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: "no check" }
     └─StreamExchange { dist: HashShard(t._row_id) }
       └─StreamProject { exprs: [t.x, t.y, t._row_id] }
         └─StreamGroupTopN { order: "[t.x ASC]", limit: 3, offset: 0, group_key: [1], with_ties: true }
@@ -288,7 +288,7 @@
       )
     ) WHERE rownum <= 3;
   stream_plan: |
-    StreamMaterialize { columns: [window_start, window_end, supplier_id, price, cnt], pk_columns: [window_start, window_end, supplier_id], pk_conflict: "no check" }
+    StreamMaterialize { columns: [window_start, window_end, supplier_id, price, cnt], stream_key: [window_start, window_end, supplier_id], pk_columns: [window_start, window_end, supplier_id], pk_conflict: "no check" }
     └─StreamGroupTopN { order: "[sum(bid.price) DESC]", limit: 3, offset: 0, group_key: [0, 1] }
       └─StreamExchange { dist: HashShard($expr1, $expr2) }
         └─StreamHashAgg { group_key: [$expr1, $expr2, bid.supplier_id], aggs: [sum(bid.price), count] }
@@ -307,7 +307,7 @@
           TUMBLE(Bid, bidtime, INTERVAL '10' MINUTE)
     ) WHERE rownum <= 3;
   stream_plan: |
-    StreamMaterialize { columns: [window_start, window_end, supplier_id, price, bid._row_id(hidden)], pk_columns: [bid._row_id], pk_conflict: "no check" }
+    StreamMaterialize { columns: [window_start, window_end, supplier_id, price, bid._row_id(hidden)], stream_key: [bid._row_id], pk_columns: [bid._row_id], pk_conflict: "no check" }
     └─StreamExchange { dist: HashShard(bid._row_id) }
       └─StreamProject { exprs: [$expr1, $expr2, bid.supplier_id, bid.price, bid._row_id] }
         └─StreamGroupTopN { order: "[bid.price DESC]", limit: 3, offset: 0, group_key: [5, 6] }
@@ -331,7 +331,7 @@
     └─LogicalTopN { order: "[t.y ASC]", limit: 1, offset: 0, group_key: [0] }
       └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   stream_plan: |
-    StreamMaterialize { columns: [x, y, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check" }
+    StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: "no check" }
     └─StreamExchange { dist: HashShard(t._row_id) }
       └─StreamProject { exprs: [t.x, t.y, t._row_id] }
         └─StreamGroupTopN { order: "[t.y ASC]", limit: 1, offset: 0, group_key: [0] }

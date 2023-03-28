@@ -18,6 +18,8 @@ message AddMutation {
   }
   // New dispatchers for each actor.
   map<uint32, Dispatchers> actor_dispatchers = 1;
+  // All actors to be added (to the main connected component of the graph) in this update.
+  repeated uint32 added_actors = 3;
   // We may embed a source change split mutation here.
   // TODO: we may allow multiple mutations in a single barrier.
   map<uint32, source.ConnectorSplits> actor_splits = 2;
@@ -343,8 +345,8 @@ message DeltaIndexJoinNode {
 
 message HopWindowNode {
   uint32 time_col = 1;
-  data.IntervalUnit window_slide = 2;
-  data.IntervalUnit window_size = 3;
+  data.Interval window_slide = 2;
+  data.Interval window_size = 3;
   repeated uint32 output_indices = 4;
   repeated expr.ExprNode window_start_exprs = 5;
   repeated expr.ExprNode window_end_exprs = 6;

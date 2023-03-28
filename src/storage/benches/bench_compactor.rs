@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
+use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
@@ -50,6 +51,7 @@ pub fn mock_sstable_store() -> SstableStoreRef {
         path,
         64 << 20,
         128 << 20,
+        0,
         TieredCache::none(),
     ))
 }
@@ -58,7 +60,7 @@ pub fn default_writer_opts() -> SstableWriterOptions {
     SstableWriterOptions {
         capacity_hint: None,
         tracker: None,
-        policy: CachePolicy::Fill,
+        policy: CachePolicy::Fill(CachePriority::High),
     }
 }
 
@@ -90,7 +92,7 @@ async fn build_table(
         SstableWriterOptions {
             capacity_hint: None,
             tracker: None,
-            policy: CachePolicy::Fill,
+            policy: CachePolicy::Fill(CachePriority::High),
         },
     );
     let mut builder = SstableBuilder::for_test(sstable_object_id, writer, opt);

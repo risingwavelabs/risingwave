@@ -18,7 +18,7 @@
 mod tests {
     use itertools::Itertools;
     use risingwave_common::array::*;
-    use risingwave_common::types::{NaiveDateWrapper, Scalar};
+    use risingwave_common::types::{Date, Scalar};
     use risingwave_pb::expr::expr_node::PbType;
 
     use super::super::*;
@@ -27,7 +27,7 @@ mod tests {
     #[tokio::test]
     async fn test_unary() {
         test_unary_bool::<BoolArray, _>(|x| !x, PbType::Not).await;
-        test_unary_date::<NaiveDateTimeArray, _>(|x| try_cast(x).unwrap(), PbType::Cast).await;
+        test_unary_date::<TimestampArray, _>(|x| try_cast(x).unwrap(), PbType::Cast).await;
         test_str_to_int16::<I16Array, _>(|x| str_parse(x).unwrap()).await;
     }
 
@@ -46,12 +46,7 @@ mod tests {
         }
         let col1 = I16Array::from_iter(&input).into();
         let data_chunk = DataChunk::new(vec![col1], 100);
-        let expr = build(
-            PbType::Cast,
-            DataType::Int32,
-            vec![InputRefExpression::new(DataType::Int16, 0).boxed()],
-        )
-        .unwrap();
+        let expr = build_from_pretty("(cast:int4 $0:int2)");
         let res = expr.eval(&data_chunk).await.unwrap();
         let arr: &I32Array = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
@@ -82,12 +77,7 @@ mod tests {
 
         let col1 = I32Array::from_iter(&input).into();
         let data_chunk = DataChunk::new(vec![col1], 3);
-        let expr = build(
-            PbType::Neg,
-            DataType::Int32,
-            vec![InputRefExpression::new(DataType::Int32, 0).boxed()],
-        )
-        .unwrap();
+        let expr = build_from_pretty("(neg:int4 $0:int4)");
         let res = expr.eval(&data_chunk).await.unwrap();
         let arr: &I32Array = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
@@ -125,12 +115,7 @@ mod tests {
         let col1_data = &input.iter().map(|x| x.as_ref().map(|x| &**x)).collect_vec();
         let col1 = Utf8Array::from_iter(col1_data).into();
         let data_chunk = DataChunk::new(vec![col1], 1);
-        let expr = build(
-            PbType::Cast,
-            DataType::Int16,
-            vec![InputRefExpression::new(DataType::Varchar, 0).boxed()],
-        )
-        .unwrap();
+        let expr = build_from_pretty("(cast:int2 $0:varchar)");
         let res = expr.eval(&data_chunk).await.unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
@@ -173,12 +158,7 @@ mod tests {
 
         let col1 = BoolArray::from_iter(&input).into();
         let data_chunk = DataChunk::new(vec![col1], 100);
-        let expr = build(
-            kind,
-            DataType::Boolean,
-            vec![InputRefExpression::new(DataType::Boolean, 0).boxed()],
-        )
-        .unwrap();
+        let expr = build_from_pretty(format!("({kind:?}:boolean $0:boolean)"));
         let res = expr.eval(&data_chunk).await.unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
@@ -199,13 +179,13 @@ mod tests {
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
         for<'a> <A as Array>::RefItem<'a>: PartialEq,
-        F: Fn(NaiveDateWrapper) -> <A as Array>::OwnedItem,
+        F: Fn(Date) -> <A as Array>::OwnedItem,
     {
-        let mut input = Vec::<Option<NaiveDateWrapper>>::new();
+        let mut input = Vec::<Option<Date>>::new();
         let mut target = Vec::<Option<<A as Array>::OwnedItem>>::new();
         for i in 0..100 {
             if i % 2 == 0 {
-                let date = NaiveDateWrapper::from_num_days_from_ce_uncheck(i);
+                let date = Date::from_num_days_from_ce_uncheck(i);
                 input.push(Some(date));
                 target.push(Some(f(date)));
             } else {
@@ -214,14 +194,9 @@ mod tests {
             }
         }
 
-        let col1 = NaiveDateArray::from_iter(&input).into();
+        let col1 = DateArray::from_iter(&input).into();
         let data_chunk = DataChunk::new(vec![col1], 100);
-        let expr = build(
-            kind,
-            DataType::Timestamp,
-            vec![InputRefExpression::new(DataType::Date, 0).boxed()],
-        )
-        .unwrap();
+        let expr = build_from_pretty(format!("({kind:?}:timestamp $0:date)"));
         let res = expr.eval(&data_chunk).await.unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
