@@ -213,6 +213,11 @@ impl Binder {
         Self::resolve_single_name(name.0, "table name")
     }
 
+    /// return the `source_name`
+    pub fn resolve_source_name(name: ObjectName) -> Result<String> {
+        Self::resolve_single_name(name.0, "source name")
+    }
+
     /// return the `user_name`
     pub fn resolve_user_name(name: ObjectName) -> Result<String> {
         Self::resolve_single_name(name.0, "user name")
