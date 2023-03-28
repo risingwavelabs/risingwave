@@ -359,7 +359,7 @@ where
         // contains all information needed for building the actor graph.
         let upstream_mview_fragments = self
             .fragment_manager
-            .get_upstream_mview_fragments(fragment_graph.dependent_streaming_jobs())
+            .get_upstream_mview_fragments(fragment_graph.dependent_table_ids())
             .await?;
         let upstream_mview_actors = upstream_mview_fragments
             .iter()
@@ -591,7 +591,7 @@ where
             StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), &*stream_job)
                 .await?;
         assert!(fragment_graph.internal_tables().is_empty());
-        assert!(fragment_graph.dependent_streaming_jobs().is_empty());
+        assert!(fragment_graph.dependent_table_ids().is_empty());
 
         // 2. Set the graph-related fields and freeze the `stream_job`.
         stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());

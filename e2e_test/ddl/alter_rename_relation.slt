@@ -144,6 +144,10 @@ SELECT * from v4
 statement ok
 CREATE MATERIALIZED VIEW mv4 AS SELECT * FROM src;
 
+# Currently we don't support query on non-kafka source, we only check renaming here.
+statement ok
+CREATE VIEW v6 AS (SELECT * FROM src);
+
 statement ok
 ALTER SOURCE src RENAME TO src1;
 
@@ -151,6 +155,11 @@ query TT
 SHOW CREATE MATERIALIZED VIEW mv4;
 ----
 public.mv4 CREATE MATERIALIZED VIEW mv4 AS SELECT * FROM src1 AS src
+
+query TT
+SHOW CREATE VIEW v6;
+----
+public.v6 CREATE VIEW v6 AS (SELECT * FROM src1 AS src)
 
 statement ok
 DROP SINK sink1;
@@ -175,6 +184,12 @@ DROP VIEW v2;
 
 statement ok
 DROP MATERIALIZED VIEW mv4;
+
+statement error other relation\(s\) depend on it
+DROP SOURCE src1;
+
+statement ok
+DROP VIEW v6;
 
 statement ok
 DROP SOURCE src1;

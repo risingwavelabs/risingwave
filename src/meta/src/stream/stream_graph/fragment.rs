@@ -350,7 +350,7 @@ impl StreamFragmentGraph {
     }
 
     /// Get the dependent streaming job ids of this job.
-    pub fn dependent_streaming_jobs(&self) -> &HashSet<TableId> {
+    pub fn dependent_table_ids(&self) -> &HashSet<TableId> {
         &self.dependent_table_ids
     }
 
