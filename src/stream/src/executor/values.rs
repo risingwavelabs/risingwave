@@ -77,7 +77,7 @@ impl ValuesExecutor {
             .await
             .unwrap();
 
-        let emit = !barrier.is_newly_added(self.ctx.id);
+        let emit = barrier.is_newly_added(self.ctx.id);
 
         yield Message::Barrier(barrier);
         // If it's failover, do not evaluate rows (assume they have been yielded)
@@ -153,7 +153,8 @@ mod tests {
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::ValuesExecutor;
-    use crate::executor::{ActorContext, Barrier, Executor, Message, Mutation};
+    use crate::executor::test_utils::StreamExecutorTestExt;
+    use crate::executor::{ActorContext, Barrier, Executor, Mutation};
 
     #[tokio::test]
     async fn test_values() {
@@ -206,8 +207,8 @@ mod tests {
         tx.send(first_message).unwrap();
 
         assert!(matches!(
-            values_executor.next().await.unwrap().unwrap(),
-            Message::Barrier { .. }
+            values_executor.next_unwrap_ready_barrier().unwrap(),
+            Barrier { .. }
         ));
 
         // Consume the barrier
@@ -253,8 +254,8 @@ mod tests {
         tx.send(Barrier::new_test_barrier(2)).unwrap();
 
         assert!(matches!(
-            values_executor.next().await.unwrap().unwrap(),
-            Message::Barrier { .. }
+            values_executor.next_unwrap_ready_barrier().unwrap(),
+            Barrier { .. }
         ));
     }
 }
