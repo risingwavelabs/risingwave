@@ -585,6 +585,7 @@ where
                 // Checkpoint frequency change
                 notification = local_notification_rx.recv() => {
                     self.handle_local_notification(notification.unwrap());
+                    continue;
                 }
                 result = barrier_complete_rx.recv() => {
                     checkpoint_control.update_barrier_nums_metrics();

@@ -182,11 +182,13 @@ where
                 .await;
         }
 
-        // Notify local subscribers.
-        self.env
-            .notification_manager()
-            .notify_local_subscribers(LocalNotification::WorkerNodeIsDeleted(worker_node))
-            .await;
+        if worker_type != WorkerType::RiseCtl {
+            // Notify local subscribers.
+            self.env
+                .notification_manager()
+                .notify_local_subscribers(LocalNotification::WorkerNodeIsDeleted(worker_node))
+                .await;
+        }
 
         Ok(worker_type)
     }
