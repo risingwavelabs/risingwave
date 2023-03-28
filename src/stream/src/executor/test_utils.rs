@@ -12,16 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::VecDeque;
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use risingwave_common::array::Op;
 use risingwave_common::catalog::Schema;
+use risingwave_common::field_generator::FieldGeneratorImpl;
 use risingwave_common::types::{DataType, ScalarImpl};
 use tokio::sync::mpsc;
-use risingwave_common::array::{DataChunk, Op};
-use risingwave_common::field_generator::FieldGeneratorImpl;
-use risingwave_expr::vector_op::arithmetic_op::date_int_add;
-use crate::executor::{BoxedExecutor, ExecutorInfo, PkIndicesRef};
 
 use super::error::StreamExecutorError;
 use super::{
@@ -442,17 +439,21 @@ pub mod top_n_executor {
 
 /// Generate `num_of_chunks` data chunks with type `data_types`, each data chunk has cardinality of
 /// `batch_size`.
-/// TODO(kwannoel): Refactor this and `batch` gen_data into data_chunk::test_utils
+/// TODO(kwannoel): Refactor this and `batch` `gen_data` into `data_chunk::test_utils`
 /// TODO(kwannoel): This should be `gen_chunk` instead.
 /// TODO(kwannoel): Instead of random, just generate sequence? See if encounter any errors...
 /// TODO(kwannoel): Different types of op, different vis.
-pub fn gen_data(num_of_chunks: usize, chunk_size: usize, data_types: &[DataType]) -> Vec<StreamChunk> {
+pub fn gen_data(
+    num_of_chunks: usize,
+    chunk_size: usize,
+    data_types: &[DataType],
+) -> Vec<StreamChunk> {
     let mut ret = Vec::<StreamChunk>::with_capacity(num_of_chunks);
 
     for i in 0..num_of_chunks {
         let mut ops = Vec::new();
         let mut columns = Vec::new();
-        for j in 0..chunk_size {
+        for _j in 0..chunk_size {
             ops.push(Op::Insert);
         }
         for data_type in data_types {
@@ -470,4 +471,3 @@ pub fn gen_data(num_of_chunks: usize, chunk_size: usize, data_types: &[DataType]
     }
     ret
 }
-

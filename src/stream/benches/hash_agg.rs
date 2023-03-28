@@ -11,7 +11,20 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, black_box};
+
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
+use futures::executor::block_on;
+use futures::StreamExt;
+use itertools::Itertools;
+use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::row::{AscentOwnedRow, OwnedRow, Row};
+use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_expr::expr::*;
+use risingwave_storage::memory::MemoryStateStore;
+use risingwave_storage::StateStore;
+use risingwave_stream::executor::aggregation::{AggArgs, AggCall};
 // use itertools::Itertools;
 // use risingwave_common::catalog::{Field, Schema};
 // use risingwave_common::types::DataType;
@@ -21,34 +34,9 @@ use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criteri
 // // use risingwave_pb::expr::{AggCall, InputRef};
 // use risingwave_stream::executor::{BoxedExecutor, HashAggExecutor};
 use risingwave_stream::executor::new_boxed_hash_agg_executor;
-use tokio::runtime::Runtime;
-use futures::executor::block_on;
-use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
-
-use assert_matches::assert_matches;
-use futures::StreamExt;
-use itertools::Itertools;
-use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::{Field, Schema, TableId};
-use risingwave_common::hash::SerializedKey;
-use risingwave_common::row::{AscentOwnedRow, OwnedRow, Row};
-use risingwave_common::types::DataType;
-use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_expr::expr::*;
-use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::StateStore;
-
-use risingwave_stream::executor::aggregation::{AggArgs, AggCall};
-use risingwave_stream::executor::monitor::StreamingMetrics;
-use risingwave_stream::executor::test_utils::agg_executor::{
-    create_agg_state_storage, create_result_table,
-};
 use risingwave_stream::executor::test_utils::*;
-use risingwave_stream::executor::{ActorContext, Executor, BoxedExecutor, HashAggExecutor, Message, PkIndices};
-
-
+use risingwave_stream::executor::{BoxedExecutor, PkIndices};
+use tokio::runtime::Runtime;
 
 trait SortedRows {
     fn sorted_rows(self) -> Vec<(Op, OwnedRow)>;
@@ -73,28 +61,19 @@ fn bench_hash_agg(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
     c.bench_function("benchmark_hash_agg", |b| {
-        b.to_async(&rt).iter_batched(|| {
-            setup_bench_hash_agg(MemoryStateStore::new())
-        },
-        |e| execute_executor(e),
+        b.to_async(&rt).iter_batched(
+            || setup_bench_hash_agg(MemoryStateStore::new()),
+            |e| execute_executor(e),
             BatchSize::SmallInput,
         )
     });
-
-}
-
-fn build_runtime() -> Runtime {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
 }
 
 /// Basic case:
 /// pk: none
 /// group by: 0
-/// chunk_size: 1000
-/// num_of_chunks: 1024
+/// `chunk_size`: 1000
+/// `num_of_chunks`: 1024
 /// aggregation: count
 fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
     // ---- Define hash agg executor parameters ----
@@ -155,7 +134,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
     let extreme_cache_size = 1024;
     let executor_id = 1;
 
-    let hash_agg = block_on(new_boxed_hash_agg_executor(
+    block_on(new_boxed_hash_agg_executor(
         store,
         Box::new(source),
         agg_calls,
@@ -164,8 +143,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
         pk_indices,
         extreme_cache_size,
         executor_id,
-    ));
-    hash_agg
+    )) as _
 }
 
 pub async fn execute_executor(executor: BoxedExecutor) {
