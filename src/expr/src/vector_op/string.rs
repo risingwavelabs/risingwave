@@ -371,13 +371,7 @@ pub fn to_hex_i64(n: i64, writer: &mut dyn Write) {
 /// ```
 #[function("quote_ident(varchar) -> varchar")]
 pub fn quote_ident(s: &str, writer: &mut dyn Write) {
-    let mut needs_quotes = false;
-    for c in s.chars() {
-        if matches!(c, 'a'..='z' | '0'..='9' | '_') {
-            needs_quotes = true;
-            break;
-        }
-    }
+    let needs_quotes = s.chars().any(|c| !matches!(c, 'a'..='z' | '0'..='9' | '_'));
     if !needs_quotes {
         write!(writer, "{}", s).unwrap();
         return;
