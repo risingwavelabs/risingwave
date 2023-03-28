@@ -343,11 +343,43 @@ impl DatabaseManager {
         }
     }
 
+    pub fn ensure_view_id(&self, view_id: ViewId) -> MetaResult<()> {
+        if self.views.contains_key(&view_id) {
+            Ok(())
+        } else {
+            Err(MetaError::catalog_id_not_found("view", view_id))
+        }
+    }
+
     pub fn ensure_table_id(&self, table_id: TableId) -> MetaResult<()> {
         if self.tables.contains_key(&table_id) {
             Ok(())
         } else {
             Err(MetaError::catalog_id_not_found("table", table_id))
+        }
+    }
+
+    pub fn ensure_source_id(&self, source_id: SourceId) -> MetaResult<()> {
+        if self.sources.contains_key(&source_id) {
+            Ok(())
+        } else {
+            Err(MetaError::catalog_id_not_found("source", source_id))
+        }
+    }
+
+    pub fn ensure_sink_id(&self, sink_id: SinkId) -> MetaResult<()> {
+        if self.sinks.contains_key(&sink_id) {
+            Ok(())
+        } else {
+            Err(MetaError::catalog_id_not_found("sink", sink_id))
+        }
+    }
+
+    pub fn ensure_index_id(&self, index_id: IndexId) -> MetaResult<()> {
+        if self.indexes.contains_key(&index_id) {
+            Ok(())
+        } else {
+            Err(MetaError::catalog_id_not_found("index", index_id))
         }
     }
 

@@ -16,8 +16,8 @@
 mod tests {
     use risingwave_common::array::interval_array::IntervalArray;
     use risingwave_common::array::*;
-    use risingwave_common::types::test_utils::IntervalUnitTestExt;
-    use risingwave_common::types::{Decimal, IntervalUnit, NaiveDateWrapper, Scalar};
+    use risingwave_common::types::test_utils::IntervalTestExt;
+    use risingwave_common::types::{Date, Decimal, Interval, Scalar};
     use risingwave_pb::expr::expr_node::Type;
 
     use super::super::*;
@@ -45,12 +45,12 @@ mod tests {
         test_binary_decimal::<BoolArray, _>(|x, y| x >= y, Type::GreaterThanOrEqual).await;
         test_binary_decimal::<BoolArray, _>(|x, y| x < y, Type::LessThan).await;
         test_binary_decimal::<BoolArray, _>(|x, y| x <= y, Type::LessThanOrEqual).await;
-        test_binary_interval::<NaiveDateTimeArray, _>(
+        test_binary_interval::<TimestampArray, _>(
             |x, y| date_interval_add(x, y).unwrap(),
             Type::Add,
         )
         .await;
-        test_binary_interval::<NaiveDateTimeArray, _>(
+        test_binary_interval::<TimestampArray, _>(
             |x, y| date_interval_sub(x, y).unwrap(),
             Type::Subtract,
         )
@@ -125,38 +125,30 @@ mod tests {
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
         for<'a> <A as Array>::RefItem<'a>: PartialEq,
-        F: Fn(NaiveDateWrapper, IntervalUnit) -> <A as Array>::OwnedItem,
+        F: Fn(Date, Interval) -> <A as Array>::OwnedItem,
     {
-        let mut lhs = Vec::<Option<NaiveDateWrapper>>::new();
-        let mut rhs = Vec::<Option<IntervalUnit>>::new();
+        let mut lhs = Vec::<Option<Date>>::new();
+        let mut rhs = Vec::<Option<Interval>>::new();
         let mut target = Vec::<Option<<A as Array>::OwnedItem>>::new();
         for i in 0..100 {
             if i % 2 == 0 {
-                rhs.push(Some(IntervalUnit::from_ymd(0, i, i)));
+                rhs.push(Some(Interval::from_ymd(0, i, i)));
                 lhs.push(None);
                 target.push(None);
             } else {
-                rhs.push(Some(IntervalUnit::from_ymd(0, i, i)));
-                lhs.push(Some(NaiveDateWrapper::from_num_days_from_ce_uncheck(i)));
+                rhs.push(Some(Interval::from_ymd(0, i, i)));
+                lhs.push(Some(Date::from_num_days_from_ce_uncheck(i)));
                 target.push(Some(f(
-                    NaiveDateWrapper::from_num_days_from_ce_uncheck(i),
-                    IntervalUnit::from_ymd(0, i, i),
+                    Date::from_num_days_from_ce_uncheck(i),
+                    Interval::from_ymd(0, i, i),
                 )));
             }
         }
 
-        let col1 = NaiveDateArray::from_iter(&lhs).into();
+        let col1 = DateArray::from_iter(&lhs).into();
         let col2 = IntervalArray::from_iter(&rhs).into();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
-        let expr = build(
-            kind,
-            DataType::Timestamp,
-            vec![
-                InputRefExpression::new(DataType::Date, 0).boxed(),
-                InputRefExpression::new(DataType::Interval, 1).boxed(),
-            ],
-        )
-        .unwrap();
+        let expr = build_from_pretty(format!("({kind:?}:timestamp $0:date $1:interval)"));
         let res = expr.eval(&data_chunk).await.unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {

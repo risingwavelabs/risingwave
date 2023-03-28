@@ -285,8 +285,9 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::{IntervalUnit, NaiveDateWrapper};
+    use risingwave_common::types::Date;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_expr::expr::build_from_pretty;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::Distribution;
 
@@ -326,8 +327,6 @@ mod tests {
     async fn create_watermark_filter_executor(
         mem_state: MemoryStateStore,
     ) -> (BoxedExecutor, MessageSender) {
-        let interval_type = DataType::Interval;
-
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int16),        // pk
@@ -335,21 +334,7 @@ mod tests {
             ],
         };
 
-        let watermark_expr = build(
-            Type::Subtract,
-            WATERMARK_TYPE.clone(),
-            vec![
-                InputRefExpression::new(WATERMARK_TYPE.clone(), 1).boxed(),
-                LiteralExpression::new(
-                    interval_type,
-                    Some(ScalarImpl::Interval(IntervalUnit::from_month_day_usec(
-                        0, 1, 0,
-                    ))),
-                )
-                .boxed(),
-            ],
-        )
-        .unwrap();
+        let watermark_expr = build_from_pretty("(subtract:timestamp $1:timestamp 1day:interval)");
 
         let table = create_in_memory_state_table(
             mem_state,
@@ -434,8 +419,8 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            watermark!(ScalarImpl::NaiveDateTime(
-                NaiveDateWrapper::from_ymd_uncheck(2022, 11, 7).and_hms_uncheck(0, 0, 0)
+            watermark!(ScalarImpl::Timestamp(
+                Date::from_ymd_uncheck(2022, 11, 7).and_hms_uncheck(0, 0, 0)
             ))
         );
 
@@ -457,8 +442,8 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            watermark!(ScalarImpl::NaiveDateTime(
-                NaiveDateWrapper::from_ymd_uncheck(2022, 11, 9).and_hms_uncheck(0, 0, 0)
+            watermark!(ScalarImpl::Timestamp(
+                Date::from_ymd_uncheck(2022, 11, 9).and_hms_uncheck(0, 0, 0)
             ))
         );
 
@@ -481,8 +466,8 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            watermark!(ScalarImpl::NaiveDateTime(
-                NaiveDateWrapper::from_ymd_uncheck(2022, 11, 9).and_hms_uncheck(0, 0, 0)
+            watermark!(ScalarImpl::Timestamp(
+                Date::from_ymd_uncheck(2022, 11, 9).and_hms_uncheck(0, 0, 0)
             ))
         );
 
@@ -500,8 +485,8 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            watermark!(ScalarImpl::NaiveDateTime(
-                NaiveDateWrapper::from_ymd_uncheck(2022, 11, 13).and_hms_uncheck(0, 0, 0)
+            watermark!(ScalarImpl::Timestamp(
+                Date::from_ymd_uncheck(2022, 11, 13).and_hms_uncheck(0, 0, 0)
             ))
         );
     }

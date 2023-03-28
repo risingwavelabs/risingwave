@@ -24,10 +24,9 @@ use std::cell::RefCell;
 use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::array::*;
-use risingwave_common::types::test_utils::IntervalUnitTestExt;
+use risingwave_common::types::test_utils::IntervalTestExt;
 use risingwave_common::types::{
-    DataType, DataTypeName, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
-    NaiveTimeWrapper, OrderedF32, OrderedF64,
+    DataType, DataTypeName, Date, Decimal, Interval, Time, Timestamp, F32, F64,
 };
 use risingwave_expr::expr::*;
 use risingwave_expr::sig::agg::agg_func_sigs;
@@ -50,18 +49,14 @@ fn bench_expr(c: &mut Criterion) {
             I16Array::from_iter((1..=CHUNK_SIZE).map(|_| 1)).into(),
             I32Array::from_iter((1..=CHUNK_SIZE).map(|_| 1)).into(),
             I64Array::from_iter((1..=CHUNK_SIZE).map(|_| 1)).into(),
-            F32Array::from_iter((1..=CHUNK_SIZE).map(|i| OrderedF32::from(i as f32))).into(),
-            F64Array::from_iter((1..=CHUNK_SIZE).map(|i| OrderedF64::from(i as f64))).into(),
+            F32Array::from_iter((1..=CHUNK_SIZE).map(|i| F32::from(i as f32))).into(),
+            F64Array::from_iter((1..=CHUNK_SIZE).map(|i| F64::from(i as f64))).into(),
             DecimalArray::from_iter((1..=CHUNK_SIZE).map(Decimal::from)).into(),
-            NaiveDateArray::from_iter((1..=CHUNK_SIZE).map(|_| NaiveDateWrapper::default())).into(),
-            NaiveTimeArray::from_iter((1..=CHUNK_SIZE).map(|_| NaiveTimeWrapper::default())).into(),
-            NaiveDateTimeArray::from_iter(
-                (1..=CHUNK_SIZE).map(|_| NaiveDateTimeWrapper::default()),
-            )
-            .into(),
+            DateArray::from_iter((1..=CHUNK_SIZE).map(|_| Date::default())).into(),
+            TimeArray::from_iter((1..=CHUNK_SIZE).map(|_| Time::default())).into(),
+            TimestampArray::from_iter((1..=CHUNK_SIZE).map(|_| Timestamp::default())).into(),
             I64Array::from_iter(1..=CHUNK_SIZE as i64).into(),
-            IntervalArray::from_iter((1..=CHUNK_SIZE).map(|i| IntervalUnit::from_days(i as _)))
-                .into(),
+            IntervalArray::from_iter((1..=CHUNK_SIZE).map(|i| Interval::from_days(i as _))).into(),
             Utf8Array::from_iter_display((1..=CHUNK_SIZE).map(Some)).into(),
             Utf8Array::from_iter_display((1..=CHUNK_SIZE).map(Some))
                 .into_bytes_array()
@@ -117,23 +112,17 @@ fn bench_expr(c: &mut Criterion) {
             Utf8Array::from_iter_display([Some(true)].into_iter().cycle().take(CHUNK_SIZE)).into(),
             // 20: date string
             Utf8Array::from_iter_display(
-                [Some(NaiveDateWrapper::default())]
-                    .into_iter()
-                    .cycle()
-                    .take(CHUNK_SIZE),
+                [Some(Date::default())].into_iter().cycle().take(CHUNK_SIZE),
             )
             .into(),
             // 21: time string
             Utf8Array::from_iter_display(
-                [Some(NaiveTimeWrapper::default())]
-                    .into_iter()
-                    .cycle()
-                    .take(CHUNK_SIZE),
+                [Some(Time::default())].into_iter().cycle().take(CHUNK_SIZE),
             )
             .into(),
             // 22: timestamp string
             Utf8Array::from_iter_display(
-                [Some(NaiveDateTimeWrapper::default())]
+                [Some(Timestamp::default())]
                     .into_iter()
                     .cycle()
                     .take(CHUNK_SIZE),
@@ -149,7 +138,7 @@ fn bench_expr(c: &mut Criterion) {
             .into(),
             // 24: interval string
             Utf8Array::from_iter_display(
-                [Some(IntervalUnit::default())]
+                [Some(Interval::default())]
                     .into_iter()
                     .cycle()
                     .take(CHUNK_SIZE),

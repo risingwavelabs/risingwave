@@ -177,7 +177,7 @@ pub fn col_descs_to_rows(columns: Vec<ColumnDesc>) -> Vec<Row> {
                     let type_name = if let DataType::Struct { .. } = c.data_type {
                         c.type_name.clone()
                     } else {
-                        format!("{:?}", &c.data_type)
+                        c.data_type.to_string()
                     };
                     Row::new(vec![Some(c.name.into()), Some(type_name.into())])
                 })

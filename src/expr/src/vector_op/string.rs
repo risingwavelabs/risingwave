@@ -333,3 +333,56 @@ pub fn to_hex_i32(n: i32, writer: &mut dyn Write) {
 pub fn to_hex_i64(n: i64, writer: &mut dyn Write) {
     write!(writer, "{:x}", n).unwrap();
 }
+
+/// Returns the given string suitably quoted to be used as an identifier in an SQL statement string.
+/// Quotes are added only if necessary (i.e., if the string contains non-identifier characters or
+/// would be case-folded). Embedded quotes are properly doubled.
+///
+/// Refer to <https://github.com/postgres/postgres/blob/90189eefc1e11822794e3386d9bafafd3ba3a6e8/src/backend/utils/adt/ruleutils.c#L11506>
+///
+/// # Example
+///
+/// ```slt
+/// query T
+/// select quote_ident('foo bar')
+/// ----
+/// "foo bar"
+///
+/// query T
+/// select quote_ident('FooBar')
+/// ----
+/// "FooBar"
+///
+/// query T
+/// select quote_ident('foo_bar')
+/// ----
+/// foo_bar
+///
+/// query T
+/// select quote_ident('foo"bar')
+/// ----
+/// "foo""bar"
+///
+/// # FIXME: quote SQL keywords is not supported yet
+/// query T
+/// select quote_ident('select')
+/// ----
+/// select
+/// ```
+#[function("quote_ident(varchar) -> varchar")]
+pub fn quote_ident(s: &str, writer: &mut dyn Write) {
+    let needs_quotes = s.chars().any(|c| !matches!(c, 'a'..='z' | '0'..='9' | '_'));
+    if !needs_quotes {
+        write!(writer, "{}", s).unwrap();
+        return;
+    }
+    write!(writer, "\"").unwrap();
+    for c in s.chars() {
+        if c == '"' {
+            write!(writer, "\"\"").unwrap();
+        } else {
+            write!(writer, "{c}").unwrap();
+        }
+    }
+    write!(writer, "\"").unwrap();
+}

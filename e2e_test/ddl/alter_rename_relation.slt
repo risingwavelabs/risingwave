@@ -1,0 +1,175 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE t (v1 INT primary key, v2 STRUCT<v1 INT, v2 STRUCT<v1 INT, v2 INT>>);
+
+statement ok
+CREATE TABLE t_as AS ( WITH source_data AS ( SELECT 1 AS id) SELECT * FROM source_data);
+
+statement ok
+CREATE MATERIALIZED VIEW mv AS SELECT v1, (t.v2).v1 AS v21 FROM t;
+
+statement ok
+CREATE SINK sink AS SELECT mv3.v1 AS v1, mv3.v21 AS v2 FROM mv AS mv3 WITH (
+    connector = 'blackhole'
+);
+
+statement ok
+CREATE SOURCE src (v INT) WITH (
+    connector = 'datagen',
+    fields.v.kind = 'sequence',
+    fields.v.start = '1',
+    fields.v.end  = '10',
+    datagen.rows.per.second='15',
+    datagen.split.num = '1'
+) ROW FORMAT JSON;
+
+statement ok
+CREATE VIEW v1 AS ( SELECT * FROM t_as WHERE id = 1);
+
+statement ok
+CREATE VIEW v2 AS (SELECT COUNT(*) FROM t, t AS t2 WHERE t.v1 = t2.v1);
+
+statement ok
+CREATE VIEW v3 AS (SELECT MAX((t.v2).v1) FROM t AS t);
+
+statement ok
+CREATE VIEW v4 AS (SELECT * FROM t join t as t2 on (t.v1 = t2.v1) ORDER BY t.v1, t2.v1);
+
+statement ok
+CREATE index idx ON t(v1);
+
+query TT
+SHOW CREATE TABLE t;
+----
+public.t CREATE TABLE t (v1 INT PRIMARY KEY, v2 STRUCT<v1 INT, v2 STRUCT<v1 INT, v2 INT>>)
+
+# alter table rename with alias conflict
+statement ok
+ALTER TABLE t RENAME TO t2;
+
+query TT
+SHOW CREATE TABLE t2;
+----
+public.t2 CREATE TABLE t2 (v1 INT PRIMARY KEY, v2 STRUCT<v1 INT, v2 STRUCT<v1 INT, v2 INT>>)
+
+query TT
+SHOW CREATE VIEW v2;
+----
+public.v2 CREATE VIEW v2 AS (SELECT COUNT(*) FROM t2 AS t, t2 AS t2 WHERE t.v1 = t2.v1)
+
+query TT
+SHOW CREATE VIEW v3;
+----
+public.v3 CREATE VIEW v3 AS (SELECT MAX((t.v2).v1) FROM t2 AS t)
+
+query TT
+SHOW CREATE VIEW v4;
+----
+public.v4 CREATE VIEW v4 AS (SELECT * FROM t2 AS t JOIN t2 AS t2 ON (t.v1 = t2.v1) ORDER BY t.v1, t2.v1)
+
+query TT
+SHOW CREATE MATERIALIZED VIEW mv;
+----
+public.mv CREATE MATERIALIZED VIEW mv AS SELECT v1, (t.v2).v1 AS v21 FROM t2 AS t
+
+# alter mview rename
+statement ok
+ALTER MATERIALIZED VIEW mv RENAME TO mv2;
+
+query TT
+SHOW CREATE MATERIALIZED VIEW mv2;
+----
+public.mv2 CREATE MATERIALIZED VIEW mv2 AS SELECT v1, (t.v2).v1 AS v21 FROM t2 AS t
+
+statement ok
+ALTER SINK sink RENAME TO sink1;
+
+# alter mview rename with alias conflict, used by sink1
+statement ok
+ALTER MATERIALIZED VIEW mv2 RENAME TO mv3;
+
+statement ok
+ALTER TABLE t_as RENAME TO t_as_1;
+
+# alter view rename
+statement ok
+ALTER VIEW v1 RENAME TO v5;
+
+query TT
+SHOW CREATE VIEW v5;
+----
+public.v5 CREATE VIEW v5 AS (SELECT * FROM t_as_1 AS t_as WHERE id = 1)
+
+statement ok
+ALTER INDEX idx RENAME TO idx1;
+
+statement ok
+INSERT INTO t2 VALUES(1,(1,(1,2)));
+
+statement ok
+INSERT INTO t2 VALUES(2,(2,(2,4)));
+
+query II rowsort
+SELECT * from mv3
+----
+1 1
+2 2
+
+query I
+SELECT * from v2
+----
+2
+
+query I
+SELECT * from v3
+----
+2
+
+query IIII rowsort
+SELECT * from v4
+----
+1 (1,(1,2)) 1 (1,(1,2))
+2 (2,(2,4)) 2 (2,(2,4))
+
+statement ok
+CREATE MATERIALIZED VIEW mv4 AS SELECT * FROM src;
+
+statement ok
+ALTER SOURCE src RENAME TO src1;
+
+query TT
+SHOW CREATE MATERIALIZED VIEW mv4;
+----
+public.mv4 CREATE MATERIALIZED VIEW mv4 AS SELECT * FROM src1 AS src
+
+statement ok
+DROP SINK sink1;
+
+statement ok
+DROP VIEW v5;
+
+statement ok
+DROP VIEW v4;
+
+statement ok
+DROP VIEW v3;
+
+statement ok
+DROP VIEW v2;
+
+statement ok
+DROP MATERIALIZED VIEW mv4;
+
+statement ok
+DROP SOURCE src1;
+
+statement ok
+DROP MATERIALIZED VIEW mv3;
+
+statement ok
+DROP TABLE t2;
+
+statement ok
+DROP TABLE t_as_1;

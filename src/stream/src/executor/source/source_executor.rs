@@ -564,6 +564,7 @@ mod tests {
 
         let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
             adds: HashMap::new(),
+            added_actors: HashSet::new(),
             splits: hashmap! {
                 ActorId::default() => vec![
                     SplitImpl::Datagen(DatagenSplit {
@@ -651,6 +652,7 @@ mod tests {
 
         let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
             adds: HashMap::new(),
+            added_actors: HashSet::new(),
             splits: hashmap! {
                 ActorId::default() => vec![
                     SplitImpl::Datagen(DatagenSplit {
