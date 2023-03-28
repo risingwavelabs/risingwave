@@ -17,7 +17,7 @@ use std::io::Write;
 use prost::Message;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl, F32, F64};
+use risingwave_common::types::{DataType, ScalarImpl, Timestamp, F32, F64};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 
 fn build_row(index: usize) -> OwnedRow {
@@ -31,8 +31,8 @@ fn build_row(index: usize) -> OwnedRow {
     row_value.push(Some(ScalarImpl::Utf8(
         format!("{}", index).repeat((index % 10) + 1).into(),
     )));
-    row_value.push(Some(ScalarImpl::NaiveDateTime(
-        NaiveDateTimeWrapper::from_timestamp_uncheck(index as _, 0),
+    row_value.push(Some(ScalarImpl::Timestamp(
+        Timestamp::from_timestamp_uncheck(index as _, 0),
     )));
     row_value.push(Some(ScalarImpl::Decimal(index.into())));
     row_value.push(if index % 5 == 0 {

@@ -474,13 +474,12 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetTimestampV
             .timestamp_class
             .get_or_try_init(|| {
                 let cls = env.find_class("java/sql/Timestamp")?;
-                Ok::<_, jni::errors::Error>(env.new_global_ref(cls)?)
+                env.new_global_ref(cls)
             })?;
         let ts_class = JClass::from(ts_class_ref.as_obj());
-        let constructor = INIT_METHOD
-            .get_or_try_init(|| env.get_method_id(ts_class, "<init>", "(J)V"))?
-            .clone();
-        let date_obj = env.new_object_unchecked(ts_class, constructor, &[millis.into()])?;
+        let constructor =
+            INIT_METHOD.get_or_try_init(|| env.get_method_id(ts_class, "<init>", "(J)V"))?;
+        let date_obj = env.new_object_unchecked(ts_class, *constructor, &[millis.into()])?;
 
         Ok(date_obj)
     })
@@ -502,16 +501,14 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetDecimalVal
             .big_decimal_class
             .get_or_try_init(|| {
                 let cls = env.find_class("java/math/BigDecimal")?;
-                Ok::<_, jni::errors::Error>(env.new_global_ref(cls)?)
+                env.new_global_ref(cls)
             })?;
         let decimal_class = JClass::from(ts_class_ref.as_obj());
-        let constructor = INIT_METHOD
-            .get_or_try_init(|| {
-                env.get_method_id(decimal_class, "<init>", "(Ljava/lang/String;)V")
-            })?
-            .clone();
+        let constructor = INIT_METHOD.get_or_try_init(|| {
+            env.get_method_id(decimal_class, "<init>", "(Ljava/lang/String;)V")
+        })?;
         let date_obj =
-            env.new_object_unchecked(decimal_class, constructor, &[string_value.into()])?;
+            env.new_object_unchecked(decimal_class, *constructor, &[string_value.into()])?;
 
         Ok(date_obj)
     })

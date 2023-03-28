@@ -145,9 +145,9 @@ impl OwnedRow {
         }
     }
 
-    pub fn get_datetime(&self, idx: usize) -> &NaiveDateTimeWrapper {
+    pub fn get_datetime(&self, idx: usize) -> &Timestamp {
         match self[idx].as_ref().unwrap() {
-            ScalarImpl::NaiveDateTime(dt) => dt,
+            ScalarImpl::Timestamp(dt) => dt,
             _ => unreachable!("type is not NaiveDateTime at index: {}", idx),
         }
     }
