@@ -850,7 +850,7 @@ impl fmt::Debug for GraphNode {
 
 impl PartialEq for GraphNode {
     fn eq(&self, other: &Self) -> bool {
-        self.join_tree.p.eq(&other.join_tree.height)
+        self.join_tree.height.eq(&other.join_tree.height)
     }
 }
 
