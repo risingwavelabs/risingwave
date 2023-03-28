@@ -286,7 +286,7 @@ mod tests {
             );
             assert_eq!(
                 row.datum_at(4).to_owned_datum(),
-                (Some(ScalarImpl::NaiveDateTime(
+                (Some(ScalarImpl::Timestamp(
                     str_to_timestamp("2018-01-01 00:00:01").unwrap()
                 )))
             );
@@ -314,7 +314,7 @@ mod tests {
             );
             assert_eq!(
                 row.datum_at(4).to_owned_datum(),
-                (Some(ScalarImpl::NaiveDateTime(
+                (Some(ScalarImpl::Timestamp(
                     str_to_timestamp("2018-01-01 00:00:01").unwrap()
                 )))
             );

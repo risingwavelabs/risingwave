@@ -16,7 +16,7 @@ use nexmark::event::{Auction, Bid, Event, EventType, Person};
 use risingwave_common::array::StructValue;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::struct_type::StructType;
-use risingwave_common::types::{DataType, Datum, NaiveDateTimeWrapper, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, ScalarImpl, Timestamp};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
@@ -229,8 +229,8 @@ fn person_to_datum(p: Person) -> Vec<Datum> {
         Some(ScalarImpl::Utf8(p.credit_card.into())),
         Some(ScalarImpl::Utf8(p.city.into())),
         Some(ScalarImpl::Utf8(p.state.into())),
-        Some(ScalarImpl::NaiveDateTime(
-            NaiveDateTimeWrapper::with_secs_nsecs(
+        Some(ScalarImpl::Timestamp(
+            Timestamp::with_secs_nsecs(
                 (p.date_time / 1_000) as i64,
                 (p.date_time % 1_000) as u32 * 1_000_000,
             )
@@ -248,15 +248,15 @@ fn auction_to_datum(a: Auction) -> Vec<Datum> {
         Some(ScalarImpl::Utf8(a.description.into())),
         Some(ScalarImpl::Int64(a.initial_bid as i64)),
         Some(ScalarImpl::Int64(a.reserve as i64)),
-        Some(ScalarImpl::NaiveDateTime(
-            NaiveDateTimeWrapper::with_secs_nsecs(
+        Some(ScalarImpl::Timestamp(
+            Timestamp::with_secs_nsecs(
                 (a.date_time / 1_000) as i64,
                 (a.date_time % 1_000) as u32 * 1_000_000,
             )
             .unwrap(),
         )),
-        Some(ScalarImpl::NaiveDateTime(
-            NaiveDateTimeWrapper::with_secs_nsecs(
+        Some(ScalarImpl::Timestamp(
+            Timestamp::with_secs_nsecs(
                 (a.expires / 1_000) as i64,
                 (a.expires % 1_000) as u32 * 1_000_000,
             )
@@ -277,8 +277,8 @@ fn bid_to_datum(b: Bid) -> Vec<Datum> {
         Some(ScalarImpl::Int64(b.price as i64)),
         Some(ScalarImpl::Utf8(b.channel.into())),
         Some(ScalarImpl::Utf8(b.url.into())),
-        Some(ScalarImpl::NaiveDateTime(
-            NaiveDateTimeWrapper::with_secs_nsecs(
+        Some(ScalarImpl::Timestamp(
+            Timestamp::with_secs_nsecs(
                 (b.date_time / 1_000) as i64,
                 (b.date_time % 1_000) as u32 * 1_000_000,
             )

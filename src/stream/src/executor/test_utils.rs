@@ -218,7 +218,7 @@ pub mod agg_executor {
 
     use crate::common::table::state_table::StateTable;
     use crate::common::StateTableColumnMapping;
-    use crate::executor::agg_common::AggExecutorArgs;
+    use crate::executor::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
     use crate::executor::aggregation::{AggCall, AggStateStorage};
     use crate::executor::{
         ActorContextRef, BoxedExecutor, Executor, GlobalSimpleAggExecutor, PkIndices,
@@ -381,7 +381,7 @@ pub mod agg_executor {
             distinct_dedup_tables: Default::default(),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
 
-            extra: None,
+            extra: SimpleAggExecutorExtraArgs {},
         })
         .unwrap()
         .boxed()

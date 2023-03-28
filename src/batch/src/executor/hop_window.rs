@@ -20,7 +20,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Vis};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, IntervalUnit};
+use risingwave_common::types::{DataType, Interval};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_expr::ExprError;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -34,8 +34,8 @@ pub struct HopWindowExecutor {
     identity: String,
     schema: Schema,
     time_col_idx: usize,
-    window_slide: IntervalUnit,
-    window_size: IntervalUnit,
+    window_slide: Interval,
+    window_size: Interval,
     window_start_exprs: Vec<BoxedExpression>,
     window_end_exprs: Vec<BoxedExpression>,
     output_indices: Vec<usize>,
@@ -111,8 +111,8 @@ impl HopWindowExecutor {
         child: BoxedExecutor,
         schema: Schema,
         time_col_idx: usize,
-        window_slide: IntervalUnit,
-        window_size: IntervalUnit,
+        window_slide: Interval,
+        window_size: Interval,
         identity: String,
         window_start_exprs: Vec<BoxedExpression>,
         window_end_exprs: Vec<BoxedExpression>,
@@ -211,7 +211,7 @@ mod tests {
     use futures::stream::StreamExt;
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::test_utils::IntervalUnitTestExt;
+    use risingwave_common::types::test_utils::IntervalTestExt;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::test_utils::make_hop_window_expression;
 
@@ -220,9 +220,9 @@ mod tests {
 
     fn create_executor(
         output_indices: Vec<usize>,
-        window_slide: IntervalUnit,
-        window_size: IntervalUnit,
-        window_offset: IntervalUnit,
+        window_slide: Interval,
+        window_size: Interval,
+        window_offset: Interval,
     ) -> Box<HopWindowExecutor> {
         let field1 = Field::unnamed(DataType::Int64);
         let field2 = Field::unnamed(DataType::Int64);
@@ -268,10 +268,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_window_offset() {
-        async fn test_window_offset_helper(window_offset: IntervalUnit) -> DataChunk {
+        async fn test_window_offset_helper(window_offset: Interval) -> DataChunk {
             let default_indices = (0..3 + 2).collect_vec();
-            let window_slide = IntervalUnit::from_minutes(15);
-            let window_size = IntervalUnit::from_minutes(30);
+            let window_slide = Interval::from_minutes(15);
+            let window_size = Interval::from_minutes(30);
             let executor =
                 create_executor(default_indices, window_slide, window_size, window_offset);
             let mut stream = executor.execute();
@@ -282,11 +282,11 @@ mod tests {
         for offset in 0..window_size {
             for coefficient in -5..0 {
                 assert_eq!(
-                    test_window_offset_helper(IntervalUnit::from_minutes(
+                    test_window_offset_helper(Interval::from_minutes(
                         coefficient * window_size + offset
                     ))
                     .await,
-                    test_window_offset_helper(IntervalUnit::from_minutes(
+                    test_window_offset_helper(Interval::from_minutes(
                         (coefficient - 1) * window_size + offset
                     ))
                     .await
@@ -296,11 +296,11 @@ mod tests {
         for offset in 0..window_size {
             for coefficient in 0..5 {
                 assert_eq!(
-                    test_window_offset_helper(IntervalUnit::from_minutes(
+                    test_window_offset_helper(Interval::from_minutes(
                         coefficient * window_size + offset
                     ))
                     .await,
-                    test_window_offset_helper(IntervalUnit::from_minutes(
+                    test_window_offset_helper(Interval::from_minutes(
                         (coefficient + 1) * window_size + offset
                     ))
                     .await
@@ -309,13 +309,13 @@ mod tests {
         }
         for offset in -window_size..window_size {
             assert_eq!(
-                test_window_offset_helper(IntervalUnit::from_minutes(window_size + offset)).await,
-                test_window_offset_helper(IntervalUnit::from_minutes(-window_size + offset)).await
+                test_window_offset_helper(Interval::from_minutes(window_size + offset)).await,
+                test_window_offset_helper(Interval::from_minutes(-window_size + offset)).await
             );
         }
 
         assert_eq!(
-            test_window_offset_helper(IntervalUnit::from_minutes(-31)).await,
+            test_window_offset_helper(Interval::from_minutes(-31)).await,
             DataChunk::from_pretty(
                 &"I I TS        TS        TS
                 1 1 ^10:00:00 ^09:44:00 ^10:14:00
@@ -330,7 +330,7 @@ mod tests {
             )
         );
         assert_eq!(
-            test_window_offset_helper(IntervalUnit::from_minutes(29)).await,
+            test_window_offset_helper(Interval::from_minutes(29)).await,
             DataChunk::from_pretty(
                 &"I I TS        TS        TS
                 1 1 ^10:00:00 ^09:44:00 ^10:14:00
@@ -350,9 +350,9 @@ mod tests {
     async fn test_execute() {
         let default_indices = (0..3 + 2).collect_vec();
 
-        let window_slide = IntervalUnit::from_minutes(15);
-        let window_size = IntervalUnit::from_minutes(30);
-        let window_offset = IntervalUnit::from_minutes(0);
+        let window_slide = Interval::from_minutes(15);
+        let window_size = Interval::from_minutes(30);
+        let window_offset = Interval::from_minutes(0);
         let executor = create_executor(default_indices, window_slide, window_size, window_offset);
 
         let mut stream = executor.execute();
@@ -394,9 +394,9 @@ mod tests {
     }
     #[tokio::test]
     async fn test_output_indices() {
-        let window_slide = IntervalUnit::from_minutes(15);
-        let window_size = IntervalUnit::from_minutes(30);
-        let window_offset = IntervalUnit::from_minutes(0);
+        let window_slide = Interval::from_minutes(15);
+        let window_size = Interval::from_minutes(30);
+        let window_offset = Interval::from_minutes(0);
         let executor = create_executor(vec![1, 3, 4, 2], window_slide, window_size, window_offset);
 
         let mut stream = executor.execute();
