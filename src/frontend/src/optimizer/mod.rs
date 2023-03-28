@@ -22,7 +22,7 @@ mod heuristic_optimizer;
 mod plan_rewriter;
 pub use plan_rewriter::PlanRewriter;
 mod plan_visitor;
-pub use plan_visitor::{ExecutionModeDecider, PlanVisitor};
+pub use plan_visitor::{ExecutionModeDecider, PlanVisitor, SysTableVisitor};
 mod logical_optimization;
 mod optimizer_context;
 mod plan_expr_rewriter;
