@@ -28,11 +28,11 @@ use risingwave_storage::StateStore;
 use super::StreamExecutorResult;
 use crate::common::table::state_table::StateTable;
 
-pub struct EowcBuffer<S: StateStore> {
+pub struct SortBuffer<S: StateStore> {
     _phantom: PhantomData<S>,
 }
 
-impl<S: StateStore> EowcBuffer<S> {
+impl<S: StateStore> SortBuffer<S> {
     pub fn new() -> Self {
         Self {
             _phantom: PhantomData,

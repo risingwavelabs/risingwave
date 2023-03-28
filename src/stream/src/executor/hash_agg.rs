@@ -37,7 +37,7 @@ use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggStateStorage, ChunkBuilder, DistinctDeduplicater,
     OnlyOutputIfHasInput,
 };
-use super::eowc_buffer::EowcBuffer;
+use super::sort_buffer::SortBuffer;
 use super::{
     expect_first_barrier, ActorContextRef, Executor, ExecutorInfo, PkIndicesRef,
     StreamExecutorResult, Watermark,
@@ -101,7 +101,7 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     /// State table for the previous result of all agg calls.
     /// The outputs of all managed agg states are collected and stored in this
     /// table when `flush_data` is called.
-    /// Also serves as EOWC buffer table.
+    /// Also serves as EOWC sort buffer table.
     result_table: StateTable<S>,
 
     /// State tables for deduplicating rows on distinct key for distinct agg calls.
@@ -212,7 +212,7 @@ impl<S: StateStore> Default for EmitOnUpdates<S> {
 }
 
 struct EmitOnWindowClose<S: StateStore> {
-    buffer: EowcBuffer<S>,
+    buffer: SortBuffer<S>,
 }
 
 impl<S: StateStore> Emitter for EmitOnWindowClose<S> {
@@ -266,7 +266,7 @@ impl<S: StateStore> Emitter for EmitOnWindowClose<S> {
 impl<S: StateStore> Default for EmitOnWindowClose<S> {
     fn default() -> Self {
         Self {
-            buffer: EowcBuffer::new(),
+            buffer: SortBuffer::new(),
         }
     }
 }
