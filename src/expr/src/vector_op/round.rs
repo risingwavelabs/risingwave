@@ -31,6 +31,13 @@ pub fn ceil_f64(input: F64) -> F64 {
     f64::ceil(input.0).into()
 }
 
+// TODO: add sin here?
+
+#[function("sin(float64) -> float64")]
+pub fn ceil_decimal(input: F64) -> F64 {
+    f64::sin(input.0).into()
+}
+
 #[function("ceil(decimal) -> decimal")]
 pub fn ceil_decimal(input: Decimal) -> Decimal {
     input.ceil()

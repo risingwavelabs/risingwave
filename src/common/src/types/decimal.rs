@@ -499,6 +499,8 @@ impl Decimal {
         }
     }
 
+    // TODO: add sin here? No. It is a float operation
+
     #[must_use]
     pub fn floor(&self) -> Self {
         match self {

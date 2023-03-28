@@ -346,6 +346,8 @@ impl Binder {
                 ("abs", raw_call(ExprType::Abs)),
                 ("exp", raw_call(ExprType::Exp)),
                 ("mod", raw_call(ExprType::Modulus)),
+                ("sin", raw_call(ExprType::Sin)),
+                // TODO: add here
                 (
                     "to_timestamp",
                     dispatch_by_len(vec![
