@@ -369,9 +369,9 @@ impl From<UserId> for u32 {
     }
 }
 
-#[derive(Clone, Debug)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ConflictBehavior {
+    #[default]
     NoCheck,
     Overwrite,
     IgnoreConflict,
@@ -382,16 +382,24 @@ impl ConflictBehavior {
         match tb_conflict_behavior {
             PbHandleConflictBehavior::Overwrite => ConflictBehavior::Overwrite,
             PbHandleConflictBehavior::Ignore => ConflictBehavior::IgnoreConflict,
-            PbHandleConflictBehavior::NoCheck => ConflictBehavior::NoCheck,
-            _ => unreachable!(),
+            PbHandleConflictBehavior::NoCheck
+            | PbHandleConflictBehavior::ConflictBehaviorUnspecified => ConflictBehavior::NoCheck,
         }
     }
 
-    pub fn to_protobuf(&self) -> PbHandleConflictBehavior {
+    pub fn to_protobuf(self) -> PbHandleConflictBehavior {
         match self {
             ConflictBehavior::NoCheck => PbHandleConflictBehavior::NoCheck,
             ConflictBehavior::Overwrite => PbHandleConflictBehavior::Overwrite,
             ConflictBehavior::IgnoreConflict => PbHandleConflictBehavior::Ignore,
+        }
+    }
+
+    pub fn debug_to_string(self) -> String {
+        match self {
+            ConflictBehavior::NoCheck => "NoCheck".to_string(),
+            ConflictBehavior::Overwrite => "Overwrite".to_string(),
+            ConflictBehavior::IgnoreConflict => "IgnoreConflict".to_string(),
         }
     }
 }

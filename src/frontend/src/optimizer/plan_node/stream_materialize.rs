@@ -171,8 +171,6 @@ impl StreamMaterialize {
 
         let (pk, stream_key) = derive_pk(input, user_order_by, &columns);
         let read_prefix_len_hint = stream_key.len();
-
-        let conflict_behavior_type = conflict_behavior.to_protobuf() as i32;
         Ok(TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
@@ -191,7 +189,7 @@ impl StreamMaterialize {
             row_id_index,
             value_indices,
             definition,
-            conflict_behavior_type,
+            conflict_behavior,
             read_prefix_len_hint,
             version,
             watermark_columns,
@@ -238,14 +236,8 @@ impl fmt::Display for StreamMaterialize {
             .field("stream_key", &format_args!("[{}]", stream_key))
             .field("pk_columns", &format_args!("[{}]", pk_columns));
 
-        let pk_conflict_behavior;
-        if self.table.conflict_behavior_type() == 0 {
-            pk_conflict_behavior = "no check";
-        } else if self.table.conflict_behavior_type() == 1 {
-            pk_conflict_behavior = "overwrite";
-        } else {
-            pk_conflict_behavior = "ignore conflict";
-        }
+        let pk_conflict_behavior = self.table.conflict_behavior().debug_to_string();
+
         builder.field("pk_conflict", &pk_conflict_behavior);
 
         let watermark_columns = &self.base.watermark_columns;
