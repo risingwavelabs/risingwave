@@ -321,6 +321,9 @@ pub struct StorageConfig {
     #[serde(default)]
     pub block_cache_capacity_mb: Option<usize>,
 
+    #[serde(default)]
+    pub high_priority_ratio_in_percent: Option<usize>,
+
     /// Capacity of sstable meta cache.
     #[serde(default)]
     pub meta_cache_capacity_mb: Option<usize>,
@@ -623,6 +626,10 @@ mod default {
             512
         }
 
+        pub fn high_priority_ratio_in_percent() -> usize {
+            70
+        }
+
         pub fn meta_cache_capacity_mb() -> usize {
             128
         }
@@ -800,6 +807,7 @@ pub struct StorageMemoryConfig {
     pub shared_buffer_capacity_mb: usize,
     pub file_cache_total_buffer_capacity_mb: usize,
     pub compactor_memory_limit_mb: usize,
+    pub high_priority_ratio_in_percent: usize,
 }
 
 pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
@@ -824,6 +832,10 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         .storage
         .compactor_memory_limit_mb
         .unwrap_or(default::storage::compactor_memory_limit_mb());
+    let high_priority_ratio_in_percent = s
+        .storage
+        .high_priority_ratio_in_percent
+        .unwrap_or(default::storage::high_priority_ratio_in_percent());
 
     StorageMemoryConfig {
         block_cache_capacity_mb,
@@ -831,5 +843,6 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         shared_buffer_capacity_mb,
         file_cache_total_buffer_capacity_mb,
         compactor_memory_limit_mb,
+        high_priority_ratio_in_percent,
     }
 }

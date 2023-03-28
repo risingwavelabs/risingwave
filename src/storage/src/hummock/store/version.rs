@@ -637,6 +637,7 @@ impl HummockVersionReader {
             for sstable_info in fetch_meta_req {
                 let inner_req_count = req_count;
                 let capture_ref = async {
+                    // We would fill block to high priority cache for level-0
                     self.sstable_store
                         .sstable_syncable(sstable_info, &local_stats)
                         .in_span(Span::enter_with_local_parent("get_sstable"))
