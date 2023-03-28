@@ -17,6 +17,7 @@ use std::ops::{Deref, DerefMut};
 
 use function_name::named;
 use itertools::Itertools;
+use risingwave_backup::checkpoint_dir;
 use risingwave_pb::hummock::hummock_version_checkpoint::StaleObjects;
 use risingwave_pb::hummock::HummockVersionCheckpoint;
 
@@ -38,7 +39,7 @@ where
         use prost::Message;
         let metadata = self
             .object_store
-            .list(&self.checkpoint_path)
+            .list(&checkpoint_dir(&self.checkpoint_path))
             .await?
             .into_iter()
             .filter(|o| o.key == self.checkpoint_path)

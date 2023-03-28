@@ -122,7 +122,8 @@ impl From<&MetaSnapshotManifest> for PbMetaSnapshotManifest {
     }
 }
 
-const CHECKPOINT_FILE_NAME: &str = "checkpoint";
+const CHECKPOINT_DIR: &str = "checkpoint";
+const CHECKPOINT_NAME: &str = "0";
 
 /// Creates the object store to persist checkpoint, using the same object store url with
 /// `state_store`.
@@ -139,6 +140,10 @@ pub async fn object_store_client(
     parse_remote_object_store(&url, metrics, "Version Checkpoint").await
 }
 
-pub fn checkpoint_path(dir: &str) -> String {
-    format!("{}/{}", dir, CHECKPOINT_FILE_NAME)
+pub fn checkpoint_path(root_dir: &str) -> String {
+    format!("{}/{}/{}", root_dir, CHECKPOINT_DIR, CHECKPOINT_NAME)
+}
+
+pub fn checkpoint_dir(checkpoint_path: &str) -> String {
+    checkpoint_path.trim_end_matches(|c| c != '/').to_string()
 }
