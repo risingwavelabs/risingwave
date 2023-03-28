@@ -695,9 +695,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         yield Message::Chunk(chunk?);
                     }
 
-                    for buffered_watermark in &mut vars.buffered_watermarks {
-                        if let Some(watermark) = buffered_watermark.take() {
+                    if this.emit_on_window_close {
+                        // ignore watermarks on other columns
+                        if let Some(watermark) = vars.buffered_watermarks[0].take() {
                             yield Message::Watermark(watermark);
+                        }
+                    } else {
+                        for buffered_watermark in &mut vars.buffered_watermarks {
+                            if let Some(watermark) = buffered_watermark.take() {
+                                yield Message::Watermark(watermark);
+                            }
                         }
                     }
 
