@@ -24,6 +24,7 @@ use prometheus::{
     register_int_gauge_with_registry, Histogram, HistogramVec, IntCounterVec, IntGauge,
     IntGaugeVec, Registry,
 };
+use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::common::WorkerType;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -102,6 +103,8 @@ pub struct MetaMetrics {
 
     /// The number of compactor CPU need to be scale.
     pub scale_compactor_core_num: IntGauge,
+
+    pub object_store_metric: Arc<ObjectStoreMetrics>,
 }
 
 impl MetaMetrics {
@@ -307,6 +310,8 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let object_store_metric = Arc::new(ObjectStoreMetrics::new(registry.clone()));
+
         Self {
             registry,
 
@@ -340,6 +345,7 @@ impl MetaMetrics {
             compact_pending_bytes,
             compact_level_compression_ratio,
             scale_compactor_core_num,
+            object_store_metric,
         }
     }
 

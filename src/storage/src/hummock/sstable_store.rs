@@ -20,7 +20,7 @@ use bytes::{Buf, BufMut, Bytes};
 use fail::fail_point;
 use itertools::Itertools;
 use risingwave_common::cache::{CachePriority, LruCacheEventListener};
-use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_object_store::object::{
     BlockLocation, MonitoredStreamingReader, ObjectError, ObjectMetadata, ObjectStoreRef,
     ObjectStreamingUploader,

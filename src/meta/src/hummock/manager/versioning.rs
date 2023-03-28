@@ -14,16 +14,17 @@
 
 use std::cmp;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::ops::RangeBounds;
 
 use function_name::named;
 use itertools::Itertools;
+use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    get_compaction_group_ids, BranchedSstInfo, HummockVersionExt,
+    build_initial_compaction_group_levels, get_compaction_group_ids, BranchedSstInfo,
+    HummockVersionExt,
 };
-use risingwave_hummock_sdk::compaction_group::StateTableId;
+use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockSstableObjectId, HummockVersionId,
+    CompactionGroupId, HummockContextId, HummockSstableObjectId, HummockVersionId, FIRST_VERSION_ID,
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
@@ -108,16 +109,14 @@ impl Versioning {
         min_pinned_version_id
     }
 
-    /// Marks all objects in (`start_exclusive`, `min_pinned_version_id`] for deletion.
-    pub(super) fn mark_objects_for_deletion_after(&mut self, start_exclusive: HummockVersionId) {
+    /// Marks all objects <= `min_pinned_version_id` for deletion.
+    pub(super) fn mark_objects_for_deletion(&mut self) {
         let min_pinned_version_id = self.min_pinned_version_id();
         self.objects_to_delete.extend(
             self.checkpoint
                 .stale_objects
                 .iter()
-                .filter(|(version_id, _)| {
-                    **version_id <= min_pinned_version_id && **version_id > start_exclusive
-                })
+                .filter(|(version_id, _)| **version_id <= min_pinned_version_id)
                 .flat_map(|(_, stale_objects)| stale_objects.id.clone()),
         );
     }

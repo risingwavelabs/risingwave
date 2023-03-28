@@ -75,8 +75,7 @@ function restore() {
   --etcd-endpoints 127.0.0.1:2388 \
   --storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
   --storage-directory backup \
-  --state-store-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
-  --state-store-dir data \
+  --state-store-url hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
   1>/dev/null
 }
 

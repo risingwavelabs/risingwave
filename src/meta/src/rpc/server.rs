@@ -444,7 +444,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let backup_manager = BackupManager::new(
         env.clone(),
         hummock_manager.clone(),
-        meta_metrics.registry().clone(),
+        meta_metrics.clone(),
         system_params_reader.backup_storage_url(),
         system_params_reader.backup_storage_directory(),
     )

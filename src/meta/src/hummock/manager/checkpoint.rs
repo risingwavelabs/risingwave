@@ -112,7 +112,7 @@ where
                     >= versioning.checkpoint.checkpoint.as_ref().unwrap().id
         );
         versioning.checkpoint = new_checkpoint;
-        versioning.mark_objects_for_deletion_after(old_checkpoint_id);
+        versioning.mark_objects_for_deletion();
         let remain = versioning.objects_to_delete.len();
         drop(versioning_guard);
         self.metrics

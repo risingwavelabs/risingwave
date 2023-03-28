@@ -27,9 +27,9 @@ use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    add_new_sub_level, build_initial_compaction_group_levels, build_version_delta_after_version,
-    get_compaction_group_ids, try_get_compaction_group_id_by_table_id, BranchedSstInfo,
-    HummockVersionExt, HummockVersionUpdateExt,
+    add_new_sub_level, build_version_delta_after_version, get_compaction_group_ids,
+    try_get_compaction_group_id_by_table_id, BranchedSstInfo, HummockVersionExt,
+    HummockVersionUpdateExt,
 };
 use risingwave_hummock_sdk::{
     CompactionGroupId, ExtendedSstableInfo, HummockCompactionTaskId, HummockContextId,
@@ -167,7 +167,6 @@ use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGro
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
 };
-use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::ObjectStoreRef;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::version_update_payload::Payload;
@@ -285,14 +284,10 @@ where
         catalog_manager: CatalogManagerRef<S>,
     ) -> Result<HummockManagerRef<S>> {
         let sys_params = env.system_params_manager().get_params().await;
-        let state_store_url = sys_params.state_store("".to_string());
+        let state_store_url = sys_params.state_store();
         let state_store_dir = sys_params.data_directory();
         let object_store = Arc::new(
-            object_store_client(
-                &state_store_url,
-                Arc::new(ObjectStoreMetrics::new(metrics.registry.clone())),
-            )
-            .await,
+            object_store_client(state_store_url, metrics.object_store_metric.clone()).await,
         );
         let checkpoint_path = checkpoint_path(state_store_dir);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -436,11 +431,18 @@ where
                 // 2. Then, for backward compatibility, try to read checkpoint from meta store.
                 let versions = HummockVersion::list(self.env.meta_store()).await?;
                 let checkpoint_version = if !versions.is_empty() {
-                    versions.into_iter().next().unwrap()
+                    let checkpoint = versions.into_iter().next().unwrap();
+                    tracing::warn!(
+                        "read hummock version checkpoint from meta store: {:#?}",
+                        checkpoint
+                    );
+                    checkpoint
                 } else {
                     // 3. Lastly, as no record found in stores, create a initial version.
                     is_init = true;
-                    create_init_version()
+                    let checkpoint = create_init_version();
+                    tracing::info!("init hummock version checkpoint");
+                    checkpoint
                 };
                 versioning_guard.checkpoint = HummockVersionCheckpoint {
                     checkpoint: Some(checkpoint_version.clone()),
@@ -492,7 +494,7 @@ where
             .collect();
 
         versioning_guard.objects_to_delete.clear();
-        versioning_guard.mark_objects_for_deletion_after(0);
+        versioning_guard.mark_objects_for_deletion();
 
         let all_group_ids = get_compaction_group_ids(&versioning_guard.current_version);
         let configs = self

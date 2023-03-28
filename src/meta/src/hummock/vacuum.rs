@@ -169,8 +169,8 @@ where
     ) -> MetaResult<()> {
         let reject: HashSet<HummockSstableObjectId> =
             self.backup_manager.list_pinned_ssts().into_iter().collect();
-        // Ack these pinned SSTs directly. Otherwise delta log containing them cannot be GCed.
-        // These SSTs will be GCed during full GC when they are no longer pinned.
+        // Ack these SSTs immediately, because they tend to be pinned for long time.
+        // They will be GCed during full GC when they are no longer pinned.
         let to_ack = objects_to_delete
             .iter()
             .filter(|s| reject.contains(s))
