@@ -79,10 +79,10 @@ pub fn gen_sink_plan(
 
     let definition = context.normalized_sql().to_owned();
 
-    let (dependent_views, bound) = {
+    let (dependent_relations, bound) = {
         let mut binder = Binder::new(session);
         let bound = binder.bind_query(*query)?;
-        (binder.shared_views(), bound)
+        (binder.including_relations(), bound)
     };
 
     let check_items = resolve_query_privileges(&bound);
@@ -105,7 +105,7 @@ pub fn gen_sink_plan(
         SchemaId::new(sink_schema_id),
         DatabaseId::new(sink_database_id),
         UserId::new(session.user_id()),
-        dependent_views,
+        dependent_relations,
     );
 
     let sink_plan: PlanRef = sink_plan.into();

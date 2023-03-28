@@ -334,8 +334,6 @@ where
 
         // 2. Set the graph-related fields and freeze the `stream_job`.
         stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
-        let dependent_relations = fragment_graph.dependent_relations().clone();
-        stream_job.add_dependent_relations(dependent_relations);
         let stream_job = &*stream_job;
 
         // 3. Mark current relation as "creating" and add reference count to dependent relations.
@@ -361,8 +359,8 @@ where
         // contains all information needed for building the actor graph.
         let upstream_mview_fragments = self
             .fragment_manager
-            .get_upstream_mview_fragments(fragment_graph.dependent_relations())
-            .await;
+            .get_upstream_mview_fragments(fragment_graph.dependent_streaming_jobs())
+            .await?;
         let upstream_mview_actors = upstream_mview_fragments
             .iter()
             .map(|(&table_id, fragment)| {
@@ -593,7 +591,7 @@ where
             StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), &*stream_job)
                 .await?;
         assert!(fragment_graph.internal_tables().is_empty());
-        assert!(fragment_graph.dependent_relations().is_empty());
+        assert!(fragment_graph.dependent_streaming_jobs().is_empty());
 
         // 2. Set the graph-related fields and freeze the `stream_job`.
         stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());

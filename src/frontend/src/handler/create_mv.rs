@@ -86,10 +86,10 @@ pub fn gen_create_mv_plan(
 
     let definition = context.normalized_sql().to_owned();
 
-    let (dependent_views, bound) = {
+    let (dependent_relations, bound) = {
         let mut binder = Binder::new_for_stream(session);
         let bound = binder.bind_query(query)?;
-        (binder.shared_views(), bound)
+        (binder.including_relations(), bound)
     };
 
     let check_items = resolve_query_privileges(&bound);
@@ -113,7 +113,7 @@ pub fn gen_create_mv_plan(
     table.owner = session.user_id();
 
     // record dependent views.
-    table.dependent_relations.extend(dependent_views);
+    table.dependent_relations = dependent_relations;
 
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();

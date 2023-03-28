@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
 use itertools::Itertools;
@@ -94,6 +94,9 @@ pub struct Binder {
 
     /// `ShareId`s identifying shared views.
     shared_views: HashMap<ViewId, ShareId>,
+
+    /// The included relations while binding a query.
+    including_relations: HashSet<u32>,
 
     param_types: ParameterTypes,
 }
@@ -202,6 +205,7 @@ impl Binder {
             search_path: session.config().get_search_path(),
             in_streaming,
             shared_views: HashMap::new(),
+            including_relations: HashSet::new(),
             param_types: ParameterTypes::new(param_types),
         }
     }
@@ -227,8 +231,8 @@ impl Binder {
         self.param_types.export()
     }
 
-    pub fn shared_views(&self) -> Vec<ViewId> {
-        self.shared_views.keys().cloned().collect()
+    pub fn including_relations(&self) -> Vec<u32> {
+        self.including_relations.iter().cloned().collect_vec()
     }
 
     fn push_context(&mut self) {

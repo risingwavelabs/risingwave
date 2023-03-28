@@ -30,7 +30,6 @@ use risingwave_sqlparser::ast::{SetExpr, Statement};
 use super::extended_handle::{Portal, PrepareStatement};
 use super::{PgResponseStream, RwPgResponse};
 use crate::binder::{Binder, BoundStatement};
-use crate::catalog::ViewId;
 use crate::handler::flush::do_flush;
 use crate::handler::privilege::resolve_privileges;
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
@@ -89,7 +88,7 @@ pub struct BatchQueryPlanResult {
     pub(crate) plan: PlanRef,
     pub(crate) query_mode: QueryMode,
     pub(crate) schema: Schema,
-    pub(crate) dependent_views: Vec<ViewId>,
+    pub(crate) dependent_relations: Vec<u32>,
 }
 
 pub fn gen_batch_query_plan(
@@ -99,10 +98,10 @@ pub fn gen_batch_query_plan(
 ) -> Result<BatchQueryPlanResult> {
     let must_dist = must_run_in_distributed_mode(&stmt)?;
 
-    let (dependent_views, bound) = {
+    let (dependent_relations, bound) = {
         let mut binder = Binder::new(session);
         let bound = binder.bind(stmt)?;
-        (binder.shared_views(), bound)
+        (binder.including_relations(), bound)
     };
 
     let check_items = resolve_privileges(&bound);
@@ -142,7 +141,7 @@ pub fn gen_batch_query_plan(
         plan: physical,
         query_mode,
         schema,
-        dependent_views,
+        dependent_relations,
     })
 }
 

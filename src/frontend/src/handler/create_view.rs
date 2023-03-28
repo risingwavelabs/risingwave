@@ -14,8 +14,6 @@
 
 //! Handle creation of logical (non-materialized) views.
 
-use std::collections::HashSet;
-
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -25,7 +23,7 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, Query, Statement};
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::handler::HandlerArgs;
-use crate::optimizer::{OptimizerContext, PlanVisitor};
+use crate::optimizer::OptimizerContext;
 
 pub async fn handle_create_view(
     handler_args: HandlerArgs,
@@ -47,9 +45,8 @@ pub async fn handle_create_view(
     let (dependent_relations, schema) = {
         let context = OptimizerContext::from_handler_args(handler_args);
         let super::query::BatchQueryPlanResult {
-            plan,
             schema,
-            dependent_views: mut dependent_relations,
+            dependent_relations,
             ..
         } = super::query::gen_batch_query_plan(
             &session,
@@ -57,11 +54,6 @@ pub async fn handle_create_view(
             Statement::Query(Box::new(query.clone())),
         )?;
 
-        let mut visitor = CollectTableIds {
-            table_ids: HashSet::new(),
-        };
-        visitor.visit(plan);
-        dependent_relations.extend(visitor.table_ids.into_iter());
         (dependent_relations, schema)
     };
 
@@ -102,23 +94,4 @@ pub async fn handle_create_view(
     catalog_writer.create_view(view).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_VIEW))
-}
-
-struct CollectTableIds {
-    table_ids: HashSet<u32>,
-}
-
-impl PlanVisitor<()> for CollectTableIds {
-    fn merge(_: (), _: ()) {}
-
-    fn visit_batch_seq_scan(&mut self, plan: &crate::optimizer::plan_node::BatchSeqScan) {
-        self.table_ids
-            .insert(plan.logical().table_desc().table_id.table_id);
-    }
-
-    fn visit_batch_source(&mut self, plan: &crate::optimizer::plan_node::BatchSource) {
-        if let Some(catalog) = plan.logical().source_catalog() {
-            self.table_ids.insert(catalog.id);
-        }
-    }
 }
