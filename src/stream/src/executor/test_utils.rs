@@ -451,12 +451,9 @@ pub mod top_n_executor {
     }
 }
 
-/// Generate `num_of_chunks` data chunks with type `data_types`, each data chunk has cardinality of
-/// `batch_size`.
-/// TODO(kwannoel): Refactor this and `batch` `gen_data` into `data_chunk::test_utils`
-/// TODO(kwannoel): This should be `gen_chunk` instead.
-/// TODO(kwannoel): Instead of random, just generate sequence? See if encounter any errors...
-/// TODO(kwannoel): Different types of op, different vis.
+/// Generate `num_of_chunks` data chunks with type `data_types`,
+/// where each data chunk has cardinality of `chunk_size`.
+/// TODO(kwannoel): Generate different types of op, different vis.
 pub fn gen_data(
     num_of_chunks: usize,
     chunk_size: usize,
