@@ -33,9 +33,10 @@ const MV5: &str = "create materialized view m5 as select * from m4;";
 #[madsim::test]
 async fn test_simple_cascade_materialized_view() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let mut session = cluster.start_session();
 
-    cluster.run(ROOT_TABLE_CREATE).await?;
-    cluster.run(MV1).await?;
+    session.run(ROOT_TABLE_CREATE).await?;
+    session.run(MV1).await?;
 
     let fragment = cluster
         .locate_one_fragment([
@@ -62,17 +63,17 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
         fragment.inner.actors.len()
     );
 
-    cluster
+    session
         .run(&format!(
             "insert into t1 values {}",
             (1..=10).map(|x| format!("({x})")).join(",")
         ))
         .await?;
 
-    cluster.run("flush").await?;
+    session.run("flush").await?;
 
     // v1 > 5, result is [6, 7, 8, 9, 10]
-    cluster
+    session
         .run("select count(*) from m1")
         .await?
         .assert_result_eq("5");
@@ -92,21 +93,21 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
         fragment.inner.actors.len()
     );
 
-    cluster
+    session
         .run("select count(*) from m1")
         .await?
         .assert_result_eq("5");
 
-    cluster
+    session
         .run(&format!(
             "insert into t1 values {}",
             (11..=20).map(|x| format!("({x})")).join(",")
         ))
         .await?;
 
-    cluster.run("flush").await?;
+    session.run("flush").await?;
     // 10 < v1 < 15, result is [11, 12, 13, 14]
-    cluster
+    session
         .run("select count(*) from m1")
         .await?
         .assert_result_eq("15");
@@ -117,13 +118,14 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
 #[madsim::test]
 async fn test_diamond_cascade_materialized_view() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let mut session = cluster.start_session();
 
-    cluster.run(ROOT_TABLE_CREATE).await?;
-    cluster.run(MV1).await?;
-    cluster.run(MV2).await?;
-    cluster.run(MV3).await?;
-    cluster.run(MV4).await?;
-    cluster.run(MV5).await?;
+    session.run(ROOT_TABLE_CREATE).await?;
+    session.run(MV1).await?;
+    session.run(MV2).await?;
+    session.run(MV3).await?;
+    session.run(MV4).await?;
+    session.run(MV5).await?;
 
     let fragment = cluster
         .locate_one_fragment([
@@ -141,15 +143,15 @@ async fn test_diamond_cascade_materialized_view() -> Result<()> {
     let fragment = cluster.locate_fragment_by_id(id).await?;
     assert_eq!(fragment.inner.actors.len(), 1);
 
-    cluster
+    session
         .run(&format!(
             "insert into t1 values {}",
             (1..=10).map(|x| format!("({x})")).join(",")
         ))
         .await?;
 
-    cluster.run("flush").await?;
-    cluster
+    session.run("flush").await?;
+    session
         .run("select count(*) from m5")
         .await?
         .assert_result_eq("0");
@@ -160,20 +162,20 @@ async fn test_diamond_cascade_materialized_view() -> Result<()> {
     let fragment = cluster.locate_fragment_by_id(id).await?;
     assert_eq!(fragment.inner.actors.len(), 6);
 
-    cluster
+    session
         .run("select count(*) from m5")
         .await?
         .assert_result_eq("0");
 
-    cluster
+    session
         .run(&format!(
             "insert into t1 values {}",
             (11..=20).map(|x| format!("({x})")).join(",")
         ))
         .await?;
 
-    cluster.run("flush").await?;
-    cluster
+    session.run("flush").await?;
+    session
         .run("select count(*) from m5")
         .await?
         .assert_result_eq("4");

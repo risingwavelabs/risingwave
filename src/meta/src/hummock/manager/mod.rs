@@ -29,7 +29,7 @@ use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     add_new_sub_level, build_initial_compaction_group_levels, build_version_delta_after_version,
-    get_compaction_group_ids, get_member_table_ids, try_get_compaction_group_id_by_table_id,
+    get_compaction_group_ids, try_get_compaction_group_id_by_table_id, BranchedSstInfo,
     HummockVersionExt, HummockVersionUpdateExt,
 };
 use risingwave_hummock_sdk::{
@@ -166,6 +166,7 @@ use risingwave_hummock_sdk::table_stats::{
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::PbCompactionGroupInfo;
+use risingwave_pb::meta::relation::RelationInfo;
 
 /// Acquire write lock of the lock with `lock_name`.
 /// The macro will use macro `function_name` to get the name of the function of method that calls
@@ -787,6 +788,7 @@ where
                 .values()
                 .map(|v| v.minimal_pinned_snapshot)
                 .fold(max_committed_epoch, std::cmp::min);
+
             (versioning_guard.current_version.clone(), watermark)
         };
         if current_version.levels.get(&compaction_group_id).is_none() {
@@ -821,6 +823,12 @@ where
             Some(task) => task,
         };
         compact_task.watermark = watermark;
+        compact_task.existing_table_ids = current_version
+            .levels
+            .get(&compaction_group_id)
+            .unwrap()
+            .member_table_ids
+            .clone();
 
         if CompactStatus::is_trivial_move_task(&compact_task) && can_trivial_move {
             compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
@@ -837,26 +845,6 @@ where
                 start_time.elapsed()
             );
         } else {
-            let all_table_ids = get_member_table_ids(&current_version);
-            // to get all relational table_id from sst_info
-            let table_ids = compact_task
-                .input_ssts
-                .iter()
-                .flat_map(|level| {
-                    level
-                        .table_infos
-                        .iter()
-                        .flat_map(|sst_info| sst_info.table_ids.iter().cloned())
-                        .collect_vec()
-                })
-                .collect::<HashSet<u32>>();
-            for table_id in table_ids {
-                // to found exist table_id from
-                if all_table_ids.contains(&table_id) {
-                    compact_task.existing_table_ids.push(table_id);
-                }
-            }
-
             compact_task.table_options = table_id_to_option
                 .into_iter()
                 .filter_map(|(table_id, table_option)| {
@@ -1045,19 +1033,14 @@ where
 
     fn is_compact_task_expired(
         compact_task: &CompactTask,
-        branched_ssts: &BTreeMap<
-            HummockSstableObjectId,
-            BTreeMap<CompactionGroupId, Vec<HummockSstableId>>,
-        >,
+        branched_ssts: &BTreeMap<HummockSstableObjectId, BranchedSstInfo>,
     ) -> bool {
         for input_level in compact_task.get_input_ssts() {
             for table_info in input_level.get_table_infos() {
                 if let Some(mp) = branched_ssts.get(&table_info.object_id) {
                     if mp
                         .get(&compact_task.compaction_group_id)
-                        .map_or(true, |sst_id_vec| {
-                            !sst_id_vec.iter().contains(&table_info.sst_id)
-                        })
+                        .map_or(true, |sst_id| *sst_id != table_info.sst_id)
                     {
                         return true;
                     }
@@ -1159,9 +1142,12 @@ where
                 }
             }
             let is_success = if let TaskStatus::Success = compact_task.task_status() {
-                let is_expired = !current_version
-                    .get_levels()
-                    .contains_key(&compact_task.compaction_group_id)
+                // if member_table_ids changes, the data of sstable may stale.
+                let is_expired = current_version
+                    .levels
+                    .get(&compact_task.compaction_group_id)
+                    .map(|group| group.member_table_ids != compact_task.existing_table_ids)
+                    .unwrap_or(true)
                     || Self::is_compact_task_expired(compact_task, &versioning.branched_ssts);
                 if is_expired {
                     compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
@@ -1376,7 +1362,7 @@ where
                     None => false,
                 };
             if !is_sst_belong_to_group_declared {
-                let mut group_table_ids: BTreeMap<_, Vec<_>> = BTreeMap::new();
+                let mut group_table_ids: BTreeMap<_, Vec<u32>> = BTreeMap::new();
                 for table_id in sst.get_table_ids() {
                     match try_get_compaction_group_id_by_table_id(
                         &versioning.current_version,
@@ -1418,15 +1404,14 @@ where
         let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
         let mut branch_sstables = Vec::with_capacity(new_sst_id_number);
         for (sst, group_table_ids) in incorrect_ssts {
-            let mut branch_groups = BTreeMap::new();
-            for (group_id, match_ids) in group_table_ids {
+            let mut branch_groups = HashMap::new();
+            for (group_id, _match_ids) in group_table_ids {
                 let mut branch_sst = sst.clone();
                 branch_sst.sst_id = new_sst_id;
-                branch_sst.table_ids = match_ids;
                 branch_sstables.push(ExtendedSstableInfo::with_compaction_group(
                     group_id, branch_sst,
                 ));
-                branch_groups.insert(group_id, vec![new_sst_id]);
+                branch_groups.insert(group_id, new_sst_id);
                 new_sst_id += 1;
             }
             if !branch_groups.is_empty() {
@@ -1640,24 +1625,31 @@ where
                 let checkpoint_version_copy = versioning_guard.checkpoint_version.clone();
                 let hummock_version_deltas_copy = versioning_guard.hummock_version_deltas.clone();
                 let version_stats_copy = versioning_guard.version_stats.clone();
+                let branched_ssts = versioning_guard.branched_ssts.clone();
                 (
-                    compact_statuses_copy,
-                    compact_task_assignment_copy,
-                    pinned_versions_copy,
-                    pinned_snapshots_copy,
-                    checkpoint_version_copy,
-                    hummock_version_deltas_copy,
-                    version_stats_copy,
+                    (
+                        compact_statuses_copy,
+                        compact_task_assignment_copy,
+                        pinned_versions_copy,
+                        pinned_snapshots_copy,
+                        checkpoint_version_copy,
+                        hummock_version_deltas_copy,
+                        version_stats_copy,
+                    ),
+                    branched_ssts,
                 )
             };
-        let mem_state = get_state(compaction_guard.borrow(), versioning_guard.borrow());
+        let (mem_state, branched_ssts) =
+            get_state(compaction_guard.borrow(), versioning_guard.borrow());
         self.load_meta_store_state_impl(
             compaction_guard.borrow_mut(),
             versioning_guard.borrow_mut(),
         )
         .await
         .expect("Failed to load state from meta store");
-        let loaded_state = get_state(compaction_guard.borrow(), versioning_guard.borrow());
+        let (loaded_state, load_branched_ssts) =
+            get_state(compaction_guard.borrow(), versioning_guard.borrow());
+        assert_eq!(branched_ssts, load_branched_ssts);
         assert_eq!(
             mem_state, loaded_state,
             "hummock in-mem state is inconsistent with meta store state",
@@ -1669,6 +1661,13 @@ where
     #[named]
     pub async fn get_current_version(&self) -> HummockVersion {
         read_lock!(self, versioning).await.current_version.clone()
+    }
+
+    /// Gets branched sstable infos
+    /// Should not be called inside [`HummockManager`], because it requests locks internally.
+    #[named]
+    pub async fn get_branched_ssts_info(&self) -> BTreeMap<HummockSstableId, BranchedSstInfo> {
+        read_lock!(self, versioning).await.branched_ssts.clone()
     }
 
     /// Get version deltas from meta store
@@ -1734,11 +1733,11 @@ where
         for table in table_catalogs {
             self.env
                 .notification_manager()
-                .notify_hummock(Operation::Add, Info::Table(table.clone()))
+                .notify_hummock_relation_info(Operation::Add, RelationInfo::Table(table.clone()))
                 .await;
             self.env
                 .notification_manager()
-                .notify_compactor(Operation::Add, Info::Table(table))
+                .notify_compactor_relation_info(Operation::Add, RelationInfo::Table(table))
                 .await;
         }
 
@@ -1989,7 +1988,7 @@ where
             .scale_compactor_core_num
             .set(suggest_scale_out_core as i64);
 
-        tracing::info!(
+        tracing::debug!(
             "report_scale_compactor_info {:?} suggest_scale_out_core {:?}",
             info,
             suggest_scale_out_core
@@ -2099,27 +2098,20 @@ where
 }
 
 fn drop_sst(
-    branched_ssts: &mut BTreeMapTransaction<
-        '_,
-        HummockSstableObjectId,
-        BTreeMap<CompactionGroupId, Vec<HummockSstableId>>,
-    >,
+    branched_ssts: &mut BTreeMapTransaction<'_, HummockSstableObjectId, BranchedSstInfo>,
     group_id: CompactionGroupId,
     object_id: HummockSstableObjectId,
     sst_id: HummockSstableId,
 ) -> bool {
     match branched_ssts.get_mut(object_id) {
         Some(mut entry) => {
-            let sst_id_vec = entry.get_mut(&group_id).unwrap();
-            sst_id_vec.remove(sst_id_vec.iter().position(|id| *id == sst_id).unwrap());
-            if sst_id_vec.is_empty() {
-                entry.remove(&group_id);
-                if entry.is_empty() {
-                    branched_ssts.remove(object_id);
-                    true
-                } else {
-                    false
-                }
+            // if group_id not exist, it would not pass the stale check before.
+            let removed_sst_id = entry.get(&group_id).unwrap();
+            assert_eq!(*removed_sst_id, sst_id);
+            entry.remove(&group_id);
+            if entry.is_empty() {
+                branched_ssts.remove(object_id);
+                true
             } else {
                 false
             }
@@ -2130,11 +2122,7 @@ fn drop_sst(
 
 fn gen_version_delta<'a>(
     txn: &mut BTreeMapTransaction<'a, HummockVersionId, HummockVersionDelta>,
-    branched_ssts: &mut BTreeMapTransaction<
-        'a,
-        HummockSstableObjectId,
-        BTreeMap<CompactionGroupId, Vec<HummockSstableId>>,
-    >,
+    branched_ssts: &mut BTreeMapTransaction<'a, HummockSstableObjectId, BranchedSstInfo>,
     old_version: &HummockVersion,
     compact_task: &CompactTask,
     trivial_move: bool,

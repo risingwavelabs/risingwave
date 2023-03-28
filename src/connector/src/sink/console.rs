@@ -106,8 +106,8 @@ fn parse_datum(datum: DatumRef<'_>) -> String {
         Some(ScalarRefImpl::Decimal(v)) => format!("Decimal({})", v),
         Some(ScalarRefImpl::Utf8(v)) => format!("Utf8(\"{}\")", v),
         Some(ScalarRefImpl::Bool(v)) => format!("Bool({})", v),
-        Some(ScalarRefImpl::NaiveDate(v)) => format!("Date({})", v),
-        Some(ScalarRefImpl::NaiveTime(v)) => format!("Time({})", v),
+        Some(ScalarRefImpl::Date(v)) => format!("Date({})", v),
+        Some(ScalarRefImpl::Time(v)) => format!("Time({})", v),
         Some(ScalarRefImpl::Interval(v)) => format!("Interval({})", v),
         Some(ScalarRefImpl::Struct(v)) => {
             format!(

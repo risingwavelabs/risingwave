@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bytes::Bytes;
 use rdkafka::message::BorrowedMessage;
 use rdkafka::Message;
 
@@ -35,7 +34,7 @@ impl SourceMessage {
         .unwrap();
         SourceMessage {
             // TODO(TaoWu): Possible performance improvement: avoid memory copying here.
-            payload: Some(encoded.into()),
+            payload: Some(encoded),
             offset: message.offset().to_string(),
             split_id: message.partition().to_string().into(),
             meta: SourceMeta::Kafka(KafkaMeta {
@@ -49,7 +48,7 @@ impl<'a> From<BorrowedMessage<'a>> for SourceMessage {
     fn from(message: BorrowedMessage<'a>) -> Self {
         SourceMessage {
             // TODO(TaoWu): Possible performance improvement: avoid memory copying here.
-            payload: message.payload().map(Bytes::copy_from_slice),
+            payload: message.payload().map(|p| p.to_vec()),
             offset: message.offset().to_string(),
             split_id: message.partition().to_string().into(),
             meta: SourceMeta::Kafka(KafkaMeta {

@@ -14,10 +14,11 @@
 
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
@@ -370,7 +371,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
         // Clone `self` to make compiler happy because of the move block.
         let t_1 = self.clone();
-        let t_2 = self.clone();
         // Spawn task for real execution.
         let fut = async move {
             trace!("Executing plan [{:?}]", task_id);
@@ -394,9 +394,9 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
             if let Some(task_metrics) = task_metrics {
                 let monitor = TaskMonitor::new();
-                let join_handle = t_2.runtime.spawn(monitor.instrument(task(task_id.clone())));
-                if let Err(join_error) = join_handle.await && join_error.is_panic() {
-                    error!("Batch task {:?} panic!", task_id);
+                let instrumented_task = AssertUnwindSafe(monitor.instrument(task(task_id.clone())));
+                if let Err(error) = instrumented_task.catch_unwind().await {
+                    error!("Batch task {:?} panic: {:?}", task_id, error);
                 }
                 let cumulative = monitor.cumulative();
                 let labels = &task_metrics.task_labels();
@@ -425,11 +425,9 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     .task_slow_poll_duration
                     .with_label_values(labels)
                     .set(cumulative.total_slow_poll_duration.as_secs_f64());
-            } else {
-                let join_handle = t_2.runtime.spawn(task(task_id.clone()));
-                if let Err(join_error) = join_handle.await && join_error.is_panic() {
-                    error!("Batch task {:?} panic!", task_id);
-                }
+            } else if let Err(error) = AssertUnwindSafe(task(task_id.clone())).catch_unwind().await
+            {
+                error!("Batch task {:?} panic: {:?}", task_id, error);
             }
         };
 
@@ -446,6 +444,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             ctx2,
         );
         self.runtime.spawn(alloc_stat_wrap_fut);
+
         Ok(())
     }
 
@@ -490,8 +489,18 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 // We prioritize abort signal over normal data chunks.
                 biased;
                 err_reason = &mut shutdown_rx => {
-                    state = TaskStatus::Aborted;
-                    error = Some(Aborted(err_reason.unwrap_or("".to_string())));
+                    match err_reason {
+                        Ok(reason_str) => {
+                            state = TaskStatus::Aborted;
+                            error = Some(Aborted(reason_str));
+                        }
+                        Err(_) => {
+                            // We use early close shutdown channel to cancel task.
+                            // Cancelling a task is different from aborting a task
+                            // in that it's not an error and should not be reported to user.
+                            state = TaskStatus::Cancelled;
+                        }
+                    }
                     break;
                 }
                 res = data_chunk_stream.next() => {
@@ -558,7 +567,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         }
     }
 
-    pub fn abort_task(&self, err_msg: String) {
+    pub fn abort(&self, err_msg: String) {
         if let Some(sender) = self.shutdown_tx.lock().take() {
             // No need to set state to be Aborted here cuz it will be set by shutdown receiver.
             // Stop task execution.
@@ -567,6 +576,13 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             } else {
                 info!("Abort task {:?} done", self.task_id);
             }
+        };
+    }
+
+    pub fn cancel(&self) {
+        if let Some(sender) = self.shutdown_tx.lock().take() {
+            // Drop sender directly to mark cancel without error.
+            drop(sender);
         };
     }
 

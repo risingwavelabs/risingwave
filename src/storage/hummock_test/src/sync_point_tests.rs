@@ -387,7 +387,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         retention_seconds: None,
         read_version_from_backup: false,
         prefetch_options: Default::default(),
-        cache_policy: CachePolicy::Fill,
+        cache_policy: CachePolicy::Fill(CachePriority::High),
     };
     let get_result = storage
         .get(Bytes::from("hhh"), 120, read_options.clone())

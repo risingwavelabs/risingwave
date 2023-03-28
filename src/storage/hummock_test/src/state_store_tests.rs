@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::{pin_mut, TryStreamExt};
+use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{
@@ -49,7 +50,7 @@ async fn test_empty_read_v2() {
                 table_id: TableId { table_id: 2333 },
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -66,7 +67,7 @@ async fn test_empty_read_v2() {
                 table_id: TableId { table_id: 2333 },
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -165,7 +166,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -184,7 +185,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -205,7 +206,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -241,7 +242,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -278,7 +279,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -298,7 +299,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -318,7 +319,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -339,7 +340,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -360,7 +361,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -380,7 +381,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -401,7 +402,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -430,7 +431,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -449,7 +450,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -632,7 +633,7 @@ async fn test_reload_storage() {
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -653,7 +654,7 @@ async fn test_reload_storage() {
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -688,7 +689,7 @@ async fn test_reload_storage() {
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -709,7 +710,7 @@ async fn test_reload_storage() {
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -730,7 +731,7 @@ async fn test_reload_storage() {
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -751,7 +752,7 @@ async fn test_reload_storage() {
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -771,7 +772,7 @@ async fn test_reload_storage() {
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -812,7 +813,7 @@ async fn test_write_anytime_inner(
                             retention_seconds: None,
                             read_version_from_backup: false,
                             prefetch_options: Default::default(),
-                            cache_policy: CachePolicy::Fill,
+                            cache_policy: CachePolicy::Fill(CachePriority::High),
                         }
                     )
                     .await
@@ -833,7 +834,7 @@ async fn test_write_anytime_inner(
                             retention_seconds: None,
                             read_version_from_backup: false,
                             prefetch_options: Default::default(),
-                            cache_policy: CachePolicy::Fill,
+                            cache_policy: CachePolicy::Fill(CachePriority::High),
                         }
                     )
                     .await
@@ -854,7 +855,7 @@ async fn test_write_anytime_inner(
                             retention_seconds: None,
                             read_version_from_backup: false,
                             prefetch_options: Default::default(),
-                            cache_policy: CachePolicy::Fill,
+                            cache_policy: CachePolicy::Fill(CachePriority::High),
                         }
                     )
                     .await
@@ -877,7 +878,7 @@ async fn test_write_anytime_inner(
                         retention_seconds: None,
                         read_version_from_backup: false,
                         prefetch_options: Default::default(),
-                        cache_policy: CachePolicy::Fill,
+                        cache_policy: CachePolicy::Fill(CachePriority::High),
                     },
                 )
                 .await
@@ -948,7 +949,7 @@ async fn test_write_anytime_inner(
                             retention_seconds: None,
                             read_version_from_backup: false,
                             prefetch_options: Default::default(),
-                            cache_policy: CachePolicy::Fill,
+                            cache_policy: CachePolicy::Fill(CachePriority::High),
                         }
                     )
                     .await
@@ -968,7 +969,7 @@ async fn test_write_anytime_inner(
                         retention_seconds: None,
                         read_version_from_backup: false,
                         prefetch_options: Default::default(),
-                        cache_policy: CachePolicy::Fill,
+                        cache_policy: CachePolicy::Fill(CachePriority::High),
                     }
                 )
                 .await
@@ -988,7 +989,7 @@ async fn test_write_anytime_inner(
                             retention_seconds: None,
                             read_version_from_backup: false,
                             prefetch_options: Default::default(),
-                            cache_policy: CachePolicy::Fill,
+                            cache_policy: CachePolicy::Fill(CachePriority::High),
                         }
                     )
                     .await
@@ -1010,7 +1011,7 @@ async fn test_write_anytime_inner(
                         retention_seconds: None,
                         read_version_from_backup: false,
                         prefetch_options: Default::default(),
-                        cache_policy: CachePolicy::Fill,
+                        cache_policy: CachePolicy::Fill(CachePriority::High),
                     },
                 )
                 .await
@@ -1168,7 +1169,7 @@ async fn test_delete_get_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             }
         )
         .await
@@ -1256,7 +1257,7 @@ async fn test_multiple_epoch_sync_inner(
                             retention_seconds: None,
                             read_version_from_backup: false,
                             prefetch_options: Default::default(),
-                            cache_policy: CachePolicy::Fill,
+                            cache_policy: CachePolicy::Fill(CachePriority::High),
                         }
                     )
                     .await
@@ -1276,7 +1277,7 @@ async fn test_multiple_epoch_sync_inner(
                         retention_seconds: None,
                         read_version_from_backup: false,
                         prefetch_options: Default::default(),
-                        cache_policy: CachePolicy::Fill,
+                        cache_policy: CachePolicy::Fill(CachePriority::High),
                     }
                 )
                 .await
@@ -1295,7 +1296,7 @@ async fn test_multiple_epoch_sync_inner(
                             retention_seconds: None,
                             read_version_from_backup: false,
                             prefetch_options: Default::default(),
-                            cache_policy: CachePolicy::Fill,
+                            cache_policy: CachePolicy::Fill(CachePriority::High),
                         }
                     )
                     .await

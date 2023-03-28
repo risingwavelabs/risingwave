@@ -352,6 +352,7 @@ impl SstableIteratorType for SstableIterator {
 mod tests {
     use itertools::Itertools;
     use rand::prelude::*;
+    use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::TableId;
 
     use super::*;
@@ -397,7 +398,7 @@ mod tests {
         assert!(sstable.meta.block_metas.len() > 10);
 
         let cache = create_small_table_cache();
-        let handle = cache.insert(0, 0, 1, Box::new(sstable));
+        let handle = cache.insert(0, 0, 1, Box::new(sstable), CachePriority::High);
         inner_test_forward_iterator(sstable_store.clone(), handle).await;
     }
 
@@ -411,7 +412,7 @@ mod tests {
         // path.
         assert!(sstable.meta.block_metas.len() > 10);
         let cache = create_small_table_cache();
-        let handle = cache.insert(0, 0, 1, Box::new(sstable));
+        let handle = cache.insert(0, 0, 1, Box::new(sstable), CachePriority::High);
 
         let mut sstable_iter = SstableIterator::create(
             handle,
@@ -505,7 +506,7 @@ mod tests {
                 .unwrap(),
             sstable_store,
             Arc::new(SstableIteratorReadOptions {
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
                 must_iterated_end_user_key: None,
             }),
         );

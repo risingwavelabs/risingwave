@@ -106,7 +106,7 @@ async fn test_failpoints_state_store_read_upload() {
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -161,7 +161,7 @@ async fn test_failpoints_state_store_read_upload() {
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await;
@@ -177,7 +177,7 @@ async fn test_failpoints_state_store_read_upload() {
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await;
@@ -200,7 +200,7 @@ async fn test_failpoints_state_store_read_upload() {
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -242,7 +242,7 @@ async fn test_failpoints_state_store_read_upload() {
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -260,7 +260,7 @@ async fn test_failpoints_state_store_read_upload() {
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await

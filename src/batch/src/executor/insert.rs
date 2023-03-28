@@ -211,6 +211,7 @@ mod tests {
     use futures::StreamExt;
     use itertools::Itertools;
     use risingwave_common::array::{Array, ArrayImpl, I32Array, StructArray};
+    use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::{
         schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
     };
@@ -354,7 +355,7 @@ mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
-                    cache_policy: CachePolicy::Fill,
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await?;

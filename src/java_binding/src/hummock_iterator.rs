@@ -83,6 +83,7 @@ impl HummockJavaBindingIterator {
             read_plan.data_dir,
             1 << 10,
             1 << 10,
+            0,
             TieredCache::none(),
         ));
         let reader =

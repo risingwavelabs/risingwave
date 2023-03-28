@@ -16,7 +16,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_common::config::load_config;
+use risingwave_common::config::{extract_storage_memory_config, load_config};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -88,12 +88,14 @@ pub async fn compactor_serve(
         hummock_metrics.clone(),
     ));
 
-    let state_store_url = {
-        let from_local = opts.state_store.unwrap_or("".to_string());
-        system_params_reader.state_store(from_local)
-    };
+    let state_store_url = system_params_reader.state_store();
 
-    let storage_opts = Arc::new(StorageOpts::from((&config, &system_params_reader)));
+    let storage_memory_config = extract_storage_memory_config(&config);
+    let storage_opts = Arc::new(StorageOpts::from((
+        &config,
+        &system_params_reader,
+        &storage_memory_config,
+    )));
     let object_store = Arc::new(
         parse_remote_object_store(
             state_store_url

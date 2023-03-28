@@ -14,13 +14,13 @@
 
 use std::fmt::Write;
 
-use crate::Result;
+use risingwave_expr_macro::function;
 
-#[inline(always)]
-pub fn replace(s: &str, from_str: &str, to_str: &str, writer: &mut dyn Write) -> Result<()> {
+#[function("replace(varchar, varchar, varchar) -> varchar")]
+pub fn replace(s: &str, from_str: &str, to_str: &str, writer: &mut dyn Write) {
     if from_str.is_empty() {
         writer.write_str(s).unwrap();
-        return Ok(());
+        return;
     }
     let mut last = 0;
     while let Some(mut start) = s[last..].find(from_str) {
@@ -30,7 +30,6 @@ pub fn replace(s: &str, from_str: &str, to_str: &str, writer: &mut dyn Write) ->
         last = start + from_str.len();
     }
     writer.write_str(&s[last..]).unwrap();
-    Ok(())
 }
 
 #[cfg(test)]
@@ -38,7 +37,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_replace() -> Result<()> {
+    fn test_replace() {
         let cases = vec![
             ("hello, word", "我的", "world", "hello, word"),
             ("hello, word", "", "world", "hello, word"),
@@ -50,9 +49,8 @@ mod tests {
 
         for (s, from_str, to_str, expected) in cases {
             let mut writer = String::new();
-            replace(s, from_str, to_str, &mut writer)?;
+            replace(s, from_str, to_str, &mut writer);
             assert_eq!(writer, expected);
         }
-        Ok(())
     }
 }
