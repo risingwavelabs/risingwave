@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
-use std::rc::Rc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
@@ -498,86 +496,104 @@ impl LogicalMultiJoin {
     ///   ii. nodes with a join tree higher than the temporal optimal join tree will be pruned.
     pub fn as_bushy_tree_join(&self) -> Result<PlanRef> {
         let (nodes, condition) = self.get_join_graph()?;
-        let mut optimized_bushy_tree: Option<GraphNodeRef> = None;
+
+        if nodes.is_empty() {
+            return Err(RwError::from(ErrorCode::InternalError(
+                "empty multi-join graph".into(),
+            )));
+        }
+
+        let mut optimized_bushy_tree: Option<GraphNode> = None;
         let mut que = VecDeque::from([nodes]);
         let mut isolated = BTreeSet::new();
 
-        while let Some(nodes) = que.pop_front() {
+        while let Some(mut nodes) = que.pop_front() {
             if nodes.len() == 1 {
                 let node = nodes.into_values().next().unwrap();
-                optimized_bushy_tree = Some(if let Some(old) = optimized_bushy_tree {
-                    node.min(old)
+
+                if let Some(old) = &optimized_bushy_tree {
+                    if node.join_tree.height < old.join_tree.height {
+                        optimized_bushy_tree = Some(node);
+                    }
                 } else {
-                    node
-                });
+                    optimized_bushy_tree = Some(node);
+                }
                 continue;
             }
 
             let (idx, _) = nodes
                 .iter()
-                .min_by(|(_, x), (_, y)| {
-                    match x.borrow().relations.len().cmp(&y.borrow().relations.len()) {
+                .min_by(
+                    |(_, x), (_, y)| match x.relations.len().cmp(&y.relations.len()) {
                         Ordering::Less => Ordering::Less,
                         Ordering::Greater => Ordering::Greater,
-                        Ordering::Equal => x
-                            .borrow()
-                            .join_tree
-                            .height
-                            .cmp(&y.borrow().join_tree.height),
-                    }
-                })
+                        Ordering::Equal => x.join_tree.height.cmp(&y.join_tree.height),
+                    },
+                )
                 .unwrap();
-            let idx = *idx;
-            let n = nodes.get(&idx).unwrap().clone();
+            let n_id = *idx;
 
-            if n.borrow().relations.is_empty() {
-                let mut nodes = clone_graph(&nodes);
-                isolated.insert(n.borrow().id);
-                nodes.remove(&idx).unwrap();
+            let n = nodes.get(&n_id).unwrap();
+            if n.relations.is_empty() {
+                isolated.insert(n.id);
+                nodes.remove(&n_id).unwrap();
                 que.push_back(nodes);
                 continue;
             }
 
-            n.borrow_mut().relations.sort();
-            n.borrow_mut().relations.dedup_by_key(|n| n.borrow().id);
+            let mut relations = nodes.get_mut(&n_id).unwrap().relations.clone();
+            relations.sort_by(|a, b| {
+                let a = nodes.get(a).unwrap();
+                let b = nodes.get(b).unwrap();
+                match a.join_tree.height.cmp(&b.join_tree.height) {
+                    Ordering::Equal => a.id.cmp(&b.id),
+                    other => other,
+                }
+            });
+            relations.dedup();
+            nodes.get_mut(&n_id).unwrap().relations = relations;
 
-            for merge_node in &n.borrow().relations {
-                let mut nodes = clone_graph(&nodes);
-                let n = nodes.remove(&idx).unwrap();
-                let merge_node_id = merge_node.borrow().id;
-                let merge_node = nodes.get(&merge_node_id).unwrap().clone();
-                for adj_node in &n.borrow().relations {
-                    let adj_node = adj_node.clone();
-                    if adj_node.borrow().id != merge_node_id {
-                        let n_idx = adj_node
-                            .borrow()
+            for merge_node_id in &nodes.get(&n_id).unwrap().relations {
+                let mut nodes = nodes.clone();
+                let n = nodes.remove(&n_id).unwrap();
+
+                for adj_node_id in &n.relations {
+                    if adj_node_id != merge_node_id {
+                        let n_id = nodes
+                            .get(adj_node_id)
+                            .unwrap()
                             .relations
                             .iter()
-                            .position(|adj_rel| adj_rel.borrow().id == n.borrow().id)
+                            .position(|adj_rel| *adj_rel == n_id)
                             .unwrap();
 
-                        adj_node.borrow_mut().relations.swap_remove(n_idx);
-                        adj_node.borrow_mut().relations.push(merge_node.clone());
-                        merge_node.borrow_mut().relations.push(adj_node);
+                        let adj_node = nodes.get_mut(adj_node_id).unwrap();
+                        adj_node.relations.swap_remove(n_id);
+                        adj_node.relations.push(*merge_node_id);
+                        let merge_node = nodes.get_mut(merge_node_id).unwrap();
+                        merge_node.relations.push(*adj_node_id);
                     }
                 }
 
-                let idx = merge_node
-                    .borrow()
+                let idx = nodes
+                    .get(merge_node_id)
+                    .unwrap()
                     .relations
                     .iter()
-                    .position(|merge_rel| merge_rel.borrow().id == n.borrow().id)
+                    .position(|merge_rel| *merge_rel == n_id)
                     .unwrap();
-                merge_node.borrow_mut().relations.swap_remove(idx);
-                let l_tree = n.borrow().join_tree.clone();
-                let r_tree = std::mem::take(&mut merge_node.borrow_mut().join_tree);
+
+                let merge_node = nodes.get_mut(merge_node_id).unwrap();
+                merge_node.relations.swap_remove(idx);
+                let l_tree = n.join_tree.clone();
+                let r_tree = std::mem::take(&mut merge_node.join_tree);
                 let new_height = usize::max(l_tree.height, r_tree.height) + 1;
 
-                if let Some(min_height) = optimized_bushy_tree.as_ref().map(|t| t.borrow().join_tree.height) && min_height < new_height {
+                if let Some(min_height) = optimized_bushy_tree.as_ref().map(|t| t.join_tree.height) && min_height < new_height {
                     continue;
                 }
 
-                merge_node.borrow_mut().join_tree = JoinTreeNode {
+                merge_node.join_tree = JoinTreeNode {
                     idx: None,
                     left: Some(Box::new(l_tree)),
                     right: Some(Box::new(r_tree)),
@@ -593,10 +609,8 @@ impl LogicalMultiJoin {
         // maintain join order to mapping columns.
         let mut join_ordering = vec![];
         let mut output = if let Some(optimized_bushy_tree) = optimized_bushy_tree {
-            let mut output = self.create_logical_join(
-                optimized_bushy_tree.borrow().join_tree.clone(),
-                &mut join_ordering,
-            )?;
+            let mut output =
+                self.create_logical_join(optimized_bushy_tree.join_tree, &mut join_ordering)?;
 
             output = isolated.into_iter().fold(output, |chain, n| {
                 join_ordering.push(n);
@@ -660,19 +674,17 @@ impl LogicalMultiJoin {
     }
 
     /// get join graph from `self.on`, return the join graph and the new join condition.
-    fn get_join_graph(&self) -> Result<(BTreeMap<usize, GraphNodeRef>, Condition)> {
-        let nodes: BTreeMap<_, _> = (0..self.inputs.len())
-            .map(|idx| {
-                Rc::new(RefCell::new(GraphNode {
-                    id: idx,
-                    relations: vec![],
-                    join_tree: JoinTreeNode {
-                        idx: Some(idx),
-                        left: None,
-                        right: None,
-                        height: 0,
-                    },
-                }))
+    fn get_join_graph(&self) -> Result<(BTreeMap<usize, GraphNode>, Condition)> {
+        let mut nodes: BTreeMap<_, _> = (0..self.inputs.len())
+            .map(|idx| GraphNode {
+                id: idx,
+                relations: vec![],
+                join_tree: JoinTreeNode {
+                    idx: Some(idx),
+                    left: None,
+                    right: None,
+                    height: 0,
+                },
             })
             .enumerate()
             .collect();
@@ -684,10 +696,8 @@ impl LogicalMultiJoin {
             .split_by_input_col_nums(&self.input_col_nums(), true);
 
         for ((src, dst), _) in eq_join_conditions {
-            let src = nodes.get(&src).unwrap();
-            let dst = nodes.get(&dst).unwrap();
-            src.borrow_mut().relations.push(dst.clone());
-            dst.borrow_mut().relations.push(src.clone());
+            nodes.get_mut(&src).unwrap().relations.push(dst);
+            nodes.get_mut(&dst).unwrap().relations.push(src);
         }
 
         Ok((nodes, condition))
@@ -700,7 +710,7 @@ impl LogicalMultiJoin {
             .split_by_input_col_nums(&self.input_col_nums(), true);
 
         let mut new_conj: BTreeMap<usize, BTreeSet<usize>> = BTreeMap::new();
-        let mut input_ref_map = HashMap::new();
+        let mut input_ref_map = BTreeMap::new();
 
         for con in eq_join_conditions.values() {
             for conj in &con.conjunctions {
@@ -793,78 +803,12 @@ struct JoinTreeNode {
 }
 
 // join graph internal representation
+#[derive(Clone, Debug)]
 struct GraphNode {
     id: usize,
     join_tree: JoinTreeNode,
     // use BTreeSet for deterministic
-    relations: Vec<GraphNodeRef>,
-}
-
-type GraphNodeRef = Rc<RefCell<GraphNode>>;
-
-impl GraphNode {
-    fn clone_without_rel(&self) -> GraphNodeRef {
-        Rc::new(RefCell::new(GraphNode {
-            id: self.id,
-            join_tree: self.join_tree.clone(),
-            // this should be maintained outside to reach other GraphNode and solve self reference.
-            relations: vec![],
-        }))
-    }
-}
-
-impl fmt::Debug for GraphNode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("GraphNode")
-            .field("id", &self.id)
-            .field("join_tree", &self.join_tree)
-            .field("rel_len", &self.relations.len())
-            .field(
-                "rel",
-                &self.relations.iter().map(|r| r.borrow().id).collect_vec(),
-            )
-            .finish()
-    }
-}
-
-impl PartialEq for GraphNode {
-    fn eq(&self, other: &Self) -> bool {
-        self.join_tree.height.eq(&other.join_tree.height)
-    }
-}
-
-impl Eq for GraphNode {}
-
-impl PartialOrd for GraphNode {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.join_tree.height.cmp(&other.join_tree.height))
-    }
-}
-
-impl Ord for GraphNode {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.join_tree.height.cmp(&other.join_tree.height)
-    }
-}
-
-fn clone_graph(nodes: &BTreeMap<usize, GraphNodeRef>) -> BTreeMap<usize, GraphNodeRef> {
-    let new_nodes: BTreeMap<usize, GraphNodeRef> = nodes
-        .iter()
-        .map(|(k, v)| (*k, v.borrow().clone_without_rel()))
-        .collect();
-
-    nodes.iter().for_each(|(k, v)| {
-        let rel = v
-            .borrow()
-            .relations
-            .iter()
-            .map(|n| new_nodes.get(&n.borrow().id).unwrap().clone())
-            .collect_vec();
-
-        new_nodes.get(k).unwrap().borrow_mut().relations = rel;
-    });
-
-    new_nodes
+    relations: Vec<usize>,
 }
 
 impl ToStream for LogicalMultiJoin {
