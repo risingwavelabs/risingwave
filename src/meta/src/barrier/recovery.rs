@@ -185,17 +185,17 @@ where
 
             let (barrier_complete_tx, mut barrier_complete_rx) =
                 tokio::sync::mpsc::unbounded_channel();
-            self.inject_barrier(command_ctx.clone(), barrier_complete_tx)
+            self.inject_barrier(command_ctx.clone(), &barrier_complete_tx)
                 .await;
-            match barrier_complete_rx.recv().await.unwrap() {
-                (_, Ok(response)) => {
+            match barrier_complete_rx.recv().await.unwrap().result {
+                Ok(response) => {
                     if let Err(err) = command_ctx.post_collect().await {
                         error!(err = ?err, "post_collect failed");
                         return Err(err);
                     }
                     Ok((new_epoch, response))
                 }
-                (_, Err(err)) => {
+                Err(err) => {
                     error!(err = ?err, "inject_barrier failed");
                     Err(err)
                 }
