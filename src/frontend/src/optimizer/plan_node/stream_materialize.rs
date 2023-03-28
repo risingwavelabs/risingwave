@@ -172,11 +172,7 @@ impl StreamMaterialize {
         let (pk, stream_key) = derive_pk(input, user_order_by, &columns);
         let read_prefix_len_hint = stream_key.len();
 
-        let conflict_behavior_type = match conflict_behavior {
-            ConflictBehavior::Overwrite => 1,
-            ConflictBehavior::IgnoreConflict => 2,
-            ConflictBehavior::NoCheck => 3,
-        };
+        let conflict_behavior_type = conflict_behavior.to_protobuf() as i32;
         Ok(TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
