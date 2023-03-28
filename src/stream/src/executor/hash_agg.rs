@@ -17,7 +17,7 @@ use std::marker::PhantomData;
 use std::ptr::NonNull;
 use std::sync::Arc;
 
-use futures::{stream, StreamExt};
+use futures::{stream, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use iter_chunks::IterChunks;
 use itertools::Itertools;
@@ -26,6 +26,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -117,9 +118,6 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     chunk_size: usize,
 
     /// Should emit on window close according to watermark?
-    /// XXX(rc): If you wanna try make this a generic parameter, please be aware that
-    /// it may waste you several hours fighting against rust compiler. If lucky, you
-    /// will work out a solution, but that will be a very ugly one.
     emit_on_window_close: bool,
 
     metrics: Arc<StreamingMetrics>,
@@ -137,7 +135,143 @@ impl<K: HashKey, S: StateStore> ExecutorInner<K, S> {
     }
 }
 
-struct ExecutionVars<K: HashKey, S: StateStore> {
+trait Emitter: Default {
+    type StateStore: StateStore;
+
+    fn emit_from_changes<'a>(
+        &'a mut self,
+        chunk_builder: &'a mut ChunkBuilder,
+        result_table: &'a mut StateTable<Self::StateStore>,
+        watermark: Option<&'a ScalarImpl>,
+        changes: impl IntoIterator<Item = Record<OwnedRow>> + 'a,
+    ) -> impl Stream<Item = StreamExecutorResult<StreamChunk>> + 'a;
+
+    fn emit_from_result_table<'a>(
+        &'a mut self,
+        chunk_builder: &'a mut ChunkBuilder,
+        result_table: &'a mut StateTable<Self::StateStore>,
+        watermark: Option<&'a ScalarImpl>,
+    ) -> impl Stream<Item = StreamExecutorResult<StreamChunk>> + 'a;
+
+    fn update_result_table_watermark(
+        &self,
+        result_table: &mut StateTable<Self::StateStore>,
+        watermark: ScalarImpl,
+    );
+}
+
+struct EmitOnUpdates<S: StateStore> {
+    _phantom: PhantomData<S>,
+}
+
+impl<S: StateStore> Emitter for EmitOnUpdates<S> {
+    type StateStore = S;
+
+    fn emit_from_changes<'a>(
+        &'a mut self,
+        chunk_builder: &'a mut ChunkBuilder,
+        result_table: &'a mut StateTable<Self::StateStore>,
+        _watermark: Option<&'a ScalarImpl>,
+        changes: impl IntoIterator<Item = Record<OwnedRow>> + 'a,
+    ) -> impl Stream<Item = StreamExecutorResult<StreamChunk>> + 'a {
+        async_stream::try_stream! {
+            for change in changes {
+                // For emit-on-updates, write change to result table and directly yield the change.
+                apply_change_to_result_table(&change, result_table);
+                if let Some(chunk) = apply_change_to_chunk_builder(&change, chunk_builder) {
+                    yield chunk;
+                }
+            }
+        }
+    }
+
+    fn emit_from_result_table<'a>(
+        &'a mut self,
+        _chunk_builder: &'a mut ChunkBuilder,
+        _result_table: &'a mut StateTable<Self::StateStore>,
+        _watermark: Option<&'a ScalarImpl>,
+    ) -> impl Stream<Item = StreamExecutorResult<StreamChunk>> + 'a {
+        stream::empty()
+    }
+
+    fn update_result_table_watermark(
+        &self,
+        result_table: &mut StateTable<Self::StateStore>,
+        watermark: ScalarImpl,
+    ) {
+        result_table.update_watermark(watermark, false);
+    }
+}
+
+impl<S: StateStore> Default for EmitOnUpdates<S> {
+    fn default() -> Self {
+        Self {
+            _phantom: PhantomData,
+        }
+    }
+}
+
+struct EmitOnWindowClose<S: StateStore> {
+    buffer: EowcBuffer<S>,
+}
+
+impl<S: StateStore> Emitter for EmitOnWindowClose<S> {
+    type StateStore = S;
+
+    fn emit_from_changes<'a>(
+        &'a mut self,
+        _chunk_builder: &'a mut ChunkBuilder,
+        result_table: &'a mut StateTable<Self::StateStore>,
+        _watermark: Option<&'a ScalarImpl>,
+        changes: impl IntoIterator<Item = Record<OwnedRow>> + 'a,
+    ) -> impl Stream<Item = StreamExecutorResult<StreamChunk>> + 'a {
+        for change in changes {
+            // For emit-on-window-close, write change to EOWC buffer.
+            self.buffer.apply_change(&change, result_table);
+        }
+        stream::empty()
+    }
+
+    fn emit_from_result_table<'a>(
+        &'a mut self,
+        chunk_builder: &'a mut ChunkBuilder,
+        result_table: &'a mut StateTable<Self::StateStore>,
+        watermark: Option<&'a ScalarImpl>,
+    ) -> impl Stream<Item = StreamExecutorResult<StreamChunk>> + 'a {
+        async_stream::try_stream! {
+            if let Some(watermark) = watermark {
+                #[futures_async_stream::for_await]
+                for row in self.buffer.consume(watermark.clone(), result_table) {
+                    let row = row?;
+                    if let Some(chunk) = apply_change_to_chunk_builder(
+                        &Record::Insert { new_row: row },
+                        chunk_builder,
+                    ) {
+                        yield chunk;
+                    }
+                }
+            }
+        }
+    }
+
+    fn update_result_table_watermark(
+        &self,
+        result_table: &mut StateTable<Self::StateStore>,
+        watermark: ScalarImpl,
+    ) {
+        result_table.update_watermark(watermark.clone(), true); // must clean state eagerly
+    }
+}
+
+impl<S: StateStore> Default for EmitOnWindowClose<S> {
+    fn default() -> Self {
+        Self {
+            buffer: EowcBuffer::new(),
+        }
+    }
+}
+
+struct ExecutionVars<K: HashKey, S: StateStore, E: Emitter<StateStore = S>> {
     stats: ExecutionStats,
 
     /// Cache for [`AggGroup`]s. `HashKey` -> `AggGroup`.
@@ -158,8 +292,8 @@ struct ExecutionVars<K: HashKey, S: StateStore> {
     /// Stream chunk builder.
     chunk_builder: ChunkBuilder,
 
-    /// Buffer for emit-on-window-close semantics.
-    eowc_buffer: Option<EowcBuffer<S>>,
+    /// Emitter for emit-on-updates/emit-on-window-close semantics.
+    chunk_emitter: E,
 }
 
 struct ExecutionStats {
@@ -186,7 +320,11 @@ impl ExecutionStats {
 
 impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.execute_inner().boxed()
+        if self.inner.emit_on_window_close {
+            self.execute_inner::<EmitOnWindowClose<S>>().boxed()
+        } else {
+            self.execute_inner::<EmitOnUpdates<S>>().boxed()
+        }
     }
 
     fn schema(&self) -> &Schema {
@@ -310,9 +448,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         Ok(())
     }
 
-    async fn apply_chunk(
+    async fn apply_chunk<E: Emitter<StateStore = S>>(
         this: &mut ExecutorInner<K, S>,
-        vars: &mut ExecutionVars<K, S>,
+        vars: &mut ExecutionVars<K, S, E>,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
         // Find groups in this chunk and generate visibility for each group key.
@@ -394,9 +532,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     }
 
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    async fn flush_data<'a>(
+    async fn flush_data<'a, E: Emitter<StateStore = S>>(
         this: &'a mut ExecutorInner<K, S>,
-        vars: &'a mut ExecutionVars<K, S>,
+        vars: &'a mut ExecutionVars<K, S, E>,
         epoch: EpochPair,
     ) {
         // Update metrics.
@@ -463,43 +601,27 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         const MAX_CONCURRENT_TASKS: usize = 100;
         let mut futs_batches = IterChunks::chunks(futs_of_all_groups, MAX_CONCURRENT_TASKS);
         while let Some(futs) = futs_batches.next() {
-            let changes = futures::future::try_join_all(futs)
-                .await?
-                .into_iter()
-                .flatten();
-            if this.emit_on_window_close {
-                let eowc_buffer = vars.eowc_buffer.as_mut().unwrap();
-                for change in changes {
-                    // For emit-on-window-close, write change to EOWC buffer.
-                    eowc_buffer.apply_change(&change, &mut this.result_table);
-                }
-            } else {
-                for change in changes {
-                    // For emit-on-updates, write change to result table and directly yield the
-                    // change.
-                    apply_change_to_result_table(&change, &mut this.result_table);
-                    if let Some(chunk) =
-                        apply_change_to_chunk_builder(&change, &mut vars.chunk_builder)
-                    {
-                        yield chunk;
-                    }
-                }
+            // Compute agg result changes for each group, and emit changes accordingly.
+            let changes = futures::future::try_join_all(futs).await?;
+            #[for_await]
+            for chunk in vars.chunk_emitter.emit_from_changes(
+                &mut vars.chunk_builder,
+                &mut this.result_table,
+                window_watermark.as_ref(),
+                changes.into_iter().flatten(),
+            ) {
+                yield chunk?;
             }
         }
 
-        // Emit result rows under the watermark.
-        if this.emit_on_window_close && let Some(watermark) = window_watermark.as_ref() {
-            let eowc_buffer = vars.eowc_buffer.as_mut().unwrap();
-            #[for_await]
-            for row in eowc_buffer.consume(watermark.clone(), &mut this.result_table) {
-                let row = row?;
-                if let Some(chunk) = apply_change_to_chunk_builder(
-                    &Record::Insert { new_row: row },
-                    &mut vars.chunk_builder,
-                ) {
-                    yield chunk;
-                }
-            }
+        // Emit remaining results from result table.
+        #[for_await]
+        for chunk in vars.chunk_emitter.emit_from_result_table(
+            &mut vars.chunk_builder,
+            &mut this.result_table,
+            window_watermark.as_ref(),
+        ) {
+            yield chunk?;
         }
 
         // Yield the remaining rows in chunk builder.
@@ -517,9 +639,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 // Update watermark of state tables, for state cleaning.
                 this.all_state_tables_except_result_mut()
                     .for_each(|table| table.update_watermark(watermark.clone(), false));
-                // Must clean state eagerly for EOWC.
-                this.result_table
-                    .update_watermark(watermark, this.emit_on_window_close);
+                vars.chunk_emitter
+                    .update_result_table_watermark(&mut this.result_table, watermark)
             }
             // Commit all state tables.
             futures::future::try_join_all(
@@ -537,7 +658,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(self) {
+    async fn execute_inner<E: Emitter<StateStore = S>>(self) {
         let HashAggExecutor {
             input,
             inner: mut this,
@@ -554,11 +675,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             buffered_watermarks: vec![None; this.group_key_indices.len()],
             window_watermark: None,
             chunk_builder: ChunkBuilder::new(this.chunk_size, &this.info.schema.data_types()),
-            eowc_buffer: if this.emit_on_window_close {
-                Some(EowcBuffer::new())
-            } else {
-                None
-            },
+            chunk_emitter: E::default(),
         };
 
         // TODO(rc): use something like a `ColumnMapping` type
