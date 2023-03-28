@@ -29,7 +29,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
-use super::agg_common::AggExecutorArgs;
+use super::agg_common::{AggExecutorArgs, GroupAggExecutorExtraArgs};
 use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggStateStorage, DistinctDeduplicater,
     OnlyOutputIfHasInput,
@@ -177,14 +177,12 @@ impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
 }
 
 impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
-    pub fn new(args: AggExecutorArgs<S>) -> StreamResult<Self> {
-        let extra_args = args.extra.unwrap();
-
+    pub fn new(args: AggExecutorArgs<S, GroupAggExecutorExtraArgs>) -> StreamResult<Self> {
         let input_info = args.input.info();
         let schema = generate_agg_schema(
             args.input.as_ref(),
             &args.agg_calls,
-            Some(&extra_args.group_key_indices),
+            Some(&args.extra.group_key_indices),
         );
         Ok(Self {
             input: args.input,
@@ -198,16 +196,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 },
                 input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
-                group_key_indices: extra_args.group_key_indices,
+                group_key_indices: args.extra.group_key_indices,
                 agg_calls: args.agg_calls,
                 row_count_index: args.row_count_index,
                 storages: args.storages,
                 result_table: args.result_table,
                 distinct_dedup_tables: args.distinct_dedup_tables,
                 watermark_epoch: args.watermark_epoch,
-                chunk_size: extra_args.chunk_size,
                 extreme_cache_size: args.extreme_cache_size,
-                metrics: extra_args.metrics,
+                chunk_size: args.extra.chunk_size,
+                metrics: args.extra.metrics,
             },
         })
     }
@@ -613,7 +611,7 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
-    use crate::executor::agg_common::{AggExecutorArgs, AggExecutorArgsExtra};
+    use crate::executor::agg_common::{AggExecutorArgs, GroupAggExecutorExtraArgs};
     use crate::executor::aggregation::{AggArgs, AggCall};
     use crate::executor::monitor::StreamingMetrics;
     use crate::executor::test_utils::agg_executor::{
@@ -672,12 +670,11 @@ mod tests {
             distinct_dedup_tables: Default::default(),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
 
-            extra: Some(AggExecutorArgsExtra {
+            extra: GroupAggExecutorExtraArgs {
                 group_key_indices,
-
-                metrics: Arc::new(StreamingMetrics::unused()),
                 chunk_size: 1024,
-            }),
+                metrics: Arc::new(StreamingMetrics::unused()),
+            },
         })
         .unwrap()
         .boxed()

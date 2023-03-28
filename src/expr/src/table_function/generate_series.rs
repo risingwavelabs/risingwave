@@ -18,8 +18,7 @@ use anyhow::anyhow;
 use itertools::multizip;
 use num_traits::Zero;
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I32Array, IntervalArray,
-    NaiveDateTimeArray,
+    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I32Array, IntervalArray, TimestampArray,
 };
 use risingwave_common::types::{CheckedAdd, IsNegative, Scalar, ScalarRef};
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -162,12 +161,12 @@ pub fn new_generate_series<const STOP_INCLUSIVE: bool>(
     let [start, stop, step]: [_; 3] = args.try_into().unwrap();
 
     match return_type {
-        DataType::Timestamp => Ok(GenerateSeries::<
-            NaiveDateTimeArray,
-            IntervalArray,
-            STOP_INCLUSIVE,
-        >::new(start, stop, step, chunk_size)
-        .boxed()),
+        DataType::Timestamp => Ok(
+            GenerateSeries::<TimestampArray, IntervalArray, STOP_INCLUSIVE>::new(
+                start, stop, step, chunk_size,
+            )
+            .boxed(),
+        ),
         DataType::Int32 => Ok(GenerateSeries::<I32Array, I32Array, STOP_INCLUSIVE>::new(
             start, stop, step, chunk_size,
         )
@@ -180,8 +179,8 @@ pub fn new_generate_series<const STOP_INCLUSIVE: bool>(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::test_utils::IntervalUnitTestExt;
-    use risingwave_common::types::{DataType, IntervalUnit, NaiveDateTimeWrapper, ScalarImpl};
+    use risingwave_common::types::test_utils::IntervalTestExt;
+    use risingwave_common::types::{DataType, Interval, ScalarImpl, Timestamp};
 
     use super::*;
     use crate::expr::{Expression, LiteralExpression};
@@ -222,9 +221,9 @@ mod tests {
     async fn test_generate_time_series() {
         let start_time = str_to_timestamp("2008-03-01 00:00:00").unwrap();
         let stop_time = str_to_timestamp("2008-03-09 00:00:00").unwrap();
-        let one_minute_step = IntervalUnit::from_minutes(1);
-        let one_hour_step = IntervalUnit::from_minutes(60);
-        let one_day_step = IntervalUnit::from_days(1);
+        let one_minute_step = Interval::from_minutes(1);
+        let one_hour_step = Interval::from_minutes(60);
+        let one_day_step = Interval::from_days(1);
         generate_time_series_test_case(start_time, stop_time, one_minute_step, 60 * 24 * 8 + 1)
             .await;
         generate_time_series_test_case(start_time, stop_time, one_hour_step, 24 * 8 + 1).await;
@@ -233,16 +232,16 @@ mod tests {
     }
 
     async fn generate_time_series_test_case(
-        start: NaiveDateTimeWrapper,
-        stop: NaiveDateTimeWrapper,
-        step: IntervalUnit,
+        start: Timestamp,
+        stop: Timestamp,
+        step: Interval,
         expect_cnt: usize,
     ) {
         fn to_lit_expr(ty: DataType, v: ScalarImpl) -> BoxedExpression {
             LiteralExpression::new(ty, Some(v)).boxed()
         }
 
-        let function = GenerateSeries::<NaiveDateTimeArray, IntervalArray, true>::new(
+        let function = GenerateSeries::<TimestampArray, IntervalArray, true>::new(
             to_lit_expr(DataType::Timestamp, start.into()),
             to_lit_expr(DataType::Timestamp, stop.into()),
             to_lit_expr(DataType::Interval, step.into()),
@@ -289,9 +288,9 @@ mod tests {
     async fn test_time_range() {
         let start_time = str_to_timestamp("2008-03-01 00:00:00").unwrap();
         let stop_time = str_to_timestamp("2008-03-09 00:00:00").unwrap();
-        let one_minute_step = IntervalUnit::from_minutes(1);
-        let one_hour_step = IntervalUnit::from_minutes(60);
-        let one_day_step = IntervalUnit::from_days(1);
+        let one_minute_step = Interval::from_minutes(1);
+        let one_hour_step = Interval::from_minutes(60);
+        let one_day_step = Interval::from_days(1);
         time_range_test_case(start_time, stop_time, one_minute_step, 60 * 24 * 8).await;
         time_range_test_case(start_time, stop_time, one_hour_step, 24 * 8).await;
         time_range_test_case(start_time, stop_time, one_day_step, 8).await;
@@ -299,16 +298,16 @@ mod tests {
     }
 
     async fn time_range_test_case(
-        start: NaiveDateTimeWrapper,
-        stop: NaiveDateTimeWrapper,
-        step: IntervalUnit,
+        start: Timestamp,
+        stop: Timestamp,
+        step: Interval,
         expect_cnt: usize,
     ) {
         fn to_lit_expr(ty: DataType, v: ScalarImpl) -> BoxedExpression {
             LiteralExpression::new(ty, Some(v)).boxed()
         }
 
-        let function = GenerateSeries::<NaiveDateTimeArray, IntervalArray, false>::new(
+        let function = GenerateSeries::<TimestampArray, IntervalArray, false>::new(
             to_lit_expr(DataType::Timestamp, start.into()),
             to_lit_expr(DataType::Timestamp, stop.into()),
             to_lit_expr(DataType::Interval, step.into()),
