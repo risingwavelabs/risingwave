@@ -222,46 +222,49 @@ where
     }
 }
 
-pub enum JavaBindingRowKind {
+pub enum JavaBindingRowInner {
     Keyed(KeyedRow),
     StreamChunk(StreamChunkRow),
 }
 #[derive(Default)]
-pub struct JavaBindingRowCache {
+pub struct JavaClassMethodCache {
     big_decimal_class: OnceCell<GlobalRef>,
     timestamp_class: OnceCell<GlobalRef>,
 }
 
 pub struct JavaBindingRow {
-    underlying: JavaBindingRowKind,
-    class_cache: Arc<JavaBindingRowCache>,
+    inner: JavaBindingRowInner,
+    class_cache: Arc<JavaClassMethodCache>,
 }
 
 impl JavaBindingRow {
-    fn new_stream_chunk(underlying: StreamChunkRow, class_cache: Arc<JavaBindingRowCache>) -> Self {
+    fn with_stream_chunk(
+        underlying: StreamChunkRow,
+        class_cache: Arc<JavaClassMethodCache>,
+    ) -> Self {
         Self {
-            underlying: JavaBindingRowKind::StreamChunk(underlying),
+            inner: JavaBindingRowInner::StreamChunk(underlying),
             class_cache,
         }
     }
 
-    fn new_keyed(underlying: KeyedRow, class_cache: Arc<JavaBindingRowCache>) -> Self {
+    fn with_keyed(underlying: KeyedRow, class_cache: Arc<JavaClassMethodCache>) -> Self {
         Self {
-            underlying: JavaBindingRowKind::Keyed(underlying),
+            inner: JavaBindingRowInner::Keyed(underlying),
             class_cache,
         }
     }
 
     fn as_keyed(&self) -> &KeyedRow {
-        match &self.underlying {
-            JavaBindingRowKind::Keyed(r) => r,
+        match &self.inner {
+            JavaBindingRowInner::Keyed(r) => r,
             _ => unreachable!("can only call as_keyed for KeyedRow"),
         }
     }
 
     fn as_stream_chunk(&self) -> &StreamChunkRow {
-        match &self.underlying {
-            JavaBindingRowKind::StreamChunk(r) => r,
+        match &self.inner {
+            JavaBindingRowInner::StreamChunk(r) => r,
             _ => unreachable!("can only call as_stream_chunk for StreamChunkRow"),
         }
     }
@@ -271,9 +274,9 @@ impl Deref for JavaBindingRow {
     type Target = OwnedRow;
 
     fn deref(&self) -> &Self::Target {
-        match &self.underlying {
-            JavaBindingRowKind::Keyed(r) => r.row(),
-            JavaBindingRowKind::StreamChunk(r) => r.row(),
+        match &self.inner {
+            JavaBindingRowInner::Keyed(r) => r.row(),
+            JavaBindingRowInner::StreamChunk(r) => r.row(),
         }
     }
 }
@@ -306,7 +309,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorN
         let iter = pointer.as_mut();
         match RUNTIME.block_on(iter.next())? {
             None => Ok(Pointer::null()),
-            Some(row) => Ok(JavaBindingRow::new_keyed(row, iter.class_cache.clone()).into()),
+            Some(row) => Ok(JavaBindingRow::with_keyed(row, iter.class_cache.clone()).into()),
         }
     })
 }
@@ -341,7 +344,9 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_streamChunkItera
         let iter = pointer.as_mut();
         match iter.next() {
             None => Ok(Pointer::null()),
-            Some(row) => Ok(JavaBindingRow::new_stream_chunk(row, iter.class_cache.clone()).into()),
+            Some(row) => {
+                Ok(JavaBindingRow::with_stream_chunk(row, iter.class_cache.clone()).into())
+            }
         }
     })
 }
@@ -460,7 +465,9 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetTimestampV
     pointer: Pointer<'a, JavaBindingRow>,
     idx: jint,
 ) -> JObject<'a> {
-    // since JMethodID is always validate until the belonging class is unload.
+    // The JMethodID is globally available until the referenced class is unloaded.
+    // However, if the referenced class is unloaded, calling find_class will result in an error and
+    // prevent access to the INIT_METHOD. So it's safe here to cache it with static lifetime.
     static INIT_METHOD: OnceCell<JMethodID> = OnceCell::new();
     execute_and_catch(env, move || {
         let millis = pointer
@@ -491,6 +498,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetDecimalVal
     pointer: Pointer<'a, JavaBindingRow>,
     idx: jint,
 ) -> JObject<'a> {
+    // Same as Java_com_risingwave_java_binding_Binding_rowGetTimestampValue.
     static INIT_METHOD: OnceCell<JMethodID> = OnceCell::new();
     execute_and_catch(env, move || {
         let value = pointer.as_ref().get_decimal(idx as usize).to_string();

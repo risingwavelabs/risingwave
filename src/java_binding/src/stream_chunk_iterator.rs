@@ -38,7 +38,7 @@ type StreamChunkRowIterator = impl Iterator<Item = StreamChunkRow> + 'static;
 
 pub struct StreamChunkIterator {
     iter: StreamChunkRowIterator,
-    pub class_cache: Arc<crate::JavaBindingRowCache>,
+    pub class_cache: Arc<crate::JavaClassMethodCache>,
 }
 
 impl StreamChunkIterator {

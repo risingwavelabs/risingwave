@@ -50,7 +50,7 @@ fn select_all_vnode_stream(
 pub struct HummockJavaBindingIterator {
     row_serde: EitherSerde,
     stream: SelectAllIterStream,
-    pub class_cache: Arc<crate::JavaBindingRowCache>,
+    pub class_cache: Arc<crate::JavaClassMethodCache>,
 }
 
 pub struct KeyedRow {
