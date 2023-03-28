@@ -464,7 +464,7 @@ pub fn gen_data(
     for i in 0..num_of_chunks {
         let mut ops = Vec::new();
         let mut columns = Vec::new();
-        for _j in 0..chunk_size {
+        for _ in 0..chunk_size {
             ops.push(Op::Insert);
         }
         for data_type in data_types {
