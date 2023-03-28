@@ -14,12 +14,12 @@
 
 use std::fmt::Debug;
 use std::io::{Read, Write};
-use rust_decimal::prelude::MathematicalOps;
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
 use bytes::{BufMut, Bytes, BytesMut};
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
 use postgres_types::{ToSql, Type};
+use rust_decimal::prelude::MathematicalOps;
 pub use rust_decimal::prelude::{FromPrimitive, FromStr, ToPrimitive};
 use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
 
@@ -505,6 +505,63 @@ impl Decimal {
         match self {
             Self::Normalized(d) => Self::Normalized(d.sin()),
             d => *d,
+        }
+    }
+
+    #[must_use]
+    pub fn cos(&self) -> Self {
+        match self {
+            Self::Normalized(d) => Self::Normalized(d.cos()),
+            d => *d,
+        }
+    }
+
+    #[must_use]
+    pub fn tan(&self) -> Self {
+        match self {
+            Self::Normalized(d) => Self::Normalized(d.tan()),
+            d => *d,
+        }
+    }
+
+    #[must_use]
+    pub fn cot(&self) -> Self {
+        match self {
+            Self::Normalized(d) => Self::Normalized(d.cos() / d.sin()),
+            d => *d,
+        }
+    }
+
+    #[must_use]
+    pub fn asin(&self) -> Self {
+        match self {
+            Self::Normalized(d) => Self::Normalized(*d).to_f64().expect("Expected valid f64 value").asin().into(),
+            d => d.to_f64().expect("Expected valid f64 value").asin().into(),
+        }
+    }
+
+    #[must_use]
+    pub fn acos(&self) -> Self {
+        match self {
+            Self::Normalized(d) => Self::Normalized(*d).to_f64().expect("Expected valid f64 value").acos().into(),
+            d => d.to_f64().expect("Expected valid f64 value").acos().into(),
+        }
+    }
+
+    #[must_use]
+    pub fn atan(&self) -> Self {
+        match self {
+            Self::Normalized(d) => Self::Normalized(*d).to_f64().expect("Expected valid f64 value").atan().into(),
+            d => d.to_f64().expect("Expected valid f64 value").atan().into(),
+        }
+    }
+
+    #[must_use]
+    pub fn atan2(&self) -> Self {
+        match self {
+            // Somehow pass 2 args here. Do not just pass 0
+            Self::Normalized(d) => Self::Normalized(*d).to_f64().expect("Expected valid f64 value").atan2(0 as f64).into(),
+            d => d.to_f64().expect("Expected valid f64 value").atan2(0 as f64).into(),
         }
     }
 

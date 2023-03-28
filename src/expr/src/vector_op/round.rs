@@ -38,6 +38,78 @@ pub fn sin_decimal(input: Decimal) -> Decimal {
     input.sin()
 }
 
+#[function("cos(float64) -> float64")]
+pub fn cos_f64(input: F64) -> F64 {
+    f64::cos(input.0).into()
+}
+
+#[function("cos(decimal) -> decimal")]
+pub fn cos_decimal(input: Decimal) -> Decimal {
+    input.cos()
+}
+
+#[function("tan(float64) -> float64")]
+pub fn tan_f64(input: F64) -> F64 {
+    f64::tan(input.0).into()
+}
+
+#[function("tan(decimal) -> decimal")]
+pub fn tan_decimal(input: Decimal) -> Decimal {
+    input.tan()
+}
+
+#[function("cot(float64) -> float64")]
+pub fn cot_f64(input: F64) -> F64 {
+    f64::cot(input.0).into() // TODO
+}
+
+#[function("cot(decimal) -> decimal")]
+pub fn cot_decimal(input: Decimal) -> Decimal {
+    input.cot()
+}
+
+#[function("asin(float64) -> float64")]
+pub fn asin_f64(input: F64) -> F64 {
+    f64::asin(input.0).into()
+}
+
+#[function("asin(decimal) -> decimal")]
+pub fn asin_decimal(input: Decimal) -> Decimal {
+    input.asin()
+}
+
+#[function("acos(float64) -> float64")]
+pub fn acos_f64(input: F64) -> F64 {
+    f64::acos(input.0).into()
+}
+
+#[function("acos(decimal) -> decimal")]
+pub fn acos_decimal(input: Decimal) -> Decimal {
+    input.acos()
+}
+
+#[function("atan(float64) -> float64")]
+pub fn atan_f64(input: F64) -> F64 {
+    f64::atan(input.0).into()
+}
+
+#[function("atan(decimal) -> decimal")]
+pub fn atan_decimal(input: Decimal) -> Decimal {
+    input.atan()
+}
+// TODO: how do I pass 2 args here?
+#[function("atan2(float64, float64) -> float64")]
+pub fn atan2_f64(input: F64) -> F64 {
+    f64::atan2(input.0, input.1).into()
+}
+
+
+#[function("atan2(decimal) -> decimal")]
+pub fn atan2_decimal(input: Decimal) -> Decimal {
+    input.atan2()
+}
+
+
 #[function("ceil(float64) -> float64")]
 pub fn ceil_f64(input: F64) -> F64 {
     f64::ceil(input.0).into()
