@@ -354,6 +354,7 @@ impl Binder {
                     ]),
                 ),
                 ("date_trunc", raw_call(ExprType::DateTrunc)),
+                ("date_part", raw_call(ExprType::Extract)),
                 // string
                 ("substr", raw_call(ExprType::Substr)),
                 ("length", raw_call(ExprType::Length)),
