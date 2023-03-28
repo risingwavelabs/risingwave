@@ -843,7 +843,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Share }
             , { Stream, WatermarkFilter }
             , { Stream, TemporalJoin }
-            , { Stream, Values}
+            , { Stream, Values }
         }
     };
 }

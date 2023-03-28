@@ -150,7 +150,6 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_expr::expr::{BoxedExpression, LiteralExpression};
-    use risingwave_pb::stream_plan::Dispatcher;
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::ValuesExecutor;

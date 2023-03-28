@@ -90,7 +90,7 @@ pub mod subtask;
 mod temporal_join;
 mod top_n;
 mod union;
-pub mod values;
+mod values;
 mod watermark;
 mod watermark_filter;
 mod wrapper;
@@ -135,6 +135,7 @@ pub use top_n::{
     AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,
 };
 pub use union::UnionExecutor;
+pub use values::ValuesExecutor;
 pub use watermark_filter::WatermarkFilterExecutor;
 pub use wrapper::WrapperExecutor;
 
