@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use clap::Parser;
 use itertools::Itertools;
 use risingwave_backup::error::{BackupError, BackupResult};
@@ -19,6 +21,7 @@ use risingwave_backup::meta_snapshot::MetaSnapshot;
 use risingwave_backup::storage::MetaSnapshotStorageRef;
 use risingwave_backup::{checkpoint_path, object_store_client};
 use risingwave_common::config::MetaBackend;
+use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionCheckpoint};
 
 use crate::backup_restore::utils::{get_backup_store, get_meta_store, MetaStoreBackendImpl};
@@ -60,7 +63,7 @@ pub struct RestoreOpts {
     #[clap(long, default_value_t = String::from("hummock+memory"))]
     pub state_store_url: String,
     /// Directory of storage to restore hummock version to.
-    #[clap(long, default_value_t = String::from("data"))]
+    #[clap(long, default_value_t = String::from("hummock_001"))]
     pub state_store_dir: String,
     /// Print the target snapshot, but won't restore to meta store.
     #[clap(long)]
@@ -72,7 +75,8 @@ async fn restore_hummock_version(
     state_store_dir: &str,
     hummock_version: &HummockVersion,
 ) -> BackupResult<()> {
-    let object_store = object_store_client(state_store_url).await;
+    let object_store =
+        object_store_client(state_store_url, Arc::new(ObjectStoreMetrics::unused())).await;
     let checkpoint_path = checkpoint_path(state_store_dir);
     let checkpoint = HummockVersionCheckpoint {
         checkpoint: Some(hummock_version.clone()),

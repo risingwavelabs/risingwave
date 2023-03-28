@@ -33,7 +33,7 @@ use crate::rpc::server::ElectionClientRef;
 use crate::storage::MetaStore;
 
 pub struct MetaMetrics {
-    registry: Registry,
+    pub registry: Registry,
 
     /// gRPC latency of meta services
     pub grpc_latency: HistogramVec,

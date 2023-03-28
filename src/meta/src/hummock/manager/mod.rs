@@ -15,7 +15,7 @@
 use core::panic;
 use std::borrow::{Borrow, BorrowMut};
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::ops::{Bound, DerefMut};
+use std::ops::DerefMut;
 use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
@@ -167,6 +167,7 @@ use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGro
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
 };
+use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::ObjectStoreRef;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::version_update_payload::Payload;
@@ -285,7 +286,13 @@ where
         let sys_params = env.system_params_manager().get_params().await;
         let state_store_url = sys_params.state_store("".to_string());
         let state_store_dir = sys_params.data_directory();
-        let object_store = Arc::new(object_store_client(&state_store_url).await);
+        let object_store = Arc::new(
+            object_store_client(
+                &state_store_url,
+                Arc::new(ObjectStoreMetrics::new(metrics.registry.clone())),
+            )
+            .await,
+        );
         let checkpoint_path = checkpoint_path(state_store_dir);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let instance = HummockManager {
@@ -484,7 +491,7 @@ where
             .collect();
 
         versioning_guard.objects_to_delete.clear();
-        versioning_guard.mark_objects_for_deletion((Bound::Unbounded, Bound::Unbounded));
+        versioning_guard.mark_objects_for_deletion_after(0);
 
         let all_group_ids = get_compaction_group_ids(&versioning_guard.current_version);
         let configs = self

@@ -121,13 +121,12 @@ where
         };
         let to_delete = object_ids
             .iter()
-            .filter(|object_id| !tracked_object_ids.contains(object_id))
-            .collect_vec();
+            .filter(|object_id| !tracked_object_ids.contains(object_id));
         let mut versioning_guard = write_lock!(self, versioning).await;
         versioning_guard.objects_to_delete.extend(to_delete.clone());
         let remain = versioning_guard.objects_to_delete.len();
         drop(versioning_guard);
         trigger_stale_ssts_stat(&self.metrics, remain);
-        to_delete.len()
+        to_delete.count()
     }
 }

@@ -14,7 +14,6 @@
 
 use std::cmp;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::ops::{Bound, RangeBounds};
 
 use function_name::named;
 use itertools::Itertools;
@@ -110,18 +109,15 @@ impl Versioning {
         min_pinned_version_id
     }
 
-    /// Marks all objects <= `min_pinned_version_id` and in `range` for deletion.
-    pub(super) fn mark_objects_for_deletion(
-        &mut self,
-        range: (Bound<HummockVersionId>, Bound<HummockVersionId>),
-    ) {
+    /// Marks all objects in (`start_exclusive`, `min_pinned_version_id`] for deletion.
+    pub(super) fn mark_objects_for_deletion_after(&mut self, start_exclusive: HummockVersionId) {
         let min_pinned_version_id = self.min_pinned_version_id();
         self.objects_to_delete.extend(
             self.checkpoint
                 .stale_objects
                 .iter()
                 .filter(|(version_id, _)| {
-                    **version_id <= min_pinned_version_id && range.contains(*version_id)
+                    **version_id <= min_pinned_version_id && **version_id > start_exclusive
                 })
                 .flat_map(|(_, stale_objects)| stale_objects.id.clone()),
         );

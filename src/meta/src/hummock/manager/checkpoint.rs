@@ -17,7 +17,6 @@ use std::ops::{Deref, DerefMut};
 
 use function_name::named;
 use itertools::Itertools;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
 use risingwave_pb::hummock::hummock_version_checkpoint::StaleObjects;
 use risingwave_pb::hummock::HummockVersionCheckpoint;
 
@@ -81,14 +80,11 @@ where
         if new_checkpoint_id < old_checkpoint_id + min_delta_log_num {
             return Ok(0);
         }
-        let mut checkpoint_version = old_checkpoint.checkpoint.as_ref().unwrap().clone();
         let mut stale_objects = old_checkpoint.stale_objects.clone();
         for (_, version_delta) in versioning
             .hummock_version_deltas
             .range((Excluded(old_checkpoint_id), Included(new_checkpoint_id)))
         {
-            assert_eq!(version_delta.prev_id, checkpoint_version.id);
-            checkpoint_version.apply_version_delta(version_delta);
             let removed_object_ids = version_delta.gc_object_ids.clone();
             if removed_object_ids.is_empty() {
                 continue;
@@ -101,7 +97,7 @@ where
             );
         }
         let new_checkpoint = HummockVersionCheckpoint {
-            checkpoint: Some(checkpoint_version),
+            checkpoint: Some(current_version.clone()),
             stale_objects,
         };
         drop(versioning_guard);
@@ -110,9 +106,13 @@ where
         // 3. hold write lock and update in memory state
         let mut versioning_guard = write_lock!(self, versioning).await;
         let mut versioning = versioning_guard.deref_mut();
+        assert!(
+            versioning.checkpoint.checkpoint.is_none()
+                || new_checkpoint.checkpoint.as_ref().unwrap().id
+                    >= versioning.checkpoint.checkpoint.as_ref().unwrap().id
+        );
         versioning.checkpoint = new_checkpoint;
-        versioning
-            .mark_objects_for_deletion((Excluded(old_checkpoint_id), Included(new_checkpoint_id)));
+        versioning.mark_objects_for_deletion_after(old_checkpoint_id);
         let remain = versioning.objects_to_delete.len();
         drop(versioning_guard);
         self.metrics
