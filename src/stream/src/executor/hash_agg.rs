@@ -26,6 +26,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
+use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
@@ -150,6 +151,9 @@ struct ExecutionVars<K: HashKey, S: StateStore> {
 
     /// Buffer watermarks on group keys received since last barrier.
     buffered_watermarks: Vec<Option<Watermark>>,
+
+    /// Latest watermark on window column.
+    window_watermark: Option<ScalarImpl>,
 
     /// Stream chunk builder.
     chunk_builder: ChunkBuilder,
@@ -422,13 +426,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             .inc_by(vars.stats.chunk_total_lookup_count);
         vars.stats.chunk_total_lookup_count = 0;
 
-        // Get current watermark of window column.
-        let window_watermark = vars
-            .buffered_watermarks
-            .first()
-            .and_then(|opt_watermark| opt_watermark.as_ref())
-            .map(|watermark| watermark.val.clone());
-
+        let window_watermark = vars.window_watermark.take();
         let n_dirty_group = vars.group_change_set.len();
 
         // Flush agg states if needed.
@@ -554,6 +552,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             group_change_set: HashSet::new(),
             distinct_dedup: DistinctDeduplicater::new(&this.agg_calls, &this.watermark_epoch),
             buffered_watermarks: vec![None; this.group_key_indices.len()],
+            window_watermark: None,
             chunk_builder: ChunkBuilder::new(this.chunk_size, &this.info.schema.data_types()),
             eowc_buffer: if this.emit_on_window_close {
                 Some(EowcBuffer::new())
@@ -591,6 +590,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 Message::Watermark(watermark) => {
                     let group_key_seq = group_key_invert_idx[watermark.col_idx];
                     if let Some(group_key_seq) = group_key_seq {
+                        if group_key_seq == 0 {
+                            vars.window_watermark = Some(watermark.val.clone());
+                        }
                         vars.buffered_watermarks[group_key_seq] =
                             Some(watermark.with_idx(group_key_seq));
                     }
