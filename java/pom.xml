@@ -19,6 +19,7 @@
         <module>connector-node/risingwave-source-test</module>
         <module>connector-node/risingwave-connector-service</module>
         <module>connector-node/assembly</module>
+        <module>connector-node/risingwave-sink-hudi</module>
     </modules>
     <packaging>pom</packaging>
 
@@ -179,6 +180,11 @@
             <dependency>
                 <groupId>com.risingwave.java</groupId>
                 <artifactId>risingwave-sink-iceberg</artifactId>
+                <version>${module.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.risingwave.java</groupId>
+                <artifactId>risingwave-sink-hudi</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>

@@ -30,6 +30,8 @@ public class SinkUtils {
                 return new JDBCSinkFactory();
             case "iceberg":
                 return new IcebergSinkFactory();
+            case "hudi":
+                return new HudiSinkFactory();
             case "deltalake":
                 return new DeltaLakeSinkFactory();
             default:

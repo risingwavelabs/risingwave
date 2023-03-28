@@ -39,6 +39,10 @@
         </dependency>
         <dependency>
             <groupId>com.risingwave.java</groupId>
+            <artifactId>risingwave-sink-hudi</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.risingwave.java</groupId>
             <artifactId>risingwave-sink-deltalake</artifactId>
         </dependency>
     </dependencies>

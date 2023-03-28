@@ -42,6 +42,7 @@
                 <include>*:risingwave-sink-jdbc</include>
                 <include>*:risingwave-sink-iceberg</include>
                 <include>*:risingwave-sink-deltalake</include>
+                <include>*:risingwave-sink-hudi</include>
             </includes>
             <useTransitiveDependencies>true</useTransitiveDependencies>
             <useTransitiveFiltering>true</useTransitiveFiltering>
