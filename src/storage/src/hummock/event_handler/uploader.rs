@@ -31,6 +31,7 @@ use risingwave_hummock_sdk::{info_in_release, CompactionGroupId, HummockEpoch, L
 use tokio::task::JoinHandle;
 use tracing::error;
 
+use crate::hummock::compactor::{merge_imms_in_memory, CompactionExecutor};
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -79,14 +80,14 @@ struct UploadingTask {
 
 pub struct MergeImmTaskOutput {
     pub table_id: TableId,
-    pub shard_id: LocalInstanceId,
+    pub instance_id: LocalInstanceId,
     pub merged_imm: ImmutableMemtable,
 }
 
 // A future that merges multiple immutable memtables to a single immutable memtable.
 struct MergingImmTask {
     table_id: TableId,
-    shard_id: LocalInstanceId,
+    instance_id: LocalInstanceId,
     input_imms: Vec<ImmutableMemtable>,
     join_handle: JoinHandle<HummockResult<ImmutableMemtable>>,
 }
@@ -94,20 +95,19 @@ struct MergingImmTask {
 impl MergingImmTask {
     fn new(
         table_id: TableId,
-        shard_id: LocalInstanceId,
+        instance_id: LocalInstanceId,
         imms: Vec<ImmutableMemtable>,
         context: &UploaderContext,
     ) -> Self {
         let memory_limiter = context.buffer_tracker.get_memory_limiter().clone();
         let input_imms = imms.clone();
-        let join_handle = tokio::spawn(async move {
-            ImmutableMemtable::build_merged_imm(table_id, shard_id, imms, Some(memory_limiter))
-                .await
+        let join_handle = context.compaction_executor.spawn(async move {
+            merge_imms_in_memory(table_id, instance_id, imms, Some(memory_limiter)).await
         });
 
         MergingImmTask {
             table_id,
-            shard_id,
+            instance_id,
             input_imms,
             join_handle,
         }
@@ -361,7 +361,7 @@ impl SealedData {
         // rearrange sealed imms by table shard and in epoch descending order
         for imm in unseal_epoch_data.imms.into_iter().rev() {
             self.imms_by_table_shard
-                .entry((imm.table_id, imm.shard_id))
+                .entry((imm.table_id, imm.instance_id))
                 .or_default()
                 .push_front(imm);
         }
@@ -407,7 +407,7 @@ impl SealedData {
         for task in self.merging_tasks.iter().rev() {
             task.input_imms.iter().for_each(|imm| {
                 self.imms_by_table_shard
-                    .entry((imm.table_id, imm.shard_id))
+                    .entry((imm.table_id, imm.instance_id))
                     .or_default()
                     .push_back(imm.clone());
             });
@@ -464,13 +464,13 @@ impl SealedData {
             match merge_result {
                 Ok(merged_imm) => Poll::Ready(Some(MergeImmTaskOutput {
                     table_id: task.table_id,
-                    shard_id: task.shard_id,
+                    instance_id: task.instance_id,
                     merged_imm,
                 })),
                 Err(err) => {
                     error!(
                         "poll merge imm task failed. table_id: {}, shard_id: {},  {}",
-                        task.table_id, task.shard_id, err
+                        task.table_id, task.instance_id, err
                     );
                     Poll::Ready(None)
                 }
@@ -535,6 +535,8 @@ struct UploaderContext {
     /// When the number of imms of a table shard exceeds this threshold, uploader will generate
     /// merging tasks to merge them.
     imm_merge_threshold: usize,
+
+    compaction_executor: Arc<CompactionExecutor>,
 }
 
 impl UploaderContext {
@@ -543,12 +545,14 @@ impl UploaderContext {
         spawn_upload_task: SpawnUploadTask,
         buffer_tracker: BufferTracker,
         config: &StorageOpts,
+        compaction_executor: Arc<CompactionExecutor>,
     ) -> Self {
         UploaderContext {
             pinned_version,
             spawn_upload_task,
             buffer_tracker,
             imm_merge_threshold: config.imm_merge_threshold,
+            compaction_executor,
         }
     }
 }
@@ -599,6 +603,7 @@ impl HummockUploader {
         spawn_upload_task: SpawnUploadTask,
         buffer_tracker: BufferTracker,
         config: &StorageOpts,
+        compaction_executor: Arc<CompactionExecutor>,
     ) -> Self {
         let initial_epoch = pinned_version.version().max_committed_epoch;
         Self {
@@ -614,6 +619,7 @@ impl HummockUploader {
                 spawn_upload_task,
                 buffer_tracker,
                 config,
+                compaction_executor,
             ),
         }
     }
@@ -966,6 +972,7 @@ mod tests {
     use tokio::sync::oneshot;
     use tokio::task::yield_now;
 
+    use crate::hummock::compactor::CompactionExecutor;
     use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
     use crate::hummock::event_handler::uploader::{
         HummockUploader, UploadTaskInfo, UploadTaskOutput, UploadTaskPayload, UploaderContext,
@@ -1064,11 +1071,13 @@ mod tests {
         F: UploadFn<Fut>,
     {
         let config = StorageOpts::default();
+        let compaction_executor = Arc::new(CompactionExecutor::new(None));
         UploaderContext::new(
             initial_pinned_version(),
             Arc::new(move |payload, task_info| spawn(upload_fn(payload, task_info))),
             BufferTracker::for_test(),
             &config,
+            compaction_executor,
         )
     }
 
@@ -1078,11 +1087,13 @@ mod tests {
         F: UploadFn<Fut>,
     {
         let config = StorageOpts::default();
+        let compaction_executor = Arc::new(CompactionExecutor::new(None));
         HummockUploader::new(
             initial_pinned_version(),
             Arc::new(move |payload, task_info| spawn(upload_fn(payload, task_info))),
             BufferTracker::for_test(),
             &config,
+            compaction_executor,
         )
     }
 
@@ -1246,8 +1257,8 @@ mod tests {
             let mut imm1 = gen_imm(epoch).await;
             let mut imm2 = gen_imm(epoch).await;
 
-            imm1.shard_id = 1 as LocalInstanceId;
-            imm2.shard_id = 2 as LocalInstanceId;
+            imm1.instance_id = 1 as LocalInstanceId;
+            imm2.instance_id = 2 as LocalInstanceId;
 
             uploader.add_imm(imm1.clone());
             uploader.add_imm(imm2.clone());
@@ -1458,6 +1469,7 @@ mod tests {
         };
 
         let config = StorageOpts::default();
+        let compaction_executor = Arc::new(CompactionExecutor::new(None));
         let uploader = HummockUploader::new(
             initial_pinned_version(),
             Arc::new({
@@ -1477,6 +1489,7 @@ mod tests {
             }),
             buffer_tracker.clone(),
             &config,
+            compaction_executor,
         );
         (buffer_tracker, uploader, new_task_notifier)
     }

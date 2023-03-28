@@ -22,7 +22,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
-use risingwave_hummock_sdk::key::{FullKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, UserKey, EPOCH_LEN};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
@@ -31,10 +31,19 @@ use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
 use crate::hummock::compactor::context::CompactorContext;
 use crate::hummock::compactor::{CompactOutput, Compactor};
 use crate::hummock::event_handler::uploader::UploadTaskPayload;
-use crate::hummock::iterator::{Forward, HummockIterator, OrderedMergeIteratorInner};
+use crate::hummock::event_handler::LocalInstanceId;
+use crate::hummock::iterator::{
+    Forward, HummockIterator, OrderedMergeIteratorInner, UnorderedMergeIteratorInner,
+};
+use crate::hummock::shared_buffer::shared_buffer_batch::{
+    SharedBufferBatch, SharedBufferBatchInner, SharedBufferVersionedEntry,
+};
 use crate::hummock::sstable::DeleteRangeAggregatorBuilder;
+use crate::hummock::store::memtable::ImmutableMemtable;
+use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    CachePolicy, HummockError, HummockResult, RangeTombstonesCollector, SstableBuilderOptions,
+    CachePolicy, HummockError, HummockResult, MemoryLimiter, RangeTombstonesCollector,
+    SstableBuilderOptions,
 };
 
 const GC_DELETE_KEYS_FOR_FLUSH: bool = false;
@@ -235,6 +244,91 @@ async fn compact_shared_buffer(
     } else {
         Err(err.unwrap())
     }
+}
+
+/// Merge multiple batches into a larger one
+pub async fn merge_imms_in_memory(
+    table_id: TableId,
+    instance_id: LocalInstanceId,
+    imms: Vec<ImmutableMemtable>,
+    memory_limiter: Option<Arc<MemoryLimiter>>,
+) -> HummockResult<ImmutableMemtable> {
+    let mut range_tombstone_list = Vec::new();
+    let mut kv_count = 0;
+    let mut epochs = vec![];
+    let mut merged_size = 0;
+    let mut merged_imm_ids = Vec::with_capacity(imms.len());
+
+    let mut imm_iters = Vec::with_capacity(imms.len());
+    for imm in imms {
+        assert!(imm.kv_count() > 0, "imm should not be empty");
+        assert_eq!(
+            table_id,
+            imm.table_id(),
+            "should only merge data belonging to the same table"
+        );
+
+        merged_imm_ids.push(imm.batch_id());
+        epochs.push(imm.min_epoch());
+        kv_count += imm.kv_count();
+        merged_size += imm.size();
+        range_tombstone_list.extend(imm.get_delete_range_tombstones());
+        imm_iters.push(imm.into_forward_iter());
+    }
+    range_tombstone_list.sort();
+    epochs.sort();
+
+    // use merge iterator to merge input imms
+    let mut mi = UnorderedMergeIteratorInner::new(imm_iters);
+    mi.rewind().await?;
+    let mut items = Vec::with_capacity(kv_count);
+    while mi.is_valid() {
+        let full_key = mi.key();
+        let epoch = full_key.epoch;
+        // copy key and value to avoid lifetime issue
+        // because the merge iterator will be dropped after the function returns
+        let item = (
+            Bytes::copy_from_slice(full_key.user_key.table_key.as_ref()),
+            mi.value().to_bytes(),
+        );
+        items.push((item, epoch));
+        mi.next().await?;
+    }
+
+    let mut merged_payload: Vec<SharedBufferVersionedEntry> = Vec::new();
+    let mut pivot = items.first().map(|((k, _), _)| k.clone()).unwrap();
+    let mut versions: Vec<(HummockEpoch, HummockValue<Bytes>)> = Vec::new();
+
+    for ((key, value), epoch) in items {
+        if key == pivot {
+            versions.push((epoch, value));
+        } else {
+            merged_payload.push((pivot, versions));
+            pivot = key;
+            versions = vec![(epoch, value)];
+        }
+    }
+    // process the last key
+    if !versions.is_empty() {
+        merged_payload.push((pivot, versions));
+    }
+
+    let tracker = memory_limiter.and_then(|limiter| {
+        limiter.try_require_memory((merged_size + kv_count * EPOCH_LEN) as u64)
+    });
+    Ok(SharedBufferBatch {
+        inner: Arc::new(SharedBufferBatchInner::new_with_multi_epoch_batches(
+            epochs,
+            merged_payload,
+            kv_count,
+            merged_imm_ids,
+            range_tombstone_list,
+            merged_size,
+            tracker,
+        )),
+        table_id,
+        instance_id,
+    })
 }
 
 pub struct SharedBufferCompactRunner {

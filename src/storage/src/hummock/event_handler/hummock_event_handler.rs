@@ -145,14 +145,19 @@ impl HummockEventHandler {
         let write_conflict_detector =
             ConflictDetector::new_from_config(&compactor_context.storage_opts);
         let sstable_object_id_manager = compactor_context.sstable_object_id_manager.clone();
-        let storage_opts = compactor_context.storage_opts.clone();
+        let upload_compactor_context = compactor_context.clone();
         let uploader = HummockUploader::new(
             pinned_version.clone(),
             Arc::new(move |payload, task_info| {
-                spawn(flush_imms(payload, task_info, compactor_context.clone()))
+                spawn(flush_imms(
+                    payload,
+                    task_info,
+                    upload_compactor_context.clone(),
+                ))
             }),
             buffer_tracker,
-            &storage_opts,
+            &compactor_context.storage_opts,
+            compactor_context.compaction_executor.clone(),
         );
 
         Self {
@@ -453,7 +458,7 @@ impl HummockEventHandler {
                         let read_guard = self.read_version_mapping.read();
                         read_guard.get(&merge_output.table_id).map_or((), |shards| {
                             shards
-                                .get(&merge_output.shard_id)
+                                .get(&merge_output.instance_id)
                                 .map_or((), |read_version| {
                                     read_version.write().update(VersionUpdate::Staging(
                                         StagingData::MergedImmMem(merge_output.merged_imm),
