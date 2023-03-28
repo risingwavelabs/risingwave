@@ -19,7 +19,6 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::{
     BatchValues, ColPrunable, ExprRewritable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown,

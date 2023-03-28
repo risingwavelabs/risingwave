@@ -206,7 +206,7 @@
     LogicalProject { exprs: [*VALUES*_0.column_0, $expr1, $expr2] }
     └─LogicalProject { exprs: [*VALUES*_0.column_0, TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) as $expr1, (TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) + '00:00:10':Interval) as $expr2] }
       └─LogicalShare { id = 1 }
-        └─LogicalValues { rows: [['2020-01-01 12:00:00':Timestamp]] }
+        └─LogicalValues { rows: [['2020-01-01 12:00:00':Timestamp]], schema: Schema { fields: [*VALUES*_0.column_0:Timestamp] } }
   batch_plan: |
     BatchProject { exprs: [*VALUES*_0.column_0, TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) as $expr1, (TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) + '00:00:10':Interval) as $expr2] }
     └─BatchValues { rows: [['2020-01-01 12:00:00':Timestamp]] }

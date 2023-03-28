@@ -341,7 +341,7 @@
     insert into s values (1,2,(1,2,(1,2,null)));
   logical_plan: |
     LogicalInsert { table: s }
-    └─LogicalValues { rows: [[1:Int32, 2:Int32, Row(1:Int32, 2:Int32, Row(1:Int32, 2:Int32, null:Int32))]] }
+    └─LogicalValues { rows: [[1:Int32, 2:Int32, Row(1:Int32, 2:Int32, Row(1:Int32, 2:Int32, null:Int32))]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32, *VALUES*_0.column_2:Struct(StructType { fields: [Int32, Int32, Struct(StructType { fields: [Int32, Int32, Int32], field_names: ["v1", "v2", "v3"] })], field_names: ["v1", "v2", "v3"] })] } }
   create_table_with_connector:
     row_format: protobuf
     name: s
@@ -399,4 +399,4 @@
     select CASE WHEN false THEN ROW(0, INTERVAL '1') WHEN true THEN ROW(1.1, INTERVAL '1') ELSE ROW(1, INTERVAL '1') END;
   logical_plan: |
     LogicalProject { exprs: [Case(false:Boolean, Row(0:Int32::Decimal, '00:00:01':Interval), true:Boolean, Row(1.1:Decimal, '00:00:01':Interval), Row(1:Int32::Decimal, '00:00:01':Interval)) as $expr1] }
-    └─LogicalValues { rows: [[]] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }

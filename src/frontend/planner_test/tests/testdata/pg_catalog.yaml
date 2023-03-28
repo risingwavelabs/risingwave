@@ -25,7 +25,7 @@
   logical_plan: |
     LogicalProject { exprs: [pg_user.name] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-      ├─LogicalValues { rows: [[]] }
+      ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
       └─LogicalProject { exprs: [pg_user.name] }
         └─LogicalFilter { predicate: (1:Int32 = pg_user.usesysid) }
           └─LogicalScan { table: pg_user, columns: [pg_user.usesysid, pg_user.name, pg_user.usecreatedb, pg_user.usesuper, pg_user.passwd] }
@@ -39,6 +39,6 @@
     select 'pg_namespace'::regclass
   logical_plan: |
     LogicalProject { exprs: [2:Int32] }
-    └─LogicalValues { rows: [[]] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
     BatchValues { rows: [[2:Int32]] }

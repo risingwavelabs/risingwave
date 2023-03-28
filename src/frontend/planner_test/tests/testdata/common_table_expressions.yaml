@@ -54,7 +54,7 @@
           | └─LogicalProject { exprs: [t1.x] }
           |   └─LogicalScan { table: t1, columns: [t1.x, t1._row_id] }
           └─LogicalProject { exprs: [0.1:Decimal] }
-            └─LogicalValues { rows: [[]] }
+            └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - name: Ensure we can bind CTE with aliases in both table name and columns
   sql: |
     create table t1 (x int, y int);
@@ -76,9 +76,9 @@
     └─LogicalJoin { type: Inner, on: (t.c = *VALUES*_0.column_0), output: all }
       ├─LogicalScan { table: t, columns: [t.v, t.c, t._row_id] }
       └─LogicalShare { id = 1 }
-        └─LogicalValues { rows: [['cn':Varchar, 'China':Varchar], ['us':Varchar, 'United States':Varchar]] }
+        └─LogicalValues { rows: [['cn':Varchar, 'China':Varchar], ['us':Varchar, 'United States':Varchar]], schema: Schema { fields: [*VALUES*_0.column_0:Varchar, *VALUES*_0.column_1:Varchar] } }
   stream_plan: |
-    StreamMaterialize { columns: [v, c, abbr, real, t._row_id(hidden), _row_id(hidden)], pk_columns: [t._row_id, _row_id, c], pk_conflict: "no check" }
+    StreamMaterialize { columns: [v, c, abbr, real, t._row_id(hidden), _row_id(hidden)], stream_key: [t._row_id, _row_id, c], pk_columns: [t._row_id, _row_id, c], pk_conflict: "NoCheck" }
     └─StreamHashJoin { type: Inner, predicate: t.c = *VALUES*_0.column_0, output: [t.v, t.c, *VALUES*_0.column_0, *VALUES*_0.column_1, t._row_id, _row_id] }
       ├─StreamExchange { dist: HashShard(t.c) }
       | └─StreamTableScan { table: t, columns: [t.v, t.c, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }

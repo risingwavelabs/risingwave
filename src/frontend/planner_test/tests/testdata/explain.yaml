@@ -4,38 +4,38 @@
     Begin:
 
     LogicalProject { exprs: [1:Int32] }
-    └─LogicalValues { rows: [[]] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
     Predicate Push Down:
 
     LogicalProject { exprs: [1:Int32] }
-    └─LogicalValues { rows: [[]] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
     Predicate Push Down:
 
     LogicalProject { exprs: [1:Int32] }
-    └─LogicalValues { rows: [[]] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
     Predicate Push Down:
 
     LogicalProject { exprs: [1:Int32] }
-    └─LogicalValues { rows: [[]] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
     Prune Columns:
 
     LogicalProject { exprs: [1:Int32] }
-    └─LogicalValues { rows: [[]] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
     Predicate Push Down:
 
     LogicalProject { exprs: [1:Int32] }
-    └─LogicalValues { rows: [[]] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
     Project Remove:
 
     apply TrivialProjectToValuesRule 1 time(s)
 
-    LogicalValues { rows: [[1:Int32]] }
+    LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
 
     Inline Session Timezone:
 

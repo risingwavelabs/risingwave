@@ -215,7 +215,7 @@
       └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr2] }
         └─LogicalAgg { group_key: [$expr1], aggs: [] }
           └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr1] }
-            └─LogicalValues { rows: [[]] }
+            └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   optimized_logical_plan_for_batch: |
     LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(auction.date_time, auction.date_time), output: all }
     ├─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
@@ -227,7 +227,7 @@
             ├─LogicalAgg { group_key: [auction.date_time], aggs: [] }
             | └─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
             |   └─LogicalScan { table: auction, columns: [auction.date_time], predicate: IsNotNull(auction.date_time) }
-            └─LogicalValues { rows: [[]] }
+            └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: LeftSemi, predicate: auction.date_time IS NOT DISTINCT FROM auction.date_time, output: all }
@@ -261,13 +261,13 @@
         └─LogicalFilter { predicate: (CorrelatedInputRef { index: 0, correlated_id: 1 } > 1:Int32) }
           └─LogicalAgg { aggs: [] }
             └─LogicalProject { exprs: [] }
-              └─LogicalValues { rows: [[]] }
+              └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [1:Int32] }
     └─LogicalJoin { type: LeftSemi, on: true, output: all }
       ├─LogicalScan { table: t, output_columns: [], required_columns: [t.v], predicate: (t.v > 1:Int32) }
       └─LogicalAgg { aggs: [] }
-        └─LogicalValues { rows: [[]] }
+        └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     create table a (a1 int, a2 int);
     create table b (b1 int, b2 int);

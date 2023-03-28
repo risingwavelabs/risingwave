@@ -40,7 +40,7 @@
                 └─LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
                   ├─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
                   └─LogicalProject { exprs: [CorrelatedInputRef { index: 1, correlated_id: 1 } as $expr1] }
-                    └─LogicalValues { rows: [[]] }
+                    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -64,7 +64,7 @@
                           └─LogicalJoin { type: Inner, on: true, output: all }
                             ├─LogicalScan { table: t3, columns: [t3.x, t3.y, t3._row_id] }
                             └─LogicalProject { exprs: [1:Int32] }
-                              └─LogicalValues { rows: [[]] }
+                              └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -679,7 +679,7 @@
       └─LogicalJoin { type: Inner, on: true, output: all }
         ├─LogicalAgg { group_key: [t1.a], aggs: [] }
         | └─LogicalScan { table: t1, columns: [t1.a] }
-        └─LogicalValues { rows: [[]] }
+        └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);

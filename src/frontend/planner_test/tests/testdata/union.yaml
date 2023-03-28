@@ -235,20 +235,20 @@
 - sql: |
     select 1 union all select 1
   optimized_logical_plan_for_batch: |
-    LogicalValues { rows: [[1:Int32], [1:Int32]] }
+    LogicalValues { rows: [[1:Int32], [1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
   batch_plan: |
     BatchValues { rows: [[1:Int32], [1:Int32]] }
 - sql: |
     select 1 union all select 2 union all select 3 union all select 4 union all select 5
   optimized_logical_plan_for_batch: |
-    LogicalValues { rows: [[1:Int32], [2:Int32], [3:Int32], [4:Int32], [5:Int32]] }
+    LogicalValues { rows: [[1:Int32], [2:Int32], [3:Int32], [4:Int32], [5:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
   batch_plan: |
     BatchValues { rows: [[1:Int32], [2:Int32], [3:Int32], [4:Int32], [5:Int32]] }
 - sql: |
     select 1 union select 2 union select 3 union select 4 union select 5 union select 5
   optimized_logical_plan_for_batch: |
     LogicalAgg { group_key: [1:Int32], aggs: [] }
-    └─LogicalValues { rows: [[1:Int32], [2:Int32], [3:Int32], [4:Int32], [5:Int32], [5:Int32]] }
+    └─LogicalValues { rows: [[1:Int32], [2:Int32], [3:Int32], [4:Int32], [5:Int32], [5:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchHashAgg { group_key: [1:Int32], aggs: [] }

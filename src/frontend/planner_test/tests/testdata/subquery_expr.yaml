@@ -4,13 +4,13 @@
   logical_plan: |
     LogicalProject { exprs: [1:Int32] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-      ├─LogicalValues { rows: [[]] }
+      ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
       └─LogicalProject { exprs: [1:Int32] }
-        └─LogicalValues { rows: [[]] }
+        └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   optimized_logical_plan_for_batch: |
     LogicalJoin { type: LeftOuter, on: true, output: all }
-    ├─LogicalValues { rows: [[]] }
-    └─LogicalValues { rows: [[1:Int32]] }
+    ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
 - sql: |
     create table t(x int);
     select (select x from t), 1 from t;
@@ -81,11 +81,11 @@
     LogicalProject { exprs: [t.x, 1:Int32] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
       ├─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-      | ├─LogicalValues { rows: [[]] }
+      | ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
       | └─LogicalProject { exprs: [t.x] }
       |   └─LogicalScan { table: t, columns: [t.x, t._row_id] }
       └─LogicalProject { exprs: [1:Int32] }
-        └─LogicalValues { rows: [[]] }
+        └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
 - sql: |
     create table t(x int);
@@ -119,13 +119,13 @@
   logical_plan: |
     LogicalProject { exprs: [1:Int32] }
     └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
-      ├─LogicalValues { rows: [[]] }
+      ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
       └─LogicalProject { exprs: [t.x] }
         └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [1:Int32] }
     └─LogicalJoin { type: LeftSemi, on: true, output: all }
-      ├─LogicalValues { rows: [[]] }
+      ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
       └─LogicalScan { table: t, columns: [] }
 - sql: |
     create table t(x int);
@@ -133,13 +133,13 @@
   logical_plan: |
     LogicalProject { exprs: [1:Int32] }
     └─LogicalApply { type: LeftAnti, on: true, correlated_id: 1 }
-      ├─LogicalValues { rows: [[]] }
+      ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
       └─LogicalProject { exprs: [t.x] }
         └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [1:Int32] }
     └─LogicalJoin { type: LeftAnti, on: true, output: all }
-      ├─LogicalValues { rows: [[]] }
+      ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
       └─LogicalScan { table: t, columns: [] }
 - sql: |
     create table t1(x int);
@@ -177,8 +177,8 @@
     LogicalProject { exprs: [1:Int32] }
     └─LogicalFilter { predicate: (1:Int32 > 0:Int32) }
       └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
-        ├─LogicalValues { rows: [[]] }
-        └─LogicalValues { rows: [[1:Int32]] }
+        ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+        └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32] } }
 - sql: |
     select 1 where (not exists (values (1))) and (1>0 or exists (values (1)))
   logical_plan: |
@@ -186,23 +186,23 @@
     └─LogicalFilter { predicate: ((1:Int32 > 0:Int32) OR $expr1) }
       └─LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
         ├─LogicalApply { type: LeftAnti, on: true, correlated_id: 1 }
-        | ├─LogicalValues { rows: [[]] }
-        | └─LogicalValues { rows: [[1:Int32]] }
+        | ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+        | └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32] } }
         └─LogicalProject { exprs: [(count >= 1:Int32) as $expr1] }
           └─LogicalAgg { aggs: [count] }
-            └─LogicalValues { rows: [[1:Int32]] }
+            └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [*VALUES*_1.column_0:Int32] } }
 - sql: |
     select a + 1, b::varchar, c from (values (1, 2, 3), (4, 5, 6)) t(a, b, c);
   logical_plan: |
     LogicalProject { exprs: [(*VALUES*_0.column_0 + 1:Int32) as $expr1, *VALUES*_0.column_1::Varchar as $expr2, *VALUES*_0.column_2] }
-    └─LogicalValues { rows: [[1:Int32, 2:Int32, 3:Int32], [4:Int32, 5:Int32, 6:Int32]] }
+    └─LogicalValues { rows: [[1:Int32, 2:Int32, 3:Int32], [4:Int32, 5:Int32, 6:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32, *VALUES*_0.column_2:Int32] } }
 - sql: |
     select sum(a), max(b + c + 10), string_agg(c::varchar || '~', ',') from (values (1, 2, 3), (4, 5, 6)) as t(a, b, c);
   logical_plan: |
     LogicalProject { exprs: [sum(*VALUES*_0.column_0), max($expr1), string_agg($expr2, ',':Varchar)] }
     └─LogicalAgg { aggs: [sum(*VALUES*_0.column_0), max($expr1), string_agg($expr2, ',':Varchar)] }
       └─LogicalProject { exprs: [*VALUES*_0.column_0, ((*VALUES*_0.column_1 + *VALUES*_0.column_2) + 10:Int32) as $expr1, ConcatOp(*VALUES*_0.column_2::Varchar, '~':Varchar) as $expr2, ',':Varchar] }
-        └─LogicalValues { rows: [[1:Int32, 2:Int32, 3:Int32], [4:Int32, 5:Int32, 6:Int32]] }
+        └─LogicalValues { rows: [[1:Int32, 2:Int32, 3:Int32], [4:Int32, 5:Int32, 6:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32, *VALUES*_0.column_2:Int32] } }
 - sql: |
     select 1 + (select 2 from t);
   binder_error: 'Catalog error: table or source not found: t'
