@@ -116,7 +116,7 @@ pub struct TableCatalog {
     pub definition: String,
 
     /// The behavior of handling incoming pk conflict from source executor, we can overwrite or
-    /// ignore conflict pk. For normal materialize executor and other executore, this filed will be
+    /// ignore conflict pk. For normal materialize executor and other executors, this field will be
     /// `No Check`.
     pub conflict_behavior: ConflictBehavior,
 
