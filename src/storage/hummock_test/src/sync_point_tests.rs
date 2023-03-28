@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
+use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::hummock::CompactionFilterFlag;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;

@@ -16,6 +16,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes};
+use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::TABLE_PREFIX_LEN;
 use risingwave_hummock_sdk::HummockReadEpoch;
