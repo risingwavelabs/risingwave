@@ -30,6 +30,7 @@ use risingwave_sqlparser::ast::{SetExpr, Statement};
 use super::extended_handle::{Portal, PrepareStatement};
 use super::{PgResponseStream, RwPgResponse};
 use crate::binder::{Binder, BoundStatement};
+use crate::catalog::TableId;
 use crate::handler::flush::do_flush;
 use crate::handler::privilege::resolve_privileges;
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
@@ -88,7 +89,7 @@ pub struct BatchQueryPlanResult {
     pub(crate) plan: PlanRef,
     pub(crate) query_mode: QueryMode,
     pub(crate) schema: Schema,
-    pub(crate) dependent_relations: Vec<u32>,
+    pub(crate) dependent_relations: Vec<TableId>,
 }
 
 pub fn gen_batch_query_plan(

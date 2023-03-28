@@ -17,7 +17,9 @@ pub mod desc;
 use std::collections::HashMap;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, DatabaseId, Field, Schema, SchemaId, UserId};
+use risingwave_common::catalog::{
+    ColumnCatalog, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
+};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{PbSink, PbSinkType};
 
@@ -113,7 +115,7 @@ pub struct SinkCatalog {
     /// All columns of the sink. Note that this is NOT sorted by columnId in the vector.
     pub columns: Vec<ColumnCatalog>,
 
-    /// Primiary keys of the sink. Derived by the frontend.
+    /// Primary keys of the sink. Derived by the frontend.
     pub plan_pk: Vec<ColumnOrder>,
 
     /// User-defined primary key indices for upsert sink.
@@ -130,7 +132,7 @@ pub struct SinkCatalog {
     pub owner: UserId,
 
     // Relations on which the sink depends.
-    pub dependent_relations: Vec<u32>,
+    pub dependent_relations: Vec<TableId>,
 
     // The append-only behavior of the physical sink connector. Frontend will determine `sink_type`
     // based on both its own derivation on the append-only attribute and other user-specified
@@ -153,7 +155,11 @@ impl SinkCatalog {
                 .iter()
                 .map(|idx| *idx as i32)
                 .collect_vec(),
-            dependent_relations: self.dependent_relations.clone(),
+            dependent_relations: self
+                .dependent_relations
+                .iter()
+                .map(|id| id.table_id)
+                .collect_vec(),
             distribution_key: self
                 .distribution_key
                 .iter()
@@ -206,7 +212,11 @@ impl From<PbSink> for SinkCatalog {
                 .collect_vec(),
             properties: pb.properties,
             owner: pb.owner.into(),
-            dependent_relations: pb.dependent_relations,
+            dependent_relations: pb
+                .dependent_relations
+                .into_iter()
+                .map(TableId::from)
+                .collect_vec(),
             sink_type: SinkType::from_proto(sink_type),
         }
     }

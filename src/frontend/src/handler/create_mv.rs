@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::PbTable;
@@ -113,7 +114,10 @@ pub fn gen_create_mv_plan(
     table.owner = session.user_id();
 
     // record dependent views.
-    table.dependent_relations = dependent_relations;
+    table.dependent_relations = dependent_relations
+        .into_iter()
+        .map(|t| t.table_id)
+        .collect_vec();
 
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();

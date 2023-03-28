@@ -204,7 +204,7 @@ impl Binder {
             .iter()
             .map(|c| (c.is_hidden, Field::from(&c.column_desc)))
             .collect_vec();
-        self.including_relations.insert(table_id.table_id);
+        self.including_relations.insert(table_id);
         let table_indexes = self.resolve_table_indexes(schema_name, table_id)?;
 
         let table = BoundBaseTable {
@@ -221,7 +221,7 @@ impl Binder {
         &mut self,
         source_catalog: &SourceCatalog,
     ) -> (Relation, Vec<(bool, Field)>) {
-        self.including_relations.insert(source_catalog.id);
+        self.including_relations.insert(source_catalog.id.into());
         (
             Relation::Source(Box::new(source_catalog.into())),
             source_catalog
@@ -256,7 +256,7 @@ impl Binder {
             None => {
                 let share_id = self.next_share_id();
                 self.shared_views.insert(view_catalog.id, share_id);
-                self.including_relations.insert(view_catalog.id);
+                self.including_relations.insert(view_catalog.id.into());
                 share_id
             }
         };

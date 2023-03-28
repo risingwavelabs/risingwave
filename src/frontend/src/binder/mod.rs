@@ -55,7 +55,7 @@ pub use update::BoundUpdate;
 pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;
-use crate::catalog::ViewId;
+use crate::catalog::{TableId, ViewId};
 use crate::session::{AuthContext, SessionImpl};
 
 pub type ShareId = usize;
@@ -96,7 +96,7 @@ pub struct Binder {
     shared_views: HashMap<ViewId, ShareId>,
 
     /// The included relations while binding a query.
-    including_relations: HashSet<u32>,
+    including_relations: HashSet<TableId>,
 
     param_types: ParameterTypes,
 }
@@ -231,7 +231,7 @@ impl Binder {
         self.param_types.export()
     }
 
-    pub fn including_relations(&self) -> Vec<u32> {
+    pub fn including_relations(&self) -> Vec<TableId> {
         self.including_relations.iter().cloned().collect_vec()
     }
 

@@ -14,6 +14,7 @@
 
 //! Handle creation of logical (non-materialized) views.
 
+use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -85,7 +86,10 @@ pub async fn handle_create_view(
         name: view_name,
         properties: properties.inner().clone().into_iter().collect(),
         owner: session.user_id(),
-        dependent_relations,
+        dependent_relations: dependent_relations
+            .into_iter()
+            .map(|t| t.table_id)
+            .collect_vec(),
         sql: format!("{}", query),
         columns: columns.into_iter().map(|f| f.to_prost()).collect(),
     };
