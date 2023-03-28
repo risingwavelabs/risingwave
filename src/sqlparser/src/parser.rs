@@ -24,7 +24,9 @@ use core::fmt;
 
 use tracing::{debug, instrument};
 
-use crate::ast::ddl::SourceWatermark;
+use crate::ast::ddl::{
+    AlterIndexOperation, AlterSinkOperation, AlterViewOperation, SourceWatermark,
+};
 use crate::ast::{ParseTo, *};
 use crate::keywords::{self, Keyword};
 use crate::tokenizer::*;
@@ -69,6 +71,7 @@ pub enum IsLateral {
 
 use IsLateral::*;
 
+#[derive(Debug)]
 pub enum WildcardOrExpr {
     Expr(Expr),
     /// Expr is an arbitrary expression, returning either a table or a column.
@@ -368,6 +371,8 @@ impl Parser {
             Expr::CompoundIdentifier(_) => expr,
             // expr is `((1,2,3)::foo)`
             Expr::Cast { .. } => expr,
+            // expr is `(func())`
+            Expr::Function(_) => expr,
             // expr is `((foo.v1).v2)`
             Expr::FieldIdentifier(expr, ids) => {
                 // Put `ids` to the latter part!
@@ -2415,6 +2420,14 @@ impl Parser {
     pub fn parse_alter(&mut self) -> Result<Statement, ParserError> {
         if self.parse_keyword(Keyword::TABLE) {
             self.parse_alter_table()
+        } else if self.parse_keyword(Keyword::INDEX) {
+            self.parse_alter_index()
+        } else if self.parse_keyword(Keyword::VIEW) {
+            self.parse_alter_view(false)
+        } else if self.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEW]) {
+            self.parse_alter_view(true)
+        } else if self.parse_keyword(Keyword::SINK) {
+            self.parse_alter_sink()
         } else if self.parse_keyword(Keyword::USER) {
             self.parse_alter_user()
         } else if self.parse_keyword(Keyword::SYSTEM) {
@@ -2511,6 +2524,70 @@ impl Parser {
         };
         Ok(Statement::AlterTable {
             name: table_name,
+            operation,
+        })
+    }
+
+    pub fn parse_alter_index(&mut self) -> Result<Statement, ParserError> {
+        let index_name = self.parse_object_name()?;
+        let operation = if self.parse_keyword(Keyword::RENAME) {
+            if self.parse_keyword(Keyword::TO) {
+                let index_name = self.parse_object_name()?;
+                AlterIndexOperation::RenameIndex { index_name }
+            } else {
+                return self.expected("TO after RENAME", self.peek_token());
+            }
+        } else {
+            return self.expected("RENAME after ALTER INDEX", self.peek_token());
+        };
+
+        Ok(Statement::AlterIndex {
+            name: index_name,
+            operation,
+        })
+    }
+
+    pub fn parse_alter_view(&mut self, materialized: bool) -> Result<Statement, ParserError> {
+        let view_name = self.parse_object_name()?;
+        let operation = if self.parse_keyword(Keyword::RENAME) {
+            if self.parse_keyword(Keyword::TO) {
+                let view_name = self.parse_object_name()?;
+                AlterViewOperation::RenameView { view_name }
+            } else {
+                return self.expected("TO after RENAME", self.peek_token());
+            }
+        } else {
+            return self.expected(
+                &format!(
+                    "RENAME after ALTER {}VIEW",
+                    if materialized { "MATERIALIZED " } else { "" }
+                ),
+                self.peek_token(),
+            );
+        };
+
+        Ok(Statement::AlterView {
+            materialized,
+            name: view_name,
+            operation,
+        })
+    }
+
+    pub fn parse_alter_sink(&mut self) -> Result<Statement, ParserError> {
+        let sink_name = self.parse_object_name()?;
+        let operation = if self.parse_keyword(Keyword::RENAME) {
+            if self.parse_keyword(Keyword::TO) {
+                let sink_name = self.parse_object_name()?;
+                AlterSinkOperation::RenameSink { sink_name }
+            } else {
+                return self.expected("TO after RENAME", self.peek_token());
+            }
+        } else {
+            return self.expected("RENAME after ALTER SINK", self.peek_token());
+        };
+
+        Ok(Statement::AlterSink {
+            name: sink_name,
             operation,
         })
     }

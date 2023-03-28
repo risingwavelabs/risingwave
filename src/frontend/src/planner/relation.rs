@@ -16,7 +16,7 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
+use risingwave_common::types::{DataType, Interval, ScalarImpl};
 
 use crate::binder::{
     BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
@@ -275,7 +275,7 @@ impl Planner {
                 Some(ScalarImpl::Interval(window_offset)) => window_offset,
                 _ => return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into()),
             },
-            (None, None) => IntervalUnit::from_month_day_usec(0, 0, 0),
+            (None, None) => Interval::from_month_day_usec(0, 0, 0),
             _ => return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into()),
         };
 

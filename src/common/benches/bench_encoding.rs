@@ -18,10 +18,7 @@ use std::sync::Arc;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::types::struct_type::StructType;
-use risingwave_common::types::{
-    DataType, Datum, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
-    ScalarImpl,
-};
+use risingwave_common::types::{DataType, Date, Datum, Interval, ScalarImpl, Time, Timestamp};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::{memcmp_encoding, value_encoding};
 
@@ -92,23 +89,15 @@ fn bench_encoding(c: &mut Criterion) {
         Case::new(
             "Interval",
             DataType::Interval,
-            ScalarImpl::Interval(IntervalUnit::default()),
+            ScalarImpl::Interval(Interval::default()),
         ),
+        Case::new("Date", DataType::Date, ScalarImpl::Date(Date::default())),
         Case::new(
-            "NaiveDate",
-            DataType::Date,
-            ScalarImpl::NaiveDate(NaiveDateWrapper::default()),
-        ),
-        Case::new(
-            "NaiveDateTime",
+            "Timestamp",
             DataType::Timestamp,
-            ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::default()),
+            ScalarImpl::Timestamp(Timestamp::default()),
         ),
-        Case::new(
-            "NaiveTime",
-            DataType::Time,
-            ScalarImpl::NaiveTime(NaiveTimeWrapper::default()),
-        ),
+        Case::new("Time", DataType::Time, ScalarImpl::Time(Time::default())),
         Case::new(
             "Utf8 (len = 10)",
             DataType::Varchar,

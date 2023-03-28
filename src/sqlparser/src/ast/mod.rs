@@ -43,6 +43,7 @@ pub use self::query::{
 };
 pub use self::statement::*;
 pub use self::value::{DateTimeField, DollarQuotedString, TrimWhereField, Value};
+pub use crate::ast::ddl::{AlterIndexOperation, AlterSinkOperation, AlterViewOperation};
 use crate::keywords::Keyword;
 use crate::parser::{Parser, ParserError};
 
@@ -991,6 +992,25 @@ pub enum Statement {
         name: ObjectName,
         operation: AlterTableOperation,
     },
+    /// ALTER INDEX
+    AlterIndex {
+        /// Index name
+        name: ObjectName,
+        operation: AlterIndexOperation,
+    },
+    /// ALTER VIEW
+    AlterView {
+        /// View name
+        name: ObjectName,
+        materialized: bool,
+        operation: AlterViewOperation,
+    },
+    /// ALTER SINK
+    AlterSink {
+        /// Sink name
+        name: ObjectName,
+        operation: AlterSinkOperation,
+    },
     /// DESCRIBE TABLE OR SOURCE
     Describe {
         /// Table or Source name
@@ -1363,7 +1383,7 @@ impl fmt::Display for Statement {
                 if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
                 name = name,
                 table_name = table_name,
-                columns = display_separated(columns, ","),
+                columns = display_comma_separated(columns),
                 include = if include.is_empty() {
                     "".to_string()
                 } else {
@@ -1385,6 +1405,15 @@ impl fmt::Display for Statement {
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
             Statement::AlterTable { name, operation } => {
                 write!(f, "ALTER TABLE {} {}", name, operation)
+            }
+            Statement::AlterIndex { name, operation } => {
+                write!(f, "ALTER INDEX {} {}", name, operation)
+            }
+            Statement::AlterView { materialized, name, operation } => {
+                write!(f, "ALTER {}VIEW {} {}", if *materialized { "MATERIALIZED " } else { "" }, name, operation)
+            }
+            Statement::AlterSink { name, operation } => {
+                write!(f, "ALTER SINK {} {}", name, operation)
             }
             Statement::Drop(stmt) => write!(f, "DROP {}", stmt),
             Statement::DropFunction {

@@ -2617,6 +2617,26 @@ def section_memory_manager(outer_panels):
         ),
     ]
 
+def section_connector_node(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed(
+            "Connector Node",
+            [
+                panels.timeseries_rowsps(
+                    "Connector Source Throughput(rows)",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('connector_source_rows_received')}[$__interval])",
+                            "{{source_type}} @ {{source_id}}",
+                        ),
+                    ],
+                ),
+            ],
+        )
+    ]
+
 templating = Templating()
 if namespace_filter_enabled:
     templating = Templating(
@@ -2674,5 +2694,6 @@ dashboard = Dashboard(
         *section_grpc_hummock_meta_client(panels),
         *section_frontend(panels),
         *section_memory_manager(panels),
+        *section_connector_node(panels),
     ],
 ).auto_panel_ids()

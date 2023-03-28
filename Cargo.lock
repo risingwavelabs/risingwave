@@ -6354,6 +6354,7 @@ dependencies = [
  "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
+ "risingwave_sqlparser",
  "risingwave_test_runner",
  "scopeguard",
  "serde",

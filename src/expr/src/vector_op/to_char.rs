@@ -18,7 +18,7 @@ use std::sync::LazyLock;
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
 use chrono::format::StrftimeItems;
 use ouroboros::self_referencing;
-use risingwave_common::types::NaiveDateTimeWrapper;
+use risingwave_common::types::Timestamp;
 
 #[self_referencing]
 pub struct ChronoPattern {
@@ -69,7 +69,7 @@ pub fn compile_pattern_to_chrono(tmpl: &str) -> ChronoPattern {
 }
 
 // #[function("to_char(timestamp, varchar) -> varchar")]
-pub fn to_char_timestamp(data: NaiveDateTimeWrapper, tmpl: &str, writer: &mut dyn Write) {
+pub fn to_char_timestamp(data: Timestamp, tmpl: &str, writer: &mut dyn Write) {
     let pattern = compile_pattern_to_chrono(tmpl);
     let format = data.0.format_with_items(pattern.borrow_items().iter());
     write!(writer, "{}", format).unwrap();

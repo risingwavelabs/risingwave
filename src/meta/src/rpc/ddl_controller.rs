@@ -15,6 +15,7 @@
 use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::{Connection, Database, Function, Schema, Source, Table, View};
+use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 
@@ -62,9 +63,10 @@ pub enum DdlCommand {
     DropFunction(FunctionId),
     CreateView(View),
     DropView(ViewId),
-    CreatingStreamingJob(StreamingJob, StreamFragmentGraphProto),
+    CreateStreamingJob(StreamingJob, StreamFragmentGraphProto),
     DropStreamingJob(StreamingJobId),
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
+    AlterRelationName(Relation, String),
     CreateConnection(Connection),
     DropConnection(String),
 }
@@ -135,13 +137,16 @@ where
                 DdlCommand::DropFunction(function_id) => ctrl.drop_function(function_id).await,
                 DdlCommand::CreateView(view) => ctrl.create_view(view).await,
                 DdlCommand::DropView(view_id) => ctrl.drop_view(view_id).await,
-                DdlCommand::CreatingStreamingJob(stream_job, fragment_graph) => {
+                DdlCommand::CreateStreamingJob(stream_job, fragment_graph) => {
                     ctrl.create_streaming_job(stream_job, fragment_graph).await
                 }
                 DdlCommand::DropStreamingJob(job_id) => ctrl.drop_streaming_job(job_id).await,
                 DdlCommand::ReplaceTable(stream_job, fragment_graph, table_col_index_mapping) => {
                     ctrl.replace_table(stream_job, fragment_graph, table_col_index_mapping)
                         .await
+                }
+                DdlCommand::AlterRelationName(relation, name) => {
+                    ctrl.alter_relation_name(relation, &name).await
                 }
                 DdlCommand::CreateConnection(connection) => {
                     ctrl.create_connection(connection).await
@@ -714,5 +719,34 @@ where
         self.catalog_manager
             .cancel_replace_table_procedure(table)
             .await
+    }
+
+    async fn alter_relation_name(
+        &self,
+        relation: Relation,
+        new_name: &str,
+    ) -> MetaResult<NotificationVersion> {
+        match relation {
+            Relation::TableId(table_id) => {
+                self.catalog_manager
+                    .alter_table_name(table_id, new_name)
+                    .await
+            }
+            Relation::ViewId(view_id) => {
+                self.catalog_manager
+                    .alter_view_name(view_id, new_name)
+                    .await
+            }
+            Relation::IndexId(index_id) => {
+                self.catalog_manager
+                    .alter_index_name(index_id, new_name)
+                    .await
+            }
+            Relation::SinkId(sink_id) => {
+                self.catalog_manager
+                    .alter_sink_name(sink_id, new_name)
+                    .await
+            }
+        }
     }
 }
