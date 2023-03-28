@@ -14,8 +14,10 @@
 
 use std::fmt::Debug;
 use std::future::Future;
+use std::sync::Arc;
 
 use risingwave_common::array::StreamChunk;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use tokio::sync::mpsc::{
     channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
@@ -64,6 +66,9 @@ pub trait LogWriter {
         next_epoch: u64,
         is_checkpoint: bool,
     ) -> Self::FlushCurrentEpoch<'_>;
+
+    /// Update the vnode bitmap of the log writer
+    fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>);
 }
 
 pub trait LogReader {
@@ -297,5 +302,9 @@ impl LogWriter for BoundedInMemLogStoreWriter {
 
             Ok(())
         }
+    }
+
+    fn update_vnode_bitmap(&mut self, _new_vnodes: Arc<Bitmap>) {
+        // Since this is in memory, we don't need to handle the vnode bitmap
     }
 }

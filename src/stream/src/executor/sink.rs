@@ -34,7 +34,7 @@ use crate::common::log_store::{
     BoundedInMemLogStoreFactory, LogReader, LogStoreFactory, LogStoreReadItem, LogWriter,
 };
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{expect_first_barrier, PkIndices};
+use crate::executor::{expect_first_barrier, ActorContextRef, PkIndices};
 
 pub struct SinkExecutor {
     input: BoxedExecutor,
@@ -45,6 +45,7 @@ pub struct SinkExecutor {
     schema: Schema,
     pk_indices: Vec<usize>,
     sink_type: SinkType,
+    actor_context: ActorContextRef,
 }
 
 async fn build_sink(
@@ -83,6 +84,7 @@ impl SinkExecutor {
         schema: Schema,
         pk_indices: Vec<usize>,
         sink_type: SinkType,
+        actor_context: ActorContextRef,
     ) -> Self {
         Self {
             input: materialize_executor,
@@ -93,6 +95,7 @@ impl SinkExecutor {
             schema,
             connector_params,
             sink_type,
+            actor_context,
         }
     }
 
@@ -119,8 +122,13 @@ impl SinkExecutor {
             metrics,
         );
 
-        let write_log_stream =
-            Self::execute_write_log(self.input, log_writer, self.schema, self.sink_type);
+        let write_log_stream = Self::execute_write_log(
+            self.input,
+            log_writer,
+            self.schema,
+            self.sink_type,
+            self.actor_context,
+        );
 
         select(consume_log_stream.into_stream(), write_log_stream)
     }
@@ -131,6 +139,7 @@ impl SinkExecutor {
         mut log_writer: impl LogWriter,
         schema: Schema,
         sink_type: SinkType,
+        actor_context: ActorContextRef,
     ) {
         let data_types = schema.data_types();
         let mut input = input.execute();
@@ -173,6 +182,9 @@ impl SinkExecutor {
                     log_writer
                         .flush_current_epoch(barrier.epoch.curr, barrier.checkpoint)
                         .await?;
+                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(actor_context.id) {
+                        log_writer.update_vnode_bitmap(vnode_bitmap);
+                    }
                     yield Message::Barrier(barrier);
                 }
             }
@@ -272,6 +284,7 @@ impl Executor for SinkExecutor {
 mod test {
     use super::*;
     use crate::executor::test_utils::*;
+    use crate::executor::ActorContext;
 
     #[ignore]
     #[tokio::test]
@@ -324,6 +337,7 @@ mod test {
             schema.clone(),
             pk.clone(),
             SinkType::AppendOnly,
+            ActorContext::create(0),
         );
 
         let mut executor = SinkExecutor::execute(Box::new(sink_executor));
@@ -387,6 +401,7 @@ mod test {
             schema.clone(),
             pk.clone(),
             SinkType::ForceAppendOnly,
+            ActorContext::create(0),
         );
 
         let mut executor = SinkExecutor::execute(Box::new(sink_executor));

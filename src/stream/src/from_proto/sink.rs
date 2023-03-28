@@ -59,6 +59,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             schema,
             pk_indices,
             sink_type,
+            params.actor_context,
         )))
     }
 }
