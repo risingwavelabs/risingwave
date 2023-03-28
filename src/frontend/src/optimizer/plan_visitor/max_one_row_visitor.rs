@@ -65,8 +65,22 @@ impl PlanVisitor<bool> for MaxOneRowVisitor {
                 eq_set.insert(input_ref.index);
             }
         }
-        eq_set.is_superset(&plan.input().logical_pk().iter().copied().collect())
-            || self.visit(plan.input())
+        let input = plan.input();
+        eq_set.is_superset(&input.logical_pk().iter().copied().collect())
+            || {
+                // We don't have UNIQUE key now. So we hack here to support some complex queries on
+                // system tables.
+                if let Some(scan) = input.as_logical_scan() && scan.table_name() == "pg_namespace" {
+                    let nspname = scan.output_col_idx().iter().find(|i| scan.table_desc().columns[**i].name == "nspname").unwrap();
+                    let unique_key = [
+                        *nspname
+                    ];
+                    eq_set.is_superset(&unique_key.into_iter().collect())
+                } else {
+                    false
+                }
+            }
+            || self.visit(input)
     }
 
     fn visit_logical_union(&mut self, _plan: &LogicalUnion) -> bool {
