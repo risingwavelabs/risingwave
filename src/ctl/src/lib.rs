@@ -183,6 +183,8 @@ enum MetaCommands {
     Resume,
     /// get cluster info
     ClusterInfo,
+    /// get source split info
+    SourceSplitInfo,
     /// Reschedule the parallel unit in the stream graph
     ///
     /// The format is `fragment_id-[removed]+[added]`
@@ -337,6 +339,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::Pause) => cmd_impl::meta::pause(context).await?,
         Commands::Meta(MetaCommands::Resume) => cmd_impl::meta::resume(context).await?,
         Commands::Meta(MetaCommands::ClusterInfo) => cmd_impl::meta::cluster_info(context).await?,
+        Commands::Meta(MetaCommands::SourceSplitInfo) => {
+            cmd_impl::meta::source_split_info(context).await?
+        }
         Commands::Meta(MetaCommands::Reschedule { plan, dry_run }) => {
             cmd_impl::meta::reschedule(context, plan, dry_run).await?
         }
