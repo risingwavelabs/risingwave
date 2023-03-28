@@ -14,6 +14,7 @@
 
 use std::fmt::Debug;
 use std::io::{Read, Write};
+use rust_decimal::prelude::MathematicalOps;
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
 use bytes::{BufMut, Bytes, BytesMut};
@@ -499,7 +500,13 @@ impl Decimal {
         }
     }
 
-    // TODO: add sin here? No. It is a float operation
+    #[must_use]
+    pub fn sin(&self) -> Self {
+        match self {
+            Self::Normalized(d) => Self::Normalized(d.sin()),
+            d => *d,
+        }
+    }
 
     #[must_use]
     pub fn floor(&self) -> Self {

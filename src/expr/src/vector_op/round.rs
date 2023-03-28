@@ -26,16 +26,21 @@ pub fn round_digits<D: Into<i32>>(input: Decimal, digits: D) -> Decimal {
     }
 }
 
-#[function("ceil(float64) -> float64")]
-pub fn ceil_f64(input: F64) -> F64 {
-    f64::ceil(input.0).into()
-}
-
 // TODO: add sin here?
 
 #[function("sin(float64) -> float64")]
-pub fn ceil_decimal(input: F64) -> F64 {
+pub fn sin_f64(input: F64) -> F64 {
     f64::sin(input.0).into()
+}
+
+#[function("sin(decimal) -> decimal")]
+pub fn sin_decimal(input: Decimal) -> Decimal {
+    input.sin()
+}
+
+#[function("ceil(float64) -> float64")]
+pub fn ceil_f64(input: F64) -> F64 {
+    f64::ceil(input.0).into()
 }
 
 #[function("ceil(decimal) -> decimal")]
