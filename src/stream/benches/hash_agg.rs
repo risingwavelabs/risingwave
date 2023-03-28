@@ -40,7 +40,6 @@ use risingwave_expr::expr::*;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::StateStore;
 
-use risingwave_stream::executor::agg_common::{AggExecutorArgs, AggExecutorArgsExtra};
 use risingwave_stream::executor::aggregation::{AggArgs, AggCall};
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::test_utils::agg_executor::{

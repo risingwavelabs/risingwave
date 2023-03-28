@@ -46,7 +46,6 @@ use crate::executor::aggregation::{generate_agg_schema, AggCall, AggGroup as Gen
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContext, BoxedMessageStream, Message, PkIndices};
-use crate::executor::agg_common::AggExecutorArgsExtra;
 use crate::executor::test_utils::agg_executor::{create_agg_state_storage, create_result_table};
 use crate::task::AtomicU64Ref;
 
@@ -596,7 +595,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 }
 
     #[allow(clippy::too_many_arguments)]
-    async fn new_boxed_hash_agg_executor<S: StateStore>(
+    pub async fn new_boxed_hash_agg_executor<S: StateStore>(
         store: S,
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
@@ -674,7 +673,7 @@ pub mod tests {
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
-    use crate::executor::agg_common::{AggExecutorArgs, GroupAggExecutorExtraArgs};
+    use crate::executor::agg_common::AggExecutorArgs;
     use crate::executor::aggregation::{AggArgs, AggCall};
     use crate::executor::monitor::StreamingMetrics;
     use crate::executor::test_utils::agg_executor::{
