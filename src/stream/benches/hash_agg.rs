@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, black_box};
 // use itertools::Itertools;
 // use risingwave_common::catalog::{Field, Schema};
 // use risingwave_common::types::DataType;
@@ -21,7 +21,7 @@ use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criteri
 // // use risingwave_pb::expr::{AggCall, InputRef};
 // use risingwave_stream::executor::{BoxedExecutor, HashAggExecutor};
 use risingwave_stream::executor::new_boxed_hash_agg_executor;
-// use tokio::runtime::Runtime;
+use tokio::runtime::Runtime;
 
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
@@ -46,7 +46,9 @@ use risingwave_stream::executor::test_utils::agg_executor::{
     create_agg_state_storage, create_result_table,
 };
 use risingwave_stream::executor::test_utils::*;
-use risingwave_stream::executor::{ActorContext, Executor, HashAggExecutor, Message, PkIndices};
+use risingwave_stream::executor::{ActorContext, Executor, BoxedExecutor, HashAggExecutor, Message, PkIndices};
+
+
 
 trait SortedRows {
     fn sorted_rows(self) -> Vec<(Op, OwnedRow)>;
@@ -68,7 +70,24 @@ impl SortedRows for StreamChunk {
 }
 
 fn bench_hash_agg(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
 
+    c.bench_function("benchmark_hash_agg", |b| {
+        b.to_async(&rt).iter_batched(|| {
+            setup_bench_hash_agg(MemoryStateStore::new())
+        },
+        |e| execute_executor(e),
+            BatchSize::SmallInput,
+        )
+    });
+
+}
+
+fn build_runtime() -> Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
 }
 
 /// Basic case:
@@ -77,7 +96,7 @@ fn bench_hash_agg(c: &mut Criterion) {
 /// chunk_size: 1000
 /// num_of_chunks: 1024
 /// aggregation: count
-async fn setup_bench_hash_agg<S: StateStore>(store: S) {
+fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
     // ---- Define hash agg executor parameters ----
     let data_types = vec![DataType::Int64; 3];
     let schema = Schema {
@@ -131,50 +150,31 @@ async fn setup_bench_hash_agg<S: StateStore>(store: S) {
     }
 
     // ---- Create HashAggExecutor to be benchmarked ----
-    let hash_agg = new_boxed_hash_agg_executor(
+    let row_count_index = 0;
+    let pk_indices = vec![];
+    let extreme_cache_size = 1024;
+    let executor_id = 1;
+
+    let hash_agg = build_runtime().block_on(new_boxed_hash_agg_executor(
         store,
         Box::new(source),
         agg_calls,
-        0,
+        row_count_index,
         group_key_indices,
-        vec![],
-        1 << 10,
-        1,
-    )
-    .await;
-    let mut hash_agg = hash_agg.execute();
+        pk_indices,
+        extreme_cache_size,
+        executor_id,
+    ));
+    hash_agg
+}
 
+pub async fn execute_executor(executor: BoxedExecutor) {
+    let mut stream = executor.execute();
     // Consume the init barrier
-    hash_agg.next().await.unwrap().unwrap();
-    // Consume stream chunk
-    let msg = hash_agg.next().await.unwrap().unwrap();
-    assert_eq!(
-        msg.into_chunk().unwrap().sorted_rows(),
-        StreamChunk::from_pretty(
-            " I I I I
-            + 1 1 1 1
-            + 2 2 4 4"
-        )
-        .sorted_rows(),
-    );
-
-    assert_matches!(
-        hash_agg.next().await.unwrap().unwrap(),
-        Message::Barrier { .. }
-    );
-
-    let msg = hash_agg.next().await.unwrap().unwrap();
-    assert_eq!(
-        msg.into_chunk().unwrap().sorted_rows(),
-        StreamChunk::from_pretty(
-            "  I I I I
-            -  1 1 1 1
-            U- 2 2 4 4
-            U+ 2 1 2 2
-            +  3 1 3 3"
-        )
-        .sorted_rows(),
-    );
+    stream.next().await.unwrap().unwrap();
+    while let Some(ret) = stream.next().await {
+        _ = black_box(ret.unwrap());
+    }
 }
 
 criterion_group!(benches, bench_hash_agg);
