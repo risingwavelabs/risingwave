@@ -56,6 +56,15 @@ impl MessageSender {
     }
 
     #[allow(dead_code)]
+    pub fn push_barrier_with_prev_epoch_for_test(&mut self, cur_epoch: u64, prev_epoch: u64, stop: bool) {
+        let mut barrier = Barrier::with_prev_epoch_for_test(cur_epoch, prev_epoch);
+        if stop {
+            barrier = barrier.with_stop();
+        }
+        self.0.send(Message::Barrier(barrier)).unwrap();
+    }
+
+    #[allow(dead_code)]
     pub fn push_watermark(&mut self, col_idx: usize, data_type: DataType, val: ScalarImpl) {
         self.0
             .send(Message::Watermark(Watermark {

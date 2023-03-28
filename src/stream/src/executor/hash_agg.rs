@@ -39,6 +39,7 @@ use super::{
     expect_first_barrier, ActorContextRef, ExecutorInfo, PkIndicesRef,
     StreamExecutorResult, Watermark,
 };
+use crate::executor::Executor;
 use crate::cache::{cache_may_stale, new_with_hasher, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
