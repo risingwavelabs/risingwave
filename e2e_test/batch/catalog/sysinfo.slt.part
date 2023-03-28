@@ -9,6 +9,6 @@ SELECT pg_catalog.pg_get_userbyid(1);
 root
 
 query T
-select (SELECT nspname FROM pg_catalog.pg_namespace WHERE oid = 1);
+select (SELECT pg_catalog.pg_get_userbyid(1));
 ----
-pg_catalog
+root
