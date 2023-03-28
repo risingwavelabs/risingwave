@@ -22,7 +22,7 @@ use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criteri
 // use risingwave_stream::executor::{BoxedExecutor, HashAggExecutor};
 use risingwave_stream::executor::new_boxed_hash_agg_executor;
 use tokio::runtime::Runtime;
-
+use futures::executor::block_on;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
@@ -144,7 +144,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
 
     // ---- Create MockSourceExecutor ----
     let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
-    tx.push_barrier(1, false);
+    tx.push_barrier(1001, false);
     for chunk in chunks {
         tx.push_chunk(chunk);
     }
@@ -155,7 +155,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
     let extreme_cache_size = 1024;
     let executor_id = 1;
 
-    let hash_agg = build_runtime().block_on(new_boxed_hash_agg_executor(
+    let hash_agg = block_on(new_boxed_hash_agg_executor(
         store,
         Box::new(source),
         agg_calls,
