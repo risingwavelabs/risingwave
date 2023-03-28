@@ -95,6 +95,10 @@ impl BoundQuery {
         self.body
             .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
     }
+
+    pub fn contains_sys_table(&self) -> bool {
+        self.body.contains_sys_table()
+    }
 }
 
 impl RewriteExprsRecursive for BoundQuery {

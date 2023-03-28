@@ -166,7 +166,7 @@ mod tests {
             );
             assert_eq!(
                 row.datum_at(3).to_owned_datum(),
-                (Some(ScalarImpl::NaiveDateTime(
+                (Some(ScalarImpl::Timestamp(
                     str_to_timestamp("2017-12-31 16:00:01").unwrap()
                 )))
             )
@@ -186,7 +186,7 @@ mod tests {
             );
             assert_eq!(
                 row.datum_at(3).to_owned_datum(),
-                (Some(ScalarImpl::NaiveDateTime(
+                (Some(ScalarImpl::Timestamp(
                     str_to_timestamp("1999-12-31 16:00:01").unwrap()
                 )))
             )
@@ -206,7 +206,7 @@ mod tests {
             );
             assert_eq!(
                 row.datum_at(3).to_owned_datum(),
-                (Some(ScalarImpl::NaiveDateTime(
+                (Some(ScalarImpl::Timestamp(
                     str_to_timestamp("1999-12-31 16:00:01").unwrap()
                 )))
             )
@@ -226,7 +226,7 @@ mod tests {
             );
             assert_eq!(
                 row.datum_at(3).to_owned_datum(),
-                (Some(ScalarImpl::NaiveDateTime(
+                (Some(ScalarImpl::Timestamp(
                     str_to_timestamp("1999-12-31 16:00:01").unwrap()
                 )))
             )

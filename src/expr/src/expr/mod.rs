@@ -58,7 +58,7 @@ mod expr_unary;
 mod expr_vnode;
 
 mod agg;
-mod build_expr_from_prost;
+mod build;
 pub(crate) mod data_types;
 pub(crate) mod template;
 pub(crate) mod template_fast;
@@ -72,7 +72,7 @@ use risingwave_common::types::{DataType, Datum};
 use static_assertions::const_assert;
 
 pub use self::agg::AggKind;
-pub use self::build_expr_from_prost::{build, build_from_prost};
+pub use self::build::*;
 pub use self::expr_input_ref::InputRefExpression;
 pub use self::expr_literal::LiteralExpression;
 use super::{ExprError, Result};
