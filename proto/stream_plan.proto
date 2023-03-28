@@ -185,7 +185,6 @@ message MaterializeNode {
   catalog.Table table = 3;
 }
 
-
 message AggCallState {
   // use the one column of stream's result table as the AggCall's state, used for count/sum/append-only extreme.
   message ResultValueState {}

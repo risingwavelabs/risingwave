@@ -373,14 +373,14 @@ impl From<UserId> for u32 {
 #[cfg_attr(test, derive(PartialEq))]
 pub enum ConflictBehavior {
     NoCheck,
-    OverWrite,
+    Overwrite,
     IgnoreConflict,
 }
 
 impl ConflictBehavior {
     pub fn from_protobuf(tb_conflict_behavior: &PbHandleConflictBehavior) -> Self {
         match tb_conflict_behavior {
-            PbHandleConflictBehavior::Overwrite => ConflictBehavior::OverWrite,
+            PbHandleConflictBehavior::Overwrite => ConflictBehavior::Overwrite,
             PbHandleConflictBehavior::Ignore => ConflictBehavior::IgnoreConflict,
             PbHandleConflictBehavior::NoCheck => ConflictBehavior::NoCheck,
             _ => unreachable!(),
@@ -390,7 +390,7 @@ impl ConflictBehavior {
     pub fn to_protobuf(&self) -> PbHandleConflictBehavior {
         match self {
             ConflictBehavior::NoCheck => PbHandleConflictBehavior::NoCheck,
-            ConflictBehavior::OverWrite => PbHandleConflictBehavior::Overwrite,
+            ConflictBehavior::Overwrite => PbHandleConflictBehavior::Overwrite,
             ConflictBehavior::IgnoreConflict => PbHandleConflictBehavior::Ignore,
         }
     }

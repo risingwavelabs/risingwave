@@ -173,9 +173,9 @@ impl StreamMaterialize {
         let read_prefix_len_hint = stream_key.len();
 
         let conflict_behavior_type = match conflict_behavior {
-            ConflictBehavior::NoCheck => 0,
-            ConflictBehavior::OverWrite => 1,
+            ConflictBehavior::Overwrite => 1,
             ConflictBehavior::IgnoreConflict => 2,
+            ConflictBehavior::NoCheck => 3,
         };
         Ok(TableCatalog {
             id: TableId::placeholder(),
