@@ -245,7 +245,11 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     side_r: JoinSide<K, S>,
     /// Optional non-equi join conditions
     cond: Option<BoxedExpression>,
+    /// Column indices of watermark output and offset expression of each inequality, respectively.
     inequality_pairs: Vec<(Vec<usize>, Option<BoxedExpression>)>,
+    /// The output watermark of each inequality condition and its value is the minimum of the
+    /// calculation result of both side. It will be used to generate watermark into downstream
+    /// and do state cleaning if `clean_state` field of that inequality is `true`.
     inequality_watermarks: Vec<Option<Watermark>>,
     /// Identity string
     identity: String,
@@ -1454,7 +1458,7 @@ mod tests {
         );
         let chunk_r1 = StreamChunk::from_pretty(
             "  I I
-             + 2 5
+             + 2 6
              + 4 8
              + 6 9",
         );
@@ -1466,8 +1470,8 @@ mod tests {
         let (mut tx_l, mut tx_r, mut hash_join) = create_executor::<{ JoinType::Inner }>(
             true,
             false,
-            Some(String::from("(equal:boolean $1:int8 $3:int8)")),
-            vec![(1, 3, true, None), (3, 1, true, None)],
+            Some(String::from("(and:boolean (greater_than:boolean $1:int8 (subtract:int8 $3:int8 2:int8)) (greater_than:boolean $3:int8 (subtract:int8 $1:int8 2:int8)))")),
+            vec![(1, 3, true, Some(build_from_pretty("(subtract:int8 $0:int8 2:int8)"))), (3, 1, true, Some(build_from_pretty("(subtract:int8 $0:int8 2:int8)")))],
         )
         .await;
 
@@ -1492,7 +1496,7 @@ mod tests {
         tx_l.push_watermark(1, DataType::Int64, ScalarImpl::Int64(10));
         hash_join.next_unwrap_pending();
 
-        tx_r.push_watermark(1, DataType::Int64, ScalarImpl::Int64(4));
+        tx_r.push_watermark(1, DataType::Int64, ScalarImpl::Int64(6));
         let output_watermark = hash_join.next_unwrap_ready_watermark()?;
         assert_eq!(
             output_watermark,
@@ -1501,7 +1505,7 @@ mod tests {
         let output_watermark = hash_join.next_unwrap_ready_watermark()?;
         assert_eq!(
             output_watermark,
-            Watermark::new(3, DataType::Int64, ScalarImpl::Int64(4))
+            Watermark::new(3, DataType::Int64, ScalarImpl::Int64(6))
         );
 
         // push the 1st right chunk
@@ -1512,7 +1516,7 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 " I I I I
-                + 2 5 2 5"
+                + 2 5 2 6"
             )
         );
 

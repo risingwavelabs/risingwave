@@ -45,15 +45,21 @@ pub struct StreamHashJoin {
     /// non-equal parts to facilitate execution later
     eq_join_predicate: EqJoinPredicate,
 
-    /// `(generate_output, key_required_larger, key_required_smaller, delta_expression)`
-    /// View struct `InequalityInputPair` for details.
+    /// `(do_state_cleaning, InequalityInputPair {key_required_larger, key_required_smaller,
+    /// delta_expression})`. View struct `InequalityInputPair` for details.
     inequality_pairs: Vec<(bool, InequalityInputPair)>,
 
     /// Whether can optimize for append-only stream.
     /// It is true if input of both side is append-only
     is_append_only: bool,
 
+    /// The conjunction index of the inequality which is used to clean left state table in
+    /// `HashJoinExecutor`. If any equal condition is able to clean state table, this field
+    /// will always be `None`.
     clean_left_state_conjunction_idx: Option<usize>,
+    /// The conjunction index of the inequality which is used to clean right state table in
+    /// `HashJoinExecutor`. If any equal condition is able to clean state table, this field
+    /// will always be `None`.
     clean_right_state_conjunction_idx: Option<usize>,
 }
 
