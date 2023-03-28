@@ -326,3 +326,29 @@ steps:
           files: ./**/*.sh
     timeout_in_minutes: 5
     retry: *auto-retry
+
+  - label: "Astra Streaming source check"
+    command: "ci/scripts/astra-streaming-source-test.sh -p ci-release"
+    depends_on: build
+    plugins:
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          environment:
+            ASTRA_STREAMING_TEST_TOKEN: astra_streaming_test_token
+    timeout_in_minutes: 20
+    retry: *auto-retry 
+
+  - label: "StreamNative Cloud source check"
+    command: "ci/scripts/streamnative-cloud-source-test.sh -p ci-release"
+    depends_on: build
+    plugins:
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          environment:
+            STREAMNATIVE_CLOUD_TEST_CONF: streamnative_cloud_test_conf
+    timeout_in_minutes: 20
+    retry: *auto-retry 

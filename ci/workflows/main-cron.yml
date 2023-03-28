@@ -247,7 +247,7 @@ steps:
             - S3_SOURCE_TEST_CONF
     timeout_in_minutes: 20
     retry: *auto-retry  
-  
+
   - label: "Astra Streaming source check"
     command: "ci/scripts/astra-streaming-source-test.sh -p ci-release"
     depends_on: build
