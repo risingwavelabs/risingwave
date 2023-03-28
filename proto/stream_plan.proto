@@ -263,7 +263,7 @@ message DeltaExpression {
   expr.ExprNode delta = 2;
 }
 
-message BandJoinCondition {
+message InequalityPair {
   // Input index of greater side of inequality.
   uint32 key_required_larger = 1;
   // Input index of less side of inequality.
@@ -279,7 +279,7 @@ message HashJoinNode {
   repeated int32 left_key = 2;
   repeated int32 right_key = 3;
   expr.ExprNode condition = 4;
-  repeated BandJoinCondition inequality_pairs = 5;
+  repeated InequalityPair inequality_pairs = 5;
   // Used for internal table states.
   catalog.Table left_table = 6;
   // Used for internal table states.

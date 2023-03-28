@@ -20,7 +20,7 @@ use risingwave_common::catalog::{FieldDisplay, Schema};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{DeltaExpression, HashJoinNode, PbBandJoinCondition};
+use risingwave_pb::stream_plan::{DeltaExpression, HashJoinNode, PbInequalityPair};
 
 use super::{
     ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode,
@@ -417,7 +417,7 @@ impl StreamNode for StreamHashJoin {
                             delta_expression,
                         },
                     )| {
-                        PbBandJoinCondition {
+                        PbInequalityPair {
                             key_required_larger: *key_required_larger as u32,
                             key_required_smaller: *key_required_smaller as u32,
                             generate_watermark: *generate_watermark,
