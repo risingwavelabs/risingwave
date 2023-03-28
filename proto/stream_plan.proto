@@ -178,7 +178,7 @@ message FilterNode {
 // - When creating index, `column_orders` will contain both
 //   arrange columns and pk columns, while distribution key will be arrange columns.
 message MaterializeNode {
-  // 4 was used in the previous version here, please to not assign value 4 to the new fied.
+  // Warning: 4 was used in the previous version here, please to not assign value 4 to the new field.
   uint32 table_id = 1;
   // Column indexes and orders of primary key.
   repeated common.ColumnOrder column_orders = 2;
@@ -422,7 +422,7 @@ message ArrangementInfo {
 // Special node for shared state, which will only be produced in fragmenter. ArrangeNode will
 // produce a special Materialize executor, which materializes data for downstream to query.
 message ArrangeNode {
-  // 4 was used in the previous version here, please to not assign value 4 to the new fied.
+  // Warning: 4 was used in the previous version here, please to not assign value 4 to the new field.
   // Info about the arrangement
   ArrangementInfo table_info = 1;
   // Hash key of the materialize node, which is a subset of pk.
