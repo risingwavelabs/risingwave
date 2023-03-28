@@ -5,7 +5,7 @@
     create table version(id2 int, a2 int, b2 int, primary key (id2));
     select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF NOW() on id1= id2
   stream_plan: |
-    StreamMaterialize { columns: [id1, a1, id2, a2, stream._row_id(hidden)], stream_key: [stream._row_id, id2, id1], pk_columns: [stream._row_id, id2, id1], pk_conflict: "no check" }
+    StreamMaterialize { columns: [id1, a1, id2, a2, stream._row_id(hidden)], stream_key: [stream._row_id, id2, id1], pk_columns: [stream._row_id, id2, id1], pk_conflict: "ignore conflict" }
     └─StreamTemporalJoin { type: LeftOuter, predicate: stream.id1 = version.id2, output: [stream.id1, stream.a1, version.id2, version.a2, stream._row_id] }
       ├─StreamExchange { dist: HashShard(stream.id1) }
       | └─StreamTableScan { table: stream, columns: [stream.id1, stream.a1, stream._row_id], pk: [stream._row_id], dist: UpstreamHashShard(stream._row_id) }
@@ -20,7 +20,7 @@
     create table version(id2 int, a2 int, b2 int, primary key (id2));
     select id1, a1, id2, a2 from stream join version FOR SYSTEM_TIME AS OF NOW() on id1 = id2 where a2 < 10;
   stream_plan: |
-    StreamMaterialize { columns: [id1, a1, id2, a2, stream._row_id(hidden)], stream_key: [stream._row_id, id2, id1], pk_columns: [stream._row_id, id2, id1], pk_conflict: "no check" }
+    StreamMaterialize { columns: [id1, a1, id2, a2, stream._row_id(hidden)], stream_key: [stream._row_id, id2, id1], pk_columns: [stream._row_id, id2, id1], pk_conflict: "ignore conflict" }
     └─StreamTemporalJoin { type: Inner, predicate: stream.id1 = version.id2 AND (version.a2 < 10:Int32), output: [stream.id1, stream.a1, version.id2, version.a2, stream._row_id] }
       ├─StreamExchange { dist: HashShard(stream.id1) }
       | └─StreamTableScan { table: stream, columns: [stream.id1, stream.a1, stream._row_id], pk: [stream._row_id], dist: UpstreamHashShard(stream._row_id) }
@@ -32,7 +32,7 @@
     create table version(id2 int, a2 int, b2 int, primary key (id2));
     select id1, a1, id2, a2 from stream, version FOR SYSTEM_TIME AS OF NOW() where id1 = id2 AND a2 < 10;
   stream_plan: |
-    StreamMaterialize { columns: [id1, a1, id2, a2, stream._row_id(hidden)], stream_key: [stream._row_id, id2, id1], pk_columns: [stream._row_id, id2, id1], pk_conflict: "no check" }
+    StreamMaterialize { columns: [id1, a1, id2, a2, stream._row_id(hidden)], stream_key: [stream._row_id, id2, id1], pk_columns: [stream._row_id, id2, id1], pk_conflict: "ignore conflict" }
     └─StreamTemporalJoin { type: Inner, predicate: stream.id1 = version.id2 AND (version.a2 < 10:Int32), output: [stream.id1, stream.a1, version.id2, version.a2, stream._row_id] }
       ├─StreamExchange { dist: HashShard(stream.id1) }
       | └─StreamTableScan { table: stream, columns: [stream.id1, stream.a1, stream._row_id], pk: [stream._row_id], dist: UpstreamHashShard(stream._row_id) }
@@ -44,7 +44,7 @@
     create table version(id2 int, a2 int, b2 int, primary key (id2, a2));
     select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF NOW() on a1 = a2 and id1 = id2 where b2 != a2;
   stream_plan: |
-    StreamMaterialize { columns: [id1, a1, id2, a2, stream._row_id(hidden)], stream_key: [stream._row_id, id2, a2, id1, a1], pk_columns: [stream._row_id, id2, a2, id1, a1], pk_conflict: "no check" }
+    StreamMaterialize { columns: [id1, a1, id2, a2, stream._row_id(hidden)], stream_key: [stream._row_id, id2, a2, id1, a1], pk_columns: [stream._row_id, id2, a2, id1, a1], pk_conflict: "ignore conflict" }
     └─StreamTemporalJoin { type: Inner, predicate: stream.id1 = version.id2 AND stream.a1 = version.a2 AND (version.b2 <> version.a2), output: [stream.id1, stream.a1, version.id2, version.a2, stream._row_id] }
       ├─StreamExchange { dist: HashShard(stream.id1, stream.a1) }
       | └─StreamTableScan { table: stream, columns: [stream.id1, stream.a1, stream._row_id], pk: [stream._row_id], dist: UpstreamHashShard(stream._row_id) }
@@ -56,7 +56,7 @@
     create table version(id2 int, a2 int, b2 int, primary key (id2));
     select count(*) from stream left join version FOR SYSTEM_TIME AS OF NOW() on id1 = id2 where a2 < 10;
   stream_plan: |
-    StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: "no check" }
+    StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: "ignore conflict" }
     └─StreamProject { exprs: [sum0(count)] }
       └─StreamAppendOnlyGlobalSimpleAgg { aggs: [sum0(count), count] }
         └─StreamExchange { dist: Single }
@@ -100,7 +100,7 @@
     join version1 FOR SYSTEM_TIME AS OF NOW() on stream.k = version1.k
     join version2 FOR SYSTEM_TIME AS OF NOW() on stream.k = version2.k where a1 < 10;
   stream_plan: |
-    StreamMaterialize { columns: [k, x1, x2, a1, b1, stream._row_id(hidden), version1.k(hidden), version2.k(hidden)], stream_key: [stream._row_id, version1.k, k, version2.k], pk_columns: [stream._row_id, version1.k, k, version2.k], pk_conflict: "no check" }
+    StreamMaterialize { columns: [k, x1, x2, a1, b1, stream._row_id(hidden), version1.k(hidden), version2.k(hidden)], stream_key: [stream._row_id, version1.k, k, version2.k], pk_columns: [stream._row_id, version1.k, k, version2.k], pk_conflict: "ignore conflict" }
     └─StreamTemporalJoin { type: Inner, predicate: stream.k = version2.k, output: [stream.k, version1.x1, version2.x2, stream.a1, stream.b1, stream._row_id, version1.k, version2.k] }
       ├─StreamTemporalJoin { type: Inner, predicate: stream.k = version1.k, output: [stream.k, stream.a1, stream.b1, version1.x1, stream._row_id, version1.k] }
       | ├─StreamExchange { dist: HashShard(stream.k) }
@@ -120,7 +120,7 @@
     join version1 FOR SYSTEM_TIME AS OF NOW() on stream.id1 = version1.id1
     join version2 FOR SYSTEM_TIME AS OF NOW() on stream.id2 = version2.id2 where a1 < 10;
   stream_plan: |
-    StreamMaterialize { columns: [id1, x1, id2, x2, a1, b1, stream._row_id(hidden), version1.id1(hidden), version2.id2(hidden)], stream_key: [stream._row_id, version1.id1, id1, version2.id2, id2], pk_columns: [stream._row_id, version1.id1, id1, version2.id2, id2], pk_conflict: "no check" }
+    StreamMaterialize { columns: [id1, x1, id2, x2, a1, b1, stream._row_id(hidden), version1.id1(hidden), version2.id2(hidden)], stream_key: [stream._row_id, version1.id1, id1, version2.id2, id2], pk_columns: [stream._row_id, version1.id1, id1, version2.id2, id2], pk_conflict: "ignore conflict" }
     └─StreamTemporalJoin { type: Inner, predicate: stream.id2 = version2.id2, output: [stream.id1, version1.x1, stream.id2, version2.x2, stream.a1, stream.b1, stream._row_id, version1.id1, version2.id2] }
       ├─StreamExchange { dist: HashShard(stream.id2) }
       | └─StreamTemporalJoin { type: Inner, predicate: stream.id1 = version1.id1, output: [stream.id1, stream.id2, stream.a1, stream.b1, version1.x1, stream._row_id, version1.id1] }
@@ -141,7 +141,7 @@
     join version1 FOR SYSTEM_TIME AS OF NOW() on stream.id1 = version1.id1
     join version2 FOR SYSTEM_TIME AS OF NOW() on stream.id2 = version2.id2 where a1 < 10;
   stream_plan: |
-    StreamMaterialize { columns: [id1, x1, id2, x2, a1, b1, stream._row_id(hidden), version1.id1(hidden), version2.id2(hidden)], stream_key: [stream._row_id, version1.id1, id1, version2.id2, id2], pk_columns: [stream._row_id, version1.id1, id1, version2.id2, id2], pk_conflict: "no check" }
+    StreamMaterialize { columns: [id1, x1, id2, x2, a1, b1, stream._row_id(hidden), version1.id1(hidden), version2.id2(hidden)], stream_key: [stream._row_id, version1.id1, id1, version2.id2, id2], pk_columns: [stream._row_id, version1.id1, id1, version2.id2, id2], pk_conflict: "ignore conflict" }
     └─StreamTemporalJoin { type: Inner, predicate: stream.id2 = version2.id2, output: [stream.id1, version1.x1, stream.id2, version2.x2, stream.a1, stream.b1, stream._row_id, version1.id1, version2.id2] }
       ├─StreamExchange { dist: HashShard(stream.id2) }
       | └─StreamTemporalJoin { type: Inner, predicate: stream.id1 = version1.id1, output: [stream.id1, stream.id2, stream.a1, stream.b1, version1.x1, stream._row_id, version1.id1] }
