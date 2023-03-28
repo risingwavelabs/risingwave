@@ -52,8 +52,13 @@ pub trait LogWriter {
     where
         Self: 'a;
 
+    /// Initialized the log writer with an initialize
     fn init(&mut self, epoch: u64) -> Self::InitFuture<'_>;
+
+    /// Write a stream chunk to the log writer
     fn write_chunk(&mut self, chunk: StreamChunk) -> Self::WriteChunkFuture<'_>;
+
+    /// Mark current epoch as finished and sealed, and flush the unconsumed log data.
     fn flush_current_epoch(
         &mut self,
         next_epoch: u64,
@@ -72,8 +77,14 @@ pub trait LogReader {
     where
         Self: 'a;
 
+    /// Initialize the log reader. Usually function as waiting for log writer to be initialized.
     fn init(&mut self) -> Self::InitFuture<'_>;
+
+    /// Emit the next item.
     fn next_item(&mut self) -> Self::NextItemFuture<'_>;
+
+    /// Mark that all items emitted so far have been consumed and it is safe to truncate the log
+    /// from the current offset.
     fn truncate(&mut self) -> Self::TruncateFuture<'_>;
 }
 
@@ -84,27 +95,47 @@ pub trait LogStoreFactory {
     fn build(self) -> (Self::Reader, Self::Writer);
 }
 
+/// An in-memory log store that can buffer a bounded amount of stream chunk in memory via bounded
+/// mpsc channel.
+///
+/// Since it is in-memory, when `flush_current_epoch` with checkpoint epoch, it should wait for the
+/// reader to finish consuming all the data in current checkpoint epoch.
 pub struct BoundedInMemLogStoreWriter {
+    /// Current epoch. Should be `Some` after `init`
     curr_epoch: Option<u64>,
 
+    /// Holder of oneshot channel to send the initial epoch to the associated log reader.
     init_epoch_tx: Option<oneshot::Sender<u64>>,
+
+    /// Sending log store item to log reader
     item_tx: Sender<LogStoreReadItem>,
+
+    /// Receiver for the epoch consumed by log reader.
     truncated_epoch_rx: UnboundedReceiver<u64>,
 }
 
 #[derive(Eq, PartialEq, Debug)]
 enum LogReaderEpochProgress {
+    /// In progress of consuming data in current epoch.
     Consuming(u64),
+    /// Finished emitting the data in checkpoint epoch, and waiting for a call on `truncate`.
     AwaitingTruncate { sealed_epoch: u64, next_epoch: u64 },
 }
 
 const UNINITIALIZED: LogReaderEpochProgress = LogReaderEpochProgress::Consuming(INVALID_EPOCH);
 
 pub struct BoundedInMemLogStoreReader {
+    /// Current progress of log reader. Can be either consuming an epoch, or has finished consuming
+    /// an epoch and waiting to be truncated.
     epoch_progress: LogReaderEpochProgress,
 
+    /// Holder for oneshot channel to receive the initial epoch
     init_epoch_rx: Option<oneshot::Receiver<u64>>,
+
+    /// Receiver to fetch log store item
     item_rx: Receiver<LogStoreReadItem>,
+
+    /// Sender of consumed epoch to the log writer
     truncated_epoch_tx: UnboundedSender<u64>,
 }
 
