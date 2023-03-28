@@ -119,7 +119,7 @@ impl Binder {
                     {
                         self.resolve_table_relation(
                             &table_catalog.clone(),
-                            &schema_name.clone(),
+                            schema_name,
                             for_system_time_as_of_now,
                         )?
                     } else if let Ok((source_catalog, _)) =
