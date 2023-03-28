@@ -20,6 +20,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use tokio::runtime::Runtime;
 
+// FIXME(noel): I think this whole file can be removed. Do it later.
 
 pub async fn execute_executor(executor: BoxedExecutor) {
     let mut stream = executor.execute();

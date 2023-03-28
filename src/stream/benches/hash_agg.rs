@@ -78,40 +78,16 @@ fn bench_hash_agg(c: &mut Criterion) {
 /// num_of_chunks: 1024
 /// aggregation: count
 async fn setup_bench_hash_agg<S: StateStore>(store: S) {
-    // Define schema
-    let num_of_chunks = 1000;
-    let chunk_size = 1024;
+    // ---- Define hash agg executor parameters ----
     let data_types = vec![DataType::Int64; 3];
     let schema = Schema {
         fields: vec![Field::unnamed(DataType::Int64); 3],
     };
 
-    // Gen data
-    let data = gen_data(num_of_chunks, chunk_size, &data_types);
+    let group_key_indices = vec![0];
 
-    // Construct MockSource with data
-
-    let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
-    tx.push_barrier(1, false);
-    tx.push_chunk(StreamChunk::from_pretty(
-        " I I I
-        + 1 1 1
-        + 2 2 2
-        + 2 2 2",
-    ));
-    tx.push_barrier(2, false);
-    tx.push_chunk(StreamChunk::from_pretty(
-        " I I I
-        - 1 1 1
-        - 2 2 2 D
-        - 2 2 2
-        + 3 3 3",
-    ));
-    tx.push_barrier(3, false);
-
-    // This is local hash aggregation, so we add another sum state
-    let key_indices = vec![0];
     let append_only = false;
+
     let agg_calls = vec![
         AggCall {
             kind: AggKind::Count, // as row count, index: 0
@@ -131,7 +107,6 @@ async fn setup_bench_hash_agg<S: StateStore>(store: S) {
             filter: None,
             distinct: false,
         },
-        // This is local hash aggregation, so we add another sum state
         AggCall {
             kind: AggKind::Sum,
             args: AggArgs::Unary(DataType::Int64, 2),
@@ -143,12 +118,25 @@ async fn setup_bench_hash_agg<S: StateStore>(store: S) {
         },
     ];
 
+    // ---- Generate Data ----
+    let num_of_chunks = 1000;
+    let chunk_size = 1024;
+    let chunks = gen_data(num_of_chunks, chunk_size, &data_types);
+
+    // ---- Create MockSourceExecutor ----
+    let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
+    tx.push_barrier(1, false);
+    for chunk in chunks {
+        tx.push_chunk(chunk);
+    }
+
+    // ---- Create HashAggExecutor to be benchmarked ----
     let hash_agg = new_boxed_hash_agg_executor(
         store,
         Box::new(source),
         agg_calls,
         0,
-        key_indices,
+        group_key_indices,
         vec![],
         1 << 10,
         1,
