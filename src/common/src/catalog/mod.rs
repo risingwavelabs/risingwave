@@ -380,15 +380,16 @@ pub enum ConflictBehavior {
 impl ConflictBehavior {
     pub fn from_protobuf(tb_conflict_behavior: &PbHandleConflictBehavior) -> Self {
         match tb_conflict_behavior {
-            PbHandleConflictBehavior::NoCheckUnspecified => ConflictBehavior::NoCheck,
             PbHandleConflictBehavior::Overwrite => ConflictBehavior::OverWrite,
             PbHandleConflictBehavior::Ignore => ConflictBehavior::IgnoreConflict,
+            PbHandleConflictBehavior::NoCheck => ConflictBehavior::NoCheck,
+            _ => unreachable!(),
         }
     }
 
     pub fn to_protobuf(&self) -> PbHandleConflictBehavior {
         match self {
-            ConflictBehavior::NoCheck => PbHandleConflictBehavior::NoCheckUnspecified,
+            ConflictBehavior::NoCheck => PbHandleConflictBehavior::NoCheck,
             ConflictBehavior::OverWrite => PbHandleConflictBehavior::Overwrite,
             ConflictBehavior::IgnoreConflict => PbHandleConflictBehavior::Ignore,
         }
