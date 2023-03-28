@@ -26,8 +26,6 @@ use super::{
     StreamExecutorResult, Watermark,
 };
 
-const SEED: u64 = 0xFF67FEABBAEF76FF;
-
 pub struct MockSource {
     schema: Schema,
     pk_indices: PkIndices,
@@ -459,6 +457,8 @@ pub fn gen_data(
     chunk_size: usize,
     data_types: &[DataType],
 ) -> Vec<StreamChunk> {
+    const SEED: u64 = 0xFF67FEABBAEF76FF;
+
     let mut ret = Vec::<StreamChunk>::with_capacity(num_of_chunks);
 
     for i in 0..num_of_chunks {
