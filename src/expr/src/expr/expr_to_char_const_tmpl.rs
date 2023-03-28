@@ -15,7 +15,7 @@
 use std::fmt::Write;
 use std::sync::Arc;
 
-use risingwave_common::array::{Array, ArrayBuilder, NaiveDateTimeArray, Utf8ArrayBuilder};
+use risingwave_common::array::{Array, ArrayBuilder, TimestampArray, Utf8ArrayBuilder};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -47,7 +47,7 @@ impl Expression for ExprToCharConstTmpl {
         input: &risingwave_common::array::DataChunk,
     ) -> crate::Result<risingwave_common::array::ArrayRef> {
         let data_arr = self.child.eval_checked(input).await?;
-        let data_arr: &NaiveDateTimeArray = data_arr.as_ref().into();
+        let data_arr: &TimestampArray = data_arr.as_ref().into();
         let mut output = Utf8ArrayBuilder::new(input.capacity());
         for (data, vis) in data_arr.iter().zip_eq_fast(input.vis().iter()) {
             if !vis {
@@ -69,7 +69,7 @@ impl Expression for ExprToCharConstTmpl {
 
     async fn eval_row(&self, input: &OwnedRow) -> crate::Result<Datum> {
         let data = self.child.eval_row(input).await?;
-        Ok(if let Some(ScalarImpl::NaiveDateTime(data)) = data {
+        Ok(if let Some(ScalarImpl::Timestamp(data)) = data {
             Some(
                 data.0
                     .format_with_items(self.ctx.chrono_pattern.borrow_items().iter())
@@ -102,7 +102,7 @@ fn build_to_char_expr(
         }
         .boxed()
     } else {
-        BinaryBytesExpression::<NaiveDateTimeArray, Utf8Array, _>::new(
+        BinaryBytesExpression::<TimestampArray, Utf8Array, _>::new(
             data_expr,
             tmpl_expr,
             return_type,

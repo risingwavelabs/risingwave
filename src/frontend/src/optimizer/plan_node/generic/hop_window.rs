@@ -18,7 +18,7 @@ use std::num::NonZeroUsize;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::types::{DataType, IntervalUnit, IntervalUnitDisplay};
+use risingwave_common::types::{DataType, Interval, IntervalDisplay};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_expr::ExprError;
 
@@ -34,9 +34,9 @@ use crate::utils::ColIndexMappingRewriteExt;
 pub struct HopWindow<PlanRef> {
     pub input: PlanRef,
     pub time_col: InputRef,
-    pub window_slide: IntervalUnit,
-    pub window_size: IntervalUnit,
-    pub window_offset: IntervalUnit,
+    pub window_slide: Interval,
+    pub window_size: Interval,
+    pub window_offset: Interval,
     /// Provides mapping from input schema, window_start, window_end to output schema.
     /// For example, if we had:
     /// input schema: | 0: trip_time | 1: trip_name |
@@ -119,16 +119,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for HopWindow<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
-    pub fn into_parts(
-        self,
-    ) -> (
-        PlanRef,
-        InputRef,
-        IntervalUnit,
-        IntervalUnit,
-        IntervalUnit,
-        Vec<usize>,
-    ) {
+    pub fn into_parts(self) -> (PlanRef, InputRef, Interval, Interval, Interval, Vec<usize>) {
         (
             self.input,
             self.time_col,
@@ -285,14 +276,14 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
 
         builder.field(
             "slide",
-            &IntervalUnitDisplay {
+            &IntervalDisplay {
                 core: &self.window_slide,
             },
         );
 
         builder.field(
             "size",
-            &IntervalUnitDisplay {
+            &IntervalDisplay {
                 core: &self.window_size,
             },
         );

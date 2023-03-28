@@ -147,7 +147,9 @@ where
             // get split assignments for all actors
             let source_split_assignments = self.source_manager.list_assignments().await;
             let command = Command::Plain(Some(Mutation::Add(AddMutation {
+                // Actors built during recovery is not treated as newly added actors.
                 actor_dispatchers: Default::default(),
+                added_actors: Default::default(),
                 actor_splits: build_actor_connector_splits(&source_split_assignments),
             })));
 

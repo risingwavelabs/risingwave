@@ -126,13 +126,12 @@ mod tests {
 
     use super::*;
     use crate::array::{
-        Array, ArrayBuilder, BoolArray, BoolArrayBuilder, DecimalArray, DecimalArrayBuilder,
-        I32Array, I32ArrayBuilder, NaiveDateArray, NaiveDateArrayBuilder, NaiveDateTimeArray,
-        NaiveDateTimeArrayBuilder, NaiveTimeArray, NaiveTimeArrayBuilder, Utf8Array,
-        Utf8ArrayBuilder,
+        Array, ArrayBuilder, BoolArray, BoolArrayBuilder, DateArray, DateArrayBuilder,
+        DecimalArray, DecimalArrayBuilder, I32Array, I32ArrayBuilder, TimeArray, TimeArrayBuilder,
+        TimestampArray, TimestampArrayBuilder, Utf8Array, Utf8ArrayBuilder,
     };
     use crate::error::Result;
-    use crate::types::{Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
+    use crate::types::{Date, Decimal, Time, Timestamp};
 
     // Convert a column to protobuf, then convert it back to column, and ensures the two are
     // identical.
@@ -234,12 +233,12 @@ mod tests {
     }
 
     #[test]
-    fn test_naivedate_protobuf_conversion() -> Result<()> {
+    fn test_date_protobuf_conversion() -> Result<()> {
         let cardinality = 2048;
-        let mut builder = NaiveDateArrayBuilder::new(cardinality);
+        let mut builder = DateArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
-                builder.append(NaiveDateWrapper::with_days(i as i32).ok());
+                builder.append(Date::with_days(i as i32).ok());
             } else {
                 builder.append(None);
             }
@@ -247,13 +246,10 @@ mod tests {
         let col: Column = builder.finish().into();
         let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
-        let arr: &NaiveDateArray = new_col.array_ref().as_naivedate();
+        let arr: &DateArray = new_col.array_ref().as_date();
         arr.iter().enumerate().for_each(|(i, x)| {
             if i % 2 == 0 {
-                assert_eq!(
-                    NaiveDateWrapper::with_days(i as i32).ok().unwrap(),
-                    x.unwrap()
-                );
+                assert_eq!(Date::with_days(i as i32).ok().unwrap(), x.unwrap());
             } else {
                 assert!(x.is_none());
             }
@@ -262,12 +258,12 @@ mod tests {
     }
 
     #[test]
-    fn test_naivetime_protobuf_conversion() -> Result<()> {
+    fn test_time_protobuf_conversion() -> Result<()> {
         let cardinality = 2048;
-        let mut builder = NaiveTimeArrayBuilder::new(cardinality);
+        let mut builder = TimeArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
-                builder.append(NaiveTimeWrapper::with_secs_nano(i as u32, i as u32 * 1000).ok());
+                builder.append(Time::with_secs_nano(i as u32, i as u32 * 1000).ok());
             } else {
                 builder.append(None);
             }
@@ -275,11 +271,11 @@ mod tests {
         let col: Column = builder.finish().into();
         let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
-        let arr: &NaiveTimeArray = new_col.array_ref().as_naivetime();
+        let arr: &TimeArray = new_col.array_ref().as_time();
         arr.iter().enumerate().for_each(|(i, x)| {
             if i % 2 == 0 {
                 assert_eq!(
-                    NaiveTimeWrapper::with_secs_nano(i as u32, i as u32 * 1000)
+                    Time::with_secs_nano(i as u32, i as u32 * 1000)
                         .ok()
                         .unwrap(),
                     x.unwrap()
@@ -292,13 +288,12 @@ mod tests {
     }
 
     #[test]
-    fn test_naivedatetime_protobuf_conversion() -> Result<()> {
+    fn test_timestamp_protobuf_conversion() -> Result<()> {
         let cardinality = 2048;
-        let mut builder = NaiveDateTimeArrayBuilder::new(cardinality);
+        let mut builder = TimestampArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
-                builder
-                    .append(NaiveDateTimeWrapper::with_secs_nsecs(i as i64, i as u32 * 1000).ok());
+                builder.append(Timestamp::with_secs_nsecs(i as i64, i as u32 * 1000).ok());
             } else {
                 builder.append(None);
             }
@@ -306,11 +301,11 @@ mod tests {
         let col: Column = builder.finish().into();
         let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
-        let arr: &NaiveDateTimeArray = new_col.array_ref().as_naivedatetime();
+        let arr: &TimestampArray = new_col.array_ref().as_timestamp();
         arr.iter().enumerate().for_each(|(i, x)| {
             if i % 2 == 0 {
                 assert_eq!(
-                    NaiveDateTimeWrapper::with_secs_nsecs(i as i64, i as u32 * 1000)
+                    Timestamp::with_secs_nsecs(i as i64, i as u32 * 1000)
                         .ok()
                         .unwrap(),
                     x.unwrap()

@@ -1,6 +1,6 @@
 # Create a table with generated columns.
 statement ok
-create table t1 (v1 int as v2-1, v2 int, v3 int as v2+1);
+create table t1 (v1 int as v2-1, v2 int, v3 int as v2+1.02, v4 double as v2 + 1.02);
 
 statement ok
 insert into t1 (v2) values (1), (2);
@@ -8,11 +8,11 @@ insert into t1 (v2) values (1), (2);
 statement ok
 flush;
 
-query III
+query IIIR
 select * from t1;
 ----
-0 1 2
-1 2 3
+0 1 2 2.02
+1 2 3 3.02
 
 statement ok
 drop table t1;

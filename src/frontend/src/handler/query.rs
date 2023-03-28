@@ -29,7 +29,7 @@ use risingwave_sqlparser::ast::{SetExpr, Statement};
 
 use super::extended_handle::{Portal, PrepareStatement};
 use super::{PgResponseStream, RwPgResponse};
-use crate::binder::{Binder, BoundSetExpr, BoundStatement};
+use crate::binder::{Binder, BoundStatement};
 use crate::catalog::ViewId;
 use crate::handler::flush::do_flush;
 use crate::handler::privilege::resolve_privileges;
@@ -78,17 +78,11 @@ fn must_run_in_distributed_mode(stmt: &Statement) -> Result<bool> {
 }
 
 fn must_run_in_local_mode(bound: &BoundStatement) -> bool {
-    let mut must_local = false;
-
     if let BoundStatement::Query(query) = &bound {
-        if let BoundSetExpr::Select(select) = &query.body
-            && let Some(relation) = &select.from
-            && relation.contains_sys_table() {
-                must_local = true;
-        }
+        return query.contains_sys_table();
     }
 
-    must_local
+    false
 }
 
 pub struct BatchQueryPlanResult {

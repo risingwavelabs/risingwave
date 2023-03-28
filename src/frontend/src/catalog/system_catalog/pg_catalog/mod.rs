@@ -67,7 +67,7 @@ pub use pg_views::*;
 use risingwave_common::array::ListValue;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{NaiveDateTimeWrapper, ScalarImpl};
+use risingwave_common::types::{ScalarImpl, Timestamp};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::user::grant_privilege::{Action, Object};
@@ -201,11 +201,11 @@ impl SysCatalogReaderImpl {
                 return None;
             }
             let time_millis = Epoch::from(epoch).as_unix_millis();
-            NaiveDateTimeWrapper::with_secs_nsecs(
+            Timestamp::with_secs_nsecs(
                 (time_millis / 1000) as i64,
                 (time_millis % 1000 * 1_000_000) as u32,
             )
-            .map(ScalarImpl::NaiveDateTime)
+            .map(ScalarImpl::Timestamp)
             .ok()
         };
         let meta_snapshots = self

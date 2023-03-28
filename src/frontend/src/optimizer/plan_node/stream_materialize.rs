@@ -224,13 +224,13 @@ impl fmt::Display for StreamMaterialize {
             .map(|c| c.name_with_hidden())
             .join(", ");
 
-        let pk_column_names = table
+        let stream_key = table
             .stream_key
             .iter()
-            .map(|&pk| &table.columns[pk].column_desc.name)
+            .map(|&k| &table.columns[k].column_desc.name)
             .join(", ");
 
-        let order_descs = table
+        let pk_columns = table
             .pk
             .iter()
             .map(|o| table.columns()[o.column_index].column_desc.name.clone())
@@ -239,11 +239,8 @@ impl fmt::Display for StreamMaterialize {
         let mut builder = f.debug_struct("StreamMaterialize");
         builder
             .field("columns", &format_args!("[{}]", column_names))
-            .field("pk_columns", &format_args!("[{}]", pk_column_names));
-
-        if pk_column_names != order_descs {
-            builder.field("order_descs", &format_args!("[{}]", order_descs));
-        }
+            .field("stream_key", &format_args!("[{}]", stream_key))
+            .field("pk_columns", &format_args!("[{}]", pk_columns));
 
         let pk_conflict_behavior;
         if self.table.conflict_behavior_type() == 0 {
