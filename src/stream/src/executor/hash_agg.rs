@@ -129,10 +129,6 @@ impl<K: HashKey, S: StateStore> ExecutorInner<K, S> {
             .chain(self.distinct_dedup_tables.values_mut())
             .chain(std::iter::once(&mut self.result_table))
     }
-
-    fn all_state_tables_except_result_mut(&mut self) -> impl Iterator<Item = &mut StateTable<S>> {
-        iter_table_storage(&mut self.storages).chain(self.distinct_dedup_tables.values_mut())
-    }
 }
 
 trait Emitter: Default {
@@ -152,12 +148,6 @@ trait Emitter: Default {
         result_table: &'a mut StateTable<Self::StateStore>,
         watermark: Option<&'a ScalarImpl>,
     ) -> impl Stream<Item = StreamExecutorResult<StreamChunk>> + 'a;
-
-    fn update_result_table_watermark(
-        &self,
-        result_table: &mut StateTable<Self::StateStore>,
-        watermark: ScalarImpl,
-    );
 }
 
 struct EmitOnUpdates<S: StateStore> {
@@ -192,14 +182,6 @@ impl<S: StateStore> Emitter for EmitOnUpdates<S> {
         _watermark: Option<&'a ScalarImpl>,
     ) -> impl Stream<Item = StreamExecutorResult<StreamChunk>> + 'a {
         stream::empty()
-    }
-
-    fn update_result_table_watermark(
-        &self,
-        result_table: &mut StateTable<Self::StateStore>,
-        watermark: ScalarImpl,
-    ) {
-        result_table.update_watermark(watermark, false);
     }
 }
 
@@ -252,14 +234,6 @@ impl<S: StateStore> Emitter for EmitOnWindowClose<S> {
                 }
             }
         }
-    }
-
-    fn update_result_table_watermark(
-        &self,
-        result_table: &mut StateTable<Self::StateStore>,
-        watermark: ScalarImpl,
-    ) {
-        result_table.update_watermark(watermark.clone(), true); // must clean state eagerly
     }
 }
 
@@ -637,10 +611,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         } else {
             if let Some(watermark) = window_watermark {
                 // Update watermark of state tables, for state cleaning.
-                this.all_state_tables_except_result_mut()
+                this.all_state_tables_mut()
                     .for_each(|table| table.update_watermark(watermark.clone(), false));
-                vars.chunk_emitter
-                    .update_result_table_watermark(&mut this.result_table, watermark)
             }
             // Commit all state tables.
             futures::future::try_join_all(

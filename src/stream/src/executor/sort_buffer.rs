@@ -15,9 +15,8 @@
 use std::marker::PhantomData;
 use std::ops::Bound;
 
-use async_stream::try_stream;
-use futures::{stream, Stream};
-use futures_async_stream::for_await;
+use futures::stream;
+use futures_async_stream::try_stream;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{self, OwnedRow, Row};
@@ -25,7 +24,7 @@ use risingwave_common::types::ScalarImpl;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
-use super::StreamExecutorResult;
+use super::StreamExecutorError;
 use crate::common::table::state_table::StateTable;
 
 pub struct SortBuffer<S: StateStore> {
@@ -70,37 +69,38 @@ impl<S: StateStore> SortBuffer<S> {
 
     /// Consume rows under `watermark` from the buffer.
     /// NOTICE: state in `buffer_table` must be correctly cleaned after calling this method.
-    pub fn consume<'a>(
+    #[try_stream(ok = OwnedRow, error = StreamExecutorError)]
+    pub async fn consume<'a>(
         &'a mut self,
         watermark: ScalarImpl,
         buffer_table: &'a mut StateTable<S>,
-    ) -> impl Stream<Item = StreamExecutorResult<OwnedRow>> + 'a {
-        try_stream! {
-            let pk_range = (
-                Bound::<row::Empty>::Unbounded,
-                Bound::Included([Some(watermark.as_scalar_ref_impl())]), // TODO(): include or exclude?
-            );
+    ) {
+        let pk_range = (
+            Bound::<row::Empty>::Unbounded,
+            // TODO(): include or exclude?
+            Bound::Included([Some(watermark.as_scalar_ref_impl())]),
+        );
 
-            let streams =
-                futures::future::try_join_all(buffer_table.vnode_bitmap().iter_vnodes().map(|vnode| {
-                    buffer_table.iter_with_pk_range(
-                        &pk_range,
-                        vnode,
-                        PrefetchOptions::new_for_exhaust_iter(),
-                    )
-                }))
-                .await?
-                .into_iter()
-                .map(Box::pin);
+        let streams =
+            futures::future::try_join_all(buffer_table.vnode_bitmap().iter_vnodes().map(|vnode| {
+                buffer_table.iter_with_pk_range(
+                    &pk_range,
+                    vnode,
+                    PrefetchOptions::new_for_exhaust_iter(),
+                )
+            }))
+            .await?
+            .into_iter()
+            .map(Box::pin);
 
-            #[for_await]
-            for row in stream::select_all(streams) {
-                let row: OwnedRow = row?;
-                yield row;
-            }
-
-            // State cleaning mechanism will clean old rows from buffer table later when
-            // committing state tables.
+        #[for_await]
+        for row in stream::select_all(streams) {
+            let row: OwnedRow = row?;
+            yield row;
         }
+
+        // TODO(rc): Need something like `table.range_delete()`. Here we call
+        // `update_watermark(watermark, true)` as an alternative to `range_delete((..watermark))`.
+        buffer_table.update_watermark(watermark, true);
     }
 }
