@@ -115,6 +115,9 @@ pub struct TableCatalog {
     /// The full `CREATE TABLE` or `CREATE MATERIALIZED VIEW` definition of the table.
     pub definition: String,
 
+    /// The behavior of handling incoming pk conflict from source executor, we can overwrite or
+    /// ignore conflict pk. For normal materialize executor and other executore, this filed will be
+    /// `No Check`.
     pub conflict_behavior: ConflictBehavior,
 
     pub read_prefix_len_hint: usize,
