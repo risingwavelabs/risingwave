@@ -21,7 +21,7 @@ use tokio::sync::mpsc::unbounded_channel;
 
 use super::ExecutorBuilder;
 use crate::error::StreamResult;
-use crate::executor::{ValuesExecutor, BoxedExecutor};
+use crate::executor::{BoxedExecutor, ValuesExecutor};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 /// Build a `ValuesExecutor` for stream. As is a leaf, current workaround registers a `sender` for
