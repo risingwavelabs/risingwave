@@ -83,7 +83,7 @@ public class DbzSourceHandler implements SourceHandler {
                             } catch (InterruptedException e) {
                                 throw new RuntimeException(e);
                             }
-                        } else {
+                        } else { // back pressure detected, return to avoid oom
                             return;
                         }
                     }
