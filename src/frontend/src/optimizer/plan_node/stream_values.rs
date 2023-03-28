@@ -36,10 +36,6 @@ impl_plan_tree_node_for_leaf! { StreamValues }
 impl StreamValues {
     /// `StreamValues` should enforce `Distribution::Single`
     pub fn new(logical: LogicalValues) -> Self {
-        Self::with_dist(logical, Distribution::Single)
-    }
-
-    fn with_dist(logical: LogicalValues, dist: Distribution) -> Self {
         let ctx = logical.ctx();
         let mut watermark_columns = FixedBitSet::with_capacity(logical.schema().len());
         (0..(logical.schema().len() - 1)).for_each(|i| watermark_columns.set(i, true));
@@ -48,7 +44,7 @@ impl StreamValues {
             logical.schema().clone(),
             logical.logical_pk().to_vec(),
             logical.functional_dependency().clone(),
-            dist,
+            Distribution::Single,
             false,
             watermark_columns,
         );

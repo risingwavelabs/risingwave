@@ -29,6 +29,8 @@ use super::{
     StreamExecutorError,
 };
 
+const DEFAULT_CHUNK_SIZE: usize = 1024;
+
 /// Execute `values` in stream. As is a leaf, current workaround holds a `barrier_executor`.
 /// May refractor with `BarrierRecvExecutor` in the near future.
 pub struct ValuesExecutor {
@@ -75,7 +77,7 @@ impl ValuesExecutor {
             .await
             .unwrap();
 
-        let emit = !barrier.is_resume();
+        let emit = !barrier.is_newly_added(self.ctx.id);
 
         yield Message::Barrier(barrier);
         // If it's failover, do not evaluate rows (assume they have been yielded)
@@ -88,7 +90,7 @@ impl ValuesExecutor {
                 // cardinality.
                 let one_row_chunk = DataChunk::new_dummy(1);
 
-                let chunk_size = 1024_usize.min(rows.len());
+                let chunk_size = DEFAULT_CHUNK_SIZE.min(rows.len());
                 let mut array_builders = schema.create_array_builders(chunk_size);
                 for row in rows.by_ref().take(chunk_size) {
                     for (expr, builder) in row.into_iter().zip_eq_fast(&mut array_builders) {
@@ -198,12 +200,8 @@ mod tests {
 
         // Init barrier
         let first_message = Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
-            adds: maplit::hashmap! {
-                0 => vec![Dispatcher {
-                    downstream_actor_id: vec![1],
-                    ..Default::default()
-                }],
-            },
+            adds: Default::default(),
+            added_actors: maplit::hashset! {1},
             splits: Default::default(),
         });
         tx.send(first_message).unwrap();

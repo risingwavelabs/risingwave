@@ -94,6 +94,7 @@ impl fmt::Display for LogicalValues {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LogicalValues")
             .field("rows", &self.rows)
+            .field("schema", &self.schema())
             .finish()
     }
 }
@@ -165,19 +166,15 @@ impl ToStream for LogicalValues {
         let col_index_mapping = ColIndexMapping::identity_or_none(row_id_index, row_id_index + 1);
         let ctx = self.ctx();
         let mut schema = self.schema().clone();
-        schema.fields.push(Field {
-            data_type: DataType::Int64,
-            name: "_row_id".to_string(),
-            sub_fields: vec![],
-            type_name: "int64".to_string(),
-        });
-        let rows = self.rows().to_vec();
-        let row_with_id = (0..rows.len())
-            .zip_eq_fast(rows.into_iter())
+        schema
+            .fields
+            .push(Field::with_name(DataType::Int64, "_row_id"));
+        let rows = self.rows().to_owned();
+        let row_with_id = rows
+            .into_iter()
+            .enumerate()
             .map(|(i, mut r)| {
-                r.extend_one(
-                    Literal::new(Some(ScalarImpl::Int64(i as i64)), DataType::Int64).into(),
-                );
+                r.push(Literal::new(Some(ScalarImpl::Int64(i as i64)), DataType::Int64).into());
                 r
             })
             .collect_vec();
