@@ -37,12 +37,6 @@ fn bench_hash_agg(c: &mut Criterion) {
     });
 }
 
-/// Basic case:
-/// pk: none
-/// group by: 0
-/// `chunk_size`: 1000
-/// `num_of_chunks`: 1024
-/// aggregation: count
 fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
     // ---- Define hash agg executor parameters ----
     let data_types = vec![DataType::Int64; 3];
