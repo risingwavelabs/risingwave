@@ -12,35 +12,45 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use chrono::{Datelike, Timelike};
+use chrono::{Datelike, NaiveDate, NaiveTime, Timelike};
 use risingwave_common::types::{Date, Decimal, Time, Timestamp};
 use risingwave_expr_macro::function;
 
 use crate::{ExprError, Result};
 
-fn extract_time<T>(time: T, unit: &str) -> Option<Decimal>
-where
-    T: Timelike,
-{
+fn extract_time(time: NaiveTime, unit: &str) -> Option<Decimal> {
     Some(match unit {
-        "HOUR" => time.hour().into(),
-        "MINUTE" => time.minute().into(),
-        "SECOND" => time.second().into(),
+        "HOUR" | "hour" => time.hour().into(),
+        "MINUTE" | "minute" => time.minute().into(),
+        "SECOND" | "second" => time.second().into(),
+        "MILLISECOND" | "millisecond" => {
+            (time.second() * 1_000 + time.nanosecond() / 1_000_000).into()
+        }
+        "MICROSECOND" | "microsecond" => {
+            (time.second() * 1_000_000 + time.nanosecond() / 1_000).into()
+        }
+        "EPOCH" | "epoch" => (time.num_seconds_from_midnight() as f64
+            + time.nanosecond() as f64 / 1_000_000_000.0)
+            .into(),
         _ => return None,
     })
 }
 
-fn extract_date<T>(date: T, unit: &str) -> Option<Decimal>
-where
-    T: Datelike,
-{
+fn extract_date(date: NaiveDate, unit: &str) -> Option<Decimal> {
     Some(match unit {
-        "DAY" => date.day().into(),
-        "MONTH" => date.month().into(),
-        "YEAR" => date.year().into(),
-        // Sun = 0 and Sat = 6
-        "DOW" => date.weekday().num_days_from_sunday().into(),
-        "DOY" => date.ordinal().into(),
+        "MILLENNIUM" | "millennium" => ((date.year() - 1) / 1000 + 1).into(),
+        "CENTURY" | "century" => ((date.year() - 1) / 100 + 1).into(),
+        "DECADE" | "decade" => (date.year() / 10).into(),
+        "YEAR" | "year" => date.year().into(),
+        "ISOYEAR" | "isoyear" => date.iso_week().year().into(),
+        "QUARTER" | "quarter" => ((date.month() - 1) / 3 + 1).into(),
+        "MONTH" | "month" => date.month().into(),
+        "WEEK" | "week" => date.iso_week().week().into(),
+        "DAY" | "day" => date.day().into(),
+        "DOY" | "doy" => date.ordinal().into(),
+        "DOW" | "dow" => date.weekday().num_days_from_sunday().into(),
+        "ISODOW" | "isodow" => date.weekday().number_from_monday().into(),
+        "EPOCH" | "epoch" => date.and_time(NaiveTime::default()).timestamp().into(),
         _ => return None,
     })
 }
@@ -59,10 +69,13 @@ pub fn extract_from_date(unit: &str, date: Date) -> Result<Decimal> {
 
 #[function("extract(varchar, timestamp) -> decimal")]
 pub fn extract_from_timestamp(unit: &str, timestamp: Timestamp) -> Result<Decimal> {
-    let time = timestamp.0;
-
-    extract_date(time, unit)
-        .or_else(|| extract_time(time, unit))
+    if matches!(unit, "EPOCH" | "epoch") {
+        let epoch =
+            timestamp.0.timestamp() as f64 + timestamp.0.nanosecond() as f64 / 1_000_000_000.0;
+        return Ok(epoch.into());
+    }
+    extract_date(timestamp.0.date(), unit)
+        .or_else(|| extract_time(timestamp.0.time(), unit))
         .ok_or_else(|| invalid_unit("timestamp unit", unit))
 }
 
@@ -94,15 +107,36 @@ mod tests {
         assert_eq!(extract_from_date("YEAR", date).unwrap(), 2021.into());
         assert_eq!(extract_from_date("DOW", date).unwrap(), 1.into());
         assert_eq!(extract_from_date("DOY", date).unwrap(), 326.into());
+        assert_eq!(extract_from_date("MILLENNIUM", date).unwrap(), 3.into());
+        assert_eq!(extract_from_date("CENTURY", date).unwrap(), 21.into());
+        assert_eq!(extract_from_date("DECADE", date).unwrap(), 202.into());
+        assert_eq!(extract_from_date("ISOYEAR", date).unwrap(), 2021.into());
+        assert_eq!(extract_from_date("QUARTER", date).unwrap(), 4.into());
+        assert_eq!(extract_from_date("WEEK", date).unwrap(), 47.into());
+        assert_eq!(extract_from_date("ISODOW", date).unwrap(), 1.into());
+        assert_eq!(extract_from_date("EPOCH", date).unwrap(), 1637539200.into());
     }
 
     #[test]
-    fn test_time() {
-        let time = Timestamp::new(
-            NaiveDateTime::parse_from_str("2021-11-22 12:4:2", "%Y-%m-%d %H:%M:%S").unwrap(),
+    fn test_timestamp() {
+        let ts = Timestamp::new(
+            NaiveDateTime::parse_from_str("2021-11-22 12:4:2.575401000", "%Y-%m-%d %H:%M:%S%.f")
+                .unwrap(),
         );
-        assert_eq!(extract_from_timestamp("HOUR", time).unwrap(), 12.into());
-        assert_eq!(extract_from_timestamp("MINUTE", time).unwrap(), 4.into());
-        assert_eq!(extract_from_timestamp("SECOND", time).unwrap(), 2.into());
+        assert_eq!(extract_from_timestamp("HOUR", ts).unwrap(), 12.into());
+        assert_eq!(extract_from_timestamp("MINUTE", ts).unwrap(), 4.into());
+        assert_eq!(extract_from_timestamp("SECOND", ts).unwrap(), 2.into());
+        assert_eq!(
+            extract_from_timestamp("MILLISECOND", ts).unwrap(),
+            2575.into()
+        );
+        assert_eq!(
+            extract_from_timestamp("MICROSECOND", ts).unwrap(),
+            2575401.into()
+        );
+        assert_eq!(
+            extract_from_timestamp("EPOCH", ts).unwrap(),
+            1637582642.575401.into()
+        );
     }
 }

@@ -223,22 +223,22 @@ SELECT f1 - date '2000-01-01' AS "Days From 2K" FROM DATE_TBL;
 --
 -- test extract!
 --
---@ SELECT f1 as "date",
---@     date_part('year', f1) AS year,
---@     date_part('month', f1) AS month,
---@     date_part('day', f1) AS day,
---@     date_part('quarter', f1) AS quarter,
---@     date_part('decade', f1) AS decade,
---@     date_part('century', f1) AS century,
---@     date_part('millennium', f1) AS millennium,
---@     date_part('isoyear', f1) AS isoyear,
---@     date_part('week', f1) AS week,
---@     date_part('dow', f1) AS dow,
---@     date_part('isodow', f1) AS isodow,
---@     date_part('doy', f1) AS doy,
---@     date_part('julian', f1) AS julian,
---@     date_part('epoch', f1) AS epoch
---@     FROM date_tbl;
+SELECT f1 as "date",
+    date_part('year', f1) AS year,
+    date_part('month', f1) AS month,
+    date_part('day', f1) AS day,
+    date_part('quarter', f1) AS quarter,
+    date_part('decade', f1) AS decade,
+    date_part('century', f1) AS century,
+    date_part('millennium', f1) AS millennium,
+    date_part('isoyear', f1) AS isoyear,
+    date_part('week', f1) AS week,
+    date_part('dow', f1) AS dow,
+    date_part('isodow', f1) AS isodow,
+    date_part('doy', f1) AS doy,
+    -- date_part('julian', f1) AS julian,
+    date_part('epoch', f1) AS epoch
+    FROM date_tbl;
 
 DROP TABLE DATE_TBL;
 
@@ -252,30 +252,30 @@ DROP TABLE DATE_TBL;
 --@ SELECT EXTRACT(CENTURY FROM DATE '0101-12-31 BC'); -- -2
 --@ SELECT EXTRACT(CENTURY FROM DATE '0100-12-31 BC'); -- -1
 --@ SELECT EXTRACT(CENTURY FROM DATE '0001-12-31 BC'); -- -1
---@ SELECT EXTRACT(CENTURY FROM DATE '0001-01-01');    --  1
+SELECT EXTRACT(CENTURY FROM DATE '0001-01-01');    --  1
 --@ SELECT EXTRACT(CENTURY FROM DATE '0001-01-01 AD'); --  1
---@ SELECT EXTRACT(CENTURY FROM DATE '1900-12-31');    -- 19
---@ SELECT EXTRACT(CENTURY FROM DATE '1901-01-01');    -- 20
---@ SELECT EXTRACT(CENTURY FROM DATE '2000-12-31');    -- 20
---@ SELECT EXTRACT(CENTURY FROM DATE '2001-01-01');    -- 21
+SELECT EXTRACT(CENTURY FROM DATE '1900-12-31');    -- 19
+SELECT EXTRACT(CENTURY FROM DATE '1901-01-01');    -- 20
+SELECT EXTRACT(CENTURY FROM DATE '2000-12-31');    -- 20
+SELECT EXTRACT(CENTURY FROM DATE '2001-01-01');    -- 21
 --@ SELECT EXTRACT(CENTURY FROM CURRENT_DATE)>=21 AS True;     -- true
 --
 -- millennium
 --
 --@ SELECT EXTRACT(MILLENNIUM FROM DATE '0001-12-31 BC'); -- -1
 --@ SELECT EXTRACT(MILLENNIUM FROM DATE '0001-01-01 AD'); --  1
---@ SELECT EXTRACT(MILLENNIUM FROM DATE '1000-12-31');    --  1
---@ SELECT EXTRACT(MILLENNIUM FROM DATE '1001-01-01');    --  2
---@ SELECT EXTRACT(MILLENNIUM FROM DATE '2000-12-31');    --  2
---@ SELECT EXTRACT(MILLENNIUM FROM DATE '2001-01-01');    --  3
---@ -- next test to be fixed on the turn of the next millennium;-)
+SELECT EXTRACT(MILLENNIUM FROM DATE '1000-12-31');    --  1
+SELECT EXTRACT(MILLENNIUM FROM DATE '1001-01-01');    --  2
+SELECT EXTRACT(MILLENNIUM FROM DATE '2000-12-31');    --  2
+SELECT EXTRACT(MILLENNIUM FROM DATE '2001-01-01');    --  3
+-- next test to be fixed on the turn of the next millennium;-)
 --@ SELECT EXTRACT(MILLENNIUM FROM CURRENT_DATE);         --  3
 --
 -- decade
 --
---@ SELECT EXTRACT(DECADE FROM DATE '1994-12-25');    -- 199
---@ SELECT EXTRACT(DECADE FROM DATE '0010-01-01');    --   1
---@ SELECT EXTRACT(DECADE FROM DATE '0009-12-31');    --   0
+SELECT EXTRACT(DECADE FROM DATE '1994-12-25');    -- 199
+SELECT EXTRACT(DECADE FROM DATE '0010-01-01');    --   1
+SELECT EXTRACT(DECADE FROM DATE '0009-12-31');    --   0
 --@ SELECT EXTRACT(DECADE FROM DATE '0001-01-01 BC'); --   0
 --@ SELECT EXTRACT(DECADE FROM DATE '0002-12-31 BC'); --  -1
 --@ SELECT EXTRACT(DECADE FROM DATE '0011-01-01 BC'); --  -1
@@ -283,31 +283,31 @@ DROP TABLE DATE_TBL;
 --
 -- all possible fields
 --
---@ SELECT EXTRACT(MICROSECONDS  FROM DATE '2020-08-11');
---@ SELECT EXTRACT(MILLISECONDS  FROM DATE '2020-08-11');
---@ SELECT EXTRACT(SECOND        FROM DATE '2020-08-11');
---@ SELECT EXTRACT(MINUTE        FROM DATE '2020-08-11');
---@ SELECT EXTRACT(HOUR          FROM DATE '2020-08-11');
+SELECT EXTRACT(MICROSECONDS  FROM DATE '2020-08-11');
+SELECT EXTRACT(MILLISECONDS  FROM DATE '2020-08-11');
+SELECT EXTRACT(SECOND        FROM DATE '2020-08-11');
+SELECT EXTRACT(MINUTE        FROM DATE '2020-08-11');
+SELECT EXTRACT(HOUR          FROM DATE '2020-08-11');
 SELECT EXTRACT(DAY           FROM DATE '2020-08-11');
 SELECT EXTRACT(MONTH         FROM DATE '2020-08-11');
 SELECT EXTRACT(YEAR          FROM DATE '2020-08-11');
 --@ SELECT EXTRACT(YEAR          FROM DATE '2020-08-11 BC');
---@ SELECT EXTRACT(DECADE        FROM DATE '2020-08-11');
---@ SELECT EXTRACT(CENTURY       FROM DATE '2020-08-11');
---@ SELECT EXTRACT(MILLENNIUM    FROM DATE '2020-08-11');
---@ SELECT EXTRACT(ISOYEAR       FROM DATE '2020-08-11');
+SELECT EXTRACT(DECADE        FROM DATE '2020-08-11');
+SELECT EXTRACT(CENTURY       FROM DATE '2020-08-11');
+SELECT EXTRACT(MILLENNIUM    FROM DATE '2020-08-11');
+SELECT EXTRACT(ISOYEAR       FROM DATE '2020-08-11');
 --@ SELECT EXTRACT(ISOYEAR       FROM DATE '2020-08-11 BC');
---@ SELECT EXTRACT(QUARTER       FROM DATE '2020-08-11');
---@ SELECT EXTRACT(WEEK          FROM DATE '2020-08-11');
+SELECT EXTRACT(QUARTER       FROM DATE '2020-08-11');
+SELECT EXTRACT(WEEK          FROM DATE '2020-08-11');
 SELECT EXTRACT(DOW           FROM DATE '2020-08-11');
 SELECT EXTRACT(DOW           FROM DATE '2020-08-16');
---@ SELECT EXTRACT(ISODOW        FROM DATE '2020-08-11');
---@ SELECT EXTRACT(ISODOW        FROM DATE '2020-08-16');
+SELECT EXTRACT(ISODOW        FROM DATE '2020-08-11');
+SELECT EXTRACT(ISODOW        FROM DATE '2020-08-16');
 SELECT EXTRACT(DOY           FROM DATE '2020-08-11');
 --@ SELECT EXTRACT(TIMEZONE      FROM DATE '2020-08-11');
 --@ SELECT EXTRACT(TIMEZONE_M    FROM DATE '2020-08-11');
 --@ SELECT EXTRACT(TIMEZONE_H    FROM DATE '2020-08-11');
---@ SELECT EXTRACT(EPOCH         FROM DATE '2020-08-11');
+SELECT EXTRACT(EPOCH         FROM DATE '2020-08-11');
 --@ SELECT EXTRACT(JULIAN        FROM DATE '2020-08-11');
 --
 -- test trunc function!
