@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 
+use crate::catalog::system_catalog::pg_catalog::PG_NAMESPACE_TABLE_NAME;
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalApply, LogicalExpand, LogicalFilter, LogicalHopWindow, LogicalLimit,
     LogicalNow, LogicalProject, LogicalProjectSet, LogicalScan, LogicalTopN, LogicalUnion,
@@ -70,7 +71,7 @@ impl PlanVisitor<bool> for MaxOneRowVisitor {
             || {
                 // We don't have UNIQUE key now. So we hack here to support some complex queries on
                 // system tables.
-                if let Some(scan) = input.as_logical_scan() && scan.table_name() == "pg_namespace" {
+                if let Some(scan) = input.as_logical_scan() && scan.is_sys_table() && scan.table_name() == PG_NAMESPACE_TABLE_NAME {
                     let nspname = scan.output_col_idx().iter().find(|i| scan.table_desc().columns[**i].name == "nspname").unwrap();
                     let unique_key = [
                         *nspname
