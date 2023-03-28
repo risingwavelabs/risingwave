@@ -594,6 +594,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     }
 }
 
+/// NOTE(kwannoel): This should only be used by `test` or `bench`.
 #[allow(clippy::too_many_arguments)]
 pub async fn new_boxed_hash_agg_executor<S: StateStore>(
     store: S,
