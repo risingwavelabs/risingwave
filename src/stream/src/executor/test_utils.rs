@@ -439,24 +439,25 @@ pub mod top_n_executor {
     }
 }
 
-/// Generate `batch_num` data chunks with type `data_types`, each data chunk has cardinality of
+/// Generate `num_of_chunks` data chunks with type `data_types`, each data chunk has cardinality of
 /// `batch_size`.
-pub fn gen_data(batch_size: usize, batch_num: usize, data_types: &[DataType]) -> Vec<DataChunk> {
-    let mut ret = Vec::<DataChunk>::with_capacity(batch_num);
+/// TODO(kwannoel): Refactor this and `batch` gen_data into data_chunk::test_utils
+pub fn gen_data(num_of_chunks: usize, chunk_size: usize, data_types: &[DataType]) -> Vec<DataChunk> {
+    let mut ret = Vec::<DataChunk>::with_capacity(num_of_chunks);
 
-    for i in 0..batch_num {
+    for i in 0..num_of_chunks {
         let mut columns = Vec::new();
         for data_type in data_types {
             let mut data_gen =
                 FieldGeneratorImpl::with_number_random(data_type.clone(), None, None, SEED)
                     .unwrap();
-            let mut array_builder = data_type.create_array_builder(batch_size);
-            for j in 0..batch_size {
+            let mut array_builder = data_type.create_array_builder(chunk_size);
+            for j in 0..chunk_size {
                 array_builder.append_datum(&data_gen.generate_datum(((i + 1) * (j + 1)) as u64));
             }
             columns.push(array_builder.finish().into());
         }
-        ret.push(DataChunk::new(columns, batch_size));
+        ret.push(DataChunk::new(columns, chunk_size));
     }
     ret
 }

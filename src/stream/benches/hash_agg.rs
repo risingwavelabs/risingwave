@@ -72,14 +72,25 @@ fn bench_hash_agg(c: &mut Criterion) {
 
 }
 
-async fn bench_hash_agg_inner<S: StateStore>(store: S) {
+/// Basic case:
+/// pk: none
+/// group by: 0
+/// chunk_size: 1000
+/// num_of_chunks: 1024
+/// aggregation: count
+async fn setup_bench_hash_agg<S: StateStore>(store: S) {
+    // Define schema
+    let num_of_chunks = 1000;
+    let chunk_size = 1024;
+    let data_types = vec![DataType::Int64; 3];
     let schema = Schema {
-        fields: vec![
-            Field::unnamed(DataType::Int64),
-            Field::unnamed(DataType::Int64),
-            Field::unnamed(DataType::Int64),
-        ],
+        fields: vec![Field::unnamed(DataType::Int64); 3],
     };
+
+    // Gen data
+    let data = gen_data(num_of_chunks, chunk_size, &data_types);
+
+    // Construct MockSource with data
 
     let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
     tx.push_barrier(1, false);
