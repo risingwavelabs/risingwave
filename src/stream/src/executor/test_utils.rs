@@ -12,17 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::VecDeque;
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, ScalarImpl};
 use tokio::sync::mpsc;
+use risingwave_common::array::DataChunk;
+use risingwave_common::field_generator::FieldGeneratorImpl;
+use crate::executor::{BoxedExecutor, ExecutorInfo, PkIndicesRef};
 
 use super::error::StreamExecutorError;
 use super::{
     Barrier, BoxedMessageStream, Executor, Message, MessageStream, PkIndices, StreamChunk,
     StreamExecutorResult, Watermark,
 };
+
+const SEED: u64 = 0xFF67FEABBAEF76FF;
 
 pub struct MockSource {
     schema: Schema,
@@ -432,3 +438,26 @@ pub mod top_n_executor {
         .await
     }
 }
+
+/// Generate `batch_num` data chunks with type `data_types`, each data chunk has cardinality of
+/// `batch_size`.
+pub fn gen_data(batch_size: usize, batch_num: usize, data_types: &[DataType]) -> Vec<DataChunk> {
+    let mut ret = Vec::<DataChunk>::with_capacity(batch_num);
+
+    for i in 0..batch_num {
+        let mut columns = Vec::new();
+        for data_type in data_types {
+            let mut data_gen =
+                FieldGeneratorImpl::with_number_random(data_type.clone(), None, None, SEED)
+                    .unwrap();
+            let mut array_builder = data_type.create_array_builder(batch_size);
+            for j in 0..batch_size {
+                array_builder.append_datum(&data_gen.generate_datum(((i + 1) * (j + 1)) as u64));
+            }
+            columns.push(array_builder.finish().into());
+        }
+        ret.push(DataChunk::new(columns, batch_size));
+    }
+    ret
+}
+

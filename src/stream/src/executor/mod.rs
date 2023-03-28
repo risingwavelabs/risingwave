@@ -97,8 +97,7 @@ mod wrapper;
 mod backfill;
 #[cfg(test)]
 mod integration_tests;
-#[cfg(test)]
-mod test_utils;
+pub mod test_utils;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
