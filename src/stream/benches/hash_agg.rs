@@ -15,39 +15,15 @@
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use futures::executor::block_on;
 use futures::StreamExt;
-use itertools::Itertools;
-use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::row::{AscentOwnedRow, OwnedRow, Row};
 use risingwave_common::types::DataType;
-use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::*;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::StateStore;
 use risingwave_stream::executor::aggregation::{AggArgs, AggCall};
-use risingwave_stream::executor::new_boxed_hash_agg_executor;
 use risingwave_stream::executor::test_utils::*;
-use risingwave_stream::executor::{BoxedExecutor, PkIndices};
+use risingwave_stream::executor::{new_boxed_hash_agg_executor, BoxedExecutor, PkIndices};
 use tokio::runtime::Runtime;
-
-trait SortedRows {
-    fn sorted_rows(self) -> Vec<(Op, OwnedRow)>;
-}
-impl SortedRows for StreamChunk {
-    fn sorted_rows(self) -> Vec<(Op, OwnedRow)> {
-        let (chunk, ops) = self.into_parts();
-        ops.into_iter()
-            .zip_eq_debug(
-                chunk
-                    .rows()
-                    .map(Row::into_owned_row)
-                    .map(AscentOwnedRow::from),
-            )
-            .sorted()
-            .map(|(op, row)| (op, row.into_inner()))
-            .collect_vec()
-    }
-}
 
 fn bench_hash_agg(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
@@ -136,7 +112,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
         pk_indices,
         extreme_cache_size,
         executor_id,
-    )) as _
+    ))
 }
 
 pub async fn execute_executor(executor: BoxedExecutor) {
