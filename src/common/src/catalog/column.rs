@@ -207,7 +207,7 @@ impl ColumnDesc {
         Self::from_field_with_column_id(field, 0)
     }
 
-    pub fn is_generated_column(&self) -> bool {
+    pub fn is_generated(&self) -> bool {
         self.generated_column.is_some()
     }
 }

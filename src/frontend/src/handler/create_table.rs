@@ -399,6 +399,14 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     bind_sql_column_constraints(session, table_name.real_value(), &mut columns, column_defs)?;
 
+    if row_id_index.is_none() && columns.iter().any(|c| c.is_generated()) {
+        // TODO(yuhao): allow delete from a non append only source
+        return Err(ErrorCode::BindError(
+            "Generated columns are only allowed in an append only source.".to_string(),
+        )
+        .into());
+    }
+
     gen_table_plan_inner(
         context.into(),
         table_name,
@@ -528,10 +536,7 @@ fn gen_table_plan_inner(
     let source_catalog = source.as_ref().map(|source| Rc::new((source).into()));
     let source_node: PlanRef = LogicalSource::new(
         source_catalog,
-        columns
-            .iter()
-            .map(|column| column.column_desc.clone())
-            .collect_vec(),
+        columns.clone(),
         pk_column_ids,
         row_id_index,
         false,

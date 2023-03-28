@@ -125,7 +125,8 @@ message StreamSource {
   catalog.Table state_table = 2;
   optional uint32 row_id_index = 3;
   repeated plan_common.ColumnCatalog columns = 4;
-  repeated int32 pk_column_ids = 5;
+  // repeated int32 pk_column_ids = 5;
+  reserved 5;
   map<string, string> properties = 6;
   catalog.StreamSourceInfo info = 7;
   string source_name = 8;

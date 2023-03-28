@@ -631,10 +631,10 @@ pub async fn handle_create_source(
 
     bind_sql_column_constraints(&session, name.clone(), &mut columns, stmt.columns)?;
 
-    if columns.iter().any(|c| c.is_generated()) {
-        // TODO(yuhao): allow generated columns on source
+    if row_id_index.is_none() && columns.iter().any(|c| c.is_generated()) {
+        // TODO(yuhao): allow delete from a non append only source
         return Err(RwError::from(ErrorCode::BindError(
-            "Generated columns on source has not been implemented.".to_string(),
+            "Generated columns are only allowed in an append only source.".to_string(),
         )));
     }
 

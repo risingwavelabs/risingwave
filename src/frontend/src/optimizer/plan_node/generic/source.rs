@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use derivative::Derivative;
-use risingwave_common::catalog::{ColumnDesc, Field, Schema};
+use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 
@@ -35,7 +35,7 @@ pub struct Source {
     pub catalog: Option<Rc<SourceCatalog>>,
     /// NOTE(Yuanxin): Here we store column descriptions, pk column ids, and row id index for plan
     /// generating, even if there is no external stream source.
-    pub column_descs: Vec<ColumnDesc>,
+    pub column_catalog: Vec<ColumnCatalog>,
     pub pk_col_ids: Vec<ColumnId>,
     pub row_id_index: Option<usize>,
     /// Whether the "SourceNode" should generate the row id column for append only source
@@ -49,20 +49,22 @@ pub struct Source {
 
 impl GenericPlanNode for Source {
     fn schema(&self) -> Schema {
-        let fields = self.non_generated_columns().map(Into::into).collect();
+        let fields = self
+            .column_catalog
+            .iter()
+            .map(|c| (&c.column_desc).into())
+            .collect();
         // let fields = self.column_descs.iter().map(Into::into).collect();
         Schema { fields }
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
         let mut id_to_idx = HashMap::new();
-        // self.column_descs.iter().filter(|c| !c.is_generated_column()).enumerate().for_each(|(idx,
+        // self.column_descs.iter().filter(|c| !c.is_generated()).enumerate().for_each(|(idx,
         // c)| {
-        self.non_generated_columns()
-            .enumerate()
-            .for_each(|(idx, c)| {
-                id_to_idx.insert(c.column_id, idx);
-            });
+        self.column_catalog.iter().enumerate().for_each(|(idx, c)| {
+            id_to_idx.insert(c.column_id(), idx);
+        });
         self.pk_col_ids
             .iter()
             .map(|c| id_to_idx.get(c).copied())
@@ -75,12 +77,11 @@ impl GenericPlanNode for Source {
 
     fn functional_dependency(&self) -> FunctionalDependencySet {
         let pk_indices = self.logical_pk();
-        let non_generated_columns_count = self.non_generated_columns().count();
         match pk_indices {
             Some(pk_indices) => {
-                FunctionalDependencySet::with_key(non_generated_columns_count, &pk_indices)
+                FunctionalDependencySet::with_key(self.column_catalog.len(), &pk_indices)
             }
-            None => FunctionalDependencySet::new(non_generated_columns_count),
+            None => FunctionalDependencySet::new(self.column_catalog.len()),
         }
     }
 }
@@ -113,12 +114,5 @@ impl Source {
         builder.add_order_column(ordered_col_idx, OrderType::ascending());
 
         builder.build(vec![], 1)
-    }
-
-    /// Non-generated columns
-    fn non_generated_columns(&self) -> impl Iterator<Item = &ColumnDesc> {
-        self.column_descs
-            .iter()
-            .filter(|c| !c.is_generated_column())
     }
 }

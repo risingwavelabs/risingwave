@@ -516,7 +516,6 @@ mod tests {
             fields: vec![Field::with_name(DataType::Int32, "sequence_int")],
         };
         let row_id_index = None;
-        let pk_column_ids = vec![0];
         let pk_indices = vec![0];
         let source_info = StreamSourceInfo {
             row_format: PbRowFormatType::Native as i32,
@@ -533,13 +532,8 @@ mod tests {
             "fields.sequence_int.start" => "11",
             "fields.sequence_int.end" => "11111",
         ));
-        let source_desc_builder = create_source_desc_builder(
-            &schema,
-            pk_column_ids,
-            row_id_index,
-            source_info,
-            properties,
-        );
+        let source_desc_builder =
+            create_source_desc_builder(&schema, row_id_index, source_info, properties);
         let split_state_store = SourceStateTableHandler::from_table_catalog(
             &default_source_internal_table(0x2333),
             MemoryStateStore::new(),
@@ -608,7 +602,6 @@ mod tests {
             fields: vec![Field::with_name(DataType::Int32, "v1")],
         };
         let row_id_index = None;
-        let pk_column_ids = vec![0];
         let pk_indices = vec![0_usize];
         let source_info = StreamSourceInfo {
             row_format: PbRowFormatType::Native as i32,
@@ -621,13 +614,8 @@ mod tests {
             "fields.v1.end" => "11111",
         ));
 
-        let source_desc_builder = create_source_desc_builder(
-            &schema,
-            pk_column_ids,
-            row_id_index,
-            source_info,
-            properties,
-        );
+        let source_desc_builder =
+            create_source_desc_builder(&schema, row_id_index, source_info, properties);
         let mem_state_store = MemoryStateStore::new();
 
         let column_ids = vec![ColumnId::from(0)];

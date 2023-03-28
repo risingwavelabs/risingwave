@@ -18,7 +18,8 @@ use std::ops::Bound;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::rc::Rc;
 
-use risingwave_common::catalog::{ColumnDesc, Schema};
+use itertools::Itertools;
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Schema};
 use risingwave_common::error::Result;
 use risingwave_connector::source::DataType;
 use risingwave_pb::plan_common::GeneratedColumnDesc;
@@ -57,16 +58,23 @@ pub struct LogicalSource {
 impl LogicalSource {
     pub fn new(
         source_catalog: Option<Rc<SourceCatalog>>,
-        column_descs: Vec<ColumnDesc>,
+        column_catalog: Vec<ColumnCatalog>,
         pk_col_ids: Vec<ColumnId>,
         row_id_index: Option<usize>,
         gen_row_id: bool,
         for_table: bool,
         ctx: OptimizerContextRef,
     ) -> Self {
+        // Filter out the generated columns.
+        let row_id_index = Self::rewrite_row_id_idx(&column_catalog, row_id_index);
+        let source_column_catalogs = column_catalog
+            .into_iter()
+            .filter(|c| !c.is_generated())
+            .collect_vec();
+
         let core = generic::Source {
             catalog: source_catalog,
-            column_descs,
+            column_catalog: source_column_catalogs,
             pk_col_ids,
             row_id_index,
             gen_row_id,
@@ -130,29 +138,50 @@ impl LogicalSource {
     }
 
     pub fn create(
-        source_catalog: Option<Rc<SourceCatalog>>,
-        column_descs: Vec<ColumnDesc>,
-        pk_col_ids: Vec<ColumnId>,
-        row_id_index: Option<usize>,
-        gen_row_id: bool,
+        source_catalog: Rc<SourceCatalog>,
         for_table: bool,
         ctx: OptimizerContextRef,
     ) -> Result<PlanRef> {
+        let column_catalogs = source_catalog.columns.clone();
+        let column_descs = column_catalogs
+            .iter()
+            .map(|c| &c.column_desc)
+            .cloned()
+            .collect();
+        let pk_col_ids = source_catalog.pk_col_ids.clone();
+        let row_id_index = source_catalog.row_id_index;
+        let gen_row_id = source_catalog.append_only;
+
         let source = Self::new(
-            source_catalog,
-            column_descs.clone(),
+            Some(source_catalog),
+            column_catalogs,
             pk_col_ids,
             row_id_index,
             gen_row_id,
             for_table,
             ctx,
         );
+
         let exprs = Self::gen_optional_generated_column_project_exprs(column_descs)?;
         if let Some(exprs) = exprs {
             Ok(LogicalProject::new(source.into(), exprs).into())
         } else {
             Ok(source.into())
         }
+    }
+
+    /// `row_id_index` in source node should rule out generated column
+    #[must_use]
+    fn rewrite_row_id_idx(columns: &[ColumnCatalog], row_id_index: Option<usize>) -> Option<usize> {
+        row_id_index.map(|idx| {
+            let mut cnt = 0;
+            for col in columns.iter().take(idx + 1) {
+                if col.is_generated() {
+                    cnt += 1;
+                }
+            }
+            idx - cnt
+        })
     }
 
     pub(super) fn column_names(&self) -> Vec<String> {
