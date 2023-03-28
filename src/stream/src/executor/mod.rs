@@ -112,6 +112,7 @@ pub use expand::ExpandExecutor;
 pub use filter::FilterExecutor;
 pub use global_simple_agg::GlobalSimpleAggExecutor;
 pub use hash_agg::HashAggExecutor;
+pub use hash_agg::new_boxed_hash_agg_executor;
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
 pub use local_simple_agg::LocalSimpleAggExecutor;

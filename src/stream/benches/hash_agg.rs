@@ -12,137 +12,171 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
+// use itertools::Itertools;
+// use risingwave_common::catalog::{Field, Schema};
+// use risingwave_common::types::DataType;
+// use risingwave_common::{enable_jemalloc_on_unix, hash};
+// use risingwave_expr::expr::AggKind;
+// use risingwave_expr::vector_op::agg::AggStateFactory;
+// // use risingwave_pb::expr::{AggCall, InputRef};
+// use risingwave_stream::executor::{BoxedExecutor, HashAggExecutor};
+use risingwave_stream::executor::new_boxed_hash_agg_executor;
+// use tokio::runtime::Runtime;
+
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
+
+use assert_matches::assert_matches;
+use futures::StreamExt;
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::catalog::{Field, Schema, TableId};
+use risingwave_common::hash::SerializedKey;
+use risingwave_common::row::{AscentOwnedRow, OwnedRow, Row};
 use risingwave_common::types::DataType;
-use risingwave_common::{enable_jemalloc_on_unix, hash};
-use risingwave_expr::expr::AggKind;
-use risingwave_expr::vector_op::agg::AggStateFactory;
-use risingwave_pb::expr::{AggCall, InputRef};
-use risingwave_stream::executor::{BoxedExecutor, HashAggExecutor};
-use tokio::runtime::Runtime;
-pub mod utils;
-use utils::{create_input, execute_executor};
+use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_expr::expr::*;
+use risingwave_storage::memory::MemoryStateStore;
+use risingwave_storage::StateStore;
 
-// enable_jemalloc_on_unix!();
+use risingwave_stream::executor::agg_common::{AggExecutorArgs, AggExecutorArgsExtra};
+use risingwave_stream::executor::aggregation::{AggArgs, AggCall};
+use risingwave_stream::executor::monitor::StreamingMetrics;
+use risingwave_stream::executor::test_utils::agg_executor::{
+    create_agg_state_storage, create_result_table,
+};
+use risingwave_stream::executor::test_utils::*;
+use risingwave_stream::executor::{ActorContext, Executor, HashAggExecutor, Message, PkIndices};
 
-fn create_agg_call(
-    input_schema: &Schema,
-    agg_kind: AggKind,
-    args: Vec<usize>,
-    return_type: DataType,
-) -> AggCall {
-    AggCall {
-        r#type: agg_kind.to_prost() as i32,
-        args: args
-            .into_iter()
-            .map(|col_idx| InputRef {
-                index: col_idx as _,
-                r#type: Some(input_schema.fields()[col_idx].data_type().to_protobuf()),
-            })
-            .collect(),
-        return_type: Some(return_type.to_protobuf()),
-        distinct: false,
-        order_by: vec![],
-        filter: None,
-    }
+trait SortedRows {
+    fn sorted_rows(self) -> Vec<(Op, OwnedRow)>;
 }
-
-fn create_hash_agg_executor(
-    group_key_columns: Vec<usize>,
-    agg_kind: AggKind,
-    arg_columns: Vec<usize>,
-    return_type: DataType,
-    chunk_size: usize,
-    chunk_num: usize,
-) -> BoxedExecutor {
-    const CHUNK_SIZE: usize = 1024;
-    let input = create_input(
-        &[DataType::Int32, DataType::Int64, DataType::Varchar],
-        chunk_size,
-        chunk_num,
-    );
-    let input_schema = input.schema();
-
-    let agg_calls = vec![create_agg_call(
-        input_schema,
-        agg_kind,
-        arg_columns,
-        return_type,
-    )];
-
-    let agg_factories: Vec<_> = agg_calls
-        .iter()
-        .map(AggStateFactory::new)
-        .try_collect()
-        .unwrap();
-
-    let group_key_types = group_key_columns
-        .iter()
-        .map(|i| input_schema.fields()[*i].data_type())
-        .collect_vec();
-
-    let fields = group_key_types
-        .iter()
-        .cloned()
-        .chain(agg_factories.iter().map(|fac| fac.get_return_type()))
-        .map(Field::unnamed)
-        .collect_vec();
-    let schema = Schema { fields };
-
-    Box::new(HashAggExecutor::<hash::Key64>::new(
-        agg_factories,
-        group_key_columns,
-        group_key_types,
-        schema,
-        input,
-        "HashAggExecutor".to_string(),
-        CHUNK_SIZE,
-    ))
+impl SortedRows for StreamChunk {
+    fn sorted_rows(self) -> Vec<(Op, OwnedRow)> {
+        let (chunk, ops) = self.into_parts();
+        ops.into_iter()
+            .zip_eq_debug(
+                chunk
+                    .rows()
+                    .map(Row::into_owned_row)
+                    .map(AscentOwnedRow::from),
+            )
+            .sorted()
+            .map(|(op, row)| (op, row.into_inner()))
+            .collect_vec()
+    }
 }
 
 fn bench_hash_agg(c: &mut Criterion) {
-    const SIZE: usize = 1024 * 1024;
-    let rt = Runtime::new().unwrap();
 
-    let bench_variants = [
-        // (group by, agg, args, return type)
-        (vec![0], AggKind::Sum, vec![1], DataType::Int64),
-        (vec![0], AggKind::Count, vec![], DataType::Int64),
-        (vec![0], AggKind::Count, vec![2], DataType::Int64),
-        (vec![0], AggKind::Min, vec![1], DataType::Int64),
-        (vec![0], AggKind::StringAgg, vec![2], DataType::Varchar),
-        (vec![0, 2], AggKind::Sum, vec![1], DataType::Int64),
-        (vec![0, 2], AggKind::Count, vec![], DataType::Int64),
-        (vec![0, 2], AggKind::Count, vec![2], DataType::Int64),
-        (vec![0, 2], AggKind::Min, vec![1], DataType::Int64),
+}
+
+async fn bench_hash_agg_inner<S: StateStore>(store: S) {
+    let schema = Schema {
+        fields: vec![
+            Field::unnamed(DataType::Int64),
+            Field::unnamed(DataType::Int64),
+            Field::unnamed(DataType::Int64),
+        ],
+    };
+
+    let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
+    tx.push_barrier(1, false);
+    tx.push_chunk(StreamChunk::from_pretty(
+        " I I I
+        + 1 1 1
+        + 2 2 2
+        + 2 2 2",
+    ));
+    tx.push_barrier(2, false);
+    tx.push_chunk(StreamChunk::from_pretty(
+        " I I I
+        - 1 1 1
+        - 2 2 2 D
+        - 2 2 2
+        + 3 3 3",
+    ));
+    tx.push_barrier(3, false);
+
+    // This is local hash aggregation, so we add another sum state
+    let key_indices = vec![0];
+    let append_only = false;
+    let agg_calls = vec![
+        AggCall {
+            kind: AggKind::Count, // as row count, index: 0
+            args: AggArgs::None,
+            return_type: DataType::Int64,
+            column_orders: vec![],
+            append_only,
+            filter: None,
+            distinct: false,
+        },
+        AggCall {
+            kind: AggKind::Sum,
+            args: AggArgs::Unary(DataType::Int64, 1),
+            return_type: DataType::Int64,
+            column_orders: vec![],
+            append_only,
+            filter: None,
+            distinct: false,
+        },
+        // This is local hash aggregation, so we add another sum state
+        AggCall {
+            kind: AggKind::Sum,
+            args: AggArgs::Unary(DataType::Int64, 2),
+            return_type: DataType::Int64,
+            column_orders: vec![],
+            append_only,
+            filter: None,
+            distinct: false,
+        },
     ];
 
-    for (group_key_columns, agg_kind, arg_columns, return_type) in bench_variants {
-        for chunk_size in &[32, 128, 512, 1024, 2048, 4096] {
-            c.bench_with_input(
-                BenchmarkId::new("HashAggExecutor", chunk_size),
-                chunk_size,
-                |b, &chunk_size| {
-                    let chunk_num = SIZE / chunk_size;
-                    b.to_async(&rt).iter_batched(
-                        || {
-                            create_hash_agg_executor(
-                                group_key_columns.clone(),
-                                agg_kind,
-                                arg_columns.clone(),
-                                return_type.clone(),
-                                chunk_size,
-                                chunk_num,
-                            )
-                        },
-                        |e| execute_executor(e),
-                        BatchSize::SmallInput,
-                    );
-                },
-            );
-        }
-    }
+    let hash_agg = new_boxed_hash_agg_executor(
+        store,
+        Box::new(source),
+        agg_calls,
+        0,
+        key_indices,
+        vec![],
+        1 << 10,
+        1,
+    )
+    .await;
+    let mut hash_agg = hash_agg.execute();
+
+    // Consume the init barrier
+    hash_agg.next().await.unwrap().unwrap();
+    // Consume stream chunk
+    let msg = hash_agg.next().await.unwrap().unwrap();
+    assert_eq!(
+        msg.into_chunk().unwrap().sorted_rows(),
+        StreamChunk::from_pretty(
+            " I I I I
+            + 1 1 1 1
+            + 2 2 4 4"
+        )
+        .sorted_rows(),
+    );
+
+    assert_matches!(
+        hash_agg.next().await.unwrap().unwrap(),
+        Message::Barrier { .. }
+    );
+
+    let msg = hash_agg.next().await.unwrap().unwrap();
+    assert_eq!(
+        msg.into_chunk().unwrap().sorted_rows(),
+        StreamChunk::from_pretty(
+            "  I I I I
+            -  1 1 1 1
+            U- 2 2 4 4
+            U+ 2 1 2 2
+            +  3 1 3 3"
+        )
+        .sorted_rows(),
+    );
 }
 
 criterion_group!(benches, bench_hash_agg);

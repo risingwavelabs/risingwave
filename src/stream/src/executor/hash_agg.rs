@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 
 use futures::{stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
@@ -23,8 +24,8 @@ use iter_chunks::IterChunks;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
-use risingwave_common::catalog::Schema;
-use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
+use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::hash::{HashKey, PrecomputedBuildHasher, SerializedKey};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
@@ -44,7 +45,9 @@ use crate::error::StreamResult;
 use crate::executor::aggregation::{generate_agg_schema, AggCall, AggGroup as GenericAggGroup};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{BoxedMessageStream, Message};
+use crate::executor::{ActorContext, BoxedMessageStream, Message, PkIndices};
+use crate::executor::agg_common::AggExecutorArgsExtra;
+use crate::executor::test_utils::agg_executor::{create_agg_state_storage, create_result_table};
 use crate::task::AtomicU64Ref;
 
 type AggGroup<S> = GenericAggGroup<S, OnlyOutputIfHasInput>;
@@ -592,34 +595,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::sync::atomic::AtomicU64;
-    use std::sync::Arc;
-
-    use assert_matches::assert_matches;
-    use futures::StreamExt;
-    use itertools::Itertools;
-    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::array::{Op, StreamChunk};
-    use risingwave_common::catalog::{Field, Schema, TableId};
-    use risingwave_common::hash::SerializedKey;
-    use risingwave_common::row::{AscentOwnedRow, OwnedRow, Row};
-    use risingwave_common::types::DataType;
-    use risingwave_common::util::iter_util::ZipEqDebug;
-    use risingwave_expr::expr::*;
-    use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::StateStore;
-
-    use crate::executor::agg_common::{AggExecutorArgs, GroupAggExecutorExtraArgs};
-    use crate::executor::aggregation::{AggArgs, AggCall};
-    use crate::executor::monitor::StreamingMetrics;
-    use crate::executor::test_utils::agg_executor::{
-        create_agg_state_storage, create_result_table,
-    };
-    use crate::executor::test_utils::*;
-    use crate::executor::{ActorContext, Executor, HashAggExecutor, Message, PkIndices};
-
     #[allow(clippy::too_many_arguments)]
     async fn new_boxed_hash_agg_executor<S: StateStore>(
         store: S,
@@ -679,6 +654,35 @@ mod tests {
         .unwrap()
         .boxed()
     }
+
+#[cfg(test)]
+pub mod tests {
+    use std::sync::atomic::AtomicU64;
+    use std::sync::Arc;
+
+    use assert_matches::assert_matches;
+    use futures::StreamExt;
+    use itertools::Itertools;
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use risingwave_common::array::{Op, StreamChunk};
+    use risingwave_common::catalog::{Field, Schema, TableId};
+    use risingwave_common::hash::SerializedKey;
+    use risingwave_common::row::{AscentOwnedRow, OwnedRow, Row};
+    use risingwave_common::types::DataType;
+    use risingwave_common::util::iter_util::ZipEqDebug;
+    use risingwave_expr::expr::*;
+    use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::StateStore;
+
+    use crate::executor::agg_common::{AggExecutorArgs, GroupAggExecutorExtraArgs};
+    use crate::executor::aggregation::{AggArgs, AggCall};
+    use crate::executor::monitor::StreamingMetrics;
+    use crate::executor::test_utils::agg_executor::{
+        create_agg_state_storage, create_result_table,
+    };
+    use crate::executor::test_utils::*;
+    use crate::executor::hash_agg::new_boxed_hash_agg_executor;
+    use crate::executor::{ActorContext, Executor, HashAggExecutor, Message, PkIndices};
 
     // --- Test HashAgg with in-memory StateStore ---
 
