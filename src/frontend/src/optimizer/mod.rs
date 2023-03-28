@@ -429,7 +429,7 @@ impl PlanRoot {
 
         let conflict_behavior = match append_only {
             true => ConflictBehavior::NoCheck,
-            false => ConflictBehavior::OverWrite,
+            false => ConflictBehavior::Overwrite,
         };
         StreamMaterialize::create_for_table(
             stream_plan,
