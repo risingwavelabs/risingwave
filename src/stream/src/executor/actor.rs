@@ -194,7 +194,7 @@ where
             self.context.lock_barrier_manager().collect(id, &barrier);
 
             // Then stop this actor if asked
-            if barrier.is_stop_or_update_drop_actor(id) {
+            if barrier.is_stop(id) {
                 break Ok(());
             }
 
