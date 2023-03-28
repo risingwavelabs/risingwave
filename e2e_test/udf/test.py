@@ -1,7 +1,7 @@
 import socket
 import struct
 import sys
-from typing import Iterator
+from typing import Iterator, Tuple
 sys.path.append('src/udf/python')  # noqa
 
 from risingwave.udf import udf, udtf, UdfServer
@@ -24,7 +24,7 @@ def gcd3(x: int, y: int, z: int) -> int:
     return gcd(gcd(x, y), z)
 
 
-@udf(input_types=['BINARY'], result_type='STRUCT<src_ip VARCHAR, dst_ip VARCHAR, src_port SMALLINT, dst_port SMALLINT>')
+@udf(input_types=['BYTEA'], result_type='STRUCT<src_ip VARCHAR, dst_ip VARCHAR, src_port SMALLINT, dst_port SMALLINT>')
 def extract_tcp_info(tcp_packet: bytes):
     src_addr, dst_addr = struct.unpack('!4s4s', tcp_packet[12:20])
     src_port, dst_port = struct.unpack('!HH', tcp_packet[20:24])
@@ -40,7 +40,7 @@ def series(n: int) -> Iterator[int]:
 
 
 @udtf(input_types='INT', result_types=['INT', 'VARCHAR'])
-def series2(n: int) -> Iterator[tuple[int, str]]:
+def series2(n: int) -> Iterator[Tuple[int, str]]:
     for i in range(n):
         yield i, f'#{i}'
 

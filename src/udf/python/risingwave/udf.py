@@ -237,38 +237,35 @@ def _to_data_type(t: Union[str, pa.DataType]) -> pa.DataType:
 
 
 def _string_to_data_type(type_str: str):
-    match type_str:
-        case 'BOOLEAN':
-            return pa.bool_()
-        case 'TINYINT':
-            return pa.int8()
-        case 'SMALLINT':
-            return pa.int16()
-        case 'INT' | 'INTEGER':
-            return pa.int32()
-        case 'BIGINT':
-            return pa.int64()
-        case 'FLOAT' | 'REAL':
-            return pa.float32()
-        case 'DOUBLE':
-            return pa.float64()
-        case 'DECIMAL':
-            return pa.decimal128(38)
-        case 'DATE':
-            return pa.date32()
-        case 'DATETIME':
-            return pa.timestamp('ms')
-        case 'TIME':
-            return pa.time32('ms')
-        case 'TIMESTAMP':
-            return pa.timestamp('us')
-        case 'CHAR' | 'VARCHAR':
-            return pa.string()
-        case 'BINARY' | 'VARBINARY':
-            return pa.binary()
-
-    # extract 'STRUCT<a INT, b VARCHAR, ...>'
-    if type_str.startswith('STRUCT'):
+    type_str = type_str.upper()
+    if type_str in ('BOOLEAN', 'BOOL'):
+        return pa.bool_()
+    elif type_str in ('SMALLINT', 'INT2'):
+        return pa.int16()
+    elif type_str in ('INT', 'INTEGER', 'INT4'):
+        return pa.int32()
+    elif type_str in ('BIGINT', 'INT8'):
+        return pa.int64()
+    elif type_str in ('FLOAT4', 'REAL'):
+        return pa.float32()
+    elif type_str in ('FLOAT8', 'DOUBLE PRECISION'):
+        return pa.float64()
+    elif type_str.startswith('DECIMAL') or type_str.startswith('NUMERIC'):
+        return pa.decimal128(38)
+    elif type_str in ('DATE'):
+        return pa.date32()
+    elif type_str in ('TIME', 'TIME WITHOUT TIME ZONE'):
+        return pa.time32('ms')
+    elif type_str in ('TIMESTAMP', 'TIMESTAMP WITHOUT TIME ZONE'):
+        return pa.timestamp('ms')
+    elif type_str.startswith('INTERVAL'):
+        return pa.duration('us')
+    elif type_str in ('VARCHAR'):
+        return pa.string()
+    elif type_str in ('BYTEA'):
+        return pa.binary()
+    elif type_str.startswith('STRUCT'):
+        # extract 'STRUCT<a INT, b VARCHAR, ...>'
         type_str = type_str[6:].strip('<>')
         fields = []
         for field in type_str.split(','):

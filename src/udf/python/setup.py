@@ -16,6 +16,6 @@ setup(
         "Programming Language :: Python",
         "License :: OSI Approved :: Apache Software License"
     ],
-    python_requires=">=3.10",
+    python_requires=">=3.8",
     install_requires=['pyarrow'],
 )
