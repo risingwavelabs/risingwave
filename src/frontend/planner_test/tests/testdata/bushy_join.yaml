@@ -1029,10 +1029,35 @@
         where
           l_partkey = p_partkey
       );
-  stream_error: |-
-    Not supported: streaming nested-loop join
-    HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
-    See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md
+  stream_plan: |
+    StreamMaterialize { columns: [avg_yearly], pk_columns: [], pk_conflict: "no check" }
+    └─StreamProject { exprs: [RoundDigit((sum(sum(lineitem.l_extendedprice)) / 7.0:Decimal), 16:Int32) as $expr2] }
+      └─StreamGlobalSimpleAgg { aggs: [sum(sum(lineitem.l_extendedprice)), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamStatelessLocalSimpleAgg { aggs: [sum(lineitem.l_extendedprice)] }
+            └─StreamProject { exprs: [lineitem.l_extendedprice, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, part.p_partkey] }
+              └─StreamFilter { predicate: (lineitem.l_quantity < $expr1) }
+                └─StreamHashJoin { type: Inner, predicate: part.p_partkey IS NOT DISTINCT FROM part.p_partkey, output: all }
+                  ├─StreamExchange { dist: HashShard(part.p_partkey) }
+                  | └─StreamHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: [lineitem.l_quantity, lineitem.l_extendedprice, part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey] }
+                  |   ├─StreamExchange { dist: HashShard(lineitem.l_partkey) }
+                  |   | └─StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_orderkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                  |   └─StreamExchange { dist: HashShard(part.p_partkey) }
+                  |     └─StreamProject { exprs: [part.p_partkey] }
+                  |       └─StreamFilter { predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
+                  |         └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
+                  └─StreamProject { exprs: [part.p_partkey, (0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity))) as $expr1] }
+                    └─StreamHashAgg { group_key: [part.p_partkey], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity), count] }
+                      └─StreamHashJoin { type: LeftOuter, predicate: part.p_partkey IS NOT DISTINCT FROM lineitem.l_partkey, output: [part.p_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber] }
+                        ├─StreamExchange { dist: HashShard(part.p_partkey) }
+                        | └─StreamProject { exprs: [part.p_partkey] }
+                        |   └─StreamHashAgg { group_key: [part.p_partkey], aggs: [count] }
+                        |     └─StreamProject { exprs: [part.p_partkey] }
+                        |       └─StreamFilter { predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
+                        |         └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
+                        └─StreamExchange { dist: HashShard(lineitem.l_partkey) }
+                          └─StreamFilter { predicate: IsNotNull(lineitem.l_partkey) }
+                            └─StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
   with_config_map:
     RW_STREAMING_ENABLE_BUSHY_JOIN: 'true'
 - id: tpch_q18

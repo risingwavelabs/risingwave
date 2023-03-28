@@ -659,6 +659,7 @@ impl LogicalMultiJoin {
         self.inputs.iter().map(|i| i.schema().len()).collect()
     }
 
+    /// get join graph from `self.on`, return the join graph and the new join condition.
     fn get_join_graph(&self) -> Result<(BTreeMap<usize, GraphNodeRef>, Condition)> {
         let nodes: BTreeMap<_, _> = (0..self.inputs.len())
             .map(|idx| {
@@ -689,28 +690,6 @@ impl LogicalMultiJoin {
             dst.borrow_mut().relations.push(src.clone());
         }
 
-        // isolated nodes can be joined at any where.
-        let iso_nodes = nodes
-            .iter()
-            .filter_map(|n| {
-                if n.1.borrow().relations.is_empty() {
-                    Some(*n.0)
-                } else {
-                    None
-                }
-            })
-            .collect_vec();
-
-        for n in iso_nodes {
-            for adj in 0..nodes.len() {
-                if adj != n {
-                    let n = nodes.get(&n).unwrap();
-                    let adj = nodes.get(&adj).unwrap();
-                    n.borrow_mut().relations.push(adj.clone());
-                    adj.borrow_mut().relations.push(n.clone());
-                }
-            }
-        }
         Ok((nodes, condition))
     }
 
