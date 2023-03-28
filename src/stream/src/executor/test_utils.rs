@@ -201,6 +201,14 @@ pub trait StreamExecutorTestExt: MessageStream + Unpin {
         self.next_unwrap_ready()
             .map(|msg| msg.into_barrier().expect("expect barrier"))
     }
+
+    /// Asserts that the executor is ready on a [`Watermark`] now, returning the next barrier.
+    ///
+    /// Panics if it is pending or the next message is not a [`Watermark`].
+    fn next_unwrap_ready_watermark(&mut self) -> StreamExecutorResult<Watermark> {
+        self.next_unwrap_ready()
+            .map(|msg| msg.into_watermark().expect("expect watermark"))
+    }
 }
 
 // FIXME: implement on any `impl MessageStream` if the analyzer works well.
