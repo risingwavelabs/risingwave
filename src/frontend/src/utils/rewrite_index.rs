@@ -16,7 +16,13 @@ use super::ColIndexMapping;
 use crate::expr::{ExprImpl, ExprRewriter, InputRef};
 
 pub struct IndexRewriter {
-    pub mapping: ColIndexMapping,
+    mapping: ColIndexMapping,
+}
+
+impl IndexRewriter {
+    pub fn new(mapping: ColIndexMapping) -> Self {
+        Self { mapping }
+    }
 }
 
 impl ExprRewriter for IndexRewriter {

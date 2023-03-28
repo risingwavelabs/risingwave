@@ -18,6 +18,7 @@ use risingwave_common::array::{ArrayImpl, ArrayRef, BoolArray, DataChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar};
+use risingwave_expr_macro::build_function;
 
 use crate::expr::{BoxedExpression, Expression};
 use crate::Result;
@@ -33,13 +34,13 @@ pub struct IsNotNullExpression {
 }
 
 impl IsNullExpression {
-    pub(crate) fn new(child: BoxedExpression) -> Self {
+    fn new(child: BoxedExpression) -> Self {
         Self { child }
     }
 }
 
 impl IsNotNullExpression {
-    pub(crate) fn new(child: BoxedExpression) -> Self {
+    fn new(child: BoxedExpression) -> Self {
         Self { child }
     }
 }
@@ -86,6 +87,20 @@ impl Expression for IsNotNullExpression {
         let is_not_null = result.is_some();
         Ok(Some(is_not_null.to_scalar_value()))
     }
+}
+
+#[build_function("is_null(*) -> boolean")]
+fn build_is_null_expr(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
+    Ok(Box::new(IsNullExpression::new(
+        children.into_iter().next().unwrap(),
+    )))
+}
+
+#[build_function("is_not_null(*) -> boolean")]
+fn build_is_not_null_expr(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
+    Ok(Box::new(IsNotNullExpression::new(
+        children.into_iter().next().unwrap(),
+    )))
 }
 
 #[cfg(test)]

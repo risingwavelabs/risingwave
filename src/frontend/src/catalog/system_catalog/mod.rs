@@ -131,6 +131,7 @@ macro_rules! def_sys_catalog {
                         name: col.1.to_string(),
                         field_descs: vec![],
                         type_name: "".to_string(),
+                        generated_column: None,
                     },
                     is_hidden: false,
                 })

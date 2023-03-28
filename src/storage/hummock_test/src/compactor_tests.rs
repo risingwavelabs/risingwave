@@ -22,6 +22,7 @@ pub(crate) mod tests {
     use bytes::Bytes;
     use itertools::Itertools;
     use rand::Rng;
+    use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::TableId;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_common::util::epoch::Epoch;
@@ -47,7 +48,7 @@ pub(crate) mod tests {
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
     use risingwave_storage::hummock::{
-        HummockStorage as GlobalHummockStorage, HummockStorage, MemoryLimiter,
+        CachePolicy, HummockStorage as GlobalHummockStorage, HummockStorage, MemoryLimiter,
         SstableObjectIdManager,
     };
     use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
@@ -305,6 +306,7 @@ pub(crate) mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await
@@ -324,6 +326,7 @@ pub(crate) mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await;
@@ -440,6 +443,7 @@ pub(crate) mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await
@@ -805,6 +809,7 @@ pub(crate) mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await
@@ -986,6 +991,7 @@ pub(crate) mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await
@@ -1169,6 +1175,7 @@ pub(crate) mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await

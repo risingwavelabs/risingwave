@@ -26,12 +26,12 @@ use super::agg_common::{
 };
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::agg_common::{AggExecutorArgs, AggExecutorArgsExtra};
+use crate::executor::agg_common::{AggExecutorArgs, GroupAggExecutorExtraArgs};
 use crate::executor::aggregation::AggCall;
 use crate::executor::HashAggExecutor;
 
 pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
-    args: AggExecutorArgs<S>,
+    args: AggExecutorArgs<S, GroupAggExecutorExtraArgs>,
     group_key_types: Vec<DataType>,
 }
 
@@ -111,12 +111,11 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
                 distinct_dedup_tables,
                 watermark_epoch: stream.get_watermark_epoch(),
 
-                extra: Some(AggExecutorArgsExtra {
+                extra: GroupAggExecutorExtraArgs {
                     group_key_indices,
-
-                    metrics: params.executor_stats,
                     chunk_size: params.env.config().developer.stream_chunk_size,
-                }),
+                    metrics: params.executor_stats,
+                },
             },
             group_key_types,
         }

@@ -17,8 +17,8 @@ use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::serial_array::SerialArray;
 use risingwave_common::array::{
-    ArrayBuilderImpl, BoolArray, DataChunk, DecimalArray, F32Array, F64Array, I16Array, I32Array,
-    I64Array, IntervalArray, NaiveDateArray, NaiveDateTimeArray, NaiveTimeArray, Utf8Array,
+    ArrayBuilderImpl, BoolArray, DataChunk, DateArray, DecimalArray, F32Array, F64Array, I16Array,
+    I32Array, I64Array, IntervalArray, TimeArray, TimestampArray, Utf8Array,
 };
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_common::test_utils::rand_array::seed_rand_array_ref;
@@ -50,7 +50,7 @@ impl HashKeyDispatcher for HashKeyBenchCaseBuilder {
         for null_ratio in NULL_RATIOS {
             for chunk_size in CHUNK_SIZES {
                 let id = format!(
-                    "{}, key type: {:?}, chunk size {}, null ratio {}",
+                    "{} {:?}, {} rows, Pr[null]={}",
                     self.describe,
                     calc_hash_key_kind(self.data_types()),
                     chunk_size,
@@ -151,13 +151,11 @@ fn gen_chunk(data_types: &[DataType], size: usize, seed: u64, null_ratio: f64) -
             DataType::Float32 => seed_rand_array_ref::<F32Array>(size, seed, null_ratio),
             DataType::Float64 => seed_rand_array_ref::<F64Array>(size, seed, null_ratio),
             DataType::Decimal => seed_rand_array_ref::<DecimalArray>(size, seed, null_ratio),
-            DataType::Date => seed_rand_array_ref::<NaiveDateArray>(size, seed, null_ratio),
+            DataType::Date => seed_rand_array_ref::<DateArray>(size, seed, null_ratio),
             DataType::Varchar => seed_rand_array_ref::<Utf8Array>(size, seed, null_ratio),
-            DataType::Time => seed_rand_array_ref::<NaiveTimeArray>(size, seed, null_ratio),
+            DataType::Time => seed_rand_array_ref::<TimeArray>(size, seed, null_ratio),
             DataType::Serial => seed_rand_array_ref::<SerialArray>(size, seed, null_ratio),
-            DataType::Timestamp => {
-                seed_rand_array_ref::<NaiveDateTimeArray>(size, seed, null_ratio)
-            }
+            DataType::Timestamp => seed_rand_array_ref::<TimestampArray>(size, seed, null_ratio),
             DataType::Timestamptz => seed_rand_array_ref::<I64Array>(size, seed, null_ratio),
             DataType::Interval => seed_rand_array_ref::<IntervalArray>(size, seed, null_ratio),
             DataType::Struct(_) | DataType::Bytea | DataType::Jsonb => {
@@ -176,35 +174,35 @@ fn case_builders() -> Vec<HashKeyBenchCaseBuilder> {
     vec![
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Serial],
-            describe: "single Serial".to_string(),
+            describe: "Serial".to_string(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int32],
-            describe: "single int32".to_string(),
+            describe: "int32".to_string(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int64],
-            describe: "single int64".to_string(),
+            describe: "int64".to_string(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Varchar],
-            describe: "single varchar".to_string(),
+            describe: "varchar".to_string(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int32, DataType::Int32, DataType::Int32],
-            describe: "composite fixed size".to_string(),
+            describe: "composite fixed".to_string(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int32, DataType::Int64, DataType::Int32],
-            describe: "composite fixed size2".to_string(),
+            describe: "composite fixed".to_string(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int32, DataType::Varchar],
-            describe: "composite fixed and not fixed size".to_string(),
+            describe: "mix fixed and not1".to_string(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int64, DataType::Varchar],
-            describe: "composite fixed and not fixed size".to_string(),
+            describe: "mix fixed and not2".to_string(),
         },
     ]
 }

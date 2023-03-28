@@ -238,12 +238,28 @@ impl Catalog {
             .drop_source(source_id);
     }
 
+    pub fn update_source(&mut self, proto: &PbSource) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .update_source(proto);
+    }
+
     pub fn drop_sink(&mut self, db_id: DatabaseId, schema_id: SchemaId, sink_id: SinkId) {
         self.get_database_mut(db_id)
             .unwrap()
             .get_schema_mut(schema_id)
             .unwrap()
             .drop_sink(sink_id);
+    }
+
+    pub fn update_sink(&mut self, proto: &PbSink) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .update_sink(proto);
     }
 
     pub fn drop_index(&mut self, db_id: DatabaseId, schema_id: SchemaId, index_id: IndexId) {
@@ -260,6 +276,14 @@ impl Catalog {
             .get_schema_mut(schema_id)
             .unwrap()
             .drop_view(view_id);
+    }
+
+    pub fn update_view(&mut self, proto: &PbView) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .update_view(proto);
     }
 
     pub fn drop_function(
@@ -377,6 +401,30 @@ impl Catalog {
             .get(table_id)
             .cloned()
             .ok_or_else(|| CatalogError::NotFound("table id", table_id.to_string()))
+    }
+
+    // Used by test_utils only.
+    pub fn alter_table_name_by_id(&mut self, table_id: &TableId, table_name: &str) {
+        let (mut database_id, mut schema_id) = (0, 0);
+        let mut found = false;
+        for database in self.database_by_name.values() {
+            if !found {
+                for schema in database.iter_schemas() {
+                    if schema.iter_table().any(|t| t.id() == *table_id) {
+                        found = true;
+                        database_id = database.id();
+                        schema_id = schema.id();
+                        break;
+                    }
+                }
+            }
+        }
+
+        if found {
+            let mut table = self.get_table_by_id(table_id).unwrap();
+            table.name = table_name.to_string();
+            self.update_table(&table.to_prost(schema_id, database_id));
+        }
     }
 
     #[cfg(test)]

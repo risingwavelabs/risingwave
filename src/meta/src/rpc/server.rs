@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use either::Either;
 use etcd_client::ConnectOptions;
+use futures::future::join_all;
 use risingwave_common::config::MetaBackend;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
@@ -386,6 +387,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     let (barrier_scheduler, scheduled_barriers) = BarrierScheduler::new_pair(
         hummock_manager.clone(),
+        meta_metrics.clone(),
         system_params_reader.checkpoint_frequency() as usize,
     );
 
@@ -578,20 +580,28 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     }
 
     let shutdown_all = async move {
+        let mut handles = Vec::with_capacity(sub_tasks.len());
+
         for (join_handle, shutdown_sender) in sub_tasks {
             if let Err(_err) = shutdown_sender.send(()) {
                 continue;
             }
-            // The barrier manager can't be shutdown gracefully if it's under recovering, try to
-            // abort it using timeout.
-            match tokio::time::timeout(Duration::from_secs(1), join_handle).await {
-                Ok(Err(err)) => {
-                    tracing::warn!("Failed to join shutdown: {:?}", err);
+
+            handles.push(join_handle);
+        }
+
+        // The barrier manager can't be shutdown gracefully if it's under recovering, try to
+        // abort it using timeout.
+        match tokio::time::timeout(Duration::from_secs(1), join_all(handles)).await {
+            Ok(results) => {
+                for result in results {
+                    if let Err(err) = result {
+                        tracing::warn!("Failed to join shutdown: {:?}", err);
+                    }
                 }
-                Err(e) => {
-                    tracing::warn!("Join shutdown timeout: {:?}", e);
-                }
-                _ => {}
+            }
+            Err(e) => {
+                tracing::warn!("Join shutdown timeout: {:?}", e);
             }
         }
     };

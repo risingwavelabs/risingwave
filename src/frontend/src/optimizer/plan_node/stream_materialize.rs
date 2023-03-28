@@ -171,12 +171,6 @@ impl StreamMaterialize {
 
         let (pk, stream_key) = derive_pk(input, user_order_by, &columns);
         let read_prefix_len_hint = stream_key.len();
-
-        let conflict_behavior_type = match conflict_behavior {
-            ConflictBehavior::NoCheck => 0,
-            ConflictBehavior::OverWrite => 1,
-            ConflictBehavior::IgnoreConflict => 2,
-        };
         Ok(TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
@@ -195,7 +189,7 @@ impl StreamMaterialize {
             row_id_index,
             value_indices,
             definition,
-            conflict_behavior_type,
+            conflict_behavior,
             read_prefix_len_hint,
             version,
             watermark_columns,
@@ -224,13 +218,13 @@ impl fmt::Display for StreamMaterialize {
             .map(|c| c.name_with_hidden())
             .join(", ");
 
-        let pk_column_names = table
+        let stream_key = table
             .stream_key
             .iter()
-            .map(|&pk| &table.columns[pk].column_desc.name)
+            .map(|&k| &table.columns[k].column_desc.name)
             .join(", ");
 
-        let order_descs = table
+        let pk_columns = table
             .pk
             .iter()
             .map(|o| table.columns()[o.column_index].column_desc.name.clone())
@@ -239,20 +233,11 @@ impl fmt::Display for StreamMaterialize {
         let mut builder = f.debug_struct("StreamMaterialize");
         builder
             .field("columns", &format_args!("[{}]", column_names))
-            .field("pk_columns", &format_args!("[{}]", pk_column_names));
+            .field("stream_key", &format_args!("[{}]", stream_key))
+            .field("pk_columns", &format_args!("[{}]", pk_columns));
 
-        if pk_column_names != order_descs {
-            builder.field("order_descs", &format_args!("[{}]", order_descs));
-        }
+        let pk_conflict_behavior = self.table.conflict_behavior().debug_to_string();
 
-        let pk_conflict_behavior;
-        if self.table.conflict_behavior_type() == 0 {
-            pk_conflict_behavior = "no check";
-        } else if self.table.conflict_behavior_type() == 1 {
-            pk_conflict_behavior = "overwrite";
-        } else {
-            pk_conflict_behavior = "ignore conflict";
-        }
         builder.field("pk_conflict", &pk_conflict_behavior);
 
         let watermark_columns = &self.base.watermark_columns;
@@ -299,7 +284,6 @@ impl StreamNode for StreamMaterialize {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
 
-        let handle_pk_conflict_behavior = self.table.conflict_behavior_type();
         PbNodeBody::Materialize(MaterializeNode {
             // We don't need table id for materialize node in frontend. The id will be generated on
             // meta catalog service.
@@ -311,7 +295,6 @@ impl StreamNode for StreamMaterialize {
                 .map(ColumnOrder::to_protobuf)
                 .collect(),
             table: Some(self.table().to_internal_table_prost()),
-            handle_pk_conflict_behavior,
         })
     }
 }

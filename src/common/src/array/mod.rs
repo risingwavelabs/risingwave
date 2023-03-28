@@ -33,6 +33,7 @@ mod primitive_array;
 pub mod serial_array;
 pub mod stream_chunk;
 mod stream_chunk_iter;
+pub mod stream_record;
 pub mod struct_array;
 mod utf8_array;
 mod value_reader;
@@ -45,8 +46,7 @@ use std::sync::Arc;
 pub use bool_array::{BoolArray, BoolArrayBuilder};
 pub use bytes_array::*;
 pub use chrono_array::{
-    NaiveDateArray, NaiveDateArrayBuilder, NaiveDateTimeArray, NaiveDateTimeArrayBuilder,
-    NaiveTimeArray, NaiveTimeArrayBuilder,
+    DateArray, DateArrayBuilder, TimeArray, TimeArrayBuilder, TimestampArray, TimestampArrayBuilder,
 };
 pub use column_proto_readers::*;
 pub use data_chunk::{DataChunk, DataChunkTestExt};
@@ -59,13 +59,13 @@ pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
 use risingwave_pb::data::{PbArray, PbArrayType};
+pub use serial_array::{Serial, SerialArray, SerialArrayBuilder};
 pub use stream_chunk::{Op, StreamChunk, StreamChunkTestExt};
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
 pub use vis::{Vis, VisRef};
 
 pub use self::error::ArrayError;
-use crate::array::serial_array::{Serial, SerialArray, SerialArrayBuilder};
 use crate::buffer::Bitmap;
 use crate::types::*;
 use crate::util::iter_util::ZipEqFast;
@@ -74,14 +74,14 @@ pub type ArrayResult<T> = std::result::Result<T, ArrayError>;
 pub type I64Array = PrimitiveArray<i64>;
 pub type I32Array = PrimitiveArray<i32>;
 pub type I16Array = PrimitiveArray<i16>;
-pub type F64Array = PrimitiveArray<OrderedF64>;
-pub type F32Array = PrimitiveArray<OrderedF32>;
+pub type F64Array = PrimitiveArray<F64>;
+pub type F32Array = PrimitiveArray<F32>;
 
 pub type I64ArrayBuilder = PrimitiveArrayBuilder<i64>;
 pub type I32ArrayBuilder = PrimitiveArrayBuilder<i32>;
 pub type I16ArrayBuilder = PrimitiveArrayBuilder<i16>;
-pub type F64ArrayBuilder = PrimitiveArrayBuilder<OrderedF64>;
-pub type F32ArrayBuilder = PrimitiveArrayBuilder<OrderedF32>;
+pub type F64ArrayBuilder = PrimitiveArrayBuilder<F64>;
+pub type F32ArrayBuilder = PrimitiveArrayBuilder<F32>;
 
 /// The hash source for `None` values when hashing an item.
 pub(crate) const NULL_VAL_FOR_HASH: u32 = 0xfffffff0;
@@ -344,9 +344,9 @@ macro_rules! for_all_variants {
             { Bool, bool, BoolArray, BoolArrayBuilder },
             { Decimal, decimal, DecimalArray, DecimalArrayBuilder },
             { Interval, interval, IntervalArray, IntervalArrayBuilder },
-            { NaiveDate, naivedate, NaiveDateArray, NaiveDateArrayBuilder },
-            { NaiveDateTime, naivedatetime, NaiveDateTimeArray, NaiveDateTimeArrayBuilder },
-            { NaiveTime, naivetime, NaiveTimeArray, NaiveTimeArrayBuilder },
+            { Date, date, DateArray, DateArrayBuilder },
+            { Timestamp, timestamp, TimestampArray, TimestampArrayBuilder },
+            { Time, time, TimeArray, TimeArrayBuilder },
             { Jsonb, jsonb, JsonbArray, JsonbArrayBuilder },
             { Serial, serial, SerialArray, SerialArrayBuilder },
             { Struct, struct, StructArray, StructArrayBuilder },
@@ -673,12 +673,8 @@ impl ArrayImpl {
             PbArrayType::Serial => {
                 read_numeric_array::<Serial, SerialValueReader>(array, cardinality)?
             }
-            PbArrayType::Float32 => {
-                read_numeric_array::<OrderedF32, F32ValueReader>(array, cardinality)?
-            }
-            PbArrayType::Float64 => {
-                read_numeric_array::<OrderedF64, F64ValueReader>(array, cardinality)?
-            }
+            PbArrayType::Float32 => read_numeric_array::<F32, F32ValueReader>(array, cardinality)?,
+            PbArrayType::Float64 => read_numeric_array::<F64, F64ValueReader>(array, cardinality)?,
             PbArrayType::Bool => read_bool_array(array, cardinality)?,
             PbArrayType::Utf8 => {
                 read_string_array::<Utf8ArrayBuilder, Utf8ValueReader>(array, cardinality)?
@@ -686,10 +682,10 @@ impl ArrayImpl {
             PbArrayType::Decimal => {
                 read_numeric_array::<Decimal, DecimalValueReader>(array, cardinality)?
             }
-            PbArrayType::Date => read_naive_date_array(array, cardinality)?,
-            PbArrayType::Time => read_naive_time_array(array, cardinality)?,
-            PbArrayType::Timestamp => read_naive_date_time_array(array, cardinality)?,
-            PbArrayType::Interval => read_interval_unit_array(array, cardinality)?,
+            PbArrayType::Date => read_date_array(array, cardinality)?,
+            PbArrayType::Time => read_time_array(array, cardinality)?,
+            PbArrayType::Timestamp => read_timestamp_array(array, cardinality)?,
+            PbArrayType::Interval => read_interval_array(array, cardinality)?,
             PbArrayType::Jsonb => {
                 read_string_array::<JsonbArrayBuilder, JsonbValueReader>(array, cardinality)?
             }

@@ -17,7 +17,7 @@ use std::str::{from_utf8, Chars};
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::{DataType, DateTimeField, Decimal, IntervalUnit, ScalarImpl};
+use risingwave_common::types::{DataType, DateTimeField, Decimal, Interval, ScalarImpl};
 use risingwave_sqlparser::ast::{DateTimeField as AstDateTimeField, Expr, Value};
 
 use crate::binder::Binder;
@@ -78,7 +78,7 @@ impl Binder {
         leading_field: Option<AstDateTimeField>,
     ) -> Result<Literal> {
         let interval =
-            IntervalUnit::parse_with_fields(&s, leading_field.map(Self::bind_date_time_field))?;
+            Interval::parse_with_fields(&s, leading_field.map(Self::bind_date_time_field))?;
         let datum = Some(ScalarImpl::Interval(interval));
         let literal = Literal::new(datum, DataType::Interval);
 
@@ -292,7 +292,7 @@ fn unescape_c_style(s: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::test_utils::IntervalUnitTestExt;
+    use risingwave_common::types::test_utils::IntervalTestExt;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::build_from_prost;
     use risingwave_sqlparser::ast::Value::Number;
@@ -443,27 +443,27 @@ mod tests {
         ];
         let data = vec![
             Ok(Literal::new(
-                Some(ScalarImpl::Interval(IntervalUnit::from_minutes(60))),
+                Some(ScalarImpl::Interval(Interval::from_minutes(60))),
                 DataType::Interval,
             )),
             Ok(Literal::new(
-                Some(ScalarImpl::Interval(IntervalUnit::from_minutes(60))),
+                Some(ScalarImpl::Interval(Interval::from_minutes(60))),
                 DataType::Interval,
             )),
             Ok(Literal::new(
-                Some(ScalarImpl::Interval(IntervalUnit::from_ymd(1, 0, 0))),
+                Some(ScalarImpl::Interval(Interval::from_ymd(1, 0, 0))),
                 DataType::Interval,
             )),
             Ok(Literal::new(
-                Some(ScalarImpl::Interval(IntervalUnit::from_millis(6 * 1000))),
+                Some(ScalarImpl::Interval(Interval::from_millis(6 * 1000))),
                 DataType::Interval,
             )),
             Ok(Literal::new(
-                Some(ScalarImpl::Interval(IntervalUnit::from_minutes(2))),
+                Some(ScalarImpl::Interval(Interval::from_minutes(2))),
                 DataType::Interval,
             )),
             Ok(Literal::new(
-                Some(ScalarImpl::Interval(IntervalUnit::from_month(1))),
+                Some(ScalarImpl::Interval(Interval::from_month(1))),
                 DataType::Interval,
             )),
         ];

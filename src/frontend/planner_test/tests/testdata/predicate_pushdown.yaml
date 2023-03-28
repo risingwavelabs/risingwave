@@ -261,7 +261,7 @@
     | └─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalScan { table: t2, columns: [t2.v2] }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, v1], pk_conflict: "no check" }
+    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, v1], pk_columns: [t1._row_id, t2._row_id, v1], pk_conflict: "NoCheck" }
     └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v2, output: [t1.v1, t2.v2, t1._row_id, t2._row_id] }
       ├─StreamExchange { dist: HashShard(t1.v1) }
       | └─StreamDynamicFilter { predicate: (t1.v1 > $expr1), output_watermarks: [t1.v1], output: [t1.v1, t1._row_id] }
@@ -301,7 +301,7 @@
     LogicalFilter { predicate: (t1.v1 > (Now + '00:30:00':Interval)) }
     └─LogicalScan { table: t1, columns: [t1.v1, t1.v2], predicate: (t1.v2 > 5:Int32) }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden)], pk_columns: [t1._row_id], pk_conflict: "no check", watermark_columns: [v1] }
+    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: "NoCheck", watermark_columns: [v1] }
     └─StreamDynamicFilter { predicate: (t1.v1 > $expr1), output_watermarks: [t1.v1], output: [t1.v1, t1.v2, t1._row_id] }
       ├─StreamFilter { predicate: (t1.v2 > 5:Int32) }
       | └─StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
@@ -347,7 +347,7 @@
     | └─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalScan { table: t2, columns: [t2.v2] }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, v1], pk_conflict: "no check" }
+    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, v1], pk_columns: [t1._row_id, t2._row_id, v1], pk_conflict: "NoCheck" }
     └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v2, output: [t1.v1, t2.v2, t1._row_id, t2._row_id] }
       ├─StreamExchange { dist: HashShard(t1.v1) }
       | └─StreamDynamicFilter { predicate: (t1.v1 > now), output_watermarks: [t1.v1], output: [t1.v1, t1._row_id] }
