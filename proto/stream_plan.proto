@@ -183,15 +183,8 @@ message MaterializeNode {
   repeated common.ColumnOrder column_orders = 2;
   // Used for internal table states.
   catalog.Table table = 3;
-  // Used to handle pk conflict, open it when upstream executor is source executor.
-  HandleConflictBehavior handle_pk_conflict_behavior = 4;
 }
 
-enum HandleConflictBehavior {
-  NO_CHECK_UNSPECIFIED = 0;
-  OVERWRITE = 1;
-  IGNORE = 2;
-}
 
 message AggCallState {
   // use the one column of stream's result table as the AggCall's state, used for count/sum/append-only extreme.
@@ -435,8 +428,6 @@ message ArrangeNode {
   repeated uint32 distribution_key = 2;
   // Used for internal table states.
   catalog.Table table = 3;
-  // Used to control whether doing sanity check, open it when upstream executor is source executor.
-  HandleConflictBehavior handle_pk_conflict_behavior = 4;
 }
 
 // Special node for shared state. LookupNode will join an arrangement with a stream.

@@ -26,6 +26,7 @@ pub use column::*;
 pub use internal_table::*;
 use parse_display::Display;
 pub use physical_table::*;
+use risingwave_pb::catalog::HandleConflictBehavior as PbHandleConflictBehavior;
 pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
 
 pub use crate::constants::hummock;
@@ -374,4 +375,22 @@ pub enum ConflictBehavior {
     NoCheck,
     OverWrite,
     IgnoreConflict,
+}
+
+impl ConflictBehavior {
+    pub fn from_protobuf(tb_conflict_behavior: &PbHandleConflictBehavior) -> Self {
+        match tb_conflict_behavior {
+            PbHandleConflictBehavior::NoCheckUnspecified => ConflictBehavior::NoCheck,
+            PbHandleConflictBehavior::Overwrite => ConflictBehavior::OverWrite,
+            PbHandleConflictBehavior::Ignore => ConflictBehavior::IgnoreConflict,
+        }
+    }
+
+    pub fn to_protobuf(&self) -> PbHandleConflictBehavior {
+        match self {
+            ConflictBehavior::NoCheck => PbHandleConflictBehavior::NoCheckUnspecified,
+            ConflictBehavior::OverWrite => PbHandleConflictBehavior::Overwrite,
+            ConflictBehavior::IgnoreConflict => PbHandleConflictBehavior::Ignore,
+        }
+    }
 }
