@@ -132,6 +132,7 @@ where
             Info::MetaBackupManifestId(_) => true,
             Info::SystemParams(_) => true,
             Info::Snapshot(_) | Info::HummockWriteLimits(_) => unreachable!(),
+            Info::HummockStats(_) => true,
         });
 
         self.observer_states

@@ -290,6 +290,7 @@ message SubscribeResponse {
     SystemParams system_params = 19;
     hummock.WriteLimits hummock_write_limits = 20;
     RelationGroup relation_group = 21;
+    hummock.HummockVersionStats hummock_stats = 22;
   }
 }
 

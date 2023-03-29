@@ -81,6 +81,9 @@ impl ObserverState for FrontendObserverNode {
             Info::SystemParams(p) => {
                 self.system_params_manager.try_set_params(p);
             }
+            Info::HummockStats(stats) => {
+                println!("FE Stats {stats:?}")
+            }
         }
     }
 
