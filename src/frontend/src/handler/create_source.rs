@@ -21,7 +21,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
     columns_extend, is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId, ROW_ID_COLUMN_ID,
 };
-use risingwave_common::error::ErrorCode::{self, ProtocolError};
+use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::{
@@ -172,16 +172,19 @@ async fn extract_protobuf_table_schema(
 }
 
 #[inline(always)]
-fn get_connector(with_properties: &HashMap<String, String>) -> String {
+fn get_connector(with_properties: &HashMap<String, String>) -> Option<String> {
     with_properties
         .get(UPSTREAM_SOURCE_KEY)
-        .unwrap_or(&"".to_string())
-        .to_lowercase()
+        .map(|s| s.to_lowercase())
 }
 
 #[inline(always)]
 pub(crate) fn is_kafka_source(with_properties: &HashMap<String, String>) -> bool {
-    get_connector(with_properties).eq(KAFKA_CONNECTOR)
+    let Some(connector) = get_connector(with_properties) else {
+        return false;
+    };
+
+    connector == KAFKA_CONNECTOR
 }
 
 pub(crate) async fn resolve_source_schema(
@@ -526,7 +529,8 @@ fn validate_compatibility(
     source_schema: &SourceSchema,
     props: &mut HashMap<String, String>,
 ) -> Result<()> {
-    let connector = get_connector(props);
+    let connector = get_connector(props)
+        .ok_or_else(|| RwError::from(ProtocolError(format!("missing field 'connector'"))))?;
     let row_format = source_shema_to_row_format(source_schema);
 
     let compatible_formats = CONNECTORS_COMPATIBLE_FORMATS
@@ -587,6 +591,12 @@ pub async fn handle_create_source(
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, stmt.source_name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
+
+    if handler_args.with_options.is_empty() {
+        return Err(RwError::from(InvalidInputSyntax(format!(
+            "missing WITH clause"
+        ))));
+    }
 
     let mut with_properties = handler_args
         .with_options
