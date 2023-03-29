@@ -19,6 +19,7 @@ use std::sync::Arc;
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::{Stream, StreamExt};
 use itertools::{izip, Itertools};
+use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{get_dist_key_in_pk_indices, ColumnDesc, TableId, TableOption};
@@ -693,6 +694,15 @@ where
         let new_value_bytes = self.serialize_value(new_value);
 
         self.update_inner(new_key_bytes, old_value_bytes, new_value_bytes);
+    }
+
+    /// Write a record into state table. Must have the same schema with the table.
+    pub fn write_record(&mut self, record: Record<impl Row>) {
+        match record {
+            Record::Insert { new_row } => self.insert(new_row),
+            Record::Delete { old_row } => self.delete(old_row),
+            Record::Update { old_row, new_row } => self.update(old_row, new_row),
+        }
     }
 
     /// Write batch with a `StreamChunk` which should have the same schema with the table.

@@ -21,8 +21,7 @@ use risingwave_storage::StateStore;
 
 use super::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
 use super::aggregation::{
-    agg_call_filter_res, apply_change_to_result_table, iter_table_storage, AggStateStorage,
-    AlwaysOutput, DistinctDeduplicater,
+    agg_call_filter_res, iter_table_storage, AggStateStorage, AlwaysOutput, DistinctDeduplicater,
 };
 use super::*;
 use crate::common::table::state_table::StateTable;
@@ -247,7 +246,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             let curr_outputs = vars.agg_group.get_outputs(&this.storages).await?;
             match vars.agg_group.build_change(curr_outputs) {
                 Some(change) => {
-                    apply_change_to_result_table(&change, &mut this.result_table);
+                    this.result_table.write_record(change.as_ref());
                     this.result_table.commit(epoch).await?;
                     Some(change.to_stream_chunk(&this.info.schema.data_types()))
                 }

@@ -341,44 +341,25 @@ impl ChunkBuilder {
     }
 
     /// Append a row to the builder, return a chunk if the builder is full.
-    pub fn append(&mut self, op: Op, row: impl Row) -> Option<StreamChunk> {
+    #[must_use]
+    pub fn append_row(&mut self, op: Op, row: impl Row) -> Option<StreamChunk> {
         self.inner.append_row_update(op, row)
+    }
+
+    /// Append a record to the builder, return a chunk if the builder is full.
+    pub fn append_record(&mut self, record: Record<impl Row>) -> Option<StreamChunk> {
+        match record {
+            Record::Insert { new_row } => self.append_row(Op::Insert, new_row),
+            Record::Delete { old_row } => self.append_row(Op::Delete, old_row),
+            Record::Update { old_row, new_row } => {
+                let _none = self.append_row(Op::UpdateDelete, old_row);
+                self.append_row(Op::UpdateInsert, new_row)
+            }
+        }
     }
 
     /// Take remaining rows and build a chunk.
     pub fn take(&mut self) -> Option<StreamChunk> {
         self.inner.take()
-    }
-}
-
-pub fn apply_change_to_chunk_builder(
-    change: &Record<OwnedRow>,
-    chunk_builder: &mut ChunkBuilder,
-) -> Option<StreamChunk> {
-    match change {
-        Record::Insert { new_row } => {
-            trace!("insert row: {:?}", new_row);
-            chunk_builder.append(Op::Insert, new_row)
-        }
-        Record::Delete { old_row } => {
-            trace!("delete row: {:?}", old_row);
-            chunk_builder.append(Op::Delete, old_row)
-        }
-        Record::Update { old_row, new_row } => {
-            trace!("update row: prev = {:?}, curr = {:?}", old_row, new_row);
-            chunk_builder.append(Op::UpdateDelete, old_row);
-            chunk_builder.append(Op::UpdateInsert, new_row)
-        }
-    }
-}
-
-pub fn apply_change_to_result_table<S: StateStore>(
-    change: &Record<OwnedRow>,
-    result_table: &mut StateTable<S>,
-) {
-    match change {
-        Record::Insert { new_row } => result_table.insert(new_row),
-        Record::Delete { old_row } => result_table.delete(old_row),
-        Record::Update { old_row, new_row } => result_table.update(old_row, new_row),
     }
 }

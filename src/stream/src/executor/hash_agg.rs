@@ -45,10 +45,7 @@ use super::{
 use crate::cache::{cache_may_stale, new_with_hasher, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
-use crate::executor::aggregation::{
-    apply_change_to_chunk_builder, apply_change_to_result_table, generate_agg_schema, AggCall,
-    AggGroup as GenericAggGroup,
-};
+use crate::executor::aggregation::{generate_agg_schema, AggCall, AggGroup as GenericAggGroup};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{BoxedMessageStream, Message};
@@ -166,9 +163,9 @@ impl<S: StateStore> Emitter for EmitOnUpdates<S> {
     ) -> impl Stream<Item = StreamExecutorResult<StreamChunk>> + 'a {
         async_stream::try_stream! {
             for change in changes {
-                // For emit-on-updates, write change to result table and directly yield the change.
-                apply_change_to_result_table(&change, result_table);
-                if let Some(chunk) = apply_change_to_chunk_builder(&change, chunk_builder) {
+                // For EOU, write change to result table and directly yield the change.
+                result_table.write_record(change.as_ref());
+                if let Some(chunk) = chunk_builder.append_record(change) {
                     yield chunk;
                 }
             }
@@ -208,7 +205,7 @@ impl<S: StateStore> Emitter for EmitOnWindowClose<S> {
         changes: impl IntoIterator<Item = Record<OwnedRow>> + 'a,
     ) -> impl Stream<Item = StreamExecutorResult<StreamChunk>> + 'a {
         for change in changes {
-            // For emit-on-window-close, write change to EOWC buffer.
+            // For EOWC, write change to the sort buffer.
             self.buffer.apply_change(&change, result_table);
         }
         stream::empty()
@@ -225,9 +222,8 @@ impl<S: StateStore> Emitter for EmitOnWindowClose<S> {
                 #[futures_async_stream::for_await]
                 for row in self.buffer.consume(watermark.clone(), result_table) {
                     let row = row?;
-                    if let Some(chunk) = apply_change_to_chunk_builder(
-                        &Record::Insert { new_row: row },
-                        chunk_builder,
+                    if let Some(chunk) = chunk_builder.append_record(
+                        Record::Insert { new_row: row },
                     ) {
                         yield chunk;
                     }
