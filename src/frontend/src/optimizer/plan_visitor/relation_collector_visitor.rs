@@ -30,9 +30,9 @@ impl RelationCollectorVisitor {
         Self { relations }
     }
 
-    /// `collect_with` will collect all the relations in the plan and the returned result will
-    /// contain the established ones, which are collected during the binding phase. Note that during
-    /// visiting, the collected relations might be duplicated with the established ones.
+    /// `collect_with` will collect all the relations in the plan with some default ones, which are
+    /// collected during the binding phase. Note that during visit the collected relations might be
+    /// duplicated with the default ones.
     pub fn collect_with(relations: HashSet<TableId>, plan: PlanRef) -> HashSet<TableId> {
         let mut visitor = Self::new_with(relations);
         visitor.visit(plan);
@@ -49,7 +49,7 @@ impl PlanVisitor<()> for RelationCollectorVisitor {
         }
     }
 
-    fn visit_logical_scan(&mut self, plan: &LogicalScan) -> () {
+    fn visit_logical_scan(&mut self, plan: &LogicalScan) {
         if !plan.is_sys_table() {
             self.relations.insert(plan.table_desc().table_id);
         }
@@ -67,7 +67,7 @@ impl PlanVisitor<()> for RelationCollectorVisitor {
         }
     }
 
-    fn visit_stream_source(&mut self, plan: &StreamSource) -> () {
+    fn visit_stream_source(&mut self, plan: &StreamSource) {
         if let Some(catalog) = plan.logical().source_catalog() {
             self.relations.insert(catalog.id.into());
         }
