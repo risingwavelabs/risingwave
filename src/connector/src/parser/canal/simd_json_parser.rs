@@ -18,11 +18,9 @@ use anyhow::anyhow;
 use futures_async_stream::try_stream;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
+use risingwave_common::types::timestamptz::str_with_time_zone_to_timestamptz;
+use risingwave_common::types::{DataType, Date, Datum, Decimal, ScalarImpl, Time, Timestamp};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::vector_op::cast::{
-    str_to_date, str_to_timestamp, str_with_time_zone_to_timestamptz,
-};
 use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 
 use crate::parser::canal::operators::*;
@@ -219,12 +217,18 @@ fn cannal_do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> R
             .map_err(|_| anyhow!("parse decimal from string err {}", v))?
             .into(),
         DataType::Varchar => ensure_str!(v, "varchar").to_string().into(),
-        DataType::Date => str_to_date(ensure_str!(v, "date"))?.into(),
-        DataType::Time => str_to_date(ensure_str!(v, "time"))?.into(),
-        DataType::Timestamp => str_to_timestamp(ensure_str!(v, "string"))?.into(),
-        DataType::Timestamptz => {
-            str_with_time_zone_to_timestamptz(ensure_str!(v, "string"))?.into()
-        }
+        DataType::Date => Date::from_str(ensure_str!(v, "date"))
+            .map_err(|err| RwError::from(InternalError(err.to_string())))?
+            .into(),
+        DataType::Time => Time::from_str(ensure_str!(v, "time"))
+            .map_err(|err| RwError::from(InternalError(err.to_string())))?
+            .into(),
+        DataType::Timestamp => Timestamp::from_str(ensure_str!(v, "string"))
+            .map_err(|err| RwError::from(InternalError(err.to_string())))?
+            .into(),
+        DataType::Timestamptz => str_with_time_zone_to_timestamptz(ensure_str!(v, "string"))
+            .map_err(|err| RwError::from(InternalError(err.to_string())))?
+            .into(),
         _ => {
             return Err(RwError::from(InternalError(format!(
                 "cannal data source not support type {}",
@@ -243,7 +247,6 @@ mod tests {
     use risingwave_common::array::Op;
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, Decimal, ScalarImpl, ToOwnedDatum};
-    use risingwave_expr::vector_op::cast::str_to_timestamp;
 
     use super::*;
     use crate::parser::SourceStreamChunkBuilder;
@@ -292,7 +295,7 @@ mod tests {
             assert_eq!(
                 row.datum_at(4).to_owned_datum(),
                 (Some(ScalarImpl::Timestamp(
-                    str_to_timestamp("2018-01-01 00:00:01").unwrap()
+                    "2018-01-01 00:00:01".parse().unwrap()
                 )))
             );
             assert_eq!(
@@ -320,7 +323,7 @@ mod tests {
             assert_eq!(
                 row.datum_at(4).to_owned_datum(),
                 (Some(ScalarImpl::Timestamp(
-                    str_to_timestamp("2018-01-01 00:00:01").unwrap()
+                    "2018-01-01 00:00:01".parse().unwrap()
                 )))
             );
             assert_eq!(

@@ -39,16 +39,18 @@ use std::str::{FromStr, Utf8Error};
 pub use native_type::*;
 pub use scalar_impl::*;
 pub use successor::*;
+pub mod bytea;
 pub mod chrono_wrapper;
 pub mod decimal;
 pub mod interval;
+mod ordered_float;
 mod postgres_type;
 pub mod struct_type;
+pub mod timestamptz;
 pub mod to_binary;
 pub mod to_text;
 
 pub mod num256;
-mod ordered_float;
 
 use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
 pub use chrono_wrapper::{Date, Time, Timestamp, UNIX_EPOCH_DAYS};
@@ -61,7 +63,9 @@ use paste::paste;
 use postgres_types::{IsNull, ToSql, Type};
 use strum_macros::EnumDiscriminants;
 
+use self::bytea::str_to_bytea;
 use self::struct_type::StructType;
+use self::timestamptz::str_with_time_zone_to_timestamptz;
 use self::to_binary::ToBinary;
 use self::to_text::ToText;
 use crate::array::serial_array::Serial;
@@ -429,6 +433,133 @@ impl DataType {
             )),
             DataType::List { .. } => ScalarImpl::List(ListValue::new(vec![])),
         }
+    }
+
+    fn cstr_to_str(b: &Bytes) -> Result<&str, Utf8Error> {
+        let without_null = if b.last() == Some(&0) {
+            &b[..b.len() - 1]
+        } else {
+            &b[..]
+        };
+        std::str::from_utf8(without_null)
+    }
+
+    pub fn text_bytes_instance(&self, b: &Bytes) -> Result<ScalarImpl, String> {
+        let text = Self::cstr_to_str(b).map_err(|err| err.to_string())?;
+        self.text_instance(text)
+    }
+
+    pub fn text_instance(&self, text: &str) -> Result<ScalarImpl, String> {
+        match self {
+            DataType::Boolean => Self::text_to_bool(text).map(Scalar::to_scalar_value),
+            DataType::Int16 => Self::text_to_i16(text).map(Scalar::to_scalar_value),
+            DataType::Int32 => Self::text_to_i32(text).map(Scalar::to_scalar_value),
+            DataType::Int64 => Self::text_to_i64(text).map(Scalar::to_scalar_value),
+            DataType::Float32 => Self::text_to_f32(text).map(Scalar::to_scalar_value),
+            DataType::Float64 => Self::text_to_f64(text).map(Scalar::to_scalar_value),
+            DataType::Decimal => Self::text_to_decimal(text).map(Scalar::to_scalar_value),
+            DataType::Date => Self::text_to_date(text).map(Scalar::to_scalar_value),
+            DataType::Varchar => Self::text_to_varchar(text).map(Scalar::to_scalar_value),
+            DataType::Time => Self::text_to_time(text).map(Scalar::to_scalar_value),
+            DataType::Timestamp => Self::text_to_timestamp(text).map(Scalar::to_scalar_value),
+            DataType::Timestamptz => Self::text_to_timestamptz(text).map(Scalar::to_scalar_value),
+            DataType::Interval => Self::text_to_interval(text).map(Scalar::to_scalar_value),
+            DataType::List { datatype } => {
+                Self::text_to_list(text, datatype).map(Scalar::to_scalar_value)
+            }
+            DataType::Bytea => Self::text_to_bytea(text).map(Scalar::to_scalar_value),
+            DataType::Jsonb => Self::text_to_jsonb(text).map(Scalar::to_scalar_value),
+            DataType::Serial => Self::text_to_serial(text).map(Scalar::to_scalar_value),
+            DataType::Struct(struct_type) => {
+                Self::text_to_struct(text, struct_type).map(Scalar::to_scalar_value)
+            }
+            DataType::Int256 => todo!(),
+        }
+    }
+
+    fn text_to_bool(text: &str) -> Result<bool, String> {
+        text.parse().map_err(|err| (format!("{}", err)))
+    }
+
+    fn text_to_i16(text: &str) -> Result<i16, String> {
+        text.parse().map_err(|err| (format!("{}", err)))
+    }
+
+    fn text_to_i32(text: &str) -> Result<i32, String> {
+        text.parse().map_err(|err| (format!("{}", err)))
+    }
+
+    fn text_to_i64(text: &str) -> Result<i64, String> {
+        text.parse().map_err(|err| (format!("{}", err)))
+    }
+
+    fn text_to_serial(text: &str) -> Result<Serial, String> {
+        text.parse()
+    }
+
+    fn text_to_f32(text: &str) -> Result<F32, String> {
+        text.parse().map_err(|err| (format!("{}", err)))
+    }
+
+    fn text_to_f64(text: &str) -> Result<F64, String> {
+        text.parse().map_err(|err| (format!("{}", err)))
+    }
+
+    fn text_to_decimal(text: &str) -> Result<Decimal, String> {
+        text.parse().map_err(|err| (format!("{}", err)))
+    }
+
+    fn text_to_date(text: &str) -> Result<Date, String> {
+        text.parse().map_err(|err| (format!("{}", err)))
+    }
+
+    fn text_to_time(text: &str) -> Result<Time, String> {
+        text.parse().map_err(|err| (format!("{}", err)))
+    }
+
+    fn text_to_timestamp(text: &str) -> Result<Timestamp, String> {
+        text.parse().map_err(|err| (format!("{}", err)))
+    }
+
+    fn text_to_interval(text: &str) -> Result<Interval, String> {
+        text.parse().map_err(|err| (format!("{}", err)))
+    }
+
+    fn text_to_jsonb(text: &str) -> Result<JsonbVal, String> {
+        text.parse().map_err(|err| (format!("{}", err)))
+    }
+
+    fn text_to_bytea(text: &str) -> Result<Box<[u8]>, String> {
+        str_to_bytea(text).map_err(|err| (format!("{}", err)))
+    }
+
+    fn text_to_timestamptz(text: &str) -> Result<i64, String> {
+        str_with_time_zone_to_timestamptz(text).map_err(|err| (format!("{}", err)))
+    }
+
+    fn text_to_varchar(text: &str) -> Result<Box<str>, String> {
+        Ok(text.to_string().into())
+    }
+
+    fn text_to_list(text: &str, elem_type: &DataType) -> Result<ListValue, String> {
+        ListValue::str_to_list(text, elem_type, |target_type, str| {
+            target_type.text_instance(str).map(Some)
+        })
+        .map_err(|err| format!("Cannot parse list: {}", err))
+    }
+
+    fn text_to_struct(text: &str, struct_type: &StructType) -> Result<StructValue, String> {
+        if !(text.starts_with('{') && text.ends_with('}')) {
+            return Err(format!("Invalid param string: {text}",));
+        }
+        let mut fields = Vec::with_capacity(struct_type.fields.len());
+        for (s, ty) in text[1..text.len() - 1]
+            .split(',')
+            .zip_eq_debug(&struct_type.fields)
+        {
+            fields.push(Some(ty.text_instance(s.trim())?));
+        }
+        Ok(StructValue::new(fields))
     }
 }
 
@@ -847,120 +978,6 @@ impl ScalarImpl {
         };
         Ok(res)
     }
-
-    pub fn cstr_to_str(b: &[u8]) -> Result<&str, Utf8Error> {
-        let without_null = if b.last() == Some(&0) {
-            &b[..b.len() - 1]
-        } else {
-            b
-        };
-        std::str::from_utf8(without_null)
-    }
-
-    pub fn from_text(bytes: &[u8], data_type: &DataType) -> RwResult<Self> {
-        let str = Self::cstr_to_str(bytes).map_err(|_| {
-            ErrorCode::InvalidInputSyntax(format!("Invalid param string: {:?}", bytes))
-        })?;
-        let res = match data_type {
-            DataType::Varchar => Self::Utf8(str.to_string().into()),
-            DataType::Boolean => Self::Bool(bool::from_str(str).map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-            })?),
-            DataType::Int16 => Self::Int16(i16::from_str(str).map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-            })?),
-            DataType::Int32 => Self::Int32(i32::from_str(str).map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-            })?),
-            DataType::Int64 => Self::Int64(i64::from_str(str).map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-            })?),
-            DataType::Int256 => Self::Int256(Int256::from_str(str).map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-            })?),
-            DataType::Serial => Self::Serial(Serial::from(i64::from_str(str).map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-            })?)),
-            DataType::Float32 => Self::Float32(
-                f32::from_str(str)
-                    .map_err(|_| {
-                        ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-                    })?
-                    .into(),
-            ),
-            DataType::Float64 => Self::Float64(
-                f64::from_str(str)
-                    .map_err(|_| {
-                        ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-                    })?
-                    .into(),
-            ),
-            DataType::Decimal => Self::Decimal(
-                rust_decimal::Decimal::from_str(str)
-                    .map_err(|_| {
-                        ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-                    })?
-                    .into(),
-            ),
-            DataType::Date => Self::Date(Date::from_str(str).map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-            })?),
-            DataType::Time => Self::Time(Time::from_str(str).map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-            })?),
-            DataType::Timestamp => Self::Timestamp(Timestamp::from_str(str).map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-            })?),
-            DataType::Timestamptz => Self::Int64(
-                chrono::DateTime::<chrono::Utc>::from_str(str)
-                    .map_err(|_| {
-                        ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-                    })?
-                    .timestamp_micros(),
-            ),
-            DataType::Interval => Self::Interval(Interval::from_str(str).map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-            })?),
-            DataType::Jsonb => Self::Jsonb(JsonbVal::from_str(str).map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-            })?),
-            DataType::List { datatype } => {
-                // TODO: support nested list
-                if !(str.starts_with('{') && str.ends_with('}')) {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "Invalid param string: {str}",
-                    ))
-                    .into());
-                }
-                let mut values = vec![];
-                for s in str[1..str.len() - 1].split(',') {
-                    values.push(Some(Self::from_text(s.trim().as_bytes(), datatype)?));
-                }
-                Self::List(ListValue::new(values))
-            }
-            DataType::Struct(s) => {
-                if !(str.starts_with('{') && str.ends_with('}')) {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "Invalid param string: {str}",
-                    ))
-                    .into());
-                }
-                let mut fields = Vec::with_capacity(s.fields.len());
-                for (s, ty) in str[1..str.len() - 1].split(',').zip_eq_debug(&s.fields) {
-                    fields.push(Some(Self::from_text(s.trim().as_bytes(), ty)?));
-                }
-                ScalarImpl::Struct(StructValue::new(fields))
-            }
-            DataType::Bytea => {
-                return Err(ErrorCode::NotSupported(
-                    format!("param type: {}", data_type),
-                    "".to_string(),
-                )
-                .into())
-            }
-        };
-        Ok(res)
-    }
 }
 
 macro_rules! impl_scalar_impl_ref_conversion {
@@ -1033,12 +1050,12 @@ pub fn hash_datum(datum: impl ToDatumRef, state: &mut impl std::hash::Hasher) {
 impl ScalarRefImpl<'_> {
     /// Encode the scalar to postgresql binary format.
     /// The encoder implements encoding using <https://docs.rs/postgres-types/0.2.3/postgres_types/trait.ToSql.html>
-    pub fn binary_format(&self, data_type: &DataType) -> RwResult<Bytes> {
+    pub fn encode_to_binary(&self, data_type: &DataType) -> RwResult<Bytes> {
         self.to_binary_with_type(data_type).transpose().unwrap()
     }
 
-    pub fn text_format(&self, data_type: &DataType) -> String {
-        self.to_text_with_type(data_type)
+    pub fn encode_to_text(&self, data_type: &DataType) -> Bytes {
+        self.to_text_with_type(data_type).into()
     }
 
     /// Serialize the scalar.

@@ -121,10 +121,10 @@ fn pg_value_format(
             if *data_type == DataType::Timestamptz {
                 Ok(timestamptz_to_string_with_session_data(d, session_data))
             } else {
-                Ok(d.text_format(data_type).into())
+                Ok(d.encode_to_text(data_type))
             }
         }
-        Format::Binary => d.binary_format(data_type),
+        Format::Binary => d.encode_to_binary(data_type),
     }
 }
 

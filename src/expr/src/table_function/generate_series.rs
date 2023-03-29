@@ -179,12 +179,13 @@ pub fn new_generate_series<const STOP_INCLUSIVE: bool>(
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use risingwave_common::types::test_utils::IntervalTestExt;
     use risingwave_common::types::{DataType, Interval, ScalarImpl, Timestamp};
 
     use super::*;
     use crate::expr::{Expression, LiteralExpression};
-    use crate::vector_op::cast::str_to_timestamp;
 
     const CHUNK_SIZE: usize = 1024;
 
@@ -219,8 +220,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_time_series() {
-        let start_time = str_to_timestamp("2008-03-01 00:00:00").unwrap();
-        let stop_time = str_to_timestamp("2008-03-09 00:00:00").unwrap();
+        let start_time = Timestamp::from_str("2008-03-01 00:00:00").unwrap();
+        let stop_time = Timestamp::from_str("2008-03-09 00:00:00").unwrap();
         let one_minute_step = Interval::from_minutes(1);
         let one_hour_step = Interval::from_minutes(60);
         let one_day_step = Interval::from_days(1);
@@ -286,8 +287,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_time_range() {
-        let start_time = str_to_timestamp("2008-03-01 00:00:00").unwrap();
-        let stop_time = str_to_timestamp("2008-03-09 00:00:00").unwrap();
+        let start_time = Timestamp::from_str("2008-03-01 00:00:00").unwrap();
+        let stop_time = Timestamp::from_str("2008-03-09 00:00:00").unwrap();
         let one_minute_step = Interval::from_minutes(1);
         let one_hour_step = Interval::from_minutes(60);
         let one_day_step = Interval::from_days(1);

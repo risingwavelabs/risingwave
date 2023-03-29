@@ -14,9 +14,7 @@
 
 use super::Row;
 use crate::estimate_size::EstimateSize;
-use crate::types::{
-    DataType, Date, Datum, DatumRef, Decimal, Interval, ScalarImpl, Time, Timestamp, ToDatumRef,
-};
+use crate::types::{DataType, Datum, DatumRef, ScalarImpl, ToDatumRef};
 use crate::util::iter_util::ZipEqDebug;
 use crate::util::value_encoding;
 use crate::util::value_encoding::deserialize_datum;
@@ -67,21 +65,7 @@ impl OwnedRow {
             .iter()
             .zip_eq_debug(s.as_ref().split_ascii_whitespace())
             .map(|(ty, x)| {
-                let scalar: ScalarImpl = match ty {
-                    DataType::Int16 => x.parse::<i16>().unwrap().into(),
-                    DataType::Int32 => x.parse::<i32>().unwrap().into(),
-                    DataType::Int64 => x.parse::<i64>().unwrap().into(),
-                    DataType::Float32 => x.parse::<f32>().unwrap().into(),
-                    DataType::Float64 => x.parse::<f64>().unwrap().into(),
-                    DataType::Varchar => x.to_string().into(),
-                    DataType::Boolean => x.parse::<bool>().unwrap().into(),
-                    DataType::Date => x.parse::<Date>().unwrap().into(),
-                    DataType::Time => x.parse::<Time>().unwrap().into(),
-                    DataType::Timestamp => x.parse::<Timestamp>().unwrap().into(),
-                    DataType::Interval => x.parse::<Interval>().unwrap().into(),
-                    DataType::Decimal => x.parse::<Decimal>().unwrap().into(),
-                    _ => todo!(),
-                };
+                let scalar: ScalarImpl = ty.text_instance(x).unwrap();
                 Some(scalar)
             })
             .collect();

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::hash::Hash;
+use std::str::FromStr;
 
 use postgres_types::{ToSql as _, Type};
 use serde::{Serialize, Serializer};
@@ -30,6 +31,17 @@ pub type SerialArrayBuilder = PrimitiveArrayBuilder<Serial>;
 impl From<i64> for Serial {
     fn from(value: i64) -> Self {
         Self(value)
+    }
+}
+
+impl FromStr for Serial {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(
+            s.parse()
+                .map_err(|_| format!("Fail to parse {} as Serial.", s))?,
+        ))
     }
 }
 

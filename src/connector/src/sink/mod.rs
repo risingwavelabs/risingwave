@@ -362,9 +362,8 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
 
 #[cfg(test)]
 mod tests {
-
+    use risingwave_common::types::timestamptz::str_with_time_zone_to_timestamptz;
     use risingwave_common::types::{Interval, ScalarImpl, Time, Timestamp};
-    use risingwave_expr::vector_op::cast::str_with_time_zone_to_timestamptz;
 
     use super::*;
     #[test]

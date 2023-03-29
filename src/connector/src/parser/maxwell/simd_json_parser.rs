@@ -129,7 +129,6 @@ mod tests {
     use risingwave_common::array::Op;
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
-    use risingwave_expr::vector_op::cast::str_to_timestamp;
 
     use super::*;
     use crate::parser::{SourceColumnDesc, SourceStreamChunkBuilder};
@@ -175,7 +174,7 @@ mod tests {
             assert_eq!(
                 row.datum_at(3).to_owned_datum(),
                 (Some(ScalarImpl::Timestamp(
-                    str_to_timestamp("2017-12-31 16:00:01").unwrap()
+                    "2017-12-31 16:00:01".parse().unwrap()
                 )))
             )
         }
@@ -195,7 +194,7 @@ mod tests {
             assert_eq!(
                 row.datum_at(3).to_owned_datum(),
                 (Some(ScalarImpl::Timestamp(
-                    str_to_timestamp("1999-12-31 16:00:01").unwrap()
+                    "1999-12-31 16:00:01".parse().unwrap()
                 )))
             )
         }
@@ -215,7 +214,7 @@ mod tests {
             assert_eq!(
                 row.datum_at(3).to_owned_datum(),
                 (Some(ScalarImpl::Timestamp(
-                    str_to_timestamp("1999-12-31 16:00:01").unwrap()
+                    "1999-12-31 16:00:01".parse().unwrap()
                 )))
             )
         }
@@ -235,7 +234,7 @@ mod tests {
             assert_eq!(
                 row.datum_at(3).to_owned_datum(),
                 (Some(ScalarImpl::Timestamp(
-                    str_to_timestamp("1999-12-31 16:00:01").unwrap()
+                    "1999-12-31 16:00:01".parse().unwrap()
                 )))
             )
         }

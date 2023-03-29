@@ -13,14 +13,15 @@
 // limitations under the License.
 
 use std::fmt::Write;
+use std::str::FromStr;
 
 use chrono::{TimeZone, Utc};
 use chrono_tz::Tz;
 use num_traits::ToPrimitive;
+use risingwave_common::types::timestamptz::str_with_time_zone_to_timestamptz;
 use risingwave_common::types::{Timestamp, F64};
 use risingwave_expr_macro::function;
 
-use crate::vector_op::cast::{str_to_timestamp, str_with_time_zone_to_timestamptz};
 use crate::{ExprError, Result};
 
 /// Just a wrapper to reuse the `map_err` logic.
@@ -85,9 +86,13 @@ pub fn timestamptz_to_string(elem: i64, time_zone: &str, writer: &mut dyn Write)
 // Tries to interpret the string with a timezone, and if failing, tries to interpret the string as a
 // timestamp and then adjusts it with the session timezone.
 #[function("cast_with_time_zone(varchar, varchar) -> timestamptz")]
-pub fn str_to_timestamptz(elem: &str, time_zone: &str) -> Result<i64> {
-    str_with_time_zone_to_timestamptz(elem)
-        .or_else(|_| timestamp_at_time_zone(str_to_timestamp(elem)?, time_zone))
+pub fn varchar_to_timestamptz(elem: &str, time_zone: &str) -> Result<i64> {
+    str_with_time_zone_to_timestamptz(elem).or_else(|_| {
+        timestamp_at_time_zone(
+            Timestamp::from_str(elem).map_err(ExprError::Parse)?,
+            time_zone,
+        )
+    })
 }
 
 #[function("at_time_zone(timestamptz, varchar) -> timestamp")]
@@ -104,11 +109,11 @@ pub fn timestamptz_at_time_zone(input: i64, time_zone: &str) -> Result<Timestamp
 #[cfg(test)]
 mod tests {
     use std::assert_matches::assert_matches;
+    use std::str::FromStr;
 
     use risingwave_common::util::iter_util::ZipEqFast;
 
     use super::*;
-    use crate::vector_op::cast::str_to_timestamp;
 
     #[test]
     fn test_time_zone_conversion() {
@@ -133,12 +138,12 @@ mod tests {
             ["2022-11-06 10:00:00Z", "2022-11-06 02:00:00", "2022-11-06 18:00:00", "2022-11-06 11:00:00"],
         ];
         for case in test_cases {
-            let usecs = str_to_timestamptz(case[0], "UTC").unwrap();
+            let usecs = varchar_to_timestamptz(case[0], "UTC").unwrap();
             case.iter()
                 .skip(1)
                 .zip_eq_fast(zones)
                 .for_each(|(local, zone)| {
-                    let local = str_to_timestamp(local).unwrap();
+                    let local = Timestamp::from_str(local).unwrap();
 
                     let actual = timestamptz_at_time_zone(usecs, zone).unwrap();
                     assert_eq!(local, actual);
@@ -157,7 +162,7 @@ mod tests {
             ("2022-03-27 02:00:00", "europe/zurich"),
             ("2022-03-27 02:59:00", "europe/zurich"),
         ] {
-            let local = str_to_timestamp(local).unwrap();
+            let local = Timestamp::from_str(local).unwrap();
 
             let actual = timestamp_at_time_zone(local, zone);
             assert_matches!(actual, Err(_));
@@ -178,8 +183,8 @@ mod tests {
             ("2022-11-06 09:59:00Z", "2022-11-06 01:59:00", "US/Pacific", true),
         ];
         for (instant, local, zone, preferred) in test_cases {
-            let usecs = str_to_timestamptz(instant, "UTC").unwrap();
-            let local = str_to_timestamp(local).unwrap();
+            let usecs = varchar_to_timestamptz(instant, "UTC").unwrap();
+            let local = Timestamp::from_str(local).unwrap();
 
             let actual = timestamptz_at_time_zone(usecs, zone).unwrap();
             assert_eq!(local, actual);
@@ -194,7 +199,7 @@ mod tests {
     #[test]
     fn test_timestamptz_to_and_from_string() {
         let str1 = "0001-11-15 15:35:40.999999+08:00";
-        let timestamptz1 = str_to_timestamptz(str1, "UTC").unwrap();
+        let timestamptz1 = varchar_to_timestamptz(str1, "UTC").unwrap();
         assert_eq!(timestamptz1, -62108094259000001);
 
         let mut writer = String::new();
@@ -206,7 +211,7 @@ mod tests {
         assert_eq!(writer, "0001-11-15 07:35:40.999999+00:00");
 
         let str2 = "1969-12-31 23:59:59.999999+00:00";
-        let timestamptz2 = str_to_timestamptz(str2, "UTC").unwrap();
+        let timestamptz2 = varchar_to_timestamptz(str2, "UTC").unwrap();
         assert_eq!(timestamptz2, -1);
 
         let mut writer = String::new();
@@ -215,10 +220,10 @@ mod tests {
 
         // Parse a timestamptz from a str without timezone
         let str3 = "2022-01-01 00:00:00+08:00";
-        let timestamptz3 = str_to_timestamptz(str3, "UTC").unwrap();
+        let timestamptz3 = varchar_to_timestamptz(str3, "UTC").unwrap();
 
         let timestamp_from_no_tz =
-            str_to_timestamptz("2022-01-01 00:00:00", "Asia/Singapore").unwrap();
+            varchar_to_timestamptz("2022-01-01 00:00:00", "Asia/Singapore").unwrap();
         assert_eq!(timestamptz3, timestamp_from_no_tz);
     }
 }

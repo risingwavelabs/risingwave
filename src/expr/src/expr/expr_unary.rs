@@ -22,13 +22,13 @@ mod tests {
     use risingwave_pb::expr::expr_node::PbType;
 
     use super::super::*;
-    use crate::vector_op::cast::{str_parse, try_cast};
+    use crate::vector_op::cast::{try_cast, varchar_parse};
 
     #[tokio::test]
     async fn test_unary() {
         test_unary_bool::<BoolArray, _>(|x| !x, PbType::Not).await;
         test_unary_date::<TimestampArray, _>(|x| try_cast(x).unwrap(), PbType::Cast).await;
-        test_str_to_int16::<I16Array, _>(|x| str_parse(x).unwrap()).await;
+        test_str_to_int16::<I16Array, _>(|x| varchar_parse(x).unwrap()).await;
     }
 
     #[tokio::test]

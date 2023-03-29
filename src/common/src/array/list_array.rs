@@ -375,6 +375,73 @@ impl ListValue {
         }
         Ok(Self::new(values))
     }
+
+    // TODO(nanderstabel): optimize for multidimensional List. Depth can be given as a parameter to
+    // this function.
+    /// Takes a string input in the form of a comma-separated list enclosed in braces, and returns a
+    /// vector of strings containing the list items.
+    ///
+    /// # Examples
+    /// - "{1, 2, 3}" => ["1", "2", "3"]
+    /// - "{1, {2, 3}}" => ["1", "{2, 3}"]
+    fn unnest(input: &str) -> Result<Vec<String>, String> {
+        // Trim input
+        let trimmed = input.trim();
+
+        let mut chars = trimmed.chars();
+        if chars.next() != Some('{') || chars.next_back() != Some('}') {
+            return Err("Input must be braced".into());
+        }
+
+        let mut items = Vec::new();
+        while let Some(c) = chars.next() {
+            match c {
+                '{' => {
+                    let mut string = String::from(c);
+                    let mut depth = 1;
+                    while depth != 0 {
+                        let c = match chars.next() {
+                            Some(c) => {
+                                if c == '{' {
+                                    depth += 1;
+                                } else if c == '}' {
+                                    depth -= 1;
+                                }
+                                c
+                            }
+                            None => return Err("Missing closing brace '}}' character".into()),
+                        };
+                        string.push(c);
+                    }
+                    items.push(string);
+                }
+                '}' => return Err("Unexpected closing brace '}}' character".into()),
+                ',' => {}
+                c if c.is_whitespace() => {}
+                c => items.push(format!(
+                    "{}{}",
+                    c,
+                    chars.take_while_ref(|&c| c != ',').collect::<String>()
+                )),
+            }
+        }
+        Ok(items)
+    }
+
+    /// Used by `text_to_list`,`varchar_to_list` to parse a `ListValue` from string.
+    #[inline(always)]
+    pub fn str_to_list(
+        input: &str,
+        target_elem_type: &DataType,
+        parse: for<'a> fn(&'a DataType, &'a str) -> Result<Datum, String>,
+    ) -> Result<ListValue, String> {
+        let mut values = vec![];
+        for item in Self::unnest(input)? {
+            let v = parse(target_elem_type, &item)?;
+            values.push(v);
+        }
+        Ok(ListValue::new(values))
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -575,6 +642,7 @@ mod tests {
     use more_asserts::{assert_gt, assert_lt};
 
     use super::*;
+    use crate::types::ScalarImpl;
     use crate::{array, empty_array, try_match_expand};
 
     #[test]
@@ -1017,5 +1085,106 @@ mod tests {
         // Get 2nd value from ListRef
         let scalar = list_ref.value_at(2).unwrap();
         assert_eq!(scalar, Some(types::ScalarRefImpl::Int32(5)));
+    }
+
+    #[test]
+    fn test_unnest() {
+        assert_eq!(
+            ListValue::unnest("{1, 2, 3}").unwrap(),
+            vec!["1".to_string(), "2".to_string(), "3".to_string()]
+        );
+        assert_eq!(
+            ListValue::unnest("{{1, 2, 3}, {4, 5, 6}}").unwrap(),
+            vec!["{1, 2, 3}".to_string(), "{4, 5, 6}".to_string()]
+        );
+        assert_eq!(
+            ListValue::unnest("{{{1, 2, 3}}, {{4, 5, 6}}}").unwrap(),
+            vec!["{{1, 2, 3}}".to_string(), "{{4, 5, 6}}".to_string()]
+        );
+        assert_eq!(
+            ListValue::unnest("{{{1, 2, 3}, {4, 5, 6}}}").unwrap(),
+            vec!["{{1, 2, 3}, {4, 5, 6}}".to_string()]
+        );
+        assert_eq!(
+            ListValue::unnest("{{{aa, bb, cc}, {dd, ee, ff}}}").unwrap(),
+            vec!["{{aa, bb, cc}, {dd, ee, ff}}".to_string()]
+        );
+    }
+
+    pub fn str_to_list_for_text(text: &str, elem_type: &DataType) -> Result<ListValue, String> {
+        ListValue::str_to_list(text, elem_type, |target_type, str| {
+            // TODO: may need to use Datum::from_scalar(val) instead of Some(val) to avoid
+            // abstarcion leak
+            target_type.text_instance(str).map(Some)
+        })
+        .map_err(|err| format!("Cannot parse list: {}", err))
+    }
+
+    #[test]
+    fn test_str_to_list() {
+        // Empty List
+        assert_eq!(
+            str_to_list_for_text("{}", &DataType::Int32).unwrap(),
+            ListValue::new(vec![])
+        );
+
+        let list123 = ListValue::new(vec![
+            Some(1.to_scalar_value()),
+            Some(2.to_scalar_value()),
+            Some(3.to_scalar_value()),
+        ]);
+
+        // Single List
+        assert_eq!(
+            str_to_list_for_text("{1, 2, 3}", &DataType::Int32).unwrap(),
+            list123
+        );
+
+        // Nested List
+        let nested_list123 = ListValue::new(vec![Some(ScalarImpl::List(list123))]);
+        assert_eq!(
+            str_to_list_for_text(
+                "{{1, 2, 3}}",
+                &DataType::List {
+                    datatype: Box::new(DataType::Int32)
+                }
+            )
+            .unwrap(),
+            nested_list123
+        );
+
+        let nested_list445566 = ListValue::new(vec![Some(ScalarImpl::List(ListValue::new(vec![
+            Some(44.to_scalar_value()),
+            Some(55.to_scalar_value()),
+            Some(66.to_scalar_value()),
+        ])))]);
+
+        let double_nested_list123_445566 = ListValue::new(vec![
+            Some(ScalarImpl::List(nested_list123)),
+            Some(ScalarImpl::List(nested_list445566)),
+        ]);
+
+        // Double nested List
+        assert_eq!(
+            str_to_list_for_text(
+                "{{{1, 2, 3}}, {{44, 55, 66}}}",
+                &DataType::List {
+                    datatype: Box::new(DataType::List {
+                        datatype: Box::new(DataType::Int32)
+                    })
+                }
+            )
+            .unwrap(),
+            double_nested_list123_445566
+        );
+    }
+
+    #[test]
+    fn test_invalid_list() {
+        // Unbalanced input
+        assert!(str_to_list_for_text("{{}", &DataType::Int32).is_err());
+        assert!(str_to_list_for_text("{}}", &DataType::Int32).is_err());
+        assert!(str_to_list_for_text("{{1, 2, 3}, {4, 5, 6}", &DataType::Int32).is_err());
+        assert!(str_to_list_for_text("{{1, 2, 3}, 4, 5, 6}}", &DataType::Int32).is_err());
     }
 }

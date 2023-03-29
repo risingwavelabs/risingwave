@@ -638,7 +638,6 @@ pub trait DataChunkTestExt {
 
 impl DataChunkTestExt for DataChunk {
     fn from_pretty(s: &str) -> Self {
-        use crate::types::ScalarImpl;
         fn parse_type(s: &str) -> DataType {
             match s {
                 "B" => DataType::Boolean,
@@ -686,7 +685,7 @@ impl DataChunkTestExt for DataChunk {
                     "." => None,
                     "t" => Some(true.into()),
                     "f" => Some(false.into()),
-                    _ => Some(ScalarImpl::from_text(val_str.as_bytes(), ty).unwrap()),
+                    _ => Some(ty.text_instance(val_str).unwrap()),
                 };
                 builder.append_datum(datum);
             }

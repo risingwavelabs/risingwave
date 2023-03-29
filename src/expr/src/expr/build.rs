@@ -15,7 +15,7 @@
 use std::iter::Peekable;
 
 use itertools::Itertools;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::DataType;
 use risingwave_pb::expr::expr_node::{PbType, RexNode};
 use risingwave_pb::expr::ExprNode;
 
@@ -186,9 +186,7 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
                 let ty = self.parse_type();
                 let value = match value.as_str() {
                     "null" => None,
-                    _ => Some(
-                        ScalarImpl::from_text(value.as_bytes(), &ty).expect_str("value", &value),
-                    ),
+                    _ => Some(ty.text_instance(&value).expect_str("value", &value)),
                 };
                 LiteralExpression::new(ty, value).boxed()
             }

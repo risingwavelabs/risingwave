@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::hash::Hash;
 use std::io::Write;
+use std::str::FromStr;
 
 use bytes::{Bytes, BytesMut};
 use chrono::{Datelike, Days, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday};
 use postgres_types::{ToSql, Type};
+use speedate::{Date as SpeedDate, DateTime as SpeedDateTime, Time as SpeedTime};
 use thiserror::Error;
 
 use super::to_binary::ToBinary;
@@ -54,14 +57,6 @@ macro_rules! impl_chrono_wrapper {
             }
         }
 
-        impl std::str::FromStr for $variant_name {
-            type Err = chrono::ParseError;
-
-            fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-                Ok($variant_name(s.parse()?))
-            }
-        }
-
         impl From<$chrono> for $variant_name {
             fn from(data: $chrono) -> Self {
                 $variant_name(data)
@@ -74,7 +69,7 @@ impl_chrono_wrapper!(Date, NaiveDate);
 impl_chrono_wrapper!(Timestamp, NaiveDateTime);
 impl_chrono_wrapper!(Time, NaiveTime);
 
-#[derive(Copy, Clone, Debug, Error)]
+#[derive(Clone, Debug, Error)]
 enum InvalidParamsErrorKind {
     #[error("Invalid date: days: {days}")]
     Date { days: i32 },
@@ -183,6 +178,8 @@ impl ToBinary for Timestamp {
 }
 
 impl Date {
+    const PARSE_ERROR: &str = "Can't cast string to date (expected format is YYYY-MM-DD)";
+
     pub fn with_days(days: i32) -> Result<Self> {
         Ok(Date::new(
             NaiveDate::from_num_days_from_ce_opt(days)
@@ -223,9 +220,31 @@ impl Date {
                 .and_time(Time::from_hms_micro_uncheck(hour, min, sec, micro).0),
         )
     }
+
+    #[inline]
+    fn parse_naive_date(s: &str) -> std::result::Result<NaiveDate, Cow<'static, str>> {
+        let res = SpeedDate::parse_str(s).map_err(|_| Self::PARSE_ERROR)?;
+        Ok(Date::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32).0)
+    }
+
+    #[inline(always)]
+    fn str_to_date(elem: &str) -> std::result::Result<Date, Cow<'static, str>> {
+        Ok(Date::new(Self::parse_naive_date(elem)?))
+    }
+}
+
+impl FromStr for Date {
+    type Err = Cow<'static, str>;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Self::str_to_date(s)
+    }
 }
 
 impl Time {
+    const PARSE_ERROR: &str =
+        "Can't cast string to time (expected format is HH:MM:SS[.D+{up to 6 digits}] or HH:MM)";
+
     pub fn with_secs_nano(secs: u32, nano: u32) -> Result<Self> {
         Ok(Time::new(
             NaiveTime::from_num_seconds_from_midnight_opt(secs, nano)
@@ -270,9 +289,36 @@ impl Time {
     pub fn from_num_seconds_from_midnight_uncheck(secs: u32, nano: u32) -> Self {
         Self::new(NaiveTime::from_num_seconds_from_midnight_opt(secs, nano).unwrap())
     }
+
+    #[inline]
+    fn parse_naive_time(s: &str) -> std::result::Result<NaiveTime, Cow<'static, str>> {
+        let res = SpeedTime::parse_str(s).map_err(|_| Self::PARSE_ERROR)?;
+        Ok(Time::from_hms_micro_uncheck(
+            res.hour as u32,
+            res.minute as u32,
+            res.second as u32,
+            res.microsecond,
+        )
+        .0)
+    }
+
+    #[inline(always)]
+    fn str_to_time(elem: &str) -> std::result::Result<Time, Cow<'static, str>> {
+        Ok(Time::new(Self::parse_naive_time(elem)?))
+    }
+}
+
+impl FromStr for Time {
+    type Err = Cow<'static, str>;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Self::str_to_time(s)
+    }
 }
 
 impl Timestamp {
+    const PARSE_ERROR: &str = "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)";
+
     pub fn with_secs_nsecs(secs: i64, nsecs: u32) -> Result<Self> {
         Ok(Timestamp::new({
             NaiveDateTime::from_timestamp_opt(secs, nsecs)
@@ -499,6 +545,53 @@ impl Timestamp {
     pub fn truncate_millennium(self) -> Self {
         Date::from_ymd_uncheck((self.0.year() - 1) / 1000 * 1000 + 1, 1, 1).into()
     }
+
+    #[inline]
+    fn parse_naive_datetime(s: &str) -> std::result::Result<NaiveDateTime, Cow<'static, str>> {
+        if let Ok(res) = SpeedDateTime::parse_str(s) {
+            Ok(Date::from_ymd_uncheck(
+                res.date.year as i32,
+                res.date.month as u32,
+                res.date.day as u32,
+            )
+            .and_hms_micro_uncheck(
+                res.time.hour as u32,
+                res.time.minute as u32,
+                res.time.second as u32,
+                res.time.microsecond,
+            )
+            .0)
+        } else {
+            match SpeedDate::parse_str(s) {
+                Ok(res) => {
+                    Ok(
+                        Date::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32)
+                            .and_hms_micro_uncheck(0, 0, 0, 0)
+                            .0,
+                    )
+                }
+                Err(_) => {
+                    // TODO: Format like '2022-1-1T01:01:01' can't support by SpeedDate now. So we
+                    // use NaiveDateTime::from_str to parse it. We may need to merge it when
+                    // SpeedDate support all format.
+                    NaiveDateTime::from_str(s).map_err(|_| Self::PARSE_ERROR.into())
+                }
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn str_to_timestamp(elem: &str) -> std::result::Result<Timestamp, Cow<'static, str>> {
+        Ok(Timestamp::new(Self::parse_naive_datetime(elem)?))
+    }
+}
+
+impl FromStr for Timestamp {
+    type Err = Cow<'static, str>;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Self::str_to_timestamp(s)
+    }
 }
 
 impl From<Date> for Timestamp {
@@ -560,5 +653,57 @@ impl CheckedAdd<Interval> for Timestamp {
         datetime = datetime.checked_add_signed(Duration::microseconds(rhs.usecs()))?;
 
         Some(Timestamp::new(datetime))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::str::FromStr;
+
+    use crate::types::{Date, Time, Timestamp};
+
+    #[test]
+    fn parse_date() {
+        Date::from_str("1999-01-08").unwrap();
+
+        assert_eq!(
+            Date::from_str("1999-01-08AA").unwrap_err().to_string(),
+            Date::PARSE_ERROR.to_string(),
+        );
+    }
+
+    #[test]
+    fn parse_time() {
+        Time::from_str("04:05").unwrap();
+        Time::from_str("04:05:06").unwrap();
+
+        assert_eq!(
+            Time::from_str("AA04:05:06").unwrap_err().to_string(),
+            Time::PARSE_ERROR.to_string()
+        );
+    }
+
+    #[test]
+    fn parse_timestamp() {
+        Timestamp::from_str("1999-01-08 04:02").unwrap();
+        Timestamp::from_str("1999-01-08 04:05:06").unwrap();
+        Timestamp::from_str("1999-1-1T04:05:06").unwrap();
+        assert_eq!(
+            Timestamp::from_str("2022-08-03T10:34:02Z").unwrap(),
+            Timestamp::from_str("2022-08-03 10:34:02").unwrap()
+        );
+
+        assert_eq!(
+            Timestamp::from_str("1999-01-08 04:05:06AA")
+                .unwrap_err()
+                .to_string(),
+            Timestamp::PARSE_ERROR.to_string()
+        );
+
+        let timestamp = Timestamp::from_str("0001-11-15 07:35:40.999999").unwrap();
+        assert_eq!(timestamp.0.timestamp_micros(), -62108094259000001);
+
+        let timestamp = Timestamp::from_str("1969-12-31 23:59:59.999999").unwrap();
+        assert_eq!(timestamp.0.timestamp_micros(), -1);
     }
 }
