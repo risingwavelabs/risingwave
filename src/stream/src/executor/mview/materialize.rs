@@ -419,9 +419,27 @@ pub struct MaterializeCache<SD> {
 }
 
 #[derive(EnumAsInner)]
-enum CacheValue {
+pub enum CacheValue {
     Overwrite(Option<CompactedRow>),
     Ignore(Option<EmptyValue>),
+}
+
+impl CacheValue {
+    fn to_overwrite(&self) -> &Option<CompactedRow> {
+        if let CacheValue::Overwrite(res) = self {
+            res
+        } else {
+            unreachable!()
+        }
+    }
+
+    fn to_ignore(&self) -> &Option<EmptyValue> {
+        if let CacheValue::Ignore(res) = self {
+            res
+        } else {
+            unreachable!()
+        }
+    }
 }
 
 type EmptyValue = ();
@@ -452,7 +470,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                 KeyOp::Insert(new_row) => {
                     match conflict_behavior {
                         ConflictBehavior::Overwrite => {
-                            match self.force_get_for_overwrite(&key) {
+                            match self.force_get(&key).to_overwrite() {
                                 Some(old_row) => fixed_changes.push((
                                     key.clone(),
                                     KeyOp::Update((old_row.row.clone(), new_row.clone())),
@@ -463,7 +481,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                             update_cache = true;
                         }
                         ConflictBehavior::IgnoreConflict => {
-                            match self.force_get_for_ignore(&key) {
+                            match self.force_get(&key).to_ignore() {
                                 Some(_) => (),
                                 None => {
                                     fixed_changes
@@ -493,7 +511,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                 KeyOp::Delete(_) => {
                     match conflict_behavior {
                         ConflictBehavior::Overwrite => {
-                            match self.force_get_for_overwrite(&key) {
+                            match self.force_get(&key).to_overwrite() {
                                 Some(old_row) => {
                                     fixed_changes
                                         .push((key.clone(), KeyOp::Delete(old_row.row.clone())));
@@ -521,7 +539,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                 KeyOp::Update((_, new_row)) => {
                     match conflict_behavior {
                         ConflictBehavior::Overwrite => {
-                            match self.force_get_for_overwrite(&key) {
+                            match self.force_get(&key).to_overwrite() {
                                 Some(old_row) => fixed_changes.push((
                                     key.clone(),
                                     KeyOp::Update((old_row.row.clone(), new_row.clone())),
@@ -532,7 +550,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                             update_cache = true;
                         }
                         ConflictBehavior::IgnoreConflict => {
-                            match self.force_get_for_ignore(&key) {
+                            match self.force_get(&key).to_ignore() {
                                 Some(_) => (),
                                 None => {
                                     fixed_changes
@@ -597,30 +615,13 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         Ok(())
     }
 
-    pub fn force_get_for_overwrite(&mut self, key: &[u8]) -> &Option<CompactedRow> {
-        if let CacheValue::Overwrite(cache_row) = self.data.get(key).unwrap_or_else(|| {
+    pub fn force_get(&mut self, key: &[u8]) -> &CacheValue {
+        self.data.get(key).unwrap_or_else(|| {
             panic!(
                 "the key {:?} has not been fetched in the materialize executor's cache ",
                 key
             )
-        }) {
-            cache_row
-        } else {
-            unreachable!()
-        }
-    }
-
-    pub fn force_get_for_ignore(&mut self, key: &[u8]) -> &Option<EmptyValue> {
-        if let CacheValue::Ignore(cache_row) = self.data.get(key).unwrap_or_else(|| {
-            panic!(
-                "the key {:?} has not been fetched in the materialize executor's cache ",
-                key
-            )
-        }) {
-            cache_row
-        } else {
-            unreachable!()
-        }
+        })
     }
 
     fn evict(&mut self) {
