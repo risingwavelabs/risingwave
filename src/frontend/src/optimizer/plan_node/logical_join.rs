@@ -164,11 +164,6 @@ impl LogicalJoin {
         self.core.i2o_col_mapping()
     }
 
-    /// get the Mapping of columnIndex from output column index to internal column index
-    pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        self.core.o2i_col_mapping()
-    }
-
     /// Get a reference to the logical join's on.
     pub fn on(&self) -> &Condition {
         &self.core.on
@@ -568,7 +563,7 @@ impl PlanTreeNodeBinary for LogicalJoin {
             join.internal_column_num(),
         );
 
-        let old_o2i = self.o2i_col_mapping();
+        let old_o2i = self.core.o2i_col_mapping();
 
         let old_o2l = old_o2i
             .composite(&self.core.i2l_col_mapping())
@@ -810,7 +805,7 @@ impl PredicatePushdown for LogicalJoin {
         let join_type = LogicalJoin::simplify_outer(&predicate, left_col_num, self.join_type());
 
         // rewrite output col referencing indices as internal cols
-        let mut mapping = self.o2i_col_mapping();
+        let mut mapping = self.core.o2i_col_mapping();
 
         predicate = predicate.rewrite_expr(&mut mapping);
 
@@ -1409,9 +1404,11 @@ impl ToStream for LogicalJoin {
             // ignore the all NULL to maintain the stream key's uniqueness, see https://github.com/risingwavelabs/risingwave/issues/8084 for more information
 
             let l2o = join_with_pk
+                .core
                 .l2i_col_mapping()
                 .composite(&join_with_pk.i2o_col_mapping());
             let r2o = join_with_pk
+                .core
                 .r2i_col_mapping()
                 .composite(&join_with_pk.i2o_col_mapping());
             let left_right_stream_keys = join_with_pk
