@@ -144,6 +144,14 @@ impl Condition {
         .unwrap()
     }
 
+    pub fn collect_input_refs(&self, input_col_num: usize) -> FixedBitSet {
+        let mut input_bits = FixedBitSet::with_capacity(input_col_num);
+        for expr in &self.conjunctions {
+            input_bits.union_with(&expr.collect_input_refs(input_col_num));
+        }
+        input_bits
+    }
+
     /// Split the condition expressions into (N choose 2) + 1 groups: those containing two columns
     /// from different buckets (and optionally, needing an equal condition between them), and
     /// others.
