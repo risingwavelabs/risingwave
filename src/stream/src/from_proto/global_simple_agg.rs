@@ -47,12 +47,23 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
         let storages =
             build_agg_state_storages_from_proto(node.get_agg_call_states(), store.clone(), None)
                 .await;
-        let result_table =
-            StateTable::from_table_catalog(node.get_result_table().unwrap(), store.clone(), None)
-                .await;
+        let table = node.get_result_table().unwrap();
+        let result_table = StateTable::from_table_catalog(table, store.clone(), None).await;
+        stream.streaming_metrics.actor_info_collector.add_table(
+            table.id.into(),
+            params.actor_context.id,
+            &table.name,
+        );
         let distinct_dedup_tables =
             build_distinct_dedup_table_from_proto(node.get_distinct_dedup_tables(), store, None)
                 .await;
+        for table in node.get_distinct_dedup_tables().values() {
+            stream.streaming_metrics.actor_info_collector.add_table(
+                table.id.into(),
+                params.actor_context.id,
+                &table.name,
+            );
+        }
 
         Ok(GlobalSimpleAggExecutor::new(AggExecutorArgs {
             input,

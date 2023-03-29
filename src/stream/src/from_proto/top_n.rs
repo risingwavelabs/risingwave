@@ -31,11 +31,16 @@ impl ExecutorBuilder for TopNExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
+        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
 
         let table = node.get_table()?;
+        stream.streaming_metrics.actor_info_collector.add_table(
+            table.id.into(),
+            params.actor_context.id,
+            &table.name,
+        );
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let state_table = StateTable::from_table_catalog(table, store, vnodes).await;
         let storage_key = table

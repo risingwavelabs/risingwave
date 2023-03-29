@@ -1,4 +1,4 @@
-from grafanalib.core import Dashboard, TimeSeries, Target, GridPos, RowPanel, Time, Templating
+from grafanalib.core import Dashboard, TimeSeries, Target, GridPos, RowPanel, Time, Templating, Table
 import logging
 import os
 import sys
@@ -2420,6 +2420,7 @@ dashboard = Dashboard(
     templating=templating,
     version=dashboard_version,
     panels=[
+        *section_actor_info(panels),
         *section_cluster_node(panels),
         *section_recovery_node(panels),
         *section_streaming(panels),

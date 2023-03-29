@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use prometheus::core::{AtomicF64, AtomicI64, AtomicU64, GenericCounterVec, GenericGaugeVec};
 use prometheus::{
     exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
@@ -21,8 +23,12 @@ use prometheus::{
     HistogramVec, IntCounter, IntGauge, Registry,
 };
 
+use super::actor_info_collector::{monitor_actor_info, ActorInfoCollector};
+
 pub struct StreamingMetrics {
     pub registry: Registry,
+    pub actor_info_collector: Arc<ActorInfoCollector>,
+
     pub executor_row_count: GenericCounterVec<AtomicU64>,
     pub actor_execution_time: GenericGaugeVec<AtomicF64>,
     pub actor_output_buffer_blocking_duration_ns: GenericCounterVec<AtomicU64>,
@@ -98,6 +104,9 @@ pub struct StreamingMetrics {
 
 impl StreamingMetrics {
     pub fn new(registry: Registry) -> Self {
+        let actor_info_collector = Arc::new(ActorInfoCollector::new());
+        monitor_actor_info(&registry, actor_info_collector.clone()).unwrap();
+
         let executor_row_count = register_int_counter_vec_with_registry!(
             "stream_executor_row_count",
             "Total number of rows that have been output from each executor",
@@ -490,6 +499,7 @@ impl StreamingMetrics {
         .unwrap();
         Self {
             registry,
+            actor_info_collector,
             executor_row_count,
             actor_execution_time,
             actor_output_buffer_blocking_duration_ns,

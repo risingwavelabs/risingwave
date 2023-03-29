@@ -50,6 +50,7 @@ if namespace_filter_enabled:
         ]
     )
 
+
 class Layout:
 
     def __init__(self):
@@ -401,10 +402,10 @@ class Panels:
         )
 
     def timeseries_bytesps(self,
-                          title,
-                          description,
-                          targets,
-                          legendCols=["mean"]):
+                           title,
+                           description,
+                           targets,
+                           legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -476,10 +477,23 @@ class Panels:
             legendPlacement="right",
         )
 
+    def table_info(self, title, description, targets, excluded_columns):
+        gridPos = self.layout.next_half_width_graph()
+        excludedByName = dict.fromkeys(excluded_columns, True)
+        transformations = [{"id": "organize", "options": {
+            "excludeByName": excludedByName}}]
+        return Table(
+            title=title,
+            description=description,
+            targets=targets,
+            gridPos=gridPos,
+            showHeader=True,
+            filterable=True,
+            transformations=transformations
+        )
+
     def sub_panel(self):
         return Panels(self.datasource)
-
-
 
 
 def metric(name, filter=None):

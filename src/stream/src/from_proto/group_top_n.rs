@@ -42,6 +42,11 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
             .map(|idx| *idx as usize)
             .collect();
         let table = node.get_table()?;
+        stream.streaming_metrics.actor_info_collector.add_table(
+            table.id.into(),
+            params.actor_context.id,
+            &table.name,
+        );
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let state_table = StateTable::from_table_catalog(table, store, vnodes).await;
         let storage_key = table

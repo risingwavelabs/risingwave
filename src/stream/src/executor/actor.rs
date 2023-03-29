@@ -125,7 +125,7 @@ pub struct Actor<C> {
     subtasks: Vec<SubtaskHandle>,
 
     context: Arc<SharedContext>,
-    _metrics: Arc<StreamingMetrics>,
+    metrics: Arc<StreamingMetrics>,
     actor_context: ActorContextRef,
 }
 
@@ -144,13 +144,17 @@ where
             consumer,
             subtasks,
             context,
-            _metrics: metrics,
+            metrics,
             actor_context,
         }
     }
 
     #[inline(always)]
     pub async fn run(mut self) -> StreamResult<()> {
+        self.metrics
+            .actor_info_collector
+            .add_actor(self.actor_context.id, self.actor_context.fragment_id);
+
         tokio::join!(
             // Drive the subtasks concurrently.
             join_all(std::mem::take(&mut self.subtasks)),

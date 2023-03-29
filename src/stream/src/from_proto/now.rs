@@ -40,9 +40,13 @@ impl ExecutorBuilder for NowExecutorBuilder {
             .lock_barrier_manager()
             .register_sender(params.actor_context.id, sender);
 
-        let state_table =
-            StateTable::from_table_catalog(node.get_state_table()?, store, None).await;
-
+        let table = node.get_state_table()?;
+        let state_table = StateTable::from_table_catalog(table, store, None).await;
+        stream.streaming_metrics.actor_info_collector.add_table(
+            table.id.into(),
+            params.actor_context.id,
+            &table.name,
+        );
         Ok(Box::new(NowExecutor::new(
             barrier_receiver,
             params.executor_id,
