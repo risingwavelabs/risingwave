@@ -122,7 +122,9 @@ impl ValuesExecutor {
         }
 
         while let Some(barrier) = barrier_receiver.recv().await {
-            progress.finish(barrier.epoch.curr);
+            if emit {
+                progress.finish(barrier.epoch.curr);
+            }
             yield Message::Barrier(barrier);
         }
     }
@@ -266,6 +268,13 @@ mod tests {
 
         // ValueExecutor should simply forward following barriers
         tx.send(Barrier::new_test_barrier(2)).unwrap();
+
+        assert!(matches!(
+            values_executor.next_unwrap_ready_barrier().unwrap(),
+            Barrier { .. }
+        ));
+
+        tx.send(Barrier::new_test_barrier(3)).unwrap();
 
         assert!(matches!(
             values_executor.next_unwrap_ready_barrier().unwrap(),

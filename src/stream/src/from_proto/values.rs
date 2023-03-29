@@ -38,14 +38,14 @@ impl ExecutorBuilder for ValuesExecutorBuilder {
         _store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let progress = stream
-            .context
-            .register_create_mview_progress(params.actor_context.id);
         let (sender, barrier_receiver) = unbounded_channel();
         stream
             .context
             .lock_barrier_manager()
             .register_sender(params.actor_context.id, sender);
+        let progress = stream
+            .context
+            .register_create_mview_progress(params.actor_context.id);
         let rows = node
             .get_tuples()
             .iter()
