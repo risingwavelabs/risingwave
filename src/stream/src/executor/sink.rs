@@ -30,13 +30,11 @@ use risingwave_connector::ConnectorParams;
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, Message};
-use crate::common::log_store::{
-    BoundedInMemLogStoreFactory, LogReader, LogStoreFactory, LogStoreReadItem, LogWriter,
-};
+use crate::common::log_store::{LogReader, LogStoreFactory, LogStoreReadItem, LogWriter};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{expect_first_barrier, ActorContextRef, PkIndices};
 
-pub struct SinkExecutor {
+pub struct SinkExecutor<F: LogStoreFactory> {
     input: BoxedExecutor,
     metrics: Arc<StreamingMetrics>,
     config: SinkConfig,
@@ -46,6 +44,8 @@ pub struct SinkExecutor {
     pk_indices: Vec<usize>,
     sink_type: SinkType,
     actor_context: ActorContextRef,
+    log_reader: F::Reader,
+    log_writer: F::Writer,
 }
 
 async fn build_sink(
@@ -73,9 +73,9 @@ fn force_append_only(chunk: StreamChunk, data_types: Vec<DataType>) -> Option<St
     })
 }
 
-impl SinkExecutor {
+impl<F: LogStoreFactory> SinkExecutor<F> {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub async fn new(
         materialize_executor: BoxedExecutor,
         metrics: Arc<StreamingMetrics>,
         config: SinkConfig,
@@ -85,7 +85,9 @@ impl SinkExecutor {
         pk_indices: Vec<usize>,
         sink_type: SinkType,
         actor_context: ActorContextRef,
+        log_store_factory: F,
     ) -> Self {
+        let (log_reader, log_writer) = log_store_factory.build().await;
         Self {
             input: materialize_executor,
             metrics,
@@ -96,17 +98,14 @@ impl SinkExecutor {
             connector_params,
             sink_type,
             actor_context,
+            log_reader,
+            log_writer,
         }
     }
 
-    fn execute_inner(
-        self,
-        log_store_factory: impl LogStoreFactory,
-    ) -> impl Stream<Item = StreamExecutorResult<Message>> {
+    fn execute_inner(self) -> impl Stream<Item = StreamExecutorResult<Message>> {
         let config = self.config.clone();
         let schema = self.schema.clone();
-
-        let (log_reader, log_writer) = log_store_factory.build();
 
         let metrics = self
             .metrics
@@ -118,13 +117,13 @@ impl SinkExecutor {
             self.pk_indices,
             self.connector_params,
             self.sink_type,
-            log_reader,
+            self.log_reader,
             metrics,
         );
 
         let write_log_stream = Self::execute_write_log(
             self.input,
-            log_writer,
+            self.log_writer,
             self.schema,
             self.sink_type,
             self.actor_context,
@@ -260,11 +259,10 @@ impl SinkExecutor {
     }
 }
 
-impl Executor for SinkExecutor {
+impl<F: LogStoreFactory> Executor for SinkExecutor<F> {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         // TODO: dispatch in enum
-        let bounded_log_store_factory = BoundedInMemLogStoreFactory::new(1);
-        self.execute_inner(bounded_log_store_factory).boxed()
+        self.execute_inner().boxed()
     }
 
     fn schema(&self) -> &Schema {
@@ -283,6 +281,7 @@ impl Executor for SinkExecutor {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::common::log_store::BoundedInMemLogStoreFactory;
     use crate::executor::test_utils::*;
     use crate::executor::ActorContext;
 
@@ -328,6 +327,7 @@ mod test {
         );
 
         let config = SinkConfig::from_hashmap(properties).unwrap();
+        let bounded_log_store_factory = BoundedInMemLogStoreFactory::new(1);
         let sink_executor = SinkExecutor::new(
             Box::new(mock),
             Arc::new(StreamingMetrics::unused()),
@@ -338,7 +338,9 @@ mod test {
             pk.clone(),
             SinkType::AppendOnly,
             ActorContext::create(0),
-        );
+            bounded_log_store_factory,
+        )
+        .await;
 
         let mut executor = SinkExecutor::execute(Box::new(sink_executor));
 
@@ -402,7 +404,9 @@ mod test {
             pk.clone(),
             SinkType::ForceAppendOnly,
             ActorContext::create(0),
-        );
+            BoundedInMemLogStoreFactory::new(1),
+        )
+        .await;
 
         let mut executor = SinkExecutor::execute(Box::new(sink_executor));
 

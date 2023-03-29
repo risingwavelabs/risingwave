@@ -93,11 +93,13 @@ pub trait LogReader {
     fn truncate(&mut self) -> Self::TruncateFuture<'_>;
 }
 
-pub trait LogStoreFactory {
-    type Reader: LogReader;
-    type Writer: LogWriter;
+pub trait LogStoreFactory: 'static {
+    type Reader: LogReader + Send + 'static;
+    type Writer: LogWriter + Send + 'static;
 
-    fn build(self) -> (Self::Reader, Self::Writer);
+    type BuildFuture: Future<Output = (Self::Reader, Self::Writer)> + Send;
+
+    fn build(self) -> Self::BuildFuture;
 }
 
 /// An in-memory log store that can buffer a bounded amount of stream chunk in memory via bounded
@@ -158,23 +160,27 @@ impl LogStoreFactory for BoundedInMemLogStoreFactory {
     type Reader = BoundedInMemLogStoreReader;
     type Writer = BoundedInMemLogStoreWriter;
 
-    fn build(self) -> (Self::Reader, Self::Writer) {
-        let (init_epoch_tx, init_epoch_rx) = oneshot::channel();
-        let (item_tx, item_rx) = channel(self.bound);
-        let (truncated_epoch_tx, truncated_epoch_rx) = unbounded_channel();
-        let reader = BoundedInMemLogStoreReader {
-            epoch_progress: UNINITIALIZED,
-            init_epoch_rx: Some(init_epoch_rx),
-            item_rx,
-            truncated_epoch_tx,
-        };
-        let writer = BoundedInMemLogStoreWriter {
-            curr_epoch: None,
-            init_epoch_tx: Some(init_epoch_tx),
-            item_tx,
-            truncated_epoch_rx,
-        };
-        (reader, writer)
+    type BuildFuture = impl Future<Output = (Self::Reader, Self::Writer)>;
+
+    fn build(self) -> Self::BuildFuture {
+        async move {
+            let (init_epoch_tx, init_epoch_rx) = oneshot::channel();
+            let (item_tx, item_rx) = channel(self.bound);
+            let (truncated_epoch_tx, truncated_epoch_rx) = unbounded_channel();
+            let reader = BoundedInMemLogStoreReader {
+                epoch_progress: UNINITIALIZED,
+                init_epoch_rx: Some(init_epoch_rx),
+                item_rx,
+                truncated_epoch_tx,
+            };
+            let writer = BoundedInMemLogStoreWriter {
+                curr_epoch: None,
+                init_epoch_tx: Some(init_epoch_tx),
+                item_tx,
+                truncated_epoch_rx,
+            };
+            (reader, writer)
+        }
     }
 }
 
