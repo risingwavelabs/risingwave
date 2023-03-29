@@ -209,6 +209,7 @@ lazy_static! {
             ProjectEliminateRule::create(),
             TrivialProjectToValuesRule::create(),
             UnionInputValuesMergeRule::create(),
+            JoinProjectTransposeRule::create(),
             // project-join merge should be applied after merge
             // eliminate and to values
             ProjectJoinMergeRule::create(),
