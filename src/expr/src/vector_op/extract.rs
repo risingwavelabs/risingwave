@@ -19,29 +19,29 @@ use risingwave_expr_macro::function;
 use crate::{ExprError, Result};
 
 fn extract_date(date: impl Datelike, unit: &str) -> Option<Decimal> {
-    Some(if unit.eq_ignore_ascii_case("MILLENNIUM") {
+    Some(if unit.eq_ignore_ascii_case("millennium") {
         ((date.year() - 1) / 1000 + 1).into()
-    } else if unit.eq_ignore_ascii_case("CENTURY") {
+    } else if unit.eq_ignore_ascii_case("century") {
         ((date.year() - 1) / 100 + 1).into()
-    } else if unit.eq_ignore_ascii_case("DECADE") {
+    } else if unit.eq_ignore_ascii_case("decade") {
         (date.year() / 10).into()
-    } else if unit.eq_ignore_ascii_case("YEAR") {
+    } else if unit.eq_ignore_ascii_case("year") {
         date.year().into()
-    } else if unit.eq_ignore_ascii_case("ISOYEAR") {
+    } else if unit.eq_ignore_ascii_case("isoyear") {
         date.iso_week().year().into()
-    } else if unit.eq_ignore_ascii_case("QUARTER") {
+    } else if unit.eq_ignore_ascii_case("quarter") {
         ((date.month() - 1) / 3 + 1).into()
-    } else if unit.eq_ignore_ascii_case("MONTH") {
+    } else if unit.eq_ignore_ascii_case("month") {
         date.month().into()
-    } else if unit.eq_ignore_ascii_case("WEEK") {
+    } else if unit.eq_ignore_ascii_case("week") {
         date.iso_week().week().into()
-    } else if unit.eq_ignore_ascii_case("DAY") {
+    } else if unit.eq_ignore_ascii_case("day") {
         date.day().into()
-    } else if unit.eq_ignore_ascii_case("DOY") {
+    } else if unit.eq_ignore_ascii_case("doy") {
         date.ordinal().into()
-    } else if unit.eq_ignore_ascii_case("DOW") {
+    } else if unit.eq_ignore_ascii_case("dow") {
         date.weekday().num_days_from_sunday().into()
-    } else if unit.eq_ignore_ascii_case("ISODOW") {
+    } else if unit.eq_ignore_ascii_case("isodow") {
         date.weekday().number_from_monday().into()
     } else {
         return None;
@@ -100,7 +100,7 @@ pub fn extract_from_timestamp(unit: &str, timestamp: Timestamp) -> Result<Decima
 #[function("extract(varchar, timestamptz) -> decimal")]
 pub fn extract_from_timestamptz(unit: &str, usecs: i64) -> Result<Decimal> {
     match unit {
-        "EPOCH" => Ok(Decimal::from(usecs) / 1_000_000.into()),
+        "EPOCH" => Ok(Decimal::from_i128_with_scale(usecs as i128, 6)),
         // TODO(#5826): all other units depend on implicit session TimeZone
         _ => Err(invalid_unit("timestamp with time zone units", unit)),
     }
@@ -108,29 +108,29 @@ pub fn extract_from_timestamptz(unit: &str, usecs: i64) -> Result<Decimal> {
 
 #[function("extract(varchar, interval) -> decimal")]
 pub fn extract_from_interval(unit: &str, interval: Interval) -> Result<Decimal> {
-    Ok(if unit.eq_ignore_ascii_case("MILLENNIUM") {
+    Ok(if unit.eq_ignore_ascii_case("millennium") {
         (interval.years() / 1000).into()
-    } else if unit.eq_ignore_ascii_case("CENTURY") {
+    } else if unit.eq_ignore_ascii_case("century") {
         (interval.years() / 100).into()
-    } else if unit.eq_ignore_ascii_case("DECADE") {
+    } else if unit.eq_ignore_ascii_case("decade") {
         (interval.years() / 10).into()
-    } else if unit.eq_ignore_ascii_case("YEAR") {
+    } else if unit.eq_ignore_ascii_case("year") {
         interval.years().into()
-    } else if unit.eq_ignore_ascii_case("QUARTER") {
+    } else if unit.eq_ignore_ascii_case("quarter") {
         ((interval.months() - 1) / 3 + 1).into()
-    } else if unit.eq_ignore_ascii_case("MONTH") {
+    } else if unit.eq_ignore_ascii_case("month") {
         interval.months().into()
-    } else if unit.eq_ignore_ascii_case("DAY") {
+    } else if unit.eq_ignore_ascii_case("day") {
         interval.days().into()
-    } else if unit.eq_ignore_ascii_case("HOUR") {
+    } else if unit.eq_ignore_ascii_case("hour") {
         interval.hours().into()
-    } else if unit.eq_ignore_ascii_case("MINUTE") {
+    } else if unit.eq_ignore_ascii_case("minute") {
         interval.minutes().into()
-    } else if unit.eq_ignore_ascii_case("SECOND") {
+    } else if unit.eq_ignore_ascii_case("second") {
         Decimal::from_i128_with_scale(interval.seconds_in_microseconds() as i128, 6)
-    } else if unit.eq_ignore_ascii_case("MILLISECOND") {
+    } else if unit.eq_ignore_ascii_case("millisecond") {
         Decimal::from_i128_with_scale(interval.seconds_in_microseconds() as i128, 3)
-    } else if unit.eq_ignore_ascii_case("MICROSECOND") {
+    } else if unit.eq_ignore_ascii_case("microsecond") {
         interval.seconds_in_microseconds().into()
     } else {
         return Err(invalid_unit("interval unit", unit));
