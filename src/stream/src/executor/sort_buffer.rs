@@ -77,8 +77,7 @@ impl<S: StateStore> SortBuffer<S> {
     ) {
         let pk_range = (
             Bound::<row::Empty>::Unbounded,
-            // TODO(): include or exclude?
-            Bound::Included([Some(watermark.as_scalar_ref_impl())]),
+            Bound::Excluded([Some(watermark.as_scalar_ref_impl())]),
         );
 
         let streams =
