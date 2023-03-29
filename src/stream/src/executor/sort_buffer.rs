@@ -68,7 +68,6 @@ impl<S: StateStore> SortBuffer<S> {
     }
 
     /// Consume rows under `watermark` from the buffer.
-    /// NOTICE: state in `buffer_table` must be correctly cleaned after calling this method.
     #[try_stream(ok = OwnedRow, error = StreamExecutorError)]
     pub async fn consume<'a>(
         &'a mut self,
