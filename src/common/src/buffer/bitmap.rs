@@ -562,6 +562,26 @@ pub struct BitmapIter<'a> {
     current_usize: usize,
 }
 
+impl<'a> BitmapIter<'a> {
+    fn next_always_load_usize(&mut self) -> Option<bool> {
+        if self.idx >= self.num_bits {
+            return None;
+        }
+
+        // Offset of the bit within the usize.
+        let usize_offset = self.idx % BITS;
+
+        // Get the index of usize which the bit is located in
+        let usize_index = self.idx / BITS;
+        self.current_usize = unsafe { *self.bits.get_unchecked(usize_index) };
+
+        let bit_mask = 1 << usize_offset;
+        let bit_flag = self.current_usize & bit_mask != 0;
+        self.idx += 1;
+        Some(bit_flag)
+    }
+}
+
 impl<'a> iter::Iterator for BitmapIter<'a> {
     type Item = bool;
 
@@ -593,7 +613,7 @@ impl<'a> iter::Iterator for BitmapIter<'a> {
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         self.idx += n;
-        self.next()
+        self.next_always_load_usize()
     }
 }
 
