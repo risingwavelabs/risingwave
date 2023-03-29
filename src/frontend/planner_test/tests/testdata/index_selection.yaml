@@ -650,3 +650,24 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchScan { table: idx, columns: [idx.a, idx.b, idx.c, idx.d], scan_ranges: [idx.a = Utf8("ABC")], distribution: UpstreamHashShard(idx.a) }
+- sql: |
+    create table t1 (k1 int primary key, v1 int);
+    create table t2 (k2 int primary key, v2 int);
+    select v1 +1 , v2_p1 from t1, (select v2+2 as v2_p1, k2 from t2) where k1 = k2;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [(t1.v1 + 1:Int32) as $expr1, (t2.v2 + 2:Int32) as $expr2] }
+      └─BatchLookupJoin { type: Inner, predicate: t1.k1 = t2.k2, output: all }
+        └─BatchExchange { order: [], dist: UpstreamHashShard(t1.k1) }
+          └─BatchScan { table: t1, columns: [t1.k1, t1.v1], distribution: UpstreamHashShard(t1.k1) }
+- sql: |
+    create table t1 (c1 varchar,c2 int,c3 timestamp);
+    create table t2 (d1 int,d2 varchar);
+    create index idx_t1 on t1(c2) include (c1, c2, c3);
+    select * from t2 inner join tumble(t1,  c3, interval '10 minute')  on t2.d1 = t1.c2;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [t2.d1, t2.d2, idx_t1.c1, idx_t1.c2, idx_t1.c3, TumbleStart(idx_t1.c3, '00:10:00':Interval) as $expr1, (TumbleStart(idx_t1.c3, '00:10:00':Interval) + '00:10:00':Interval) as $expr2] }
+      └─BatchLookupJoin { type: Inner, predicate: t2.d1 = idx_t1.c2, output: all }
+        └─BatchExchange { order: [], dist: UpstreamHashShard(t2.d1) }
+          └─BatchScan { table: t2, columns: [t2.d1, t2.d2], distribution: SomeShard }
