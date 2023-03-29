@@ -29,7 +29,7 @@ use risingwave_sqlparser::ast::{SetExpr, Statement};
 
 use super::extended_handle::{Portal, PrepareStatement};
 use super::{PgResponseStream, RwPgResponse};
-use crate::binder::{Binder, BoundStatement};
+use crate::binder::Binder;
 use crate::catalog::TableId;
 use crate::handler::flush::do_flush;
 use crate::handler::privilege::resolve_privileges;
@@ -37,7 +37,8 @@ use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::Explain;
 use crate::optimizer::{
-    ExecutionModeDecider, OptimizerContext, OptimizerContextRef, SysTableVisitor,
+    ExecutionModeDecider, OptimizerContext, OptimizerContextRef, RelationCollectorVisitor,
+    SysTableVisitor,
 };
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
@@ -96,7 +97,7 @@ pub fn gen_batch_query_plan(
     let (dependent_relations, bound) = {
         let mut binder = Binder::new(session);
         let bound = binder.bind(stmt)?;
-        (binder.including_relations(), bound)
+        (binder.included_relations(), bound)
     };
 
     let check_items = resolve_privileges(&bound);
@@ -107,6 +108,9 @@ pub fn gen_batch_query_plan(
     let mut logical = planner.plan(bound)?;
     let schema = logical.schema();
     let batch_plan = logical.gen_batch_plan()?;
+
+    let dependent_relations =
+        RelationCollectorVisitor::collect_with(dependent_relations, batch_plan.clone());
 
     let must_local = must_run_in_local_mode(batch_plan.clone());
 
@@ -136,7 +140,7 @@ pub fn gen_batch_query_plan(
         plan: physical,
         query_mode,
         schema,
-        dependent_relations,
+        dependent_relations: dependent_relations.into_iter().collect_vec(),
     })
 }
 

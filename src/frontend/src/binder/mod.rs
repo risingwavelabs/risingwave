@@ -96,7 +96,7 @@ pub struct Binder {
     shared_views: HashMap<ViewId, ShareId>,
 
     /// The included relations while binding a query.
-    including_relations: HashSet<TableId>,
+    included_relations: HashSet<TableId>,
 
     param_types: ParameterTypes,
 }
@@ -205,7 +205,7 @@ impl Binder {
             search_path: session.config().get_search_path(),
             in_streaming,
             shared_views: HashMap::new(),
-            including_relations: HashSet::new(),
+            included_relations: HashSet::new(),
             param_types: ParameterTypes::new(param_types),
         }
     }
@@ -231,8 +231,8 @@ impl Binder {
         self.param_types.export()
     }
 
-    pub fn including_relations(&self) -> Vec<TableId> {
-        self.including_relations.iter().cloned().collect_vec()
+    pub fn included_relations(&self) -> HashSet<TableId> {
+        self.included_relations.clone()
     }
 
     fn push_context(&mut self) {

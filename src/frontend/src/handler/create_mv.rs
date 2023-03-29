@@ -26,7 +26,7 @@ use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::Explain;
-use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
 use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
@@ -90,7 +90,7 @@ pub fn gen_create_mv_plan(
     let (dependent_relations, bound) = {
         let mut binder = Binder::new_for_stream(session);
         let bound = binder.bind_query(query)?;
-        (binder.including_relations(), bound)
+        (binder.included_relations(), bound)
     };
 
     let check_items = resolve_query_privileges(&bound);
@@ -111,9 +111,12 @@ pub fn gen_create_mv_plan(
         );
     }
     let plan: PlanRef = materialize.into();
+    let dependent_relations =
+        RelationCollectorVisitor::collect_with(dependent_relations, plan.clone());
+
     table.owner = session.user_id();
 
-    // record dependent views.
+    // record dependent relations.
     table.dependent_relations = dependent_relations
         .into_iter()
         .map(|t| t.table_id)

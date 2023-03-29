@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{DatabaseId, SchemaId, UserId};
 use risingwave_common::error::Result;
@@ -28,7 +29,7 @@ use crate::binder::Binder;
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::Explain;
-use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
@@ -82,7 +83,7 @@ pub fn gen_sink_plan(
     let (dependent_relations, bound) = {
         let mut binder = Binder::new(session);
         let bound = binder.bind_query(*query)?;
-        (binder.including_relations(), bound)
+        (binder.included_relations(), bound)
     };
 
     let check_items = resolve_query_privileges(&bound);
@@ -99,24 +100,25 @@ pub fn gen_sink_plan(
     };
 
     let sink_plan = plan_root.gen_sink_plan(sink_table_name, definition, properties)?;
-
     let sink_desc = sink_plan.sink_desc().clone();
-    let sink_catalog = sink_desc.into_catalog(
-        SchemaId::new(sink_schema_id),
-        DatabaseId::new(sink_database_id),
-        UserId::new(session.user_id()),
-        dependent_relations,
-    );
-
     let sink_plan: PlanRef = sink_plan.into();
 
     let ctx = sink_plan.ctx();
-
     let explain_trace = ctx.is_explain_trace();
     if explain_trace {
         ctx.trace("Create Sink:");
         ctx.trace(sink_plan.explain_to_string().unwrap());
     }
+
+    let dependent_relations =
+        RelationCollectorVisitor::collect_with(dependent_relations, sink_plan.clone());
+
+    let sink_catalog = sink_desc.into_catalog(
+        SchemaId::new(sink_schema_id),
+        DatabaseId::new(sink_database_id),
+        UserId::new(session.user_id()),
+        dependent_relations.into_iter().collect_vec(),
+    );
 
     Ok((sink_plan, sink_catalog))
 }
