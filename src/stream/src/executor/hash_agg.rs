@@ -336,7 +336,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 watermark_epoch: args.watermark_epoch,
                 extreme_cache_size: args.extreme_cache_size,
                 chunk_size: args.extra.chunk_size,
-                emit_on_window_close: false,
+                emit_on_window_close: args.extra.emit_on_window_close,
                 metrics: args.extra.metrics,
             },
         })
@@ -732,16 +732,12 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
 #[cfg(test)]
 pub mod tests {
-
     use assert_matches::assert_matches;
     use futures::StreamExt;
-    use itertools::Itertools;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::array::{Op, StreamChunk};
+    use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::row::{AscentOwnedRow, OwnedRow, Row};
     use risingwave_common::types::DataType;
-    use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_expr::expr::*;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
@@ -749,7 +745,7 @@ pub mod tests {
     use crate::executor::aggregation::{AggArgs, AggCall};
     use crate::executor::test_utils::agg_executor::new_boxed_hash_agg_executor;
     use crate::executor::test_utils::*;
-    use crate::executor::{Message, PkIndices};
+    use crate::executor::{Message, PkIndices, Watermark};
 
     // --- Test HashAgg with in-memory StateStore ---
 
@@ -835,6 +831,7 @@ pub mod tests {
             keys,
             vec![],
             1 << 10,
+            false,
             1,
         )
         .await;
@@ -845,13 +842,13 @@ pub mod tests {
         // Consume stream chunk
         let msg = hash_agg.next().await.unwrap().unwrap();
         assert_eq!(
-            msg.into_chunk().unwrap().sorted_rows(),
+            msg.into_chunk().unwrap().sort_rows(),
             StreamChunk::from_pretty(
                 " I I I I
                 + 1 1 1 1
                 + 2 2 2 2"
             )
-            .sorted_rows(),
+            .sort_rows(),
         );
 
         assert_matches!(
@@ -861,14 +858,14 @@ pub mod tests {
 
         let msg = hash_agg.next().await.unwrap().unwrap();
         assert_eq!(
-            msg.into_chunk().unwrap().sorted_rows(),
+            msg.into_chunk().unwrap().sort_rows(),
             StreamChunk::from_pretty(
                 "  I I I I
                 -  1 1 1 1
                 U- 2 2 2 2
                 U+ 2 1 1 1"
             )
-            .sorted_rows(),
+            .sort_rows(),
         );
     }
 
@@ -941,6 +938,7 @@ pub mod tests {
             key_indices,
             vec![],
             1 << 10,
+            false,
             1,
         )
         .await;
@@ -951,13 +949,13 @@ pub mod tests {
         // Consume stream chunk
         let msg = hash_agg.next().await.unwrap().unwrap();
         assert_eq!(
-            msg.into_chunk().unwrap().sorted_rows(),
+            msg.into_chunk().unwrap().sort_rows(),
             StreamChunk::from_pretty(
                 " I I I I
                 + 1 1 1 1
                 + 2 2 4 4"
             )
-            .sorted_rows(),
+            .sort_rows(),
         );
 
         assert_matches!(
@@ -967,7 +965,7 @@ pub mod tests {
 
         let msg = hash_agg.next().await.unwrap().unwrap();
         assert_eq!(
-            msg.into_chunk().unwrap().sorted_rows(),
+            msg.into_chunk().unwrap().sort_rows(),
             StreamChunk::from_pretty(
                 "  I I I I
                 -  1 1 1 1
@@ -975,7 +973,7 @@ pub mod tests {
                 U+ 2 1 2 2
                 +  3 1 3 3"
             )
-            .sorted_rows(),
+            .sort_rows(),
         );
     }
 
@@ -1038,6 +1036,7 @@ pub mod tests {
             keys,
             vec![2],
             1 << 10,
+            false,
             1,
         )
         .await;
@@ -1048,13 +1047,13 @@ pub mod tests {
         // Consume stream chunk
         let msg = hash_agg.next().await.unwrap().unwrap();
         assert_eq!(
-            msg.into_chunk().unwrap().sorted_rows(),
+            msg.into_chunk().unwrap().sort_rows(),
             StreamChunk::from_pretty(
                 " I I    I
                 + 1 2  233
                 + 2 1 2333"
             )
-            .sorted_rows(),
+            .sort_rows(),
         );
 
         assert_matches!(
@@ -1064,14 +1063,14 @@ pub mod tests {
 
         let msg = hash_agg.next().await.unwrap().unwrap();
         assert_eq!(
-            msg.into_chunk().unwrap().sorted_rows(),
+            msg.into_chunk().unwrap().sort_rows(),
             StreamChunk::from_pretty(
                 "  I I     I
                 -  2 1  2333
                 U- 1 2   233
                 U+ 1 1 23333"
             )
-            .sorted_rows(),
+            .sort_rows(),
         );
     }
 
@@ -1140,6 +1139,7 @@ pub mod tests {
             keys,
             vec![2],
             1 << 10,
+            false,
             1,
         )
         .await;
@@ -1150,13 +1150,13 @@ pub mod tests {
         // Consume stream chunk
         let msg = hash_agg.next().await.unwrap().unwrap();
         assert_eq!(
-            msg.into_chunk().unwrap().sorted_rows(),
+            msg.into_chunk().unwrap().sort_rows(),
             StreamChunk::from_pretty(
                 " I I    I
                 + 1 2 8
                 + 2 3 5"
             )
-            .sorted_rows(),
+            .sort_rows(),
         );
 
         assert_matches!(
@@ -1166,7 +1166,7 @@ pub mod tests {
 
         let msg = hash_agg.next().await.unwrap().unwrap();
         assert_eq!(
-            msg.into_chunk().unwrap().sorted_rows(),
+            msg.into_chunk().unwrap().sort_rows(),
             StreamChunk::from_pretty(
                 "  I I  I
                 U- 1 2 8
@@ -1175,26 +1175,145 @@ pub mod tests {
                 U+ 2 5 5
                 "
             )
-            .sorted_rows(),
+            .sort_rows(),
         );
     }
 
-    trait SortedRows {
-        fn sorted_rows(self) -> Vec<(Op, OwnedRow)>;
+    #[tokio::test]
+    async fn test_hash_agg_emit_on_window_close_in_memory() {
+        test_hash_agg_emit_on_window_close(MemoryStateStore::new()).await
     }
-    impl SortedRows for StreamChunk {
-        fn sorted_rows(self) -> Vec<(Op, OwnedRow)> {
-            let (chunk, ops) = self.into_parts();
-            ops.into_iter()
-                .zip_eq_debug(
-                    chunk
-                        .rows()
-                        .map(Row::into_owned_row)
-                        .map(AscentOwnedRow::from),
+
+    async fn test_hash_agg_emit_on_window_close<S: StateStore>(store: S) {
+        let input_schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Varchar), // to ensure correct group key column mapping
+                Field::unnamed(DataType::Int64),   // window group key column
+            ],
+        };
+        let input_window_col = 1;
+        let group_key_indices = vec![input_window_col];
+        let append_only = false;
+        let agg_calls = vec![AggCall {
+            kind: AggKind::Count, // as row count, index: 0
+            args: AggArgs::None,
+            return_type: DataType::Int64,
+            column_orders: vec![],
+            append_only,
+            filter: None,
+            distinct: false,
+        }];
+
+        let (mut tx, source) = MockSource::channel(input_schema, PkIndices::new());
+        let hash_agg = new_boxed_hash_agg_executor(
+            store,
+            Box::new(source),
+            agg_calls,
+            0,
+            group_key_indices,
+            vec![],
+            1 << 10,
+            true, // enable emit-on-window-close
+            1,
+        )
+        .await;
+        let mut hash_agg = hash_agg.execute();
+
+        let mut epoch = 1;
+        let mut get_epoch = || {
+            let e = epoch;
+            epoch += 1;
+            e
+        };
+
+        {
+            // init barrier
+            tx.push_barrier(get_epoch(), false);
+            hash_agg.expect_barrier().await;
+        }
+
+        {
+            tx.push_chunk(StreamChunk::from_pretty(
+                " T I
+                + _ 1
+                + _ 2
+                + _ 3",
+            ));
+            tx.push_barrier(get_epoch(), false);
+
+            // no window is closed, nothing is expected to be emitted
+            hash_agg.expect_barrier().await;
+        }
+
+        {
+            tx.push_chunk(StreamChunk::from_pretty(
+                " T I
+                - _ 2
+                + _ 4",
+            ));
+            tx.push_int64_watermark(input_window_col, 3); // windows < 3 are closed
+            tx.push_barrier(get_epoch(), false);
+
+            let chunk = hash_agg.expect_chunk().await;
+            assert_eq!(
+                chunk.sort_rows(),
+                StreamChunk::from_pretty(
+                    " I I
+                    + 1 1" // 1 row for group (1,)
                 )
-                .sorted()
-                .map(|(op, row)| (op, row.into_inner()))
-                .collect_vec()
+                .sort_rows()
+            );
+
+            let wtmk = hash_agg.expect_watermark().await;
+            assert_eq!(wtmk, Watermark::new(0, DataType::Int64, 3i64.into()));
+
+            hash_agg.expect_barrier().await;
+        }
+
+        {
+            tx.push_int64_watermark(input_window_col, 4); // windows < 4 are closed
+            tx.push_barrier(get_epoch(), false);
+
+            let chunk = hash_agg.expect_chunk().await;
+            assert_eq!(
+                chunk.sort_rows(),
+                StreamChunk::from_pretty(
+                    " I I
+                    + 3 1" // 1 rows for group (3,)
+                )
+                .sort_rows()
+            );
+
+            let wtmk = hash_agg.expect_watermark().await;
+            assert_eq!(wtmk, Watermark::new(0, DataType::Int64, 4i64.into()));
+
+            hash_agg.expect_barrier().await;
+        }
+
+        {
+            tx.push_int64_watermark(input_window_col, 10); // windows < 10 are closed
+            tx.push_barrier(get_epoch(), false);
+
+            let chunk = hash_agg.expect_chunk().await;
+            assert_eq!(
+                chunk.sort_rows(),
+                StreamChunk::from_pretty(
+                    " I I
+                    + 4 1" // 1 rows for group (4,)
+                )
+                .sort_rows()
+            );
+
+            hash_agg.expect_watermark().await;
+            hash_agg.expect_barrier().await;
+        }
+
+        {
+            tx.push_int64_watermark(input_window_col, 20); // windows < 20 are closed
+            tx.push_barrier(get_epoch(), false);
+
+            hash_agg.expect_watermark().await;
+            hash_agg.expect_barrier().await;
         }
     }
 }
