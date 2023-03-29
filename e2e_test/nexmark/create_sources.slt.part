@@ -32,7 +32,7 @@ CREATE SOURCE nexmark (
     nexmark.min.event.gap.in.ns = '100'
 );
 
-statement err The shema of the nexmark source must specify all columns in order
+statement error The shema of the nexmark source must specify all columns in order
 CREATE SOURCE nexmark1 (
   person STRUCT<"id" BIGINT,
                 "name" VARCHAR,
