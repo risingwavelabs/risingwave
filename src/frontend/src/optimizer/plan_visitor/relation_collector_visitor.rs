@@ -45,11 +45,11 @@ impl PlanVisitor<()> for RelationCollectorVisitor {
             .insert(plan.logical().table_desc().table_id.table_id.into());
     }
 
-    fn visit_stream_table_scan(&mut self, plan: &StreamTableScan) -> () {
+    fn visit_stream_table_scan(&mut self, plan: &StreamTableScan) {
         self.relations.insert(plan.logical().table_desc().table_id);
     }
 
-    fn visit_batch_source(&mut self, plan: &BatchSource) -> () {
+    fn visit_batch_source(&mut self, plan: &BatchSource) {
         if let Some(catalog) = plan.logical().source_catalog() {
             self.relations.insert(catalog.id.into());
         }
