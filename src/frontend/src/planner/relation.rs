@@ -77,7 +77,7 @@ impl Planner {
     }
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
-        LogicalSource::create(Rc::new(source.catalog), false, self.ctx())
+        Ok(LogicalSource::with_catalog(Rc::new(source.catalog), false, self.ctx()).into())
     }
 
     pub(super) fn plan_join(&mut self, join: BoundJoin) -> Result<PlanRef> {

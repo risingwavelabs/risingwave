@@ -49,6 +49,8 @@ fn check_expr_type(expr: &ExprImpl) -> std::result::Result<(), &'static str> {
 pub struct Project<PlanRef> {
     pub exprs: Vec<ExprImpl>,
     pub input: PlanRef,
+    pub pk_indices: Option<Vec<usize>>,
+    pub o2i_col_mapping: ColIndexMapping,
     // we need some check when construct the `Project::new`
     _private: (),
 }
@@ -119,15 +121,41 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {
 
 impl<PlanRef: GenericPlanRef> Project<PlanRef> {
     pub fn new(exprs: Vec<ExprImpl>, input: PlanRef) -> Self {
+        Self::new_inner(exprs, input, None)
+    }
+
+    fn new_inner(exprs: Vec<ExprImpl>, input: PlanRef, pk_indices: Option<Vec<usize>>) -> Self {
         for expr in &exprs {
             assert_input_ref!(expr, input.schema().fields().len());
             check_expr_type(expr)
                 .map_err(|expr| format!("{expr} should not in Project operator"))
                 .unwrap();
         }
+
+        let input_len = input.schema().len();
+        let mut map = vec![None; exprs.len()];
+        for (i, expr) in exprs.iter().enumerate() {
+            map[i] = match expr {
+                ExprImpl::InputRef(input) => Some(input.index()),
+                _ => None,
+            }
+        }
+        let o2i_col_mapping = ColIndexMapping::with_target_size(map, input_len);
+
+        let i2o = o2i_col_mapping.inverse();
+        let pk_indices = pk_indices.or_else(|| {
+            input
+                .logical_pk()
+                .iter()
+                .map(|pk_col| i2o.try_map(*pk_col))
+                .collect::<Option<Vec<_>>>()
+        });
+
         Project {
             exprs,
             input,
+            o2i_col_mapping,
+            pk_indices,
             _private: (),
         }
     }
@@ -173,6 +201,12 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
         Self::new(exprs, input)
     }
 
+    /// Creates a `Project` with given pk column indices,
+    /// overwrite the one calculated by `generic::Project`.
+    pub fn with_pk_indices(input: PlanRef, exprs: Vec<ExprImpl>, pk_indices: &[usize]) -> Self {
+        Self::new_inner(exprs, input, Some(pk_indices.to_vec()))
+    }
+
     pub fn decompose(self) -> (Vec<ExprImpl>, PlanRef) {
         (self.exprs, self.input)
     }
@@ -212,16 +246,7 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
     }
 
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        let exprs = &self.exprs;
-        let input_len = self.input.schema().len();
-        let mut map = vec![None; exprs.len()];
-        for (i, expr) in exprs.iter().enumerate() {
-            map[i] = match expr {
-                ExprImpl::InputRef(input) => Some(input.index()),
-                _ => None,
-            }
-        }
-        ColIndexMapping::with_target_size(map, input_len)
+        self.o2i_col_mapping.clone()
     }
 
     /// get the Mapping of columnIndex from input column index to output column index,if a input

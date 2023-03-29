@@ -26,8 +26,9 @@ use risingwave_pb::plan_common::GeneratedColumnDesc;
 
 use super::stream_watermark_filter::StreamWatermarkFilter;
 use super::{
-    generic, BatchSource, ColPrunable, ExprRewritable, LogicalFilter, LogicalProject, PlanBase,
-    PlanRef, PredicatePushdown, StreamRowIdGen, StreamSource, ToBatch, ToStream,
+    generic, BatchProject, BatchSource, ColPrunable, ExprRewritable, LogicalFilter, LogicalProject,
+    PlanBase, PlanRef, PredicatePushdown, StreamProject, StreamRowIdGen, StreamSource, ToBatch,
+    ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::ColumnId;
@@ -65,16 +66,9 @@ impl LogicalSource {
         for_table: bool,
         ctx: OptimizerContextRef,
     ) -> Self {
-        // Filter out the generated columns.
-        let row_id_index = Self::rewrite_row_id_idx(&column_catalog, row_id_index);
-        let source_column_catalogs = column_catalog
-            .into_iter()
-            .filter(|c| !c.is_generated())
-            .collect_vec();
-
         let core = generic::Source {
             catalog: source_catalog,
-            column_catalog: source_column_catalogs,
+            column_catalog,
             pk_col_ids,
             row_id_index,
             gen_row_id,
@@ -89,6 +83,60 @@ impl LogicalSource {
             base,
             core,
             kafka_timestamp_range,
+        }
+    }
+
+    pub fn with_catalog(
+        source_catalog: Rc<SourceCatalog>,
+        for_table: bool,
+        ctx: OptimizerContextRef,
+    ) -> Self {
+        let column_catalogs = source_catalog.columns.clone();
+        let pk_col_ids = source_catalog.pk_col_ids.clone();
+        let row_id_index = source_catalog.row_id_index;
+        let gen_row_id = source_catalog.append_only;
+
+        Self::new(
+            Some(source_catalog),
+            column_catalogs,
+            pk_col_ids,
+            row_id_index,
+            gen_row_id,
+            for_table,
+            ctx,
+        )
+    }
+
+    pub fn create(
+        source_catalog: Rc<SourceCatalog>,
+        for_table: bool,
+        ctx: OptimizerContextRef,
+    ) -> Result<PlanRef> {
+        let column_catalogs = source_catalog.columns.clone();
+        let column_descs = column_catalogs
+            .iter()
+            .map(|c| &c.column_desc)
+            .cloned()
+            .collect();
+        let pk_col_ids = source_catalog.pk_col_ids.clone();
+        let row_id_index = source_catalog.row_id_index;
+        let gen_row_id = source_catalog.append_only;
+
+        let source = Self::new(
+            Some(source_catalog),
+            column_catalogs,
+            pk_col_ids,
+            row_id_index,
+            gen_row_id,
+            for_table,
+            ctx,
+        );
+
+        let exprs = Self::gen_optional_generated_column_project_exprs(column_descs)?;
+        if let Some(exprs) = exprs {
+            Ok(LogicalProject::new(source.into(), exprs).into())
+        } else {
+            Ok(source.into())
         }
     }
 
@@ -135,39 +183,6 @@ impl LogicalSource {
         }
 
         Ok(Some(exprs))
-    }
-
-    pub fn create(
-        source_catalog: Rc<SourceCatalog>,
-        for_table: bool,
-        ctx: OptimizerContextRef,
-    ) -> Result<PlanRef> {
-        let column_catalogs = source_catalog.columns.clone();
-        let column_descs = column_catalogs
-            .iter()
-            .map(|c| &c.column_desc)
-            .cloned()
-            .collect();
-        let pk_col_ids = source_catalog.pk_col_ids.clone();
-        let row_id_index = source_catalog.row_id_index;
-        let gen_row_id = source_catalog.append_only;
-
-        let source = Self::new(
-            Some(source_catalog),
-            column_catalogs,
-            pk_col_ids,
-            row_id_index,
-            gen_row_id,
-            for_table,
-            ctx,
-        );
-
-        let exprs = Self::gen_optional_generated_column_project_exprs(column_descs)?;
-        if let Some(exprs) = exprs {
-            Ok(LogicalProject::new(source.into(), exprs).into())
-        } else {
-            Ok(source.into())
-        }
     }
 
     /// `row_id_index` in source node should rule out generated column
@@ -224,6 +239,73 @@ impl LogicalSource {
             base: self.base.clone(),
             core: self.core.clone(),
             kafka_timestamp_range: range,
+        }
+    }
+
+    #[must_use]
+    fn rewrite_to_stream_batch_source(&self) -> Self {
+        let column_catalog = self.core.column_catalog.clone();
+        // Filter out the generated columns.
+        let row_id_index = Self::rewrite_row_id_idx(&column_catalog, self.core.row_id_index);
+        let source_column_catalogs = column_catalog
+            .into_iter()
+            .filter(|c| !c.is_generated())
+            .collect_vec();
+        let core = generic::Source {
+            catalog: self.core.catalog.clone(),
+            column_catalog: source_column_catalogs,
+            pk_col_ids: self.core.pk_col_ids.clone(),
+            row_id_index,
+            gen_row_id: self.core.gen_row_id,
+            for_table: self.core.for_table,
+            ctx: self.core.ctx.clone(),
+        };
+        let base = PlanBase::new_logical_with_core(&core);
+
+        Self {
+            base,
+            core,
+            kafka_timestamp_range: self.kafka_timestamp_range,
+        }
+    }
+
+    fn wrap_with_optional_generated_columns_stream_proj(&self) -> Result<PlanRef> {
+        let column_catalogs = self.core.column_catalog.clone();
+        let pk_indices = self.logical_pk();
+        let exprs = Self::gen_optional_generated_column_project_exprs(
+            column_catalogs
+                .iter()
+                .map(|c| &c.column_desc)
+                .cloned()
+                .collect_vec(),
+        )?;
+        if let Some(exprs) = exprs {
+            let source = StreamSource::new(self.rewrite_to_stream_batch_source());
+            let logical_project = LogicalProject::with_pk_indices(source.into(), exprs, pk_indices);
+            Ok(StreamProject::new(logical_project).into())
+        } else {
+            let source = StreamSource::new(self.clone());
+            Ok(source.into())
+        }
+    }
+
+    fn wrap_with_optional_generated_columns_batch_proj(&self) -> Result<PlanRef> {
+        let column_catalogs = self.core.column_catalog.clone();
+        let pk_indices = self.logical_pk();
+        let exprs = Self::gen_optional_generated_column_project_exprs(
+            column_catalogs
+                .iter()
+                .map(|c| &c.column_desc)
+                .cloned()
+                .collect_vec(),
+        )?;
+        if let Some(exprs) = exprs {
+            let source = BatchSource::new(self.rewrite_to_stream_batch_source());
+            let logical_project = LogicalProject::with_pk_indices(source.into(), exprs, pk_indices);
+            Ok(BatchProject::new(logical_project).into())
+        } else {
+            let source = BatchSource::new(self.clone());
+            Ok(source.into())
         }
     }
 }
@@ -440,13 +522,20 @@ impl PredicatePushdown for LogicalSource {
 
 impl ToBatch for LogicalSource {
     fn to_batch(&self) -> Result<PlanRef> {
-        Ok(BatchSource::new(self.clone()).into())
+        let source = self.wrap_with_optional_generated_columns_batch_proj()?;
+        Ok(source)
     }
 }
 
 impl ToStream for LogicalSource {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        let mut plan: PlanRef = StreamSource::new(self.clone()).into();
+        let mut plan = if self.core.for_table {
+            StreamSource::new(self.rewrite_to_stream_batch_source()).into()
+        } else {
+            // Create MV on source.
+            self.wrap_with_optional_generated_columns_stream_proj()?
+        };
+
         if let Some(catalog) = self.source_catalog() && !catalog.watermark_descs.is_empty() && !self.core.for_table{
             plan = StreamWatermarkFilter::new(plan, catalog.watermark_descs.clone()).into();
         }
