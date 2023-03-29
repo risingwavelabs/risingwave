@@ -157,7 +157,11 @@ impl PlanTreeNodeBinary for BatchHashJoin {
         let mut logical = self.logical.clone();
         logical.left = left;
         logical.right = right;
-        Self::new(self.base.clone(), logical, self.eq_join_predicate.clone())
+        Self::new(
+            self.base.clone_with_new_plan_id(),
+            logical,
+            self.eq_join_predicate.clone(),
+        )
     }
 }
 

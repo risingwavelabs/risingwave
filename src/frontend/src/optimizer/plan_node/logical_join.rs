@@ -154,11 +154,6 @@ impl LogicalJoin {
         self.core.l2i_col_mapping()
     }
 
-    /// Get the Mapping of columnIndex from right column index to internal column index.
-    pub fn r2i_col_mapping(&self) -> ColIndexMapping {
-        self.core.r2i_col_mapping()
-    }
-
     /// get the Mapping of columnIndex from internal column index to output column index
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
         self.core.i2o_col_mapping()
