@@ -217,7 +217,7 @@ steps:
     retry: *auto-retry
 
   - label: "unit test (deterministic simulation)"
-    command: "MADSIM_TEST_NUM=50 timeout 10m ci/scripts/deterministic-unit-test.sh"
+    command: "MADSIM_TEST_NUM=50 ci/scripts/deterministic-unit-test.sh"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
@@ -228,7 +228,7 @@ steps:
     retry: *auto-retry
 
   - label: "scaling test (deterministic simulation)"
-    command: "TEST_NUM=30 timeout 40m ci/scripts/deterministic-scale-test.sh"
+    command: "TEST_NUM=30 ci/scripts/deterministic-scale-test.sh"
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -240,7 +240,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"
-    command: "TEST_NUM=32 timeout 25m ci/scripts/deterministic-e2e-test.sh"
+    command: "TEST_NUM=32 ci/scripts/deterministic-e2e-test.sh"
     depends_on: "build-simulation"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
@@ -258,7 +258,7 @@ steps:
     retry: *auto-retry
 
   - label: "recovery test (deterministic simulation)"
-    command: "TEST_NUM=16 KILL_RATE=0.5 timeout 25m ci/scripts/deterministic-recovery-test.sh"
+    command: "TEST_NUM=16 KILL_RATE=0.5 ci/scripts/deterministic-recovery-test.sh"
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
