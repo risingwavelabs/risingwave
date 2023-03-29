@@ -56,8 +56,6 @@ pub fn atan2_f64(input_x: F64, input_y: F64) -> F64 {
     input_x.0.atan2(input_y.0).into()
 }
 
-//  cargo test --package risingwave_expr --lib -- vector_op::trigonometric::tests --nocapture
-
 #[cfg(test)]
 mod tests {
 
