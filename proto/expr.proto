@@ -107,12 +107,12 @@ message ExprNode {
     QUOTE_IDENT = 244;
     SIN = 245;
     COS = 246;
-    TAN = 247; 
-    COT = 248; 
-    ASIN = 249; 
-    ACOS = 250; 
-    ATAN = 251; 
-    ATAN2 = 252; 
+    TAN = 247;
+    COT = 248;
+    ASIN = 249;
+    ACOS = 250;
+    ATAN = 251;
+    ATAN2 = 252;
 
     // Boolean comparison
     IS_TRUE = 301;
