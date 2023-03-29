@@ -312,6 +312,7 @@ impl Bitmap {
             bits: &self.bits,
             idx: 0,
             num_bits: self.num_bits,
+            current_usize: 0,
         }
     }
 
@@ -558,6 +559,7 @@ pub struct BitmapIter<'a> {
     bits: &'a [usize],
     idx: usize,
     num_bits: usize,
+    current_usize: usize,
 }
 
 impl<'a> iter::Iterator for BitmapIter<'a> {
@@ -567,13 +569,19 @@ impl<'a> iter::Iterator for BitmapIter<'a> {
         if self.idx >= self.num_bits {
             return None;
         }
-        // Get the index of usize which the bit is located in
-        let usize_index = self.idx / BITS;
+
         // Offset of the bit within the usize.
         let usize_offset = self.idx % BITS;
+
+        if usize_offset == 0 {
+            // Get the index of usize which the bit is located in
+            let usize_index = self.idx / BITS;
+            self.current_usize = unsafe { *self.bits.get_unchecked(usize_index) };
+        }
+
         let bit_mask = 1 << usize_offset;
-        let usize_containing_bit = unsafe { self.bits.get_unchecked(usize_index) };
-        let bit_flag = usize_containing_bit & bit_mask != 0;
+
+        let bit_flag = self.current_usize & bit_mask != 0;
         self.idx += 1;
         Some(bit_flag)
     }
