@@ -173,14 +173,15 @@ impl BitmapBuilder {
 /// An immutable bitmap. Use [`BitmapBuilder`] to build it.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Bitmap {
-    // The useful bits in the bitmap. The total number of bits will usually
-    // be larger than the useful bits due to byte-padding.
+    /// The useful bits in the bitmap. The total number of bits will usually
+    /// be larger than the useful bits due to byte-padding.
     num_bits: usize,
 
-    // The number of high bits in the bitmap.
+    /// The number of high bits in the bitmap.
     count_ones: usize,
 
-    /// Bits are stored in a compact form via usize.
+    /// Bits are stored in a compact form.
+    /// They are packed into `usize`s.
     bits: Box<[usize]>,
 }
 
