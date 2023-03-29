@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use criterion::{criterion_group, criterion_main, BatchSize, Criterion, black_box};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use itertools::Itertools;
 use risingwave_common::buffer::{Bitmap, BitmapIter};
 
@@ -23,9 +23,27 @@ fn bench_bitmap(c: &mut Criterion) {
     let i = 0x123;
     c.bench_function("zeros", |b| b.iter(|| Bitmap::zeros(CHUNK_SIZE)));
     c.bench_function("ones", |b| b.iter(|| Bitmap::ones(CHUNK_SIZE)));
-    c.bench_function("get", |b| b.iter(|| for _ in 0..1000 { black_box(x.is_set(i)); }));
-    c.bench_function("get_1000", |b| b.iter(|| for _ in 0..1000 { black_box(x.is_set(i)); }));
-    c.bench_function("get_1000_000", |b| b.iter(|| for _ in 0..1000_000 { black_box(x.is_set(i)); }));
+    c.bench_function("get", |b| {
+        b.iter(|| {
+            for _ in 0..1000 {
+                black_box(x.is_set(i));
+            }
+        })
+    });
+    c.bench_function("get_1000", |b| {
+        b.iter(|| {
+            for _ in 0..1000 {
+                black_box(x.is_set(i));
+            }
+        })
+    });
+    c.bench_function("get_1000_000", |b| {
+        b.iter(|| {
+            for _ in 0..1_000_000 {
+                black_box(x.is_set(i));
+            }
+        })
+    });
     c.bench_function("and", |b| b.iter(|| &x & &y));
     c.bench_function("or", |b| b.iter(|| &x | &y));
     c.bench_function("not", |b| b.iter(|| !&x));
