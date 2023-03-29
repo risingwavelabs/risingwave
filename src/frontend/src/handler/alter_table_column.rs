@@ -102,10 +102,11 @@ pub async fn handle_alter_table_column(
                 )))?
             }
 
-            if new_column.options.iter().any(|x| match x.option {
-                ColumnOption::GeneratedColumns(_) => true,
-                _ => false,
-            }) {
+            if new_column
+                .options
+                .iter()
+                .any(|x| matches!(x.option, ColumnOption::GeneratedColumns(_)))
+            {
                 Err(ErrorCode::InvalidInputSyntax(format!(
                     "alter table add generated columns is not supported"
                 )))?
