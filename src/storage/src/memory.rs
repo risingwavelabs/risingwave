@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::ops::Bound::{Excluded, Included, Unbounded};
-use std::ops::{Bound, RangeBounds};
+use std::ops::{Bound, DerefMut, RangeBounds};
 use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
@@ -33,6 +33,7 @@ use crate::{
     define_state_store_write_associated_type,
 };
 
+pub type BytesUserKey = UserKey<Bytes>;
 pub type BytesFullKey = FullKey<Bytes>;
 pub type BytesFullKeyRange = (Bound<BytesFullKey>, Bound<BytesFullKey>);
 
@@ -52,7 +53,12 @@ pub trait RangeKv: Clone + Send + Sync + 'static {
     fn flush(&self) -> StorageResult<()>;
 }
 
-pub type BTreeMapRangeKv = Arc<RwLock<BTreeMap<BytesFullKey, Option<Bytes>>>>;
+pub type BTreeMapRangeKv = Arc<
+    RwLock<(
+        BTreeMap<BytesFullKey, Option<Bytes>>,
+        BTreeMap<BytesUserKey, Option<Bytes>>,
+    )>,
+>;
 
 impl RangeKv for BTreeMapRangeKv {
     fn range(
@@ -63,6 +69,7 @@ impl RangeKv for BTreeMapRangeKv {
         let limit = limit.unwrap_or(usize::MAX);
         Ok(self
             .read()
+            .0
             .range(range)
             .take(limit)
             .map(|(key, value)| (key.clone(), value.clone()))
@@ -74,11 +81,16 @@ impl RangeKv for BTreeMapRangeKv {
         kv_pairs: impl Iterator<Item = (BytesFullKey, Option<Bytes>)>,
     ) -> StorageResult<()> {
         let mut inner = self.write();
+        let (full_key_map, user_key_map) = inner.deref_mut();
+        println!("OLD SIZE {:?}", full_key_map.len());
         for (key, value) in kv_pairs {
             let is_delete_operation = value.is_none();
-            let old_value = inner.insert(key, value);
+            println!("{key:?}, {value:?}");
+            let old_value = user_key_map.insert(key.user_key.clone(), value.clone());
             assert_eq!(is_delete_operation, matches!(old_value, Some(Some(_))));
+            full_key_map.insert(key, value);
         }
+        println!("NEW SIZE {:?}", full_key_map.len());
         Ok(())
     }
 
@@ -361,7 +373,7 @@ mod batched_iter {
 
         #[test]
         fn test_btreemap_iter_chaos() {
-            let map = Arc::new(RwLock::new(BTreeMap::new()));
+            let map = Arc::new(RwLock::new((BTreeMap::new(), BTreeMap::new())));
             test_iter_chaos_inner(map, 1000);
         }
 
