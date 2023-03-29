@@ -38,6 +38,9 @@ impl ExecutorBuilder for ValuesExecutorBuilder {
         _store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
+        let progress = stream
+            .context
+            .register_create_mview_progress(params.actor_context.id);
         let (sender, barrier_receiver) = unbounded_channel();
         stream
             .context
@@ -57,6 +60,7 @@ impl ExecutorBuilder for ValuesExecutorBuilder {
         let schema = Schema::new(node.get_fields().iter().map(Field::from).collect_vec());
         Ok(Box::new(ValuesExecutor::new(
             params.actor_context,
+            progress,
             rows,
             schema,
             barrier_receiver,

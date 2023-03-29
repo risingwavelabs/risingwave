@@ -28,6 +28,7 @@ use super::{
     ActorContextRef, Barrier, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
     StreamExecutorError,
 };
+use crate::task::CreateMviewProgress;
 
 const DEFAULT_CHUNK_SIZE: usize = 1024;
 
@@ -37,6 +38,7 @@ pub struct ValuesExecutor {
     ctx: ActorContextRef,
     // Receiver of barrier channel.
     barrier_receiver: UnboundedReceiver<Barrier>,
+    progress: CreateMviewProgress,
 
     rows: vec::IntoIter<Vec<BoxedExpression>>,
     pk_indices: PkIndices,
@@ -48,6 +50,7 @@ impl ValuesExecutor {
     /// Currently hard-code the `pk_indices` as the last column.
     pub fn new(
         ctx: ActorContextRef,
+        progress: CreateMviewProgress,
         rows: Vec<Vec<BoxedExpression>>,
         schema: Schema,
         barrier_receiver: UnboundedReceiver<Barrier>,
@@ -55,6 +58,7 @@ impl ValuesExecutor {
     ) -> Self {
         Self {
             ctx,
+            progress,
             barrier_receiver,
             rows: rows.into_iter(),
             pk_indices: vec![schema.len()],
@@ -66,6 +70,7 @@ impl ValuesExecutor {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(self) {
         let Self {
+            mut progress,
             mut barrier_receiver,
             schema,
             mut rows,
@@ -117,6 +122,7 @@ impl ValuesExecutor {
         }
 
         while let Some(barrier) = barrier_receiver.recv().await {
+            progress.finish(barrier.epoch.curr);
             yield Message::Barrier(barrier);
         }
     }
@@ -142,6 +148,8 @@ impl Executor for ValuesExecutor {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use futures::StreamExt;
     use risingwave_common::array;
     use risingwave_common::array::{
@@ -155,9 +163,14 @@ mod tests {
     use super::ValuesExecutor;
     use crate::executor::test_utils::StreamExecutorTestExt;
     use crate::executor::{ActorContext, Barrier, Executor, Mutation};
+    use crate::task::{CreateMviewProgress, LocalBarrierManager};
 
     #[tokio::test]
     async fn test_values() {
+        let barrier_manager = LocalBarrierManager::for_test();
+        let progress =
+            CreateMviewProgress::for_test(Arc::new(parking_lot::Mutex::new(barrier_manager)));
+        let actor_id = progress.actor_id();
         let (tx, barrier_receiver) = unbounded_channel();
         let value = StructValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
         let exprs = vec![
@@ -190,7 +203,8 @@ mod tests {
             .map(|col| Field::unnamed(col.return_type()))
             .collect::<Vec<Field>>();
         let values_executor_struct = ValuesExecutor::new(
-            ActorContext::create(1),
+            ActorContext::create(actor_id),
+            progress,
             vec![exprs],
             Schema { fields },
             barrier_receiver,
@@ -201,7 +215,7 @@ mod tests {
         // Init barrier
         let first_message = Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
             adds: Default::default(),
-            added_actors: maplit::hashset! {1},
+            added_actors: maplit::hashset! {actor_id},
             splits: Default::default(),
         });
         tx.send(first_message).unwrap();
