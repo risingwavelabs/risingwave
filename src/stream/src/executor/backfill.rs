@@ -117,7 +117,7 @@ where
         // If the barrier is a conf change of creating this mview, we follow the procedure of
         // backfill. Otherwise, it means we've recovered and we can forward the upstream messages
         // directly.
-        let to_create_mv = first_barrier.is_add_dispatcher(self.actor_id);
+        let to_create_mv = first_barrier.is_newly_added(self.actor_id);
         // If the snapshot is empty, we don't need to backfill.
         let is_snapshot_empty: bool = {
             let snapshot = Self::snapshot_read(&self.table, init_epoch, None, false);

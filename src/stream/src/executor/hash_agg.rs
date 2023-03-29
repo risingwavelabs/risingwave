@@ -39,8 +39,8 @@ use super::aggregation::{
 };
 use super::sort_buffer::SortBuffer;
 use super::{
-    expect_first_barrier, ActorContextRef, Executor, ExecutorInfo, PkIndicesRef,
-    StreamExecutorResult, Watermark,
+    expect_first_barrier, ActorContextRef, ExecutorInfo, PkIndicesRef, StreamExecutorResult,
+    Watermark,
 };
 use crate::cache::{cache_may_stale, new_with_hasher, ExecutorCache};
 use crate::common::table::state_table::StateTable;
@@ -48,7 +48,7 @@ use crate::error::StreamResult;
 use crate::executor::aggregation::{generate_agg_schema, AggCall, AggGroup as GenericAggGroup};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{BoxedMessageStream, Message};
+use crate::executor::{BoxedMessageStream, Executor, Message};
 use crate::task::AtomicU64Ref;
 
 type AggGroup<S> = GenericAggGroup<S, OnlyOutputIfHasInput>;
@@ -731,17 +731,14 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::sync::atomic::AtomicU64;
-    use std::sync::Arc;
+pub mod tests {
 
     use assert_matches::assert_matches;
     use futures::StreamExt;
     use itertools::Itertools;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Op, StreamChunk};
-    use risingwave_common::catalog::{Field, Schema, TableId};
-    use risingwave_common::hash::SerializedKey;
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::row::{AscentOwnedRow, OwnedRow, Row};
     use risingwave_common::types::DataType;
     use risingwave_common::util::iter_util::ZipEqDebug;
@@ -749,74 +746,10 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
-    use crate::executor::agg_common::{AggExecutorArgs, GroupAggExecutorExtraArgs};
     use crate::executor::aggregation::{AggArgs, AggCall};
-    use crate::executor::monitor::StreamingMetrics;
-    use crate::executor::test_utils::agg_executor::{
-        create_agg_state_storage, create_result_table,
-    };
+    use crate::executor::test_utils::agg_executor::new_boxed_hash_agg_executor;
     use crate::executor::test_utils::*;
-    use crate::executor::{ActorContext, Executor, HashAggExecutor, Message, PkIndices};
-
-    #[allow(clippy::too_many_arguments)]
-    async fn new_boxed_hash_agg_executor<S: StateStore>(
-        store: S,
-        input: Box<dyn Executor>,
-        agg_calls: Vec<AggCall>,
-        row_count_index: usize,
-        group_key_indices: Vec<usize>,
-        pk_indices: PkIndices,
-        extreme_cache_size: usize,
-        executor_id: u64,
-    ) -> Box<dyn Executor> {
-        let mut storages = Vec::with_capacity(agg_calls.iter().len());
-        for (idx, agg_call) in agg_calls.iter().enumerate() {
-            storages.push(
-                create_agg_state_storage(
-                    store.clone(),
-                    TableId::new(idx as u32),
-                    agg_call,
-                    &group_key_indices,
-                    &pk_indices,
-                    input.as_ref(),
-                )
-                .await,
-            )
-        }
-
-        let result_table = create_result_table(
-            store,
-            TableId::new(agg_calls.len() as u32),
-            &agg_calls,
-            &group_key_indices,
-            input.as_ref(),
-        )
-        .await;
-
-        HashAggExecutor::<SerializedKey, S>::new(AggExecutorArgs {
-            input,
-            actor_ctx: ActorContext::create(123),
-            pk_indices,
-            executor_id,
-
-            extreme_cache_size,
-
-            agg_calls,
-            row_count_index,
-            storages,
-            result_table,
-            distinct_dedup_tables: Default::default(),
-            watermark_epoch: Arc::new(AtomicU64::new(0)),
-
-            extra: GroupAggExecutorExtraArgs {
-                group_key_indices,
-                chunk_size: 1024,
-                metrics: Arc::new(StreamingMetrics::unused()),
-            },
-        })
-        .unwrap()
-        .boxed()
-    }
+    use crate::executor::{Message, PkIndices};
 
     // --- Test HashAgg with in-memory StateStore ---
 

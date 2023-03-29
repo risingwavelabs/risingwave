@@ -251,14 +251,14 @@ mod tests {
         }
 
         let expected_columns: HashMap<String, String> = maplit::hashmap! {
-            "id".into() => "Int32".into(),
-            "country.zipcode".into() => "Varchar".into(),
-            "zipcode".into() => "Int64".into(),
-            "country.city.address".into() => "Varchar".into(),
-            "country.address".into() => "Varchar".into(),
+            "id".into() => "integer".into(),
+            "country.zipcode".into() => "varchar".into(),
+            "zipcode".into() => "bigint".into(),
+            "country.city.address".into() => "varchar".into(),
+            "country.address".into() => "varchar".into(),
             "country.city".into() => "test.City".into(),
-            "country.city.zipcode".into() => "Varchar".into(),
-            "rate".into() => "Float32".into(),
+            "country.city.zipcode".into() => "varchar".into(),
+            "rate".into() => "real".into(),
             "country".into() => "test.Country".into(),
         };
 
