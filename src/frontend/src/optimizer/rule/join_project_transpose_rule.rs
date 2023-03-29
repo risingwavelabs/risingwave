@@ -61,7 +61,7 @@ impl Rule for JoinProjectTransposeRule {
         let mut has_new_right: bool = false;
 
         // prepare for pull up left child.
-        let new_left = if let Some(project) = left.as_logical_project() && left_input_index_on_condition.iter().all(|index| project.exprs()[*index].as_input_ref().is_some()) && join_type != JoinType::RightAnti && join_type != JoinType::RightSemi && join_type != JoinType::RightOuter {
+        let new_left = if let Some(project) = left.as_logical_project() && left_input_index_on_condition.iter().all(|index| project.exprs()[*index].as_input_ref().is_some()) && join_type != JoinType::RightAnti && join_type != JoinType::RightSemi && join_type != JoinType::RightOuter && join_type != JoinType::FullOuter {
             let (exprs,child) = project.clone().decompose();
 
             old_i2new_i = old_i2new_i.union(&join.i2l_col_mapping_ignore_join_type().composite(&project.o2i_col_mapping()));
@@ -82,7 +82,7 @@ impl Rule for JoinProjectTransposeRule {
         };
 
         // prepare for pull up right child.
-        let new_right = if let Some(project) = right.as_logical_project() && right_input_index_on_condition.iter().all(|index| project.exprs()[*index].as_input_ref().is_some()) && join_type != JoinType::LeftAnti && join_type != JoinType::LeftSemi && join_type != JoinType::LeftOuter{
+        let new_right = if let Some(project) = right.as_logical_project() && right_input_index_on_condition.iter().all(|index| project.exprs()[*index].as_input_ref().is_some()) && join_type != JoinType::LeftAnti && join_type != JoinType::LeftSemi && join_type != JoinType::LeftOuter && join_type != JoinType::FullOuter {
             let (exprs,child) = project.clone().decompose();
 
             old_i2new_i = old_i2new_i.union(&join.i2r_col_mapping_ignore_join_type().composite(&project.o2i_col_mapping()).clone_with_offset(new_left.schema().len()));
