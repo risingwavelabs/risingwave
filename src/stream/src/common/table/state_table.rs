@@ -54,7 +54,7 @@ use crate::cache::cache_may_stale;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 /// This num is arbitrary and we may want to improve this choice in the future.
-const STATE_CLEANING_PERIOD_EPOCH: usize = 5;
+pub const STATE_CLEANING_PERIOD_EPOCH: usize = 5;
 
 /// `StateTableInner` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
@@ -511,10 +511,11 @@ where
 }
 
 // point get
-impl<S, SD> StateTableInner<S, SD>
+impl<S, SD, W> StateTableInner<S, SD, W>
 where
     S: StateStore,
     SD: ValueRowSerde,
+    W: WatermarkBufferStrategy,
 {
     /// Get a single row from state table.
     pub async fn get_row(&self, pk: impl Row) -> StreamExecutorResult<Option<OwnedRow>> {
@@ -609,10 +610,11 @@ where
 }
 
 // write
-impl<S, SD> StateTableInner<S, SD>
+impl<S, SD, W> StateTableInner<S, SD, W>
 where
     S: StateStore,
     SD: ValueRowSerde,
+    W: WatermarkBufferStrategy,
 {
     fn handle_mem_table_error(&self, e: StorageError) {
         let e = match e {

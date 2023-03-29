@@ -13,7 +13,7 @@
 // limitations under the License.
 
 /// Strategy to decide how to buffer the watermarks, used for state cleaning.
-pub trait WatermarkBufferStrategy: Default {
+pub trait WatermarkBufferStrategy: Default + Sync + Send + 'static {
     /// Trigger when a epoch is committed.
     fn tick(&mut self);
 

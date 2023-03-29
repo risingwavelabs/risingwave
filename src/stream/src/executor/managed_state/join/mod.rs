@@ -32,11 +32,13 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::value_encoding::ValueRowSerde;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use crate::cache::{new_with_hasher_in, ExecutorCache};
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::StateTableInner;
+use crate::common::table::WatermarkBufferStrategy;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::{ActorId, AtomicU64Ref};
@@ -218,7 +220,7 @@ impl JoinHashMapMetrics {
     }
 }
 
-pub struct JoinHashMap<K: HashKey, S: StateStore> {
+pub struct JoinHashMap<K: HashKey, S: StateStore, SD: ValueRowSerde, W: WatermarkBufferStrategy> {
     /// Store the join states.
     inner: JoinHashMapInner<K>,
     /// Data types of the join key columns
@@ -228,7 +230,7 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// The memcomparable serializer of primary key.
     pk_serializer: OrderedRowSerde,
     /// State table. Contains the data from upstream.
-    state: TableInner<S>,
+    state: TableInner<S, SD, W>,
     /// Degree table.
     ///
     /// The degree is generated from the hash join executor.
@@ -241,7 +243,7 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// - Left Outer/Semi/Anti: left side
     /// - Right Outer/Semi/Anti: right side
     /// - Inner: None.
-    degree_state: TableInner<S>,
+    degree_state: TableInner<S, SD, W>,
     /// If degree table is need
     need_degree_table: bool,
     /// Pk is part of the join key.
@@ -250,27 +252,29 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     metrics: JoinHashMapMetrics,
 }
 
-struct TableInner<S: StateStore> {
+struct TableInner<S: StateStore, SD: ValueRowSerde, W: WatermarkBufferStrategy> {
     pk_indices: Vec<usize>,
     // This should be identical to the pk in state table.
     order_key_indices: Vec<usize>,
     // This should be identical to the data types in table schema.
     #[expect(dead_code)]
     all_data_types: Vec<DataType>,
-    pub(crate) table: StateTable<S>,
+    pub(crate) table: StateTableInner<S, SD, W>,
 }
 
-impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
+impl<K: HashKey, S: StateStore, SD: ValueRowSerde, W: WatermarkBufferStrategy>
+    JoinHashMap<K, S, SD, W>
+{
     /// Create a [`JoinHashMap`] with the given LRU capacity.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         watermark_epoch: AtomicU64Ref,
         join_key_data_types: Vec<DataType>,
         state_all_data_types: Vec<DataType>,
-        state_table: StateTable<S>,
+        state_table: StateTableInner<S, SD, W>,
         state_pk_indices: Vec<usize>,
         degree_all_data_types: Vec<DataType>,
-        degree_table: StateTable<S>,
+        degree_table: StateTableInner<S, SD, W>,
         degree_pk_indices: Vec<usize>,
         null_matched: NullBitmap,
         need_degree_table: bool,

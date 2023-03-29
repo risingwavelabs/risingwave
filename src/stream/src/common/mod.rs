@@ -14,6 +14,7 @@
 
 pub use builder::*;
 pub use column_mapping::*;
+pub use table::state_table::STATE_CLEANING_PERIOD_EPOCH;
 
 mod builder;
 pub mod cache;

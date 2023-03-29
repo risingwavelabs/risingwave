@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
+use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_expr::expr::{build, build_from_prost, BoxedExpression, InputRefExpression};
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
@@ -24,6 +25,8 @@ use risingwave_pb::stream_plan::HashJoinNode;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
+use crate::common::table::WatermarkBufferByEpoch;
+use crate::common::STATE_CLEANING_PERIOD_EPOCH;
 use crate::executor::hash_join::*;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, PkIndices};
@@ -188,30 +191,34 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
         /// This macro helps to fill the const generic type parameter.
         macro_rules! build {
             ($join_type:ident) => {
-                Ok(Box::new(
-                    HashJoinExecutor::<K, S, { JoinType::$join_type }>::new(
-                        self.ctx,
-                        self.source_l,
-                        self.source_r,
-                        self.params_l,
-                        self.params_r,
-                        self.null_safe,
-                        self.pk_indices,
-                        self.output_indices,
-                        self.executor_id,
-                        self.cond,
-                        self.inequality_pairs,
-                        self.op_info,
-                        self.state_table_l,
-                        self.degree_state_table_l,
-                        self.state_table_r,
-                        self.degree_state_table_r,
-                        self.lru_manager,
-                        self.is_append_only,
-                        self.metrics,
-                        self.chunk_size,
-                    ),
-                ))
+                Ok(Box::new(HashJoinExecutor::<
+                    K,
+                    S,
+                    { JoinType::$join_type },
+                    BasicSerde,
+                    WatermarkBufferByEpoch<STATE_CLEANING_PERIOD_EPOCH>,
+                >::new(
+                    self.ctx,
+                    self.source_l,
+                    self.source_r,
+                    self.params_l,
+                    self.params_r,
+                    self.null_safe,
+                    self.pk_indices,
+                    self.output_indices,
+                    self.executor_id,
+                    self.cond,
+                    self.inequality_pairs,
+                    self.op_info,
+                    self.state_table_l,
+                    self.degree_state_table_l,
+                    self.state_table_r,
+                    self.degree_state_table_r,
+                    self.lru_manager,
+                    self.is_append_only,
+                    self.metrics,
+                    self.chunk_size,
+                )))
             };
         }
         match self.join_type_proto {

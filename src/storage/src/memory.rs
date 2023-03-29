@@ -82,15 +82,12 @@ impl RangeKv for BTreeMapRangeKv {
     ) -> StorageResult<()> {
         let mut inner = self.write();
         let (full_key_map, user_key_map) = inner.deref_mut();
-        println!("OLD SIZE {:?}", full_key_map.len());
         for (key, value) in kv_pairs {
             let is_delete_operation = value.is_none();
-            println!("{key:?}, {value:?}");
             let old_value = user_key_map.insert(key.user_key.clone(), value.clone());
             assert_eq!(is_delete_operation, matches!(old_value, Some(Some(_))));
             full_key_map.insert(key, value);
         }
-        println!("NEW SIZE {:?}", full_key_map.len());
         Ok(())
     }
 

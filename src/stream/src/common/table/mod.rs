@@ -14,6 +14,7 @@
 
 pub mod state_table;
 mod watermark;
+pub use watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 
 #[cfg(test)]
 pub mod test_state_table;
