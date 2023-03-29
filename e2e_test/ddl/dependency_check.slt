@@ -1,0 +1,64 @@
+statement ok
+set rw_streaming_enable_delta_join = true;
+
+statement ok
+create table a (a1 int, a2 int);
+
+statement ok
+create index i_a1 on a(a1);
+
+statement ok
+create table b (b1 int, b2 int);
+
+statement ok
+create index i_b1 on b(b1);
+
+statement ok
+create materialized view mv1 as select * from a join b on a.a1 = b.b1;
+
+statement error other relation\(s\) depend on it
+drop index i_a1;
+
+statement ok
+drop materialized view mv1;
+
+statement ok
+create materialized view mv2 as with ctx as (select a1 from a) select b1 from b;
+
+statement error other relation\(s\) depend on it
+drop table a;
+
+statement ok
+create source src (v int) with (
+    connector = 'datagen',
+    fields.v.kind = 'sequence',
+    fields.v.start = '1',
+    fields.v.end  = '10',
+    datagen.rows.per.second='15',
+    datagen.split.num = '1'
+) row format json;
+
+# Currently we don't support query on non-kafka source, we only check dependency here.
+statement ok
+create view v as select * from src;
+
+statement error other relation\(s\) depend on it
+drop source src;
+
+statement ok
+drop view v;
+
+statement ok
+drop source src;
+
+statement ok
+drop materialized view mv2;
+
+statement ok
+drop table a;
+
+statement ok
+drop table b;
+
+statement ok
+set rw_streaming_enable_delta_join = false;

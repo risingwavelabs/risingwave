@@ -84,6 +84,9 @@ pub struct BatchQueryPlanResult {
     pub(crate) plan: PlanRef,
     pub(crate) query_mode: QueryMode,
     pub(crate) schema: Schema,
+    // Note that these relations are only resolved in the binding phase, and it can only be a
+    // subset of the final one. i.e. the final one may contain more implicit dependencies on
+    // indices.
     pub(crate) dependent_relations: Vec<TableId>,
 }
 

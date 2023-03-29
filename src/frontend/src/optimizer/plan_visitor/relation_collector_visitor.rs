@@ -16,7 +16,7 @@ use std::collections::HashSet;
 
 use risingwave_common::catalog::TableId;
 
-use crate::optimizer::plan_node::{BatchSource, StreamTableScan};
+use crate::optimizer::plan_node::{BatchSource, LogicalScan, StreamSource, StreamTableScan};
 use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::PlanRef;
 
@@ -30,6 +30,9 @@ impl RelationCollectorVisitor {
         Self { relations }
     }
 
+    /// `collect_with` will collect all the relations in the plan and the returned result will
+    /// contain the established ones, which are collected during the binding phase. Note that during
+    /// visiting, the collected relations might be duplicated with the established ones.
     pub fn collect_with(relations: HashSet<TableId>, plan: PlanRef) -> HashSet<TableId> {
         let mut visitor = Self::new_with(relations);
         visitor.visit(plan);
@@ -41,15 +44,30 @@ impl PlanVisitor<()> for RelationCollectorVisitor {
     fn merge(_: (), _: ()) {}
 
     fn visit_batch_seq_scan(&mut self, plan: &crate::optimizer::plan_node::BatchSeqScan) {
-        self.relations
-            .insert(plan.logical().table_desc().table_id.table_id.into());
+        if !plan.logical().is_sys_table() {
+            self.relations.insert(plan.logical().table_desc().table_id);
+        }
+    }
+
+    fn visit_logical_scan(&mut self, plan: &LogicalScan) -> () {
+        if !plan.is_sys_table() {
+            self.relations.insert(plan.table_desc().table_id);
+        }
     }
 
     fn visit_stream_table_scan(&mut self, plan: &StreamTableScan) {
-        self.relations.insert(plan.logical().table_desc().table_id);
+        if !plan.logical().is_sys_table() {
+            self.relations.insert(plan.logical().table_desc().table_id);
+        }
     }
 
     fn visit_batch_source(&mut self, plan: &BatchSource) {
+        if let Some(catalog) = plan.logical().source_catalog() {
+            self.relations.insert(catalog.id.into());
+        }
+    }
+
+    fn visit_stream_source(&mut self, plan: &StreamSource) -> () {
         if let Some(catalog) = plan.logical().source_catalog() {
             self.relations.insert(catalog.id.into());
         }
