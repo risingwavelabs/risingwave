@@ -36,7 +36,7 @@ fn bench_bitmap_iter(c: &mut Criterion) {
     fn make_iterators(bitmaps: &[Bitmap]) -> Vec<BitmapIter<'_>> {
         bitmaps.iter().map(|bitmap| bitmap.iter()).collect_vec()
     }
-    fn bench_bitmap_iter(bench_id: &str, bitmap: Bitmap, c: &mut Criterion) {
+    fn bench_bitmap_iter_inner(bench_id: &str, bitmap: Bitmap, c: &mut Criterion) {
         let bitmaps = vec![bitmap; N_CHUNKS];
         let make_iters = || make_iterators(&bitmaps);
         c.bench_function(bench_id, |b| {
@@ -54,9 +54,9 @@ fn bench_bitmap_iter(c: &mut Criterion) {
         });
     }
     let zeros = Bitmap::zeros(CHUNK_SIZE);
-    bench_bitmap_iter("zeros_iter", zeros, c);
+    bench_bitmap_iter_inner("zeros_iter", zeros, c);
     let ones = Bitmap::ones(CHUNK_SIZE);
-    bench_bitmap_iter("ones_iter", ones, c);
+    bench_bitmap_iter_inner("ones_iter", ones, c);
 }
 
 criterion_group!(benches, bench_bitmap, bench_bitmap_iter);
