@@ -433,7 +433,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         conflict_behavior: &ConflictBehavior,
     ) -> StreamExecutorResult<Vec<(Vec<u8>, KeyOp)>> {
         // fill cache
-        self.fetch_keys(buffer.keys().map(|v| v.as_ref()), table)
+        self.fetch_keys(buffer.keys().map(|v| v.as_ref()), table, conflict_behavior)
             .await?;
 
         let mut fixed_changes = vec![];
@@ -455,8 +455,9 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                         }
                         ConflictBehavior::IgnoreConflict => {
                             match self.force_get(&key) {
-                                Some(_) => (),
+                                Some(_) => (println!("这里")),
                                 None => {
+                                    println!("插入一次");
                                     fixed_changes
                                         .push((key.clone(), KeyOp::Insert(new_row.clone())));
                                     update_cache = true;
@@ -467,7 +468,12 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                     };
 
                     if update_cache {
-                        self.put(key, Some(CompactedRow { row: new_row }));
+                        match conflict_behavior{
+                            ConflictBehavior::NoCheck => unreachable!(),
+                            ConflictBehavior::Overwrite => self.put(key, Some(CompactedRow { row: new_row })),
+                            ConflictBehavior::IgnoreConflict => self.put_without_value(key),
+                        }
+                  
                     }
                 }
                 KeyOp::Delete(_) => {
@@ -487,7 +493,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                     };
 
                     if update_cache {
-                        self.put(key, None);
+                        self.put_without_value(key);
                     }
                 }
                 KeyOp::Update((_, new_row)) => {
@@ -505,7 +511,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                         }
                         ConflictBehavior::IgnoreConflict => {
                             match self.force_get(&key) {
-                                Some(_) => (),
+                                Some(_)=> (),
                                 None => {
                                     fixed_changes
                                         .push((key.clone(), KeyOp::Insert(new_row.clone())));
@@ -517,7 +523,12 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                     };
 
                     if update_cache {
-                        self.put(key, Some(CompactedRow { row: new_row }));
+                        match conflict_behavior{
+                            ConflictBehavior::NoCheck => unreachable!(),
+                            ConflictBehavior::Overwrite => self.put(key, Some(CompactedRow { row: new_row })),
+                            ConflictBehavior::IgnoreConflict => self.put_without_value(key),
+                        }
+                  
                     }
                 }
             }
@@ -529,6 +540,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         &mut self,
         keys: impl Iterator<Item = &'a [u8]>,
         table: &StateTableInner<S, SD>,
+        conflict_behavior: &ConflictBehavior
     ) -> StreamExecutorResult<()> {
         let mut futures = vec![];
         for key in keys {
@@ -545,8 +557,13 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         let mut buffered = stream::iter(futures).buffer_unordered(10).fuse();
         while let Some(result) = buffered.next().await {
             let (key, value) = result;
-            self.data.push(key, value?);
-        }
+            match conflict_behavior{
+                ConflictBehavior::NoCheck => unreachable!(),
+                ConflictBehavior::Overwrite => self.data.push(key, value?),
+                ConflictBehavior::IgnoreConflict => self.data.push(key, None),
+            };
+        }   
+       
 
         Ok(())
     }
@@ -560,8 +577,16 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         })
     }
 
-    pub fn put(&mut self, key: Vec<u8>, value: Option<CompactedRow>) {
+    pub fn is_key_exist_in_cache(&mut self, key: &[u8]) -> bool {
+        self.data.get(key).is_some()
+    }
+
+    pub fn put(&mut self, key: Vec<u8>, value: Option<CompactedRow>, ) {
         self.data.push(key, value);
+    }
+
+    pub fn put_without_value(&mut self, key: Vec<u8> ) {
+        self.data.push(key, None);
     }
 
     fn evict(&mut self) {
@@ -1147,7 +1172,7 @@ mod tests {
         ]);
         let column_ids = vec![0.into(), 1.into()];
 
-        // test double insert one pk, the latter needs to override the former.
+        // test double insert one pk, the latter should be ignored.
         let chunk1 = StreamChunk::from_pretty(
             " i i
             + 1 4
