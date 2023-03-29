@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use chrono::{Datelike, NaiveTime, Timelike};
-use risingwave_common::types::{Date, Decimal, Time, Timestamp, F64};
+use risingwave_common::types::{Date, Decimal, Interval, Time, Timestamp, F64};
 use risingwave_expr_macro::function;
 
 use crate::{ExprError, Result};
@@ -106,6 +106,37 @@ pub fn extract_from_timestamptz(unit: &str, usecs: i64) -> Result<Decimal> {
     }
 }
 
+#[function("extract(varchar, interval) -> decimal")]
+pub fn extract_from_interval(unit: &str, interval: Interval) -> Result<Decimal> {
+    Ok(if unit.eq_ignore_ascii_case("MILLENNIUM") {
+        (interval.years() / 1000).into()
+    } else if unit.eq_ignore_ascii_case("CENTURY") {
+        (interval.years() / 100).into()
+    } else if unit.eq_ignore_ascii_case("DECADE") {
+        (interval.years() / 10).into()
+    } else if unit.eq_ignore_ascii_case("YEAR") {
+        interval.years().into()
+    } else if unit.eq_ignore_ascii_case("QUARTER") {
+        ((interval.months() - 1) / 3 + 1).into()
+    } else if unit.eq_ignore_ascii_case("MONTH") {
+        interval.months().into()
+    } else if unit.eq_ignore_ascii_case("DAY") {
+        interval.days().into()
+    } else if unit.eq_ignore_ascii_case("HOUR") {
+        interval.hours().into()
+    } else if unit.eq_ignore_ascii_case("MINUTE") {
+        interval.minutes().into()
+    } else if unit.eq_ignore_ascii_case("SECOND") {
+        Decimal::from_i128_with_scale(interval.seconds_in_microseconds() as i128, 6)
+    } else if unit.eq_ignore_ascii_case("MILLISECOND") {
+        Decimal::from_i128_with_scale(interval.seconds_in_microseconds() as i128, 3)
+    } else if unit.eq_ignore_ascii_case("MICROSECOND") {
+        interval.seconds_in_microseconds().into()
+    } else {
+        return Err(invalid_unit("interval unit", unit));
+    })
+}
+
 #[function("date_part(varchar, date) -> float64")]
 pub fn date_part_from_date(unit: &str, date: Date) -> Result<F64> {
     // date_part of date manually cast to timestamp
@@ -121,6 +152,11 @@ pub fn date_part_from_time(unit: &str, time: Time) -> Result<F64> {
 #[function("date_part(varchar, timestamp) -> float64")]
 pub fn date_part_from_timestamp(unit: &str, timestamp: Timestamp) -> Result<F64> {
     extract_from_timestamp(unit, timestamp).map(|d| d.into())
+}
+
+#[function("date_part(varchar, interval) -> float64")]
+pub fn date_part_from_interval(unit: &str, interval: Interval) -> Result<F64> {
+    extract_from_interval(unit, interval).map(|d| d.into())
 }
 
 fn invalid_unit(name: &'static str, unit: &str) -> ExprError {
@@ -184,5 +220,24 @@ mod tests {
             extract("JULIAN", ts).unwrap(),
             "2459541.5028075856597222222222".parse().unwrap()
         );
+    }
+
+    #[test]
+    fn test_extract_from_interval() {
+        let interval: Interval = "2345 years 1 mon 250 days 23:22:57.123456".parse().unwrap();
+        let extract = extract_from_interval;
+        assert_eq!(extract("Millennium", interval).unwrap(), 2.into());
+        assert_eq!(extract("Century", interval).unwrap(), 23.into());
+        assert_eq!(extract("Decade", interval).unwrap(), 234.into());
+        assert_eq!(extract("Year", interval).unwrap(), 2345.into());
+        assert_eq!(extract("Month", interval).unwrap(), 1.into());
+        assert_eq!(extract("Day", interval).unwrap(), 250.into());
+        assert_eq!(extract("Hour", interval).unwrap(), 23.into());
+        assert_eq!(extract("Minute", interval).unwrap(), 22.into());
+        assert_eq!(extract("Second", interval).unwrap(), 57.123_456.into());
+        assert_eq!(extract("Millisecond", interval).unwrap(), 57_123.456.into());
+        assert_eq!(extract("Microsecond", interval).unwrap(), 57_123_456.into());
+        assert!(extract("Nanosecond", interval).is_err());
+        assert!(extract("Week", interval).is_err());
     }
 }

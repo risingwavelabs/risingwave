@@ -81,6 +81,36 @@ impl Interval {
         self.usecs.rem_euclid(USECS_PER_DAY) as u64
     }
 
+    /// Returns the years field.
+    pub fn years(&self) -> i32 {
+        self.months / 12
+    }
+
+    /// Returns the months field. range: 0-11
+    pub fn months(&self) -> i32 {
+        self.months % 12
+    }
+
+    /// Returns the days field.
+    pub fn days(&self) -> i32 {
+        self.days
+    }
+
+    /// Returns the hours field. range: 0-23
+    pub fn hours(&self) -> i32 {
+        (self.usecs / USECS_PER_SEC / 3600).rem_euclid(24) as i32
+    }
+
+    /// Returns the minutes field. range: 0-59
+    pub fn minutes(&self) -> i32 {
+        (self.usecs / USECS_PER_SEC / 60).rem_euclid(60) as i32
+    }
+
+    /// Returns the seconds field, including fractional parts, in microseconds. range: 0-59,999,999
+    pub fn seconds_in_microseconds(&self) -> i32 {
+        (self.usecs % (USECS_PER_SEC * 60)) as i32
+    }
+
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output.write_i32::<BigEndian>(self.months)?;
         output.write_i32::<BigEndian>(self.days)?;
