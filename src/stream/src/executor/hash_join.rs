@@ -1658,29 +1658,29 @@ mod tests {
 
     #[tokio::test]
     async fn test_streaming_hash_join_sanity_check() -> StreamExecutorResult<()> {
-        let chunk_l1 = StreamChunk::from_pretty(
+        let chunk_r1 = StreamChunk::from_pretty(
             "  I I
              + 2 5
              + 3 6",
         );
-        let chunk_l2 = StreamChunk::from_pretty(
+        let chunk_r2 = StreamChunk::from_pretty(
             "  I I
              + 3 8
              - 3 8",
         );
-        let chunk_r1 = StreamChunk::from_pretty(
+        let chunk_l1 = StreamChunk::from_pretty(
             "  I I
              + 1 1
              + 2 7
              + 4 8
              + 6 9",
         );
-        let chunk_r2 = StreamChunk::from_pretty(
+        let chunk_l2 = StreamChunk::from_pretty(
             "  I  I
              + 3 10
              + 6 11",
         );
-        let chunk_r3 = StreamChunk::from_pretty(
+        let chunk_l3 = StreamChunk::from_pretty(
             "  I I
              - 1 1",
         );
@@ -1692,8 +1692,8 @@ mod tests {
         tx_r.push_barrier(1, false);
         hash_join.next_unwrap_ready_barrier()?;
 
-        // push the 1st left chunk
-        tx_l.push_chunk(chunk_l1);
+        // push the 1st right chunk
+        tx_r.push_chunk(chunk_r1);
         hash_join.next_unwrap_pending();
 
         // push the init barrier for left and right
@@ -1701,36 +1701,36 @@ mod tests {
         tx_r.push_barrier(2, false);
         hash_join.next_unwrap_ready_barrier()?;
 
-        // push the 2nd left chunk
-        tx_l.push_chunk(chunk_l2);
+        // push the 2nd right chunk
+        tx_r.push_chunk(chunk_r2);
         hash_join.next_unwrap_pending();
 
-        // push the 1st right chunk
-        tx_r.push_chunk(chunk_r1);
+        // push the 1st left chunk
+        tx_l.push_chunk(chunk_l1);
         let chunk = hash_join.next_unwrap_ready_chunk()?;
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
                 " I I I I
-                + 2 5 2 7"
+                + 2 7 2 5"
             )
         );
 
         // push the 2nd right chunk
-        tx_r.push_chunk(chunk_r2);
+        tx_l.push_chunk(chunk_l2);
         let chunk = hash_join.next_unwrap_ready_chunk()?;
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
                 " I I I I
-                + 3 6 3 10"
+                + 3 10 3 6"
             )
         );
 
-        tx_l.push_int64_watermark(0, 3);
+        tx_r.push_int64_watermark(0, 3);
         hash_join.next_unwrap_pending();
 
-        tx_r.push_int64_watermark(0, 1);
+        tx_l.push_int64_watermark(0, 1);
         hash_join.next_unwrap_ready_watermark()?;
         hash_join.next_unwrap_ready_watermark()?;
 
@@ -1738,12 +1738,13 @@ mod tests {
         tx_r.push_barrier(3, false);
         hash_join.next_unwrap_ready_barrier()?;
 
-        // this may fail sanity check
-        tx_r.push_chunk(chunk_r3);
+        // this chunk is the root cause of sanity check fail
+        tx_l.push_chunk(chunk_l3);
         hash_join.next_unwrap_pending();
 
         tx_l.push_barrier(4, false);
         tx_r.push_barrier(4, false);
+        // this may fail sanity check during commit
         hash_join.next_unwrap_ready_barrier()?;
 
         Ok(())
