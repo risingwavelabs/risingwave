@@ -32,9 +32,9 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     HummockVersionUpdateExt,
 };
 use risingwave_hummock_sdk::{
-    CompactionGroupId, ExtendedSstableInfo, HummockCompactionTaskId, HummockContextId,
-    HummockEpoch, HummockSstableId, HummockSstableObjectId, HummockVersionId, SstObjectIdRange,
-    INVALID_VERSION_ID,
+    version_checkpoint_object_store_url, version_checkpoint_path, CompactionGroupId,
+    ExtendedSstableInfo, HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockSstableId,
+    HummockSstableObjectId, HummockVersionId, SstObjectIdRange, INVALID_VERSION_ID,
 };
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::group_delta::DeltaType;
@@ -56,8 +56,8 @@ use crate::hummock::compaction::{
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
-    trigger_lsm_stat, trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state,
-    trigger_sst_stat, trigger_version_stat,
+    trigger_delta_log_stats, trigger_lsm_stat, trigger_pin_unpin_snapshot_state,
+    trigger_pin_unpin_version_state, trigger_sst_stat, trigger_version_stat,
 };
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{
@@ -116,7 +116,7 @@ pub struct HummockManager<S: MetaStore> {
     event_sender: HummockManagerEventSender,
 
     object_store: ObjectStoreRef,
-    checkpoint_path: String,
+    version_checkpoint_path: String,
 }
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
@@ -162,12 +162,11 @@ macro_rules! read_lock {
     };
 }
 pub(crate) use read_lock;
-use risingwave_backup::{checkpoint_path, object_store_client};
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
 };
-use risingwave_object_store::object::ObjectStoreRef;
+use risingwave_object_store::object::{parse_remote_object_store, ObjectStoreRef};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::PbCompactionGroupInfo;
@@ -287,9 +286,14 @@ where
         let state_store_url = sys_params.state_store();
         let state_store_dir = sys_params.data_directory();
         let object_store = Arc::new(
-            object_store_client(state_store_url, metrics.object_store_metric.clone()).await,
+            parse_remote_object_store(
+                &version_checkpoint_object_store_url(state_store_url),
+                metrics.object_store_metric.clone(),
+                "Version Checkpoint",
+            )
+            .await,
         );
-        let checkpoint_path = checkpoint_path(state_store_dir);
+        let checkpoint_path = version_checkpoint_path(state_store_dir);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let instance = HummockManager {
             env,
@@ -315,7 +319,7 @@ where
             }),
             event_sender: tx,
             object_store,
-            checkpoint_path,
+            version_checkpoint_path: checkpoint_path,
         };
         let instance = Arc::new(instance);
         instance.start_worker(rx).await;
@@ -414,45 +418,43 @@ where
                 .map(|version_delta| (version_delta.id, version_delta))
                 .collect();
 
-        let mut is_init = false;
-        // 1. Try to read checkpoint from object store first.
-        let checkpoint_from_object_store = self.read_checkpoint().await?;
-        let mut redo_state = match checkpoint_from_object_store {
-            Some(checkpoint) => {
-                versioning_guard.checkpoint = checkpoint;
-                versioning_guard
-                    .checkpoint
-                    .checkpoint
-                    .as_ref()
-                    .cloned()
-                    .unwrap()
-            }
-            None => {
-                // 2. Then, for backward compatibility, try to read checkpoint from meta store.
-                let versions = HummockVersion::list(self.env.meta_store()).await?;
-                let checkpoint_version = if !versions.is_empty() {
-                    let checkpoint = versions.into_iter().next().unwrap();
-                    tracing::warn!(
-                        "read hummock version checkpoint from meta store: {:#?}",
-                        checkpoint
-                    );
+        let mut need_init = self.need_init().await?;
+        let mut redo_state = if need_init {
+            // For backward compatibility, try to read checkpoint from meta store.
+            let versions = HummockVersion::list(self.env.meta_store()).await?;
+            let checkpoint_version = if !versions.is_empty() {
+                // Reject further init op.
+                need_init = false;
+                let checkpoint = versions.into_iter().next().unwrap();
+                tracing::warn!(
+                    "read hummock version checkpoint from meta store: {:#?}",
                     checkpoint
-                } else {
-                    // 3. Lastly, as no record found in stores, create a initial version.
-                    is_init = true;
-                    let checkpoint = create_init_version();
-                    tracing::info!("init hummock version checkpoint");
-                    checkpoint
-                };
-                versioning_guard.checkpoint = HummockVersionCheckpoint {
-                    checkpoint: Some(checkpoint_version.clone()),
-                    stale_objects: Default::default(),
-                };
-                self.write_checkpoint(&versioning_guard.checkpoint).await?;
-                checkpoint_version
-            }
+                );
+                checkpoint
+            } else {
+                // As no record found in stores, create a initial version.
+                let checkpoint = create_init_version();
+                tracing::info!("init hummock version checkpoint");
+                checkpoint
+            };
+            versioning_guard.checkpoint = HummockVersionCheckpoint {
+                version: Some(checkpoint_version.clone()),
+                stale_objects: Default::default(),
+            };
+            self.write_checkpoint(&versioning_guard.checkpoint).await?;
+            self.mark_init().await?;
+            checkpoint_version
+        } else {
+            // Read checkpoint from object store.
+            versioning_guard.checkpoint = self.read_checkpoint().await?.expect("checkpoint exists");
+            versioning_guard
+                .checkpoint
+                .version
+                .as_ref()
+                .cloned()
+                .unwrap()
         };
-        if is_init {
+        if need_init {
             versioning_guard.version_stats = HummockVersionStats::default();
             versioning_guard
                 .version_stats
@@ -465,7 +467,6 @@ where
                 .next()
                 .expect("should contain exact one item");
         }
-
         for version_delta in hummock_version_deltas.values() {
             if version_delta.prev_id == redo_state.id {
                 redo_state.apply_version_delta(version_delta);
@@ -1201,6 +1202,7 @@ where
                 current_version.apply_version_delta(&version_delta);
 
                 trigger_version_stat(&self.metrics, current_version, &versioning.version_stats);
+                trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
 
                 if !deterministic_mode {
                     self.notify_last_version_delta(versioning);
@@ -1530,6 +1532,7 @@ where
         tracing::trace!("new committed epoch {}", epoch);
 
         self.notify_last_version_delta(versioning);
+        trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
 
         drop(versioning_guard);
         // Don't trigger compactions if we enable deterministic compaction

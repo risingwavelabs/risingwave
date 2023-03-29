@@ -347,7 +347,7 @@ impl<S: MetaStore> BackupWorker<S> {
                     hummock_manager
                         .read_checkpoint()
                         .await
-                        .map(|c| c.unwrap().checkpoint.unwrap())
+                        .map(|c| c.unwrap().version.unwrap())
                         .map_err(|e| BackupError::StateStorage(e.into()))
                 })
                 .await?;

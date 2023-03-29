@@ -19,9 +19,10 @@ use itertools::Itertools;
 use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::meta_snapshot::MetaSnapshot;
 use risingwave_backup::storage::MetaSnapshotStorageRef;
-use risingwave_backup::{checkpoint_path, object_store_client};
 use risingwave_common::config::MetaBackend;
+use risingwave_hummock_sdk::{version_checkpoint_object_store_url, version_checkpoint_path};
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionCheckpoint};
 
 use crate::backup_restore::utils::{get_backup_store, get_meta_store, MetaStoreBackendImpl};
@@ -75,11 +76,17 @@ async fn restore_hummock_version(
     state_store_dir: &str,
     hummock_version: &HummockVersion,
 ) -> BackupResult<()> {
-    let object_store =
-        object_store_client(state_store_url, Arc::new(ObjectStoreMetrics::unused())).await;
-    let checkpoint_path = checkpoint_path(state_store_dir);
+    let object_store = Arc::new(
+        parse_remote_object_store(
+            &version_checkpoint_object_store_url(state_store_url),
+            Arc::new(ObjectStoreMetrics::unused()),
+            "Version Checkpoint",
+        )
+        .await,
+    );
+    let checkpoint_path = version_checkpoint_path(state_store_dir);
     let checkpoint = HummockVersionCheckpoint {
-        checkpoint: Some(hummock_version.clone()),
+        version: Some(hummock_version.clone()),
         // Ignore stale objects. Full GC will clear them.
         stale_objects: Default::default(),
     };

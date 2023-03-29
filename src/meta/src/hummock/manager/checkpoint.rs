@@ -17,7 +17,7 @@ use std::ops::{Deref, DerefMut};
 
 use function_name::named;
 use itertools::Itertools;
-use risingwave_backup::checkpoint_dir;
+use risingwave_hummock_sdk::version_checkpoint_dir;
 use risingwave_pb::hummock::hummock_version_checkpoint::StaleObjects;
 use risingwave_pb::hummock::HummockVersionCheckpoint;
 
@@ -25,7 +25,9 @@ use crate::hummock::error::Result;
 use crate::hummock::manager::{read_lock, write_lock};
 use crate::hummock::metrics_utils::trigger_stale_ssts_stat;
 use crate::hummock::HummockManager;
-use crate::storage::MetaStore;
+use crate::storage::{MetaStore, MetaStoreError, DEFAULT_COLUMN_FAMILY};
+
+const HUMMOCK_INIT_FLAG_KEY: &[u8] = b"hummock_init_flag";
 
 /// A hummock version checkpoint compacts previous hummock version delta logs, and stores stale
 /// objects from those delta logs.
@@ -39,16 +41,19 @@ where
         use prost::Message;
         let metadata = self
             .object_store
-            .list(&checkpoint_dir(&self.checkpoint_path))
+            .list(&version_checkpoint_dir(&self.version_checkpoint_path))
             .await?
             .into_iter()
-            .filter(|o| o.key == self.checkpoint_path)
+            .filter(|o| o.key == self.version_checkpoint_path)
             .collect_vec();
         assert!(metadata.len() <= 1);
         if metadata.is_empty() {
             return Ok(None);
         }
-        let data = self.object_store.read(&self.checkpoint_path, None).await?;
+        let data = self
+            .object_store
+            .read(&self.version_checkpoint_path, None)
+            .await?;
         let ckpt = HummockVersionCheckpoint::decode(data).map_err(|e| anyhow::anyhow!(e))?;
         Ok(Some(ckpt))
     }
@@ -60,7 +65,7 @@ where
         use prost::Message;
         let buf = checkpoint.encode_to_vec();
         self.object_store
-            .upload(&self.checkpoint_path, buf.into())
+            .upload(&self.version_checkpoint_path, buf.into())
             .await?;
         Ok(())
     }
@@ -71,13 +76,14 @@ where
     /// lock throughout the method.
     #[named]
     pub async fn create_version_checkpoint(&self, min_delta_log_num: u64) -> Result<u64> {
+        let timer = self.metrics.version_checkpoint_latency.start_timer();
         // 1. hold read lock and create new checkpoint
         let versioning_guard = read_lock!(self, versioning).await;
         let versioning = versioning_guard.deref();
         let current_version = &versioning.current_version;
         let old_checkpoint = &versioning.checkpoint;
         let new_checkpoint_id = current_version.id;
-        let old_checkpoint_id = old_checkpoint.checkpoint.as_ref().unwrap().id;
+        let old_checkpoint_id = old_checkpoint.version.as_ref().unwrap().id;
         if new_checkpoint_id < old_checkpoint_id + min_delta_log_num {
             return Ok(0);
         }
@@ -98,7 +104,7 @@ where
             );
         }
         let new_checkpoint = HummockVersionCheckpoint {
-            checkpoint: Some(current_version.clone()),
+            version: Some(current_version.clone()),
             stale_objects,
         };
         drop(versioning_guard);
@@ -108,19 +114,45 @@ where
         let mut versioning_guard = write_lock!(self, versioning).await;
         let mut versioning = versioning_guard.deref_mut();
         assert!(
-            versioning.checkpoint.checkpoint.is_none()
-                || new_checkpoint.checkpoint.as_ref().unwrap().id
-                    >= versioning.checkpoint.checkpoint.as_ref().unwrap().id
+            versioning.checkpoint.version.is_none()
+                || new_checkpoint.version.as_ref().unwrap().id
+                    >= versioning.checkpoint.version.as_ref().unwrap().id
         );
         versioning.checkpoint = new_checkpoint;
         versioning.mark_objects_for_deletion();
         let remain = versioning.objects_to_delete.len();
         drop(versioning_guard);
+        timer.observe_duration();
         self.metrics
             .checkpoint_version_id
             .set(new_checkpoint_id as i64);
         trigger_stale_ssts_stat(&self.metrics, remain);
 
         Ok(new_checkpoint_id - old_checkpoint_id)
+    }
+
+    pub(super) async fn need_init(&self) -> Result<bool> {
+        match self
+            .env
+            .meta_store()
+            .get_cf(DEFAULT_COLUMN_FAMILY, HUMMOCK_INIT_FLAG_KEY)
+            .await
+        {
+            Ok(_) => Ok(false),
+            Err(MetaStoreError::ItemNotFound(_)) => Ok(true),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub(super) async fn mark_init(&self) -> Result<()> {
+        self.env
+            .meta_store()
+            .put_cf(
+                DEFAULT_COLUMN_FAMILY,
+                HUMMOCK_INIT_FLAG_KEY.to_vec(),
+                memcomparable::to_vec(&0).unwrap(),
+            )
+            .await
+            .map_err(Into::into)
     }
 }

@@ -255,3 +255,23 @@ pub fn can_concat(ssts: &[SstableInfo]) -> bool {
     }
     true
 }
+
+const CHECKPOINT_DIR: &str = "checkpoint";
+const CHECKPOINT_NAME: &str = "0";
+
+/// Creates the object store to persist checkpoint, using the same object store url with
+/// `state_store`.
+pub fn version_checkpoint_object_store_url(state_store_url: &str) -> String {
+    state_store_url
+        .strip_prefix("hummock+")
+        .unwrap_or("memory")
+        .to_string()
+}
+
+pub fn version_checkpoint_path(root_dir: &str) -> String {
+    format!("{}/{}/{}", root_dir, CHECKPOINT_DIR, CHECKPOINT_NAME)
+}
+
+pub fn version_checkpoint_dir(checkpoint_path: &str) -> String {
+    checkpoint_path.trim_end_matches(|c| c != '/').to_string()
+}

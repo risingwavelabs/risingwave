@@ -71,7 +71,7 @@ where
         let versioning = versioning_guard.deref_mut();
         let deltas_to_delete = versioning
             .hummock_version_deltas
-            .range(..=versioning.checkpoint.checkpoint.as_ref().unwrap().id)
+            .range(..=versioning.checkpoint.version.as_ref().unwrap().id)
             .map(|(k, _)| *k)
             .collect_vec();
         // If there is any safe point, skip this to ensure meta backup has required delta logs to
