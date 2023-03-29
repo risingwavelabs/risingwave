@@ -31,7 +31,8 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
 /// `StreamProjectMaterialized` implements [`super::LogicalProject`] to evaluate specified
-/// expressions on input rows.
+/// expressions on input rows. and additionally, materializes the `materialize_columns`
+/// which is a concatenation of the node's PK with the non-pk `forced_materialize_columns`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamProjectMaterialized {
     pub base: PlanBase,
