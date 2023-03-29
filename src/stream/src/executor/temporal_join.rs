@@ -289,8 +289,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<S, T> {
                         }
                     }
                     self.right_table.cache.update_epoch(barrier.epoch.curr);
-                    self.right_table
-                        .update(updates, &self.right_join_keys, barrier.epoch.curr);
+                    self.right_table.update(updates, &self.right_join_keys);
                     prev_epoch = Some(barrier.epoch.curr);
                     yield Message::Barrier(barrier)
                 }
