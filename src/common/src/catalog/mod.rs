@@ -26,6 +26,7 @@ pub use column::*;
 pub use internal_table::*;
 use parse_display::Display;
 pub use physical_table::*;
+use risingwave_pb::catalog::HandleConflictBehavior as PbHandleConflictBehavior;
 pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
 
 pub use crate::constants::hummock;
@@ -368,10 +369,39 @@ impl From<UserId> for u32 {
     }
 }
 
-#[derive(Clone, Debug)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ConflictBehavior {
+    #[default]
     NoCheck,
-    OverWrite,
+    Overwrite,
     IgnoreConflict,
+}
+
+impl ConflictBehavior {
+    pub fn from_protobuf(tb_conflict_behavior: &PbHandleConflictBehavior) -> Self {
+        match tb_conflict_behavior {
+            PbHandleConflictBehavior::Overwrite => ConflictBehavior::Overwrite,
+            PbHandleConflictBehavior::Ignore => ConflictBehavior::IgnoreConflict,
+            // This is for backward compatibility, in the previous version
+            // `ConflictBehaviorUnspecified' represented `NoCheck`, so just treat it as `NoCheck`.
+            PbHandleConflictBehavior::NoCheck
+            | PbHandleConflictBehavior::ConflictBehaviorUnspecified => ConflictBehavior::NoCheck,
+        }
+    }
+
+    pub fn to_protobuf(self) -> PbHandleConflictBehavior {
+        match self {
+            ConflictBehavior::NoCheck => PbHandleConflictBehavior::NoCheck,
+            ConflictBehavior::Overwrite => PbHandleConflictBehavior::Overwrite,
+            ConflictBehavior::IgnoreConflict => PbHandleConflictBehavior::Ignore,
+        }
+    }
+
+    pub fn debug_to_string(self) -> String {
+        match self {
+            ConflictBehavior::NoCheck => "NoCheck".to_string(),
+            ConflictBehavior::Overwrite => "Overwrite".to_string(),
+            ConflictBehavior::IgnoreConflict => "IgnoreConflict".to_string(),
+        }
+    }
 }

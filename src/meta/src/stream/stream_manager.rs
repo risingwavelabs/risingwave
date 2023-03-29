@@ -726,6 +726,7 @@ mod tests {
 
             let (barrier_scheduler, scheduled_barriers) = BarrierScheduler::new_pair(
                 hummock_manager.clone(),
+                meta_metrics.clone(),
                 system_params.checkpoint_frequency() as usize,
             );
 

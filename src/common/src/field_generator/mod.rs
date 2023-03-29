@@ -163,7 +163,7 @@ impl FieldGeneratorImpl {
             DataType::Float64 => Ok(FieldGeneratorImpl::F64Random(F64RandomField::new(
                 min, max, seed,
             )?)),
-            _ => unimplemented!(),
+            _ => unimplemented!("DataType: {}", data_type),
         }
     }
 

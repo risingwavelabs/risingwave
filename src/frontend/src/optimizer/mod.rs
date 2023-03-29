@@ -22,7 +22,7 @@ mod heuristic_optimizer;
 mod plan_rewriter;
 pub use plan_rewriter::PlanRewriter;
 mod plan_visitor;
-pub use plan_visitor::{ExecutionModeDecider, PlanVisitor};
+pub use plan_visitor::{ExecutionModeDecider, PlanVisitor, SysTableVisitor};
 mod logical_optimization;
 mod optimizer_context;
 mod plan_expr_rewriter;
@@ -429,7 +429,7 @@ impl PlanRoot {
 
         let conflict_behavior = match append_only {
             true => ConflictBehavior::NoCheck,
-            false => ConflictBehavior::OverWrite,
+            false => ConflictBehavior::Overwrite,
         };
         StreamMaterialize::create_for_table(
             stream_plan,

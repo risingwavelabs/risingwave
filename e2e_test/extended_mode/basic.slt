@@ -42,17 +42,17 @@ create table t3 (v1 int, v2 int, v3 int);
 query TT
 describe t3;
 ----
-v1 Int32
-v2 Int32
-v3 Int32
+v1 integer
+v2 integer
+v3 integer
 primary key _row_id
 
 query TT
 show columns from t3;
 ----
-v1 Int32
-v2 Int32
-v3 Int32
+v1 integer
+v2 integer
+v3 integer
 
 statement ok
 drop table t3;
