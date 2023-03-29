@@ -21,8 +21,9 @@ use risingwave_expr::expr::*;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::StateStore;
 use risingwave_stream::executor::aggregation::{AggArgs, AggCall};
+use risingwave_stream::executor::test_utils::agg_executor::new_boxed_hash_agg_executor;
 use risingwave_stream::executor::test_utils::*;
-use risingwave_stream::executor::{new_boxed_hash_agg_executor, BoxedExecutor, PkIndices};
+use risingwave_stream::executor::{BoxedExecutor, PkIndices};
 use tokio::runtime::Runtime;
 
 fn bench_hash_agg(c: &mut Criterion) {
