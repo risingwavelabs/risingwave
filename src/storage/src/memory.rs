@@ -597,11 +597,11 @@ impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
                     (Bound::Included(fullkey_start), Bound::Excluded(fullkey_end)),
                     None,
                 )? {
-                    delete_keys.insert(key);
+                    delete_keys.insert(key.user_key.table_key.0);
                 }
             }
             for key in delete_keys {
-                kv_pairs.push((key.user_key.table_key.0, StorageValue::new_delete()));
+                kv_pairs.push((key, StorageValue::new_delete()));
             }
 
             let mut size = 0;
