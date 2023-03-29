@@ -344,11 +344,7 @@ impl<S: MetaStore> BackupWorker<S> {
             let hummock_manager = backup_manager_clone.hummock_manager.clone();
             snapshot_builder
                 .build(job_id, async move {
-                    hummock_manager
-                        .read_checkpoint()
-                        .await
-                        .map(|c| c.unwrap().version.unwrap())
-                        .map_err(|e| BackupError::StateStorage(e.into()))
+                    hummock_manager.get_current_version().await
                 })
                 .await?;
             let snapshot = snapshot_builder.finish()?;

@@ -45,17 +45,17 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
         }
     }
 
-    pub async fn build<D: Future<Output = BackupResult<HummockVersion>>>(
+    pub async fn build<D: Future<Output = HummockVersion>>(
         &mut self,
         id: MetaSnapshotId,
-        hummock_version_checkpoint_builder: D,
+        hummock_version_builder: D,
     ) -> BackupResult<()> {
         self.snapshot.format_version = VERSION;
         self.snapshot.id = id;
-        // Get `hummock_version_checkpoint` before `meta_store_snapshot`.
+        // Get `hummock_version` before `meta_store_snapshot`.
         // We have ensure the required delta logs for replay is available, see
         // `HummockManager::delete_version_deltas`.
-        let hummock_version_checkpoint = hummock_version_checkpoint_builder.await?;
+        let hummock_version = hummock_version_builder.await;
         // Caveat: snapshot impl of etcd meta store doesn't prevent it from expiration.
         // So expired snapshot read may return error. If that happens,
         // tune auto-compaction-mode and auto-compaction-retention on demand.
@@ -63,7 +63,7 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
         let default_cf = self.build_default_cf(&meta_store_snapshot).await?;
         // hummock_version and version_stats is guaranteed to exist in a initialized cluster.
         let hummock_version = {
-            let mut redo_state = hummock_version_checkpoint;
+            let mut redo_state = hummock_version;
             let hummock_version_deltas =
                 HummockVersionDelta::list_at_snapshot::<S>(&meta_store_snapshot).await?;
             for version_delta in &hummock_version_deltas {
@@ -176,7 +176,7 @@ mod tests {
         };
         let get_ckpt_builder = |v: &HummockVersion| {
             let v_ = v.clone();
-            async move { Ok(v_) }
+            async move { v_ }
         };
         hummock_version.insert(meta_store.deref()).await.unwrap();
         let err = builder

@@ -55,13 +55,13 @@ pub struct RestoreOpts {
     #[clap(long, default_value = "")]
     pub etcd_password: String,
     /// Url of storage to fetch meta snapshot from.
-    #[clap(long, default_value_t = String::from("memory"))]
+    #[clap(long)]
     pub storage_url: String,
     /// Directory of storage to fetch meta snapshot from.
     #[clap(long, default_value_t = String::from("backup"))]
     pub storage_directory: String,
     /// Url of storage to restore hummock version to.
-    #[clap(long, default_value_t = String::from("hummock+memory"))]
+    #[clap(long)]
     pub state_store_url: String,
     /// Directory of storage to restore hummock version to.
     #[clap(long, default_value_t = String::from("hummock_001"))]
