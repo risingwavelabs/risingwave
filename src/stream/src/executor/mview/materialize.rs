@@ -463,7 +463,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                         ConflictBehavior::IgnoreConflict => {
                             match self.force_get_for_ignore(&key) {
                                 Some(_) => (),
-                                _ => {
+                                None => {
                                     fixed_changes
                                         .push((key.clone(), KeyOp::Insert(new_row.clone())));
                                     update_cache = true;
@@ -475,11 +475,11 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
 
                     if update_cache {
                         match conflict_behavior {
-                            ConflictBehavior::NoCheck => unreachable!(),
                             ConflictBehavior::Overwrite => {
                                 self.put(key, Some(CompactedRow { row: new_row }))
                             }
                             ConflictBehavior::IgnoreConflict => self.put_without_value(key),
+                            _ => unreachable!(),
                         }
                     }
                 }
@@ -500,7 +500,11 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                     };
 
                     if update_cache {
-                        self.put_without_value(key);
+                        match conflict_behavior {
+                            ConflictBehavior::Overwrite => self.put(key, None),
+                            ConflictBehavior::IgnoreConflict => self.put_without_value(key),
+                            _ => unreachable!(),
+                        }
                     }
                 }
                 KeyOp::Update((_, new_row)) => {
@@ -531,11 +535,11 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
 
                     if update_cache {
                         match conflict_behavior {
-                            ConflictBehavior::NoCheck => unreachable!(),
                             ConflictBehavior::Overwrite => {
                                 self.put(key, Some(CompactedRow { row: new_row }))
                             }
                             ConflictBehavior::IgnoreConflict => self.put_without_value(key),
+                            _ => unreachable!(),
                         }
                     }
                 }
@@ -566,7 +570,6 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         while let Some(result) = buffered.next().await {
             let (key, value) = result;
             match conflict_behavior {
-                ConflictBehavior::NoCheck => unreachable!(),
                 ConflictBehavior::Overwrite => self.data.push(key, CacheValue::Overwrite(value?)),
                 ConflictBehavior::IgnoreConflict => match value? {
                     // for ignore conflict, we only need to check whether the record exist in cache,
@@ -574,6 +577,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                     Some(_) => self.data.push(key, CacheValue::Ignore(Some(()))),
                     None => self.data.push(key, CacheValue::Ignore(None)),
                 },
+                _ => unreachable!(),
             };
         }
 
