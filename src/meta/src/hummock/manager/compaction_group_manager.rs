@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids, get_compaction_group_ssts,
     get_member_table_ids, try_get_compaction_group_id_by_table_id, HummockVersionExt,
-    HummockVersionUpdateExt,
+    HummockVersionUpdateExt, TableGroupInfo,
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::CompactionGroupId;
@@ -635,45 +635,9 @@ impl<S: MetaStore> HummockManager<S> {
     #[named]
     pub async fn calculate_compaction_group_statistic(&self) -> Vec<TableGroupInfo> {
         let versioning_guard = read_lock!(self, versioning).await;
-        let versioning = &versioning_guard.current_version;
-        let mut infos = vec![];
-        for (group_id, group) in &versioning.levels {
-            let group_size = group
-                .levels
-                .iter()
-                .map(|level| level.total_file_size)
-                .sum::<u64>()
-                + group.l0.as_ref().unwrap().total_file_size;
-            let max_level = group.levels.last().unwrap().level_idx;
-            // only calculate the bottommost too level.
-            let mut table_statistic: HashMap<StateTableId, u64> = HashMap::new();
-            let member_table_id: HashSet<u32> = HashSet::from_iter(group.member_table_ids.clone());
-            for level in &group.levels {
-                if level.level_idx + 1 < max_level {
-                    continue;
-                }
-                for sst in &level.table_infos {
-                    if sst.table_ids.len() > 2 {
-                        // do not calculate size for small state-table.
-                        continue;
-                    }
-                    for table_id in &sst.table_ids {
-                        if !member_table_id.contains(table_id) {
-                            continue;
-                        }
-                        let entry = table_statistic.entry(*table_id).or_default();
-                        *entry += sst.file_size;
-                    }
-                }
-            }
-            infos.push(TableGroupInfo {
-                group_id: *group_id,
-                group_size,
-                table_statistic,
-                split_by_table: false,
-            });
-        }
-        infos
+        versioning_guard
+            .current_version
+            .calculate_compaction_group_statistic()
     }
 }
 
@@ -810,13 +774,6 @@ impl CompactionGroupManager {
         compaction_groups.commit();
         Ok(())
     }
-}
-
-pub struct TableGroupInfo {
-    pub group_id: CompactionGroupId,
-    pub group_size: u64,
-    pub table_statistic: HashMap<StateTableId, u64>,
-    pub split_by_table: bool,
 }
 
 fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfig]) {

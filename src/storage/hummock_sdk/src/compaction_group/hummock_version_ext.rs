@@ -95,6 +95,13 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
     }
 }
 
+pub struct TableGroupInfo {
+    pub group_id: CompactionGroupId,
+    pub group_size: u64,
+    pub table_statistic: HashMap<StateTableId, u64>,
+    pub split_by_table: bool,
+}
+
 pub trait HummockVersionExt {
     /// Gets `compaction_group_id`'s levels
     fn get_compaction_group_levels(&self, compaction_group_id: CompactionGroupId) -> &Levels;
@@ -111,6 +118,7 @@ pub trait HummockVersionExt {
     fn level_iter<F: FnMut(&Level) -> bool>(&self, compaction_group_id: CompactionGroupId, f: F);
 
     fn get_object_ids(&self) -> Vec<u64>;
+    fn calculate_compaction_group_statistic(&self) -> Vec<TableGroupInfo>;
 }
 
 pub type BranchedSstInfo = HashMap<CompactionGroupId, /* SST Id */ HummockSstableId>;
@@ -197,6 +205,60 @@ impl HummockVersionExt for HummockVersion {
             .get(&compaction_group_id)
             .map(|group| group.levels.len() + 1)
             .unwrap_or(0)
+    }
+
+    fn calculate_compaction_group_statistic(&self) -> Vec<TableGroupInfo> {
+        let mut infos = vec![];
+        for (group_id, group) in &self.levels {
+            let group_size = group
+                .levels
+                .iter()
+                .map(|level| level.total_file_size)
+                .sum::<u64>()
+                + group.l0.as_ref().unwrap().total_file_size;
+            // only calculate the bottommost too level.
+            let mut table_statistic: HashMap<StateTableId, u64> = HashMap::new();
+            let member_table_id: HashSet<u32> = HashSet::from_iter(group.member_table_ids.clone());
+            for level in &group.l0.as_ref().unwrap().sub_levels {
+                if level.level_type() == LevelType::Overlapping {
+                    continue;
+                }
+                for sst in &level.table_infos {
+                    if sst.table_ids.len() > 1 {
+                        // do not calculate size for small state-table.
+                        continue;
+                    }
+                    if !member_table_id.contains(&sst.table_ids[0]) {
+                        continue;
+                    }
+                    let entry = table_statistic.entry(sst.table_ids[0]).or_default();
+                    *entry += sst.file_size;
+                }
+            }
+
+            for level in &group.levels {
+                for sst in &level.table_infos {
+                    if sst.table_ids.len() > 2 {
+                        // do not calculate size for small state-table.
+                        continue;
+                    }
+                    for table_id in &sst.table_ids {
+                        if !member_table_id.contains(table_id) {
+                            continue;
+                        }
+                        let entry = table_statistic.entry(*table_id).or_default();
+                        *entry += sst.file_size;
+                    }
+                }
+            }
+            infos.push(TableGroupInfo {
+                group_id: *group_id,
+                group_size,
+                table_statistic,
+                split_by_table: false,
+            });
+        }
+        infos
     }
 }
 
