@@ -209,6 +209,7 @@ lazy_static! {
             ProjectEliminateRule::create(),
             TrivialProjectToValuesRule::create(),
             UnionInputValuesMergeRule::create(),
+            JoinProjectTransposeRule::create(),
             // project-join merge should be applied after merge
             // eliminate and to values
             ProjectJoinMergeRule::create(),
@@ -253,12 +254,6 @@ lazy_static! {
         "Void always-false filter's downstream",
         vec![AlwaysFalseFilterRule::create()],
         ApplyOrder::TopDown,
-    );
-
-    static ref JOIN_PROJECT_TRANSPOSE: OptimizationStage = OptimizationStage::new(
-        "Join Project Transpose",
-        vec![JoinProjectTransposeRule::create()],
-        ApplyOrder::BottomUp,
     );
 }
 
@@ -499,8 +494,6 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&DEDUP_GROUP_KEYS);
 
         plan = plan.optimize_by_rules(&TOP_N_AGG_ON_INDEX);
-
-        plan = plan.optimize_by_rules(&JOIN_PROJECT_TRANSPOSE);
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());

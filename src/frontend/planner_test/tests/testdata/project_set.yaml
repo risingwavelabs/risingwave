@@ -143,14 +143,13 @@
       (select unnest(x) as unnest from t);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [Unnest($0)] }
-      └─BatchHashJoin { type: Inner, predicate: Unnest($0) = Unnest($0), output: all }
-        ├─BatchExchange { order: [], dist: HashShard(Unnest($0)) }
-        | └─BatchProjectSet { select_list: [Unnest($0)] }
-        |   └─BatchScan { table: t, columns: [t.x, t._row_id], distribution: UpstreamHashShard(t._row_id) }
-        └─BatchExchange { order: [], dist: HashShard(Unnest($0)) }
-          └─BatchProjectSet { select_list: [Unnest($0)] }
-            └─BatchScan { table: t, columns: [t.x, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─BatchHashJoin { type: Inner, predicate: Unnest($0) = Unnest($0), output: [Unnest($0)] }
+      ├─BatchExchange { order: [], dist: HashShard(Unnest($0)) }
+      | └─BatchProjectSet { select_list: [Unnest($0)] }
+      |   └─BatchScan { table: t, columns: [t.x, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+      └─BatchExchange { order: [], dist: HashShard(Unnest($0)) }
+        └─BatchProjectSet { select_list: [Unnest($0)] }
+          └─BatchScan { table: t, columns: [t.x, t._row_id], distribution: UpstreamHashShard(t._row_id) }
   stream_plan: |
     StreamMaterialize { columns: [unnest, t._row_id(hidden), projected_row_id(hidden), t._row_id#1(hidden), projected_row_id#1(hidden)], stream_key: [t._row_id, projected_row_id, t._row_id#1, projected_row_id#1, unnest], pk_columns: [t._row_id, projected_row_id, t._row_id#1, projected_row_id#1, unnest], pk_conflict: "NoCheck" }
     └─StreamHashJoin { type: Inner, predicate: Unnest($0) = Unnest($0), output: [Unnest($0), t._row_id, projected_row_id, t._row_id, projected_row_id] }

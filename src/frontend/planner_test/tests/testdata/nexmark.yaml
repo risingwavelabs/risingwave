@@ -374,35 +374,34 @@
                       └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [bid.auction, count] }
-      └─BatchHashJoin { type: Inner, predicate: window_start = window_start AND (count >= max(count)), output: all }
-        ├─BatchExchange { order: [], dist: HashShard(window_start) }
-        | └─BatchHashAgg { group_key: [bid.auction, window_start], aggs: [count] }
-        |   └─BatchHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start] }
-        |     └─BatchExchange { order: [], dist: HashShard(bid.auction) }
-        |       └─BatchFilter { predicate: IsNotNull(bid.date_time) }
-        |         └─BatchScan { table: bid, columns: [bid.auction, bid.date_time], distribution: SomeShard }
-        └─BatchHashAgg { group_key: [window_start], aggs: [max(count)] }
-          └─BatchExchange { order: [], dist: HashShard(window_start) }
-            └─BatchHashAgg { group_key: [bid.auction, window_start], aggs: [count] }
-              └─BatchHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start] }
-                └─BatchExchange { order: [], dist: HashShard(bid.auction) }
-                  └─BatchFilter { predicate: IsNotNull(bid.date_time) }
-                    └─BatchScan { table: bid, columns: [bid.auction, bid.date_time], distribution: SomeShard }
+    └─BatchHashJoin { type: Inner, predicate: window_start = window_start AND (count >= max(count)), output: [bid.auction, count] }
+      ├─BatchExchange { order: [], dist: HashShard(window_start) }
+      | └─BatchHashAgg { group_key: [bid.auction, window_start], aggs: [count] }
+      |   └─BatchHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start] }
+      |     └─BatchExchange { order: [], dist: HashShard(bid.auction) }
+      |       └─BatchFilter { predicate: IsNotNull(bid.date_time) }
+      |         └─BatchScan { table: bid, columns: [bid.auction, bid.date_time], distribution: SomeShard }
+      └─BatchHashAgg { group_key: [window_start], aggs: [max(count)] }
+        └─BatchExchange { order: [], dist: HashShard(window_start) }
+          └─BatchHashAgg { group_key: [bid.auction, window_start], aggs: [count] }
+            └─BatchHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start] }
+              └─BatchExchange { order: [], dist: HashShard(bid.auction) }
+                └─BatchFilter { predicate: IsNotNull(bid.date_time) }
+                  └─BatchScan { table: bid, columns: [bid.auction, bid.date_time], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], stream_key: [auction, window_start, window_start#1], pk_columns: [auction, window_start, window_start#1], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [bid.auction, count, window_start, window_start] }
       └─StreamFilter { predicate: (count >= max(count)) }
         └─StreamHashJoin { type: Inner, predicate: window_start = window_start, output: all }
           ├─StreamExchange { dist: HashShard(window_start) }
-          | └─StreamProject { exprs: [bid.auction, count, window_start] }
+          | └─StreamProject { exprs: [bid.auction, window_start, count] }
           |   └─StreamShare { id = 8 }
           |     └─StreamAppendOnlyHashAgg { group_key: [bid.auction, window_start], aggs: [count] }
           |       └─StreamExchange { dist: HashShard(bid.auction, window_start) }
           |         └─StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
           |           └─StreamFilter { predicate: IsNotNull(bid.date_time) }
           |             └─StreamTableScan { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
-          └─StreamProject { exprs: [max(count), window_start] }
+          └─StreamProject { exprs: [window_start, max(count)] }
             └─StreamHashAgg { group_key: [window_start], aggs: [max(count), count] }
               └─StreamExchange { dist: HashShard(window_start) }
                 └─StreamProject { exprs: [bid.auction, window_start, count] }
@@ -419,13 +418,13 @@
     └── StreamProject { exprs: [bid.auction, count, window_start, window_start] }
         └── StreamFilter { predicate: (count >= max(count)) }
             └── StreamHashJoin { type: Inner, predicate: window_start = window_start, output: all } { left table: 0, right table: 2, left degree table: 1, right degree table: 3 }
-                ├──  StreamExchange Hash([2]) from 1
-                └── StreamProject { exprs: [max(count), window_start] }
+                ├──  StreamExchange Hash([1]) from 1
+                └── StreamProject { exprs: [window_start, max(count)] }
                     └── StreamHashAgg { group_key: [window_start], aggs: [max(count), count] } { result table: 6, state tables: [ 5 ], distinct tables: [] }
                         └──  StreamExchange Hash([1]) from 4
 
     Fragment 1
-    StreamProject { exprs: [bid.auction, count, window_start] }
+    StreamProject { exprs: [bid.auction, window_start, count] }
     └──  StreamExchange Hash([0, 1]) from 2
 
     Fragment 2
@@ -443,11 +442,11 @@
     StreamProject { exprs: [bid.auction, window_start, count] }
     └──  StreamExchange Hash([0, 1]) from 2
 
-    Table 0 { columns: [ bid_auction, count, window_start ], primary key: [ $2 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ bid_auction, window_start, count ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
     Table 1 { columns: [ window_start, bid_auction, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 2 { columns: [ max(count), window_start ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ window_start, max(count) ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 3 { columns: [ window_start, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 

@@ -487,13 +487,14 @@
     select max(v1) as max_time from t group by v2 having max(v1) >= now();
   stream_plan: |
     StreamMaterialize { columns: [max_time, t.v2(hidden)], stream_key: [t.v2], pk_columns: [t.v2], pk_conflict: "NoCheck", watermark_columns: [max_time] }
-    └─StreamDynamicFilter { predicate: (max(t.v1) >= now), output_watermarks: [max(t.v1)], output: [max(t.v1), t.v2] }
-      ├─StreamProject { exprs: [max(t.v1), t.v2] }
-      | └─StreamHashAgg { group_key: [t.v2], aggs: [max(t.v1), count] }
-      |   └─StreamExchange { dist: HashShard(t.v2) }
-      |     └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-      └─StreamExchange { dist: Broadcast }
-        └─StreamNow { output: [now] }
+    └─StreamProject { exprs: [max(t.v1), t.v2], output_watermarks: [max(t.v1)] }
+      └─StreamDynamicFilter { predicate: (max(t.v1) >= now), output_watermarks: [max(t.v1)], output: [t.v2, max(t.v1)] }
+        ├─StreamProject { exprs: [t.v2, max(t.v1)] }
+        | └─StreamHashAgg { group_key: [t.v2], aggs: [max(t.v1), count] }
+        |   └─StreamExchange { dist: HashShard(t.v2) }
+        |     └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamExchange { dist: Broadcast }
+          └─StreamNow { output: [now] }
 - name: forbid now in group by for stream
   sql: |
     create table t (v1 timestamp with time zone, v2 int);
