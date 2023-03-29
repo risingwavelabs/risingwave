@@ -298,6 +298,8 @@ mod tests {
             "mem",
             "--storage-url",
             "memory",
+            "--state-store-url",
+            "hummock+memory",
         ])
     }
 
