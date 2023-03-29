@@ -18,6 +18,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use enum_as_inner::EnumAsInner;
 use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
@@ -417,6 +418,7 @@ pub struct MaterializeCache<SD> {
     _serde: PhantomData<SD>,
 }
 
+#[derive(EnumAsInner)]
 enum CacheValue {
     Overwrite(Option<CompactedRow>),
     Ignore(Option<EmptyValue>),
@@ -476,9 +478,14 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                     if update_cache {
                         match conflict_behavior {
                             ConflictBehavior::Overwrite => {
-                                self.put(key, Some(CompactedRow { row: new_row }))
+                                self.data.push(
+                                    key,
+                                    CacheValue::Overwrite(Some(CompactedRow { row: new_row })),
+                                );
                             }
-                            ConflictBehavior::IgnoreConflict => self.put_without_value(key),
+                            ConflictBehavior::IgnoreConflict => {
+                                self.data.push(key, CacheValue::Ignore(Some(())));
+                            }
                             _ => unreachable!(),
                         }
                     }
@@ -501,8 +508,12 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
 
                     if update_cache {
                         match conflict_behavior {
-                            ConflictBehavior::Overwrite => self.put(key, None),
-                            ConflictBehavior::IgnoreConflict => self.put_without_value(key),
+                            ConflictBehavior::Overwrite => {
+                                self.data.push(key, CacheValue::Overwrite(None));
+                            }
+                            ConflictBehavior::IgnoreConflict => {
+                                self.data.push(key, CacheValue::Ignore(Some(())));
+                            }
                             _ => unreachable!(),
                         }
                     }
@@ -536,9 +547,14 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                     if update_cache {
                         match conflict_behavior {
                             ConflictBehavior::Overwrite => {
-                                self.put(key, Some(CompactedRow { row: new_row }))
+                                self.data.push(
+                                    key,
+                                    CacheValue::Overwrite(Some(CompactedRow { row: new_row })),
+                                );
                             }
-                            ConflictBehavior::IgnoreConflict => self.put_without_value(key),
+                            ConflictBehavior::IgnoreConflict => {
+                                self.data.push(key, CacheValue::Ignore(Some(())));
+                            }
                             _ => unreachable!(),
                         }
                     }
@@ -571,12 +587,9 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
             let (key, value) = result;
             match conflict_behavior {
                 ConflictBehavior::Overwrite => self.data.push(key, CacheValue::Overwrite(value?)),
-                ConflictBehavior::IgnoreConflict => match value? {
-                    // for ignore conflict, we only need to check whether the record exist in cache,
-                    // and do not need it's value.
-                    Some(_) => self.data.push(key, CacheValue::Ignore(Some(()))),
-                    None => self.data.push(key, CacheValue::Ignore(None)),
-                },
+                ConflictBehavior::IgnoreConflict => {
+                    self.data.push(key, CacheValue::Ignore(value?.map(|_| ())))
+                }
                 _ => unreachable!(),
             };
         }
@@ -608,14 +621,6 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         } else {
             unreachable!()
         }
-    }
-
-    pub fn put(&mut self, key: Vec<u8>, value: Option<CompactedRow>) {
-        self.data.push(key, CacheValue::Overwrite(value));
-    }
-
-    pub fn put_without_value(&mut self, key: Vec<u8>) {
-        self.data.push(key, CacheValue::Ignore(Some(())));
     }
 
     fn evict(&mut self) {
