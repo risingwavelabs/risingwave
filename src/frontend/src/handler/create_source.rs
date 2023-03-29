@@ -530,7 +530,7 @@ fn validate_compatibility(
     props: &mut HashMap<String, String>,
 ) -> Result<()> {
     let connector = get_connector(props)
-        .ok_or_else(|| RwError::from(ProtocolError(format!("missing field 'connector'"))))?;
+        .ok_or_else(|| RwError::from(ProtocolError("missing field 'connector'".to_string())))?;
     let row_format = source_shema_to_row_format(source_schema);
 
     let compatible_formats = CONNECTORS_COMPATIBLE_FORMATS
@@ -593,9 +593,9 @@ pub async fn handle_create_source(
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     if handler_args.with_options.is_empty() {
-        return Err(RwError::from(InvalidInputSyntax(format!(
-            "missing WITH clause"
-        ))));
+        return Err(RwError::from(InvalidInputSyntax(
+            "missing WITH clause".to_string(),
+        )));
     }
 
     let mut with_properties = handler_args
