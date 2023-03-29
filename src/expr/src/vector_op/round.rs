@@ -26,47 +26,6 @@ pub fn round_digits<D: Into<i32>>(input: Decimal, digits: D) -> Decimal {
     }
 }
 
-#[function("sin(float64) -> float64")]
-pub fn sin_f64(input: F64) -> F64 {
-    f64::sin(input.0).into()
-}
-
-#[function("cos(float64) -> float64")]
-pub fn cos_f64(input: F64) -> F64 {
-    f64::cos(input.0).into()
-}
-
-#[function("tan(float64) -> float64")]
-pub fn tan_f64(input: F64) -> F64 {
-    f64::tan(input.0).into()
-}
-
-#[function("cot(float64) -> float64")]
-pub fn cot_f64(input: F64) -> F64 {
-    let res = 1.0 / f64::tan(input.0);
-    res.into()
-}
-
-#[function("asin(float64) -> float64")]
-pub fn asin_f64(input: F64) -> F64 {
-    f64::asin(input.0).into()
-}
-
-#[function("acos(float64) -> float64")]
-pub fn acos_f64(input: F64) -> F64 {
-    f64::acos(input.0).into()
-}
-
-#[function("atan(float64) -> float64")]
-pub fn atan_f64(input: F64) -> F64 {
-    f64::atan(input.0).into()
-}
-
-#[function("atan2(float64, float64) -> float64")]
-pub fn atan2_f64(input_x: F64, input_y: F64) -> F64 {
-    input_x.0.atan2(input_y.0).into()
-}
-
 #[function("ceil(float64) -> float64")]
 pub fn ceil_f64(input: F64) -> F64 {
     f64::ceil(input.0).into()
