@@ -1,0 +1,154 @@
+query R
+SELECT sin(1)
+----
+0.8414709848078965
+
+query R
+SELECT cos(1)
+----
+0.5403023058681398
+
+query R
+SELECT tan(1)
+----
+1.557407724654902
+
+query R
+SELECT cot(1)
+----
+0.642092615934331
+
+query R
+SELECT asin(1)
+----
+1.5707963267948966
+
+query R
+SELECT acos(1)
+----
+0.0
+
+query R
+SELECT atan(1)
+----
+0.7853981633974483
+
+query R
+SELECT sin(1.1)
+----
+0.8912073600614354
+
+query R
+SELECT cos(1.1)
+----
+0.4535961214255773
+
+query R
+SELECT tan(1.1)
+----
+1.9647596572486525
+
+query R
+SELECT cot(1.1)
+----
+0.508968105239064
+
+query R
+SELECT asin(1.1)
+----
+
+query R
+SELECT acos(1.1)
+----
+
+query R
+SELECT atan(1.1)
+----
+0.8329812666744317
+
+query R
+SELECT sin(-1.1)
+----
+-0.8912073600614354
+
+query R
+SELECT cos(-1.1)
+----
+0.4535961214255773
+
+query R
+SELECT tan(-1.1)
+----
+-1.9647596572486525
+
+query R
+SELECT cot(-1.1)
+----
+-0.508968105239064
+
+query R
+SELECT asin(-1.1)
+----
+
+query R
+SELECT acos(-1.1)
+----
+
+query R
+SELECT atan(-1.1)
+----
+-0.8329812666744317
+
+query R
+SELECT sin(pi())
+----
+1.2246467991473532e-16
+
+query R
+SELECT cos(pi())
+----
+-1.0
+
+query R
+SELECT tan(pi())
+----
+-1.2246467991473532e-16
+
+query R
+SELECT cot(pi())
+----
+-8.16561967659769e+15
+
+query R
+SELECT asin(pi())
+----
+
+query R
+SELECT acos(pi())
+----
+
+query R
+SELECT atan(pi())
+----
+1.2626272556789115
+
+query R
+SELECT atan2(1, 0)
+----
+1.5707963267948966
+
+query R
+SELECT atan2(1.1, 3.8)
+----
+0.2817718672733522
+
+query R
+SELECT atan2(-1.1, -3.8)
+----
+-2.859820786316441
+
+query R
+SELECT atan2(pi(), -3.8)
+----
+2.4507611878363194
+
