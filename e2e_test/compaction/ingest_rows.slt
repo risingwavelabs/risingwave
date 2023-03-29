@@ -26,6 +26,34 @@ with (
   nexmark.min.event.gap.in.ns = '0'
 );
 
+statement error The shema of the nexmark source must specify all columns in order
+CREATE SOURCE person1
+    (name VARCHAR, id BIGINT, "email_address" VARCHAR, "credit_card" VARCHAR, city VARCHAR, state VARCHAR, "date_time" TIMESTAMP, "extra" VARCHAR)
+with (
+  connector = 'nexmark',
+  nexmark.table.type = 'Person',
+  nexmark.split.num = '12',
+  nexmark.min.event.gap.in.ns = '0'
+);
+
+statement error The shema of the nexmark source must specify all columns in order
+CREATE SOURCE auction1 (id BIGINT, description VARCHAR, "item_name" VARCHAR, "initial_bid" BIGINT, reserve BIGINT, "date_time" TIMESTAMP, expires TIMESTAMP, seller BIGINT, category BIGINT, "extra" VARCHAR)
+with (
+  connector = 'nexmark',
+  nexmark.table.type = 'Auction',
+  nexmark.split.num = '12',
+  nexmark.min.event.gap.in.ns = '0'
+);
+
+statement error The shema of the nexmark source must specify all columns in order
+CREATE SOURCE bid1 ("channel" VARCHAR, auction BIGINT, bidder BIGINT, price BIGINT, "url" VARCHAR, "date_time" TIMESTAMP, "extra" VARCHAR)
+with (
+  connector = 'nexmark',
+  nexmark.table.type = 'Bid',
+  nexmark.split.num = '12',
+  nexmark.min.event.gap.in.ns = '0'
+);
+
 statement ok
 CREATE MATERIALIZED VIEW nexmark_q7 AS
 SELECT
