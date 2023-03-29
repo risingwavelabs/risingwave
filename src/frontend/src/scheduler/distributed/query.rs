@@ -455,7 +455,7 @@ pub(crate) mod tests {
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
         generic, BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalFilter,
-        LogicalJoin, LogicalScan, PlanBase, ToBatch,
+        LogicalScan, PlanBase, ToBatch,
     };
     use crate::optimizer::property::{Distribution, Order};
     use crate::optimizer::{OptimizerContext, PlanRef};
