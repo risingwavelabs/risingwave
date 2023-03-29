@@ -19,6 +19,7 @@ mod varchar;
 use std::time::Duration;
 
 use anyhow::Result;
+use chrono::{DateTime, FixedOffset};
 pub use numeric::*;
 use serde_json::Value;
 pub use timestamp::*;
@@ -51,7 +52,13 @@ pub trait NumericFieldRandomGenerator {
 
 /// fields that can be continuously generated impl this trait
 pub trait NumericFieldSequenceGenerator {
-    fn new(start: Option<String>, end: Option<String>, offset: u64, step: u64) -> Result<Self>
+    fn new(
+        start: Option<String>,
+        end: Option<String>,
+        offset: u64,
+        step: u64,
+        event_offset: u64,
+    ) -> Result<Self>
     where
         Self: Sized;
 
@@ -92,6 +99,7 @@ impl FieldGeneratorImpl {
         end: Option<String>,
         split_index: u64,
         split_num: u64,
+        offset: u64,
     ) -> Result<Self> {
         match data_type {
             DataType::Int16 => Ok(FieldGeneratorImpl::I16Sequence(I16SequenceField::new(
@@ -99,30 +107,35 @@ impl FieldGeneratorImpl {
                 end,
                 split_index,
                 split_num,
+                offset,
             )?)),
             DataType::Int32 => Ok(FieldGeneratorImpl::I32Sequence(I32SequenceField::new(
                 start,
                 end,
                 split_index,
                 split_num,
+                offset,
             )?)),
             DataType::Int64 => Ok(FieldGeneratorImpl::I64Sequence(I64SequenceField::new(
                 start,
                 end,
                 split_index,
                 split_num,
+                offset,
             )?)),
             DataType::Float32 => Ok(FieldGeneratorImpl::F32Sequence(F32SequenceField::new(
                 start,
                 end,
                 split_index,
                 split_num,
+                offset,
             )?)),
             DataType::Float64 => Ok(FieldGeneratorImpl::F64Sequence(F64SequenceField::new(
                 start,
                 end,
                 split_index,
                 split_num,
+                offset,
             )?)),
             _ => unimplemented!(),
         }
@@ -155,11 +168,13 @@ impl FieldGeneratorImpl {
     }
 
     pub fn with_timestamp(
+        base: Option<DateTime<FixedOffset>>,
         max_past: Option<String>,
         max_past_mode: Option<String>,
         seed: u64,
     ) -> Result<Self> {
         Ok(FieldGeneratorImpl::Timestamp(TimestampField::new(
+            base,
             max_past,
             max_past_mode,
             seed,
@@ -262,6 +277,7 @@ mod tests {
                     Some("20".to_string()),
                     split_index,
                     split_num,
+                    0,
                 )
                 .unwrap(),
             );
@@ -293,7 +309,7 @@ mod tests {
             let mut generator = match data_type {
                 DataType::Varchar => FieldGeneratorImpl::with_varchar(None, seed).unwrap(),
                 DataType::Timestamp => {
-                    FieldGeneratorImpl::with_timestamp(None, None, seed).unwrap()
+                    FieldGeneratorImpl::with_timestamp(None, None, None, seed).unwrap()
                 }
                 _ => FieldGeneratorImpl::with_number_random(data_type, None, None, seed).unwrap(),
             };
@@ -320,5 +336,17 @@ mod tests {
             assert_eq!(datum1_new, datum1);
             assert_eq!(datum2_new, datum2);
         }
+    }
+
+    #[test]
+    fn test_deterministic_timestamp() {
+        let seed = 1234;
+        let base_time: DateTime<FixedOffset> =
+            DateTime::parse_from_rfc3339("2020-01-01T00:00:00+00:00").unwrap();
+        let mut generator =
+            FieldGeneratorImpl::with_timestamp(Some(base_time), None, None, seed).unwrap();
+        let val1 = generator.generate_json(1);
+        let val2 = generator.generate_json(1);
+        assert_eq!(val1, val2);
     }
 }

@@ -73,11 +73,12 @@ message Sink {
   uint32 database_id = 3;
   string name = 4;
   repeated plan_common.ColumnCatalog columns = 5;
-  repeated common.ColumnOrder pk = 6;
+  // Primary key derived from the SQL by the frontend.
+  repeated common.ColumnOrder plan_pk = 6;
   repeated uint32 dependent_relations = 7;
   repeated int32 distribution_key = 8;
-  // pk_indices of the corresponding materialize operator's output.
-  repeated int32 stream_key = 9;
+  // User-defined primary key indices for the upsert sink.
+  repeated int32 downstream_pk = 9;
   SinkType sink_type = 10;
   uint32 owner = 11;
   map<string, string> properties = 12;
@@ -182,6 +183,7 @@ message Table {
   // `[0..columns.len()]`.
   repeated int32 value_indices = 20;
   string definition = 21;
+  // Used to control whether handling pk conflict for incoming data.
   HandleConflictBehavior handle_pk_conflict_behavior = 22;
   // Anticipated read prefix pattern (number of fields) for the table, which can be utilized
   // for implementing the table's bloom filter or other storage optimization techniques.
@@ -194,9 +196,10 @@ message Table {
 }
 
 enum HandleConflictBehavior {
-  NO_CHECK_UNSPECIFIED = 0;
+  CONFLICT_BEHAVIOR_UNSPECIFIED = 0;
   OVERWRITE = 1;
   IGNORE = 2;
+  NO_CHECK = 3;
 }
 
 message View {

@@ -22,6 +22,8 @@ env_scripts = [
   '''
 #!@duckscript
 
+set_env ENABLE_TELEMETRY "false"
+
 is_sanitizer_enabled = get_env ENABLE_SANITIZER
 is_all_in_one_enabled = get_env ENABLE_ALL_IN_ONE
 is_hdfs_backend = get_env ENABLE_HDFS
@@ -164,7 +166,7 @@ script = '''
 #!/usr/bin/env bash
 set -e
 
-if [[ -z "$1" ]]; then 
+if [[ -z "$1" ]]; then
   echo "Please pass a parameter to this script, defining which logs you want to follow"
   echo "Available logs are..."
   ls ${PREFIX_LOG}
@@ -176,7 +178,7 @@ if [[ ! -f ${PREFIX_LOG}/$1 ]]; then
   echo "Available logs are..."
   ls ${PREFIX_LOG}
   exit 1
-fi 
+fi
 
 tail -f -n 5 ${PREFIX_LOG}/$1
 '''
@@ -369,7 +371,6 @@ cp "src/risedevtool/welcome.sh" "${PREFIX_BIN}/welcome.sh"
 category = "RiseDev - Components"
 description = "Download all available components at once"
 dependencies = [
-  "download-connector",
   "download-maven",
   "download-etcd",
   "download-grafana",
@@ -441,7 +442,7 @@ alias = "playground"
 [tasks.playground]
 category = "RiseDev - Start"
 description = "Start a lite RisingWave playground using risingwave all-in-one binary"
-dependencies = ["download-connector"]
+dependencies = ["build-connector-node"]
 script = '''
 #!/usr/bin/env bash
 
@@ -588,7 +589,7 @@ description = "Run unit tests"
 [tasks.build-connector-node]
 category = "RiseDev - Components"
 dependencies = ["prepare"]
-condition = { env_set = [ "ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
+condition = { env_set = ["ENABLE_BUILD_RW_CONNECTOR"] }
 description = "Build RisingWave Connector from source"
 script = '''
 #!/usr/bin/env bash
@@ -608,24 +609,24 @@ if [[ ! -f ${TARGET_PATH} ]] || [[ ! -z ${REBUILD_CONNECTOR_NODE} ]]; then
   cd "${JAVA_DIR}"
   "${MAVEN_PATH}" --batch-mode --update-snapshots clean package -Dmaven.test.skip
 else
-  echo "Connector node was built already. Skipped. Set REBUILD_CONNECTOR_NODE=1 to enable rebuild"
+  echo "$(tput setaf 4)$(tput bold)[Reminder]$(tput sgr0) Connector node was built already, skipped build. Set $(tput setaf 4)REBUILD_CONNECTOR_NODE=1$(tput sgr0) to enable rebuild"
 fi
 rm -rf ${PREFIX_BIN}/connector-node
 mkdir -p "${PREFIX_BIN}/connector-node"
 tar xf ${TARGET_PATH} -C "${PREFIX_BIN}/connector-node"
 '''
 
-
 [tasks.sbuild]
 category = "RiseDev - Build in simulation mode"
 description = "Build in simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/usr/bin/env bash
 set -e
 
 cargo build \
+  --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
   -p risingwave_batch \
   -p risingwave_common \
   -p risingwave_compute \
@@ -644,12 +645,13 @@ cargo build \
 category = "RiseDev - Deterministic Simulation Test"
 description = "Run unit tests in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/usr/bin/env bash
 set -e
 
 cargo nextest run \
+  --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
   -p risingwave_batch \
   -p risingwave_common \
   -p risingwave_compute \
@@ -668,12 +670,13 @@ cargo nextest run \
 category = "RiseDev - Simulation scaling tests"
 description = "Run integration scaling tests in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/usr/bin/env bash
 set -e
 
 cargo nextest run \
+  --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
   -p risingwave_simulation \
   "$@"
 """
@@ -682,12 +685,13 @@ cargo nextest run \
 category = "RiseDev - Simulation scaling tests"
 description = "Archive integration scaling tests in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/usr/bin/env bash
 set -e
 
 cargo nextest archive \
+  --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
   -p risingwave_simulation \
   --archive-file scale-test.tar.zst \
   "$@"
@@ -697,48 +701,58 @@ cargo nextest archive \
 category = "RiseDev - Deterministic Simulation End-to-end Test"
 description = "Run cargo check in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/usr/bin/env bash
 set -e
 
-cargo check -p risingwave_simulation --all-targets "$@"
+cargo check \
+  --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
+  -p risingwave_simulation --all-targets "$@"
 """
 
 [tasks.sslt]
 category = "RiseDev - Deterministic Simulation End-to-end Test"
 description = "Run e2e tests in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/usr/bin/env bash
 set -e
 
-cargo run -p risingwave_simulation "$@"
+cargo run \
+  --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
+  -p risingwave_simulation "$@"
 """
 
 [tasks.sslt-build-all]
 category = "RiseDev - Deterministic Simulation End-to-end Test"
 description = "Build deterministic simulation runner and tests"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/usr/bin/env bash
 set -e
 
-cargo build -p risingwave_simulation --tests "$@"
+cargo build \
+  --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
+  -p risingwave_simulation \
+  --tests "$@"
 """
 
 [tasks.sslt-cov]
 category = "RiseDev - Deterministic Simulation End-to-end Test"
 description = "Run e2e tests in deterministic simulation mode and report code coverage"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim-cov" }
+env = { CARGO_TARGET_DIR = "target/sim-cov" }
 script = """
 #!/usr/bin/env bash
 set -e
 
-cargo llvm-cov run -p risingwave_simulation --html "$@"
+cargo llvm-cov run \
+  --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
+  -p risingwave_simulation \
+  --html "$@"
 """
 
 [tasks.check-java]
@@ -757,7 +771,7 @@ else
 fi
 
 cd "${JAVA_DIR}"
-"${MAVEN_PATH}" spotless:check
+"${MAVEN_PATH}" spotless:check -q
 """
 
 [tasks.check-java-fix]
@@ -1053,4 +1067,15 @@ script = '''
 set -e
 
 cp -a .risingwave/rw-docker/* docker
+'''
+
+[tasks.generate-example-config]
+category = "misc"
+description = "Generate default config and write to src/config/example.toml"
+script = '''
+cat << EOF > src/config/example.toml
+# This file is generated by ./risedev generate-example-config
+# Check detailed comments in src/common/src/config.rs
+EOF
+cargo run --bin example-config >> src/config/example.toml
 '''

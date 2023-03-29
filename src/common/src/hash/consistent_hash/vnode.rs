@@ -12,9 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use parse_display::Display;
 
+use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::hash::HashCode;
+use crate::row::{Row, RowExt};
+use crate::types::ScalarRefImpl;
+use crate::util::hash_util::Crc32FastBuilder;
+use crate::util::row_id::extract_vnode_id_from_row_id;
 
 /// Parallel unit is the minimal scheduling unit.
 // TODO: make it a newtype
@@ -98,5 +104,80 @@ impl VirtualNode {
     /// Iterates over all virtual nodes.
     pub fn all() -> AllVirtualNodeIter {
         (0..Self::COUNT).map(Self::from_index)
+    }
+}
+
+impl VirtualNode {
+    // `compute_chunk` is used to calculate the `VirtualNode` for the columns in the
+    // chunk. When only one column is provided and its type is `Serial`, we consider the column to
+    // be the one that contains RowId, and use a special method to skip the calculation of Hash
+    // and directly extract the `VirtualNode` from `RowId`.
+    pub fn compute_chunk(data_chunk: &DataChunk, keys: &[usize]) -> Vec<VirtualNode> {
+        if let Ok(idx) = keys.iter().exactly_one() &&
+            let ArrayImpl::Serial(serial_array) = data_chunk.column_at(*idx).array_ref() {
+
+            return serial_array.iter()
+                .map(|serial|extract_vnode_id_from_row_id(serial.unwrap().as_row_id()))
+                .collect();
+        }
+
+        data_chunk
+            .get_hash_values(keys, Crc32FastBuilder)
+            .into_iter()
+            .map(|hash| hash.into())
+            .collect()
+    }
+
+    // `compute_row` is used to calculate the `VirtualNode` for the corresponding column in a `Row`.
+    // Similar to `compute_chunk`, it also contains special handling for serial columns.
+    pub fn compute_row(row: impl Row, indices: &[usize]) -> VirtualNode {
+        let project = row.project(indices);
+        if let Ok(Some(ScalarRefImpl::Serial(s))) = project.iter().exactly_one().as_ref() {
+            return extract_vnode_id_from_row_id(s.as_row_id());
+        }
+
+        project.hash(Crc32FastBuilder).into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::array::DataChunkTestExt;
+    use crate::row::OwnedRow;
+    use crate::types::ScalarImpl;
+    use crate::util::row_id::RowIdGenerator;
+
+    #[tokio::test]
+    async fn test_serial_key_chunk() {
+        let mut gen = RowIdGenerator::new(100);
+        let chunk = format!(
+            "SRL I
+             {} 1
+             {} 2",
+            gen.next().await,
+            gen.next().await,
+        );
+
+        let chunk = DataChunk::from_pretty(chunk.as_str());
+        let vnodes = VirtualNode::compute_chunk(&chunk, &[0]);
+
+        assert_eq!(
+            vnodes.as_slice(),
+            &[VirtualNode::from_index(100), VirtualNode::from_index(100)]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_serial_key_row() {
+        let mut gen = RowIdGenerator::new(100);
+        let row = OwnedRow::new(vec![
+            Some(ScalarImpl::Serial(gen.next().await.into())),
+            Some(ScalarImpl::Int64(12345)),
+        ]);
+
+        let vnode = VirtualNode::compute_row(&row, &[0]);
+
+        assert_eq!(vnode, VirtualNode::from_index(100));
     }
 }

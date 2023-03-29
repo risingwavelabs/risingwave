@@ -16,16 +16,16 @@ use std::collections::{HashMap, HashSet};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, TableDesc, TableId, TableVersionId};
+use risingwave_common::catalog::{
+    ColumnCatalog, ConflictBehavior, TableDesc, TableId, TableVersionId,
+};
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::table::{
-    OptionalAssociatedSourceId, TableType as ProstTableType, TableVersion as ProstTableVersion,
-};
-use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
+use risingwave_pb::catalog::PbTable;
 
-use super::{ColumnId, ConflictBehaviorType, DatabaseId, FragmentId, RelationCatalog, SchemaId};
+use super::{ColumnId, DatabaseId, FragmentId, RelationCatalog, SchemaId};
 use crate::user::UserId;
 use crate::WithOptions;
 
@@ -115,7 +115,10 @@ pub struct TableCatalog {
     /// The full `CREATE TABLE` or `CREATE MATERIALIZED VIEW` definition of the table.
     pub definition: String,
 
-    pub conflict_behavior_type: ConflictBehaviorType,
+    /// The behavior of handling incoming pk conflict from source executor, we can overwrite or
+    /// ignore conflict pk. For normal materialize executor and other executors, this field will be
+    /// `No Check`.
+    pub conflict_behavior: ConflictBehavior,
 
     pub read_prefix_len_hint: usize,
 
@@ -150,27 +153,27 @@ impl Default for TableType {
 }
 
 impl TableType {
-    fn from_prost(prost: ProstTableType) -> Self {
+    fn from_prost(prost: PbTableType) -> Self {
         match prost {
-            ProstTableType::Table => Self::Table,
-            ProstTableType::MaterializedView => Self::MaterializedView,
-            ProstTableType::Index => Self::Index,
-            ProstTableType::Internal => Self::Internal,
-            ProstTableType::Unspecified => unreachable!(),
+            PbTableType::Table => Self::Table,
+            PbTableType::MaterializedView => Self::MaterializedView,
+            PbTableType::Index => Self::Index,
+            PbTableType::Internal => Self::Internal,
+            PbTableType::Unspecified => unreachable!(),
         }
     }
 
-    fn to_prost(self) -> ProstTableType {
+    pub(crate) fn to_prost(self) -> PbTableType {
         match self {
-            Self::Table => ProstTableType::Table,
-            Self::MaterializedView => ProstTableType::MaterializedView,
-            Self::Index => ProstTableType::Index,
-            Self::Internal => ProstTableType::Internal,
+            Self::Table => PbTableType::Table,
+            Self::MaterializedView => PbTableType::MaterializedView,
+            Self::Index => PbTableType::Index,
+            Self::Internal => PbTableType::Internal,
         }
     }
 }
 
-/// The version of a table, used by schema change. See [`ProstTableVersion`].
+/// The version of a table, used by schema change. See [`PbTableVersion`].
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TableVersion {
     pub version_id: TableVersionId,
@@ -189,15 +192,15 @@ impl TableVersion {
         }
     }
 
-    pub fn from_prost(prost: ProstTableVersion) -> Self {
+    pub fn from_prost(prost: PbTableVersion) -> Self {
         Self {
             version_id: prost.version,
             next_column_id: ColumnId::from(prost.next_column_id),
         }
     }
 
-    pub fn to_prost(&self) -> ProstTableVersion {
-        ProstTableVersion {
+    pub fn to_prost(&self) -> PbTableVersion {
+        PbTableVersion {
             version: self.version_id,
             next_column_id: self.next_column_id.into(),
         }
@@ -215,8 +218,8 @@ impl TableCatalog {
         self
     }
 
-    pub fn conflict_behavior_type(&self) -> ConflictBehaviorType {
-        self.conflict_behavior_type
+    pub fn conflict_behavior(&self) -> ConflictBehavior {
+        self.conflict_behavior
     }
 
     pub fn table_type(&self) -> TableType {
@@ -315,7 +318,7 @@ impl TableCatalog {
         self.distribution_key.as_ref()
     }
 
-    pub fn to_internal_table_prost(&self) -> ProstTable {
+    pub fn to_internal_table_prost(&self) -> PbTable {
         use risingwave_common::catalog::{DatabaseId, SchemaId};
         self.to_prost(
             SchemaId::placeholder().schema_id,
@@ -338,8 +341,8 @@ impl TableCatalog {
         self.version().map(|v| v.version_id)
     }
 
-    pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {
-        ProstTable {
+    pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> PbTable {
+        PbTable {
             id: self.id.table_id,
             schema_id,
             database_id,
@@ -369,14 +372,33 @@ impl TableCatalog {
             version: self.version.as_ref().map(TableVersion::to_prost),
             watermark_indices: self.watermark_columns.ones().map(|x| x as _).collect_vec(),
             dist_key_in_pk: self.dist_key_in_pk.iter().map(|x| *x as _).collect(),
-            handle_pk_conflict_behavior: self.conflict_behavior_type,
+            handle_pk_conflict_behavior: self.conflict_behavior.to_protobuf().into(),
         }
+    }
+
+    /// Get columns excluding hidden columns and generated golumns.
+    pub fn columns_to_insert(&self) -> impl Iterator<Item = &ColumnCatalog> {
+        self.columns
+            .iter()
+            .filter(|c| !c.is_hidden() && !c.is_generated())
+    }
+
+    pub fn generated_column_names(&self) -> impl Iterator<Item = &str> {
+        self.columns
+            .iter()
+            .filter(|c| c.is_generated())
+            .map(|c| c.name())
+    }
+
+    pub fn has_generated_column(&self) -> bool {
+        self.columns.iter().any(|c| c.is_generated())
     }
 }
 
-impl From<ProstTable> for TableCatalog {
-    fn from(tb: ProstTable) -> Self {
+impl From<PbTable> for TableCatalog {
+    fn from(tb: PbTable) -> Self {
         let id = tb.id;
+        let tb_conflict_behavior = tb.handle_pk_conflict_behavior();
         let table_type = tb.get_table_type().unwrap();
         let associated_source_id = tb.optional_associated_source_id.map(|id| match id {
             OptionalAssociatedSourceId::AssociatedSourceId(id) => id,
@@ -384,6 +406,8 @@ impl From<ProstTable> for TableCatalog {
         let name = tb.name.clone();
         let mut col_names = HashSet::new();
         let mut col_index: HashMap<i32, usize> = HashMap::new();
+
+        let conflict_behavior = ConflictBehavior::from_protobuf(&tb_conflict_behavior);
         let columns: Vec<ColumnCatalog> = tb.columns.into_iter().map(ColumnCatalog::from).collect();
         for (idx, catalog) in columns.clone().into_iter().enumerate() {
             let col_name = catalog.name();
@@ -397,11 +421,9 @@ impl From<ProstTable> for TableCatalog {
 
         let pk = tb.pk.iter().map(ColumnOrder::from_protobuf).collect();
         let mut watermark_columns = FixedBitSet::with_capacity(columns.len());
-        for idx in tb.watermark_indices {
-            watermark_columns.insert(idx as _);
+        for idx in &tb.watermark_indices {
+            watermark_columns.insert(*idx as _);
         }
-
-        let conflict_behavior_type = tb.handle_pk_conflict_behavior;
 
         Self {
             id: id.into(),
@@ -424,7 +446,7 @@ impl From<ProstTable> for TableCatalog {
             row_id_index: tb.row_id_index.map(|x| x as usize),
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
             definition: tb.definition,
-            conflict_behavior_type,
+            conflict_behavior,
             read_prefix_len_hint: tb.read_prefix_len_hint as usize,
             version: tb.version.map(TableVersion::from_prost),
             watermark_columns,
@@ -433,8 +455,8 @@ impl From<ProstTable> for TableCatalog {
     }
 }
 
-impl From<&ProstTable> for TableCatalog {
-    fn from(tb: &ProstTable) -> Self {
+impl From<&PbTable> for TableCatalog {
+    fn from(tb: &PbTable) -> Self {
         tb.clone().into()
     }
 }
@@ -456,10 +478,8 @@ mod tests {
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_pb::catalog::Table as ProstTable;
-    use risingwave_pb::plan_common::{
-        ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc,
-    };
+    use risingwave_pb::catalog::PbTable;
+    use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
 
     use super::*;
     use crate::catalog::table_catalog::{TableCatalog, TableType};
@@ -467,33 +487,25 @@ mod tests {
 
     #[test]
     fn test_into_table_catalog() {
-        let table: TableCatalog = ProstTable {
+        let table: TableCatalog = PbTable {
             id: 0,
             schema_id: 0,
             database_id: 0,
             name: "test".to_string(),
-            table_type: ProstTableType::Table as i32,
+            table_type: PbTableType::Table as i32,
             columns: vec![
-                ProstColumnCatalog {
+                PbColumnCatalog {
                     column_desc: Some((&row_id_column_desc()).into()),
                     is_hidden: true,
                 },
-                ProstColumnCatalog {
-                    column_desc: Some(ProstColumnDesc::new_struct(
+                PbColumnCatalog {
+                    column_desc: Some(PbColumnDesc::new_struct(
                         "country",
                         1,
                         ".test.Country",
                         vec![
-                            ProstColumnDesc::new_atomic(
-                                DataType::Varchar.to_protobuf(),
-                                "address",
-                                2,
-                            ),
-                            ProstColumnDesc::new_atomic(
-                                DataType::Varchar.to_protobuf(),
-                                "zipcode",
-                                3,
-                            ),
+                            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "address", 2),
+                            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "zipcode", 3),
                         ],
                     )),
                     is_hidden: false,
@@ -517,12 +529,12 @@ mod tests {
             read_prefix_len_hint: 0,
             vnode_col_index: None,
             row_id_index: None,
-            version: Some(ProstTableVersion {
+            version: Some(PbTableVersion {
                 version: 0,
                 next_column_id: 2,
             }),
             watermark_indices: vec![],
-            handle_pk_conflict_behavior: 0,
+            handle_pk_conflict_behavior: 3,
             dist_key_in_pk: vec![],
         }
         .into();
@@ -545,22 +557,11 @@ mod tests {
                             column_id: ColumnId::new(1),
                             name: "country".to_string(),
                             field_descs: vec![
-                                ColumnDesc {
-                                    data_type: DataType::Varchar,
-                                    column_id: ColumnId::new(2),
-                                    name: "address".to_string(),
-                                    field_descs: vec![],
-                                    type_name: String::new(),
-                                },
-                                ColumnDesc {
-                                    data_type: DataType::Varchar,
-                                    column_id: ColumnId::new(3),
-                                    name: "zipcode".to_string(),
-                                    field_descs: vec![],
-                                    type_name: String::new(),
-                                }
+                                ColumnDesc::new_atomic(DataType::Varchar, "address", 2),
+                                ColumnDesc::new_atomic(DataType::Varchar, "zipcode", 3),
                             ],
-                            type_name: ".test.Country".to_string()
+                            type_name: ".test.Country".to_string(),
+                            generated_column: None,
                         },
                         is_hidden: false
                     }
@@ -579,7 +580,7 @@ mod tests {
                 row_id_index: None,
                 value_indices: vec![0],
                 definition: "".into(),
-                conflict_behavior_type: 0,
+                conflict_behavior: ConflictBehavior::NoCheck,
                 read_prefix_len_hint: 0,
                 version: Some(TableVersion::new_initial_for_test(ColumnId::new(1))),
                 watermark_columns: FixedBitSet::with_capacity(2),

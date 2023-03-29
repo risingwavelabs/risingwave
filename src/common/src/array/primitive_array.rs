@@ -18,7 +18,7 @@ use std::mem::size_of;
 
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
-use risingwave_pb::data::{Array as ProstArray, ArrayType};
+use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::{Array, ArrayBuilder, ArrayResult};
 use crate::array::serial_array::Serial;
@@ -26,10 +26,8 @@ use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayMeta};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::for_all_native_types;
 use crate::types::decimal::Decimal;
-use crate::types::interval::IntervalUnit;
-use crate::types::{
-    NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, NativeType, Scalar, ScalarRef,
-};
+use crate::types::interval::Interval;
+use crate::types::{Date, NativeType, Scalar, ScalarRef, Time, Timestamp};
 
 /// Physical type of array items which have fixed size.
 pub trait PrimitiveArrayItemType
@@ -120,10 +118,10 @@ macro_rules! impl_primitive_for_others {
 
 impl_primitive_for_others! {
     { Decimal, Decimal, Decimal },
-    { IntervalUnit, Interval, Interval },
-    { NaiveDateWrapper, Date, NaiveDate },
-    { NaiveTimeWrapper, Time, NaiveTime },
-    { NaiveDateTimeWrapper, Timestamp, NaiveDateTime }
+    { Interval, Interval, Interval },
+    { Date, Date, Date },
+    { Time, Time, Time },
+    { Timestamp, Timestamp, Timestamp }
 }
 
 /// `PrimitiveArray` is a collection of primitive types, such as `i32`, `f32`.
@@ -188,7 +186,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
         self.data.len()
     }
 
-    fn to_protobuf(&self) -> ProstArray {
+    fn to_protobuf(&self) -> PbArray {
         let mut output_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<T>());
 
         for v in self.iter() {
@@ -200,7 +198,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
             body: output_buffer,
         };
         let null_bitmap = self.null_bitmap().to_protobuf();
-        ProstArray {
+        PbArray {
             null_bitmap: Some(null_bitmap),
             values: vec![buffer],
             array_type: T::array_type() as i32,
@@ -278,7 +276,7 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{OrderedF32, OrderedF64};
+    use crate::types::{F32, F64};
 
     fn helper_test_builder<T: PrimitiveArrayItemType>(data: Vec<Option<T>>) -> PrimitiveArray<T> {
         let mut builder = PrimitiveArrayBuilder::<T>::new(data.len());
@@ -326,7 +324,7 @@ mod tests {
 
     #[test]
     fn test_f32_builder() {
-        let arr = helper_test_builder::<OrderedF32>(
+        let arr = helper_test_builder::<F32>(
             (0..1000)
                 .map(|x| {
                     if x % 2 == 0 {
@@ -344,7 +342,7 @@ mod tests {
 
     #[test]
     fn test_f64_builder() {
-        let arr = helper_test_builder::<OrderedF64>(
+        let arr = helper_test_builder::<F64>(
             (0..1000)
                 .map(|x| {
                     if x % 2 == 0 {

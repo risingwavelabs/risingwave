@@ -18,7 +18,9 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use futures::Future;
-use risingwave_common::cache::{CacheableEntry, LookupResponse, LruCache, LruCacheEventListener};
+use risingwave_common::cache::{
+    CachePriority, CacheableEntry, LookupResponse, LruCache, LruCacheEventListener,
+};
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use tokio::sync::oneshot::Receiver;
 use tokio::task::JoinHandle;
@@ -118,21 +120,28 @@ impl BlockResponse {
 }
 
 impl BlockCache {
-    pub fn new(capacity: usize, max_shard_bits: usize) -> Self {
-        Self::new_inner(capacity, max_shard_bits, None)
+    pub fn new(capacity: usize, max_shard_bits: usize, high_priority_ratio: usize) -> Self {
+        Self::new_inner(capacity, max_shard_bits, high_priority_ratio, None)
     }
 
     pub fn with_event_listener(
         capacity: usize,
         max_shard_bits: usize,
+        high_priority_ratio: usize,
         listener: BlockCacheEventListener,
     ) -> Self {
-        Self::new_inner(capacity, max_shard_bits, Some(listener))
+        Self::new_inner(
+            capacity,
+            max_shard_bits,
+            high_priority_ratio,
+            Some(listener),
+        )
     }
 
     fn new_inner(
         capacity: usize,
         mut max_shard_bits: usize,
+        high_priority_ratio: usize,
         listener: Option<BlockCacheEventListener>,
     ) -> Self {
         if capacity == 0 {
@@ -143,8 +152,13 @@ impl BlockCache {
         }
 
         let cache = match listener {
-            Some(listener) => LruCache::with_event_listener(max_shard_bits, capacity, listener),
-            None => LruCache::new(max_shard_bits, capacity),
+            Some(listener) => LruCache::with_event_listener(
+                max_shard_bits,
+                capacity,
+                high_priority_ratio,
+                listener,
+            ),
+            None => LruCache::new(max_shard_bits, capacity, high_priority_ratio),
         };
 
         Self {
@@ -163,12 +177,14 @@ impl BlockCache {
         object_id: HummockSstableObjectId,
         block_idx: u64,
         block: Box<Block>,
+        priority: CachePriority,
     ) -> BlockHolder {
         BlockHolder::from_cached_block(self.inner.insert(
             (object_id, block_idx),
             Self::hash(object_id, block_idx),
             block.capacity(),
             block,
+            priority,
         ))
     }
 
@@ -176,6 +192,7 @@ impl BlockCache {
         &self,
         object_id: HummockSstableObjectId,
         block_idx: u64,
+        priority: CachePriority,
         mut fetch_block: F,
     ) -> BlockResponse
     where
@@ -186,7 +203,7 @@ impl BlockCache {
         let key = (object_id, block_idx);
         match self
             .inner
-            .lookup_with_request_dedup::<_, HummockError, _>(h, key, || {
+            .lookup_with_request_dedup::<_, HummockError, _>(h, key, priority, || {
                 let f = fetch_block();
                 async move {
                     let block = f.await?;

@@ -13,6 +13,17 @@ import "user.proto";
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
+message GetTelemetryInfoRequest {}
+
+message TelemetryInfoResponse {
+  optional string tracking_id = 1;
+}
+
+service TelemetryInfoService {
+  // Request telemetry info from meta node
+  rpc GetTelemetryInfo(GetTelemetryInfoRequest) returns (TelemetryInfoResponse);
+}
+
 message HeartbeatRequest {
   message ExtraInfo {
     oneof info {
@@ -240,6 +251,21 @@ message MetaSnapshot {
   SnapshotVersion version = 13;
 }
 
+message Relation {
+  oneof relation_info {
+    catalog.Table table = 1;
+    catalog.Source source = 2;
+    catalog.Sink sink = 3;
+    catalog.Index index = 4;
+    catalog.View view = 5;
+    catalog.Function function = 6;
+  }
+}
+
+message RelationGroup {
+  repeated Relation relations = 1;
+}
+
 message SubscribeResponse {
   enum Operation {
     UNSPECIFIED = 0;
@@ -254,12 +280,6 @@ message SubscribeResponse {
   oneof info {
     catalog.Database database = 4;
     catalog.Schema schema = 5;
-    catalog.Table table = 6;
-    catalog.Source source = 7;
-    catalog.Sink sink = 8;
-    catalog.Index index = 9;
-    catalog.View view = 10;
-    catalog.Function function = 18;
     user.UserInfo user = 11;
     FragmentParallelUnitMapping parallel_unit_mapping = 12;
     common.WorkerNode node = 13;
@@ -269,6 +289,7 @@ message SubscribeResponse {
     backup_service.MetaBackupManifestId meta_backup_manifest_id = 17;
     SystemParams system_params = 19;
     hummock.WriteLimits hummock_write_limits = 20;
+    RelationGroup relation_group = 21;
   }
 }
 
@@ -344,6 +365,7 @@ message SystemParams {
   optional string data_directory = 7;
   optional string backup_storage_url = 8;
   optional string backup_storage_directory = 9;
+  optional bool telemetry_enabled = 10;
 }
 
 message GetSystemParamsRequest {}

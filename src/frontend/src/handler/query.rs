@@ -29,13 +29,15 @@ use risingwave_sqlparser::ast::{SetExpr, Statement};
 
 use super::extended_handle::{Portal, PrepareStatement};
 use super::{PgResponseStream, RwPgResponse};
-use crate::binder::{Binder, BoundSetExpr, BoundStatement};
+use crate::binder::Binder;
 use crate::handler::flush::do_flush;
 use crate::handler::privilege::resolve_privileges;
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::Explain;
-use crate::optimizer::{ExecutionModeDecider, OptimizerContext, OptimizerContextRef};
+use crate::optimizer::{
+    ExecutionModeDecider, OptimizerContext, OptimizerContextRef, SysTableVisitor,
+};
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::{
@@ -76,20 +78,6 @@ fn must_run_in_distributed_mode(stmt: &Statement) -> Result<bool> {
     ) | is_insert_using_select(stmt))
 }
 
-fn must_run_in_local_mode(bound: &BoundStatement) -> bool {
-    let mut must_local = false;
-
-    if let BoundStatement::Query(query) = &bound {
-        if let BoundSetExpr::Select(select) = &query.body
-            && let Some(relation) = &select.from
-            && relation.contains_sys_table() {
-                must_local = true;
-        }
-    }
-
-    must_local
-}
-
 pub fn gen_batch_query_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
@@ -105,13 +93,13 @@ pub fn gen_batch_query_plan(
     let check_items = resolve_privileges(&bound);
     session.check_privileges(&check_items)?;
 
-    let must_local = must_run_in_local_mode(&bound);
-
     let mut planner = Planner::new(context);
 
     let mut logical = planner.plan(bound)?;
     let schema = logical.schema();
     let batch_plan = logical.gen_batch_plan()?;
+
+    let must_local = must_run_in_local_mode(batch_plan.clone());
 
     let query_mode = match (must_dist, must_local) {
         (true, true) => {
@@ -143,6 +131,10 @@ fn determine_query_mode(batch_plan: PlanRef) -> QueryMode {
     } else {
         QueryMode::Distributed
     }
+}
+
+fn must_run_in_local_mode(batch_plan: PlanRef) -> bool {
+    SysTableVisitor::has_sys_table(batch_plan)
 }
 
 pub async fn handle_query(
@@ -389,13 +381,14 @@ pub async fn handle_execute(handler_args: HandlerArgs, portal: Portal) -> Result
         let context = OptimizerContext::from_handler_args(handler_args);
 
         let must_dist = must_run_in_distributed_mode(&statement)?;
-        let must_local = must_run_in_local_mode(&bound_statement);
 
         let mut planner = Planner::new(context.into());
 
         let mut logical = planner.plan(bound_statement)?;
         let schema = logical.schema();
         let batch_plan = logical.gen_batch_plan()?;
+
+        let must_local = must_run_in_local_mode(batch_plan.clone());
 
         let query_mode = match (must_dist, must_local) {
             (true, true) => {

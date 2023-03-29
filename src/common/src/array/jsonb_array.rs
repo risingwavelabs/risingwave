@@ -274,6 +274,26 @@ impl JsonbRef<'_> {
     }
 }
 
+impl FromIterator<Option<JsonbVal>> for JsonbArray {
+    fn from_iter<I: IntoIterator<Item = Option<JsonbVal>>>(iter: I) -> Self {
+        let iter = iter.into_iter();
+        let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
+        for i in iter {
+            match i {
+                Some(x) => builder.append(Some(x.as_scalar_ref())),
+                None => builder.append(None),
+            }
+        }
+        builder.finish()
+    }
+}
+
+impl FromIterator<JsonbVal> for JsonbArray {
+    fn from_iter<I: IntoIterator<Item = JsonbVal>>(iter: I) -> Self {
+        iter.into_iter().map(Some).collect()
+    }
+}
+
 #[derive(Debug)]
 pub struct JsonbArrayBuilder {
     bitmap: BitmapBuilder,
@@ -353,7 +373,7 @@ impl Array for JsonbArray {
         self.data.len()
     }
 
-    fn to_protobuf(&self) -> super::ProstArray {
+    fn to_protobuf(&self) -> super::PbArray {
         // The memory layout contains `serde_json::Value` trees, but in protobuf we transmit this as
         // variable length bytes in value encoding. That is, one buffer of length n+1 containing
         // start and end offsets into the 2nd buffer containing all value bytes concatenated.
@@ -389,10 +409,10 @@ impl Array for JsonbArray {
         ];
 
         let null_bitmap = self.null_bitmap().to_protobuf();
-        super::ProstArray {
+        super::PbArray {
             null_bitmap: Some(null_bitmap),
             values,
-            array_type: super::ProstArrayType::Jsonb as i32,
+            array_type: super::PbArrayType::Jsonb as i32,
             struct_array_data: None,
             list_array_data: None,
         }

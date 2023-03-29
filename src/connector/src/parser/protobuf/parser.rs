@@ -24,7 +24,7 @@ use prost_reflect::{
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{InternalError, NotImplemented, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl, F32, F64};
 use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
@@ -154,6 +154,7 @@ impl ProtobufParserConfig {
                 column_type: Some(field_type.to_protobuf()),
                 field_descs,
                 type_name: m.full_name().to_string(),
+                generated_column: None,
             })
         } else {
             *index += 1;
@@ -188,13 +189,14 @@ impl ProtobufParser {
     #[allow(clippy::unused_async)]
     pub async fn parse_inner(
         &self,
-        mut payload: &[u8],
+        payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        if self.confluent_wire_type {
-            let raw_payload = resolve_pb_header(payload)?;
-            payload = raw_payload;
-        }
+        let payload = if self.confluent_wire_type {
+            resolve_pb_header(&payload)?
+        } else {
+            &payload
+        };
 
         let message = DynamicMessage::decode(self.message_descriptor.clone(), payload)
             .map_err(|e| ProtocolError(format!("parse message failed: {}", e)))?;
@@ -227,8 +229,8 @@ fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Da
         Value::U32(i) => ScalarImpl::Int64(*i as i64),
         Value::I64(i) => ScalarImpl::Int64(*i),
         Value::U64(i) => ScalarImpl::Decimal(Decimal::from(*i)),
-        Value::F32(f) => ScalarImpl::Float32(OrderedF32::from(*f)),
-        Value::F64(f) => ScalarImpl::Float64(OrderedF64::from(*f)),
+        Value::F32(f) => ScalarImpl::Float32(F32::from(*f)),
+        Value::F64(f) => ScalarImpl::Float64(F64::from(*f)),
         Value::String(s) => ScalarImpl::Utf8(s.as_str().into()),
         Value::EnumNumber(idx) => {
             let kind = field_desc.kind();
@@ -341,7 +343,7 @@ mod test {
 
     use std::path::PathBuf;
 
-    use risingwave_pb::data::data_type::TypeName as ProstTypeName;
+    use risingwave_pb::data::data_type::PbTypeName;
 
     use super::*;
 
@@ -413,35 +415,29 @@ mod test {
         assert_eq!(columns[2].name, "timestamp".to_string());
 
         let data_type = columns[3].column_type.as_ref().unwrap();
-        assert_eq!(data_type.get_type_name().unwrap(), ProstTypeName::List);
+        assert_eq!(data_type.get_type_name().unwrap(), PbTypeName::List);
         let inner_field_type = data_type.field_type.clone();
         assert_eq!(
             inner_field_type[0].get_type_name().unwrap(),
-            ProstTypeName::Struct
+            PbTypeName::Struct
         );
         let struct_inner = inner_field_type[0].field_type.clone();
-        assert_eq!(
-            struct_inner[0].get_type_name().unwrap(),
-            ProstTypeName::Int32
-        );
-        assert_eq!(
-            struct_inner[1].get_type_name().unwrap(),
-            ProstTypeName::Int32
-        );
+        assert_eq!(struct_inner[0].get_type_name().unwrap(), PbTypeName::Int32);
+        assert_eq!(struct_inner[1].get_type_name().unwrap(), PbTypeName::Int32);
         assert_eq!(
             struct_inner[2].get_type_name().unwrap(),
-            ProstTypeName::Varchar
+            PbTypeName::Varchar
         );
 
         assert_eq!(columns[4].name, "contacts".to_string());
         let inner_field_type = columns[4].column_type.as_ref().unwrap().field_type.clone();
         assert_eq!(
             inner_field_type[0].get_type_name().unwrap(),
-            ProstTypeName::List
+            PbTypeName::List
         );
         assert_eq!(
             inner_field_type[1].get_type_name().unwrap(),
-            ProstTypeName::List
+            PbTypeName::List
         );
         Ok(())
     }

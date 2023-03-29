@@ -22,6 +22,7 @@ pub(crate) mod tests {
     use bytes::Bytes;
     use itertools::Itertools;
     use rand::Rng;
+    use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::TableId;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_common::util::epoch::Epoch;
@@ -47,7 +48,7 @@ pub(crate) mod tests {
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
     use risingwave_storage::hummock::{
-        HummockStorage as GlobalHummockStorage, HummockStorage, MemoryLimiter,
+        CachePolicy, HummockStorage as GlobalHummockStorage, HummockStorage, MemoryLimiter,
         SstableObjectIdManager,
     };
     use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
@@ -254,7 +255,7 @@ pub(crate) mod tests {
         val.extend_from_slice(&compact_task.watermark.to_be_bytes());
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-        compactor_manager.add_compactor(worker_node.id, u64::MAX);
+        compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
         let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
         hummock_manager_ref
             .assign_compaction_task(&compact_task, compactor.context_id())
@@ -305,6 +306,7 @@ pub(crate) mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await
@@ -324,6 +326,7 @@ pub(crate) mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await;
@@ -379,7 +382,7 @@ pub(crate) mod tests {
         compact_task.current_epoch_time = 0;
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-        compactor_manager.add_compactor(worker_node.id, u64::MAX);
+        compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
         let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
         hummock_manager_ref
             .assign_compaction_task(&compact_task, compactor.context_id())
@@ -440,6 +443,7 @@ pub(crate) mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await
@@ -729,13 +733,12 @@ pub(crate) mod tests {
             .await
             .unwrap()
             .unwrap();
-        compact_task.existing_table_ids.push(2);
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
 
         // 3. pick compactor and assign
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-        compactor_manager.add_compactor(worker_node.id, u64::MAX);
+        compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
         let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
         hummock_manager_ref
             .assign_compaction_task(&compact_task, compactor.context_id())
@@ -806,6 +809,7 @@ pub(crate) mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await
@@ -903,7 +907,6 @@ pub(crate) mod tests {
             .unwrap()
             .unwrap();
 
-        compact_task.existing_table_ids.push(existing_table_id);
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
         let retention_seconds_expire_second = 1;
@@ -916,7 +919,7 @@ pub(crate) mod tests {
         compact_task.current_epoch_time = epoch;
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-        compactor_manager.add_compactor(worker_node.id, u64::MAX);
+        compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
         let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
         hummock_manager_ref
             .assign_compaction_task(&compact_task, compactor.context_id())
@@ -988,6 +991,7 @@ pub(crate) mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await
@@ -1092,7 +1096,6 @@ pub(crate) mod tests {
             kv_count,
         );
 
-        compact_task.existing_table_ids.push(existing_table_id);
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
         // compact_task.table_options =
@@ -1100,7 +1103,7 @@ pub(crate) mod tests {
         compact_task.current_epoch_time = epoch;
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-        compactor_manager.add_compactor(worker_node.id, u64::MAX);
+        compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
         let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
         hummock_manager_ref
             .assign_compaction_task(&compact_task, compactor.context_id())
@@ -1172,6 +1175,7 @@ pub(crate) mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await
@@ -1224,7 +1228,7 @@ pub(crate) mod tests {
 
         flush_and_commit(&hummock_meta_client, &storage, 130).await;
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-        compactor_manager.add_compactor(worker_node.id, u64::MAX);
+        compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
 
         // 2. get compact task
         let manual_compcation_option = ManualCompactionOption {

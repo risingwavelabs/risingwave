@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::catalog::PbTable;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::user::grant_privilege::Action;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
@@ -77,7 +78,7 @@ pub fn gen_create_mv_plan(
     query: Query,
     name: ObjectName,
     columns: Vec<Ident>,
-) -> Result<(PlanRef, ProstTable)> {
+) -> Result<(PlanRef, PbTable)> {
     let db_name = session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
 
@@ -87,7 +88,11 @@ pub fn gen_create_mv_plan(
 
     let bound = {
         let mut binder = Binder::new_for_stream(session);
-        binder.bind_query(query)?
+        let bound = binder.bind_query(query)?;
+        // FIXME: We should record the views into mv's dependent relations to to refine the drop
+        // check and recursive rename of the views.
+        let _views = binder.shared_views().keys().cloned().collect_vec();
+        bound
     };
 
     let col_names = get_column_names(&bound, session, columns)?;
@@ -244,7 +249,7 @@ pub mod tests {
         );
         let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
-            row_id_col_name.as_str() => DataType::Int64,
+            row_id_col_name.as_str() => DataType::Serial,
             "country" => DataType::new_struct(
                  vec![DataType::Varchar,city_type,DataType::Varchar],
                  vec!["address".to_string(), "city".to_string(), "zipcode".to_string()],

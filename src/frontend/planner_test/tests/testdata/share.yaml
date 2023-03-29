@@ -34,7 +34,7 @@
               └─BatchFilter { predicate: (initial_bid = 2:Int32) }
                 └─BatchSource { source: "auction", columns: ["id", "item_name", "description", "initial_bid", "reserve", "date_time", "expires", "seller", "category", "extra", "_row_id"], filter: (None, None) }
   stream_plan: |
-    StreamMaterialize { columns: [cnt], pk_columns: [], pk_conflict: "no check" }
+    StreamMaterialize { columns: [cnt], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [sum0(count)] }
       └─StreamAppendOnlyGlobalSimpleAgg { aggs: [sum0(count), count] }
         └─StreamExchange { dist: Single }
@@ -109,7 +109,7 @@
                     └─BatchFilter { predicate: IsNotNull(date_time) }
                       └─BatchSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"], filter: (None, None) }
   stream_plan: |
-    StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], pk_columns: [auction, window_start, window_start#1], pk_conflict: "no check" }
+    StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], stream_key: [auction, window_start, window_start#1], pk_columns: [auction, window_start, window_start#1], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [auction, count, window_start, window_start] }
       └─StreamFilter { predicate: (count >= max(count)) }
         └─StreamHashJoin { type: Inner, predicate: window_start = window_start, output: all }
@@ -140,7 +140,7 @@
     create table t(a int, b int);
     with cte as (select count(*) from t) select * from cte union all select * from cte;
   stream_plan: |
-    StreamMaterialize { columns: [count, 0:Int32(hidden)], pk_columns: [0:Int32], pk_conflict: "no check" }
+    StreamMaterialize { columns: [count, 0:Int32(hidden)], stream_key: [0:Int32], pk_columns: [0:Int32], pk_conflict: "NoCheck" }
     └─StreamUnion { all: true }
       ├─StreamExchange { dist: HashShard(0:Int32) }
       | └─StreamProject { exprs: [sum0(count), 0:Int32] }
@@ -163,7 +163,7 @@
     create table t(a int, b int);
     with cte as (select count(*) from t) select * from cte union all select * from cte;
   stream_plan: |
-    StreamMaterialize { columns: [count, 0:Int32(hidden)], pk_columns: [0:Int32], pk_conflict: "no check" }
+    StreamMaterialize { columns: [count, 0:Int32(hidden)], stream_key: [0:Int32], pk_columns: [0:Int32], pk_conflict: "NoCheck" }
     └─StreamUnion { all: true }
       ├─StreamExchange { dist: HashShard(0:Int32) }
       | └─StreamProject { exprs: [sum0(count), 0:Int32] }
@@ -184,7 +184,7 @@
     set rw_enable_share_plan=false;
     select count(*) cnt from auction A join auction B on A.id = B.id;
   stream_plan: |
-    StreamMaterialize { columns: [cnt], pk_columns: [], pk_conflict: "no check" }
+    StreamMaterialize { columns: [cnt], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [sum0(count)] }
       └─StreamAppendOnlyGlobalSimpleAgg { aggs: [sum0(count), count] }
         └─StreamExchange { dist: Single }

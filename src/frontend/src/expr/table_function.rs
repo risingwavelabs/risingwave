@@ -20,7 +20,7 @@ use risingwave_common::error::ErrorCode;
 use risingwave_common::types::{unnested_list_type, DataType, ScalarImpl};
 use risingwave_pb::expr::table_function::Type;
 use risingwave_pb::expr::{
-    TableFunction as TableFunctionProst, UserDefinedTableFunction as UserDefinedTableFunctionProst,
+    TableFunction as TableFunctionPb, UserDefinedTableFunction as UserDefinedTableFunctionPb,
 };
 
 use super::{Expr, ExprImpl, ExprRewriter, RwResult};
@@ -61,14 +61,14 @@ impl TableFunctionType {
     }
 }
 
-impl TableFunctionType {
+impl TableFunction {
     pub fn name(&self) -> &str {
-        match self {
+        match self.function_type {
             TableFunctionType::Generate => "generate_series",
             TableFunctionType::Range => "range",
             TableFunctionType::Unnest => "unnest",
             TableFunctionType::RegexpMatches => "regexp_matches",
-            TableFunctionType::Udtf => "udtf",
+            TableFunctionType::Udtf => &self.udtf_catalog.as_ref().unwrap().name,
         }
     }
 }
@@ -229,15 +229,15 @@ impl TableFunction {
         }
     }
 
-    pub fn to_protobuf(&self) -> TableFunctionProst {
-        TableFunctionProst {
+    pub fn to_protobuf(&self) -> TableFunctionPb {
+        TableFunctionPb {
             function_type: self.function_type.to_protobuf() as i32,
             args: self.args.iter().map(|c| c.to_expr_proto()).collect_vec(),
             return_type: Some(self.return_type.to_protobuf()),
             udtf: self
                 .udtf_catalog
                 .as_ref()
-                .map(|c| UserDefinedTableFunctionProst {
+                .map(|c| UserDefinedTableFunctionPb {
                     arg_types: c.arg_types.iter().map(|t| t.to_protobuf()).collect(),
                     language: c.language.clone(),
                     link: c.link.clone(),

@@ -19,6 +19,8 @@
 //! We have a `Serializer` and a `Deserializer` for each schema of `Row`, which can be reused
 //! until schema changes
 
+#![expect(clippy::disallowed_methods, reason = "used by bitflags!")]
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -38,6 +40,7 @@ use crate::row::Row;
 // }
 
 bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     struct Flag: u8 {
         const EMPTY = 0b_1000_0000;
         const OFFSET8 = 0b01;
@@ -133,7 +136,7 @@ impl Serializer {
         let mut row_bytes = Vec::with_capacity(
             5 + self.encoded_column_ids.len() + encoding.offsets.len() + encoding.buf.len(), /* 5 comes from u8+u32 */
         );
-        row_bytes.put_u8(encoding.flag.bits);
+        row_bytes.put_u8(encoding.flag.bits());
         row_bytes.put_u32_le(self.datum_num);
         row_bytes.extend(&self.encoded_column_ids);
         row_bytes.extend(&encoding.offsets);
@@ -182,7 +185,7 @@ impl ValueRowDeserializer for Deserializer {
             Flag::OFFSET8 => 1,
             Flag::OFFSET16 => 2,
             Flag::OFFSET32 => 4,
-            _ => return Err(ValueEncodingError::InvalidFlag(flag.bits)),
+            _ => return Err(ValueEncodingError::InvalidFlag(flag.bits())),
         };
         let datum_num = encoded_bytes.get_u32_le() as usize;
         let offsets_start_idx = 4 * datum_num;

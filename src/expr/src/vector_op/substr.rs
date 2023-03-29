@@ -15,23 +15,25 @@
 use std::cmp::{max, min};
 use std::fmt::Write;
 
+use risingwave_expr_macro::function;
+
 use crate::{bail, Result};
 
-#[inline(always)]
+#[function("substr(varchar, int32) -> varchar")]
 pub fn substr_start(s: &str, start: i32, writer: &mut dyn Write) -> Result<()> {
     let start = (start.saturating_sub(1).max(0) as usize).min(s.len());
     writer.write_str(&s[start..]).unwrap();
     Ok(())
 }
 
-#[inline(always)]
+// #[function("substr(varchar, 0, int32) -> varchar")]
 pub fn substr_for(s: &str, count: i32, writer: &mut dyn Write) -> Result<()> {
     let end = min(count as usize, s.len());
     writer.write_str(&s[..end]).unwrap();
     Ok(())
 }
 
-#[inline(always)]
+#[function("substr(varchar, int32, int32) -> varchar")]
 pub fn substr_start_for(s: &str, start: i32, count: i32, writer: &mut dyn Write) -> Result<()> {
     if count < 0 {
         bail!("length in substr should be non-negative: {}", count);
@@ -56,19 +58,19 @@ mod tests {
         let s = "cxscgccdd";
 
         let cases = [
-            (s.to_owned(), Some(4), None, "cgccdd"),
-            (s.to_owned(), None, Some(3), "cxs"),
-            (s.to_owned(), Some(4), Some(-2), "[unused result]"),
-            (s.to_owned(), Some(4), Some(2), "cg"),
-            (s.to_owned(), Some(-1), Some(-5), "[unused result]"),
-            (s.to_owned(), Some(-1), Some(5), "cxs"),
+            (s, Some(4), None, "cgccdd"),
+            (s, None, Some(3), "cxs"),
+            (s, Some(4), Some(-2), "[unused result]"),
+            (s, Some(4), Some(2), "cg"),
+            (s, Some(-1), Some(-5), "[unused result]"),
+            (s, Some(-1), Some(5), "cxs"),
         ];
 
         for (s, off, len, expected) in cases {
             let mut writer = String::new();
             match (off, len) {
                 (Some(off), Some(len)) => {
-                    let result = substr_start_for(&s, off, len, &mut writer);
+                    let result = substr_start_for(s, off, len, &mut writer);
                     if len < 0 {
                         assert!(result.is_err());
                         continue;
@@ -76,8 +78,8 @@ mod tests {
                         result?
                     }
                 }
-                (Some(off), None) => substr_start(&s, off, &mut writer)?,
-                (None, Some(len)) => substr_for(&s, len, &mut writer)?,
+                (Some(off), None) => substr_start(s, off, &mut writer)?,
+                (None, Some(len)) => substr_for(s, len, &mut writer)?,
                 _ => unreachable!(),
             }
             assert_eq!(writer, expected);

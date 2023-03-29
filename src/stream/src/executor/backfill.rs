@@ -25,7 +25,7 @@ use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::sort_util::{Direction, OrderType};
+use risingwave_common::util::sort_util::{compare_datum, OrderType};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -117,7 +117,7 @@ where
         // If the barrier is a conf change of creating this mview, we follow the procedure of
         // backfill. Otherwise, it means we've recovered and we can forward the upstream messages
         // directly.
-        let to_create_mv = first_barrier.is_add_dispatcher(self.actor_id);
+        let to_create_mv = first_barrier.is_newly_added(self.actor_id);
         // If the snapshot is empty, we don't need to backfill.
         let is_snapshot_empty: bool = {
             let snapshot = Self::snapshot_read(&self.table, init_epoch, None, false);
@@ -373,12 +373,9 @@ where
             match row
                 .project(pk_in_output_indices)
                 .iter()
-                .zip_eq_fast(pk_order.iter())
+                .zip_eq_fast(pk_order.iter().copied())
                 .cmp_by(current_pos.iter(), |(x, order), y| {
-                    match order.direction() {
-                        Direction::Ascending => x.cmp(&y),
-                        Direction::Descending => y.cmp(&x),
-                    }
+                    compare_datum(x, y, order)
                 }) {
                 Ordering::Less | Ordering::Equal => true,
                 Ordering::Greater => false,

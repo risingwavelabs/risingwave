@@ -51,9 +51,9 @@ pub trait ToText {
     /// - `ScalarRefImpl::Boolean` -> `DataType::Boolean`
     /// - `ScalarRefImpl::Utf8` -> `DataType::Varchar`
     /// - `ScalarRefImpl::Bytea` -> `DataType::Bytea`
-    /// - `ScalarRefImpl::NaiveDate` -> `DataType::Date`
-    /// - `ScalarRefImpl::NaiveTime` -> `DataType::Time`
-    /// - `ScalarRefImpl::NaiveDateTime` -> `DataType::Timestamp`
+    /// - `ScalarRefImpl::Date` -> `DataType::Date`
+    /// - `ScalarRefImpl::Time` -> `DataType::Time`
+    /// - `ScalarRefImpl::Timestamp` -> `DataType::Timestamp`
     /// - `ScalarRefImpl::Interval` -> `DataType::Interval`
     /// - `ScalarRefImpl::List` -> `DataType::List`
     /// - `ScalarRefImpl::Struct` -> `DataType::Struct`
@@ -161,8 +161,8 @@ macro_rules! implement_using_ryu {
 }
 
 implement_using_ryu! {
-    { crate::types::OrderedF32, Float32 },
-    { crate::types::OrderedF64, Float64 }
+    { crate::types::F32, Float32 },
+    { crate::types::F64, Float64 }
 }
 
 impl ToText for i64 {

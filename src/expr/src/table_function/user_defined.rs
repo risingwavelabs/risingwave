@@ -51,23 +51,19 @@ impl TableFunction for UserDefinedTableFunction {
         let input =
             arrow_array::RecordBatch::try_new_with_options(self.arg_schema.clone(), columns, &opts)
                 .expect("failed to build record batch");
-        let output = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.client.call(&self.identifier, input))
-        })?;
+        let output = self.client.call(&self.identifier, input).await?;
+        let array: arrow_array::ArrayRef = if output.num_columns() == 1 {
+            output.column(0).clone()
+        } else {
+            Arc::new(arrow_array::StructArray::from(output))
+        };
         // TODO: split by chunk_size
-        Ok(output
-            .columns()
-            .iter()
-            .map(|a| Arc::new(ArrayImpl::from(a)))
-            .collect())
+        Ok(vec![Arc::new(ArrayImpl::from(&array))])
     }
 }
 
 #[cfg(not(madsim))]
-pub fn new_user_defined(
-    prost: &TableFunctionProst,
-    chunk_size: usize,
-) -> Result<BoxedTableFunction> {
+pub fn new_user_defined(prost: &TableFunctionPb, chunk_size: usize) -> Result<BoxedTableFunction> {
     let Some(udtf) = &prost.udtf else {
         bail!("expect UDTF");
     };
@@ -108,7 +104,7 @@ impl TableFunction for UserDefinedTableFunction {
 
 #[cfg(madsim)]
 pub fn new_user_defined(
-    _prost: &TableFunctionProst,
+    _prost: &TableFunctionPb,
     _chunk_size: usize,
 ) -> Result<BoxedTableFunction> {
     panic!("UDF is not supported in simulation yet");

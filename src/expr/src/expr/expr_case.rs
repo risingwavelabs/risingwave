@@ -18,7 +18,7 @@ use risingwave_common::array::{ArrayRef, DataChunk, Vis};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::{bail, ensure};
-use risingwave_pb::expr::expr_node::{RexNode, Type};
+use risingwave_pb::expr::expr_node::{PbType, RexNode};
 use risingwave_pb::expr::ExprNode;
 
 use crate::expr::{build_from_prost, BoxedExpression, Expression};
@@ -26,14 +26,8 @@ use crate::{ExprError, Result};
 
 #[derive(Debug)]
 pub struct WhenClause {
-    pub when: BoxedExpression,
-    pub then: BoxedExpression,
-}
-
-impl WhenClause {
-    pub fn new(when: BoxedExpression, then: BoxedExpression) -> Self {
-        WhenClause { when, then }
-    }
+    when: BoxedExpression,
+    then: BoxedExpression,
 }
 
 #[derive(Debug)]
@@ -122,7 +116,7 @@ impl<'a> TryFrom<&'a ExprNode> for CaseExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type().unwrap() == Type::Case);
+        ensure!(prost.get_expr_type().unwrap() == PbType::Case);
 
         let ret_type = DataType::from(prost.get_return_type().unwrap());
         let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
@@ -152,7 +146,10 @@ impl<'a> TryFrom<&'a ExprNode> for CaseExpression {
             if then_expr.return_type() != ret_type {
                 bail!("Type mismatched between then clause and case");
             }
-            let when_clause = WhenClause::new(when_expr, then_expr);
+            let when_clause = WhenClause {
+                when: when_expr,
+                then: then_expr,
+            };
             when_clauses.push(when_clause);
         }
         Ok(CaseExpression::new(ret_type, when_clauses, else_clause))
@@ -163,47 +160,9 @@ impl<'a> TryFrom<&'a ExprNode> for CaseExpression {
 mod tests {
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::Scalar;
-    use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType as ProstDataType;
-    use risingwave_pb::expr::expr_node::Type;
-    use risingwave_pb::expr::FunctionCall;
 
     use super::*;
-    use crate::expr::expr_binary_nonnull::new_binary_expr;
-    use crate::expr::{InputRefExpression, LiteralExpression};
-
-    #[test]
-    fn test_case_expr() {
-        let call = FunctionCall {
-            children: vec![
-                ExprNode {
-                    expr_type: Type::ConstantValue as i32,
-                    return_type: Some(ProstDataType {
-                        type_name: TypeName::Boolean as i32,
-                        ..Default::default()
-                    }),
-                    rex_node: None,
-                },
-                ExprNode {
-                    expr_type: Type::ConstantValue as i32,
-                    return_type: Some(ProstDataType {
-                        type_name: TypeName::Int32 as i32,
-                        ..Default::default()
-                    }),
-                    rex_node: None,
-                },
-            ],
-        };
-        let p = ExprNode {
-            expr_type: Type::Case as i32,
-            return_type: Some(ProstDataType {
-                type_name: TypeName::Int32 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::FuncCall(call)),
-        };
-        assert!(CaseExpression::try_from(&p).is_ok());
-    }
+    use crate::expr::build_from_pretty;
 
     async fn test_eval_row(expr: CaseExpression, row_inputs: Vec<i32>, expected: Vec<Option<f32>>) {
         for (i, row_input) in row_inputs.iter().enumerate() {
@@ -217,25 +176,12 @@ mod tests {
     #[tokio::test]
     async fn test_eval_searched_case() {
         let ret_type = DataType::Float32;
-        // when x <= 2 then 3.1
-        let when_clauses = vec![WhenClause::new(
-            new_binary_expr(
-                Type::LessThanOrEqual,
-                DataType::Boolean,
-                Box::new(InputRefExpression::new(DataType::Int32, 0)),
-                Box::new(LiteralExpression::new(DataType::Float32, Some(2f32.into()))),
-            )
-            .unwrap(),
-            Box::new(LiteralExpression::new(
-                DataType::Float32,
-                Some(3.1f32.into()),
-            )),
-        )];
-        // else 4.1
-        let els = Box::new(LiteralExpression::new(
-            DataType::Float32,
-            Some(4.1f32.into()),
-        ));
+        // when x <= 2 then 3.1 else 4.1
+        let when_clauses = vec![WhenClause {
+            when: build_from_pretty("(less_than_or_equal:boolean $0:int4 2:float4)"),
+            then: build_from_pretty("3.1:float4"),
+        }];
+        let els = build_from_pretty("4.1:float4");
         let searched_case_expr = CaseExpression::new(ret_type, when_clauses, Some(els));
         let input = DataChunk::from_pretty(
             "i
@@ -257,19 +203,10 @@ mod tests {
     async fn test_eval_without_else() {
         let ret_type = DataType::Float32;
         // when x <= 3 then 3.1
-        let when_clauses = vec![WhenClause::new(
-            new_binary_expr(
-                Type::LessThanOrEqual,
-                DataType::Boolean,
-                Box::new(InputRefExpression::new(DataType::Int32, 0)),
-                Box::new(LiteralExpression::new(DataType::Float32, Some(3f32.into()))),
-            )
-            .unwrap(),
-            Box::new(LiteralExpression::new(
-                DataType::Float32,
-                Some(3.1f32.into()),
-            )),
-        )];
+        let when_clauses = vec![WhenClause {
+            when: build_from_pretty("(less_than_or_equal:boolean $0:int4 3:float4)"),
+            then: build_from_pretty("3.1:float4"),
+        }];
         let searched_case_expr = CaseExpression::new(ret_type, when_clauses, None);
         let input = DataChunk::from_pretty(
             "i
@@ -288,25 +225,12 @@ mod tests {
     #[tokio::test]
     async fn test_eval_row_searched_case() {
         let ret_type = DataType::Float32;
-        // when x <= 2 then 3.1
-        let when_clauses = vec![WhenClause::new(
-            new_binary_expr(
-                Type::LessThanOrEqual,
-                DataType::Boolean,
-                Box::new(InputRefExpression::new(DataType::Int32, 0)),
-                Box::new(LiteralExpression::new(DataType::Float32, Some(2f32.into()))),
-            )
-            .unwrap(),
-            Box::new(LiteralExpression::new(
-                DataType::Float32,
-                Some(3.1f32.into()),
-            )),
-        )];
-        // else 4.1
-        let els = Box::new(LiteralExpression::new(
-            DataType::Float32,
-            Some(4.1f32.into()),
-        ));
+        // when x <= 2 then 3.1 else 4.1
+        let when_clauses = vec![WhenClause {
+            when: build_from_pretty("(less_than_or_equal:boolean $0:int4 2:float4)"),
+            then: build_from_pretty("3.1:float4"),
+        }];
+        let els = build_from_pretty("4.1:float4");
         let searched_case_expr = CaseExpression::new(ret_type, when_clauses, Some(els));
 
         let row_inputs = vec![1, 2, 3, 4, 5];
@@ -325,19 +249,10 @@ mod tests {
     async fn test_eval_row_without_else() {
         let ret_type = DataType::Float32;
         // when x <= 3 then 3.1
-        let when_clauses = vec![WhenClause::new(
-            new_binary_expr(
-                Type::LessThanOrEqual,
-                DataType::Boolean,
-                Box::new(InputRefExpression::new(DataType::Int32, 0)),
-                Box::new(LiteralExpression::new(DataType::Float32, Some(3f32.into()))),
-            )
-            .unwrap(),
-            Box::new(LiteralExpression::new(
-                DataType::Float32,
-                Some(3.1f32.into()),
-            )),
-        )];
+        let when_clauses = vec![WhenClause {
+            when: build_from_pretty("(less_than_or_equal:boolean $0:int4 3:float4)"),
+            then: build_from_pretty("3.1:float4"),
+        }];
         let searched_case_expr = CaseExpression::new(ret_type, when_clauses, None);
 
         let row_inputs = vec![2, 3, 4, 5];

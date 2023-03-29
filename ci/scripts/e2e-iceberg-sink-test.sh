@@ -25,8 +25,13 @@ echo "--- Download artifacts"
 mkdir -p target/debug
 buildkite-agent artifact download risingwave-"$profile" target/debug/
 buildkite-agent artifact download risedev-dev-"$profile" target/debug/
+buildkite-agent artifact download librisingwave_java_binding.so-"$profile" target/debug
 mv target/debug/risingwave-"$profile" target/debug/risingwave
 mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
+mv target/debug/librisingwave_java_binding.so-"$profile" target/debug/librisingwave_java_binding.so
+
+export RW_JAVA_BINDING_LIB_PATH=${PWD}/target/debug
+export RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT=stream_chunk
 
 echo "--- Download connector node package"
 buildkite-agent artifact download risingwave-connector.tar.gz ./
@@ -45,6 +50,7 @@ cargo make pre-start-dev
 cargo make link-all-in-one-binaries
 
 echo "--- starting risingwave cluster with connector node"
+mkdir -p .risingwave/log
 ./connector-node/start-service.sh -p 50051 > .risingwave/log/connector-sink.log 2>&1 &
 cargo make ci-start ci-iceberg-test
 sleep 1
@@ -80,7 +86,7 @@ spark-3.3.1-bin-hadoop3/bin/spark-sql --packages $DEPENDENCIES \
 
 # check sink destination using shell
 if cat ./spark-output/*.csv | sort | awk -F "," '{
-if ($1 == 1 && $2 == 2 && $3 == "1-2") c1++;
+if ($1 == 1 && $2 == 50 && $3 == "1-50") c1++;
  if ($1 == 13 && $2 == 2 && $3 == "13-2") c2++;
   if ($1 == 21 && $2 == 2 && $3 == "21-2") c3++;
    if ($1 == 2 && $2 == 2 && $3 == "2-2") c4++;

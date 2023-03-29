@@ -14,14 +14,14 @@
 
 package com.risingwave.connector;
 
-import com.risingwave.connector.api.sink.SinkRow;
 import io.grpc.Status;
+import org.apache.iceberg.data.Record;
 
 public class SinkRowOp {
-    private final SinkRow delete;
-    private final SinkRow insert;
+    private final Record delete;
+    private final Record insert;
 
-    public static SinkRowOp insertOp(SinkRow row) {
+    public static SinkRowOp insertOp(Record row) {
         if (row == null) {
             throw Status.FAILED_PRECONDITION
                     .withDescription("row op must not be null to initialize insertOp")
@@ -30,7 +30,7 @@ public class SinkRowOp {
         return new SinkRowOp(null, row);
     }
 
-    public static SinkRowOp deleteOp(SinkRow row) {
+    public static SinkRowOp deleteOp(Record row) {
         if (row == null) {
             throw Status.FAILED_PRECONDITION
                     .withDescription("row op must not be null to initialize deleteOp")
@@ -39,7 +39,7 @@ public class SinkRowOp {
         return new SinkRowOp(row, null);
     }
 
-    public static SinkRowOp updateOp(SinkRow delete, SinkRow insert) {
+    public static SinkRowOp updateOp(Record delete, Record insert) {
         if (delete == null || insert == null) {
             throw Status.FAILED_PRECONDITION
                     .withDescription("row ops must not be null initialize updateOp")
@@ -48,7 +48,7 @@ public class SinkRowOp {
         return new SinkRowOp(delete, insert);
     }
 
-    private SinkRowOp(SinkRow delete, SinkRow insert) {
+    private SinkRowOp(Record delete, Record insert) {
         this.delete = delete;
         this.insert = insert;
     }
@@ -57,11 +57,11 @@ public class SinkRowOp {
         return insert == null && delete != null;
     }
 
-    public SinkRow getDelete() {
+    public Record getDelete() {
         return delete;
     }
 
-    public SinkRow getInsert() {
+    public Record getInsert() {
         return insert;
     }
 }

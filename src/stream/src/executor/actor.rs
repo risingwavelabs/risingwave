@@ -15,9 +15,9 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use await_tree::InstrumentAwait;
 use futures::future::join_all;
-use futures::pin_mut;
 use hytra::TrAdder;
 use minitrace::prelude::*;
 use parking_lot::Mutex;
@@ -173,33 +173,33 @@ where
         };
 
         let mut last_epoch: Option<EpochPair> = None;
-
-        let stream = Box::new(self.consumer).execute();
-        pin_mut!(stream);
+        let mut stream = Box::pin(Box::new(self.consumer).execute());
 
         // Drive the streaming task with an infinite loop
-        while let Some(barrier) = stream
-            .next()
-            .in_span(span)
-            .instrument_await(
-                last_epoch.map_or("Epoch <initial>".into(), |e| format!("Epoch {}", e.curr)),
-            )
-            .await
-            .transpose()?
-        {
-            last_epoch = Some(barrier.epoch);
+        let result = loop {
+            let barrier = match stream
+                .try_next()
+                .in_span(span)
+                .instrument_await(
+                    last_epoch.map_or("Epoch <initial>".into(), |e| format!("Epoch {}", e.curr)),
+                )
+                .await
+            {
+                Ok(Some(barrier)) => barrier,
+                Ok(None) => break Err(anyhow!("actor exited unexpectedly").into()),
+                Err(err) => break Err(err),
+            };
 
             // Collect barriers to local barrier manager
             self.context.lock_barrier_manager().collect(id, &barrier);
 
             // Then stop this actor if asked
-            let to_stop = barrier.is_stop_or_update_drop_actor(id);
-            if to_stop {
-                tracing::trace!(actor_id = id, "actor exit");
-                return Ok(());
+            if barrier.is_stop(id) {
+                break Ok(());
             }
 
             // Tracing related work
+            last_epoch = Some(barrier.epoch);
             span = {
                 let mut span = Span::enter_with_local_parent("actor_poll");
                 span.add_property(|| ("otel.name", span_name.to_string()));
@@ -208,8 +208,24 @@ where
                 span.add_property(|| ("epoch", barrier.epoch.curr.to_string()));
                 span
             };
-        }
+        };
 
-        Ok(())
+        spawn_blocking_drop_stream(stream).await;
+
+        tracing::trace!(actor_id = id, "actor exit");
+        result
     }
+}
+
+/// Drop the stream in a blocking task to avoid interfering with other actors.
+///
+/// Logically the actor is dropped after we send the barrier with `Drop` mutation to the
+/// downstream，thus making the `drop`'s progress asynchronous. However, there might be a
+/// considerable amount of data in the executors' in-memory cache, dropping these structures might
+/// be a CPU-intensive task. This may lead to the runtime being unable to schedule other actors if
+/// the `drop` is called on the current thread.
+pub async fn spawn_blocking_drop_stream<T: Send + 'static>(stream: T) {
+    let _ = tokio::task::spawn_blocking(move || drop(stream))
+        .instrument_await("drop_stream")
+        .await;
 }

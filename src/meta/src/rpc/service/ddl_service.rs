@@ -24,7 +24,7 @@ use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{connection, Connection};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
-use risingwave_pb::ddl_service::drop_table_request::SourceId as ProstSourceId;
+use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use tonic::{Request, Response, Status};
@@ -236,7 +236,7 @@ where
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreatingStreamingJob(stream_job, fragment_graph))
+            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
             .await?;
 
         Ok(Response::new(CreateSinkResponse {
@@ -279,7 +279,7 @@ where
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreatingStreamingJob(stream_job, fragment_graph))
+            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
             .await?;
 
         Ok(Response::new(CreateMaterializedViewResponse {
@@ -328,7 +328,7 @@ where
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreatingStreamingJob(stream_job, fragment_graph))
+            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
             .await?;
 
         Ok(Response::new(CreateIndexResponse {
@@ -436,7 +436,7 @@ where
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreatingStreamingJob(stream_job, fragment_graph))
+            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
             .await?;
 
         Ok(Response::new(CreateTableResponse {
@@ -457,7 +457,7 @@ where
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob(StreamingJobId::Table(
-                source_id.map(|ProstSourceId::Id(id)| id),
+                source_id.map(|PbSourceId::Id(id)| id),
                 table_id,
             )))
             .await?;
@@ -561,6 +561,21 @@ where
         } else {
             Ok(Response::new(GetTableResponse { table: None }))
         }
+    }
+
+    async fn alter_relation_name(
+        &self,
+        request: Request<AlterRelationNameRequest>,
+    ) -> Result<Response<AlterRelationNameResponse>, Status> {
+        let AlterRelationNameRequest { relation, new_name } = request.into_inner();
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterRelationName(relation.unwrap(), new_name))
+            .await?;
+        Ok(Response::new(AlterRelationNameResponse {
+            status: None,
+            version,
+        }))
     }
 
     async fn get_ddl_progress(

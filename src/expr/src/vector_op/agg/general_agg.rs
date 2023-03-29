@@ -155,9 +155,9 @@ impl_aggregator! { BoolArray, Bool, BoolArray, Bool } // TODO(#359): remove once
 impl_aggregator! { StructArray, Struct, StructArray, Struct }
 impl_aggregator! { ListArray, List, ListArray, List }
 impl_aggregator! { IntervalArray, Interval, IntervalArray, Interval }
-impl_aggregator! { NaiveTimeArray, NaiveTime, NaiveTimeArray, NaiveTime }
-impl_aggregator! { NaiveDateArray, NaiveDate, NaiveDateArray, NaiveDate }
-impl_aggregator! { NaiveDateTimeArray, NaiveDateTime, NaiveDateTimeArray, NaiveDateTime }
+impl_aggregator! { TimeArray, Time, TimeArray, Time }
+impl_aggregator! { DateArray, Date, DateArray, Date }
+impl_aggregator! { TimestampArray, Timestamp, TimestampArray, Timestamp }
 
 // count
 impl_aggregator! { I16Array, Int16, I64Array, Int64 } // sum
@@ -170,9 +170,9 @@ impl_aggregator! { BoolArray, Bool, I64Array, Int64 }
 impl_aggregator! { StructArray, Struct, I64Array, Int64 }
 impl_aggregator! { ListArray, List, I64Array, Int64 }
 impl_aggregator! { IntervalArray, Interval, I64Array, Int64 }
-impl_aggregator! { NaiveTimeArray, NaiveTime, I64Array, Int64 }
-impl_aggregator! { NaiveDateArray, NaiveDate, I64Array, Int64 }
-impl_aggregator! { NaiveDateTimeArray, NaiveDateTime, I64Array, Int64 }
+impl_aggregator! { TimeArray, Time, I64Array, Int64 }
+impl_aggregator! { DateArray, Date, I64Array, Int64 }
+impl_aggregator! { TimestampArray, Timestamp, I64Array, Int64 }
 
 // sum
 impl_aggregator! { I64Array, Int64, DecimalArray, Decimal }

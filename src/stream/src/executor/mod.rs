@@ -34,16 +34,15 @@ use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum
 use risingwave_connector::source::SplitImpl;
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_expr::ExprError;
-use risingwave_pb::data::{Datum as ProstDatum, Epoch as ProstEpoch};
-use risingwave_pb::expr::InputRef as ProstInputRef;
+use risingwave_pb::data::{PbDatum, PbEpoch};
+use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
-use risingwave_pb::stream_plan::barrier::Mutation as ProstMutation;
+use risingwave_pb::stream_plan::barrier::PbMutation;
 use risingwave_pb::stream_plan::stream_message::StreamMessage;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    AddMutation, Barrier as ProstBarrier, Dispatcher as ProstDispatcher, PauseMutation,
-    ResumeMutation, SourceChangeSplitMutation, StopMutation, StreamMessage as ProstStreamMessage,
-    UpdateMutation, Watermark as ProstWatermark,
+    AddMutation, PauseMutation, PbBarrier, PbDispatcher, PbStreamMessage, PbWatermark,
+    ResumeMutation, SourceChangeSplitMutation, StopMutation, UpdateMutation,
 };
 use smallvec::SmallVec;
 
@@ -208,7 +207,7 @@ pub const INVALID_EPOCH: u64 = 0;
 
 type UpstreamFragmentId = FragmentId;
 
-/// See [`risingwave_pb::stream_plan::barrier::Mutation`] for the semantics of each mutation.
+/// See [`PbMutation`] for the semantics of each mutation.
 #[derive(Debug, Clone, PartialEq, EnumAsInner)]
 pub enum Mutation {
     Stop(HashSet<ActorId>),
@@ -220,7 +219,8 @@ pub enum Mutation {
         actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
     },
     Add {
-        adds: HashMap<ActorId, Vec<ProstDispatcher>>,
+        adds: HashMap<ActorId, Vec<PbDispatcher>>,
+        added_actors: HashSet<ActorId>,
         // TODO: remove this and use `SourceChangesSplit` after we support multiple mutations.
         splits: HashMap<ActorId, Vec<SplitImpl>>,
     },
@@ -278,7 +278,7 @@ impl Barrier {
     }
 
     /// Whether this barrier is to stop the actor with `actor_id`.
-    pub fn is_stop_or_update_drop_actor(&self, actor_id: ActorId) -> bool {
+    pub fn is_stop(&self, actor_id: ActorId) -> bool {
         self.all_stop_actors()
             .map_or(false, |actors| actors.contains(&actor_id))
     }
@@ -292,15 +292,16 @@ impl Barrier {
         }
     }
 
-    /// Whether this barrier is to add new dispatchers for the actor with `actor_id`.
-    pub fn is_add_dispatcher(&self, actor_id: ActorId) -> bool {
-        matches!(
-            self.mutation.as_deref(),
-            Some(Mutation::Add {adds, ..}) if adds
-                .values()
-                .flatten()
-                .any(|dispatcher| dispatcher.downstream_actor_id.contains(&actor_id))
-        )
+    /// Whether this barrier is to newly add the actor with `actor_id`. This is used for `Chain` and
+    /// `Values` to decide whether to output the existing (historical) data.
+    ///
+    /// By "newly", we mean the actor belongs to a subgraph of a new streaming job. That is, actors
+    /// added for scaling are not included.
+    pub fn is_newly_added(&self, actor_id: ActorId) -> bool {
+        match self.mutation.as_deref() {
+            Some(Mutation::Add { added_actors, .. }) => added_actors.contains(&actor_id),
+            _ => false,
+        }
     }
 
     /// Whether this barrier is for pause.
@@ -364,9 +365,23 @@ impl Mutation {
         matches!(self, Mutation::Stop(_))
     }
 
-    fn to_protobuf(&self) -> ProstMutation {
+    fn to_protobuf(&self) -> PbMutation {
+        let actor_splits_to_protobuf = |actor_splits: &HashMap<ActorId, Vec<SplitImpl>>| {
+            actor_splits
+                .iter()
+                .map(|(&actor_id, splits)| {
+                    (
+                        actor_id,
+                        ConnectorSplits {
+                            splits: splits.clone().iter().map(ConnectorSplit::from).collect(),
+                        },
+                    )
+                })
+                .collect::<HashMap<_, _>>()
+        };
+
         match self {
-            Mutation::Stop(actors) => ProstMutation::Stop(StopMutation {
+            Mutation::Stop(actors) => PbMutation::Stop(StopMutation {
                 actors: actors.iter().copied().collect::<Vec<_>>(),
             }),
             Mutation::Update {
@@ -375,7 +390,7 @@ impl Mutation {
                 vnode_bitmaps,
                 dropped_actors,
                 actor_splits,
-            } => ProstMutation::Update(UpdateMutation {
+            } => PbMutation::Update(UpdateMutation {
                 dispatcher_update: dispatchers.values().flatten().cloned().collect(),
                 merge_update: merges.values().cloned().collect(),
                 actor_vnode_bitmap_update: vnode_bitmaps
@@ -383,19 +398,13 @@ impl Mutation {
                     .map(|(&actor_id, bitmap)| (actor_id, bitmap.to_protobuf()))
                     .collect(),
                 dropped_actors: dropped_actors.iter().cloned().collect(),
-                actor_splits: actor_splits
-                    .iter()
-                    .map(|(&actor_id, splits)| {
-                        (
-                            actor_id,
-                            ConnectorSplits {
-                                splits: splits.clone().iter().map(ConnectorSplit::from).collect(),
-                            },
-                        )
-                    })
-                    .collect(),
+                actor_splits: actor_splits_to_protobuf(actor_splits),
             }),
-            Mutation::Add { adds, .. } => ProstMutation::Add(AddMutation {
+            Mutation::Add {
+                adds,
+                added_actors,
+                splits,
+            } => PbMutation::Add(AddMutation {
                 actor_dispatchers: adds
                     .iter()
                     .map(|(&actor_id, dispatchers)| {
@@ -407,39 +416,32 @@ impl Mutation {
                         )
                     })
                     .collect(),
-                ..Default::default()
+                added_actors: added_actors.iter().copied().collect(),
+                actor_splits: actor_splits_to_protobuf(splits),
             }),
-            Mutation::SourceChangeSplit(changes) => {
-                ProstMutation::Splits(SourceChangeSplitMutation {
-                    actor_splits: changes
-                        .iter()
-                        .map(|(&actor_id, splits)| {
-                            (
-                                actor_id,
-                                ConnectorSplits {
-                                    splits: splits
-                                        .clone()
-                                        .iter()
-                                        .map(ConnectorSplit::from)
-                                        .collect(),
-                                },
-                            )
-                        })
-                        .collect(),
-                })
-            }
-            Mutation::Pause => ProstMutation::Pause(PauseMutation {}),
-            Mutation::Resume => ProstMutation::Resume(ResumeMutation {}),
+            Mutation::SourceChangeSplit(changes) => PbMutation::Splits(SourceChangeSplitMutation {
+                actor_splits: changes
+                    .iter()
+                    .map(|(&actor_id, splits)| {
+                        (
+                            actor_id,
+                            ConnectorSplits {
+                                splits: splits.clone().iter().map(ConnectorSplit::from).collect(),
+                            },
+                        )
+                    })
+                    .collect(),
+            }),
+            Mutation::Pause => PbMutation::Pause(PauseMutation {}),
+            Mutation::Resume => PbMutation::Resume(ResumeMutation {}),
         }
     }
 
-    fn from_protobuf(prost: &ProstMutation) -> StreamExecutorResult<Self> {
+    fn from_protobuf(prost: &PbMutation) -> StreamExecutorResult<Self> {
         let mutation = match prost {
-            ProstMutation::Stop(stop) => {
-                Mutation::Stop(HashSet::from_iter(stop.get_actors().clone()))
-            }
+            PbMutation::Stop(stop) => Mutation::Stop(HashSet::from_iter(stop.get_actors().clone())),
 
-            ProstMutation::Update(update) => Mutation::Update {
+            PbMutation::Update(update) => Mutation::Update {
                 dispatchers: update
                     .dispatcher_update
                     .iter()
@@ -472,12 +474,13 @@ impl Mutation {
                     .collect(),
             },
 
-            ProstMutation::Add(add) => Mutation::Add {
+            PbMutation::Add(add) => Mutation::Add {
                 adds: add
                     .actor_dispatchers
                     .iter()
                     .map(|(&actor_id, dispatchers)| (actor_id, dispatchers.dispatchers.clone()))
                     .collect(),
+                added_actors: add.added_actors.iter().copied().collect(),
                 // TODO: remove this and use `SourceChangesSplit` after we support multiple
                 // mutations.
                 splits: add
@@ -496,7 +499,7 @@ impl Mutation {
                     .collect(),
             },
 
-            ProstMutation::Splits(s) => {
+            PbMutation::Splits(s) => {
                 let mut change_splits: Vec<(ActorId, Vec<SplitImpl>)> =
                     Vec::with_capacity(s.actor_splits.len());
                 for (&actor_id, splits) in &s.actor_splits {
@@ -513,15 +516,15 @@ impl Mutation {
                 }
                 Mutation::SourceChangeSplit(change_splits.into_iter().collect())
             }
-            ProstMutation::Pause(_) => Mutation::Pause,
-            ProstMutation::Resume(_) => Mutation::Resume,
+            PbMutation::Pause(_) => Mutation::Pause,
+            PbMutation::Resume(_) => Mutation::Resume,
         };
         Ok(mutation)
     }
 }
 
 impl Barrier {
-    pub fn to_protobuf(&self) -> ProstBarrier {
+    pub fn to_protobuf(&self) -> PbBarrier {
         let Barrier {
             epoch,
             mutation,
@@ -529,8 +532,8 @@ impl Barrier {
             passed_actors,
             ..
         }: Barrier = self.clone();
-        ProstBarrier {
-            epoch: Some(ProstEpoch {
+        PbBarrier {
+            epoch: Some(PbEpoch {
                 curr: epoch.curr,
                 prev: epoch.prev,
             }),
@@ -541,7 +544,7 @@ impl Barrier {
         }
     }
 
-    pub fn from_protobuf(prost: &ProstBarrier) -> StreamExecutorResult<Self> {
+    pub fn from_protobuf(prost: &PbBarrier) -> StreamExecutorResult<Self> {
         let mutation = prost
             .mutation
             .as_ref()
@@ -624,19 +627,19 @@ impl Watermark {
             .map(|new_col_idx| self.with_idx(new_col_idx))
     }
 
-    pub fn to_protobuf(&self) -> ProstWatermark {
-        ProstWatermark {
-            column: Some(ProstInputRef {
+    pub fn to_protobuf(&self) -> PbWatermark {
+        PbWatermark {
+            column: Some(PbInputRef {
                 index: self.col_idx as _,
                 r#type: Some(self.data_type.to_protobuf()),
             }),
-            val: Some(ProstDatum {
+            val: Some(PbDatum {
                 body: serialize_datum(Some(&self.val)),
             }),
         }
     }
 
-    pub fn from_protobuf(prost: &ProstWatermark) -> StreamExecutorResult<Self> {
+    pub fn from_protobuf(prost: &PbWatermark) -> StreamExecutorResult<Self> {
         let col_ref = prost.get_column()?;
         let data_type = DataType::from(col_ref.get_type()?);
         let val = deserialize_datum(prost.get_val()?.get_body().as_slice(), &data_type)?
@@ -692,7 +695,7 @@ impl Message {
         )
     }
 
-    pub fn to_protobuf(&self) -> ProstStreamMessage {
+    pub fn to_protobuf(&self) -> PbStreamMessage {
         let prost = match self {
             Self::Chunk(stream_chunk) => {
                 let prost_stream_chunk = stream_chunk.to_protobuf();
@@ -701,12 +704,12 @@ impl Message {
             Self::Barrier(barrier) => StreamMessage::Barrier(barrier.clone().to_protobuf()),
             Self::Watermark(watermark) => StreamMessage::Watermark(watermark.to_protobuf()),
         };
-        ProstStreamMessage {
+        PbStreamMessage {
             stream_message: Some(prost),
         }
     }
 
-    pub fn from_protobuf(prost: &ProstStreamMessage) -> StreamExecutorResult<Self> {
+    pub fn from_protobuf(prost: &PbStreamMessage) -> StreamExecutorResult<Self> {
         let res = match prost.get_stream_message()? {
             StreamMessage::StreamChunk(chunk) => Message::Chunk(StreamChunk::from_protobuf(chunk)?),
             StreamMessage::Barrier(barrier) => Message::Barrier(Barrier::from_protobuf(barrier)?),

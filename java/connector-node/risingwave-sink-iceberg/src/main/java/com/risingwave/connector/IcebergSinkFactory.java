@@ -39,7 +39,7 @@ public class IcebergSinkFactory implements SinkFactory {
 
     private static final Logger LOG = LoggerFactory.getLogger(IcebergSinkFactory.class);
 
-    public static final String SINK_MODE_PROP = "sink.mode";
+    public static final String SINK_TYPE_PROP = "type";
     public static final String WAREHOUSE_PATH_PROP = "warehouse.path";
     public static final String DATABASE_NAME_PROP = "database.name";
     public static final String TABLE_NAME_PROP = "table.name";
@@ -58,7 +58,7 @@ public class IcebergSinkFactory implements SinkFactory {
 
     @Override
     public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
-        String mode = tableProperties.get(SINK_MODE_PROP);
+        String mode = tableProperties.get(SINK_TYPE_PROP);
         String warehousePath = getWarehousePath(tableProperties);
         String databaseName = tableProperties.get(DATABASE_NAME_PROP);
         String tableName = tableProperties.get(TABLE_NAME_PROP);
@@ -93,7 +93,7 @@ public class IcebergSinkFactory implements SinkFactory {
     @Override
     public void validate(
             TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType) {
-        if (!tableProperties.containsKey(SINK_MODE_PROP) // only append-only, upsert
+        if (!tableProperties.containsKey(SINK_TYPE_PROP) // only append-only, upsert
                 || !tableProperties.containsKey(WAREHOUSE_PATH_PROP)
                 || !tableProperties.containsKey(DATABASE_NAME_PROP)
                 || !tableProperties.containsKey(TABLE_NAME_PROP)) {
@@ -101,14 +101,14 @@ public class IcebergSinkFactory implements SinkFactory {
                     .withDescription(
                             String.format(
                                     "%s, %s, %s or %s is not specified",
-                                    SINK_MODE_PROP,
+                                    SINK_TYPE_PROP,
                                     WAREHOUSE_PATH_PROP,
                                     DATABASE_NAME_PROP,
                                     TABLE_NAME_PROP))
                     .asRuntimeException();
         }
 
-        String mode = tableProperties.get(SINK_MODE_PROP);
+        String mode = tableProperties.get(SINK_TYPE_PROP);
         String databaseName = tableProperties.get(DATABASE_NAME_PROP);
         String tableName = tableProperties.get(TABLE_NAME_PROP);
         String warehousePath = getWarehousePath(tableProperties);
