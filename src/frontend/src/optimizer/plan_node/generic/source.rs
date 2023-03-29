@@ -54,14 +54,12 @@ impl GenericPlanNode for Source {
             .iter()
             .map(|c| (&c.column_desc).into())
             .collect();
-        // let fields = self.column_descs.iter().map(Into::into).collect();
         Schema { fields }
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
         let mut id_to_idx = HashMap::new();
-        // self.column_descs.iter().filter(|c| !c.is_generated()).enumerate().for_each(|(idx,
-        // c)| {
+
         self.column_catalog.iter().enumerate().for_each(|(idx, c)| {
             id_to_idx.insert(c.column_id(), idx);
         });
