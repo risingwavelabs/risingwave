@@ -98,6 +98,13 @@ pub enum AlterSinkOperation {
     RenameSink { sink_name: ObjectName },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterSourceOperation {
+    RenameSource { source_name: ObjectName },
+}
+
 impl fmt::Display for AlterTableOperation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -179,6 +186,16 @@ impl fmt::Display for AlterSinkOperation {
         match self {
             AlterSinkOperation::RenameSink { sink_name } => {
                 write!(f, "RENAME TO {sink_name}")
+            }
+        }
+    }
+}
+
+impl fmt::Display for AlterSourceOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterSourceOperation::RenameSource { source_name } => {
+                write!(f, "RENAME TO {source_name}")
             }
         }
     }

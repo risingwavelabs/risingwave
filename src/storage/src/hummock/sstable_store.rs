@@ -110,6 +110,12 @@ pub enum CachePolicy {
     NotFill,
 }
 
+impl Default for CachePolicy {
+    fn default() -> Self {
+        CachePolicy::Fill(CachePriority::High)
+    }
+}
+
 pub struct SstableStore {
     path: String,
     store: ObjectStoreRef,

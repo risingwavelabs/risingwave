@@ -231,10 +231,10 @@ mod tests {
         }
 
         let expected_columns: HashMap<String, String> = maplit::hashmap! {
-            "v1".into() => "Int32".into(),
-            "v2".into() => "Int32".into(),
-            "v3".into() => "Int32".into(),
-            "v4".into() => "Int32".into(),
+            "v1".into() => "integer".into(),
+            "v2".into() => "integer".into(),
+            "v3".into() => "integer".into(),
+            "v4".into() => "integer".into(),
             "primary key".into() => "v3".into(),
             "idx1".into() => "index(v1 DESC, v2 ASC, v3 ASC) include(v4) distributed by(v1, v2)".into(),
         };

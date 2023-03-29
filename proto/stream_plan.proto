@@ -180,19 +180,14 @@ message FilterNode {
 // - When creating index, `column_orders` will contain both
 //   arrange columns and pk columns, while distribution key will be arrange columns.
 message MaterializeNode {
+  reserved 4;
+  reserved "handle_pk_conflict_behavior";
+
   uint32 table_id = 1;
   // Column indexes and orders of primary key.
   repeated common.ColumnOrder column_orders = 2;
   // Used for internal table states.
   catalog.Table table = 3;
-  // Used to handle pk conflict, open it when upstream executor is source executor.
-  HandleConflictBehavior handle_pk_conflict_behavior = 4;
-}
-
-enum HandleConflictBehavior {
-  NO_CHECK_UNSPECIFIED = 0;
-  OVERWRITE = 1;
-  IGNORE = 2;
 }
 
 message AggCallState {
@@ -263,11 +258,28 @@ message GroupTopNNode {
   bool with_ties = 6;
 }
 
+message DeltaExpression {
+  expr.ExprNode.Type delta_type = 1;
+  expr.ExprNode delta = 2;
+}
+
+message InequalityPair {
+  // Input index of greater side of inequality.
+  uint32 key_required_larger = 1;
+  // Input index of less side of inequality.
+  uint32 key_required_smaller = 2;
+  // Whether this condition is used to clean state table of `HashJoinExecutor`.
+  bool clean_state = 3;
+  // greater >= less + delta_expression, if `None`, it represents that greater >= less
+  DeltaExpression delta_expression = 4;
+}
+
 message HashJoinNode {
   plan_common.JoinType join_type = 1;
   repeated int32 left_key = 2;
   repeated int32 right_key = 3;
   expr.ExprNode condition = 4;
+  repeated InequalityPair inequality_pairs = 5;
   // Used for internal table states.
   catalog.Table left_table = 6;
   // Used for internal table states.
@@ -431,14 +443,15 @@ message ArrangementInfo {
 // Special node for shared state, which will only be produced in fragmenter. ArrangeNode will
 // produce a special Materialize executor, which materializes data for downstream to query.
 message ArrangeNode {
+  reserved 4;
+  reserved "handle_pk_conflict_behavior";
+
   // Info about the arrangement
   ArrangementInfo table_info = 1;
   // Hash key of the materialize node, which is a subset of pk.
   repeated uint32 distribution_key = 2;
   // Used for internal table states.
   catalog.Table table = 3;
-  // Used to control whether doing sanity check, open it when upstream executor is source executor.
-  HandleConflictBehavior handle_pk_conflict_behavior = 4;
 }
 
 // Special node for shared state. LookupNode will join an arrangement with a stream.

@@ -944,6 +944,7 @@ impl LogicalJoin {
                 Condition::true_cond(),
                 predicate.eq_keys().to_vec(),
                 self.left().schema().len(),
+                self.right().schema().len(),
             );
             let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
             let hash_join = StreamHashJoin::new(logical_join, eq_cond).into();

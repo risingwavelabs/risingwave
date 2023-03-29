@@ -145,6 +145,7 @@ message AlterRelationNameRequest {
     uint32 view_id = 2;
     uint32 index_id = 3;
     uint32 sink_id = 4;
+    uint32 source_id = 5;
   }
   string new_name = 20;
 }

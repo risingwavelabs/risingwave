@@ -119,7 +119,7 @@
       l_returnflag,
       l_linestatus;
   stream_plan: |
-    StreamMaterialize { columns: [l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc, count_order], stream_key: [l_returnflag, l_linestatus], pk_columns: [l_returnflag, l_linestatus], pk_conflict: "no check" }
+    StreamMaterialize { columns: [l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc, count_order], stream_key: [l_returnflag, l_linestatus], pk_columns: [l_returnflag, l_linestatus], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), RoundDigit((sum(lineitem.l_quantity) / count(lineitem.l_quantity)), 4:Int32) as $expr3, RoundDigit((sum(lineitem.l_extendedprice) / count(lineitem.l_extendedprice)), 4:Int32) as $expr4, RoundDigit((sum(lineitem.l_discount) / count(lineitem.l_discount)), 4:Int32) as $expr5, count] }
       └─StreamHashAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), count(lineitem.l_quantity), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count] }
         └─StreamExchange { dist: HashShard(lineitem.l_returnflag, lineitem.l_linestatus) }
@@ -177,7 +177,7 @@
           p_partkey
     limit 100;
   stream_plan: |
-    StreamMaterialize { columns: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, region.r_regionkey(hidden), nation.n_nationkey(hidden), supplier.s_suppkey(hidden), part.p_partkey(hidden), partsupp.ps_partkey(hidden), partsupp.ps_suppkey(hidden), min(partsupp.ps_supplycost)(hidden)], stream_key: [region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, min(partsupp.ps_supplycost)], pk_columns: [s_acctbal, n_name, s_name, p_partkey, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, min(partsupp.ps_supplycost)], pk_conflict: "no check" }
+    StreamMaterialize { columns: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, region.r_regionkey(hidden), nation.n_nationkey(hidden), supplier.s_suppkey(hidden), part.p_partkey(hidden), partsupp.ps_partkey(hidden), partsupp.ps_suppkey(hidden), min(partsupp.ps_supplycost)(hidden)], stream_key: [region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, min(partsupp.ps_supplycost)], pk_columns: [s_acctbal, n_name, s_name, p_partkey, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, min(partsupp.ps_supplycost)], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, min(partsupp.ps_supplycost)] }
       └─StreamTopN { order: "[supplier.s_acctbal DESC, nation.n_name ASC, supplier.s_name ASC, part.p_partkey ASC]", limit: 100, offset: 0 }
         └─StreamExchange { dist: Single }
@@ -261,7 +261,7 @@
       o_orderdate
     limit 10;
   stream_plan: |
-    StreamMaterialize { columns: [l_orderkey, revenue, o_orderdate, o_shippriority], stream_key: [l_orderkey, o_orderdate, o_shippriority], pk_columns: [revenue, o_orderdate, l_orderkey, o_shippriority], pk_conflict: "no check" }
+    StreamMaterialize { columns: [l_orderkey, revenue, o_orderdate, o_shippriority], stream_key: [l_orderkey, o_orderdate, o_shippriority], pk_columns: [revenue, o_orderdate, l_orderkey, o_shippriority], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [lineitem.l_orderkey, sum($expr1), orders.o_orderdate, orders.o_shippriority] }
       └─StreamTopN { order: "[sum($expr1) DESC, orders.o_orderdate ASC]", limit: 10, offset: 0 }
         └─StreamExchange { dist: Single }
@@ -311,7 +311,7 @@
     order by
       o_orderpriority;
   stream_plan: |
-    StreamMaterialize { columns: [o_orderpriority, order_count], stream_key: [o_orderpriority], pk_columns: [o_orderpriority], pk_conflict: "no check" }
+    StreamMaterialize { columns: [o_orderpriority, order_count], stream_key: [o_orderpriority], pk_columns: [o_orderpriority], pk_conflict: "NoCheck" }
     └─StreamHashAgg { group_key: [orders.o_orderpriority], aggs: [count] }
       └─StreamExchange { dist: HashShard(orders.o_orderpriority) }
         └─StreamHashJoin { type: LeftSemi, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [orders.o_orderpriority, orders.o_orderkey] }
@@ -354,7 +354,7 @@
     order by
       revenue desc;
   stream_plan: |
-    StreamMaterialize { columns: [n_name, revenue], stream_key: [n_name], pk_columns: [revenue, n_name], pk_conflict: "no check" }
+    StreamMaterialize { columns: [n_name, revenue], stream_key: [n_name], pk_columns: [revenue, n_name], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [nation.n_name, sum($expr1)] }
       └─StreamHashAgg { group_key: [nation.n_name], aggs: [sum($expr1), count] }
         └─StreamExchange { dist: HashShard(nation.n_name) }
@@ -400,7 +400,7 @@
       and l_discount between 0.08 - 0.01 and 0.08 + 0.01
       and l_quantity < 24;
   stream_plan: |
-    StreamMaterialize { columns: [revenue], stream_key: [], pk_columns: [], pk_conflict: "no check" }
+    StreamMaterialize { columns: [revenue], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [sum(sum($expr1))] }
       └─StreamGlobalSimpleAgg { aggs: [sum(sum($expr1)), count] }
         └─StreamExchange { dist: Single }
@@ -454,7 +454,7 @@
       cust_nation,
       l_year;
   stream_plan: |
-    StreamMaterialize { columns: [supp_nation, cust_nation, l_year, revenue], stream_key: [supp_nation, cust_nation, l_year], pk_columns: [supp_nation, cust_nation, l_year], pk_conflict: "no check" }
+    StreamMaterialize { columns: [supp_nation, cust_nation, l_year, revenue], stream_key: [supp_nation, cust_nation, l_year], pk_columns: [supp_nation, cust_nation, l_year], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [nation.n_name, nation.n_name, $expr1, sum($expr2)] }
       └─StreamHashAgg { group_key: [nation.n_name, nation.n_name, $expr1], aggs: [sum($expr2), count] }
         └─StreamExchange { dist: HashShard(nation.n_name, nation.n_name, $expr1) }
@@ -526,7 +526,7 @@
     order by
       o_year;
   stream_plan: |
-    StreamMaterialize { columns: [o_year, mkt_share], stream_key: [o_year], pk_columns: [o_year], pk_conflict: "no check" }
+    StreamMaterialize { columns: [o_year, mkt_share], stream_key: [o_year], pk_columns: [o_year], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [$expr1, RoundDigit((sum($expr2) / sum($expr3)), 6:Int32) as $expr4] }
       └─StreamHashAgg { group_key: [$expr1], aggs: [sum($expr2), sum($expr3), count] }
         └─StreamExchange { dist: HashShard($expr1) }
@@ -604,7 +604,7 @@
       nation,
       o_year desc;
   stream_plan: |
-    StreamMaterialize { columns: [nation, o_year, sum_profit], stream_key: [nation, o_year], pk_columns: [nation, o_year], pk_conflict: "no check" }
+    StreamMaterialize { columns: [nation, o_year, sum_profit], stream_key: [nation, o_year], pk_columns: [nation, o_year], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [nation.n_name, $expr1, RoundDigit(sum($expr2), 2:Int32) as $expr3] }
       └─StreamHashAgg { group_key: [nation.n_name, $expr1], aggs: [sum($expr2), count] }
         └─StreamExchange { dist: HashShard(nation.n_name, $expr1) }
@@ -671,7 +671,7 @@
       revenue desc
     limit 20;
   stream_plan: |
-    StreamMaterialize { columns: [c_custkey, c_name, revenue, c_acctbal, n_name, c_address, c_phone, c_comment], stream_key: [c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment], pk_columns: [revenue, c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment], pk_conflict: "no check" }
+    StreamMaterialize { columns: [c_custkey, c_name, revenue, c_acctbal, n_name, c_address, c_phone, c_comment], stream_key: [c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment], pk_columns: [revenue, c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [customer.c_custkey, customer.c_name, sum($expr1), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment] }
       └─StreamTopN { order: "[sum($expr1) DESC]", limit: 20, offset: 0 }
         └─StreamExchange { dist: Single }
@@ -731,7 +731,7 @@
     order by
       value desc;
   stream_plan: |
-    StreamMaterialize { columns: [ps_partkey, value], stream_key: [ps_partkey], pk_columns: [value, ps_partkey], pk_conflict: "no check" }
+    StreamMaterialize { columns: [ps_partkey, value], stream_key: [ps_partkey], pk_columns: [value, ps_partkey], pk_conflict: "NoCheck" }
     └─StreamDynamicFilter { predicate: (sum($expr1) > $expr3), output: [partsupp.ps_partkey, sum($expr1)] }
       ├─StreamProject { exprs: [partsupp.ps_partkey, sum($expr1)] }
       | └─StreamHashAgg { group_key: [partsupp.ps_partkey], aggs: [sum($expr1), count] }
@@ -802,7 +802,7 @@
     order by
         l_shipmode;
   stream_plan: |
-    StreamMaterialize { columns: [l_shipmode, high_line_count, low_line_count], stream_key: [l_shipmode], pk_columns: [l_shipmode], pk_conflict: "no check" }
+    StreamMaterialize { columns: [l_shipmode, high_line_count, low_line_count], stream_key: [l_shipmode], pk_columns: [l_shipmode], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [lineitem.l_shipmode, sum($expr1), sum($expr2)] }
       └─StreamHashAgg { group_key: [lineitem.l_shipmode], aggs: [sum($expr1), sum($expr2), count] }
         └─StreamExchange { dist: HashShard(lineitem.l_shipmode) }
@@ -841,7 +841,7 @@
       custdist desc,
       c_count desc;
   stream_plan: |
-    StreamMaterialize { columns: [c_count, custdist], stream_key: [c_count], pk_columns: [custdist, c_count], pk_conflict: "no check" }
+    StreamMaterialize { columns: [c_count, custdist], stream_key: [c_count], pk_columns: [custdist, c_count], pk_conflict: "NoCheck" }
     └─StreamHashAgg { group_key: [count(orders.o_orderkey)], aggs: [count] }
       └─StreamExchange { dist: HashShard(count(orders.o_orderkey)) }
         └─StreamProject { exprs: [customer.c_custkey, count(orders.o_orderkey)] }
@@ -873,7 +873,7 @@
       and l_shipdate >= date '1995-09-01'
       and l_shipdate < date '1995-09-01' + interval '1' month;
   stream_plan: |
-    StreamMaterialize { columns: [promo_revenue], stream_key: [], pk_columns: [], pk_conflict: "no check" }
+    StreamMaterialize { columns: [promo_revenue], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [((100.00:Decimal * sum(sum($expr1))) / sum(sum($expr2))) as $expr3] }
       └─StreamGlobalSimpleAgg { aggs: [sum(sum($expr1)), sum(sum($expr2)), count] }
         └─StreamExchange { dist: Single }
@@ -924,7 +924,7 @@
     order by
       s_suppkey;
   stream_plan: |
-    StreamMaterialize { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, max(max(sum($expr1)))(hidden), lineitem.l_suppkey(hidden)], stream_key: [s_suppkey, lineitem.l_suppkey, max(max(sum($expr1)))], pk_columns: [s_suppkey, lineitem.l_suppkey, max(max(sum($expr1)))], pk_conflict: "no check" }
+    StreamMaterialize { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, max(max(sum($expr1)))(hidden), lineitem.l_suppkey(hidden)], stream_key: [s_suppkey, lineitem.l_suppkey, max(max(sum($expr1)))], pk_columns: [s_suppkey, lineitem.l_suppkey, max(max(sum($expr1)))], pk_conflict: "NoCheck" }
     └─StreamHashJoin { type: Inner, predicate: max(max(sum($expr1))) = sum($expr1), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1), max(max(sum($expr1))), lineitem.l_suppkey] }
       ├─StreamExchange { dist: HashShard(max(max(sum($expr1)))) }
       | └─StreamProject { exprs: [max(max(sum($expr1)))] }
@@ -987,7 +987,7 @@
       p_type,
       p_size;
   stream_plan: |
-    StreamMaterialize { columns: [p_brand, p_type, p_size, supplier_cnt], stream_key: [p_brand, p_type, p_size], pk_columns: [supplier_cnt, p_brand, p_type, p_size], pk_conflict: "no check" }
+    StreamMaterialize { columns: [p_brand, p_type, p_size, supplier_cnt], stream_key: [p_brand, p_type, p_size], pk_columns: [supplier_cnt, p_brand, p_type, p_size], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, count(distinct partsupp.ps_suppkey)] }
       └─StreamHashAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count(distinct partsupp.ps_suppkey), count] }
         └─StreamExchange { dist: HashShard(part.p_brand, part.p_type, part.p_size) }
@@ -1027,7 +1027,7 @@
           l_partkey = p_partkey
       );
   stream_plan: |
-    StreamMaterialize { columns: [avg_yearly], stream_key: [], pk_columns: [], pk_conflict: "no check" }
+    StreamMaterialize { columns: [avg_yearly], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [RoundDigit((sum(sum(lineitem.l_extendedprice)) / 7.0:Decimal), 16:Int32) as $expr2] }
       └─StreamGlobalSimpleAgg { aggs: [sum(sum(lineitem.l_extendedprice)), count] }
         └─StreamExchange { dist: Single }
@@ -1096,7 +1096,7 @@
       o_orderdate
     LIMIT 100;
   stream_plan: |
-    StreamMaterialize { columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, quantity], stream_key: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice], pk_columns: [o_totalprice, o_orderdate, c_name, c_custkey, o_orderkey], pk_conflict: "no check" }
+    StreamMaterialize { columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, quantity], stream_key: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice], pk_columns: [o_totalprice, o_orderdate, c_name, c_custkey, o_orderkey], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity)] }
       └─StreamTopN { order: "[orders.o_totalprice DESC, orders.o_orderdate ASC]", limit: 100, offset: 0 }
         └─StreamExchange { dist: Single }
@@ -1162,7 +1162,7 @@
         and l_shipinstruct = 'DELIVER IN PERSON'
       );
   stream_plan: |
-    StreamMaterialize { columns: [revenue], stream_key: [], pk_columns: [], pk_conflict: "no check" }
+    StreamMaterialize { columns: [revenue], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [sum(sum($expr1))] }
       └─StreamGlobalSimpleAgg { aggs: [sum(sum($expr1)), count] }
         └─StreamExchange { dist: Single }
@@ -1221,7 +1221,7 @@
     order by
       s_name;
   stream_plan: |
-    StreamMaterialize { columns: [s_name, s_address, supplier.s_suppkey(hidden), nation.n_nationkey(hidden), supplier.s_nationkey(hidden)], stream_key: [supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey], pk_columns: [s_name, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey], pk_conflict: "no check" }
+    StreamMaterialize { columns: [s_name, s_address, supplier.s_suppkey(hidden), nation.n_nationkey(hidden), supplier.s_nationkey(hidden)], stream_key: [supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey], pk_columns: [s_name, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey], pk_conflict: "NoCheck" }
     └─StreamHashJoin { type: LeftSemi, predicate: supplier.s_suppkey = partsupp.ps_suppkey, output: [supplier.s_name, supplier.s_address, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
       ├─StreamExchange { dist: HashShard(supplier.s_suppkey) }
       | └─StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: all }
@@ -1302,7 +1302,7 @@
       s_name
     LIMIT 100;
   stream_plan: |
-    StreamMaterialize { columns: [s_name, numwait], stream_key: [s_name], pk_columns: [numwait, s_name], pk_conflict: "no check" }
+    StreamMaterialize { columns: [s_name, numwait], stream_key: [s_name], pk_columns: [numwait, s_name], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [supplier.s_name, count] }
       └─StreamTopN { order: "[count DESC, supplier.s_name ASC]", limit: 100, offset: 0 }
         └─StreamExchange { dist: Single }
@@ -1382,7 +1382,7 @@
     order by
       cntrycode;
   stream_plan: |
-    StreamMaterialize { columns: [cntrycode, numcust, totacctbal], stream_key: [cntrycode], pk_columns: [cntrycode], pk_conflict: "no check" }
+    StreamMaterialize { columns: [cntrycode, numcust, totacctbal], stream_key: [cntrycode], pk_columns: [cntrycode], pk_conflict: "NoCheck" }
     └─StreamHashAgg { group_key: [$expr2], aggs: [count, sum(customer.c_acctbal)] }
       └─StreamExchange { dist: HashShard($expr2) }
         └─StreamProject { exprs: [Substr(customer.c_phone, 1:Int32, 2:Int32) as $expr2, customer.c_acctbal, customer.c_custkey] }
