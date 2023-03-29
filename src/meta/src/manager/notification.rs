@@ -239,6 +239,10 @@ where
             .await
     }
 
+    pub fn notify_compute_without_version(&self, operation: Operation, info: Info) {
+        self.notify_without_version(SubscribeType::Compute.into(), operation, info)
+    }
+
     pub fn notify_frontend_without_version(&self, operation: Operation, info: Info) {
         self.notify_without_version(SubscribeType::Frontend.into(), operation, info)
     }

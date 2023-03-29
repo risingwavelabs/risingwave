@@ -1533,6 +1533,7 @@ where
 
         self.notify_last_version_delta(versioning);
         trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
+        self.notify_stats(&versioning.version_stats);
 
         drop(versioning_guard);
         // Don't trigger compactions if we enable deterministic compaction
@@ -2014,6 +2015,16 @@ where
                         .clone()],
                 }),
             );
+    }
+
+    fn notify_stats(&self, stats: &HummockVersionStats) {
+        println!("Sending stats");
+        self.env
+            .notification_manager()
+            .notify_frontend_without_version(Operation::Update, Info::HummockStats(stats.clone()));
+        self.env
+            .notification_manager()
+            .notify_compute_without_version(Operation::Update, Info::HummockStats(stats.clone()));
     }
 
     #[named]
