@@ -73,9 +73,8 @@ function restore() {
   --meta-store-type etcd \
   --meta-snapshot-id "${job_id}" \
   --etcd-endpoints 127.0.0.1:2388 \
-  --storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
-  --storage-directory backup \
-  --state-store-url hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
+  --backup-storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
+  --hummock-storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
   1>/dev/null
 }
 

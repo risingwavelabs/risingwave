@@ -20,7 +20,7 @@ use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::meta_snapshot::MetaSnapshot;
 use risingwave_backup::storage::MetaSnapshotStorageRef;
 use risingwave_common::config::MetaBackend;
-use risingwave_hummock_sdk::{version_checkpoint_object_store_url, version_checkpoint_path};
+use risingwave_hummock_sdk::version_checkpoint_path;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionCheckpoint};
@@ -56,35 +56,35 @@ pub struct RestoreOpts {
     pub etcd_password: String,
     /// Url of storage to fetch meta snapshot from.
     #[clap(long)]
-    pub storage_url: String,
+    pub backup_storage_url: String,
     /// Directory of storage to fetch meta snapshot from.
     #[clap(long, default_value_t = String::from("backup"))]
-    pub storage_directory: String,
+    pub backup_storage_directory: String,
     /// Url of storage to restore hummock version to.
     #[clap(long)]
-    pub state_store_url: String,
+    pub hummock_storage_url: String,
     /// Directory of storage to restore hummock version to.
     #[clap(long, default_value_t = String::from("hummock_001"))]
-    pub state_store_dir: String,
+    pub hummock_storage_dir: String,
     /// Print the target snapshot, but won't restore to meta store.
     #[clap(long)]
     pub dry_run: bool,
 }
 
 async fn restore_hummock_version(
-    state_store_url: &str,
-    state_store_dir: &str,
+    hummock_storage_url: &str,
+    hummock_storage_dir: &str,
     hummock_version: &HummockVersion,
 ) -> BackupResult<()> {
     let object_store = Arc::new(
         parse_remote_object_store(
-            &version_checkpoint_object_store_url(state_store_url),
+            hummock_storage_url,
             Arc::new(ObjectStoreMetrics::unused()),
             "Version Checkpoint",
         )
         .await,
     );
-    let checkpoint_path = version_checkpoint_path(state_store_dir);
+    let checkpoint_path = version_checkpoint_path(hummock_storage_dir);
     let checkpoint = HummockVersionCheckpoint {
         version: Some(hummock_version.clone()),
         // Ignore stale objects. Full GC will clear them.
@@ -246,8 +246,8 @@ async fn restore_impl(
         return Ok(());
     }
     restore_hummock_version(
-        &opts.state_store_url,
-        &opts.state_store_dir,
+        &opts.hummock_storage_url,
+        &opts.hummock_storage_dir,
         &target_snapshot.metadata.hummock_version,
     )
     .await?;
@@ -296,10 +296,10 @@ mod tests {
             "1",
             "--meta-store-type",
             "mem",
-            "--storage-url",
+            "--backup-storage-url",
             "memory",
-            "--state-store-url",
-            "hummock+memory",
+            "--hummock-storage-url",
+            "memory",
         ])
     }
 

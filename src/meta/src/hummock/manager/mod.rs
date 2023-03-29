@@ -32,9 +32,9 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     HummockVersionUpdateExt,
 };
 use risingwave_hummock_sdk::{
-    version_checkpoint_object_store_url, version_checkpoint_path, CompactionGroupId,
-    ExtendedSstableInfo, HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockSstableId,
-    HummockSstableObjectId, HummockVersionId, SstObjectIdRange, INVALID_VERSION_ID,
+    version_checkpoint_path, CompactionGroupId, ExtendedSstableInfo, HummockCompactionTaskId,
+    HummockContextId, HummockEpoch, HummockSstableId, HummockSstableObjectId, HummockVersionId,
+    SstObjectIdRange, INVALID_VERSION_ID,
 };
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::group_delta::DeltaType;
@@ -287,7 +287,7 @@ where
         let state_store_dir = sys_params.data_directory();
         let object_store = Arc::new(
             parse_remote_object_store(
-                &version_checkpoint_object_store_url(state_store_url),
+                state_store_url.strip_prefix("hummock+").unwrap_or("memory"),
                 metrics.object_store_metric.clone(),
                 "Version Checkpoint",
             )
