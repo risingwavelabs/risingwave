@@ -450,7 +450,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                 KeyOp::Insert(new_row) => {
                     match conflict_behavior {
                         ConflictBehavior::Overwrite => {
-                            match self.force_get(&key) {
+                            match self.force_get_for_overwrite(&key) {
                                 Some(old_row) => fixed_changes.push((
                                     key.clone(),
                                     KeyOp::Update((old_row.row.clone(), new_row.clone())),
@@ -461,7 +461,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                             update_cache = true;
                         }
                         ConflictBehavior::IgnoreConflict => {
-                            match self.is_key_exist_in_cache(&key) {
+                            match self.force_get_for_ignore(&key) {
                                 Some(_) => (),
                                 _ => {
                                     fixed_changes
@@ -486,7 +486,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                 KeyOp::Delete(_) => {
                     match conflict_behavior {
                         ConflictBehavior::Overwrite => {
-                            match self.force_get(&key) {
+                            match self.force_get_for_overwrite(&key) {
                                 Some(old_row) => {
                                     fixed_changes
                                         .push((key.clone(), KeyOp::Delete(old_row.row.clone())));
@@ -506,7 +506,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                 KeyOp::Update((_, new_row)) => {
                     match conflict_behavior {
                         ConflictBehavior::Overwrite => {
-                            match self.force_get(&key) {
+                            match self.force_get_for_overwrite(&key) {
                                 Some(old_row) => fixed_changes.push((
                                     key.clone(),
                                     KeyOp::Update((old_row.row.clone(), new_row.clone())),
@@ -517,7 +517,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                             update_cache = true;
                         }
                         ConflictBehavior::IgnoreConflict => {
-                            match self.is_key_exist_in_cache(&key) {
+                            match self.force_get_for_ignore(&key) {
                                 Some(_) => (),
                                 None => {
                                     fixed_changes
@@ -569,6 +569,8 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                 ConflictBehavior::NoCheck => unreachable!(),
                 ConflictBehavior::Overwrite => self.data.push(key, CacheValue::Overwrite(value?)),
                 ConflictBehavior::IgnoreConflict => match value? {
+                    // for ignore conflict, we only need to check whether the record exist in cache,
+                    // and do not need it's value.
                     Some(_) => self.data.push(key, CacheValue::Ignore(Some(()))),
                     None => self.data.push(key, CacheValue::Ignore(None)),
                 },
@@ -578,7 +580,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         Ok(())
     }
 
-    pub fn force_get(&mut self, key: &[u8]) -> &Option<CompactedRow> {
+    pub fn force_get_for_overwrite(&mut self, key: &[u8]) -> &Option<CompactedRow> {
         if let CacheValue::Overwrite(cache_row) = self.data.get(key).unwrap_or_else(|| {
             panic!(
                 "the key {:?} has not been fetched in the materialize executor's cache ",
@@ -587,11 +589,11 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         }) {
             cache_row
         } else {
-            &None
+            unreachable!()
         }
     }
 
-    pub fn is_key_exist_in_cache(&mut self, key: &[u8]) -> &Option<EmptyValue> {
+    pub fn force_get_for_ignore(&mut self, key: &[u8]) -> &Option<EmptyValue> {
         if let CacheValue::Ignore(cache_row) = self.data.get(key).unwrap_or_else(|| {
             panic!(
                 "the key {:?} has not been fetched in the materialize executor's cache ",
