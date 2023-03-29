@@ -102,6 +102,23 @@ steps:
     timeout_in_minutes: 15
     retry: *auto-retry
 
+  - label: "fuzz test"
+    command: "ci/scripts/cron-fuzz-test.sh -p ci-release"
+    depends_on:
+      - "build"
+      - "build-simulation"
+    plugins:
+      - ./ci/plugins/swapfile
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 15
+    retry: *auto-retry
+    soft_fail: true
+
   - label: "unit test"
     command: "ci/scripts/unit-test.sh"
     plugins:
