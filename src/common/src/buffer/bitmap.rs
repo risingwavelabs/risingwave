@@ -180,6 +180,7 @@ pub struct Bitmap {
     // The number of high bits in the bitmap.
     count_ones: usize,
 
+    /// Bits are stored in a compact form via usize.
     bits: Box<[usize]>,
 }
 
@@ -565,9 +566,15 @@ impl<'a> iter::Iterator for BitmapIter<'a> {
         if self.idx >= self.num_bits {
             return None;
         }
-        let b = unsafe { self.bits.get_unchecked(self.idx / BITS) } & (1 << (self.idx % BITS)) != 0;
+        // Get the index of usize which the bit is located in
+        let usize_index = self.idx / BITS;
+        // Offset of the bit within the usize.
+        let usize_offset = self.idx % BITS;
+        let bit_mask = 1 << usize_offset;
+        let usize_containing_bit = unsafe { self.bits.get_unchecked(usize_index) };
+        let bit_flag = usize_containing_bit & bit_mask != 0;
         self.idx += 1;
-        Some(b)
+        Some(bit_flag)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
