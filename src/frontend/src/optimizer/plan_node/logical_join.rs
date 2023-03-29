@@ -161,14 +161,12 @@ impl LogicalJoin {
 
     /// get the Mapping of columnIndex from internal column index to output column index
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        ColIndexMapping::with_remaining_columns(self.output_indices(), self.internal_column_num())
+        self.core.i2o_col_mapping()
     }
 
     /// get the Mapping of columnIndex from output column index to internal column index
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        // If output_indices = [0, 0, 1], we should use it as `o2i_col_mapping` directly.
-        // If we use `self.i2o_col_mapping().inverse()`, we will lose the first 0.
-        ColIndexMapping::new(self.output_indices().iter().map(|x| Some(*x)).collect())
+        self.core.o2i_col_mapping()
     }
 
     /// Get a reference to the logical join's on.
@@ -959,7 +957,8 @@ impl LogicalJoin {
                 self.right().schema().len(),
             );
             let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
-            let hash_join = StreamHashJoin::new(logical_join, eq_cond).into();
+            let hash_join =
+                StreamHashJoin::new(logical_join.base, logical_join.core, eq_cond).into();
             let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
             let plan = StreamFilter::new(logical_filter).into();
             if self.output_indices() != &default_indices {
@@ -975,7 +974,7 @@ impl LogicalJoin {
                 Ok(plan)
             }
         } else {
-            Ok(StreamHashJoin::new(logical_join, predicate).into())
+            Ok(StreamHashJoin::new(logical_join.base, logical_join.core, predicate).into())
         }
     }
 
