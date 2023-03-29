@@ -355,7 +355,6 @@ impl Binder {
                 ("atan", raw_call(ExprType::Atan)), 
                 ("atan2", raw_call(ExprType::Atan2)),      
 
-                // TODO: add here
                 (
                     "to_timestamp",
                     dispatch_by_len(vec![

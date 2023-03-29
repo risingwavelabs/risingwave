@@ -26,8 +26,6 @@ pub fn round_digits<D: Into<i32>>(input: Decimal, digits: D) -> Decimal {
     }
 }
 
-// TODO: add sin here?
-
 #[function("sin(float64) -> float64")]
 pub fn sin_f64(input: F64) -> F64 {
     f64::sin(input.0).into()
