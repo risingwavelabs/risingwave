@@ -6696,6 +6696,7 @@ dependencies = [
  "async-trait",
  "await-tree",
  "bytes",
+ "criterion",
  "derivative",
  "dyn-clone",
  "either",

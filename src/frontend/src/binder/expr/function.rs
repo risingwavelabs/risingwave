@@ -398,6 +398,7 @@ impl Binder {
                 ("strpos", raw_call(ExprType::Strpos)),
                 ("to_ascii", raw_call(ExprType::ToAscii)),
                 ("to_hex", raw_call(ExprType::ToHex)),
+                ("quote_ident", raw_call(ExprType::QuoteIdent)),
                 // array
                 ("array_cat", raw_call(ExprType::ArrayCat)),
                 ("array_append", raw_call(ExprType::ArrayAppend)),

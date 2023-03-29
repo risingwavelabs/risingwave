@@ -249,6 +249,10 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
         )
     }
 
+    pub fn is_full_out(&self) -> bool {
+        self.output_indices.len() == self.internal_column_num()
+    }
+
     /// Get the Mapping of columnIndex from internal column index to left column index.
     pub fn i2l_col_mapping(&self) -> ColIndexMapping {
         let left_len = self.left.schema().len();
@@ -280,6 +284,22 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
             JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::identity(right_len),
             JoinType::Unspecified => unreachable!(),
         }
+    }
+
+    /// TODO: This function may can be merged with `i2l_col_mapping` in future.
+    pub fn i2l_col_mapping_ignore_join_type(&self) -> ColIndexMapping {
+        let left_len = self.left.schema().len();
+        let right_len = self.right.schema().len();
+
+        ColIndexMapping::identity_or_none(left_len + right_len, left_len)
+    }
+
+    /// TODO: This function may can be merged with `i2r_col_mapping` in future.
+    pub fn i2r_col_mapping_ignore_join_type(&self) -> ColIndexMapping {
+        let left_len = self.left.schema().len();
+        let right_len = self.right.schema().len();
+
+        ColIndexMapping::with_shift_offset(left_len + right_len, -(left_len as isize))
     }
 
     /// Get the Mapping of columnIndex from left column index to internal column index.

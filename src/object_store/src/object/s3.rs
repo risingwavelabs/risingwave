@@ -484,10 +484,7 @@ impl ObjectStore for S3ObjectStore {
                     .iter()
                     .map(|obj| ObjectMetadata {
                         key: obj.key().expect("key required").to_owned(),
-                        last_modified: obj
-                            .last_modified()
-                            .expect("last_modified required")
-                            .as_secs_f64(),
+                        last_modified: obj.last_modified().map(|l| l.as_secs_f64()).unwrap_or(0f64),
                         total_size: obj.size() as usize,
                     })
                     .collect_vec(),

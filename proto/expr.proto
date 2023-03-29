@@ -104,6 +104,7 @@ message ExprNode {
     STRPOS = 241;
     TO_ASCII = 242;
     TO_HEX = 243;
+    QUOTE_IDENT = 244;
     SIN = 245;
     COS = 246;
     TAN = 247; 

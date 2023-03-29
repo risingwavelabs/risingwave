@@ -18,7 +18,6 @@ use std::future::Future;
 use std::ops::Bound::*;
 use std::sync::Arc;
 
-use risingwave_common::cache::CachePriority;
 use risingwave_hummock_sdk::key::FullKey;
 
 use super::super::{HummockResult, HummockValue};
@@ -26,7 +25,8 @@ use super::Sstable;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::{
-    BlockHolder, BlockIterator, BlockResponse, SstableStore, SstableStoreRef, TableHolder,
+    BlockHolder, BlockIterator, BlockResponse, CachePolicy, SstableStore, SstableStoreRef,
+    TableHolder,
 };
 use crate::monitor::StoreLocalStatistic;
 
@@ -41,7 +41,7 @@ pub trait SstableIteratorType: HummockIterator + 'static {
 /// Prefetching may increase the memory footprint of the CN process because the prefetched blocks
 /// cannot be evicted.
 enum BlockFetcher {
-    Simple,
+    Simple(SimpleFetchContext),
     Prefetch(PrefetchContext),
 }
 
@@ -54,14 +54,9 @@ impl BlockFetcher {
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockHolder> {
         match self {
-            BlockFetcher::Simple => {
+            BlockFetcher::Simple(context) => {
                 sstable_store
-                    .get(
-                        sst,
-                        block_idx,
-                        crate::hummock::CachePolicy::Fill(CachePriority::High),
-                        stats,
-                    )
+                    .get(sst, block_idx, context.cache_policy, stats)
                     .await
             }
             BlockFetcher::Prefetch(context) => {
@@ -73,20 +68,27 @@ impl BlockFetcher {
     }
 }
 
+struct SimpleFetchContext {
+    cache_policy: CachePolicy,
+}
+
 struct PrefetchContext {
     prefetched_blocks: VecDeque<(usize, BlockResponse)>,
 
     /// block[cur_idx..=dest_idx] will definitely be visited in the future.
     dest_idx: usize,
+
+    cache_policy: CachePolicy,
 }
 
 const DEFAULT_PREFETCH_BLOCK_NUM: usize = 1;
 
 impl PrefetchContext {
-    fn new(dest_idx: usize) -> Self {
+    fn new(dest_idx: usize, cache_policy: CachePolicy) -> Self {
         Self {
             prefetched_blocks: VecDeque::with_capacity(DEFAULT_PREFETCH_BLOCK_NUM + 1),
             dest_idx,
+            cache_policy,
         }
     }
 
@@ -112,12 +114,7 @@ impl PrefetchContext {
             self.prefetched_blocks.push_back((
                 idx,
                 sstable_store
-                    .get_block_response(
-                        sst,
-                        idx,
-                        crate::hummock::CachePolicy::Fill(CachePriority::High),
-                        stats,
-                    )
+                    .get_block_response(sst, idx, self.cache_policy, stats)
                     .await?,
             ));
         }
@@ -132,12 +129,7 @@ impl PrefetchContext {
             self.prefetched_blocks.push_back((
                 next_prefetch_idx,
                 sstable_store
-                    .get_block_response(
-                        sst,
-                        next_prefetch_idx,
-                        crate::hummock::CachePolicy::Fill(CachePriority::High),
-                        stats,
-                    )
+                    .get_block_response(sst, next_prefetch_idx, self.cache_policy, stats)
                     .await?,
             ));
         }
@@ -174,7 +166,9 @@ impl SstableIterator {
         Self {
             block_iter: None,
             cur_idx: 0,
-            block_fetcher: BlockFetcher::Simple,
+            block_fetcher: BlockFetcher::Simple(SimpleFetchContext {
+                cache_policy: options.cache_policy,
+            }),
             sst: sstable,
             sstable_store,
             stats: StoreLocalStatistic::default(),
@@ -222,7 +216,10 @@ impl SstableIterator {
                     }
                 };
                 if start_idx < dest_idx {
-                    self.block_fetcher = BlockFetcher::Prefetch(PrefetchContext::new(dest_idx));
+                    self.block_fetcher = BlockFetcher::Prefetch(PrefetchContext::new(
+                        dest_idx,
+                        self.options.cache_policy,
+                    ));
                 }
             }
         }
@@ -355,6 +352,7 @@ impl SstableIteratorType for SstableIterator {
 mod tests {
     use itertools::Itertools;
     use rand::prelude::*;
+    use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::TableId;
 
     use super::*;
@@ -508,7 +506,7 @@ mod tests {
                 .unwrap(),
             sstable_store,
             Arc::new(SstableIteratorReadOptions {
-                prefetch: true,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
                 must_iterated_end_user_key: None,
             }),
         );

@@ -89,16 +89,6 @@ impl RewriteExprsRecursive for Relation {
 }
 
 impl Relation {
-    pub fn contains_sys_table(&self) -> bool {
-        match self {
-            Relation::SystemTable(_) => true,
-            Relation::Subquery(s) => s.query.contains_sys_table(),
-            Relation::Join(j) => j.left.contains_sys_table() || j.right.contains_sys_table(),
-            Relation::Share(s) => s.input.contains_sys_table(),
-            _ => false,
-        }
-    }
-
     pub fn is_correlated(&self, depth: Depth) -> bool {
         match self {
             Relation::Subquery(subquery) => subquery.query.is_correlated(depth),
