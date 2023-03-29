@@ -60,7 +60,8 @@ pub fn tan_decimal(input: Decimal) -> Decimal {
 
 #[function("cot(float64) -> float64")]
 pub fn cot_f64(input: F64) -> F64 {
-    f64::cot(input.0).into() // TODO
+    let res = 1.0 / f64::tan(input.0);
+    res.into()
 }
 
 #[function("cot(decimal) -> decimal")]
@@ -97,18 +98,16 @@ pub fn atan_f64(input: F64) -> F64 {
 pub fn atan_decimal(input: Decimal) -> Decimal {
     input.atan()
 }
-// TODO: how do I pass 2 args here?
+
 #[function("atan2(float64, float64) -> float64")]
-pub fn atan2_f64(input: F64) -> F64 {
-    f64::atan2(input.0, input.1).into()
+pub fn atan2_f64(input_x: F64, input_y: F64) -> F64 {
+    input_x.0.atan2(input_y.0).into()
 }
 
-
-#[function("atan2(decimal) -> decimal")]
-pub fn atan2_decimal(input: Decimal) -> Decimal {
-    input.atan2()
+#[function("atan2(decimal, decimal) -> decimal")]
+pub fn atan2_decimal(input_x: Decimal, input_y: Decimal) -> Decimal {
+    input_x.atan2(input_y)
 }
-
 
 #[function("ceil(float64) -> float64")]
 pub fn ceil_f64(input: F64) -> F64 {

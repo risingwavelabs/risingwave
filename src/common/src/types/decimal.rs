@@ -527,7 +527,7 @@ impl Decimal {
     #[must_use]
     pub fn cot(&self) -> Self {
         match self {
-            Self::Normalized(d) => Self::Normalized(d.cos() / d.sin()),
+            Self::Normalized(d) => (1.to_f64().unwrap() / Self::Normalized(*d).to_f64().expect("expected valid f64").tan()).into(), // Self::Normalized(1.to_f64().unwrap() / d.tan()),
             d => *d,
         }
     }
@@ -557,11 +557,11 @@ impl Decimal {
     }
 
     #[must_use]
-    pub fn atan2(&self) -> Self {
+    pub fn atan2(&self, other: Decimal) -> Self {
+        let other = other.to_f64().expect("Expected valid f64 value for 'other'"); 
         match self {
-            // Somehow pass 2 args here. Do not just pass 0
-            Self::Normalized(d) => Self::Normalized(*d).to_f64().expect("Expected valid f64 value").atan2(0 as f64).into(),
-            d => d.to_f64().expect("Expected valid f64 value").atan2(0 as f64).into(),
+            Self::Normalized(d) => Self::Normalized(*d).to_f64().expect("Expected valid f64 value").atan2(other).into(),
+            d => d.to_f64().expect("Expected valid f64 value").atan2(other).into(),
         }
     }
 
