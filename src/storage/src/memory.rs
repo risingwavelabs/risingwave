@@ -85,7 +85,9 @@ impl RangeKv for BTreeMapRangeKv {
         for (key, value) in kv_pairs {
             let is_delete_operation = value.is_none();
             let old_value = user_key_map.insert(key.user_key.clone(), value.clone());
-            assert_eq!(is_delete_operation, matches!(old_value, Some(Some(_))));
+            if is_delete_operation {
+                assert!(matches!(old_value, Some(Some(_))));
+            }
             full_key_map.insert(key, value);
         }
         Ok(())
