@@ -73,6 +73,13 @@ pub struct MetaOpts {
 
     /// Interval of GC metadata in meta store and stale SSTs in object store.
     pub vacuum_interval_sec: u64,
+    /// Interval of hummock version checkpoint.
+    pub hummock_version_checkpoint_interval_sec: u64,
+    /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
+    /// attempt is rejected. Greater value reduces object store IO, meanwhile it results in
+    /// more loss of in memory `HummockVersionCheckpoint::stale_objects` state when meta node is
+    /// restarted.
+    pub min_delta_log_num_for_hummock_version_checkpoint: u64,
     /// Threshold used by worker node to filter out new SSTs when scanning object store.
     pub min_sst_retention_time_sec: u64,
     /// The spin interval when collecting global GC watermark in hummock
@@ -118,6 +125,8 @@ impl MetaOpts {
             max_idle_ms: 0,
             compaction_deterministic_test: false,
             vacuum_interval_sec: 30,
+            hummock_version_checkpoint_interval_sec: 30,
+            min_delta_log_num_for_hummock_version_checkpoint: 1,
             min_sst_retention_time_sec: 3600 * 24 * 7,
             collect_gc_watermark_spin_interval_sec: 5,
             enable_committed_sst_sanity_check: false,

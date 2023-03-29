@@ -79,13 +79,13 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<MetaStoreBackendI
 
 pub async fn get_backup_store(opts: RestoreOpts) -> BackupResult<MetaSnapshotStorageRef> {
     let object_store = parse_remote_object_store(
-        &opts.storage_url,
+        &opts.backup_storage_url,
         Arc::new(ObjectStoreMetrics::unused()),
         "Meta Backup",
     )
     .await;
     let backup_store =
-        ObjectStoreMetaSnapshotStorage::new(&opts.storage_directory, Arc::new(object_store))
+        ObjectStoreMetaSnapshotStorage::new(&opts.backup_storage_directory, Arc::new(object_store))
             .await?;
     Ok(Arc::new(backup_store))
 }
