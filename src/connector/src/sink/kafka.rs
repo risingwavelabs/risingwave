@@ -411,11 +411,40 @@ pub fn chunk_to_json(chunk: StreamChunk, schema: &Schema) -> Result<Vec<String>>
 
 fn fields_to_json(fields: &[Field]) -> Value {
     let mut res = Vec::new();
+
     fields.iter().for_each(|field| {
+        // mapping from 'https://debezium.io/documentation/reference/2.1/connectors/postgresql.html#postgresql-data-types'
+        let r#type = match field.data_type() {
+            risingwave_common::types::DataType::Boolean => "boolean",
+            risingwave_common::types::DataType::Int16 => "int16",
+            risingwave_common::types::DataType::Int32 => "int32",
+            risingwave_common::types::DataType::Int64 => "int64",
+            risingwave_common::types::DataType::Float32 => "float32",
+            risingwave_common::types::DataType::Float64 => "float64",
+            // currently, we only support handling decimal as string.
+            // https://debezium.io/documentation/reference/2.1/connectors/postgresql.html#postgresql-decimal-types
+            risingwave_common::types::DataType::Decimal => "string",
+
+            risingwave_common::types::DataType::Varchar => "string",
+
+            risingwave_common::types::DataType::Date => "int32",
+            risingwave_common::types::DataType::Time => "int64",
+            risingwave_common::types::DataType::Timestamp => "int64",
+            risingwave_common::types::DataType::Timestamptz => "string",
+            risingwave_common::types::DataType::Interval => "string",
+
+            risingwave_common::types::DataType::Bytea => "bytes",
+            risingwave_common::types::DataType::Jsonb => "string",
+            risingwave_common::types::DataType::Serial => "int32",
+            // since the original debezium pg support HSTORE via encoded as json string by default,
+            // we do the same here
+            risingwave_common::types::DataType::Struct(_) => "string",
+            risingwave_common::types::DataType::List { .. } => "string",
+        };
         res.push(json!({
             "field": field.name,
             "optional": true,
-            "type": field.type_name,
+            "type": r#type,
         }))
     });
 

@@ -6048,6 +6048,7 @@ dependencies = [
  "futures-async-stream",
  "globset",
  "google-cloud-pubsub",
+ "hex",
  "http",
  "http-serde",
  "hyper",
