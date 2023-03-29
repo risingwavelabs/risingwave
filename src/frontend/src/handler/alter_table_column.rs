@@ -107,9 +107,9 @@ pub async fn handle_alter_table_column(
                 .iter()
                 .any(|x| matches!(x.option, ColumnOption::GeneratedColumns(_)))
             {
-                Err(ErrorCode::InvalidInputSyntax(format!(
-                    "alter table add generated columns is not supported"
-                )))?
+                Err(ErrorCode::InvalidInputSyntax(
+                    "alter table add generated columns is not supported".to_string(),
+                ))?
             }
 
             // Add the new column to the table definition.
