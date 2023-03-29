@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
@@ -580,12 +580,30 @@ impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
 
     fn ingest_batch(
         &self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
-        _delete_ranges: Vec<(Bytes, Bytes)>,
+        mut kv_pairs: Vec<(Bytes, StorageValue)>,
+        delete_ranges: Vec<(Bytes, Bytes)>,
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
             let epoch = write_options.epoch;
+
+            let mut delete_keys = BTreeSet::new();
+            for del_range in delete_ranges {
+                let fullkey_start =
+                    FullKey::new(write_options.table_id, TableKey(del_range.0), epoch);
+                let fullkey_end =
+                    FullKey::new(write_options.table_id, TableKey(del_range.1), epoch);
+                for (key, _) in self.inner.range(
+                    (Bound::Included(fullkey_start), Bound::Excluded(fullkey_end)),
+                    None,
+                )? {
+                    delete_keys.insert(key);
+                }
+            }
+            for key in delete_keys {
+                kv_pairs.push((key.user_key.table_key.0, StorageValue::new_delete()));
+            }
+
             let mut size = 0;
             self.inner
                 .ingest_batch(kv_pairs.into_iter().map(|(key, value)| {
