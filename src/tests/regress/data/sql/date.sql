@@ -236,7 +236,7 @@ SELECT f1 as "date",
     date_part('dow', f1) AS dow,
     date_part('isodow', f1) AS isodow,
     date_part('doy', f1) AS doy,
-    -- date_part('julian', f1) AS julian,
+    date_part('julian', f1) AS julian,
     date_part('epoch', f1) AS epoch
     FROM date_tbl;
 
@@ -308,7 +308,7 @@ SELECT EXTRACT(DOY           FROM DATE '2020-08-11');
 --@ SELECT EXTRACT(TIMEZONE_M    FROM DATE '2020-08-11');
 --@ SELECT EXTRACT(TIMEZONE_H    FROM DATE '2020-08-11');
 SELECT EXTRACT(EPOCH         FROM DATE '2020-08-11');
---@ SELECT EXTRACT(JULIAN        FROM DATE '2020-08-11');
+SELECT EXTRACT(JULIAN        FROM DATE '2020-08-11');
 --
 -- test trunc function!
 --

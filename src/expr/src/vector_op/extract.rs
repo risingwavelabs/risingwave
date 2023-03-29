@@ -58,6 +58,9 @@ pub fn extract_from_timestamp(unit: &str, timestamp: Timestamp) -> Result<Decima
         Decimal::from_i128_with_scale(nanoseconds() as i128, 3)
     } else if unit.eq_ignore_ascii_case("epoch") {
         Decimal::from_i128_with_scale(ts.timestamp_nanos() as i128, 9)
+    } else if unit.eq_ignore_ascii_case("julian") {
+        Decimal::from_i128_with_scale(ts.timestamp_nanos() as i128, 9) / (24 * 60 * 60).into()
+            + 2_440_588.into()
     } else {
         return Err(invalid_unit("timestamp unit", unit));
     })
@@ -115,5 +118,9 @@ mod tests {
         assert_eq!(extract("MILLISECOND", ts).unwrap(), 2575.401.into());
         assert_eq!(extract("MICROSECOND", ts).unwrap(), 2575401.into());
         assert_eq!(extract("EPOCH", ts).unwrap(), 1637582642.575401.into());
+        assert_eq!(
+            extract("JULIAN", ts).unwrap(),
+            "2459541.5028075856597222222222".parse().unwrap()
+        );
     }
 }
