@@ -32,7 +32,8 @@ impl RelationCollectorVisitor {
 
     /// `collect_with` will collect all the relations in the plan with some default ones, which are
     /// collected during the binding phase. Note that during visit the collected relations might be
-    /// duplicated with the default ones.
+    /// duplicated with the default ones. The collection is necessary, because implicit dependencies
+    /// on indices can only be discovered after plan is built.
     pub fn collect_with(relations: HashSet<TableId>, plan: PlanRef) -> HashSet<TableId> {
         let mut visitor = Self::new_with(relations);
         visitor.visit(plan);

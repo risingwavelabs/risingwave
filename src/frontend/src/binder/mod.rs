@@ -231,6 +231,11 @@ impl Binder {
         self.param_types.export()
     }
 
+    /// Returns included relations in the query after binding. This is used for resolving relation
+    /// dependencies. Note that it only contains referenced relations discovered during binding.
+    /// After the plan is built, the referenced relations may be changed. We cannot rely on the
+    /// collection result of plan, because we still need to record the dependencies that have been
+    /// optimised away.
     pub fn included_relations(&self) -> HashSet<TableId> {
         self.included_relations.clone()
     }
