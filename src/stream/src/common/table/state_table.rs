@@ -762,7 +762,7 @@ where
     /// * `eager_cleaning` - Whether to clean up the state table eagerly.
     pub fn update_watermark(&mut self, watermark: ScalarImpl, eager_cleaning: bool) {
         trace!(table_id = %self.table_id, watermark = ?watermark, "update watermark");
-        if eager_cleaning || self.watermark_buffer_strategy.apply() {
+        if self.watermark_buffer_strategy.apply() || eager_cleaning {
             self.state_clean_watermark = Some(watermark);
         }
     }
