@@ -490,7 +490,7 @@ impl ExprRewritable for StreamHashJoin {
         let mut logical = self.logical.clone();
         logical.rewrite_exprs(r);
         Self::new(
-            self.base.clone(),
+            self.base.clone_with_new_plan_id(),
             logical,
             self.eq_join_predicate.rewrite_exprs(r),
         )
