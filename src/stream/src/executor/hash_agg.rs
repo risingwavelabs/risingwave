@@ -154,31 +154,31 @@ struct EmitOnUpdates<S: StateStore> {
 impl<S: StateStore> Emitter for EmitOnUpdates<S> {
     type StateStore = S;
 
-    fn emit_from_changes<'a>(
+    #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
+    async fn emit_from_changes<'a>(
         &'a mut self,
         chunk_builder: &'a mut ChunkBuilder,
         result_table: &'a mut StateTable<Self::StateStore>,
         _watermark: Option<&'a ScalarImpl>,
         changes: impl IntoIterator<Item = Record<OwnedRow>> + 'a,
-    ) -> impl Stream<Item = StreamExecutorResult<StreamChunk>> + 'a {
-        async_stream::try_stream! {
-            for change in changes {
-                // For EOU, write change to result table and directly yield the change.
-                result_table.write_record(change.as_ref());
-                if let Some(chunk) = chunk_builder.append_record(change) {
-                    yield chunk;
-                }
+    ) {
+        for change in changes {
+            // For EOU, write change to result table and directly yield the change.
+            result_table.write_record(change.as_ref());
+            if let Some(chunk) = chunk_builder.append_record(change) {
+                yield chunk;
             }
         }
     }
 
-    fn emit_from_result_table<'a>(
+    #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
+    async fn emit_from_result_table<'a>(
         &'a mut self,
         _chunk_builder: &'a mut ChunkBuilder,
         _result_table: &'a mut StateTable<Self::StateStore>,
         _watermark: Option<&'a ScalarImpl>,
-    ) -> impl Stream<Item = StreamExecutorResult<StreamChunk>> + 'a {
-        stream::empty()
+    ) {
+        // do nothing
     }
 }
 
@@ -197,36 +197,33 @@ struct EmitOnWindowClose<S: StateStore> {
 impl<S: StateStore> Emitter for EmitOnWindowClose<S> {
     type StateStore = S;
 
-    fn emit_from_changes<'a>(
+    #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
+    async fn emit_from_changes<'a>(
         &'a mut self,
         _chunk_builder: &'a mut ChunkBuilder,
         result_table: &'a mut StateTable<Self::StateStore>,
         _watermark: Option<&'a ScalarImpl>,
         changes: impl IntoIterator<Item = Record<OwnedRow>> + 'a,
-    ) -> impl Stream<Item = StreamExecutorResult<StreamChunk>> + 'a {
+    ) {
         for change in changes {
             // For EOWC, write change to the sort buffer.
             self.buffer.apply_change(&change, result_table);
         }
-        stream::empty()
     }
 
-    fn emit_from_result_table<'a>(
+    #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
+    async fn emit_from_result_table<'a>(
         &'a mut self,
         chunk_builder: &'a mut ChunkBuilder,
         result_table: &'a mut StateTable<Self::StateStore>,
         watermark: Option<&'a ScalarImpl>,
-    ) -> impl Stream<Item = StreamExecutorResult<StreamChunk>> + 'a {
-        async_stream::try_stream! {
-            if let Some(watermark) = watermark {
-                #[futures_async_stream::for_await]
-                for row in self.buffer.consume(watermark.clone(), result_table) {
-                    let row = row?;
-                    if let Some(chunk) = chunk_builder.append_record(
-                        Record::Insert { new_row: row },
-                    ) {
-                        yield chunk;
-                    }
+    ) {
+        if let Some(watermark) = watermark {
+            #[for_await]
+            for row in self.buffer.consume(watermark.clone(), result_table) {
+                let row = row?;
+                if let Some(chunk) = chunk_builder.append_record(Record::Insert { new_row: row }) {
+                    yield chunk;
                 }
             }
         }
