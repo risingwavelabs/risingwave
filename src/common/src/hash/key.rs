@@ -114,7 +114,7 @@ pub trait HashKey:
         data_chunk: &DataChunk,
         hash_codes: Vec<HashCode>,
     ) -> Vec<Self> {
-        let estimated_key_size = data_chunk.estimate_key_size(column_idxes);
+        let estimated_key_size = data_chunk.estimate_value_encoding_size(column_idxes);
         // Construct serializers for each row.
         let mut serializers: Vec<Self::S> = hash_codes
             .into_iter()
@@ -581,9 +581,9 @@ pub struct SerializedKeySerializer {
 impl HashKeySerializer for SerializedKeySerializer {
     type K = SerializedKey;
 
-    fn from_hash_code(hash_code: HashCode, estimated_key_size: usize) -> Self {
+    fn from_hash_code(hash_code: HashCode, estimated_value_encoding_size: usize) -> Self {
         Self {
-            buffer: Vec::with_capacity(estimated_key_size),
+            buffer: Vec::with_capacity(estimated_value_encoding_size),
             hash_code: hash_code.0,
             null_bitmap: FixedBitSet::new(),
         }
