@@ -2,6 +2,9 @@
 - sql: values (11, 22), (33+(1+2), 44);
   batch_plan: |
     BatchValues { rows: [[11:Int32, 22:Int32], [36:Int32, 44:Int32]] }
+  stream_plan: |
+    StreamMaterialize { columns: [*VALUES*_0.column_0, *VALUES*_0.column_1, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: "NoCheck", watermark_columns: [*VALUES*_0.column_0, *VALUES*_0.column_1] }
+    └─StreamValues { rows: [[11:Int32, 22:Int32, 0:Int64], [(33:Int32 + (1:Int32 + 2:Int32)), 44:Int32, 1:Int64]] }
 - sql: select * from t
   binder_error: 'Catalog error: table or source not found: t'
 - sql: |
