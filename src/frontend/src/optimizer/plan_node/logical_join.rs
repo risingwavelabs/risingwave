@@ -137,16 +137,6 @@ impl LogicalJoin {
         self.core.i2r_col_mapping_ignore_join_type()
     }
 
-    /// Get the Mapping of columnIndex from left column index to internal column index.
-    pub fn l2i_col_mapping(&self) -> ColIndexMapping {
-        self.core.l2i_col_mapping()
-    }
-
-    /// get the Mapping of columnIndex from internal column index to output column index
-    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        self.core.i2o_col_mapping()
-    }
-
     /// Get a reference to the logical join's on.
     pub fn on(&self) -> &Condition {
         &self.core.on
@@ -859,7 +849,7 @@ impl PredicatePushdown for LogicalJoin {
             self.output_indices().clone(),
         );
 
-        let mut mapping = self.i2o_col_mapping();
+        let mut mapping = self.core.i2o_col_mapping();
         predicate = predicate.rewrite_expr(&mut mapping);
         LogicalFilter::create(new_join.into(), predicate)
     }
@@ -1379,11 +1369,11 @@ impl ToStream for LogicalJoin {
             let l2o = join_with_pk
                 .core
                 .l2i_col_mapping()
-                .composite(&join_with_pk.i2o_col_mapping());
+                .composite(&join_with_pk.core.i2o_col_mapping());
             let r2o = join_with_pk
                 .core
                 .r2i_col_mapping()
-                .composite(&join_with_pk.i2o_col_mapping());
+                .composite(&join_with_pk.core.i2o_col_mapping());
             let left_right_stream_keys = join_with_pk
                 .left()
                 .logical_pk()
