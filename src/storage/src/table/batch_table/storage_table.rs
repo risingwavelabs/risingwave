@@ -294,6 +294,10 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             .map(|&i| self.output_indices.iter().position(|&j| i == j))
             .collect()
     }
+
+    pub fn table_id(&self) -> TableId {
+        self.table_id.clone()
+    }
 }
 
 /// Point get

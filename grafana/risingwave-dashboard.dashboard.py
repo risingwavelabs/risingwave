@@ -1026,6 +1026,26 @@ def section_streaming(panels):
                 )
             ]
         ),
+        panels.timeseries_rowsps(
+            "Backfill Snapshot Read Throughput(rows)",
+            "",
+            [
+                panels.target(
+                    f"rate({metric('stream_backfill_snapshot_read_row_count')}[$__rate_interval])",
+                    "table_id={{table_id}} actor={{actor_id}} @ {{instance}}"
+                ),
+            ],
+        ),
+        panels.timeseries_rowsps(
+            "Backfill Upstream Throughput(rows)",
+            "",
+            [
+                panels.target(
+                    f"rate({metric('stream_backfill_upstream_output_row_count')}[$__rate_interval])",
+                    "table_id={{table_id}} actor={{actor_id}} @ {{instance}}"
+                ),
+            ],
+        ),
         panels.timeseries_count(
             "Barrier Number",
             "",
