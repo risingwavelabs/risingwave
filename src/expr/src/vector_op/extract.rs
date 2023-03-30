@@ -121,7 +121,7 @@ pub fn extract_from_interval(unit: &str, interval: Interval) -> Result<Decimal> 
     } else if unit.eq_ignore_ascii_case("year") {
         interval.years_field().into()
     } else if unit.eq_ignore_ascii_case("quarter") {
-        ((interval.months_field() - 1) / 3 + 1).into()
+        (interval.months_field() / 3 + 1).into()
     } else if unit.eq_ignore_ascii_case("month") {
         interval.months_field().into()
     } else if unit.eq_ignore_ascii_case("day") {
