@@ -25,12 +25,13 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 use std::panic::catch_unwind;
 use std::slice::from_raw_parts;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use hummock_iterator::{HummockJavaBindingIterator, KeyedRow};
-use jni::objects::{AutoArray, JClass, JObject, JString, ReleaseMode};
+use jni::objects::{AutoArray, GlobalRef, JClass, JMethodID, JObject, JString, ReleaseMode};
 use jni::sys::{jboolean, jbyte, jbyteArray, jdouble, jfloat, jint, jlong, jshort};
 use jni::JNIEnv;
+use once_cell::sync::OnceCell;
 use prost::{DecodeError, Message};
 use risingwave_common::array::{ArrayError, StreamChunk};
 use risingwave_common::hash::VirtualNode;
@@ -221,22 +222,49 @@ where
     }
 }
 
-pub enum JavaBindingRow {
+pub enum JavaBindingRowInner {
     Keyed(KeyedRow),
     StreamChunk(StreamChunkRow),
 }
+#[derive(Default)]
+pub struct JavaClassMethodCache {
+    big_decimal_ctor: OnceCell<(GlobalRef, JMethodID)>,
+    timestamp_ctor: OnceCell<(GlobalRef, JMethodID)>,
+}
+
+pub struct JavaBindingRow {
+    inner: JavaBindingRowInner,
+    class_cache: Arc<JavaClassMethodCache>,
+}
 
 impl JavaBindingRow {
+    fn with_stream_chunk(
+        underlying: StreamChunkRow,
+        class_cache: Arc<JavaClassMethodCache>,
+    ) -> Self {
+        Self {
+            inner: JavaBindingRowInner::StreamChunk(underlying),
+            class_cache,
+        }
+    }
+
+    fn with_keyed(underlying: KeyedRow, class_cache: Arc<JavaClassMethodCache>) -> Self {
+        Self {
+            inner: JavaBindingRowInner::Keyed(underlying),
+            class_cache,
+        }
+    }
+
     fn as_keyed(&self) -> &KeyedRow {
-        match &self {
-            JavaBindingRow::Keyed(r) => r,
+        match &self.inner {
+            JavaBindingRowInner::Keyed(r) => r,
             _ => unreachable!("can only call as_keyed for KeyedRow"),
         }
     }
 
     fn as_stream_chunk(&self) -> &StreamChunkRow {
-        match &self {
-            JavaBindingRow::StreamChunk(r) => r,
+        match &self.inner {
+            JavaBindingRowInner::StreamChunk(r) => r,
             _ => unreachable!("can only call as_stream_chunk for StreamChunkRow"),
         }
     }
@@ -246,9 +274,9 @@ impl Deref for JavaBindingRow {
     type Target = OwnedRow;
 
     fn deref(&self) -> &Self::Target {
-        match &self {
-            JavaBindingRow::Keyed(r) => r.row(),
-            JavaBindingRow::StreamChunk(r) => r.row(),
+        match &self.inner {
+            JavaBindingRowInner::Keyed(r) => r.row(),
+            JavaBindingRowInner::StreamChunk(r) => r.row(),
         }
     }
 }
@@ -278,9 +306,10 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorN
     mut pointer: Pointer<'a, HummockJavaBindingIterator>,
 ) -> Pointer<'static, JavaBindingRow> {
     execute_and_catch(env, move || {
-        match RUNTIME.block_on(pointer.as_mut().next())? {
+        let iter = pointer.as_mut();
+        match RUNTIME.block_on(iter.next())? {
             None => Ok(Pointer::null()),
-            Some(row) => Ok(JavaBindingRow::Keyed(row).into()),
+            Some(row) => Ok(JavaBindingRow::with_keyed(row, iter.class_cache.clone()).into()),
         }
     })
 }
@@ -311,9 +340,14 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_streamChunkItera
     env: EnvParam<'a>,
     mut pointer: Pointer<'a, StreamChunkIterator>,
 ) -> Pointer<'static, JavaBindingRow> {
-    execute_and_catch(env, move || match pointer.as_mut().next() {
-        None => Ok(Pointer::null()),
-        Some(row) => Ok(JavaBindingRow::StreamChunk(row).into()),
+    execute_and_catch(env, move || {
+        let iter = pointer.as_mut();
+        match iter.next() {
+            None => Ok(Pointer::null()),
+            Some(row) => {
+                Ok(JavaBindingRow::with_stream_chunk(row, iter.class_cache.clone()).into())
+            }
+        }
     })
 }
 
@@ -422,6 +456,60 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetStringValu
 ) -> JString<'a> {
     execute_and_catch(env, move || {
         Ok(env.new_string(pointer.as_ref().get_utf8(idx as usize))?)
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetTimestampValue<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, JavaBindingRow>,
+    idx: jint,
+) -> JObject<'a> {
+    execute_and_catch(env, move || {
+        let millis = pointer
+            .as_ref()
+            .get_datetime(idx as usize)
+            .0
+            .timestamp_millis();
+        let (ts_class_ref, constructor) = pointer
+            .as_ref()
+            .class_cache
+            .timestamp_ctor
+            .get_or_try_init(|| {
+                let cls = env.find_class("java/sql/Timestamp")?;
+                let init_method = env.get_method_id(cls, "<init>", "(J)V")?;
+                Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
+            })?;
+        let ts_class = JClass::from(ts_class_ref.as_obj());
+        let date_obj = env.new_object_unchecked(ts_class, *constructor, &[millis.into()])?;
+
+        Ok(date_obj)
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetDecimalValue<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, JavaBindingRow>,
+    idx: jint,
+) -> JObject<'a> {
+    execute_and_catch(env, move || {
+        let value = pointer.as_ref().get_decimal(idx as usize).to_string();
+        let string_value = env.new_string(value)?;
+        let (decimal_class_ref, constructor) = pointer
+            .as_ref()
+            .class_cache
+            .big_decimal_ctor
+            .get_or_try_init(|| {
+                let cls = env.find_class("java/math/BigDecimal")?;
+                let init_method = env.get_method_id(cls, "<init>", "(Ljava/lang/String;)V")?;
+                Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
+            })?;
+        let decimal_class = JClass::from(decimal_class_ref.as_obj());
+        let date_obj =
+            env.new_object_unchecked(decimal_class, *constructor, &[string_value.into()])?;
+
+        Ok(date_obj)
     })
 }
 
