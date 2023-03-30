@@ -219,7 +219,10 @@ mod tests {
             .await
             .unwrap();
 
-        let err = builder.build(1).await.unwrap_err();
+        let err = builder
+            .build(1, get_ckpt_builder(&hummock_version))
+            .await
+            .unwrap_err();
         let err = assert_matches!(err, BackupError::Other(e) => e);
         assert_eq!("tracking id not found in meta store", err.to_error_str());
 
