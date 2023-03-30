@@ -2807,8 +2807,8 @@
           └─LogicalScan { table: lineitem, output_columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount], required_columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate], predicate: (lineitem.l_shipdate >= '1993-01-01':Date) AND (lineitem.l_shipdate < ('1993-01-01':Date + '3 mons':Interval)) }
   stream_plan: |
     StreamMaterialize { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, lineitem.l_suppkey(hidden)], stream_key: [s_suppkey, lineitem.l_suppkey, total_revenue], pk_columns: [s_suppkey, lineitem.l_suppkey, total_revenue], pk_conflict: "NoCheck" }
-    └─StreamHashJoin { type: Inner, predicate: sum($expr1) = max(max(sum($expr1))), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1), lineitem.l_suppkey] }
-      ├─StreamExchange { dist: HashShard(sum($expr1)) }
+    └─StreamHashJoin { type: Inner, predicate: sum($expr10082) = max(max(sum($expr1))), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr10082), lineitem.l_suppkey] }
+      ├─StreamExchange { dist: HashShard(sum($expr10082)) }
       | └─StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1), lineitem.l_suppkey] }
       |   ├─StreamExchange { dist: HashShard(supplier.s_suppkey) }
       |   | └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
@@ -2836,7 +2836,7 @@
     Fragment 0
     StreamMaterialize { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, lineitem.l_suppkey(hidden)], stream_key: [s_suppkey, lineitem.l_suppkey, total_revenue], pk_columns: [s_suppkey, lineitem.l_suppkey, total_revenue], pk_conflict: "NoCheck" }
     ├── materialized table: 4294967294
-    └── StreamHashJoin { type: Inner, predicate: sum($expr1) = max(max(sum($expr1))), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1), lineitem.l_suppkey] }
+    └── StreamHashJoin { type: Inner, predicate: sum($expr10082) = max(max(sum($expr1))), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr10082), lineitem.l_suppkey] }
         ├── left table: 0
         ├── right table: 2
         ├── left degree table: 1
@@ -2880,9 +2880,9 @@
     └── StreamProject { exprs: [lineitem.l_suppkey, sum($expr1), Vnode(lineitem.l_suppkey) as $expr2] }
         └──  StreamExchange Hash([0]) from 3
 
-    Table 0 { columns: [ supplier_s_suppkey, supplier_s_name, supplier_s_address, supplier_s_phone, sum($expr1), lineitem_l_suppkey ], primary key: [ $4 ASC, $0 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 4 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ supplier_s_suppkey, supplier_s_name, supplier_s_address, supplier_s_phone, sum($expr10082), lineitem_l_suppkey ], primary key: [ $4 ASC, $0 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 4 ], read pk prefix len hint: 1 }
 
-    Table 1 { columns: [ sum($expr1), supplier_s_suppkey, lineitem_l_suppkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 1 { columns: [ sum($expr10082), supplier_s_suppkey, lineitem_l_suppkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 2 { columns: [ max(max(sum($expr1))) ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -3150,7 +3150,7 @@
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [sum(lineitem.l_extendedprice)] }
             └─StreamProject { exprs: [lineitem.l_extendedprice, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, part.p_partkey] }
-              └─StreamFilter { predicate: (lineitem.l_quantity < $expr1) }
+              └─StreamFilter { predicate: (lineitem.l_quantity < $expr10151) }
                 └─StreamHashJoin { type: Inner, predicate: part.p_partkey IS NOT DISTINCT FROM part.p_partkey, output: all }
                   ├─StreamExchange { dist: HashShard(part.p_partkey) }
                   | └─StreamHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: [lineitem.l_quantity, lineitem.l_extendedprice, part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey] }
@@ -3186,7 +3186,7 @@
     Fragment 1
     StreamStatelessLocalSimpleAgg { aggs: [sum(lineitem.l_extendedprice)] }
     └── StreamProject { exprs: [lineitem.l_extendedprice, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, part.p_partkey] }
-        └── StreamFilter { predicate: (lineitem.l_quantity < $expr1) }
+        └── StreamFilter { predicate: (lineitem.l_quantity < $expr10151) }
             └── StreamHashJoin { type: Inner, predicate: part.p_partkey IS NOT DISTINCT FROM part.p_partkey, output: all } { left table: 1, right table: 3, left degree table: 2, right degree table: 4 }
                 ├──  StreamExchange Hash([2]) from 2
                 └── StreamProject { exprs: [part.p_partkey, (0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity))) as $expr1] }
@@ -3736,7 +3736,7 @@
       |         └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
       └─StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
         └─StreamProject { exprs: [partsupp.ps_suppkey, partsupp.ps_partkey, partsupp.ps_partkey, partsupp.ps_suppkey] }
-          └─StreamFilter { predicate: ($expr1 > $expr2) }
+          └─StreamFilter { predicate: ($expr10114 > $expr10113) }
             └─StreamHashJoin { type: Inner, predicate: partsupp.ps_partkey IS NOT DISTINCT FROM partsupp.ps_partkey AND partsupp.ps_suppkey IS NOT DISTINCT FROM partsupp.ps_suppkey, output: all }
               ├─StreamExchange { dist: HashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
               | └─StreamProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty::Decimal as $expr1] }
@@ -3785,7 +3785,7 @@
 
     Fragment 4
     StreamProject { exprs: [partsupp.ps_suppkey, partsupp.ps_partkey, partsupp.ps_partkey, partsupp.ps_suppkey] }
-    └── StreamFilter { predicate: ($expr1 > $expr2) }
+    └── StreamFilter { predicate: ($expr10114 > $expr10113) }
         └── StreamHashJoin { type: Inner, predicate: partsupp.ps_partkey IS NOT DISTINCT FROM partsupp.ps_partkey AND partsupp.ps_suppkey IS NOT DISTINCT FROM partsupp.ps_suppkey, output: all } { left table: 8, right table: 10, left degree table: 9, right degree table: 11 }
             ├──  StreamExchange Hash([0, 1]) from 5
             └── StreamProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey, (0.5:Decimal * sum(lineitem.l_quantity)) as $expr2] }

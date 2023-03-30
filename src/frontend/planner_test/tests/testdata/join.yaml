@@ -604,7 +604,7 @@
       └─BatchExchange { order: [], dist: HashShard(t2.v2) }
         └─BatchScan { table: t2, columns: [t2.v2], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), $expr1(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, $expr1], pk_columns: [t1._row_id, t2._row_id, $expr1], pk_conflict: "NoCheck" }
+    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), $expr10026(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, $expr10026], pk_columns: [t1._row_id, t2._row_id, $expr10026], pk_conflict: "NoCheck" }
     └─StreamHashJoin { type: Inner, predicate: $expr1 IS NOT DISTINCT FROM t2.v2, output: [t1.v1, t2.v2, t1._row_id, $expr1, t2._row_id] }
       ├─StreamExchange { dist: HashShard($expr1) }
       | └─StreamProject { exprs: [t1.v1, t1.v1::Int64 as $expr1, t1._row_id] }
