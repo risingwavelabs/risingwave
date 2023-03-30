@@ -133,7 +133,7 @@ pub fn extract_from_interval(unit: &str, interval: Interval) -> Result<Decimal> 
     } else if unit.eq_ignore_ascii_case("microsecond") {
         interval.seconds_in_micros().into()
     } else if unit.eq_ignore_ascii_case("epoch") {
-        Decimal::from_i128_with_scale(interval.epoch_in_micros() as i128, 6)
+        Decimal::from_i128_with_scale(interval.epoch_in_micros(), 6)
     } else {
         return Err(invalid_unit("interval unit", unit));
     })
