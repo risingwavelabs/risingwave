@@ -655,6 +655,7 @@ pub async fn handle_create_source(
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs,
+        optional_associated_table_id: None,
     };
 
     let catalog_writer = session.env().catalog_writer();
