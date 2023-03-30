@@ -69,19 +69,25 @@ impl<S: MetaStore> MetaTelemetryInfoFetcher<S> {
 
 #[async_trait::async_trait]
 impl<S: MetaStore> TelemetryInfoFetcher for MetaTelemetryInfoFetcher<S> {
-    async fn fetch_telemetry_info(&self) -> anyhow::Result<String> {
+    async fn fetch_telemetry_info(&self) -> anyhow::Result<Option<String>> {
         let tracking_id = get_or_create_tracking_id(self.meta_store.clone()).await?;
-
-        Ok(tracking_id)
+        Ok(Some(tracking_id))
     }
+}
+
+pub(crate) async fn get_tracking_id(
+    meta_store: &Arc<impl MetaStore>,
+) -> Result<String, anyhow::Error> {
+    let bytes = meta_store.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await?;
+    String::from_utf8(bytes).map_err(|e| anyhow!("failed to parse uuid, {}", e))
 }
 
 /// fetch or create a `tracking_id` from etcd
 async fn get_or_create_tracking_id(
     meta_store: Arc<impl MetaStore>,
 ) -> Result<String, anyhow::Error> {
-    match meta_store.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await {
-        Ok(bytes) => String::from_utf8(bytes).map_err(|e| anyhow!("failed to parse uuid, {}", e)),
+    match get_tracking_id(&meta_store).await {
+        Ok(id) => Ok(id),
         Err(_) => {
             let uuid = Uuid::new_v4().to_string();
             // put new uuid in meta store
@@ -130,6 +136,29 @@ mod tests {
 
     use super::*;
     use crate::storage::MemStore;
+
+    #[tokio::test]
+    async fn test_get_tracking_id() {
+        let meta_store = Arc::new(MemStore::new());
+
+        // Test case 1: When meta store is empty, an error should be returned
+        let result = get_tracking_id(&meta_store).await;
+        assert!(result.is_err()); // An error should be returned
+
+        // Test case 2: When meta store has a UUID for the tracking ID key, it should be returned
+        let uuid = Uuid::new_v4().to_string();
+        meta_store
+            .put_cf(
+                TELEMETRY_CF,
+                TELEMETRY_KEY.to_vec(),
+                uuid.clone().into_bytes(),
+            )
+            .await
+            .unwrap();
+        let result = get_tracking_id(&meta_store).await.unwrap();
+        assert_eq!(result, uuid); // Returned UUID should be the same as the one stored in meta
+                                  // store
+    }
 
     #[tokio::test]
     async fn test_get_or_create_tracking_id_existing_id() {
