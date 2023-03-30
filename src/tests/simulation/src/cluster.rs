@@ -79,7 +79,7 @@ impl Configuration {
             config_path: CONFIG_PATH.as_os_str().to_string_lossy().into(),
             frontend_nodes: 2,
             compute_nodes: 3,
-            meta_nodes: 1,
+            meta_nodes: 3,
             compactor_nodes: 2,
             compute_node_cores: 2,
             etcd_timeout_rate: 0.0,
