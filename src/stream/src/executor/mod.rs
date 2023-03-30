@@ -84,12 +84,14 @@ pub mod row_id_gen;
 mod sink;
 mod sort;
 mod sort_buffer;
+mod sort_buffer_v0;
 pub mod source;
 mod stream_reader;
 pub mod subtask;
 mod temporal_join;
 mod top_n;
 mod union;
+mod values;
 mod watermark;
 mod watermark_filter;
 mod wrapper;
@@ -133,6 +135,7 @@ pub use top_n::{
     AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,
 };
 pub use union::UnionExecutor;
+pub use values::ValuesExecutor;
 pub use watermark_filter::WatermarkFilterExecutor;
 pub use wrapper::WrapperExecutor;
 

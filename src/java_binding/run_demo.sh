@@ -10,7 +10,7 @@ INSERT_DATA=$(python3 ${RISINGWAVE_ROOT}/src/java_binding/gen-demo-insert-data.p
 
 psql -d ${DB_NAME} -h localhost -p 4566 -U root << EOF
 DROP TABLE IF EXISTS ${TABLE_NAME};
-CREATE TABLE ${TABLE_NAME} (v1 smallint, v2 int, v3 bigint, v4 float4, v5 float8, v6 bool, v7 varchar, may_null bigint);
+CREATE TABLE ${TABLE_NAME} (v1 smallint, v2 int, v3 bigint, v4 float4, v5 float8, v6 bool, v7 varchar, v8 timestamp, v9 decimal, may_null bigint);
 INSERT INTO ${TABLE_NAME} values ${INSERT_DATA};
 FLUSH;
 EOF
