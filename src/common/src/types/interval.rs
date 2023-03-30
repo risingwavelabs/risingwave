@@ -68,8 +68,9 @@ impl Interval {
 
     /// Returns the total number of whole months.
     ///
-    /// Note the difference between [`months`] and [`months_field`].
-    /// We have: `months` = `years_field` * 12 + `months_field`.
+    /// Note the difference between `months` and `months_field`.
+    ///
+    /// We have: `months = years_field * 12 + months_field`
     ///
     /// # Example
     /// ```
@@ -89,19 +90,18 @@ impl Interval {
 
     /// Returns the number of microseconds.
     ///
-    /// Note the difference between [`usecs`] and [`seconds_in_micros`].
-    /// We have:
-    /// `usecs` = `hours_field` * 3600
-    ///     + `minutes_field` * 60
-    ///     + `seconds_in_micros` as f64 / 1_000_000.0
+    /// Note the difference between `usecs` and `seconds_in_micros`.
+    ///
+    /// We have: `usecs = hours_field * 3600 + minutes_field * 60 + seconds_in_micros as f64 /
+    /// 1_000_000.0`.
     pub fn usecs(&self) -> i64 {
         self.usecs
     }
 
     /// Calculates the remaining number of microseconds.
-    /// range: 0..86_400_000_000
+    /// range: `0..86_400_000_000`
     ///
-    /// Note the difference between [`usecs`] and [`usecs_of_day`].
+    /// Note the difference between `usecs` and `usecs_of_day`.
     /// ```
     /// # use risingwave_common::types::Interval;
     /// let interval: Interval = "-1:00:00".parse().unwrap();
@@ -124,7 +124,7 @@ impl Interval {
         self.months / 12
     }
 
-    /// Returns the months field. range: -11..=11
+    /// Returns the months field. range: `-11..=11`
     ///
     /// # Example
     /// ```
@@ -166,7 +166,7 @@ impl Interval {
         (self.usecs / USECS_PER_SEC / 3600) as i32
     }
 
-    /// Returns the minutes field. range: -59..=-59
+    /// Returns the minutes field. range: `-59..=-59`
     ///
     /// # Example
     /// ```
@@ -182,7 +182,7 @@ impl Interval {
     }
 
     /// Returns the seconds field, including fractional parts, in microseconds.
-    /// range: -59,999,999..=59,999,999
+    /// range: `-59_999_999..=59_999_999`
     ///
     /// # Example
     /// ```
