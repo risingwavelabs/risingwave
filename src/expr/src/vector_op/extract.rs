@@ -60,6 +60,10 @@ fn extract_time(time: impl Timelike, unit: &str) -> Option<Decimal> {
         Decimal::from_i128_with_scale(usecs() as i128, 3)
     } else if unit.eq_ignore_ascii_case("microsecond") {
         usecs().into()
+    } else if unit.eq_ignore_ascii_case("epoch") {
+        let usecs =
+            time.num_seconds_from_midnight() as u64 * 1_000_000 + (time.nanosecond() / 1000) as u64;
+        Decimal::from_i128_with_scale(usecs as i128, 6)
     } else {
         return None;
     })
@@ -219,6 +223,18 @@ mod tests {
         assert_eq!(extract("MICROSECOND", ts), "2575400");
         assert_eq!(extract("EPOCH", ts), "1637582642.575400");
         assert_eq!(extract("JULIAN", ts), "2459541.5028075856481481481481");
+    }
+
+    #[test]
+    fn test_extract_from_time() {
+        let time: Time = "23:22:57.123450".parse().unwrap();
+        let extract = |f, i| extract_from_time(f, i).unwrap().to_string();
+        assert_eq!(extract("Hour", time), "23");
+        assert_eq!(extract("Minute", time), "22");
+        assert_eq!(extract("Second", time), "57.123450");
+        assert_eq!(extract("Millisecond", time), "57123.450");
+        assert_eq!(extract("Microsecond", time), "57123450");
+        assert_eq!(extract("Epoch", time), "84177.123450");
     }
 
     #[test]
