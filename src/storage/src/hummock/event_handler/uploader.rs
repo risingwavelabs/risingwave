@@ -366,7 +366,6 @@ impl SealedData {
                 .push_front(imm);
         }
 
-        // self.imms.push_front((epoch, unseal_epoch_data.imms));
         self.epochs.push_front(epoch);
         unseal_epoch_data
             .spilled_data
@@ -958,6 +957,7 @@ mod tests {
     use std::sync::atomic::Ordering::SeqCst;
     use std::sync::Arc;
     use std::task::Poll;
+    use std::time::Duration;
 
     use bytes::Bytes;
     use futures::future::BoxFuture;
@@ -975,13 +975,17 @@ mod tests {
     use crate::hummock::compactor::CompactionExecutor;
     use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
     use crate::hummock::event_handler::uploader::{
-        HummockUploader, UploadTaskInfo, UploadTaskOutput, UploadTaskPayload, UploaderContext,
-        UploaderEvent, UploadingTask,
+        HummockUploader, MergingImmTask, UploadTaskInfo, UploadTaskOutput, UploadTaskPayload,
+        UploaderContext, UploaderEvent, UploadingTask,
     };
     use crate::hummock::event_handler::LocalInstanceId;
+    use crate::hummock::iterator::test_utils::{
+        iterator_test_table_key_of, transform_shared_buffer,
+    };
     use crate::hummock::local_version::pinned_version::PinnedVersion;
     use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
     use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
+    use crate::hummock::value::HummockValue;
     use crate::hummock::{HummockError, HummockResult, MemoryLimiter};
     use crate::opts::StorageOpts;
     use crate::storage_value::StorageValue;
@@ -1371,6 +1375,97 @@ mod tests {
         uploader.update_pinned_version(new_pinned_version);
         assert!(uploader.synced_data.is_empty());
         assert_eq!(epoch1, uploader.max_committed_epoch());
+    }
+
+    #[tokio::test]
+    async fn test_drop_success_merging_task() {
+        let table_id = TableId { table_id: 1004 };
+        let shared_buffer_items1: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
+            (
+                iterator_test_table_key_of(1),
+                HummockValue::put(Bytes::from("value1")),
+            ),
+            (
+                iterator_test_table_key_of(2),
+                HummockValue::put(Bytes::from("value2")),
+            ),
+            (
+                iterator_test_table_key_of(3),
+                HummockValue::put(Bytes::from("value3")),
+            ),
+        ];
+        let epoch = 1;
+        let imm1 = SharedBufferBatch::for_test(
+            transform_shared_buffer(shared_buffer_items1.clone()),
+            epoch,
+            table_id,
+        );
+        let shared_buffer_items2: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
+            (
+                iterator_test_table_key_of(1),
+                HummockValue::put(Bytes::from("value12")),
+            ),
+            (
+                iterator_test_table_key_of(2),
+                HummockValue::put(Bytes::from("value22")),
+            ),
+            (
+                iterator_test_table_key_of(3),
+                HummockValue::put(Bytes::from("value32")),
+            ),
+        ];
+        let epoch = 2;
+        let imm2 = SharedBufferBatch::for_test(
+            transform_shared_buffer(shared_buffer_items2.clone()),
+            epoch,
+            table_id,
+        );
+
+        let shared_buffer_items3: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
+            (
+                iterator_test_table_key_of(1),
+                HummockValue::put(Bytes::from("value13")),
+            ),
+            (
+                iterator_test_table_key_of(2),
+                HummockValue::put(Bytes::from("value23")),
+            ),
+            (
+                iterator_test_table_key_of(3),
+                HummockValue::put(Bytes::from("value33")),
+            ),
+        ];
+        let epoch = 3;
+        let imm3 = SharedBufferBatch::for_test(
+            transform_shared_buffer(shared_buffer_items3.clone()),
+            epoch,
+            table_id,
+        );
+
+        // newer data comes first
+        let imms = vec![imm3, imm2, imm1];
+        let context = test_uploader_context(dummy_success_upload_future);
+        let mut task = MergingImmTask::new(table_id, 0, imms, &context);
+        let sleep = tokio::time::sleep(Duration::from_millis(500));
+        tokio::select! {
+            _ = sleep => {
+                println!("sleep timeout")
+            }
+            res = &mut task => {
+                match res {
+                    Ok(imm) => {
+                        println!("merging task success");
+                        assert_eq!(table_id, imm.table_id);
+                        assert_eq!(9, imm.kv_count());
+                    }
+                    Err(err) => {
+                        println!("merging task failed: {:?}", err);
+                    }
+                }
+            }
+        }
+        task.join_handle.abort();
+        println!("merging task abort success");
     }
 
     #[tokio::test]
