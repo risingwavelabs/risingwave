@@ -564,7 +564,6 @@ pub(crate) mod tests {
             JoinType::Inner,
             Condition::true_cond(),
         );
-        let plan_base = PlanBase::new_logical_with_core(&logical_join_node);
         let eq_key_1 = (
             InputRef {
                 index: 0,
