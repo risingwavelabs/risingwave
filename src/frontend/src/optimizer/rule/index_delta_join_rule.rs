@@ -137,7 +137,7 @@ impl Rule for IndexDeltaJoinRule {
                 // replace the children with stream index scan without inserting any exchanges.
                 Some(
                     join.clone()
-                        .to_delta_join()
+                        .into_delta_join()
                         .clone_with_left_right(left, right)
                         .into(),
                 )

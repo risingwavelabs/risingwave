@@ -249,7 +249,7 @@ impl StreamHashJoin {
     }
 
     /// Convert this hash join to a delta join plan
-    pub fn to_delta_join(self) -> StreamDeltaJoin {
+    pub fn into_delta_join(self) -> StreamDeltaJoin {
         StreamDeltaJoin::new(self.logical, self.eq_join_predicate)
     }
 
