@@ -115,7 +115,7 @@ pub trait HashKey:
         hash_codes: Vec<HashCode>,
     ) -> Vec<Self> {
         let estimated_key_size = data_chunk.estimate_key_size(column_idxes);
-        // Construct row-level serializers.
+        // Construct serializers for each row.
         let mut serializers: Vec<Self::S> = hash_codes
             .into_iter()
             .map(|hashcode| Self::S::from_hash_code(hashcode, estimated_key_size))
