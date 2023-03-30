@@ -35,17 +35,17 @@ mod tests {
         }
         let ret_arr = array_builder.finish();
         for v in ret_arr.iter().flatten() {
-            assert_eq!(v.num_months(), 12);
+            assert_eq!(v.months(), 12);
             assert_eq!(v.days(), 0);
         }
         let ret_arr = IntervalArray::from_iter([Some(Interval::from_ymd(1, 0, 0)), None]);
         let v = ret_arr.value_at(0).unwrap();
-        assert_eq!(v.num_months(), 12);
+        assert_eq!(v.months(), 12);
         assert_eq!(v.days(), 0);
         let v = ret_arr.value_at(1);
         assert_eq!(v, None);
         let v = unsafe { ret_arr.value_at_unchecked(0).unwrap() };
-        assert_eq!(v.num_months(), 12);
+        assert_eq!(v.months(), 12);
         assert_eq!(v.days(), 0);
     }
 }

@@ -109,23 +109,23 @@ pub fn extract_from_timestamptz(unit: &str, usecs: i64) -> Result<Decimal> {
 #[function("extract(varchar, interval) -> decimal")]
 pub fn extract_from_interval(unit: &str, interval: Interval) -> Result<Decimal> {
     Ok(if unit.eq_ignore_ascii_case("millennium") {
-        (interval.years() / 1000).into()
+        (interval.years_field() / 1000).into()
     } else if unit.eq_ignore_ascii_case("century") {
-        (interval.years() / 100).into()
+        (interval.years_field() / 100).into()
     } else if unit.eq_ignore_ascii_case("decade") {
-        (interval.years() / 10).into()
+        (interval.years_field() / 10).into()
     } else if unit.eq_ignore_ascii_case("year") {
-        interval.years().into()
+        interval.years_field().into()
     } else if unit.eq_ignore_ascii_case("quarter") {
-        ((interval.months() - 1) / 3 + 1).into()
+        ((interval.months_field() - 1) / 3 + 1).into()
     } else if unit.eq_ignore_ascii_case("month") {
-        interval.months().into()
+        interval.months_field().into()
     } else if unit.eq_ignore_ascii_case("day") {
-        interval.days().into()
+        interval.days_field().into()
     } else if unit.eq_ignore_ascii_case("hour") {
-        interval.hours().into()
+        interval.hours_field().into()
     } else if unit.eq_ignore_ascii_case("minute") {
-        interval.minutes().into()
+        interval.minutes_field().into()
     } else if unit.eq_ignore_ascii_case("second") {
         Decimal::from_i128_with_scale(interval.seconds_in_micros() as i128, 6)
     } else if unit.eq_ignore_ascii_case("millisecond") {

@@ -234,14 +234,14 @@ pub fn interval_timestamptz_add(l: Interval, r: i64) -> Result<i64> {
 #[inline(always)]
 fn timestamptz_interval_inner(l: i64, r: Interval, f: fn(i64, i64) -> Option<i64>) -> Result<i64> {
     // Without session TimeZone, we cannot add month/day in local time. See #5826.
-    if r.num_months() != 0 || r.days() != 0 {
+    if r.months() != 0 || r.days() != 0 {
         return Err(ExprError::UnsupportedFunction(
             "timestamp with time zone +/- interval of days".into(),
         ));
     }
 
     let result: Option<i64> = try {
-        let delta_usecs = r.num_usecs_of_day();
+        let delta_usecs = r.usecs();
         f(l, delta_usecs)?
     };
 
@@ -280,8 +280,7 @@ pub fn time_time_sub(l: Time, r: Time) -> Result<Interval> {
 #[function("subtract(time, interval) -> time")]
 pub fn time_interval_sub(l: Time, r: Interval) -> Result<Time> {
     let time = l.0;
-    let (new_time, ignored) =
-        time.overflowing_sub_signed(Duration::microseconds(r.num_usecs_of_day()));
+    let (new_time, ignored) = time.overflowing_sub_signed(Duration::microseconds(r.usecs()));
     if ignored == 0 {
         Ok(Time::new(new_time))
     } else {
@@ -292,8 +291,7 @@ pub fn time_interval_sub(l: Time, r: Interval) -> Result<Time> {
 #[function("add(time, interval) -> time")]
 pub fn time_interval_add(l: Time, r: Interval) -> Result<Time> {
     let time = l.0;
-    let (new_time, ignored) =
-        time.overflowing_add_signed(Duration::microseconds(r.num_usecs_of_day()));
+    let (new_time, ignored) = time.overflowing_add_signed(Duration::microseconds(r.usecs()));
     if ignored == 0 {
         Ok(Time::new(new_time))
     } else {

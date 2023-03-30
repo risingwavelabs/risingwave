@@ -68,57 +68,62 @@ impl Interval {
 
     /// Returns the total number of whole months.
     ///
-    /// Note the difference between [`num_months`] and [`months`].
+    /// Note the difference between [`months`] and [`months_field`].
     /// ```
     /// # use risingwave_common::types::Interval;
     /// let interval: Interval = "5 yrs 1 month".parse().unwrap();
-    /// assert_eq!(interval.num_months(), 61);
-    /// assert_eq!(interval.months(), 1);
+    /// assert_eq!(interval.months(), 61);
+    /// assert_eq!(interval.months_field(), 1);
     /// ```
-    pub fn num_months(&self) -> i32 {
+    pub fn months(&self) -> i32 {
         self.months
     }
 
+    /// Returns the number of days.
+    pub fn days(&self) -> i32 {
+        self.days
+    }
+
     /// Returns the total number of microseconds in a day.
-    pub fn num_usecs_of_day(&self) -> i64 {
+    pub fn usecs(&self) -> i64 {
         self.usecs
     }
 
     /// Calculates the remaining number of microseconds in a day.
     ///
-    /// Note the difference between [`num_usecs_of_day`] and [`rem_usecs_of_day`].
+    /// Note the difference between [`usecs`] and [`usecs_of_day`].
     /// ```
     /// # use risingwave_common::types::Interval;
     /// let interval: Interval = "-1:00:00".parse().unwrap();
-    /// assert_eq!(interval.num_usecs_of_day(), -1 * 60 * 60 * 1_000_000);
-    /// assert_eq!(interval.rem_usecs_of_day(), 23 * 60 * 60 * 1_000_000);
+    /// assert_eq!(interval.usecs(), -1 * 60 * 60 * 1_000_000);
+    /// assert_eq!(interval.usecs_of_day(), 23 * 60 * 60 * 1_000_000);
     /// ```
-    pub fn rem_usecs_of_day(&self) -> u64 {
+    pub fn usecs_of_day(&self) -> u64 {
         self.usecs.rem_euclid(USECS_PER_DAY) as u64
     }
 
     /// Returns the years field.
-    pub fn years(&self) -> i32 {
+    pub fn years_field(&self) -> i32 {
         self.months / 12
     }
 
     /// Returns the months field. range: 0-11
-    pub fn months(&self) -> i32 {
+    pub fn months_field(&self) -> i32 {
         self.months % 12
     }
 
     /// Returns the days field.
-    pub fn days(&self) -> i32 {
+    pub fn days_field(&self) -> i32 {
         self.days
     }
 
     /// Returns the hours field. range: -23..=23
-    pub fn hours(&self) -> i32 {
+    pub fn hours_field(&self) -> i32 {
         (self.usecs / USECS_PER_SEC / 3600 % 24) as i32
     }
 
     /// Returns the minutes field. range: -59..=-59
-    pub fn minutes(&self) -> i32 {
+    pub fn minutes_field(&self) -> i32 {
         (self.usecs / USECS_PER_SEC / 60 % 60) as i32
     }
 
@@ -1553,9 +1558,9 @@ mod tests {
                 }
                 Some((rhs_months, rhs_days, rhs_usecs, rhs_str)) => {
                     // We should test individual fields rather than using custom `Eq`
-                    assert_eq!(actual_deserialize.unwrap().num_months(), rhs_months);
+                    assert_eq!(actual_deserialize.unwrap().months(), rhs_months);
                     assert_eq!(actual_deserialize.unwrap().days(), rhs_days);
-                    assert_eq!(actual_deserialize.unwrap().num_usecs_of_day(), rhs_usecs);
+                    assert_eq!(actual_deserialize.unwrap().usecs(), rhs_usecs);
                     assert_eq!(actual_deserialize.unwrap().to_string(), rhs_str);
                 }
             }
@@ -1565,12 +1570,9 @@ mod tests {
         let input = Interval::from_month_day_usec(i32::MIN, -30, 1);
         let actual_deserialize = IntervalCmpValue::from(input).as_justified();
         // It has a justified interval within range, and can be obtained by our deserialization.
-        assert_eq!(actual_deserialize.unwrap().num_months(), i32::MIN);
+        assert_eq!(actual_deserialize.unwrap().months(), i32::MIN);
         assert_eq!(actual_deserialize.unwrap().days(), -29);
-        assert_eq!(
-            actual_deserialize.unwrap().num_usecs_of_day(),
-            -USECS_PER_DAY + 1
-        );
+        assert_eq!(actual_deserialize.unwrap().usecs(), -USECS_PER_DAY + 1);
     }
 
     #[test]
