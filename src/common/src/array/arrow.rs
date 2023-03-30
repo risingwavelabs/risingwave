@@ -353,10 +353,10 @@ impl FromIntoArrow for Interval {
 
     fn into_arrow(self) -> Self::ArrowType {
         arrow_array::types::IntervalMonthDayNanoType::make_value(
-            self.get_months(),
-            self.get_days(),
+            self.num_months(),
+            self.days(),
             // TODO: this may overflow and we need `try_into`
-            self.get_usecs() * 1000,
+            self.num_usecs_of_day() * 1000,
         )
     }
 }

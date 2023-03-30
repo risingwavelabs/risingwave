@@ -245,5 +245,33 @@ mod tests {
         );
         assert!(extract("Nanosecond", interval).is_err());
         assert!(extract("Week", interval).is_err());
+
+        let interval: Interval = "-2345 years -1 mon -250 days -23:22:57.123456"
+            .parse()
+            .unwrap();
+        let extract = extract_from_interval;
+        assert_eq!(extract("Millennium", interval).unwrap(), (-2).into());
+        assert_eq!(extract("Century", interval).unwrap(), (-23).into());
+        assert_eq!(extract("Decade", interval).unwrap(), (-234).into());
+        assert_eq!(extract("Year", interval).unwrap(), (-2345).into());
+        assert_eq!(extract("Month", interval).unwrap(), (-1).into());
+        assert_eq!(extract("Day", interval).unwrap(), (-250).into());
+        assert_eq!(extract("Hour", interval).unwrap(), (-23).into());
+        assert_eq!(extract("Minute", interval).unwrap(), (-22).into());
+        assert_eq!(extract("Second", interval).unwrap(), (-57.123_456).into());
+        assert_eq!(
+            extract("Millisecond", interval).unwrap(),
+            (-57_123.456).into()
+        );
+        assert_eq!(
+            extract("Microsecond", interval).unwrap(),
+            (-57_123_456).into()
+        );
+        assert_eq!(
+            extract("Epoch", interval).unwrap(),
+            (-74_026_848_177.123_46).into()
+        );
+        assert!(extract("Nanosecond", interval).is_err());
+        assert!(extract("Week", interval).is_err());
     }
 }

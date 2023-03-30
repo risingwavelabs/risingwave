@@ -293,9 +293,9 @@ fn estimate_serialize_str_size(bytes: &[u8]) -> usize {
 }
 
 fn serialize_interval(interval: &Interval, buf: &mut impl BufMut) {
-    buf.put_i32_le(interval.get_months());
-    buf.put_i32_le(interval.get_days());
-    buf.put_i64_le(interval.get_usecs());
+    buf.put_i32_le(interval.num_months());
+    buf.put_i32_le(interval.days());
+    buf.put_i64_le(interval.num_usecs_of_day());
 }
 
 fn estimate_serialize_interval_size() -> usize {

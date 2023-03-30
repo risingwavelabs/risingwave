@@ -57,6 +57,7 @@ impl Interval {
         usecs: i64::MIN,
     };
 
+    /// Creates a new `Interval` from the given number of months, days, and microseconds.
     pub fn from_month_day_usec(months: i32, days: i32, usecs: i64) -> Self {
         Interval {
             months,
@@ -65,19 +66,34 @@ impl Interval {
         }
     }
 
-    pub fn get_days(&self) -> i32 {
-        self.days
-    }
-
-    pub fn get_months(&self) -> i32 {
+    /// Returns the total number of whole months.
+    ///
+    /// Note the difference between [`num_months`] and [`months`].
+    /// ```
+    /// # use risingwave_common::types::Interval;
+    /// let interval: Interval = "5 yrs 1 month".parse().unwrap();
+    /// assert_eq!(interval.num_months(), 61);
+    /// assert_eq!(interval.months(), 1);
+    /// ```
+    pub fn num_months(&self) -> i32 {
         self.months
     }
 
-    pub fn get_usecs(&self) -> i64 {
+    /// Returns the total number of microseconds in a day.
+    pub fn num_usecs_of_day(&self) -> i64 {
         self.usecs
     }
 
-    pub fn get_usecs_of_day(&self) -> u64 {
+    /// Calculates the remaining number of microseconds in a day.
+    ///
+    /// Note the difference between [`num_usecs_of_day`] and [`rem_usecs_of_day`].
+    /// ```
+    /// # use risingwave_common::types::Interval;
+    /// let interval: Interval = "-1:00:00".parse().unwrap();
+    /// assert_eq!(interval.num_usecs_of_day(), -1 * 60 * 60 * 1_000_000);
+    /// assert_eq!(interval.rem_usecs_of_day(), 23 * 60 * 60 * 1_000_000);
+    /// ```
+    pub fn rem_usecs_of_day(&self) -> u64 {
         self.usecs.rem_euclid(USECS_PER_DAY) as u64
     }
 
@@ -96,17 +112,18 @@ impl Interval {
         self.days
     }
 
-    /// Returns the hours field. range: 0-23
+    /// Returns the hours field. range: -23..=23
     pub fn hours(&self) -> i32 {
-        (self.usecs / USECS_PER_SEC / 3600).rem_euclid(24) as i32
+        (self.usecs / USECS_PER_SEC / 3600 % 24) as i32
     }
 
-    /// Returns the minutes field. range: 0-59
+    /// Returns the minutes field. range: -59..=-59
     pub fn minutes(&self) -> i32 {
-        (self.usecs / USECS_PER_SEC / 60).rem_euclid(60) as i32
+        (self.usecs / USECS_PER_SEC / 60 % 60) as i32
     }
 
-    /// Returns the seconds field, including fractional parts, in microseconds. range: 0-59,999,999
+    /// Returns the seconds field, including fractional parts, in microseconds.
+    /// range: -59,999,999..=59,999,999
     pub fn seconds_in_microseconds(&self) -> i32 {
         (self.usecs % (USECS_PER_SEC * 60)) as i32
     }
@@ -1536,9 +1553,9 @@ mod tests {
                 }
                 Some((rhs_months, rhs_days, rhs_usecs, rhs_str)) => {
                     // We should test individual fields rather than using custom `Eq`
-                    assert_eq!(actual_deserialize.unwrap().get_months(), rhs_months);
-                    assert_eq!(actual_deserialize.unwrap().get_days(), rhs_days);
-                    assert_eq!(actual_deserialize.unwrap().get_usecs(), rhs_usecs);
+                    assert_eq!(actual_deserialize.unwrap().num_months(), rhs_months);
+                    assert_eq!(actual_deserialize.unwrap().days(), rhs_days);
+                    assert_eq!(actual_deserialize.unwrap().num_usecs_of_day(), rhs_usecs);
                     assert_eq!(actual_deserialize.unwrap().to_string(), rhs_str);
                 }
             }
@@ -1548,9 +1565,12 @@ mod tests {
         let input = Interval::from_month_day_usec(i32::MIN, -30, 1);
         let actual_deserialize = IntervalCmpValue::from(input).as_justified();
         // It has a justified interval within range, and can be obtained by our deserialization.
-        assert_eq!(actual_deserialize.unwrap().get_months(), i32::MIN);
-        assert_eq!(actual_deserialize.unwrap().get_days(), -29);
-        assert_eq!(actual_deserialize.unwrap().get_usecs(), -USECS_PER_DAY + 1);
+        assert_eq!(actual_deserialize.unwrap().num_months(), i32::MIN);
+        assert_eq!(actual_deserialize.unwrap().days(), -29);
+        assert_eq!(
+            actual_deserialize.unwrap().num_usecs_of_day(),
+            -USECS_PER_DAY + 1
+        );
     }
 
     #[test]
