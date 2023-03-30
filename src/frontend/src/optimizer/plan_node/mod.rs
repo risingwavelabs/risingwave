@@ -661,6 +661,7 @@ mod stream_local_simple_agg;
 mod stream_materialize;
 mod stream_now;
 mod stream_project;
+mod stream_project_materialized;
 mod stream_project_set;
 mod stream_row_id_gen;
 mod stream_sink;
@@ -736,6 +737,7 @@ pub use stream_local_simple_agg::StreamLocalSimpleAgg;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_now::StreamNow;
 pub use stream_project::StreamProject;
+pub use stream_project_materialized::StreamProjectMaterialized;
 pub use stream_project_set::StreamProjectSet;
 pub use stream_row_id_gen::StreamRowIdGen;
 pub use stream_share::StreamShare;
@@ -833,6 +835,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Expand }
             , { Stream, DynamicFilter }
             , { Stream, ProjectSet }
+            , { Stream, ProjectMaterialized }
             , { Stream, GroupTopN }
             , { Stream, Union }
             , { Stream, RowIdGen }
@@ -933,6 +936,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Expand }
             , { Stream, DynamicFilter }
             , { Stream, ProjectSet }
+            , { Stream, ProjectMaterialized }
             , { Stream, GroupTopN }
             , { Stream, Union }
             , { Stream, RowIdGen }

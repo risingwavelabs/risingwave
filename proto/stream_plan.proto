@@ -168,6 +168,17 @@ message ProjectNode {
   repeated uint32 watermark_output_key = 3;
 }
 
+message ProjectMaterializedNode {
+  repeated expr.ExprNode select_list = 1;
+  // this two field is expressing a list of usize pair, which means when project receives a
+  // watermark with `watermark_input_key[i]` column index, it should derive a new watermark
+  // with `watermark_output_key[i]`th expression
+  repeated uint32 watermark_input_key = 2;
+  repeated uint32 watermark_output_key = 3;
+  repeated uint32 materialize_columns_key = 4;
+  catalog.Table table = 5;
+}
+
 message FilterNode {
   expr.ExprNode search_condition = 1;
 }
@@ -565,6 +576,7 @@ message StreamNode {
     GroupTopNNode append_only_group_top_n = 130;
     TemporalJoinNode temporal_join = 131;
     BarrierRecvNode barrier_recv = 132;
+    ProjectMaterializedNode project_materialized = 133;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
