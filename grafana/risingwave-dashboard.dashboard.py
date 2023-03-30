@@ -1028,7 +1028,7 @@ def section_streaming(panels):
         ),
         panels.timeseries_rowsps(
             "Backfill Snapshot Read Throughput(rows)",
-            "",
+            "Total number of rows that have been read from the backfill snapshot",
             [
                 panels.target(
                     f"rate({metric('stream_backfill_snapshot_read_row_count')}[$__rate_interval])",
@@ -1038,7 +1038,7 @@ def section_streaming(panels):
         ),
         panels.timeseries_rowsps(
             "Backfill Upstream Throughput(rows)",
-            "",
+            "Total number of rows that have been output from the backfill upstream",
             [
                 panels.target(
                     f"rate({metric('stream_backfill_upstream_output_row_count')}[$__rate_interval])",
