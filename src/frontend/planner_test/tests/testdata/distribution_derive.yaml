@@ -17,14 +17,14 @@
       └─BatchExchange { order: [], dist: UpstreamHashShard(a.k1) }
         └─BatchScan { table: a, columns: [a.k1, a.v], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [v, bv, a._row_id(hidden), a.k1(hidden), b._row_id(hidden)], stream_key: [a._row_id, b._row_id, a.k1], pk_columns: [a._row_id, b._row_id, a.k1], pk_conflict: "NoCheck" }
-    └─StreamExchange { dist: HashShard(a._row_id, a.k1, b._row_id) }
+    StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden)], stream_key: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_columns: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_conflict: "NoCheck" }
+    └─StreamExchange { dist: HashShard(ak1.a._row_id, ak1.k1, bk1.b._row_id) }
       └─StreamDeltaJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v, ak1.a._row_id, ak1.k1, bk1.b._row_id] }
         ├─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
         └─StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [v, bv, a._row_id(hidden), a.k1(hidden), b._row_id(hidden)], stream_key: [a._row_id, b._row_id, a.k1], pk_columns: [a._row_id, b._row_id, a.k1], pk_conflict: "NoCheck" }
+    StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden)], stream_key: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_columns: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_conflict: "NoCheck" }
     ├── materialized table: 4294967294
     └──  StreamExchange Hash([2, 3, 4]) from 1
 
@@ -53,12 +53,7 @@
     ├──  StreamExchange Hash([0]) from 2
     └──  StreamExchange NoShuffle from 3
 
-    Table 4294967294
-    ├── columns: [ v, bv, a._row_id, a.k1, b._row_id ]
-    ├── primary key: [ $2 ASC, $4 ASC, $3 ASC ]
-    ├── value indices: [ 0, 1, 2, 3, 4 ]
-    ├── distribution key: [ 2, 3, 4 ]
-    └── read pk prefix len hint: 3
+    Table 4294967294 { columns: [ v, bv, ak1.a._row_id, ak1.k1, bk1.b._row_id ], primary key: [ $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2, 3, 4 ], read pk prefix len hint: 3 }
 
 - id: Ak1_join_B_onk1
   before:
@@ -70,14 +65,14 @@
       └─BatchExchange { order: [], dist: UpstreamHashShard(ak1.k1) }
         └─BatchScan { table: ak1, columns: [ak1.k1, ak1.v], distribution: UpstreamHashShard(ak1.k1) }
   stream_plan: |
-    StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), b._row_id(hidden)], stream_key: [ak1.a._row_id, b._row_id, ak1.k1], pk_columns: [ak1.a._row_id, b._row_id, ak1.k1], pk_conflict: "NoCheck" }
-    └─StreamExchange { dist: HashShard(ak1.a._row_id, ak1.k1, b._row_id) }
+    StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden)], stream_key: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_columns: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_conflict: "NoCheck" }
+    └─StreamExchange { dist: HashShard(ak1.a._row_id, ak1.k1, bk1.b._row_id) }
       └─StreamDeltaJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v, ak1.a._row_id, ak1.k1, bk1.b._row_id] }
         ├─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
         └─StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), b._row_id(hidden)], stream_key: [ak1.a._row_id, b._row_id, ak1.k1], pk_columns: [ak1.a._row_id, b._row_id, ak1.k1], pk_conflict: "NoCheck" }
+    StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden)], stream_key: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_columns: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_conflict: "NoCheck" }
     ├── materialized table: 4294967294
     └──  StreamExchange Hash([2, 3, 4]) from 1
 
@@ -106,7 +101,7 @@
     ├──  StreamExchange Hash([0]) from 2
     └──  StreamExchange NoShuffle from 3
 
-    Table 4294967294 { columns: [ v, bv, ak1.a._row_id, ak1.k1, b._row_id ], primary key: [ $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2, 3, 4 ], read pk prefix len hint: 3 }
+    Table 4294967294 { columns: [ v, bv, ak1.a._row_id, ak1.k1, bk1.b._row_id ], primary key: [ $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2, 3, 4 ], read pk prefix len hint: 3 }
 
 - id: A_join_Bk1_onk1
   before:
@@ -118,14 +113,14 @@
       └─BatchExchange { order: [], dist: UpstreamHashShard(a.k1) }
         └─BatchScan { table: a, columns: [a.k1, a.v], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [v, bv, a._row_id(hidden), a.k1(hidden), bk1.b._row_id(hidden)], stream_key: [a._row_id, bk1.b._row_id, a.k1], pk_columns: [a._row_id, bk1.b._row_id, a.k1], pk_conflict: "NoCheck" }
-    └─StreamExchange { dist: HashShard(a._row_id, a.k1, bk1.b._row_id) }
+    StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden)], stream_key: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_columns: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_conflict: "NoCheck" }
+    └─StreamExchange { dist: HashShard(ak1.a._row_id, ak1.k1, bk1.b._row_id) }
       └─StreamDeltaJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v, ak1.a._row_id, ak1.k1, bk1.b._row_id] }
         ├─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
         └─StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [v, bv, a._row_id(hidden), a.k1(hidden), bk1.b._row_id(hidden)], stream_key: [a._row_id, bk1.b._row_id, a.k1], pk_columns: [a._row_id, bk1.b._row_id, a.k1], pk_conflict: "NoCheck" }
+    StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden)], stream_key: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_columns: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_conflict: "NoCheck" }
     ├── materialized table: 4294967294
     └──  StreamExchange Hash([2, 3, 4]) from 1
 
@@ -154,7 +149,7 @@
     ├──  StreamExchange Hash([0]) from 2
     └──  StreamExchange NoShuffle from 3
 
-    Table 4294967294 { columns: [ v, bv, a._row_id, a.k1, bk1.b._row_id ], primary key: [ $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2, 3, 4 ], read pk prefix len hint: 3 }
+    Table 4294967294 { columns: [ v, bv, ak1.a._row_id, ak1.k1, bk1.b._row_id ], primary key: [ $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2, 3, 4 ], read pk prefix len hint: 3 }
 
 - id: Ak1_join_Bk1_onk1
   before:

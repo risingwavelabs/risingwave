@@ -511,9 +511,9 @@
               └─BatchProject { exprs: [(TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval) as $expr1, bid.price] }
                 └─BatchScan { table: bid, columns: [bid.price, bid.date_time], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [auction, price, bidder, date_time, bid._row_id(hidden), $expr10107(hidden)], stream_key: [bid._row_id, $expr10107, price], pk_columns: [bid._row_id, $expr10107, price], pk_conflict: "NoCheck" }
-    └─StreamProject { exprs: [bid.auction, bid.price, bid.bidder, bid.date_time, bid._row_id, $expr10107] }
-      └─StreamFilter { predicate: (bid.date_time >= $expr10109) AND (bid.date_time <= $expr10107) }
+    StreamMaterialize { columns: [auction, price, bidder, date_time, bid._row_id(hidden), $expr1(hidden)], stream_key: [bid._row_id, $expr1, price], pk_columns: [bid._row_id, $expr1, price], pk_conflict: "NoCheck" }
+    └─StreamProject { exprs: [bid.auction, bid.price, bid.bidder, bid.date_time, bid._row_id, $expr1] }
+      └─StreamFilter { predicate: (bid.date_time >= $expr2) AND (bid.date_time <= $expr1) }
         └─StreamHashJoin { type: Inner, predicate: bid.price = max(bid.price), output: all }
           ├─StreamExchange { dist: HashShard(bid.price) }
           | └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
@@ -525,10 +525,10 @@
                     └─StreamTableScan { table: bid, columns: [bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [auction, price, bidder, date_time, bid._row_id(hidden), $expr10107(hidden)], stream_key: [bid._row_id, $expr10107, price], pk_columns: [bid._row_id, $expr10107, price], pk_conflict: "NoCheck" }
+    StreamMaterialize { columns: [auction, price, bidder, date_time, bid._row_id(hidden), $expr1(hidden)], stream_key: [bid._row_id, $expr1, price], pk_columns: [bid._row_id, $expr1, price], pk_conflict: "NoCheck" }
     ├── materialized table: 4294967294
-    └── StreamProject { exprs: [bid.auction, bid.price, bid.bidder, bid.date_time, bid._row_id, $expr10107] }
-        └── StreamFilter { predicate: (bid.date_time >= $expr10109) AND (bid.date_time <= $expr10107) }
+    └── StreamProject { exprs: [bid.auction, bid.price, bid.bidder, bid.date_time, bid._row_id, $expr1] }
+        └── StreamFilter { predicate: (bid.date_time >= $expr2) AND (bid.date_time <= $expr1) }
             └── StreamHashJoin { type: Inner, predicate: bid.price = max(bid.price), output: all } { left table: 0, right table: 2, left degree table: 1, right degree table: 3 }
                 ├──  StreamExchange Hash([2]) from 1
                 └──  StreamExchange Hash([0]) from 2
@@ -559,7 +559,12 @@
 
     Table 4 { columns: [ $expr1, max(bid_price), count ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 4294967294 { columns: [ auction, price, bidder, date_time, bid._row_id, $expr10107 ], primary key: [ $4 ASC, $5 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 1 ], read pk prefix len hint: 3 }
+    Table 4294967294
+    ├── columns: [ auction, price, bidder, date_time, bid._row_id, $expr1 ]
+    ├── primary key: [ $4 ASC, $5 ASC, $1 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5 ]
+    ├── distribution key: [ 1 ]
+    └── read pk prefix len hint: 3
 
 - id: nexmark_q8
   before:
@@ -609,7 +614,7 @@
           └─BatchProject { exprs: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval) as $expr3, (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval) as $expr4] }
             └─BatchScan { table: auction, columns: [auction.date_time, auction.seller], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [id, name, starttime, $expr10208(hidden), auction.seller(hidden), $expr10205(hidden), $expr10206(hidden)], stream_key: [id, name, starttime, $expr10208, auction.seller, $expr10205, $expr10206], pk_columns: [id, name, starttime, $expr10208, auction.seller, $expr10205, $expr10206], pk_conflict: "NoCheck" }
+    StreamMaterialize { columns: [id, name, starttime, $expr2(hidden), auction.seller(hidden), $expr3(hidden), $expr4(hidden)], stream_key: [id, name, starttime, $expr2, auction.seller, $expr3, $expr4], pk_columns: [id, name, starttime, $expr2, auction.seller, $expr3, $expr4], pk_conflict: "NoCheck" }
     └─StreamHashJoin { type: Inner, predicate: person.id = auction.seller AND $expr1 = $expr3 AND $expr2 = $expr4, output: all }
       ├─StreamExchange { dist: HashShard(person.id, $expr1, $expr2) }
       | └─StreamProject { exprs: [person.id, person.name, $expr1, $expr2] }
@@ -623,7 +628,7 @@
               └─StreamTableScan { table: auction, columns: [auction.date_time, auction.seller, auction.id], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [id, name, starttime, $expr10208(hidden), auction.seller(hidden), $expr10205(hidden), $expr10206(hidden)], stream_key: [id, name, starttime, $expr10208, auction.seller, $expr10205, $expr10206], pk_columns: [id, name, starttime, $expr10208, auction.seller, $expr10205, $expr10206], pk_conflict: "NoCheck" }
+    StreamMaterialize { columns: [id, name, starttime, $expr2(hidden), auction.seller(hidden), $expr3(hidden), $expr4(hidden)], stream_key: [id, name, starttime, $expr2, auction.seller, $expr3, $expr4], pk_columns: [id, name, starttime, $expr2, auction.seller, $expr3, $expr4], pk_conflict: "NoCheck" }
     ├── materialized table: 4294967294
     └── StreamHashJoin { type: Inner, predicate: person.id = auction.seller AND $expr1 = $expr3 AND $expr2 = $expr4, output: all } { left table: 0, right table: 2, left degree table: 1, right degree table: 3 }
         ├──  StreamExchange Hash([0, 2, 3]) from 1
@@ -657,7 +662,7 @@
 
     Table 5 { columns: [ auction_seller, $expr3, $expr4, count ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
-    Table 4294967294 { columns: [ id, name, starttime, $expr10208, auction.seller, $expr10205, $expr10206 ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [ 0, 2, 3 ], read pk prefix len hint: 7 }
+    Table 4294967294 { columns: [ id, name, starttime, $expr2, auction.seller, $expr3, $expr4 ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [ 0, 2, 3 ], read pk prefix len hint: 7 }
 
 - id: nexmark_q9
   before:

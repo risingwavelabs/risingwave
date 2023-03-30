@@ -31,7 +31,7 @@
       |       └─StreamFilter { predicate: (t1.y > 0:Int32) }
       |         └─StreamTableScan { table: t1, columns: [t1.x, t1.y, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: HashShard($expr2) }
-        └─StreamProject { exprs: [(t1.x * $expr10089) as $expr2, (t1.y * $expr10089) as $expr3, t1._row_id, t1._row_id, t1.x] }
+        └─StreamProject { exprs: [(t1.x * $expr1) as $expr2, (t1.y * $expr1) as $expr3, t1._row_id, t1._row_id, t1.x] }
           └─StreamHashJoin { type: Inner, predicate: t1.x = $expr1, output: [t1.x, t1.y, $expr1, t1._row_id, t1._row_id] }
             ├─StreamExchange { dist: HashShard(t1.x) }
             | └─StreamTableScan { table: t1, columns: [t1.x, t1.y, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
