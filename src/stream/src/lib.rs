@@ -40,6 +40,7 @@
 #![feature(btree_drain_filter)]
 #![feature(bound_map)]
 #![feature(iter_order_by)]
+#![feature(exact_size_is_empty)]
 #![feature(return_position_impl_trait_in_trait)]
 
 #[macro_use]
