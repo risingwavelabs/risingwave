@@ -18,6 +18,7 @@ use std::ops::Bound;
 use futures::stream;
 use futures_async_stream::try_stream;
 use risingwave_common::array::stream_record::Record;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{self, OwnedRow, Row};
 use risingwave_common::types::ScalarImpl;
@@ -79,6 +80,13 @@ impl<S: StateStore> SortBuffer<S> {
         }
     }
 
+    /// Apply a stream chunk to the buffer.
+    pub fn apply_chunk(&mut self, chunk: StreamChunk, buffer_table: &mut StateTable<S>) {
+        for record in chunk.records() {
+            self.apply_change(record, buffer_table);
+        }
+    }
+
     /// Consume rows under `watermark` from the buffer.
     #[try_stream(ok = OwnedRow, error = StreamExecutorError)]
     pub async fn consume<'a>(
@@ -112,5 +120,9 @@ impl<S: StateStore> SortBuffer<S> {
         // TODO(rc): Need something like `table.range_delete()`. Here we call
         // `update_watermark(watermark, true)` as an alternative to `range_delete((..watermark))`.
         buffer_table.update_watermark(watermark, true);
+    }
+
+    pub fn clear_cache(&mut self) {
+        // nothing to do
     }
 }
