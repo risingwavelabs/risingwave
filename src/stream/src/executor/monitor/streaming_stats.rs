@@ -386,7 +386,8 @@ impl StreamingMetrics {
             "Aggregation executor chunk-level lookup total operation",
             &["actor_id"],
             registry
-        ).unwrap();
+        )
+        .unwrap();
 
         let backfill_snapshot_read_row_count = register_int_counter_vec_with_registry!(
             "stream_backfill_snapshot_read_row_count",
@@ -394,14 +395,15 @@ impl StreamingMetrics {
             &["table_id", "actor_id"],
             registry
         )
-            .unwrap();
+        .unwrap();
 
         let backfill_upstream_output_row_count = register_int_counter_vec_with_registry!(
             "stream_backfill_upstream_output_row_count",
             "Total number of rows that have been output from the backfill upstream",
             &["table_id", "actor_id"],
             registry
-        ).unwrap();
+        )
+        .unwrap();
 
         let opts = histogram_opts!(
             "stream_barrier_inflight_duration_seconds",

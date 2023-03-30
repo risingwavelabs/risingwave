@@ -35,8 +35,8 @@ use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
 use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndicesRef};
-use crate::executor::{PkIndices, Watermark};
 use crate::executor::monitor::StreamingMetrics;
+use crate::executor::{PkIndices, Watermark};
 use crate::task::{ActorId, CreateMviewProgress};
 
 /// An implementation of the RFC: Use Backfill To Let Mv On Mv Stream Again.(https://github.com/risingwavelabs/rfcs/pull/13)
@@ -218,8 +218,9 @@ where
 
                                 // Consume upstream buffer chunk
                                 for chunk in upstream_chunk_buffer.drain(..) {
-                                    cur_barrier_upstream_processed_rows += chunk.cardinality() as u64;
-                                        if let Some(current_pos) = &current_pos {
+                                    cur_barrier_upstream_processed_rows +=
+                                        chunk.cardinality() as u64;
+                                    if let Some(current_pos) = &current_pos {
                                         yield Message::Chunk(Self::mapping_chunk(
                                             Self::mark_chunk(
                                                 chunk,

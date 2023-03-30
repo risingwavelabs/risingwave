@@ -296,7 +296,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     }
 
     pub fn table_id(&self) -> TableId {
-        self.table_id.clone()
+        self.table_id
     }
 }
 
