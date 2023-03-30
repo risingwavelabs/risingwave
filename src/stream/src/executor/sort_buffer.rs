@@ -27,19 +27,25 @@ use risingwave_storage::StateStore;
 use super::StreamExecutorError;
 use crate::common::table::state_table::StateTable;
 
-// TODO(rc): Now it assumes first column is the watermark column and has no in-memory cache,
-// later we will support specifying watermark column index and in-memory cache.
+// TODO(rc): Internal cache will be added later.
 /// [`SortBuffer`] is a common component that consume an unordered stream and produce an ordered
 /// stream by watermark. This component maintains a buffer table passed in, whose schema is same as
 /// [`SortBuffer`]'s input and output. Generally, the component acts as a buffer that output the
 /// data it received with a delay, commonly used to implement emit-on-window-close policy.
 pub struct SortBuffer<S: StateStore> {
+    sort_column_index: usize,
     _phantom: PhantomData<S>,
 }
 
 impl<S: StateStore> SortBuffer<S> {
-    pub fn new() -> Self {
+    pub fn new(sort_column_index: usize, buffer_table: &StateTable<S>) -> Self {
+        assert_eq!(
+            sort_column_index,
+            buffer_table.pk_indices()[0],
+            "the column to sort on must be the first pk column of the buffer table"
+        );
         Self {
+            sort_column_index,
             _phantom: PhantomData,
         }
     }
