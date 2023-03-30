@@ -207,7 +207,7 @@ impl<S: StateStore> Emitter for EmitOnWindowClose<S> {
     ) {
         for change in changes {
             // For EOWC, write change to the sort buffer.
-            self.buffer.apply_change(&change, result_table);
+            self.buffer.apply_change(change, result_table);
         }
     }
 

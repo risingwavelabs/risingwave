@@ -65,7 +65,7 @@ impl<S: StateStore> SortBuffer<S> {
     }
 
     /// Apply a change to the buffer, insert/delete/update.
-    pub fn apply_change(&mut self, change: &Record<OwnedRow>, buffer_table: &mut StateTable<S>) {
+    pub fn apply_change(&mut self, change: Record<impl Row>, buffer_table: &mut StateTable<S>) {
         match change {
             Record::Insert { new_row } => self.insert(new_row, buffer_table),
             Record::Delete { old_row } => self.delete(old_row, buffer_table),
