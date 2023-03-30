@@ -258,11 +258,28 @@ message GroupTopNNode {
   bool with_ties = 6;
 }
 
+message DeltaExpression {
+  expr.ExprNode.Type delta_type = 1;
+  expr.ExprNode delta = 2;
+}
+
+message InequalityPair {
+  // Input index of greater side of inequality.
+  uint32 key_required_larger = 1;
+  // Input index of less side of inequality.
+  uint32 key_required_smaller = 2;
+  // Whether this condition is used to clean state table of `HashJoinExecutor`.
+  bool clean_state = 3;
+  // greater >= less + delta_expression, if `None`, it represents that greater >= less
+  DeltaExpression delta_expression = 4;
+}
+
 message HashJoinNode {
   plan_common.JoinType join_type = 1;
   repeated int32 left_key = 2;
   repeated int32 right_key = 3;
   expr.ExprNode condition = 4;
+  repeated InequalityPair inequality_pairs = 5;
   // Used for internal table states.
   catalog.Table left_table = 6;
   // Used for internal table states.
@@ -685,7 +702,7 @@ message StreamFragmentGraph {
   // edges between fragments.
   repeated StreamFragmentEdge edges = 2;
 
-  repeated uint32 dependent_relation_ids = 3;
+  repeated uint32 dependent_table_ids = 3;
   uint32 table_ids_cnt = 4;
   StreamEnvironment env = 5;
   // If none, default parallelism will be applied.

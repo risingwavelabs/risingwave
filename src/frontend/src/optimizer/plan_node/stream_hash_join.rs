@@ -20,12 +20,12 @@ use risingwave_common::catalog::{FieldDisplay, Schema};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::HashJoinNode;
+use risingwave_pb::stream_plan::{DeltaExpression, HashJoinNode, PbInequalityPair};
 
 use super::{
     ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode,
 };
-use crate::expr::{Expr, ExprRewriter};
+use crate::expr::{Expr, ExprDisplay, ExprRewriter, InequalityInputPair};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
@@ -45,9 +45,22 @@ pub struct StreamHashJoin {
     /// non-equal parts to facilitate execution later
     eq_join_predicate: EqJoinPredicate,
 
+    /// `(do_state_cleaning, InequalityInputPair {key_required_larger, key_required_smaller,
+    /// delta_expression})`. View struct `InequalityInputPair` for details.
+    inequality_pairs: Vec<(bool, InequalityInputPair)>,
+
     /// Whether can optimize for append-only stream.
     /// It is true if input of both side is append-only
     is_append_only: bool,
+
+    /// The conjunction index of the inequality which is used to clean left state table in
+    /// `HashJoinExecutor`. If any equal condition is able to clean state table, this field
+    /// will always be `None`.
+    clean_left_state_conjunction_idx: Option<usize>,
+    /// The conjunction index of the inequality which is used to clean right state table in
+    /// `HashJoinExecutor`. If any equal condition is able to clean state table, this field
+    /// will always be `None`.
+    clean_right_state_conjunction_idx: Option<usize>,
 }
 
 impl StreamHashJoin {
@@ -65,21 +78,101 @@ impl StreamHashJoin {
             &logical,
         );
 
+        let mut inequality_pairs = vec![];
+        let mut clean_left_state_conjunction_idx = None;
+        let mut clean_right_state_conjunction_idx = None;
+
         let watermark_columns = {
             let l2i = logical.l2i_col_mapping();
             let r2i = logical.r2i_col_mapping();
 
+            let mut equal_condition_clean_state = false;
             let mut watermark_columns = FixedBitSet::with_capacity(logical.internal_column_num());
             for (left_key, right_key) in eq_join_predicate.eq_indexes() {
                 if logical.left().watermark_columns().contains(left_key)
                     && logical.right().watermark_columns().contains(right_key)
                 {
+                    equal_condition_clean_state = true;
                     if let Some(internal) = l2i.try_map(left_key) {
                         watermark_columns.insert(internal);
                     }
                     if let Some(internal) = r2i.try_map(right_key) {
                         watermark_columns.insert(internal);
                     }
+                }
+            }
+            let (left_cols_num, original_inequality_pairs) = eq_join_predicate.inequality_pairs();
+            for (
+                conjunction_idx,
+                InequalityInputPair {
+                    key_required_larger,
+                    key_required_smaller,
+                    delta_expression,
+                },
+            ) in original_inequality_pairs
+            {
+                let both_upstream_has_watermark = if key_required_larger < key_required_smaller {
+                    logical
+                        .left()
+                        .watermark_columns()
+                        .contains(key_required_larger)
+                        && logical
+                            .right()
+                            .watermark_columns()
+                            .contains(key_required_smaller - left_cols_num)
+                } else {
+                    logical
+                        .left()
+                        .watermark_columns()
+                        .contains(key_required_smaller)
+                        && logical
+                            .right()
+                            .watermark_columns()
+                            .contains(key_required_larger - left_cols_num)
+                };
+                if !both_upstream_has_watermark {
+                    continue;
+                }
+
+                let (internal, do_state_cleaning) = if key_required_larger < key_required_smaller {
+                    (
+                        l2i.try_map(key_required_larger),
+                        if !equal_condition_clean_state
+                            && clean_left_state_conjunction_idx.is_none()
+                        {
+                            clean_left_state_conjunction_idx = Some(conjunction_idx);
+                            true
+                        } else {
+                            false
+                        },
+                    )
+                } else {
+                    (
+                        r2i.try_map(key_required_larger - left_cols_num),
+                        if !equal_condition_clean_state
+                            && clean_right_state_conjunction_idx.is_none()
+                        {
+                            clean_right_state_conjunction_idx = Some(conjunction_idx);
+                            true
+                        } else {
+                            false
+                        },
+                    )
+                };
+                let mut is_valuable_inequality = do_state_cleaning;
+                if let Some(internal) = internal && !watermark_columns.contains(internal) {
+                    watermark_columns.insert(internal);
+                    is_valuable_inequality = true;
+                }
+                if is_valuable_inequality {
+                    inequality_pairs.push((
+                        do_state_cleaning,
+                        InequalityInputPair {
+                            key_required_larger,
+                            key_required_smaller,
+                            delta_expression,
+                        },
+                    ));
                 }
             }
             logical.i2o_col_mapping().rewrite_bitset(&watermark_columns)
@@ -100,7 +193,10 @@ impl StreamHashJoin {
             base,
             logical,
             eq_join_predicate,
+            inequality_pairs,
             is_append_only: append_only,
+            clean_left_state_conjunction_idx,
+            clean_right_state_conjunction_idx,
         }
     }
 
@@ -184,6 +280,10 @@ impl fmt::Display for StreamHashJoin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = if self.is_append_only {
             f.debug_struct("StreamAppendOnlyHashJoin")
+        } else if self.clean_left_state_conjunction_idx.is_some()
+            && self.clean_right_state_conjunction_idx.is_some()
+        {
+            f.debug_struct("StreamIntervalJoin")
         } else {
             f.debug_struct("StreamHashJoin")
         };
@@ -201,6 +301,25 @@ impl fmt::Display for StreamHashJoin {
                 input_schema: &concat_schema,
             },
         );
+
+        if let Some(conjunction_idx) = self.clean_left_state_conjunction_idx {
+            builder.field(
+                "conditions_to_clean_left_state_table",
+                &ExprDisplay {
+                    expr: &self.eq_join_predicate().other_cond().conjunctions[conjunction_idx],
+                    input_schema: &concat_schema,
+                },
+            );
+        }
+        if let Some(conjunction_idx) = self.clean_right_state_conjunction_idx {
+            builder.field(
+                "conditions_to_clean_right_state_table",
+                &ExprDisplay {
+                    expr: &self.eq_join_predicate().other_cond().conjunctions[conjunction_idx],
+                    input_schema: &concat_schema,
+                },
+            );
+        }
 
         let watermark_columns = &self.base.watermark_columns;
         if self.base.watermark_columns.count_ones(..) > 0 {
@@ -311,6 +430,32 @@ impl StreamNode for StreamHashJoin {
                 .other_cond()
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
+            inequality_pairs: self
+                .inequality_pairs
+                .iter()
+                .map(
+                    |(
+                        do_state_clean,
+                        InequalityInputPair {
+                            key_required_larger,
+                            key_required_smaller,
+                            delta_expression,
+                        },
+                    )| {
+                        PbInequalityPair {
+                            key_required_larger: *key_required_larger as u32,
+                            key_required_smaller: *key_required_smaller as u32,
+                            clean_state: *do_state_clean,
+                            delta_expression: delta_expression.as_ref().map(
+                                |(delta_type, delta)| DeltaExpression {
+                                    delta_type: *delta_type as i32,
+                                    delta: Some(delta.to_expr_proto()),
+                                },
+                            ),
+                        }
+                    },
+                )
+                .collect_vec(),
             left_table: Some(left_table.to_internal_table_prost()),
             right_table: Some(right_table.to_internal_table_prost()),
             left_degree_table: Some(left_degree_table.to_internal_table_prost()),

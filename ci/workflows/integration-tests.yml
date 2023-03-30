@@ -1,0 +1,68 @@
+steps:
+  - label: "Run Demos {{matrix.testcase}} {{matrix.format}}"
+    command: "ci/scripts/integration-tests.sh -c {{matrix.testcase}} -f {{matrix.format}}"
+    timeout_in_minutes: 30
+    matrix:
+      setup:
+        testcase:
+          - "ad-click"
+          - "ad-ctr"
+          - "cdn-metrics"
+          - "clickstream"
+          - "livestream"
+          - "twitter"
+          - "prometheus"
+          - "schema-registry"
+          - "mysql-cdc"
+          - "postgres-cdc"
+          - "mysql-sink"
+          - "postgres-sink"
+          - "iceberg-sink"
+        format:
+          - "json"
+          - "protobuf"
+      adjustments:
+        - with:
+            testcase: "ad-click"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "ad-ctr"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "cdn-metrics"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "clickstream"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "prometheus"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "schema-registry"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "mysql-cdc"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "postgres-cdc"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "mysql-sink"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "postgres-sink"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "iceberg-sink"
+            format: "protobuf"
+          skip: true

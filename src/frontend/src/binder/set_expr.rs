@@ -108,23 +108,6 @@ impl BoundSetExpr {
             }
         }
     }
-
-    pub fn contains_sys_table(&self) -> bool {
-        match self {
-            BoundSetExpr::Select(s) => {
-                if let Some(relation) = &s.from {
-                    relation.contains_sys_table()
-                } else {
-                    false
-                }
-            }
-            BoundSetExpr::Values(_) => false,
-            BoundSetExpr::Query(q) => q.contains_sys_table(),
-            BoundSetExpr::SetOperation { left, right, .. } => {
-                left.contains_sys_table() || right.contains_sys_table()
-            }
-        }
-    }
 }
 
 impl Binder {
