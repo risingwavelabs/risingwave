@@ -695,8 +695,10 @@ impl HummockUploader {
     }
 
     pub(crate) fn start_merge_imms(&mut self, sealed_epoch: HummockEpoch) {
-        self.sealed_data
-            .gen_merging_tasks(sealed_epoch, &self.context);
+        if self.context.imm_merge_threshold > 1 {
+            self.sealed_data
+                .gen_merging_tasks(sealed_epoch, &self.context);
+        }
     }
 
     pub(crate) fn update_sealed_data(&mut self, merged_imm: &ImmutableMemtable) {
