@@ -1021,7 +1021,7 @@ impl TelemetryInfoFetcher for MetaClient {
         let resp = self.get_telemetry_info().await?;
         let tracking_id = resp
             .get_tracking_id()
-            .map_err(|e| anyhow::format_err!("failed to get tracking_id {:?}", e))?;
+            .map_err(|e| anyhow::format_err!("Telemetry is disabled by meta node, err {:?}", e))?;
         Ok(tracking_id.to_string())
     }
 }

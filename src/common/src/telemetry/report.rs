@@ -65,7 +65,7 @@ where
         let tracking_id = match info_fetcher.fetch_telemetry_info().await {
             Ok(resp) => resp,
             Err(err) => {
-                tracing::error!("Telemetry failed to get tracking_id, err {}", err);
+                tracing::error!("Telemetry is disabled by meta node, err {}", err);
                 return;
             }
         };
