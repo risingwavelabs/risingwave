@@ -19,7 +19,8 @@ use std::num::NonZeroU32;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_sqlparser::ast::{
-    CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement, SqlOption, Statement, Value,
+    CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement, SqlOption, Statement,
+    Value,
 };
 
 mod options {

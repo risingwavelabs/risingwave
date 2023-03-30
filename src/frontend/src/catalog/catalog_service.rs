@@ -235,9 +235,12 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn create_connection(&self, connection: create_connection_request::Payload) -> Result<()> {
+    async fn create_connection(
+        &self,
+        connection: create_connection_request::Payload,
+    ) -> Result<()> {
         let (_, version) = self.meta_client.create_connection(connection).await?;
-        self.wait_version(version.into()).await
+        self.wait_version(version).await
     }
 
     async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()> {

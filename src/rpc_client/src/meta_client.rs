@@ -125,7 +125,10 @@ impl MetaClient {
         .await
     }
 
-    pub async fn create_connection(&self, req: create_connection_request::Payload) -> Result<(ConnectionId, CatalogVersion)> {
+    pub async fn create_connection(
+        &self,
+        req: create_connection_request::Payload,
+    ) -> Result<(ConnectionId, CatalogVersion)> {
         let request = CreateConnectionRequest { payload: Some(req) };
         let resp = self.inner.create_connection(request).await?;
         Ok((resp.connection_id, resp.version))

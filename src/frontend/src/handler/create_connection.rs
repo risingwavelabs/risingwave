@@ -42,8 +42,7 @@ fn resolve_private_link_properties(
         serde_json::from_str(&availability_zones_str).map_err(|e| {
             RwError::from(ProtocolError(format!(
                 "Can not parse {}: {}",
-                CONNECTION_AVAIL_ZONE_PROP,
-                e.to_string()
+                CONNECTION_AVAIL_ZONE_PROP, e
             )))
         })?;
     Ok(create_connection_request::PrivateLink {
@@ -67,7 +66,7 @@ fn resolve_create_connection_payload(
             ))));
         }
     };
-    return Ok(create_connection_payload);
+    Ok(create_connection_payload)
 }
 
 pub async fn handle_create_connection(
