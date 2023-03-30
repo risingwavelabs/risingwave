@@ -242,7 +242,7 @@ pub async fn playground() -> Result<()> {
                     let _stderr_handle = tokio::spawn(async move {
                         let mut reader = BufReader::new(stderr).lines();
                         while let Ok(Some(line)) = reader.next_line().await {
-                            tracing::error!(target: "risingwave_connector_node", "{}", line);
+                            tracing::info!(target: "risingwave_connector_node", "{}", line);
                         }
                     });
                 } else {

@@ -16,14 +16,12 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
-use super::agg_common::AggExecutorArgs;
+use super::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
 use super::aggregation::{
-    agg_call_filter_res, iter_table_storage, AggChangesInfo, AggStateStorage, AlwaysOutput,
-    DistinctDeduplicater,
+    agg_call_filter_res, iter_table_storage, AggStateStorage, AlwaysOutput, DistinctDeduplicater,
 };
 use super::*;
 use crate::common::table::state_table::StateTable;
@@ -128,7 +126,7 @@ impl<S: StateStore> Executor for GlobalSimpleAggExecutor<S> {
 }
 
 impl<S: StateStore> GlobalSimpleAggExecutor<S> {
-    pub fn new(args: AggExecutorArgs<S>) -> StreamResult<Self> {
+    pub fn new(args: AggExecutorArgs<S, SimpleAggExecutorExtraArgs>) -> StreamResult<Self> {
         let input_info = args.input.info();
         let schema = generate_agg_schema(args.input.as_ref(), &args.agg_calls, None);
         Ok(Self {
@@ -251,28 +249,17 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             let mut new_ops = Vec::with_capacity(2);
             // Retrieve modified states and put the changes into the builders.
             let curr_outputs = vars.agg_group.get_outputs(&this.storages).await?;
-            let AggChangesInfo {
-                result_row,
-                prev_outputs,
-                n_appended_ops,
-            } = vars
-                .agg_group
-                .build_changes(curr_outputs, &mut builders, &mut new_ops);
-
-            if n_appended_ops == 0 {
+            if let Some(change) = vars.agg_group.build_change(curr_outputs) {
+                vars.agg_group
+                    .apply_change_to_builders(&change, &mut builders, &mut new_ops);
+                vars.agg_group
+                    .apply_change_to_result_table(&change, &mut this.result_table);
+                this.result_table.commit(epoch).await?;
+            } else {
                 // Agg result is not changed.
                 this.result_table.commit_no_data_expected(epoch);
                 return Ok(None);
             }
-
-            // Update the result table with latest agg outputs.
-            if let Some(prev_outputs) = prev_outputs {
-                let old_row = vars.agg_group.group_key().chain(prev_outputs);
-                this.result_table.update(old_row, result_row);
-            } else {
-                this.result_table.insert(result_row);
-            }
-            this.result_table.commit(epoch).await?;
 
             let columns = builders
                 .into_iter()

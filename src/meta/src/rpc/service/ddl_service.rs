@@ -236,7 +236,7 @@ where
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreatingStreamingJob(stream_job, fragment_graph))
+            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
             .await?;
 
         Ok(Response::new(CreateSinkResponse {
@@ -279,7 +279,7 @@ where
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreatingStreamingJob(stream_job, fragment_graph))
+            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
             .await?;
 
         Ok(Response::new(CreateMaterializedViewResponse {
@@ -328,7 +328,7 @@ where
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreatingStreamingJob(stream_job, fragment_graph))
+            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
             .await?;
 
         Ok(Response::new(CreateIndexResponse {
@@ -436,7 +436,7 @@ where
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreatingStreamingJob(stream_job, fragment_graph))
+            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
             .await?;
 
         Ok(Response::new(CreateTableResponse {
@@ -561,6 +561,21 @@ where
         } else {
             Ok(Response::new(GetTableResponse { table: None }))
         }
+    }
+
+    async fn alter_relation_name(
+        &self,
+        request: Request<AlterRelationNameRequest>,
+    ) -> Result<Response<AlterRelationNameResponse>, Status> {
+        let AlterRelationNameRequest { relation, new_name } = request.into_inner();
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterRelationName(relation.unwrap(), new_name))
+            .await?;
+        Ok(Response::new(AlterRelationNameResponse {
+            status: None,
+            version,
+        }))
     }
 
     async fn get_ddl_progress(

@@ -14,7 +14,6 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
-use bytes::Bytes;
 use futures_async_stream::try_stream;
 use maplit::hashmap;
 use risingwave_common::array::{Op, StreamChunk};
@@ -121,7 +120,7 @@ impl DatagenEventGenerator {
 
                                 map.insert(name.clone(), value);
                             }
-                            Bytes::from(serde_json::Value::from(map).to_string())
+                            serde_json::Value::from(map).to_string().as_bytes().to_vec()
                         }
                         _ => {
                             unimplemented!("only json format is supported for now")
@@ -242,6 +241,7 @@ mod tests {
                     Some(end.to_string()),
                     split_index,
                     split_num,
+                    0,
                 )
                 .unwrap(),
             ),
@@ -252,6 +252,7 @@ mod tests {
                     Some(end.to_string()),
                     split_index,
                     split_num,
+                    0,
                 )
                 .unwrap(),
             ),

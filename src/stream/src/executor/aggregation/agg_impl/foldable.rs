@@ -406,9 +406,9 @@ impl_fold_agg! { I64Array, Int64, DecimalArray }
 impl_fold_agg! { I64Array, Int64, StructArray }
 impl_fold_agg! { I64Array, Int64, ListArray }
 impl_fold_agg! { I64Array, Int64, IntervalArray }
-impl_fold_agg! { I64Array, Int64, NaiveTimeArray }
-impl_fold_agg! { I64Array, Int64, NaiveDateArray }
-impl_fold_agg! { I64Array, Int64, NaiveDateTimeArray }
+impl_fold_agg! { I64Array, Int64, TimeArray }
+impl_fold_agg! { I64Array, Int64, DateArray }
+impl_fold_agg! { I64Array, Int64, TimestampArray }
 // max/min
 impl_fold_agg! { I16Array, Int16, I16Array }
 impl_fold_agg! { I32Array, Int32, I32Array }
@@ -419,9 +419,9 @@ impl_fold_agg! { Utf8Array, Utf8, Utf8Array }
 impl_fold_agg! { BytesArray, Bytea, BytesArray }
 impl_fold_agg! { StructArray, Struct, StructArray }
 impl_fold_agg! { IntervalArray, Interval, IntervalArray }
-impl_fold_agg! { NaiveTimeArray, NaiveTime, NaiveTimeArray }
-impl_fold_agg! { NaiveDateArray, NaiveDate, NaiveDateArray }
-impl_fold_agg! { NaiveDateTimeArray, NaiveDateTime, NaiveDateTimeArray }
+impl_fold_agg! { TimeArray, Time, TimeArray }
+impl_fold_agg! { DateArray, Date, DateArray }
+impl_fold_agg! { TimestampArray, Timestamp, TimestampArray }
 // sum
 impl_fold_agg! { DecimalArray, Decimal, I64Array }
 // avg
@@ -430,7 +430,7 @@ impl_fold_agg! { F64Array, Float64, F32Array }
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::I64Array;
-    use risingwave_common::types::OrderedF64;
+    use risingwave_common::types::F64;
     use risingwave_common::{array, array_nonnull};
 
     use super::*;
@@ -503,7 +503,7 @@ mod tests {
                 .map(|(c, v)| {
                     (
                         if c == '+' { Op::Insert } else { Op::Delete },
-                        Some(OrderedF64::from(v)),
+                        Some(F64::from(v)),
                     )
                 })
                 .unzip();
@@ -516,7 +516,7 @@ mod tests {
             .unwrap();
             assert_eq!(
                 agg.get_output().unwrap().unwrap().as_float64(),
-                &OrderedF64::from(expected)
+                &F64::from(expected)
             );
         }
     }

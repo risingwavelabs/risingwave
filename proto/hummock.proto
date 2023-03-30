@@ -71,6 +71,13 @@ message GroupMetaChange {
   repeated uint32 table_ids_remove = 2;
 }
 
+message GroupTableChange {
+  repeated uint32 table_ids = 1;
+  uint64 target_group_id = 2;
+  uint64 origin_group_id = 3;
+  uint64 new_sst_start_id = 4;
+}
+
 message GroupDestroy {}
 
 message GroupDelta {
@@ -79,6 +86,7 @@ message GroupDelta {
     GroupConstruct group_construct = 2;
     GroupDestroy group_destroy = 3;
     GroupMetaChange group_meta_change = 4;
+    GroupTableChange group_table_change = 5;
   }
 }
 
@@ -122,6 +130,14 @@ message HummockVersionDelta {
 
 message HummockVersionDeltas {
   repeated HummockVersionDelta version_deltas = 1;
+}
+
+message HummockVersionCheckpoint {
+  message StaleObjects {
+    repeated uint64 id = 1;
+  }
+  HummockVersion version = 1;
+  map<uint64, StaleObjects> stale_objects = 2;
 }
 
 // We will have two epoch after decouple

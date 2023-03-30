@@ -120,7 +120,7 @@ pub async fn handle_explain(
                 .0
             }
 
-            stmt => gen_batch_query_plan(&session, context.into(), stmt)?.0,
+            stmt => gen_batch_query_plan(&session, context.into(), stmt)?.plan,
         };
 
         let ctx = plan.plan_base().ctx.clone();

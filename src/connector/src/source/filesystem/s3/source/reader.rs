@@ -81,7 +81,7 @@ impl S3FileReader {
             let bytes = read?;
             let len = bytes.len();
             let msg = SourceMessage {
-                payload: Some(bytes),
+                payload: Some(bytes.as_ref().to_vec()),
                 offset: offset.to_string(),
                 split_id: split.id(),
                 meta: SourceMeta::Empty,

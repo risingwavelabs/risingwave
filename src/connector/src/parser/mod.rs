@@ -197,7 +197,7 @@ impl SourceStreamChunkRowWriter<'_> {
         &mut self,
         mut f: impl FnMut(&SourceColumnDesc) -> Result<A::Output>,
     ) -> Result<WriteGuard> {
-        let mut modify_col = vec![];
+        let mut modify_col = Vec::with_capacity(self.descs.len());
         self.descs
             .iter()
             .zip_eq(self.builders.iter_mut())

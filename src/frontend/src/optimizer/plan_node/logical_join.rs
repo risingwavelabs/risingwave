@@ -141,6 +141,14 @@ impl LogicalJoin {
         self.core.internal_column_num()
     }
 
+    pub fn i2l_col_mapping_ignore_join_type(&self) -> ColIndexMapping {
+        self.core.i2l_col_mapping_ignore_join_type()
+    }
+
+    pub fn i2r_col_mapping_ignore_join_type(&self) -> ColIndexMapping {
+        self.core.i2r_col_mapping_ignore_join_type()
+    }
+
     /// Get the Mapping of columnIndex from left column index to internal column index.
     pub fn l2i_col_mapping(&self) -> ColIndexMapping {
         self.core.l2i_col_mapping()
@@ -206,6 +214,10 @@ impl LogicalJoin {
 
     pub fn is_right_join(&self) -> bool {
         matches!(self.join_type(), JoinType::RightSemi | JoinType::RightAnti)
+    }
+
+    pub fn is_full_out(&self) -> bool {
+        self.core.is_full_out()
     }
 
     /// Try to split and pushdown `predicate` into a join's left/right child or the on clause.
@@ -944,6 +956,7 @@ impl LogicalJoin {
                 Condition::true_cond(),
                 predicate.eq_keys().to_vec(),
                 self.left().schema().len(),
+                self.right().schema().len(),
             );
             let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
             let hash_join = StreamHashJoin::new(logical_join, eq_cond).into();

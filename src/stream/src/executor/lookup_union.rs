@@ -119,7 +119,7 @@ impl LookupUnionExecutor {
                         msg @ Message::Chunk(_) => yield msg,
                         Message::Barrier(barrier) => {
                             if let Some(this_barrier) = &this_barrier {
-                                if this_barrier != &barrier {
+                                if this_barrier.epoch != barrier.epoch {
                                     return Err(StreamExecutorError::align_barrier(
                                         this_barrier.clone(),
                                         barrier,

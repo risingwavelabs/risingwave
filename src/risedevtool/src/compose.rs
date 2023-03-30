@@ -154,11 +154,7 @@ fn health_check_port(port: u16) -> HealthCheck {
 impl Compose for ComputeNodeConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("compute-node");
-        ComputeNodeService::apply_command_args(
-            &mut command,
-            self,
-            HummockInMemoryStrategy::Disallowed,
-        )?;
+        ComputeNodeService::apply_command_args(&mut command, self)?;
         if self.enable_tiered_cache {
             command.arg("--file-cache-dir").arg("/filecache");
         }
@@ -201,7 +197,11 @@ impl Compose for ComputeNodeConfig {
 impl Compose for MetaNodeConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("meta-node");
-        MetaNodeService::apply_command_args(&mut command, self)?;
+        MetaNodeService::apply_command_args(
+            &mut command,
+            self,
+            HummockInMemoryStrategy::Disallowed,
+        )?;
 
         if let Some(c) = &config.rw_config_path {
             let target = Path::new(&config.config_directory).join("risingwave.toml");
@@ -264,11 +264,7 @@ impl Compose for FrontendConfig {
 impl Compose for CompactorConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("compactor-node");
-        CompactorService::apply_command_args(
-            &mut command,
-            self,
-            HummockInMemoryStrategy::Disallowed,
-        )?;
+        CompactorService::apply_command_args(&mut command, self)?;
 
         if let Some(c) = &config.rw_config_path {
             let target = Path::new(&config.config_directory).join("risingwave.toml");

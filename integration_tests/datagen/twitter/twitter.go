@@ -37,16 +37,10 @@ type twitterUser struct {
 }
 
 func (r *twitterEvent) ToPostgresSql() string {
-	return fmt.Sprintf("INSERT INTO %s (data, author) values (%s, %s);",
-		"twitter", r.Data.objectString(), r.Author.objectString())
-}
-
-func (r *twitterUser) objectString() string {
-	return fmt.Sprintf("('%s'::TIMESTAMP, '%s', '%s', '%s')", r.CreatedAt, r.Id, r.Name, r.UserName)
-}
-
-func (r *tweetData) objectString() string {
-	return fmt.Sprintf("('%s'::TIMESTAMP, '%s', '%s', '%s')", r.CreatedAt, r.Id, r.Text, r.Lang)
+	return fmt.Sprintf("INSERT INTO tweet (created_at, id, text, lang, author_id) values ('%s', '%s', '%s', '%s', '%s'); INSERT INTO user (created_at, id, name, username, followers) values ('%s', '%s', '%s', '%s', %d);",
+		r.Data.CreatedAt, r.Data.Id, r.Data.Text, r.Data.Lang, r.Author.Id,
+		r.Author.CreatedAt, r.Author.Id, r.Author.Name, r.Author.UserName, r.Author.Followers,
+	)
 }
 
 func (r *twitterEvent) ToJson() (topic string, key string, data []byte) {

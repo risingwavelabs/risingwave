@@ -18,7 +18,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{StreamChunk, Vis};
-use risingwave_common::types::IntervalUnit;
+use risingwave_common::types::Interval;
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_expr::ExprError;
 
@@ -30,8 +30,8 @@ pub struct HopWindowExecutor {
     pub input: BoxedExecutor,
     pub info: ExecutorInfo,
     pub time_col_idx: usize,
-    pub window_slide: IntervalUnit,
-    pub window_size: IntervalUnit,
+    pub window_slide: Interval,
+    pub window_size: Interval,
     window_start_exprs: Vec<BoxedExpression>,
     window_end_exprs: Vec<BoxedExpression>,
     pub output_indices: Vec<usize>,
@@ -44,8 +44,8 @@ impl HopWindowExecutor {
         input: BoxedExecutor,
         info: ExecutorInfo,
         time_col_idx: usize,
-        window_slide: IntervalUnit,
-        window_size: IntervalUnit,
+        window_slide: Interval,
+        window_size: Interval,
         window_start_exprs: Vec<BoxedExpression>,
         window_end_exprs: Vec<BoxedExpression>,
         output_indices: Vec<usize>,
@@ -199,8 +199,8 @@ mod tests {
     use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::test_utils::IntervalUnitTestExt;
-    use risingwave_common::types::{DataType, IntervalUnit};
+    use risingwave_common::types::test_utils::IntervalTestExt;
+    use risingwave_common::types::{DataType, Interval};
     use risingwave_expr::expr::test_utils::make_hop_window_expression;
 
     use super::super::*;
@@ -227,9 +227,9 @@ mod tests {
         );
         let input =
             MockSource::with_chunks(schema.clone(), pk_indices.clone(), vec![chunk]).boxed();
-        let window_slide = IntervalUnit::from_minutes(15);
-        let window_size = IntervalUnit::from_minutes(30);
-        let window_offset = IntervalUnit::from_minutes(0);
+        let window_slide = Interval::from_minutes(15);
+        let window_size = Interval::from_minutes(30);
+        let window_offset = Interval::from_minutes(0);
         let (window_start_exprs, window_end_exprs) = make_hop_window_expression(
             DataType::Timestamp,
             2,
@@ -350,9 +350,9 @@ mod tests {
         let pk_indices = vec![0];
         let (tx, source) = MockSource::channel(schema.clone(), pk_indices.clone());
 
-        let window_slide = IntervalUnit::from_minutes(15);
-        let window_size = IntervalUnit::from_minutes(30);
-        let offset = IntervalUnit::from_minutes(0);
+        let window_slide = Interval::from_minutes(15);
+        let window_size = Interval::from_minutes(30);
+        let offset = Interval::from_minutes(0);
         let (window_start_exprs, window_end_exprs) =
             make_hop_window_expression(DataType::Timestamp, 2, window_size, window_slide, offset)
                 .unwrap();

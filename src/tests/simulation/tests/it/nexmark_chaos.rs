@@ -41,15 +41,17 @@ async fn nexmark_chaos_common_inner(
 ) -> Result<()> {
     let mut cluster =
         NexmarkCluster::new(Configuration::for_scale(), 6, Some(20 * THROUGHPUT), false).await?;
-    cluster.run(create).await?;
+    let mut session = cluster.start_session();
+    session.run(create).await?;
     sleep(Duration::from_secs(30)).await;
-    let final_result = cluster.run(select).await?;
-    cluster.run(drop).await?;
+    let final_result = session.run(select).await?;
+    session.run(drop).await?;
     sleep(Duration::from_secs(5)).await;
 
     println!("Reference run done.");
-
-    cluster.run(create).await?;
+    // Create a new session for the chaos run.
+    let mut session = cluster.start_session();
+    session.run(create).await?;
 
     let _initial_result = cluster
         .wait_until_non_empty(select, initial_interval, initial_timeout)
@@ -68,7 +70,7 @@ async fn nexmark_chaos_common_inner(
         cluster.reschedule(join_plans(fragments)).await?;
 
         sleep(after_scale_duration).await;
-        cluster.run(select).await?.assert_result_ne(&final_result);
+        session.run(select).await?.assert_result_ne(&final_result);
 
         let fragments = cluster.locate_random_fragments().await?;
         cluster.reschedule(join_plans(fragments)).await?;
@@ -78,7 +80,7 @@ async fn nexmark_chaos_common_inner(
         cluster.reschedule(fragment.random_reschedule()).await?;
 
         sleep(after_scale_duration).await;
-        cluster.run(select).await?.assert_result_ne(&final_result);
+        session.run(select).await?.assert_result_ne(&final_result);
 
         let fragment = cluster.locate_fragment_by_id(id).await?;
         cluster.reschedule(fragment.random_reschedule()).await?;
@@ -86,7 +88,7 @@ async fn nexmark_chaos_common_inner(
 
     sleep(Duration::from_secs(50)).await;
 
-    cluster.run(select).await?.assert_result_eq(&final_result);
+    session.run(select).await?.assert_result_eq(&final_result);
 
     Ok(())
 }
