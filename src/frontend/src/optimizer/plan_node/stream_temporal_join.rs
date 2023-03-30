@@ -208,7 +208,7 @@ impl StreamNode for StreamTemporalJoin {
             table_desc: Some(scan.logical().table_desc().to_protobuf()),
             table_output_indices: scan
                 .logical()
-                .output_column_indices()
+                .output_col_idx()
                 .iter()
                 .map(|&i| i as _)
                 .collect(),

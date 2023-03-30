@@ -34,7 +34,7 @@ use risingwave_storage::error::{StorageError, StorageResult};
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::store::state_store::HummockStorageIterator;
 use risingwave_storage::hummock::store::version::HummockVersionReader;
-use risingwave_storage::hummock::{SstableStore, TieredCache};
+use risingwave_storage::hummock::{CachePolicy, SstableStore, TieredCache};
 use risingwave_storage::monitor::HummockStateStoreMetrics;
 use risingwave_storage::store::{ReadOptions, StateStoreReadIterStream, StreamTypeOfIter};
 use tokio::sync::mpsc::unbounded_channel;
@@ -84,6 +84,7 @@ impl HummockJavaBindingIterator {
             read_plan.data_dir,
             1 << 10,
             1 << 10,
+            0,
             TieredCache::none(),
         ));
         let reader =
@@ -108,6 +109,7 @@ impl HummockJavaBindingIterator {
                         table_id: read_plan.table_id.into(),
                         read_version_from_backup: false,
                         prefetch_options: Default::default(),
+                        cache_policy: CachePolicy::NotFill,
                     },
                     (vec![], vec![], pin_version.clone()),
                 )

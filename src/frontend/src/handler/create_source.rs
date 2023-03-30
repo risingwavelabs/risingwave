@@ -30,6 +30,7 @@ use risingwave_connector::parser::{
 use risingwave_connector::source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR};
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::filesystem::S3_CONNECTOR;
+use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::{
     GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, NEXMARK_CONNECTOR,
     PULSAR_CONNECTOR,
@@ -193,6 +194,7 @@ pub(crate) async fn resolve_source_schema(
     is_materialized: bool,
 ) -> Result<StreamSourceInfo> {
     validate_compatibility(&source_schema, with_properties)?;
+    check_nexmark_schema(with_properties, *row_id_index, columns)?;
 
     let is_kafka = is_kafka_source(with_properties);
 
@@ -572,6 +574,53 @@ fn validate_compatibility(
             // Default schema name is "public"
             props.insert("schema.name".into(), "public".into());
         }
+    }
+    Ok(())
+}
+
+fn check_nexmark_schema(
+    props: &HashMap<String, String>,
+    row_id_index: Option<usize>,
+    columns: &[ColumnCatalog],
+) -> Result<()> {
+    let connector = get_connector(props);
+    if connector != NEXMARK_CONNECTOR {
+        return Ok(());
+    }
+
+    let table_type = props
+        .get("nexmark.table.type")
+        .map(|t| t.to_ascii_lowercase());
+
+    let event_type = match table_type.as_deref() {
+        None => None,
+        Some("bid") => Some(EventType::Bid),
+        Some("auction") => Some(EventType::Auction),
+        Some("person") => Some(EventType::Person),
+        Some(t) => {
+            return Err(RwError::from(ProtocolError(format!(
+                "unsupported table type for nexmark source: {}",
+                t
+            ))))
+        }
+    };
+
+    let expected = get_event_data_types_with_names(event_type, row_id_index);
+    let user_defined = columns
+        .iter()
+        .map(|c| {
+            (
+                c.column_desc.name.to_ascii_lowercase(),
+                c.column_desc.data_type.to_owned(),
+            )
+        })
+        .collect_vec();
+
+    if expected != user_defined {
+        return Err(RwError::from(ProtocolError(format!(
+            "The shema of the nexmark source must specify all columns in order, expected {:?}, but get {:?}",
+            expected, user_defined
+        ))));
     }
     Ok(())
 }

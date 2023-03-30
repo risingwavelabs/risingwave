@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::future::try_join_all;
-use risingwave_common::cache::{CacheableEntry, LruCache};
+use risingwave_common::cache::{CachePriority, CacheableEntry, LruCache};
 use tokio::io::{AsyncRead, AsyncWriteExt};
 
 use super::{
@@ -123,6 +123,7 @@ impl DiskObjectStore {
             opened_read_file_cache: Arc::new(LruCache::new(
                 OPENED_FILE_CACHE_DEFAULT_NUM_SHARD_BITS,
                 OPENED_FILE_CACHE_DEFAULT_CAPACITY,
+                0,
             )),
         }
     }
@@ -151,6 +152,7 @@ impl DiskObjectStore {
             .lookup_with_request_dedup::<_, ObjectError, _>(
                 hash,
                 path.clone(),
+                CachePriority::High,
                 move || async move {
                     let file = utils::open_file(&path, true, false, false)
                         .await?

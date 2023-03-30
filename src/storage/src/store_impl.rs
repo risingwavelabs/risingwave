@@ -595,6 +595,7 @@ impl StateStoreImpl {
                     opts.data_directory.to_string(),
                     opts.block_cache_capacity_mb * (1 << 20),
                     opts.meta_cache_capacity_mb * (1 << 20),
+                    opts.high_priority_ratio,
                     tiered_cache,
                 ));
                 let notification_client =

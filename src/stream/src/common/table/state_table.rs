@@ -21,6 +21,7 @@ use futures::{Stream, StreamExt};
 use itertools::{izip, Itertools};
 use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{get_dist_key_in_pk_indices, ColumnDesc, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
@@ -35,6 +36,7 @@ use risingwave_hummock_sdk::key::{
 };
 use risingwave_pb::catalog::Table;
 use risingwave_storage::error::StorageError;
+use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::mem_table::MemTableError;
 use risingwave_storage::row_serde::row_serde_util::{
     deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
@@ -549,6 +551,7 @@ where
             ignore_range_tombstone: false,
             read_version_from_backup: false,
             prefetch_options: Default::default(),
+            cache_policy: CachePolicy::Fill(CachePriority::High),
         };
 
         self.local_store
@@ -993,6 +996,7 @@ where
             table_id: self.table_id,
             read_version_from_backup: false,
             prefetch_options,
+            cache_policy: CachePolicy::Fill(CachePriority::High),
         };
 
         Ok(self.local_store.iter(key_range, read_options).await?)
@@ -1039,6 +1043,7 @@ where
             table_id: self.table_id,
             read_version_from_backup: false,
             prefetch_options: Default::default(),
+            cache_policy: CachePolicy::Fill(CachePriority::High),
         };
 
         self.local_store

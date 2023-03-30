@@ -578,7 +578,6 @@ async fn test_hummock_manager_basic() {
             init_version_id + commit_log_count + register_log_count - 2,
         );
     }
-
     // objects_to_delete is always empty because no compaction is ever invoked.
     assert!(hummock_manager.get_objects_to_delete().await.is_empty());
     assert_eq!(
@@ -589,8 +588,8 @@ async fn test_hummock_manager_basic() {
         (0, 0)
     );
     assert_eq!(
-        hummock_manager.proceed_version_checkpoint().await.unwrap(),
-        commit_log_count + register_log_count - 2
+        hummock_manager.create_version_checkpoint(1).await.unwrap(),
+        commit_log_count + register_log_count
     );
     assert!(hummock_manager.get_objects_to_delete().await.is_empty());
     assert_eq!(
@@ -598,9 +597,8 @@ async fn test_hummock_manager_basic() {
             .delete_version_deltas(usize::MAX)
             .await
             .unwrap(),
-        ((commit_log_count + register_log_count - 2) as usize, 0)
+        ((commit_log_count + register_log_count) as usize, 0)
     );
-
     hummock_manager
         .unpin_version_before(context_id_1, u64::MAX)
         .await
@@ -609,27 +607,6 @@ async fn test_hummock_manager_basic() {
         hummock_manager.get_min_pinned_version_id().await,
         init_version_id + commit_log_count + register_log_count
     );
-    assert!(hummock_manager.get_objects_to_delete().await.is_empty());
-    assert_eq!(
-        hummock_manager
-            .delete_version_deltas(usize::MAX)
-            .await
-            .unwrap(),
-        (0, 0)
-    );
-    assert_eq!(
-        hummock_manager.proceed_version_checkpoint().await.unwrap(),
-        2
-    );
-    assert!(hummock_manager.get_objects_to_delete().await.is_empty());
-    assert_eq!(
-        hummock_manager
-            .delete_version_deltas(usize::MAX)
-            .await
-            .unwrap(),
-        (2, 0)
-    );
-
     hummock_manager
         .unpin_version_before(context_id_2, u64::MAX)
         .await
@@ -637,11 +614,6 @@ async fn test_hummock_manager_basic() {
     assert_eq!(
         hummock_manager.get_min_pinned_version_id().await,
         HummockVersionId::MAX
-    );
-
-    assert_eq!(
-        hummock_manager.proceed_version_checkpoint().await.unwrap(),
-        0
     );
 }
 
@@ -1198,7 +1170,7 @@ async fn test_extend_objects_to_delete() {
 
     // Checkpoint
     assert_eq!(
-        hummock_manager.proceed_version_checkpoint().await.unwrap(),
+        hummock_manager.create_version_checkpoint(1).await.unwrap(),
         6
     );
     assert_eq!(

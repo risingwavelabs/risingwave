@@ -194,6 +194,14 @@ impl ColIndexMapping {
         Self::with_target_size(map, following.target_size())
     }
 
+    pub fn clone_with_offset(&self, offset: usize) -> Self {
+        let mut map = self.map.clone();
+        for target in &mut map {
+            *target = target.and_then(|index| index.checked_add(offset));
+        }
+        Self::with_target_size(map, self.target_size() + offset)
+    }
+
     /// Union two mapping, the result mapping `target_size` and source size will be the max size
     /// of the two mappings.
     ///
