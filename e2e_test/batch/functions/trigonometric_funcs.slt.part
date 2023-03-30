@@ -16,7 +16,7 @@ SELECT tan(1)
 query R
 SELECT cot(1)
 ----
-0.642092615934331
+0.6420926159343308
 
 query R
 SELECT asin(1)
@@ -26,7 +26,7 @@ SELECT asin(1)
 query R
 SELECT acos(1)
 ----
-0.0
+0
 
 query R
 SELECT atan(1)
@@ -51,15 +51,17 @@ SELECT tan(1.1)
 query R
 SELECT cot(1.1)
 ----
-0.508968105239064
+0.5089681052390642
 
 query R
 SELECT asin(1.1)
 ----
+NaN
 
 query R
 SELECT acos(1.1)
 ----
+NaN
 
 query R
 SELECT atan(1.1)
@@ -84,15 +86,17 @@ SELECT tan(-1.1)
 query R
 SELECT cot(-1.1)
 ----
--0.508968105239064
+-0.5089681052390642
 
 query R
 SELECT asin(-1.1)
 ----
+NaN
 
 query R
 SELECT acos(-1.1)
 ----
+NaN
 
 query R
 SELECT atan(-1.1)
@@ -107,7 +111,7 @@ SELECT sin(pi())
 query R
 SELECT cos(pi())
 ----
--1.0
+-1
 
 query R
 SELECT tan(pi())
@@ -117,15 +121,17 @@ SELECT tan(pi())
 query R
 SELECT cot(pi())
 ----
--8.16561967659769e+15
+-8165619676597685
 
 query R
 SELECT asin(pi())
 ----
+NaN
 
 query R
 SELECT acos(pi())
 ----
+NaN
 
 query R
 SELECT atan(pi())
