@@ -49,17 +49,17 @@ fn extract_date(date: impl Datelike, unit: &str) -> Option<Decimal> {
 }
 
 fn extract_time(time: impl Timelike, unit: &str) -> Option<Decimal> {
-    let nanoseconds = || time.second() as u64 * 1_000_000_000 + time.nanosecond() as u64;
+    let usecs = || time.second() as u64 * 1_000_000 + (time.nanosecond() / 1000) as u64;
     Some(if unit.eq_ignore_ascii_case("hour") {
         time.hour().into()
     } else if unit.eq_ignore_ascii_case("minute") {
         time.minute().into()
     } else if unit.eq_ignore_ascii_case("second") {
-        Decimal::from_i128_with_scale(nanoseconds() as i128, 9)
+        Decimal::from_i128_with_scale(usecs() as i128, 6)
     } else if unit.eq_ignore_ascii_case("millisecond") {
-        Decimal::from_i128_with_scale(nanoseconds() as i128, 6)
+        Decimal::from_i128_with_scale(usecs() as i128, 3)
     } else if unit.eq_ignore_ascii_case("microsecond") {
-        Decimal::from_i128_with_scale(nanoseconds() as i128, 3)
+        usecs().into()
     } else {
         return None;
     })
@@ -86,10 +86,10 @@ pub fn extract_from_time(unit: &str, time: Time) -> Result<Decimal> {
 #[function("extract(varchar, timestamp) -> decimal")]
 pub fn extract_from_timestamp(unit: &str, timestamp: Timestamp) -> Result<Decimal> {
     if unit.eq_ignore_ascii_case("epoch") {
-        let epoch = Decimal::from_i128_with_scale(timestamp.0.timestamp_nanos() as i128, 9);
+        let epoch = Decimal::from_i128_with_scale(timestamp.0.timestamp_micros() as i128, 6);
         return Ok(epoch);
     } else if unit.eq_ignore_ascii_case("julian") {
-        let epoch = Decimal::from_i128_with_scale(timestamp.0.timestamp_nanos() as i128, 9);
+        let epoch = Decimal::from_i128_with_scale(timestamp.0.timestamp_micros() as i128, 6);
         return Ok(epoch / (24 * 60 * 60).into() + 2_440_588.into());
     };
     extract_date(timestamp.0, unit)
@@ -127,13 +127,13 @@ pub fn extract_from_interval(unit: &str, interval: Interval) -> Result<Decimal> 
     } else if unit.eq_ignore_ascii_case("minute") {
         interval.minutes().into()
     } else if unit.eq_ignore_ascii_case("second") {
-        Decimal::from_i128_with_scale(interval.seconds_in_microseconds() as i128, 6)
+        Decimal::from_i128_with_scale(interval.seconds_in_micros() as i128, 6)
     } else if unit.eq_ignore_ascii_case("millisecond") {
-        Decimal::from_i128_with_scale(interval.seconds_in_microseconds() as i128, 3)
+        Decimal::from_i128_with_scale(interval.seconds_in_micros() as i128, 3)
     } else if unit.eq_ignore_ascii_case("microsecond") {
-        interval.seconds_in_microseconds().into()
+        interval.seconds_in_micros().into()
     } else if unit.eq_ignore_ascii_case("epoch") {
-        interval.epoch().into()
+        Decimal::from_i128_with_scale(interval.epoch_in_micros() as i128, 6)
     } else {
         return Err(invalid_unit("interval unit", unit));
     })
@@ -196,82 +196,66 @@ mod tests {
     #[test]
     fn test_timestamp() {
         let ts = Timestamp::new(
-            NaiveDateTime::parse_from_str("2021-11-22 12:4:2.575401000", "%Y-%m-%d %H:%M:%S%.f")
+            NaiveDateTime::parse_from_str("2021-11-22 12:4:2.575400", "%Y-%m-%d %H:%M:%S%.f")
                 .unwrap(),
         );
-        let extract = extract_from_timestamp;
-        assert_eq!(extract("MILLENNIUM", ts).unwrap(), 3.into());
-        assert_eq!(extract("CENTURY", ts).unwrap(), 21.into());
-        assert_eq!(extract("DECADE", ts).unwrap(), 202.into());
-        assert_eq!(extract("ISOYEAR", ts).unwrap(), 2021.into());
-        assert_eq!(extract("YEAR", ts).unwrap(), 2021.into());
-        assert_eq!(extract("QUARTER", ts).unwrap(), 4.into());
-        assert_eq!(extract("MONTH", ts).unwrap(), 11.into());
-        assert_eq!(extract("WEEK", ts).unwrap(), 47.into());
-        assert_eq!(extract("DAY", ts).unwrap(), 22.into());
-        assert_eq!(extract("DOW", ts).unwrap(), 1.into());
-        assert_eq!(extract("ISODOW", ts).unwrap(), 1.into());
-        assert_eq!(extract("DOY", ts).unwrap(), 326.into());
-        assert_eq!(extract("HOUR", ts).unwrap(), 12.into());
-        assert_eq!(extract("MINUTE", ts).unwrap(), 4.into());
-        assert_eq!(extract("SECOND", ts).unwrap(), 2.575401.into());
-        assert_eq!(extract("MILLISECOND", ts).unwrap(), 2575.401.into());
-        assert_eq!(extract("MICROSECOND", ts).unwrap(), 2575401.into());
-        assert_eq!(extract("EPOCH", ts).unwrap(), 1637582642.575401.into());
-        assert_eq!(
-            extract("JULIAN", ts).unwrap(),
-            "2459541.5028075856597222222222".parse().unwrap()
-        );
+        let extract = |f, i| extract_from_timestamp(f, i).unwrap().to_string();
+        assert_eq!(extract("MILLENNIUM", ts), "3");
+        assert_eq!(extract("CENTURY", ts), "21");
+        assert_eq!(extract("DECADE", ts), "202");
+        assert_eq!(extract("ISOYEAR", ts), "2021");
+        assert_eq!(extract("YEAR", ts), "2021");
+        assert_eq!(extract("QUARTER", ts), "4");
+        assert_eq!(extract("MONTH", ts), "11");
+        assert_eq!(extract("WEEK", ts), "47");
+        assert_eq!(extract("DAY", ts), "22");
+        assert_eq!(extract("DOW", ts), "1");
+        assert_eq!(extract("ISODOW", ts), "1");
+        assert_eq!(extract("DOY", ts), "326");
+        assert_eq!(extract("HOUR", ts), "12");
+        assert_eq!(extract("MINUTE", ts), "4");
+        assert_eq!(extract("SECOND", ts), "2.575400");
+        assert_eq!(extract("MILLISECOND", ts), "2575.400");
+        assert_eq!(extract("MICROSECOND", ts), "2575400");
+        assert_eq!(extract("EPOCH", ts), "1637582642.575400");
+        assert_eq!(extract("JULIAN", ts), "2459541.5028075856481481481481");
     }
 
     #[test]
     fn test_extract_from_interval() {
-        let interval: Interval = "2345 years 1 mon 250 days 23:22:57.123456".parse().unwrap();
-        let extract = extract_from_interval;
-        assert_eq!(extract("Millennium", interval).unwrap(), 2.into());
-        assert_eq!(extract("Century", interval).unwrap(), 23.into());
-        assert_eq!(extract("Decade", interval).unwrap(), 234.into());
-        assert_eq!(extract("Year", interval).unwrap(), 2345.into());
-        assert_eq!(extract("Month", interval).unwrap(), 1.into());
-        assert_eq!(extract("Day", interval).unwrap(), 250.into());
-        assert_eq!(extract("Hour", interval).unwrap(), 23.into());
-        assert_eq!(extract("Minute", interval).unwrap(), 22.into());
-        assert_eq!(extract("Second", interval).unwrap(), 57.123_456.into());
-        assert_eq!(extract("Millisecond", interval).unwrap(), 57_123.456.into());
-        assert_eq!(extract("Microsecond", interval).unwrap(), 57_123_456.into());
-        assert_eq!(
-            extract("Epoch", interval).unwrap(),
-            74_026_848_177.123_46.into()
-        );
-        assert!(extract("Nanosecond", interval).is_err());
-        assert!(extract("Week", interval).is_err());
+        let interval: Interval = "2345 years 1 mon 250 days 23:22:57.123450".parse().unwrap();
+        let extract = |f, i| extract_from_interval(f, i).unwrap().to_string();
+        assert_eq!(extract("Millennium", interval), "2");
+        assert_eq!(extract("Century", interval), "23");
+        assert_eq!(extract("Decade", interval), "234");
+        assert_eq!(extract("Year", interval), "2345");
+        assert_eq!(extract("Month", interval), "1");
+        assert_eq!(extract("Day", interval), "250");
+        assert_eq!(extract("Hour", interval), "23");
+        assert_eq!(extract("Minute", interval), "22");
+        assert_eq!(extract("Second", interval), "57.123450");
+        assert_eq!(extract("Millisecond", interval), "57123.450");
+        assert_eq!(extract("Microsecond", interval), "57123450");
+        assert_eq!(extract("Epoch", interval), "74026848177.123450");
+        assert!(extract_from_interval("Nanosecond", interval).is_err());
+        assert!(extract_from_interval("Week", interval).is_err());
 
-        let interval: Interval = "-2345 years -1 mon -250 days -23:22:57.123456"
+        let interval: Interval = "-2345 years -1 mon -250 days -23:22:57.123450"
             .parse()
             .unwrap();
-        let extract = extract_from_interval;
-        assert_eq!(extract("Millennium", interval).unwrap(), (-2).into());
-        assert_eq!(extract("Century", interval).unwrap(), (-23).into());
-        assert_eq!(extract("Decade", interval).unwrap(), (-234).into());
-        assert_eq!(extract("Year", interval).unwrap(), (-2345).into());
-        assert_eq!(extract("Month", interval).unwrap(), (-1).into());
-        assert_eq!(extract("Day", interval).unwrap(), (-250).into());
-        assert_eq!(extract("Hour", interval).unwrap(), (-23).into());
-        assert_eq!(extract("Minute", interval).unwrap(), (-22).into());
-        assert_eq!(extract("Second", interval).unwrap(), (-57.123_456).into());
-        assert_eq!(
-            extract("Millisecond", interval).unwrap(),
-            (-57_123.456).into()
-        );
-        assert_eq!(
-            extract("Microsecond", interval).unwrap(),
-            (-57_123_456).into()
-        );
-        assert_eq!(
-            extract("Epoch", interval).unwrap(),
-            (-74_026_848_177.123_46).into()
-        );
-        assert!(extract("Nanosecond", interval).is_err());
-        assert!(extract("Week", interval).is_err());
+        assert_eq!(extract("Millennium", interval), "-2");
+        assert_eq!(extract("Century", interval), "-23");
+        assert_eq!(extract("Decade", interval), "-234");
+        assert_eq!(extract("Year", interval), "-2345");
+        assert_eq!(extract("Month", interval), "-1");
+        assert_eq!(extract("Day", interval), "-250");
+        assert_eq!(extract("Hour", interval), "-23");
+        assert_eq!(extract("Minute", interval), "-22");
+        assert_eq!(extract("Second", interval), "-57.123450");
+        assert_eq!(extract("Millisecond", interval), "-57123.450");
+        assert_eq!(extract("Microsecond", interval), "-57123450");
+        assert_eq!(extract("Epoch", interval), "-74026848177.123450");
+        assert!(extract_from_interval("Nanosecond", interval).is_err());
+        assert!(extract_from_interval("Week", interval).is_err());
     }
 }

@@ -124,12 +124,12 @@ impl Interval {
 
     /// Returns the seconds field, including fractional parts, in microseconds.
     /// range: -59,999,999..=59,999,999
-    pub fn seconds_in_microseconds(&self) -> i32 {
+    pub fn seconds_in_micros(&self) -> i32 {
         (self.usecs % (USECS_PER_SEC * 60)) as i32
     }
 
-    /// Returns the seconds since 1970-01-01 00:00:00+00.
-    pub fn epoch(&self) -> f64 {
+    /// Returns the microseconds since 1970-01-01 00:00:00+00.
+    pub fn epoch_in_micros(&self) -> i64 {
         // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/timestamp.c#L5304
 
         const DAYS_PER_YEAR_X4: i32 = 365 * 4 + 1;
@@ -148,7 +148,7 @@ impl Interval {
             + 4 * self.days as i64)
             * (SECS_PER_DAY / 4) as i64;
 
-        secs_from_day_month as f64 + self.usecs as f64 / USECS_PER_SEC as f64
+        secs_from_day_month * USECS_PER_SEC + self.usecs
     }
 
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
