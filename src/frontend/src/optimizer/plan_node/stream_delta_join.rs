@@ -43,11 +43,8 @@ pub struct StreamDeltaJoin {
 }
 
 impl StreamDeltaJoin {
-    pub fn new(
-        base: PlanBase,
-        logical: generic::Join<PlanRef>,
-        eq_join_predicate: EqJoinPredicate,
-    ) -> Self {
+    pub fn new(logical: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Self {
+        let base = PlanBase::new_logical_with_core(&logical);
         let ctx = base.ctx.clone();
         // Inner join won't change the append-only behavior of the stream. The rest might.
         let append_only = match logical.join_type {
@@ -149,11 +146,7 @@ impl PlanTreeNodeBinary for StreamDeltaJoin {
         let mut logical = self.logical.clone();
         logical.left = left;
         logical.right = right;
-        Self::new(
-            self.base.clone_with_new_plan_id(),
-            logical,
-            self.eq_join_predicate.clone(),
-        )
+        Self::new(logical, self.eq_join_predicate.clone())
     }
 }
 
@@ -240,11 +233,6 @@ impl ExprRewritable for StreamDeltaJoin {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut logical = self.logical.clone();
         logical.rewrite_exprs(r);
-        Self::new(
-            self.base.clone_with_new_plan_id(),
-            logical,
-            self.eq_join_predicate.rewrite_exprs(r),
-        )
-        .into()
+        Self::new(logical, self.eq_join_predicate.rewrite_exprs(r)).into()
     }
 }

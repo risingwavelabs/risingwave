@@ -590,7 +590,7 @@ pub(crate) mod tests {
         let eq_join_predicate =
             EqJoinPredicate::new(Condition::true_cond(), vec![eq_key_1, eq_key_2], 2, 2);
         let hash_join_node: PlanRef =
-            BatchHashJoin::new(plan_base, logical_join_node, eq_join_predicate).into();
+            BatchHashJoin::new(logical_join_node, eq_join_predicate).into();
         let batch_exchange_node: PlanRef = BatchExchange::new(
             hash_join_node.clone(),
             Order::default(),

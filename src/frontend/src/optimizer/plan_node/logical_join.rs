@@ -947,8 +947,7 @@ impl LogicalJoin {
                 self.right().schema().len(),
             );
             let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
-            let hash_join =
-                StreamHashJoin::new(logical_join.base, logical_join.core, eq_cond).into();
+            let hash_join = StreamHashJoin::new(logical_join.core, eq_cond).into();
             let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
             let plan = StreamFilter::new(logical_filter).into();
             if self.output_indices() != &default_indices {
@@ -964,7 +963,7 @@ impl LogicalJoin {
                 Ok(plan)
             }
         } else {
-            Ok(StreamHashJoin::new(logical_join.base, logical_join.core, predicate).into())
+            Ok(StreamHashJoin::new(logical_join.core, predicate).into())
         }
     }
 
@@ -1085,9 +1084,8 @@ impl LogicalJoin {
         // rewrite.
         let new_join_output_indices = self
             .output_indices()
-            .clone()
-            .into_iter()
-            .map(|x| {
+            .iter()
+            .map(|&x| {
                 if x < left_schema_len {
                     x
                 } else {
@@ -1209,7 +1207,7 @@ impl LogicalJoin {
         logical_join: LogicalJoin,
     ) -> Result<PlanRef> {
         assert!(predicate.has_eq());
-        Ok(BatchHashJoin::new(logical_join.base, logical_join.core, predicate).into())
+        Ok(BatchHashJoin::new( logical_join.core, predicate).into())
     }
 
     pub fn index_lookup_join_to_batch_lookup_join(&self) -> Result<PlanRef> {
