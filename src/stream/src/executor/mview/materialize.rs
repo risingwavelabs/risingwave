@@ -168,7 +168,12 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                     // Update the vnode bitmap for the state table if asked.
                     if let Some(vnode_bitmap) = b.as_update_vnode_bitmap(self.actor_context.id) {
-                        let _ = self.state_table.update_vnode_bitmap(vnode_bitmap);
+                        let (_, cache_may_stale) =
+                            self.state_table.update_vnode_bitmap(vnode_bitmap);
+
+                        if cache_may_stale {
+                            self.materialize_cache.data.clear();
+                        }
                     }
                     self.materialize_cache.evict();
                     Message::Barrier(b)
