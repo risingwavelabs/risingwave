@@ -37,6 +37,43 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: message_queue
+
+  flink-jobmanager:
+    image: flink
+    build: ./flink
+    ports:
+      - "8081:8081"
+    command: jobmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager        
+
+  flink-taskmanager:
+    image: flink
+    build: ./flink
+    depends_on:
+      - flink-jobmanager
+    command: taskmanager
+    scale: 1
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 2
+
+  flink-sql-client:
+    image: flink
+    build: ./flink
+    command: bin/sql-client.sh
+    depends_on:
+      - flink-jobmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        rest.address: flink-jobmanager        
+
 volumes:
   compute-node-0:
     external: false
