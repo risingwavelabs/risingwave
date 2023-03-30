@@ -27,6 +27,12 @@ use risingwave_storage::StateStore;
 use super::StreamExecutorError;
 use crate::common::table::state_table::StateTable;
 
+// TODO(rc): Now it assumes first column is the watermark column and has no in-memory cache,
+// later we will support specifying watermark column index and in-memory cache.
+/// [`SortBuffer`] is a common component that consume an unordered stream and produce an ordered
+/// stream by watermark. This component maintains a buffer table passed in, whose schema is same as
+/// [`SortBuffer`]'s input and output. Generally, the component acts as a buffer that output the
+/// data it received with a delay, commonly used to implement emit-on-window-close policy.
 pub struct SortBuffer<S: StateStore> {
     _phantom: PhantomData<S>,
 }
