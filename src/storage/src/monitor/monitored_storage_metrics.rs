@@ -122,7 +122,7 @@ impl MonitoredStorageMetrics {
 
         let opts = histogram_opts!(
             "state_store_sync_duration",
-            "Histogram of time spent from compacting shared buffer to remote storage",
+            "Histogram of time spent on compacting shared buffer to remote storage",
             exponential_buckets(0.01, 2.0, 16).unwrap() // max 327s
         );
         let sync_duration = register_histogram_with_registry!(opts, registry).unwrap();
