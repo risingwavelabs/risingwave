@@ -115,22 +115,28 @@ impl<S: StateStore> SortExecutor<S> {
         #[for_await]
         for msg in input {
             match msg? {
-                Message::Watermark(Watermark {
-                    col_idx,
-                    val: watermark,
-                    ..
-                }) if col_idx == this.sort_column_index => {
+                Message::Watermark(watermark @ Watermark { col_idx, .. })
+                    if col_idx == this.sort_column_index =>
+                {
                     let mut chunk_builder =
                         ChunkBuilder::new(this.chunk_size, &this.info.schema.data_types());
 
                     #[for_await]
-                    for row in vars.buffer.consume(watermark, &mut this.buffer_table) {
+                    for row in vars
+                        .buffer
+                        .consume(watermark.val.clone(), &mut this.buffer_table)
+                    {
                         let row = row?;
                         if let Some(chunk) = chunk_builder.append_row(Op::Insert, row) {
                             yield Message::Chunk(chunk);
                         }
                     }
+                    if let Some(chunk) = chunk_builder.take() {
+                        yield Message::Chunk(chunk);
+                    }
                     vars.buffer_changed = true;
+
+                    yield Message::Watermark(watermark);
                 }
                 Message::Watermark(watermark) => yield Message::Watermark(watermark),
                 Message::Chunk(chunk) => {
@@ -155,6 +161,8 @@ impl<S: StateStore> SortExecutor<S> {
                             vars.buffer.clear_cache();
                         }
                     }
+
+                    yield Message::Barrier(barrier);
                 }
             }
         }
