@@ -1207,7 +1207,7 @@ impl LogicalJoin {
         logical_join: LogicalJoin,
     ) -> Result<PlanRef> {
         assert!(predicate.has_eq());
-        Ok(BatchHashJoin::new( logical_join.core, predicate).into())
+        Ok(BatchHashJoin::new(logical_join.core, predicate).into())
     }
 
     pub fn index_lookup_join_to_batch_lookup_join(&self) -> Result<PlanRef> {
