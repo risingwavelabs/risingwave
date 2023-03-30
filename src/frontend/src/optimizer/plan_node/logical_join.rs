@@ -94,10 +94,6 @@ impl fmt::Display for LogicalJoin {
     }
 }
 
-pub(crate) fn has_repeated_element(slice: &[usize]) -> bool {
-    (1..slice.len()).any(|i| slice[i..].contains(&slice[i - 1]))
-}
-
 impl LogicalJoin {
     pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
         let core = generic::Join::with_full_output(left, right, join_type, on);
@@ -111,15 +107,7 @@ impl LogicalJoin {
         on: Condition,
         output_indices: Vec<usize>,
     ) -> Self {
-        // We cannot deal with repeated output indices in join
-        debug_assert!(!has_repeated_element(&output_indices));
-        let core = generic::Join {
-            left,
-            right,
-            on,
-            join_type,
-            output_indices,
-        };
+        let core = generic::Join::new(left, right, on, join_type, output_indices);
         Self::with_core(core)
     }
 
@@ -477,16 +465,16 @@ impl LogicalJoin {
         let new_scan_output_column_ids = new_scan.output_column_ids();
 
         // Construct a new logical join, because we have change its RHS.
-        let new_logical_join = LogicalJoin::with_output_indices(
+        let new_logical_join = generic::Join::new(
             logical_join.left(),
             new_scan.into(),
-            logical_join.join_type(),
             new_join_on,
+            logical_join.join_type(),
             new_join_output_indices,
         );
 
         Some(BatchLookupJoin::new(
-            new_logical_join.core,
+            new_logical_join,
             new_predicate,
             table_desc,
             new_scan_output_column_ids,
