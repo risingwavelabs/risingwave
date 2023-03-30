@@ -71,7 +71,7 @@ pub struct SelectContext {
     // size of the files in  `base_level` reaches its capacity, we will place data in a higher
     // level, which equals to `base_level -= 1;`.
     pub base_level: usize,
-    pub score_levels: Vec<(u64, usize, usize, u64)>,
+    pub score_levels: Vec<(u64, usize, usize)>,
 }
 
 pub struct DynamicLevelSelectorCore {
@@ -94,7 +94,6 @@ impl DynamicLevelSelectorCore {
         &self,
         select_level: usize,
         target_level: usize,
-        max_compact_bytes: u64,
         overlap_strategy: Arc<dyn OverlapStrategy>,
     ) -> Box<dyn CompactionPicker> {
         if select_level == 0 {
@@ -114,7 +113,7 @@ impl DynamicLevelSelectorCore {
             Box::new(MinOverlappingPicker::new(
                 select_level,
                 target_level,
-                std::cmp::min(self.config.max_bytes_for_level_base, max_compact_bytes),
+                self.config.max_bytes_for_level_base,
                 self.config.split_by_state_table,
                 overlap_strategy,
             ))
@@ -208,10 +207,10 @@ impl DynamicLevelSelectorCore {
             let l0_score =
                 idle_file_count as u64 * SCORE_BASE / self.config.level0_tier_compact_file_number;
             ctx.score_levels
-                .push((std::cmp::min(l0_score, max_l0_score), 0, 0, 0));
+                .push((std::cmp::min(l0_score, max_l0_score), 0, 0));
             let score = total_size * SCORE_BASE
                 / std::cmp::max(self.config.max_bytes_for_level_base, base_level_size);
-            ctx.score_levels.push((score, 0, ctx.base_level, 0));
+            ctx.score_levels.push((score, 0, ctx.base_level));
         }
 
         // The bottommost level can not be input level.
@@ -235,7 +234,6 @@ impl DynamicLevelSelectorCore {
                 total_size * SCORE_BASE / ctx.level_max_bytes[level_idx],
                 level_idx,
                 level_idx + 1,
-                total_size.saturating_sub(ctx.level_max_bytes[level_idx]),
             ));
         }
 
@@ -335,14 +333,13 @@ impl LevelSelector for DynamicLevelSelector {
         let overlap_strategy =
             create_overlap_strategy(compaction_group.compaction_config.compaction_mode());
         let ctx = dynamic_level_core.get_priority_levels(levels, level_handlers);
-        for (score, select_level, target_level, max_compact_bytes) in ctx.score_levels {
+        for (score, select_level, target_level) in ctx.score_levels {
             if score <= SCORE_BASE {
                 return None;
             }
             let mut picker = dynamic_level_core.create_compaction_picker(
                 select_level,
                 target_level,
-                max_compact_bytes,
                 overlap_strategy.clone(),
             );
             let mut stats = LocalPickerStatistic::default();
