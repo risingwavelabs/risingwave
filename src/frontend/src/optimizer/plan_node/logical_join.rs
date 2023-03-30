@@ -1189,13 +1189,9 @@ impl LogicalJoin {
         }
     }
 
-    fn to_batch_hash_join(
-        &self,
-        predicate: EqJoinPredicate,
-        logical_join: LogicalJoin,
-    ) -> Result<PlanRef> {
+    fn into_batch_hash_join(self, predicate: EqJoinPredicate) -> Result<PlanRef> {
         assert!(predicate.has_eq());
-        Ok(BatchHashJoin::new(logical_join.core, predicate).into())
+        Ok(BatchHashJoin::new(self.core, predicate).into())
     }
 
     pub fn index_lookup_join_to_batch_lookup_join(&self) -> Result<PlanRef> {
@@ -1216,13 +1212,9 @@ impl LogicalJoin {
             .into())
     }
 
-    fn to_batch_nested_loop_join(
-        &self,
-        predicate: EqJoinPredicate,
-        logical_join: LogicalJoin,
-    ) -> Result<PlanRef> {
+    fn into_batch_nested_loop_join(self, predicate: EqJoinPredicate) -> Result<PlanRef> {
         assert!(!predicate.has_eq());
-        Ok(BatchNestedLoopJoin::new(logical_join).into())
+        Ok(BatchNestedLoopJoin::new(self.core).into())
     }
 }
 
@@ -1256,10 +1248,10 @@ impl ToBatch for LogicalJoin {
                 }
             }
 
-            self.to_batch_hash_join(predicate, logical_join)
+            logical_join.into_batch_hash_join(predicate)
         } else {
             // Convert to Nested-loop Join for non-equal joins
-            self.to_batch_nested_loop_join(predicate, logical_join)
+            logical_join.into_batch_nested_loop_join(predicate)
         }
     }
 }
