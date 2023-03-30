@@ -353,7 +353,15 @@ impl Binder {
                 ("asin", raw_call(ExprType::Asin)), 
                 ("acos", raw_call(ExprType::Acos)), 
                 ("atan", raw_call(ExprType::Atan)), 
-                ("atan2", raw_call(ExprType::Atan2)),      
+                ("atan2", raw_call(ExprType::Atan2)),   
+                ("sind", raw_call(ExprType::Sind)),
+                ("cosd", raw_call(ExprType::Cosd)), 
+                ("tand", raw_call(ExprType::Tand)), 
+                ("cotd", raw_call(ExprType::Cotd)), 
+                ("asind", raw_call(ExprType::Asind)), 
+                ("acosd", raw_call(ExprType::Acosd)), 
+                ("atand", raw_call(ExprType::Atand)), 
+                ("atan2d", raw_call(ExprType::Atan2d)),      
 
                 (
                     "to_timestamp",

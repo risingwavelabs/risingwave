@@ -158,3 +158,107 @@ SELECT atan2(pi(), -3.8)
 ----
 2.4507611878363194
 
+query R
+SELECT sind(1)
+----
+0.01745240643728351
+
+query R
+SELECT sind(0)
+----
+0
+
+query R
+SELECT sind(-1)
+----
+-0.01745240643728351
+
+query R
+SELECT cosd(1)
+----
+0.9998476951563913
+
+query R
+SELECT cosd(0)
+----
+1
+
+query R
+SELECT cosd(-1)
+----
+0.9998476951563913
+
+query R
+SELECT tand(1)
+----
+0.017455064928217585
+
+query R
+SELECT tand(0)
+----
+0
+
+query R
+SELECT tand(-1)
+----
+-0.017455064928217585
+
+query R
+SELECT asind(1);
+----
+0.01745417873758517
+
+query R
+SELECT asind(0);
+----
+0
+
+query R
+SELECT asind(-1);
+----
+-0.01745417873758517
+
+query R
+SELECT acosd(1);
+----
+1.5533421480573113
+
+query R
+SELECT acosd(0);
+----
+1.5707963267948966
+
+query R
+SELECT acosd(-1);
+----
+1.5882505055324818
+
+query R
+SELECT atand(1);
+----
+0.017451520651465824
+
+query R
+SELECT atand(0);
+----
+0
+
+query R
+SELECT atand(-1);
+----
+-0.017451520651465824
+
+query R
+SELECT atan2d(1, 0);
+----
+1.5707963267948966
+
+query R
+SELECT atan2d(0, 0);
+----
+0 
+
+query R
+SELECT atan2d(-1, 0);
+----
+-1.5707963267948966
