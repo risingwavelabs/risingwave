@@ -133,7 +133,7 @@ profile:
       - use: meta-node
       - use: compute-node
       - use: frontend
-      # If you want to use hdfs as storage backend, configure hdfs namenode and root path:
+      # If you want to use webhdfs as storage backend, configure hdfs namenode and root path:
       - use: opendal
         engine: webhdfs
         namenode: "127.0.0.1:9870"
@@ -148,7 +148,7 @@ profile:
       - use: meta-node
       - use: compute-node
       - use: frontend
-      # If you want to use google cloud stoage as storage backend, configure hdfs namenode and root path:
+      # If you want to use google cloud stoage as storage backend, configure bucket name and root path:
       - use: opendal
         engine: gcs
         bucket: bucket-name
@@ -163,10 +163,25 @@ profile:
       - use: meta-node
       - use: compute-node
       - use: frontend
-      # If you want to use google cloud stoage as storage backend, configure hdfs namenode and root path:
+      # If you want to use oss as storage backend, configure bucket name and root path:
       - use: opendal
         engine: oss
-        bucket: "risingwave-oss-wcy"
+        bucket: test-bucket
+        root: risingwave
+      - use: compactor
+      # - use: prometheus
+      # - use: grafana
+
+  azblob:
+    steps:
+      # - use: etcd
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      # If you want to use azblob as storage backend, configure bucket(container) name and root path:
+      - use: opendal
+        engine: azblob
+        bucket: test-bucket
         root: risingwave
       - use: compactor
       # - use: prometheus
@@ -192,6 +207,7 @@ profile:
 
   3etcd-3meta:
     steps:
+      - use: minio
       - use: etcd
         unsafe-no-fsync: true
         port: 2388
@@ -219,9 +235,11 @@ profile:
         port: 25690
         dashboard-port: 25691
         exporter-port: 21250
+      - use: compactor
 
   3etcd-3meta-1cn-1fe:
     steps:
+      - use: minio
       - use: etcd
         unsafe-no-fsync: true
         port: 2388
@@ -249,6 +267,7 @@ profile:
         port: 25690
         dashboard-port: 25691
         exporter-port: 21250
+      - use: compactor
       - use: compute-node
       - use: frontend
 
@@ -474,18 +493,16 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        enable-in-memory-kv-state-backend: true
       - use: compute-node
         port: 5687
         exporter-port: 1222
-        enable-in-memory-kv-state-backend: true
       - use: compute-node
         port: 5688
         exporter-port: 1223
-        enable-in-memory-kv-state-backend: true
       - use: compute-node
         port: 5689
         exporter-port: 1224
-        enable-in-memory-kv-state-backend: true
       - use: frontend
         port: 4565
         exporter-port: 2222
@@ -755,17 +772,8 @@ template:
     # Jaeger used by this compute node
     provide-jaeger: "jaeger*"
 
-    # Sanity check: should use shared storage if there're multiple compute nodes
-    provide-compute-node: "compute-node*"
-
-    # Sanity check: should start at lease one compactor if using shared object store
-    provide-compactor: "compactor*"
-
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
-
-    # Whether to enable in-memory pure KV state backend
-    enable-in-memory-kv-state-backend: false
 
     # Total available memory for the compute node in bytes
     total-memory-bytes: 8589934592
@@ -811,6 +819,24 @@ template:
     # Prometheus nodes used by dashboard service
     provide-prometheus: "prometheus*"
 
+    # Sanity check: should use shared storage if there're multiple compute nodes
+    provide-compute-node: "compute-node*"
+
+    # Sanity check: should start at lease one compactor if using shared object store
+    provide-compactor: "compactor*"
+
+    # Minio instances used by the cluster
+    provide-minio: "minio*"
+
+    # OpenDAL storage backend used by the cluster
+    provide-opendal: "opendal*"
+
+    # AWS s3 bucket used by the cluster
+    provide-aws-s3: "aws-s3*"
+
+    # Whether to enable in-memory pure KV state backend
+    enable-in-memory-kv-state-backend: false
+
   prometheus:
     # Advertise address of Prometheus
     address: "127.0.0.1"
@@ -854,6 +880,9 @@ template:
     # Frontend used by this Prometheus instance
     provide-frontend: "frontend*"
 
+    # Connector-node used by this Prometheus instance
+    provide-connector-node: "connector*"
+
   frontend:
     # Advertise address of frontend
     address: "127.0.0.1"
@@ -895,13 +924,8 @@ template:
     # Id of this instance
     id: compactor-${port}
 
-    # Minio instances used by this compute node
+    # Minio instances used by this compactor
     provide-minio: "minio*"
-
-    # AWS s3 bucket used by this compute node
-    provide-opendal: "opendal*"
-    # AWS s3 bucket used by this compute node
-    provide-aws-s3: "aws-s3*"
 
     # Meta-nodes used by this compute node
     provide-meta-node: "meta-node*"
@@ -918,6 +942,9 @@ template:
 
     # Connector node listen port
     port: 50051
+
+    # Prometheus exporter listen port
+    exporter-port: 50052
 
     # Id of this instance
     id: connector-${port}
@@ -957,7 +984,7 @@ template:
 
     engine: hdfs
 
-    namenode: 127.0.0.1:9000"
+    namenode: 127.0.0.1:9000
 
     bucket: risingwave-test
 

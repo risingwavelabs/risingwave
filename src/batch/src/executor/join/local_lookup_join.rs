@@ -458,13 +458,10 @@ mod tests {
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::hash::HashKeyDispatcher;
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::types::DataType;
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-    use risingwave_expr::expr::{
-        new_binary_expr, BoxedExpression, InputRefExpression, LiteralExpression,
-    };
-    use risingwave_pb::expr::expr_node::Type;
+    use risingwave_expr::expr::{build_from_pretty, BoxedExpression};
 
     use super::LocalLookupJoinExecutorArgs;
     use crate::executor::join::JoinType;
@@ -674,21 +671,9 @@ mod tests {
              2 5.5 2 5.5
              2 8.4 2 5.5",
         );
+        let condition = build_from_pretty("(less_than:boolean 5:int4 $3:float4)");
 
-        let condition = Some(
-            new_binary_expr(
-                Type::LessThan,
-                DataType::Boolean,
-                Box::new(LiteralExpression::new(
-                    DataType::Int32,
-                    Some(ScalarImpl::Int32(5)),
-                )),
-                Box::new(InputRefExpression::new(DataType::Float32, 3)),
-            )
-            .unwrap(),
-        );
-
-        do_test(JoinType::Inner, condition, false, expected).await;
+        do_test(JoinType::Inner, Some(condition), false, expected).await;
     }
 
     #[tokio::test]
@@ -703,21 +688,9 @@ mod tests {
              5 9.1 . .
              . .   . .",
         );
+        let condition = build_from_pretty("(less_than:boolean 5:int4 $3:float4)");
 
-        let condition = Some(
-            new_binary_expr(
-                Type::LessThan,
-                DataType::Boolean,
-                Box::new(LiteralExpression::new(
-                    DataType::Int32,
-                    Some(ScalarImpl::Int32(5)),
-                )),
-                Box::new(InputRefExpression::new(DataType::Float32, 3)),
-            )
-            .unwrap(),
-        );
-
-        do_test(JoinType::LeftOuter, condition, false, expected).await;
+        do_test(JoinType::LeftOuter, Some(condition), false, expected).await;
     }
 
     #[tokio::test]
@@ -728,21 +701,9 @@ mod tests {
              2 5.5
              2 8.4",
         );
+        let condition = build_from_pretty("(less_than:boolean 5:int4 $3:float4)");
 
-        let condition = Some(
-            new_binary_expr(
-                Type::LessThan,
-                DataType::Boolean,
-                Box::new(LiteralExpression::new(
-                    DataType::Int32,
-                    Some(ScalarImpl::Int32(5)),
-                )),
-                Box::new(InputRefExpression::new(DataType::Float32, 3)),
-            )
-            .unwrap(),
-        );
-
-        do_test(JoinType::LeftSemi, condition, false, expected).await;
+        do_test(JoinType::LeftSemi, Some(condition), false, expected).await;
     }
 
     #[tokio::test]
@@ -754,20 +715,8 @@ mod tests {
             5 9.1
             . .",
         );
+        let condition = build_from_pretty("(less_than:boolean 5:int4 $3:float4)");
 
-        let condition = Some(
-            new_binary_expr(
-                Type::LessThan,
-                DataType::Boolean,
-                Box::new(LiteralExpression::new(
-                    DataType::Int32,
-                    Some(ScalarImpl::Int32(5)),
-                )),
-                Box::new(InputRefExpression::new(DataType::Float32, 3)),
-            )
-            .unwrap(),
-        );
-
-        do_test(JoinType::LeftAnti, condition, false, expected).await;
+        do_test(JoinType::LeftAnti, Some(condition), false, expected).await;
     }
 }

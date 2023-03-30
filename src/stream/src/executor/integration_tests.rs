@@ -196,6 +196,7 @@ async fn test_merger_sum_aggr() {
         ],
         3,
         MultiMap::new(),
+        0.0,
     );
 
     let items = Arc::new(Mutex::new(vec![]));

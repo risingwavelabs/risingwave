@@ -17,11 +17,15 @@ use itertools::repeat_n;
 
 use crate::buffer::{Bitmap, BitmapBuilder};
 
-/// `Vis` is a visibility bitmap of rows. When all rows are visible, it is considered compact and
-/// is represented by a single cardinality number rather than that many of ones.
+/// `Vis` is a visibility bitmap of rows.
 #[derive(Clone, PartialEq, Debug)]
 pub enum Vis {
+    /// Non-compact variant.
+    /// Certain rows are hidden using this bitmap.
     Bitmap(Bitmap),
+
+    /// Compact variant which just stores cardinality of rows.
+    /// This can be used when all rows are visible.
     Compact(usize), // equivalent to all ones of this size
 }
 

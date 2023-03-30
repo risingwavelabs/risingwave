@@ -20,6 +20,7 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
 
 use bytes::Bytes;
+use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::key::{
@@ -30,6 +31,7 @@ use tokio::sync::Notify;
 
 use super::{HummockError, HummockResult};
 use crate::error::StorageResult;
+use crate::hummock::CachePolicy;
 use crate::mem_table::{KeyOp, MemTableError};
 use crate::store::{ReadOptions, StateStoreRead};
 
@@ -352,6 +354,7 @@ pub(crate) async fn do_insert_sanity_check(
         ignore_range_tombstone: false,
         read_version_from_backup: false,
         prefetch_options: Default::default(),
+        cache_policy: CachePolicy::Fill(CachePriority::High),
     };
     let stored_value = inner.get(key.clone(), epoch, read_options).await?;
 
@@ -382,6 +385,7 @@ pub(crate) async fn do_delete_sanity_check(
         ignore_range_tombstone: false,
         read_version_from_backup: false,
         prefetch_options: Default::default(),
+        cache_policy: CachePolicy::Fill(CachePriority::High),
     };
     match inner.get(key.clone(), epoch, read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
@@ -422,6 +426,7 @@ pub(crate) async fn do_update_sanity_check(
         table_id,
         read_version_from_backup: false,
         prefetch_options: Default::default(),
+        cache_policy: CachePolicy::Fill(CachePriority::High),
     };
 
     match inner.get(key.clone(), epoch, read_options).await? {

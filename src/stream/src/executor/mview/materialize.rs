@@ -122,7 +122,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 Message::Watermark(w) => Message::Watermark(w),
                 Message::Chunk(chunk) => {
                     match self.conflict_behavior {
-                        ConflictBehavior::OverWrite | ConflictBehavior::IgnoreConflict => {
+                        ConflictBehavior::Overwrite | ConflictBehavior::IgnoreConflict => {
                             // create MaterializeBuffer from chunk
                             let buffer = MaterializeBuffer::fill_buffer_from_chunk(
                                 chunk,
@@ -138,11 +138,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                             let fixed_changes = self
                                 .materialize_cache
-                                .handlle_conflict(
-                                    buffer,
-                                    &self.state_table,
-                                    &self.conflict_behavior,
-                                )
+                                .handle_conflict(buffer, &self.state_table, &self.conflict_behavior)
                                 .await?;
 
                             // TODO(st1page): when materialize partial columns(), we should
@@ -430,7 +426,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         }
     }
 
-    pub async fn handlle_conflict<'a, S: StateStore>(
+    pub async fn handle_conflict<'a, S: StateStore>(
         &mut self,
         buffer: MaterializeBuffer,
         table: &StateTableInner<S, SD>,
@@ -446,7 +442,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
             match row_op {
                 KeyOp::Insert(new_row) => {
                     match conflict_behavior {
-                        ConflictBehavior::OverWrite => {
+                        ConflictBehavior::Overwrite => {
                             match self.force_get(&key) {
                                 Some(old_row) => fixed_changes.push((
                                     key.clone(),
@@ -476,7 +472,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                 }
                 KeyOp::Delete(_) => {
                     match conflict_behavior {
-                        ConflictBehavior::OverWrite => {
+                        ConflictBehavior::Overwrite => {
                             match self.force_get(&key) {
                                 Some(old_row) => {
                                     fixed_changes
@@ -496,7 +492,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                 }
                 KeyOp::Update((_, new_row)) => {
                     match conflict_behavior {
-                        ConflictBehavior::OverWrite => {
+                        ConflictBehavior::Overwrite => {
                             match self.force_get(&key) {
                                 Some(old_row) => fixed_changes.push((
                                     key.clone(),
@@ -770,7 +766,7 @@ mod tests {
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
-                ConflictBehavior::OverWrite,
+                ConflictBehavior::Overwrite,
             )
             .await,
         )
@@ -903,7 +899,7 @@ mod tests {
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
-                ConflictBehavior::OverWrite,
+                ConflictBehavior::Overwrite,
             )
             .await,
         )

@@ -19,8 +19,8 @@ arc-swap = "1"
 arrow-array = "34"
 arrow-schema = "34"
 async-trait = "0.1"
-auto_enums = "0.7"
-bitflags = "1.3.2"
+auto_enums = "0.8"
+bitflags = "2"
 byteorder = "1"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = [
@@ -75,7 +75,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
-toml = "0.5"
+toml = "0.7"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 url = "2"
@@ -111,3 +111,11 @@ harness = false
 [[bench]]
 name = "bitmap"
 harness = false
+
+[[bench]]
+name = "bench_hash_key_encoding"
+harness = false
+
+[[bin]]
+name = "example-config"
+path = "src/bin/default_config.rs"

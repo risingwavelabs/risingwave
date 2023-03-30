@@ -40,6 +40,10 @@ struct Inner {
     /// All the watermark derivations, (input_column_index, output_column_index). And the
     /// derivation expression is the project's expression itself.
     watermark_derivations: MultiMap<usize, usize>,
+
+    /// the selectivity threshold which should be in [0,1]. for the chunk with selectivity less
+    /// than the threshold, the Project executor will construct a new chunk before expr evaluation,
+    materialize_selectivity_threshold: f64,
 }
 
 impl ProjectExecutor {
@@ -50,6 +54,7 @@ impl ProjectExecutor {
         exprs: Vec<BoxedExpression>,
         executor_id: u64,
         watermark_derivations: MultiMap<usize, usize>,
+        materialize_selectivity_threshold: f64,
     ) -> Self {
         let info = ExecutorInfo {
             schema: input.schema().to_owned(),
@@ -74,6 +79,7 @@ impl ProjectExecutor {
                 },
                 exprs,
                 watermark_derivations,
+                materialize_selectivity_threshold,
             },
         }
     }
@@ -110,10 +116,12 @@ impl Inner {
         &self,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        let chunk = chunk.compact();
-
+        let chunk = if chunk.selectivity() <= self.materialize_selectivity_threshold {
+            chunk.compact()
+        } else {
+            chunk
+        };
         let (data_chunk, ops) = chunk.into_parts();
-
         let mut projected_columns = Vec::new();
 
         for expr in &self.exprs {
@@ -125,8 +133,9 @@ impl Inner {
             let new_column = Column::new(evaluated_expr);
             projected_columns.push(new_column);
         }
-
-        let new_chunk = StreamChunk::new(ops, projected_columns, None);
+        let (_, vis) = data_chunk.into_parts();
+        let vis = vis.into_visibility();
+        let new_chunk = StreamChunk::new(ops, projected_columns, vis);
         Ok(Some(new_chunk))
     }
 
@@ -188,8 +197,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::{new_binary_expr, InputRefExpression, LiteralExpression};
-    use risingwave_pb::expr::expr_node::Type;
+    use risingwave_expr::expr::build_from_pretty;
 
     use super::super::test_utils::MockSource;
     use super::super::*;
@@ -216,15 +224,7 @@ mod tests {
         };
         let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);
 
-        let left_expr = InputRefExpression::new(DataType::Int64, 0);
-        let right_expr = InputRefExpression::new(DataType::Int64, 1);
-        let test_expr = new_binary_expr(
-            Type::Add,
-            DataType::Int64,
-            Box::new(left_expr),
-            Box::new(right_expr),
-        )
-        .unwrap();
+        let test_expr = build_from_pretty("(add:int8 $0:int8 $1:int8)");
 
         let project = Box::new(ProjectExecutor::new(
             ActorContext::create(123),
@@ -233,6 +233,7 @@ mod tests {
             vec![test_expr],
             1,
             MultiMap::new(),
+            0.0,
         ));
         let mut project = project.execute();
 
@@ -269,25 +270,8 @@ mod tests {
         };
         let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
 
-        let a_left_expr = InputRefExpression::new(DataType::Int64, 0);
-        let a_right_expr = LiteralExpression::new(DataType::Int64, Some(ScalarImpl::Int64(1)));
-        let a_expr = new_binary_expr(
-            Type::Add,
-            DataType::Int64,
-            Box::new(a_left_expr),
-            Box::new(a_right_expr),
-        )
-        .unwrap();
-
-        let b_left_expr = InputRefExpression::new(DataType::Int64, 0);
-        let b_right_expr = LiteralExpression::new(DataType::Int64, Some(ScalarImpl::Int64(1)));
-        let b_expr = new_binary_expr(
-            Type::Subtract,
-            DataType::Int64,
-            Box::new(b_left_expr),
-            Box::new(b_right_expr),
-        )
-        .unwrap();
+        let a_expr = build_from_pretty("(add:int8 $0:int8 1:int8)");
+        let b_expr = build_from_pretty("(subtract:int8 $0:int8 1:int8)");
 
         let project = Box::new(ProjectExecutor::new(
             ActorContext::create(123),
@@ -296,6 +280,7 @@ mod tests {
             vec![a_expr, b_expr],
             1,
             MultiMap::from_iter(vec![(0, 0), (0, 1)].into_iter()),
+            0.0,
         ));
         let mut project = project.execute();
 

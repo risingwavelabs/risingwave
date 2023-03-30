@@ -64,6 +64,11 @@ impl LookupCache {
         self.data.update_epoch(epoch);
     }
 
+    /// Clear the cache.
+    pub fn clear(&mut self) {
+        self.data.clear();
+    }
+
     pub fn new(watermark_epoch: AtomicU64Ref) -> Self {
         let cache = ExecutorCache::new(new_unbounded(watermark_epoch));
         Self { data: cache }
