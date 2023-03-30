@@ -486,7 +486,7 @@ impl LogicalJoin {
         );
 
         Some(BatchLookupJoin::new(
-            new_logical_join,
+            new_logical_join.core,
             new_predicate,
             table_desc,
             new_scan_output_column_ids,
