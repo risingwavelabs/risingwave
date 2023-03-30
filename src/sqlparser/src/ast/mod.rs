@@ -744,6 +744,7 @@ pub enum ShowObject {
     Source { schema: Option<Ident> },
     Sink { schema: Option<Ident> },
     Columns { table: ObjectName },
+    Connection,
 }
 
 impl fmt::Display for ShowObject {
@@ -774,6 +775,7 @@ impl fmt::Display for ShowObject {
             ShowObject::Source { schema } => write!(f, "SOURCES{}", fmt_schema(schema)),
             ShowObject::Sink { schema } => write!(f, "SINKS{}", fmt_schema(schema)),
             ShowObject::Columns { table } => write!(f, "COLUMNS FROM {}", table),
+            ShowObject::Connection => f.write_str("CONNECTIONS"),
         }
     }
 }

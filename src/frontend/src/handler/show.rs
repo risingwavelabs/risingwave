@@ -116,6 +116,7 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
                 ],
             ));
         }
+        ShowObject::Connection => catalog_reader.get_all_connection_names(),
     };
 
     let rows = names

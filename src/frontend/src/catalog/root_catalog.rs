@@ -628,4 +628,8 @@ impl Catalog {
             .map(|(id, _)| id)
             .ok_or_else(|| CatalogError::NotFound("class", class_name.to_string()))
     }
+
+    pub fn get_all_connection_names(&self) -> Vec<String> {
+        self.connection_id_by_name.keys().cloned().collect_vec()
+    }
 }

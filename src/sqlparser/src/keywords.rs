@@ -137,6 +137,7 @@ define_keywords!(
     CONFLUENT,
     CONNECT,
     CONNECTION,
+    CONNECTIONS,
     CONSTRAINT,
     CONTAINS,
     CONVERT,

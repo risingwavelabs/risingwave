@@ -3563,6 +3563,9 @@ impl Parser {
                         return self.expected("from after columns", self.peek_token());
                     }
                 }
+                Keyword::CONNECTIONS => {
+                    return Ok(Statement::ShowObjects(ShowObject::Connection));
+                }
                 _ => {}
             }
         }
