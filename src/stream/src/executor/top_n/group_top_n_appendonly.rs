@@ -229,7 +229,7 @@ where
         if watermark.col_idx == self.group_by[0] {
             self.managed_state
                 .state_table
-                .update_watermark(watermark.val.clone());
+                .update_watermark(watermark.val.clone(), false);
             Some(watermark)
         } else {
             None
