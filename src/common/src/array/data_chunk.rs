@@ -32,7 +32,7 @@ use crate::types::to_text::ToText;
 use crate::types::{DataType, ToOwnedDatum};
 use crate::util::hash_util::finalize_hashers;
 use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
-use crate::util::value_encoding::{serialize_datum_into, ValueRowSerializer};
+use crate::util::value_encoding::{estimate_serialize_datum_size, serialize_datum_into, ValueRowSerializer};
 
 /// [`DataChunk`] is a collection of Columns,
 /// a with visibility mask for each row.
@@ -331,6 +331,7 @@ impl DataChunk {
         Ok(new_chunks)
     }
 
+    /// Compute hash values for each row.
     pub fn get_hash_values<H: BuildHasher>(
         &self,
         column_idxes: &[usize],
@@ -338,6 +339,7 @@ impl DataChunk {
     ) -> Vec<HashCode> {
         let mut states = Vec::with_capacity(self.capacity());
         states.resize_with(self.capacity(), || hasher_builder.build_hasher());
+        // Compute hash for the specified columns.
         for column_idx in column_idxes {
             let array = self.column_at(*column_idx).array();
             array.hash_vec(&mut states[..]);
@@ -482,6 +484,18 @@ impl DataChunk {
             });
         }
         results
+    }
+
+    /// Estimate size of hash keys. Their indices in a row are indicated by `column_indices`.
+    pub fn estimate_key_size(&self, column_indices: &[usize]) -> usize {
+        if self.capacity() == 0 {
+            0
+        } else {
+            column_indices.iter().map(|idx| {
+                let datum = self.column_at(*idx).array_ref().datum_at(0);
+                estimate_serialize_datum_size(datum)
+            }).sum()
+        }
     }
 }
 
