@@ -16,6 +16,8 @@ use crate::executor::{
 };
 use crate::task::AtomicU64Ref;
 
+/// [`AppendOnlyDedupExecutor`] drops any message that has duplicate pk columns with previous
+/// messages. It only accepts append-only input, and its output will be append-only as well.
 pub struct AppendOnlyDedupExecutor<S: StateStore> {
     input: Option<BoxedExecutor>,
     state_table: StateTable<S>,
@@ -42,7 +44,7 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
             state_table,
             cache: DedupCache::new(watermark_epoch),
             pk_indices,
-            identity: format!("DedupExecutor {:X}", executor_id),
+            identity: format!("AppendOnlyDedupExecutor {:X}", executor_id),
             schema,
             ctx,
         }
