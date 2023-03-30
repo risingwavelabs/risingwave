@@ -1087,11 +1087,11 @@ impl LogicalJoin {
         let right = RequiredDist::no_shuffle(new_stream_table_scan.into());
 
         // Construct a new logical join, because we have change its RHS.
-        let new_logical_join = LogicalJoin::with_output_indices(
+        let new_logical_join = generic::Join::new(
             left,
             right,
-            self.join_type(),
             new_join_on,
+            self.join_type(),
             new_join_output_indices,
         );
 
