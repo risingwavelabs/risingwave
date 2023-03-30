@@ -38,6 +38,9 @@ statement ok
 CREATE VIEW v4 AS (SELECT * FROM t join t as t2 on (t.v1 = t2.v1) ORDER BY t.v1, t2.v1);
 
 statement ok
+CREATE MATERIALIZED VIEW mv_on_v1 AS SELECT * FROM v1;
+
+statement ok
 CREATE index idx ON t(v1);
 
 query TT
@@ -102,6 +105,11 @@ SHOW CREATE VIEW v5;
 ----
 public.v5 CREATE VIEW v5 AS (SELECT * FROM t_as_1 AS t_as WHERE id = 1)
 
+query TT
+SHOW CREATE MATERIALIZED VIEW mv_on_v1;
+----
+public.mv_on_v1 CREATE MATERIALIZED VIEW mv_on_v1 AS SELECT * FROM v5 AS v1
+
 statement ok
 ALTER INDEX idx RENAME TO idx1;
 
@@ -146,6 +154,12 @@ public.mv4 CREATE MATERIALIZED VIEW mv4 AS SELECT * FROM src1 AS src
 
 statement ok
 DROP SINK sink1;
+
+statement error other relation\(s\) depend on it
+DROP VIEW v5;
+
+statement ok
+DROP MATERIALIZED VIEW mv_on_v1;
 
 statement ok
 DROP VIEW v5;

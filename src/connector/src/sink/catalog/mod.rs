@@ -115,7 +115,7 @@ pub struct SinkCatalog {
     /// All columns of the sink. Note that this is NOT sorted by columnId in the vector.
     pub columns: Vec<ColumnCatalog>,
 
-    /// Primiary keys of the sink. Derived by the frontend.
+    /// Primary keys of the sink. Derived by the frontend.
     pub plan_pk: Vec<ColumnOrder>,
 
     /// User-defined primary key indices for upsert sink.
@@ -190,10 +190,10 @@ impl From<PbSink> for SinkCatalog {
         let sink_type = pb.get_sink_type().unwrap();
         SinkCatalog {
             id: pb.id.into(),
-            name: pb.name.clone(),
+            name: pb.name,
             schema_id: pb.schema_id.into(),
             database_id: pb.database_id.into(),
-            definition: pb.definition.clone(),
+            definition: pb.definition,
             columns: pb
                 .columns
                 .into_iter()
@@ -204,9 +204,13 @@ impl From<PbSink> for SinkCatalog {
                 .iter()
                 .map(ColumnOrder::from_protobuf)
                 .collect_vec(),
-            downstream_pk: pb.downstream_pk.iter().map(|k| *k as _).collect_vec(),
-            distribution_key: pb.distribution_key.iter().map(|k| *k as _).collect_vec(),
-            properties: pb.properties.clone(),
+            downstream_pk: pb.downstream_pk.into_iter().map(|k| k as _).collect_vec(),
+            distribution_key: pb
+                .distribution_key
+                .into_iter()
+                .map(|k| k as _)
+                .collect_vec(),
+            properties: pb.properties,
             owner: pb.owner.into(),
             dependent_relations: pb
                 .dependent_relations
