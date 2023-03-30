@@ -14,6 +14,7 @@
 
 #![allow(rustdoc::private_intra_doc_links)]
 #![allow(clippy::derive_partial_eq_without_eq)]
+#![allow(incomplete_features)] // for feature(return_position_impl_trait_in_trait)
 #![feature(binary_heap_retain)]
 #![feature(iterator_try_collect)]
 #![feature(trait_alias)]
