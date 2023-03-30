@@ -242,6 +242,8 @@ impl LogicalSource {
         }
     }
 
+    /// The columns in stream/batch source node indicate the actual columns it will produce,
+    /// instead of the columns defined in source catalog. The difference is generated columns.
     #[must_use]
     fn rewrite_to_stream_batch_source(&self) -> Self {
         let column_catalog = self.core.column_catalog.clone();

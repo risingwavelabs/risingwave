@@ -101,12 +101,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
-        let i2o = self.i2o_col_mapping();
-        self.input
-            .logical_pk()
-            .iter()
-            .map(|pk_col| i2o.try_map(*pk_col))
-            .collect::<Option<Vec<_>>>()
+        self.pk_indices.clone()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
