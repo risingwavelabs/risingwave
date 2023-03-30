@@ -15,14 +15,16 @@
 use std::sync::Arc;
 use std::{fmt, vec};
 
-use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use itertools::Itertools;
+use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::error::Result;
+use risingwave_common::types::{DataType, ScalarImpl};
 
 use super::{
     BatchValues, ColPrunable, ExprRewritable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown,
-    ToBatch, ToStream,
+    StreamValues, ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprImpl, ExprRewriter};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -47,6 +49,26 @@ impl LogicalValues {
         }
         let functional_dependency = FunctionalDependencySet::new(schema.len());
         let base = PlanBase::new_logical(ctx, schema, vec![], functional_dependency);
+        Self {
+            rows: rows.into(),
+            base,
+        }
+    }
+
+    /// Used only by `LogicalValues.rewrite_logical_for_stream`, set the `_row_id` column as pk
+    fn new_with_pk(
+        rows: Vec<Vec<ExprImpl>>,
+        schema: Schema,
+        ctx: OptimizerContextRef,
+        pk_index: usize,
+    ) -> Self {
+        for exprs in &rows {
+            for (i, expr) in exprs.iter().enumerate() {
+                assert_eq!(schema.fields()[i].data_type(), expr.return_type())
+            }
+        }
+        let functional_dependency = FunctionalDependencySet::new(schema.len());
+        let base = PlanBase::new_logical(ctx, schema, vec![pk_index], functional_dependency);
         Self {
             rows: rows.into(),
             base,
@@ -132,20 +154,31 @@ impl ToBatch for LogicalValues {
 
 impl ToStream for LogicalValues {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        Err(RwError::from(ErrorCode::NotImplemented(
-            "Stream values executor is unimplemented!".to_string(),
-            None.into(),
-        )))
+        Ok(StreamValues::new(self.clone()).into())
     }
 
     fn logical_rewrite_for_stream(
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        Err(RwError::from(ErrorCode::NotImplemented(
-            "Stream values executor is unimplemented!".to_string(),
-            None.into(),
-        )))
+        let row_id_index = self.schema().len();
+        let col_index_mapping = ColIndexMapping::identity_or_none(row_id_index, row_id_index + 1);
+        let ctx = self.ctx();
+        let mut schema = self.schema().clone();
+        schema
+            .fields
+            .push(Field::with_name(DataType::Int64, "_row_id"));
+        let rows = self.rows().to_owned();
+        let row_with_id = rows
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut r)| {
+                r.push(Literal::new(Some(ScalarImpl::Int64(i as i64)), DataType::Int64).into());
+                r
+            })
+            .collect_vec();
+        let logical_values = Self::new_with_pk(row_with_id, schema, ctx, row_id_index);
+        Ok((logical_values.into(), col_index_mapping))
     }
 }
 
