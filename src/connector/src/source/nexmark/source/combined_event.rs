@@ -16,6 +16,7 @@ use itertools::Itertools;
 pub use nexmark::event::EventType;
 use nexmark::event::{Auction, Bid, Event, Person};
 use risingwave_common::array::StructValue;
+use risingwave_common::catalog::row_id_column_name;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::{DataType, Datum, ScalarImpl, Timestamp};
@@ -119,7 +120,7 @@ pub fn get_event_data_types_with_names(
 
     if let Some(row_id_index) = row_id_index {
         // _row_id
-        fields.insert(row_id_index, ("_row_id".to_owned(), DataType::Serial));
+        fields.insert(row_id_index, (row_id_column_name(), DataType::Serial));
     }
 
     fields
