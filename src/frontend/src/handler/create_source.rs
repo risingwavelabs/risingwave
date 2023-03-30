@@ -587,7 +587,10 @@ fn check_nexmark_schema(
     row_id_index: Option<usize>,
     columns: &[ColumnCatalog],
 ) -> Result<()> {
-    let connector = get_connector(props);
+    let Some(connector) = get_connector(props) else {
+        return Ok(());
+    };
+
     if connector != NEXMARK_CONNECTOR {
         return Ok(());
     }
