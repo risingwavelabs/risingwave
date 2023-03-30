@@ -38,6 +38,7 @@ mod expr_array_length;
 mod expr_array_to_string;
 mod expr_binary_nonnull;
 mod expr_binary_nullable;
+mod expr_cardinality;
 mod expr_case;
 mod expr_coalesce;
 mod expr_concat_ws;

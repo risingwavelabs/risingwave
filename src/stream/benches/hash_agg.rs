@@ -106,6 +106,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
         group_key_indices,
         pk_indices,
         extreme_cache_size,
+        false,
         executor_id,
     ))
 }

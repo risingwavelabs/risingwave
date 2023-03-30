@@ -30,13 +30,15 @@ use risingwave_sqlparser::ast::{SetExpr, Statement};
 use super::extended_handle::{Portal, PrepareStatement};
 use super::{PgResponseStream, RwPgResponse};
 use crate::binder::Binder;
+use crate::catalog::TableId;
 use crate::handler::flush::do_flush;
 use crate::handler::privilege::resolve_privileges;
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::Explain;
 use crate::optimizer::{
-    ExecutionModeDecider, OptimizerContext, OptimizerContextRef, SysTableVisitor,
+    ExecutionModeDecider, OptimizerContext, OptimizerContextRef, RelationCollectorVisitor,
+    SysTableVisitor,
 };
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
@@ -78,16 +80,27 @@ fn must_run_in_distributed_mode(stmt: &Statement) -> Result<bool> {
     ) | is_insert_using_select(stmt))
 }
 
+pub struct BatchQueryPlanResult {
+    pub(crate) plan: PlanRef,
+    pub(crate) query_mode: QueryMode,
+    pub(crate) schema: Schema,
+    // Note that these relations are only resolved in the binding phase, and it may only be a
+    // subset of the final one. i.e. the final one may contain more implicit dependencies on
+    // indices.
+    pub(crate) dependent_relations: Vec<TableId>,
+}
+
 pub fn gen_batch_query_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     stmt: Statement,
-) -> Result<(PlanRef, QueryMode, Schema)> {
+) -> Result<BatchQueryPlanResult> {
     let must_dist = must_run_in_distributed_mode(&stmt)?;
 
-    let bound = {
+    let (dependent_relations, bound) = {
         let mut binder = Binder::new(session);
-        binder.bind(stmt)?
+        let bound = binder.bind(stmt)?;
+        (binder.included_relations(), bound)
     };
 
     let check_items = resolve_privileges(&bound);
@@ -98,6 +111,9 @@ pub fn gen_batch_query_plan(
     let mut logical = planner.plan(bound)?;
     let schema = logical.schema();
     let batch_plan = logical.gen_batch_plan()?;
+
+    let dependent_relations =
+        RelationCollectorVisitor::collect_with(dependent_relations, batch_plan.clone());
 
     let must_local = must_run_in_local_mode(batch_plan.clone());
 
@@ -122,7 +138,13 @@ pub fn gen_batch_query_plan(
         QueryMode::Local => logical.gen_batch_local_plan(batch_plan)?,
         QueryMode::Distributed => logical.gen_batch_distributed_plan(batch_plan)?,
     };
-    Ok((physical, query_mode, schema))
+
+    Ok(BatchQueryPlanResult {
+        plan: physical,
+        query_mode,
+        schema,
+        dependent_relations: dependent_relations.into_iter().collect_vec(),
+    })
 }
 
 fn determine_query_mode(batch_plan: PlanRef) -> QueryMode {
@@ -152,7 +174,12 @@ pub async fn handle_query(
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let (plan_fragmenter, query_mode, output_schema) = {
         let context = OptimizerContext::from_handler_args(handler_args);
-        let (plan, query_mode, schema) = gen_batch_query_plan(&session, context.into(), stmt)?;
+        let BatchQueryPlanResult {
+            plan,
+            query_mode,
+            schema,
+            ..
+        } = gen_batch_query_plan(&session, context.into(), stmt)?;
 
         let context = plan.plan_base().ctx.clone();
         tracing::trace!(
