@@ -228,8 +228,8 @@ pub enum JavaBindingRowInner {
 }
 #[derive(Default)]
 pub struct JavaClassMethodCache {
-    big_decimal_class: OnceCell<GlobalRef>,
-    timestamp_class: OnceCell<GlobalRef>,
+    big_decimal_ctor: OnceCell<(GlobalRef, JMethodID)>,
+    timestamp_ctor: OnceCell<(GlobalRef, JMethodID)>,
 }
 
 pub struct JavaBindingRow {
@@ -465,27 +465,22 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetTimestampV
     pointer: Pointer<'a, JavaBindingRow>,
     idx: jint,
 ) -> JObject<'a> {
-    // The JMethodID is globally available until the referenced class is unloaded.
-    // However, if the referenced class is unloaded, calling find_class will result in an error and
-    // prevent access to the INIT_METHOD. So it's safe here to cache it with static lifetime.
-    static INIT_METHOD: OnceCell<JMethodID> = OnceCell::new();
     execute_and_catch(env, move || {
         let millis = pointer
             .as_ref()
             .get_datetime(idx as usize)
             .0
             .timestamp_millis();
-        let ts_class_ref = pointer
+        let (ts_class_ref, constructor) = pointer
             .as_ref()
             .class_cache
-            .timestamp_class
+            .timestamp_ctor
             .get_or_try_init(|| {
                 let cls = env.find_class("java/sql/Timestamp")?;
-                env.new_global_ref(cls)
+                let init_method = env.get_method_id(cls, "<init>", "(J)V")?;
+                Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
             })?;
         let ts_class = JClass::from(ts_class_ref.as_obj());
-        let constructor =
-            INIT_METHOD.get_or_try_init(|| env.get_method_id(ts_class, "<init>", "(J)V"))?;
         let date_obj = env.new_object_unchecked(ts_class, *constructor, &[millis.into()])?;
 
         Ok(date_obj)
@@ -498,23 +493,19 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetDecimalVal
     pointer: Pointer<'a, JavaBindingRow>,
     idx: jint,
 ) -> JObject<'a> {
-    // Same as Java_com_risingwave_java_binding_Binding_rowGetTimestampValue.
-    static INIT_METHOD: OnceCell<JMethodID> = OnceCell::new();
     execute_and_catch(env, move || {
         let value = pointer.as_ref().get_decimal(idx as usize).to_string();
         let string_value = env.new_string(value)?;
-        let ts_class_ref = pointer
+        let (decimal_class_ref, constructor) = pointer
             .as_ref()
             .class_cache
-            .big_decimal_class
+            .big_decimal_ctor
             .get_or_try_init(|| {
                 let cls = env.find_class("java/math/BigDecimal")?;
-                env.new_global_ref(cls)
+                let init_method = env.get_method_id(cls, "<init>", "(Ljava/lang/String;)V")?;
+                Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
             })?;
-        let decimal_class = JClass::from(ts_class_ref.as_obj());
-        let constructor = INIT_METHOD.get_or_try_init(|| {
-            env.get_method_id(decimal_class, "<init>", "(Ljava/lang/String;)V")
-        })?;
+        let decimal_class = JClass::from(decimal_class_ref.as_obj());
         let date_obj =
             env.new_object_unchecked(decimal_class, *constructor, &[string_value.into()])?;
 
