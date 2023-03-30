@@ -58,6 +58,10 @@ message Source {
   // Define watermarks on the source. The `repeated` is just for forward
   // compatibility, currently, only one watermark on the source
   repeated WatermarkDesc watermark_descs = 11;
+  // Indicate whether this source is created by table.
+  oneof optional_associated_table_id {
+    uint32 associated_table_id = 12;
+  }
 }
 
 enum SinkType {
