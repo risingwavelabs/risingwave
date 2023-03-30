@@ -487,6 +487,7 @@ impl DataChunk {
     }
 
     /// Estimate size of hash keys. Their indices in a row are indicated by `column_indices`.
+    /// Size here refers to the number of u8s required to store the serialized datum.
     pub fn estimate_key_size(&self, column_indices: &[usize]) -> usize {
         if self.capacity() == 0 {
             0
