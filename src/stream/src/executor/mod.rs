@@ -85,6 +85,7 @@ mod sink;
 mod sort;
 mod sort_buffer;
 mod sort_buffer_v0;
+mod sort_v0;
 pub mod source;
 mod stream_reader;
 pub mod subtask;
@@ -127,7 +128,7 @@ pub use rearranged_chain::RearrangedChainExecutor;
 pub use receiver::ReceiverExecutor;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 pub use sink::SinkExecutor;
-pub use sort::SortExecutor;
+// pub use sort_v0::SortExecutor;
 pub use source::*;
 pub use temporal_join::*;
 pub use top_n::{
