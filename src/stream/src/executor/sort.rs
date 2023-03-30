@@ -168,3 +168,214 @@ impl<S: StateStore> SortExecutor<S> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use risingwave_common::array::StreamChunk;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+    use risingwave_common::types::DataType;
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_storage::memory::MemoryStateStore;
+
+    use super::*;
+    use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
+    use crate::executor::{ActorContext, BoxedMessageStream, Executor};
+
+    async fn create_executor<S: StateStore>(
+        sort_column_index: usize,
+        store: S,
+    ) -> (MessageSender, BoxedMessageStream) {
+        let input_schema = Schema::new(vec![
+            Field::unnamed(DataType::Int64), // pk
+            Field::unnamed(DataType::Int64),
+        ]);
+        let input_pk_indices = vec![0];
+
+        // state table schema = input schema
+        let table_columns = vec![
+            ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
+            ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
+        ];
+
+        // note that the sort column is the first table pk column to ensure ordering
+        let table_pk_indices = vec![sort_column_index, 0];
+        let table_order_types = vec![OrderType::ascending(), OrderType::ascending()];
+        let buffer_table = StateTable::new_without_distribution(
+            store,
+            TableId::new(1),
+            table_columns,
+            table_order_types,
+            table_pk_indices,
+        )
+        .await;
+
+        let (tx, source) = MockSource::channel(input_schema, input_pk_indices.clone());
+        let sort_executor = SortExecutor::new(SortExecutorArgs {
+            input: source.boxed(),
+            actor_ctx: ActorContext::create(123),
+            pk_indices: input_pk_indices,
+            executor_id: 1,
+            buffer_table,
+            chunk_size: 1024,
+            sort_column_index,
+        });
+        (tx, sort_executor.boxed().execute())
+    }
+
+    #[tokio::test]
+    async fn test_sort_executor() {
+        let sort_column_index = 1;
+
+        let store = MemoryStateStore::new();
+        let (mut tx, mut sort_executor) = create_executor(sort_column_index, store).await;
+
+        // Init barrier
+        tx.push_barrier(1, false);
+
+        // Consume the barrier
+        sort_executor.expect_barrier().await;
+
+        // Init watermark
+        tx.push_int64_watermark(0, 0_i64);
+        tx.push_int64_watermark(sort_column_index, 0_i64);
+
+        // Consume the watermark
+        sort_executor.expect_watermark().await;
+        sort_executor.expect_watermark().await;
+
+        // Push data chunk1
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I I
+            + 1 1
+            + 2 2
+            + 3 6
+            + 4 7",
+        ));
+
+        // Push watermark1 on an irrelevant column
+        tx.push_int64_watermark(0, 3_i64);
+
+        // Consume the watermark
+        sort_executor.expect_watermark().await;
+
+        // Push watermark1 on sorted column
+        tx.push_int64_watermark(sort_column_index, 3_i64);
+
+        // Consume the data chunk
+        let chunk = sort_executor.expect_chunk().await;
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I I
+                + 1 1
+                + 2 2"
+            )
+        );
+
+        // Consume the watermark
+        sort_executor.expect_watermark().await;
+
+        // Push data chunk2
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I I
+            + 98 4
+            + 37 5
+            + 60 8",
+        ));
+
+        // Push barrier
+        tx.push_barrier(2, false);
+
+        // Consume the barrier
+        sort_executor.expect_barrier().await;
+
+        // Push watermark2 on an irrelevant column
+        tx.push_int64_watermark(0, 7_i64);
+
+        // Consume the watermark
+        sort_executor.expect_watermark().await;
+
+        // Push watermark2 on sorted column
+        tx.push_int64_watermark(sort_column_index, 7_i64);
+
+        // Consume the data chunk
+        let chunk = sort_executor.expect_chunk().await;
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I I
+                + 98 4
+                + 37 5
+                + 3 6"
+            )
+        );
+
+        // Consume the watermark
+        sort_executor.expect_watermark().await;
+    }
+
+    #[tokio::test]
+    async fn test_sort_executor_fail_over() {
+        let sort_column_index = 1;
+
+        let store = MemoryStateStore::new();
+        let (mut tx, mut sort_executor) = create_executor(sort_column_index, store.clone()).await;
+
+        // Init barrier
+        tx.push_barrier(1, false);
+
+        // Consume the barrier
+        sort_executor.expect_barrier().await;
+
+        // Init watermark
+        tx.push_int64_watermark(0, 0_i64);
+        tx.push_int64_watermark(sort_column_index, 0_i64);
+
+        // Consume the watermark
+        sort_executor.expect_watermark().await;
+        sort_executor.expect_watermark().await;
+
+        // Push data chunk
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I I
+            + 1 1
+            + 2 2
+            + 3 6
+            + 4 7",
+        ));
+
+        // Push barrier
+        tx.push_barrier(2, false);
+
+        // Consume the barrier
+        sort_executor.expect_barrier().await;
+
+        // Mock fail over
+        let (mut recovered_tx, mut recovered_sort_executor) =
+            create_executor(sort_column_index, store).await;
+
+        // Push barrier
+        recovered_tx.push_barrier(3, false);
+
+        // Consume the barrier
+        recovered_sort_executor.expect_barrier().await;
+
+        // Push watermark on sorted column
+        recovered_tx.push_int64_watermark(sort_column_index, 3_i64);
+
+        // Consume the data chunk
+        let chunk = recovered_sort_executor.expect_chunk().await;
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I I
+                + 1 1
+                + 2 2"
+            )
+        );
+
+        // Consume the watermark
+        recovered_sort_executor.expect_watermark().await;
+    }
+}

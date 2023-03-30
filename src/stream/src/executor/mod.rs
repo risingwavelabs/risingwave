@@ -128,7 +128,7 @@ pub use rearranged_chain::RearrangedChainExecutor;
 pub use receiver::ReceiverExecutor;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 pub use sink::SinkExecutor;
-// pub use sort_v0::SortExecutor;
+pub use sort::*;
 pub use source::*;
 pub use temporal_join::*;
 pub use top_n::{

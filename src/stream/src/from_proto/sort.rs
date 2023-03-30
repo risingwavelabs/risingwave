@@ -18,7 +18,7 @@ use risingwave_pb::stream_plan::SortNode;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::SortExecutor;
+use crate::executor::{SortExecutor, SortExecutorArgs};
 
 pub struct SortExecutorBuilder;
 
@@ -36,14 +36,14 @@ impl ExecutorBuilder for SortExecutorBuilder {
         let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for sort"));
         let state_table =
             StateTable::from_table_catalog(node.get_state_table()?, store, Some(vnodes)).await;
-        Ok(Box::new(SortExecutor::new(
-            params.actor_context,
+        Ok(Box::new(SortExecutor::new(SortExecutorArgs {
             input,
-            params.pk_indices,
-            params.executor_id,
-            state_table,
-            params.env.config().developer.stream_chunk_size,
-            node.sort_column_index as _,
-        )))
+            actor_ctx: params.actor_context,
+            pk_indices: params.pk_indices,
+            executor_id: params.executor_id,
+            buffer_table: state_table,
+            chunk_size: params.env.config().developer.stream_chunk_size,
+            sort_column_index: node.sort_column_index as _,
+        })))
     }
 }
