@@ -357,3 +357,27 @@
 - sql: |
     SELECT 1, (SELECT regexp_matches('barbeque barbeque', '(bar)(beque)', 'g'))
   batch_error: 'internal error: Scalar subquery might produce more than one row.'
+- sql: |
+    create table t1 (a int, b int);
+    select a, (select count(*) from t1 where t1.a <> t.b) from t1 as t order by 1;
+  logical_plan: |
+    LogicalProject { exprs: [t1.a, count] }
+    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+      ├─LogicalScan { table: t1, columns: [t1.a, t1.b, t1._row_id] }
+      └─LogicalProject { exprs: [count] }
+        └─LogicalAgg { aggs: [count] }
+          └─LogicalProject { exprs: [] }
+            └─LogicalFilter { predicate: (t1.a <> CorrelatedInputRef { index: 1, correlated_id: 1 }) }
+              └─LogicalScan { table: t1, columns: [t1.a, t1.b, t1._row_id] }
+  optimized_logical_plan_for_batch: |
+    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t1.b, t1.b), output: [t1.a, count(1:Int32)] }
+    ├─LogicalScan { table: t1, columns: [t1.a, t1.b] }
+    └─LogicalAgg { group_key: [t1.b], aggs: [count(1:Int32)] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t1.b, t1.b), output: [t1.b, 1:Int32] }
+        ├─LogicalAgg { group_key: [t1.b], aggs: [] }
+        | └─LogicalScan { table: t1, columns: [t1.b] }
+        └─LogicalProject { exprs: [t1.b, 1:Int32] }
+          └─LogicalJoin { type: Inner, on: (t1.a <> t1.b), output: [t1.b] }
+            ├─LogicalAgg { group_key: [t1.b], aggs: [] }
+            | └─LogicalScan { table: t1, columns: [t1.b] }
+            └─LogicalScan { table: t1, columns: [t1.a] }

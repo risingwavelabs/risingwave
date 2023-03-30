@@ -147,6 +147,15 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::vacuum_interval_sec")]
     pub vacuum_interval_sec: u64,
 
+    /// Interval of hummock version checkpoint.
+    #[serde(default = "default::meta::hummock_version_checkpoint_interval_sec")]
+    pub hummock_version_checkpoint_interval_sec: u64,
+
+    /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
+    /// attempt is rejected.
+    #[serde(default = "default::meta::min_delta_log_num_for_hummock_version_checkpoint")]
+    pub min_delta_log_num_for_hummock_version_checkpoint: u64,
+
     /// Maximum allowed heartbeat interval in seconds.
     #[serde(default = "default::meta::max_heartbeat_interval_sec")]
     pub max_heartbeat_interval_secs: u32,
@@ -550,6 +559,14 @@ mod default {
 
         pub fn vacuum_interval_sec() -> u64 {
             30
+        }
+
+        pub fn hummock_version_checkpoint_interval_sec() -> u64 {
+            30
+        }
+
+        pub fn min_delta_log_num_for_hummock_version_checkpoint() -> u64 {
+            10
         }
 
         pub fn max_heartbeat_interval_sec() -> u32 {

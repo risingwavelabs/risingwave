@@ -20,7 +20,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
-use risingwave_sqlparser::ast::{AlterTableOperation, ObjectName, Statement};
+use risingwave_sqlparser::ast::{AlterTableOperation, ColumnOption, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 
 use super::create_table::{gen_create_table_plan, ColumnIdGenerator};
@@ -101,6 +101,17 @@ pub async fn handle_alter_table_column(
                     "column \"{new_column_name}\" of table \"{table_name}\" already exists"
                 )))?
             }
+
+            if new_column
+                .options
+                .iter()
+                .any(|x| matches!(x.option, ColumnOption::GeneratedColumns(_)))
+            {
+                Err(ErrorCode::InvalidInputSyntax(
+                    "alter table add generated columns is not supported".to_string(),
+                ))?
+            }
+
             // Add the new column to the table definition.
             columns.push(new_column);
         }
