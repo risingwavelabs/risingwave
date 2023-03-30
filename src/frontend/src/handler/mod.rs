@@ -38,6 +38,7 @@ mod alter_relation_rename;
 mod alter_system;
 mod alter_table_column;
 pub mod alter_user;
+pub mod create_connection;
 mod create_database;
 pub mod create_function;
 pub mod create_index;
@@ -148,6 +149,11 @@ impl HandlerArgs {
             } => {
                 *if_not_exists = false;
             }
+            Statement::CreateConnection {
+                stmt: CreateConnectionStatement { if_not_exists, .. },
+            } => {
+                *if_not_exists = false;
+            }
             _ => {}
         }
         stmt.to_string()
@@ -172,6 +178,9 @@ pub async fn handle(
             create_source::handle_create_source(handler_args, stmt).await
         }
         Statement::CreateSink { stmt } => create_sink::handle_create_sink(handler_args, stmt).await,
+        Statement::CreateConnection { stmt } => {
+            create_connection::handle_create_connection(handler_args, stmt).await
+        }
         Statement::CreateFunction {
             or_replace,
             temporary,

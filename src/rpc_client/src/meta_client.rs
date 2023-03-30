@@ -79,6 +79,7 @@ use crate::error::{Result, RpcError};
 use crate::hummock_meta_client::{CompactTaskItem, HummockMetaClient};
 use crate::{meta_rpc_client_method_impl, ExtraInfoSourceRef};
 
+type ConnectionId = u32;
 type DatabaseId = u32;
 type SchemaId = u32;
 
@@ -124,10 +125,10 @@ impl MetaClient {
         .await
     }
 
-    pub async fn create_connection(&self, req: create_connection_request::Payload) -> Result<u32> {
+    pub async fn create_connection(&self, req: create_connection_request::Payload) -> Result<(ConnectionId, CatalogVersion)> {
         let request = CreateConnectionRequest { payload: Some(req) };
         let resp = self.inner.create_connection(request).await?;
-        Ok(resp.connection_id)
+        Ok((resp.connection_id, resp.version))
     }
 
     pub async fn list_connections(&self, _name: Option<&str>) -> Result<Vec<Connection>> {

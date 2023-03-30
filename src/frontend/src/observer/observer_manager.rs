@@ -258,6 +258,13 @@ impl FrontendObserverNode {
                             ),
                             _ => panic!("receive an unsupported notify {:?}", resp),
                         },
+                        RelationInfo::Connection(connection) => match resp.operation() {
+                            Operation::Add => catalog_guard.create_connection(connection),
+                            Operation::Delete => {
+                                catalog_guard.drop_connection(connection.get_name().as_str())
+                            }
+                            _ => panic!("receive an unsupported notify {:?}", resp),
+                        },
                     }
                 }
             }

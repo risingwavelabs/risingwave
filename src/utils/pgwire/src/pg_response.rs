@@ -51,6 +51,7 @@ pub enum StatementType {
     CREATE_USER,
     CREATE_INDEX,
     CREATE_FUNCTION,
+    CREATE_CONNECTION,
     DESCRIBE,
     GRANT_PRIVILEGE,
     DROP_TABLE,

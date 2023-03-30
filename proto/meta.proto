@@ -259,6 +259,7 @@ message Relation {
     catalog.Index index = 4;
     catalog.View view = 5;
     catalog.Function function = 6;
+    catalog.Connection connection = 7;
   }
 }
 

@@ -29,7 +29,7 @@ pub async fn create_connection(
         .split(',')
         .map(|str| str.to_string())
         .collect();
-    let conn_id = meta_client
+    let (conn_id, _) = meta_client
         .create_connection(create_connection_request::Payload::PrivateLink(
             PrivateLink {
                 provider,

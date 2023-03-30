@@ -353,12 +353,15 @@ where
         let conn_id = connection.id;
         let conn_name = connection.name.clone();
         let mut connections = BTreeMapTransaction::new(&mut core.connections);
-        connections.insert(conn_id, connection);
+        connections.insert(conn_id, connection.to_owned());
         commit_meta!(self, connections)?;
 
         core.connection_by_name.insert(conn_name, conn_id);
-        // Currently we don't need to notify frontend, so just fill 0 here
-        Ok(0)
+
+        let version = self
+            .notify_frontend_relation_info(Operation::Add, RelationInfo::Connection(connection))
+            .await;
+        Ok(version)
     }
 
     pub async fn drop_connection(&self, conn_name: &str) -> MetaResult<NotificationVersion> {
@@ -370,10 +373,13 @@ where
             .ok_or_else(|| anyhow!("connection {} not found", conn_name))?;
 
         let mut connections = BTreeMapTransaction::new(&mut core.connections);
-        connections.remove(conn_id);
+        let connection = connections.remove(conn_id).unwrap();
         commit_meta!(self, connections)?;
-        // Currently we don't need to notify frontend, so just fill 0 here
-        Ok(0)
+
+        let version = self
+            .notify_frontend_relation_info(Operation::Delete, RelationInfo::Connection(connection))
+            .await;
+        Ok(version)
     }
 
     pub async fn create_schema(&self, schema: &Schema) -> MetaResult<NotificationVersion> {

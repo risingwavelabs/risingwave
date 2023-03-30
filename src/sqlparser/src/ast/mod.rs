@@ -974,6 +974,8 @@ pub enum Statement {
     CreateSource { stmt: CreateSourceStatement },
     /// CREATE SINK
     CreateSink { stmt: CreateSinkStatement },
+    /// CREATE CONNECTION
+    CreateConnection { stmt: CreateConnectionStatement },
     /// CREATE FUNCTION
     ///
     /// Postgres: https://www.postgresql.org/docs/15/sql-createfunction.html
@@ -1403,6 +1405,7 @@ impl fmt::Display for Statement {
                 stmt,
             ),
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
+            Statement::CreateConnection { stmt } => write!(f, "CREATE CONNECTION {}", stmt,),
             Statement::AlterTable { name, operation } => {
                 write!(f, "ALTER TABLE {} {}", name, operation)
             }

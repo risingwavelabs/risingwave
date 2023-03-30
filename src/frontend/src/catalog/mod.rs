@@ -24,6 +24,7 @@ use risingwave_connector::sink::catalog::SinkCatalog;
 use thiserror::Error;
 pub(crate) mod catalog_service;
 
+pub(crate) mod connection_catalog;
 pub(crate) mod database_catalog;
 pub(crate) mod function_catalog;
 pub(crate) mod index_catalog;
@@ -39,6 +40,7 @@ pub use table_catalog::TableCatalog;
 
 use crate::user::UserId;
 
+pub(crate) type ConnectionId = u32;
 pub(crate) type SourceId = u32;
 pub(crate) type SinkId = u32;
 pub(crate) type ViewId = u32;
