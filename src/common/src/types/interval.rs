@@ -69,6 +69,9 @@ impl Interval {
     /// Returns the total number of whole months.
     ///
     /// Note the difference between [`months`] and [`months_field`].
+    /// We have: `months` = `years_field` * 12 + `months_field`.
+    ///
+    /// # Example
     /// ```
     /// # use risingwave_common::types::Interval;
     /// let interval: Interval = "5 yrs 1 month".parse().unwrap();
@@ -84,12 +87,19 @@ impl Interval {
         self.days
     }
 
-    /// Returns the total number of microseconds in a day.
+    /// Returns the number of microseconds.
+    ///
+    /// Note the difference between [`usecs`] and [`seconds_in_micros`].
+    /// We have:
+    /// `usecs` = `hours_field` * 3600
+    ///     + `minutes_field` * 60
+    ///     + `seconds_in_micros` as f64 / 1_000_000.0
     pub fn usecs(&self) -> i64 {
         self.usecs
     }
 
-    /// Calculates the remaining number of microseconds in a day.
+    /// Calculates the remaining number of microseconds.
+    /// range: 0..86_400_000_000
     ///
     /// Note the difference between [`usecs`] and [`usecs_of_day`].
     /// ```
@@ -102,33 +112,87 @@ impl Interval {
         self.usecs.rem_euclid(USECS_PER_DAY) as u64
     }
 
-    /// Returns the years field.
+    /// Returns the years field. range: unlimited
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::Interval;
+    /// let interval: Interval = "2332 yrs 12 months".parse().unwrap();
+    /// assert_eq!(interval.years_field(), 2333);
+    /// ```
     pub fn years_field(&self) -> i32 {
         self.months / 12
     }
 
-    /// Returns the months field. range: 0-11
+    /// Returns the months field. range: -11..=11
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::Interval;
+    /// let interval: Interval = "15 months".parse().unwrap();
+    /// assert_eq!(interval.months_field(), 3);
+    ///
+    /// let interval: Interval = "-15 months".parse().unwrap();
+    /// assert_eq!(interval.months_field(), -3);
+    /// ```
     pub fn months_field(&self) -> i32 {
         self.months % 12
     }
 
-    /// Returns the days field.
+    /// Returns the days field. range: unlimited
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::Interval;
+    /// let interval: Interval = "1 months 100 days 25:00:00".parse().unwrap();
+    /// assert_eq!(interval.days_field(), 100);
+    /// ```
     pub fn days_field(&self) -> i32 {
         self.days
     }
 
-    /// Returns the hours field. range: -23..=23
+    /// Returns the hours field. range: unlimited
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::Interval;
+    /// let interval: Interval = "25:00:00".parse().unwrap();
+    /// assert_eq!(interval.hours_field(), 25);
+    ///
+    /// let interval: Interval = "-25:00:00".parse().unwrap();
+    /// assert_eq!(interval.hours_field(), -25);
+    /// ```
     pub fn hours_field(&self) -> i32 {
-        (self.usecs / USECS_PER_SEC / 3600 % 24) as i32
+        (self.usecs / USECS_PER_SEC / 3600) as i32
     }
 
     /// Returns the minutes field. range: -59..=-59
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::Interval;
+    /// let interval: Interval = "00:20:00".parse().unwrap();
+    /// assert_eq!(interval.minutes_field(), 20);
+    ///
+    /// let interval: Interval = "-00:20:00".parse().unwrap();
+    /// assert_eq!(interval.minutes_field(), -20);
+    /// ```
     pub fn minutes_field(&self) -> i32 {
         (self.usecs / USECS_PER_SEC / 60 % 60) as i32
     }
 
     /// Returns the seconds field, including fractional parts, in microseconds.
     /// range: -59,999,999..=59,999,999
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::Interval;
+    /// let interval: Interval = "01:02:03.45678".parse().unwrap();
+    /// assert_eq!(interval.seconds_in_micros(), 3_456_780);
+    ///
+    /// let interval: Interval = "-01:02:03.45678".parse().unwrap();
+    /// assert_eq!(interval.seconds_in_micros(), -3_456_780);
+    /// ```
     pub fn seconds_in_micros(&self) -> i32 {
         (self.usecs % (USECS_PER_SEC * 60)) as i32
     }
