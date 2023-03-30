@@ -399,6 +399,7 @@ impl Binder {
                 ("array_distinct", raw_call(ExprType::ArrayDistinct)),
                 ("array_length", raw_call(ExprType::ArrayLength)),
                 ("cardinality", raw_call(ExprType::Cardinality)),
+                ("array_ndims", raw_call(ExprType::ArrayNdims)),
                 // jsonb
                 ("jsonb_object_field", raw_call(ExprType::JsonbAccessInner)),
                 ("jsonb_array_element", raw_call(ExprType::JsonbAccessInner)),

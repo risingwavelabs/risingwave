@@ -132,6 +132,7 @@ message ExprNode {
     ARRAY_DISTINCT = 535;
     ARRAY_LENGTH = 536;
     CARDINALITY = 537;
+    ARRAY_NDIMS = 538;
 
     // Jsonb functions
 
