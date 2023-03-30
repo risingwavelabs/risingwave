@@ -84,6 +84,7 @@ pub mod row_id_gen;
 mod sink;
 mod sort;
 mod sort_buffer;
+mod sort_buffer_v0;
 pub mod source;
 mod stream_reader;
 pub mod subtask;
