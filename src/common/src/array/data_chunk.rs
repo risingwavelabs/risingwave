@@ -32,7 +32,9 @@ use crate::types::to_text::ToText;
 use crate::types::{DataType, ToOwnedDatum};
 use crate::util::hash_util::finalize_hashers;
 use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
-use crate::util::value_encoding::{estimate_serialize_datum_size, serialize_datum_into, ValueRowSerializer};
+use crate::util::value_encoding::{
+    estimate_serialize_datum_size, serialize_datum_into, ValueRowSerializer,
+};
 
 /// [`DataChunk`] is a collection of Columns,
 /// a with visibility mask for each row.
@@ -492,10 +494,13 @@ impl DataChunk {
         if self.capacity() == 0 {
             0
         } else {
-            column_indices.iter().map(|idx| {
-                let datum = self.column_at(*idx).array_ref().datum_at(0);
-                estimate_serialize_datum_size(datum)
-            }).sum()
+            column_indices
+                .iter()
+                .map(|idx| {
+                    let datum = self.column_at(*idx).array_ref().datum_at(0);
+                    estimate_serialize_datum_size(datum)
+                })
+                .sum()
         }
     }
 }
