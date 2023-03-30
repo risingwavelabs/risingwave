@@ -132,6 +132,8 @@ pub fn extract_from_interval(unit: &str, interval: Interval) -> Result<Decimal> 
         Decimal::from_i128_with_scale(interval.seconds_in_microseconds() as i128, 3)
     } else if unit.eq_ignore_ascii_case("microsecond") {
         interval.seconds_in_microseconds().into()
+    } else if unit.eq_ignore_ascii_case("epoch") {
+        interval.epoch().into()
     } else {
         return Err(invalid_unit("interval unit", unit));
     })
@@ -237,6 +239,10 @@ mod tests {
         assert_eq!(extract("Second", interval).unwrap(), 57.123_456.into());
         assert_eq!(extract("Millisecond", interval).unwrap(), 57_123.456.into());
         assert_eq!(extract("Microsecond", interval).unwrap(), 57_123_456.into());
+        assert_eq!(
+            extract("Epoch", interval).unwrap(),
+            74_026_848_177.123_46.into()
+        );
         assert!(extract("Nanosecond", interval).is_err());
         assert!(extract("Week", interval).is_err());
     }
