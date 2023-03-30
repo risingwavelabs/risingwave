@@ -71,7 +71,7 @@ use crate::rpc::service::telemetry_service::TelemetryInfoServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
 use crate::stream::{GlobalStreamManager, SourceManager};
-use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
+use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher, TrackingId};
 use crate::{hummock, MetaResult};
 
 #[derive(Debug)]
@@ -572,6 +572,15 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         Arc::new(MetaTelemetryInfoFetcher::new(meta_store.clone())),
         Arc::new(MetaReportCreator::new()),
     );
+
+    {
+        // always create a tracking_id for a cluster
+        // if it's persistent in etcd, won't create a new one
+        let tracking_id: String = TrackingId::get_or_create_meta_store(&meta_store)
+            .await?
+            .into();
+        tracing::info!("Launching Meta {}", tracking_id);
+    }
 
     // May start telemetry reporting
     if let MetaBackend::Etcd = meta_store.meta_store_type() && env.opts.telemetry_enabled && telemetry_env_enabled(){
