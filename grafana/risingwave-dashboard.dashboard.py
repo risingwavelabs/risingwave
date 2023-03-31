@@ -692,10 +692,10 @@ def section_compaction(outer_panels):
                 ),
                 panels.timeseries_percentage(
                     "Compaction Write Amplification",
-                    "Write amplification is the amount of bytes written to the disk by compaction for each one byte of "
-                    "flushed SSTable data. Write amplification is by definition higher than 1.0 because we write each "
-                    "piece of data to L0, and then write it again to an SSTable, and then compaction may read this "
-                    "piece of data and write it to a new SSTable, that’s another write.",
+                    "Write amplification is the amount of bytes written to the remote storage by compaction for each "
+                    "one byte of flushed SSTable data. Write amplification is by definition higher than 1.0 because "
+                    "we write each piece of data to L0, and then write it again to an SSTable, and then compaction "
+                    "may read this piece of data and write it to a new SSTable, that’s another write.",
                     [
                         panels.target(
                             f"sum({metric('storage_level_compact_write')}) / sum({metric('compactor_write_build_l0_bytes')})",
