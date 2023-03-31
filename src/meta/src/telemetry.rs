@@ -138,10 +138,10 @@ impl<S: MetaStore> MetaTelemetryInfoFetcher<S> {
 
 #[async_trait::async_trait]
 impl<S: MetaStore> TelemetryInfoFetcher for MetaTelemetryInfoFetcher<S> {
-    async fn fetch_telemetry_info(&self) -> anyhow::Result<String> {
+    async fn fetch_telemetry_info(&self) -> anyhow::Result<Option<String>> {
         let tracking_id = TrackingId::from_meta_store(&self.meta_store).await?;
 
-        Ok(tracking_id.into())
+        Ok(Some(tracking_id.into()))
     }
 }
 
