@@ -69,13 +69,12 @@ create table s with (
   properties.bootstrap.server = '127.0.0.1:29092'
 ) row format json;
 
-# TODO: `show sources` should display connectors created by `create source` only.
 # We should introduce `show connectors` to display all connectors created via both
 # `create source` and `create table`.
 query T
 show sources
 ----
-s
+
 
 query T
 show tables

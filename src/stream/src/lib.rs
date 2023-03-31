@@ -14,6 +14,7 @@
 
 #![allow(rustdoc::private_intra_doc_links)]
 #![allow(clippy::derive_partial_eq_without_eq)]
+#![allow(incomplete_features)] // for feature(return_position_impl_trait_in_trait)
 #![feature(binary_heap_retain)]
 #![feature(iterator_try_collect)]
 #![feature(trait_alias)]
@@ -39,6 +40,8 @@
 #![feature(btree_drain_filter)]
 #![feature(bound_map)]
 #![feature(iter_order_by)]
+#![feature(exact_size_is_empty)]
+#![feature(return_position_impl_trait_in_trait)]
 
 #[macro_use]
 extern crate tracing;

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::row::{OwnedRow, Row};
@@ -36,6 +38,7 @@ type StreamChunkRowIterator = impl Iterator<Item = StreamChunkRow> + 'static;
 
 pub struct StreamChunkIterator {
     iter: StreamChunkRowIterator,
+    pub class_cache: Arc<crate::JavaClassMethodCache>,
 }
 
 impl StreamChunkIterator {
@@ -49,6 +52,7 @@ impl StreamChunkIterator {
                 })
                 .collect_vec()
                 .into_iter(),
+            class_cache: Default::default(),
         }
     }
 

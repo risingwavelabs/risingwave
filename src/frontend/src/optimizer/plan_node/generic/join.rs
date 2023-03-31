@@ -312,6 +312,18 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
         self.i2r_col_mapping().inverse()
     }
 
+    /// Get the Mapping of columnIndex from internal column index to output column index
+    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
+        ColIndexMapping::with_remaining_columns(&self.output_indices, self.internal_column_num())
+    }
+
+    /// Get the Mapping of columnIndex from output column index to internal column index
+    pub fn o2i_col_mapping(&self) -> ColIndexMapping {
+        // If output_indices = [0, 0, 1], we should use it as `o2i_col_mapping` directly.
+        // If we use `self.i2o_col_mapping().inverse()`, we will lose the first 0.
+        ColIndexMapping::new(self.output_indices.iter().map(|x| Some(*x)).collect())
+    }
+
     pub fn add_which_join_key_to_pk(&self) -> EitherOrBoth<(), ()> {
         match self.join_type {
             JoinType::Inner => {

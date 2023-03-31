@@ -114,6 +114,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
                 extra: GroupAggExecutorExtraArgs {
                     group_key_indices,
                     chunk_size: params.env.config().developer.stream_chunk_size,
+                    emit_on_window_close: false,
                     metrics: params.executor_stats,
                 },
             },

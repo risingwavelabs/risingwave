@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use async_trait::async_trait;
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::Op;
@@ -181,6 +182,7 @@ macro_rules! row_nonnull {
 /// With `next_unwrap_ready`, we can retrieve the next message from the executor without `await`ing,
 /// so that we can immediately panic if the executor is not ready instead of getting stuck. This is
 /// useful for testing.
+#[async_trait]
 pub trait StreamExecutorTestExt: MessageStream + Unpin {
     /// Asserts that the executor is pending (not ready) now.
     ///
@@ -224,6 +226,21 @@ pub trait StreamExecutorTestExt: MessageStream + Unpin {
     fn next_unwrap_ready_watermark(&mut self) -> StreamExecutorResult<Watermark> {
         self.next_unwrap_ready()
             .map(|msg| msg.into_watermark().expect("expect watermark"))
+    }
+
+    async fn expect_barrier(&mut self) -> Barrier {
+        let msg = self.next().await.unwrap().unwrap();
+        msg.into_barrier().unwrap()
+    }
+
+    async fn expect_chunk(&mut self) -> StreamChunk {
+        let msg = self.next().await.unwrap().unwrap();
+        msg.into_chunk().unwrap()
+    }
+
+    async fn expect_watermark(&mut self) -> Watermark {
+        let msg = self.next().await.unwrap().unwrap();
+        msg.into_watermark().unwrap()
     }
 }
 
@@ -372,6 +389,7 @@ pub mod agg_executor {
         group_key_indices: Vec<usize>,
         pk_indices: PkIndices,
         extreme_cache_size: usize,
+        emit_on_window_close: bool,
         executor_id: u64,
     ) -> Box<dyn Executor> {
         let mut storages = Vec::with_capacity(agg_calls.iter().len());
@@ -416,6 +434,7 @@ pub mod agg_executor {
             extra: GroupAggExecutorExtraArgs {
                 group_key_indices,
                 chunk_size: 1024,
+                emit_on_window_close,
                 metrics: Arc::new(StreamingMetrics::unused()),
             },
         })
