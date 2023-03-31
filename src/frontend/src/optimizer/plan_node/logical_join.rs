@@ -154,24 +154,18 @@ impl LogicalJoin {
 
     /// Clone with new output indices
     pub fn clone_with_output_indices(&self, output_indices: Vec<usize>) -> Self {
-        Self::with_output_indices(
-            self.left(),
-            self.right(),
-            self.join_type(),
-            self.on().clone(),
+        Self::with_core(generic::Join {
             output_indices,
-        )
+            ..self.core.clone()
+        })
     }
 
     /// Clone with new `on` condition
-    pub fn clone_with_cond(&self, cond: Condition) -> Self {
-        Self::with_output_indices(
-            self.left(),
-            self.right(),
-            self.join_type(),
-            cond,
-            self.output_indices().clone(),
-        )
+    pub fn clone_with_cond(&self, on: Condition) -> Self {
+        Self::with_core(generic::Join {
+            on,
+            ..self.core.clone()
+        })
     }
 
     pub fn is_left_join(&self) -> bool {
@@ -488,13 +482,11 @@ impl PlanTreeNodeBinary for LogicalJoin {
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::with_output_indices(
+        Self::with_core(generic::Join {
             left,
             right,
-            self.join_type(),
-            self.on().clone(),
-            self.output_indices().clone(),
-        )
+            ..self.core.clone()
+        })
     }
 
     #[must_use]
