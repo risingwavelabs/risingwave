@@ -94,10 +94,6 @@ impl fmt::Display for LogicalJoin {
     }
 }
 
-pub(crate) fn has_repeated_element(slice: &[usize]) -> bool {
-    (1..slice.len()).any(|i| slice[i..].contains(&slice[i - 1]))
-}
-
 impl LogicalJoin {
     pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
         let core = generic::Join::with_full_output(left, right, join_type, on);
@@ -111,15 +107,7 @@ impl LogicalJoin {
         on: Condition,
         output_indices: Vec<usize>,
     ) -> Self {
-        // We cannot deal with repeated output indices in join
-        debug_assert!(!has_repeated_element(&output_indices));
-        let core = generic::Join {
-            left,
-            right,
-            on,
-            join_type,
-            output_indices,
-        };
+        let core = generic::Join::new(left, right, on, join_type, output_indices);
         Self::with_core(core)
     }
 
@@ -147,16 +135,6 @@ impl LogicalJoin {
 
     pub fn i2r_col_mapping_ignore_join_type(&self) -> ColIndexMapping {
         self.core.i2r_col_mapping_ignore_join_type()
-    }
-
-    /// Get the Mapping of columnIndex from left column index to internal column index.
-    pub fn l2i_col_mapping(&self) -> ColIndexMapping {
-        self.core.l2i_col_mapping()
-    }
-
-    /// get the Mapping of columnIndex from internal column index to output column index
-    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        self.core.i2o_col_mapping()
     }
 
     /// Get a reference to the logical join's on.
@@ -477,11 +455,11 @@ impl LogicalJoin {
         let new_scan_output_column_ids = new_scan.output_column_ids();
 
         // Construct a new logical join, because we have change its RHS.
-        let new_logical_join = LogicalJoin::with_output_indices(
+        let new_logical_join = generic::Join::new(
             logical_join.left(),
             new_scan.into(),
-            logical_join.join_type(),
             new_join_on,
+            logical_join.join_type(),
             new_join_output_indices,
         );
 
@@ -871,7 +849,7 @@ impl PredicatePushdown for LogicalJoin {
             self.output_indices().clone(),
         );
 
-        let mut mapping = self.i2o_col_mapping();
+        let mut mapping = self.core.i2o_col_mapping();
         predicate = predicate.rewrite_expr(&mut mapping);
         LogicalFilter::create(new_join.into(), predicate)
     }
@@ -1099,11 +1077,11 @@ impl LogicalJoin {
         let right = RequiredDist::no_shuffle(new_stream_table_scan.into());
 
         // Construct a new logical join, because we have change its RHS.
-        let new_logical_join = LogicalJoin::with_output_indices(
+        let new_logical_join = generic::Join::new(
             left,
             right,
-            self.join_type(),
             new_join_on,
+            self.join_type(),
             new_join_output_indices,
         );
 
@@ -1201,13 +1179,9 @@ impl LogicalJoin {
         }
     }
 
-    fn to_batch_hash_join(
-        &self,
-        predicate: EqJoinPredicate,
-        logical_join: LogicalJoin,
-    ) -> Result<PlanRef> {
+    fn into_batch_hash_join(self, predicate: EqJoinPredicate) -> Result<PlanRef> {
         assert!(predicate.has_eq());
-        Ok(BatchHashJoin::new(logical_join.core, predicate).into())
+        Ok(BatchHashJoin::new(self.core, predicate).into())
     }
 
     pub fn index_lookup_join_to_batch_lookup_join(&self) -> Result<PlanRef> {
@@ -1228,13 +1202,9 @@ impl LogicalJoin {
             .into())
     }
 
-    fn to_batch_nested_loop_join(
-        &self,
-        predicate: EqJoinPredicate,
-        logical_join: LogicalJoin,
-    ) -> Result<PlanRef> {
+    fn into_batch_nested_loop_join(self, predicate: EqJoinPredicate) -> Result<PlanRef> {
         assert!(!predicate.has_eq());
-        Ok(BatchNestedLoopJoin::new(logical_join).into())
+        Ok(BatchNestedLoopJoin::new(self.core).into())
     }
 }
 
@@ -1268,10 +1238,10 @@ impl ToBatch for LogicalJoin {
                 }
             }
 
-            self.to_batch_hash_join(predicate, logical_join)
+            logical_join.into_batch_hash_join(predicate)
         } else {
             // Convert to Nested-loop Join for non-equal joins
-            self.to_batch_nested_loop_join(predicate, logical_join)
+            logical_join.into_batch_nested_loop_join(predicate)
         }
     }
 }
@@ -1399,11 +1369,11 @@ impl ToStream for LogicalJoin {
             let l2o = join_with_pk
                 .core
                 .l2i_col_mapping()
-                .composite(&join_with_pk.i2o_col_mapping());
+                .composite(&join_with_pk.core.i2o_col_mapping());
             let r2o = join_with_pk
                 .core
                 .r2i_col_mapping()
-                .composite(&join_with_pk.i2o_col_mapping());
+                .composite(&join_with_pk.core.i2o_col_mapping());
             let left_right_stream_keys = join_with_pk
                 .left()
                 .logical_pk()

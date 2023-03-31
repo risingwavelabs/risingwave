@@ -37,9 +37,31 @@ pub struct Join<PlanRef> {
     pub output_indices: Vec<usize>,
 }
 
+pub(crate) fn has_repeated_element(slice: &[usize]) -> bool {
+    (1..slice.len()).any(|i| slice[i..].contains(&slice[i - 1]))
+}
+
 impl<PlanRef> Join<PlanRef> {
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.on = self.on.clone().rewrite_expr(r);
+    }
+
+    pub fn new(
+        left: PlanRef,
+        right: PlanRef,
+        on: Condition,
+        join_type: JoinType,
+        output_indices: Vec<usize>,
+    ) -> Self {
+        // We cannot deal with repeated output indices in join
+        debug_assert!(!has_repeated_element(&output_indices));
+        Self {
+            left,
+            right,
+            on,
+            join_type,
+            output_indices,
+        }
     }
 }
 
