@@ -121,6 +121,7 @@ pub struct ClusterMetadata {
     pub user_info: Vec<UserInfo>,
     pub function: Vec<Function>,
     pub system_param: SystemParams,
+    pub tracking_id: String,
 }
 
 impl ClusterMetadata {
@@ -143,6 +144,7 @@ impl ClusterMetadata {
         Self::encode_prost_message_list(&self.view.iter().collect_vec(), buf);
         Self::encode_prost_message_list(&self.function.iter().collect_vec(), buf);
         Self::encode_prost_message(&self.system_param, buf);
+        Self::encode_prost_message(&self.tracking_id, buf);
     }
 
     pub fn decode(mut buf: &[u8]) -> BackupResult<Self> {
@@ -166,6 +168,7 @@ impl ClusterMetadata {
         let view: Vec<View> = Self::decode_prost_message_list(&mut buf)?;
         let function: Vec<Function> = Self::decode_prost_message_list(&mut buf)?;
         let system_param: SystemParams = Self::decode_prost_message(&mut buf)?;
+        let tracking_id: String = Self::decode_prost_message(&mut buf)?;
 
         Ok(Self {
             default_cf,
@@ -183,6 +186,7 @@ impl ClusterMetadata {
             user_info,
             function,
             system_param,
+            tracking_id,
         })
     }
 
