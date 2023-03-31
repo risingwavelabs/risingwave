@@ -115,16 +115,8 @@ impl TestSuite {
             test_eq!(data, 1.234234);
         }
 
-        // TODO(ZENOTME): After #8112, risingwave should support this case. (DOUBLE PRECISION TYPE)
-        // for row in client
-        //     .query("select $1::DOUBLE PRECISION;", &[&234234.23490238483_f64])
-        //     .await?
-        // {
-        //     let data: f64 = row.try_get(0)?;
-        //     test_eq!(data, 234234.23490238483);
-        // }
         for row in client
-            .query("select $1::FLOAT8;", &[&234234.23490238483_f64])
+            .query("select $1::DOUBLE PRECISION;", &[&234234.23490238483_f64])
             .await?
         {
             let data: f64 = row.try_get(0)?;
@@ -199,8 +191,6 @@ impl TestSuite {
         Ok(())
     }
 
-    /// TODO(ZENOTME): After #8112, risingwave should support to change all `prepare_typed` to
-    /// `prepare`. We don't need to provide the type explicitly.
     async fn dql_dml_with_param(&self) -> anyhow::Result<()> {
         let (client, connection) = tokio_postgres::connect(&self.config, NoTls).await?;
 
@@ -215,7 +205,7 @@ impl TestSuite {
         client.query("create table t(id int)", &[]).await?;
 
         let insert_statement = client
-            .prepare_typed("insert INTO t (id) VALUES ($1)", &[Type::INT4])
+            .prepare_typed("insert INTO t (id) VALUES ($1)", &[])
             .await?;
 
         for i in 0..20 {
@@ -288,7 +278,7 @@ impl TestSuite {
         client.query("create table t(id int)", &[]).await?;
 
         let insert_statement = client
-            .prepare_typed("insert INTO t (id) VALUES ($1)", &[Type::INT4])
+            .prepare_typed("insert INTO t (id) VALUES ($1)", &[])
             .await?;
 
         for i in 0..10 {
