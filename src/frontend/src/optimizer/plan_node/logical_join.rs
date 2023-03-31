@@ -1178,7 +1178,7 @@ impl LogicalJoin {
 
         let mut logical_join = self.core.clone();
         logical_join.left = logical_join.left.to_batch()?;
-        logical_join.right = logical_join.left.to_batch()?;
+        logical_join.right = logical_join.right.to_batch()?;
 
         Ok(self
             .to_batch_lookup_join(predicate, logical_join)
@@ -1197,7 +1197,7 @@ impl ToBatch for LogicalJoin {
 
         let mut logical_join = self.core.clone();
         logical_join.left = logical_join.left.to_batch()?;
-        logical_join.right = logical_join.left.to_batch()?;
+        logical_join.right = logical_join.right.to_batch()?;
 
         let config = self.base.ctx.session_ctx().config();
 
