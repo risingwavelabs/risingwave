@@ -113,33 +113,33 @@
         nation,
         region
     where
-            p_partkey = ps_partkey
-            and s_suppkey = ps_suppkey
-      and p_size = 4
-      and p_type like '%TIN'
-            and s_nationkey = n_nationkey
-            and n_regionkey = r_regionkey
-            and r_name = 'AFRICA'
-            and ps_supplycost = (
-                    select
-                            min(ps_supplycost)
-                    from
-                            partsupp,
-                            supplier,
-                            nation,
-                            region
-                    where
-                            p_partkey = ps_partkey
-                            and s_suppkey = ps_suppkey
-                            and s_nationkey = n_nationkey
-                            and n_regionkey = r_regionkey
-                            and r_name = 'AFRICA'
-            )
+        p_partkey = ps_partkey
+        and s_suppkey = ps_suppkey
+        and p_size = 4
+        and p_type like '%TIN'
+        and s_nationkey = n_nationkey
+        and n_regionkey = r_regionkey
+        and r_name = 'AFRICA'
+        and ps_supplycost = (
+                select
+                        min(ps_supplycost)
+                from
+                        partsupp,
+                        supplier,
+                        nation,
+                        region
+                where
+                        p_partkey = ps_partkey
+                        and s_suppkey = ps_suppkey
+                        and s_nationkey = n_nationkey
+                        and n_regionkey = r_regionkey
+                        and r_name = 'AFRICA'
+        )
     order by
-          s_acctbal desc,
-          n_name,
-          s_name,
-          p_partkey
+        s_acctbal desc,
+        n_name,
+        s_name,
+        p_partkey
     limit 100;
   stream_plan: |
     StreamMaterialize { columns: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, region.r_regionkey(hidden), nation.n_nationkey(hidden), supplier.s_suppkey(hidden), part.p_partkey(hidden), partsupp.ps_partkey(hidden), partsupp.ps_suppkey(hidden), min(partsupp.ps_supplycost)(hidden)], pk_columns: [region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, min(partsupp.ps_supplycost)], order_descs: [s_acctbal, n_name, s_name, p_partkey, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, min(partsupp.ps_supplycost)], pk_conflict: "no check" }
@@ -630,5 +630,201 @@
                       └─StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber] }
                         └─StreamFilter { predicate: (lineitem.l_receiptdate > lineitem.l_commitdate) }
                           └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+  with_config_map:
+    RW_STREAMING_ENABLE_BUSHY_JOIN: 'true'
+- id: large_join
+  before:
+  - create_tables
+  sql: 
+    select 
+        s_acctbal,
+        s_name,
+        n_name,
+        p_partkey,
+        p_mfgr,
+        s_address,
+        s_phone,
+        s_comment
+    from
+        supplier,
+        part,
+        partsupp,
+        customer,
+        orders,
+        lineitem l1,
+        nation,
+        region
+    where
+        s_suppkey = ps_suppkey
+        and p_partkey = ps_partkey
+        and l_partkey = p_partkey
+        and s_nationkey = n_nationkey
+        and n_regionkey = r_regionkey
+        and l_orderkey = o_orderkey
+        and o_custkey = c_custkey
+        and ps_supplycost = (
+            select 
+                min(ps_supplycost)
+            from
+                supplier,
+                part,
+                partsupp,
+                customer,
+                orders,
+                lineitem l2,
+                nation,
+                region
+            where
+                s_suppkey = ps_suppkey
+                and p_partkey = ps_partkey
+                and l_partkey = p_partkey
+                and s_nationkey = n_nationkey
+                and n_regionkey = r_regionkey
+                and l_orderkey = o_orderkey
+                and o_custkey = c_custkey
+                and exists (
+                    select
+                        *
+                    from
+                        lineitem l3
+                    where
+                        l3.l_orderkey = l2.l_orderkey
+                        and l3.l_suppkey <> l2.l_suppkey
+                )
+                and not exists (
+                    select
+                        *
+                    from
+                        lineitem l4
+                    where
+                        l4.l_orderkey = l2.l_orderkey
+                        and l4.l_suppkey <> l2.l_suppkey
+                        and l4.l_receiptdate > l4.l_commitdate
+                )
+        )
+        and exists (
+            select
+                *
+            from
+                lineitem l5
+            where
+                l5.l_orderkey = l1.l_orderkey
+                and l5.l_suppkey <> l1.l_suppkey
+        )
+        and not exists (
+            select
+                *
+            from
+                lineitem l6
+            where
+                l6.l_orderkey = l1.l_orderkey
+                and l6.l_suppkey <> l1.l_suppkey
+                and l6.l_receiptdate > l6.l_commitdate
+        )
+        
+    order by
+        s_acctbal desc,
+        n_name,
+        s_name,
+        p_partkey
+    limit 100;    
+
+  stream_plan: |
+    StreamMaterialize { columns: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, region.r_regionkey(hidden), nation.n_nationkey(hidden), supplier.s_suppkey(hidden), partsupp.ps_partkey(hidden), partsupp.ps_suppkey(hidden), customer.c_custkey(hidden), orders.o_orderkey(hidden), lineitem.l_orderkey(hidden), lineitem.l_linenumber(hidden), partsupp.ps_supplycost(hidden)], pk_columns: [region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, p_partkey, customer.c_custkey, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber, partsupp.ps_supplycost], order_descs: [s_acctbal, n_name, s_name, p_partkey, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, customer.c_custkey, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber, partsupp.ps_supplycost], pk_conflict: "no check" }
+    └─StreamProject { exprs: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, customer.c_custkey, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber, partsupp.ps_supplycost] }
+      └─StreamTopN { order: "[supplier.s_acctbal DESC, nation.n_name ASC, supplier.s_name ASC, part.p_partkey ASC]", limit: 100, offset: 0 }
+        └─StreamExchange { dist: Single }
+          └─StreamGroupTopN { order: "[supplier.s_acctbal DESC, nation.n_name ASC, supplier.s_name ASC, part.p_partkey ASC]", limit: 100, offset: 0, group_key: [18] }
+            └─StreamProject { exprs: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, customer.c_custkey, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber, partsupp.ps_supplycost, Vnode(partsupp.ps_supplycost) as $expr2] }
+              └─StreamHashJoin { type: Inner, predicate: partsupp.ps_supplycost = min(min(partsupp.ps_supplycost)), output: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, customer.c_custkey, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber, partsupp.ps_supplycost] }
+                ├─StreamExchange { dist: HashShard(partsupp.ps_supplycost) }
+                | └─StreamHashJoin { type: LeftAnti, predicate: lineitem.l_orderkey = lineitem.l_orderkey AND (lineitem.l_suppkey <> lineitem.l_suppkey), output: [supplier.s_name, supplier.s_address, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, part.p_partkey, part.p_mfgr, partsupp.ps_supplycost, nation.n_name, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, customer.c_custkey, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber] }
+                |   ├─StreamHashJoin { type: LeftSemi, predicate: lineitem.l_orderkey = lineitem.l_orderkey AND (lineitem.l_suppkey <> lineitem.l_suppkey), output: all }
+                |   | ├─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
+                |   | | └─StreamProject { exprs: [supplier.s_name, supplier.s_address, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, part.p_partkey, part.p_mfgr, partsupp.ps_supplycost, lineitem.l_orderkey, lineitem.l_suppkey, nation.n_name, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, customer.c_custkey, orders.o_orderkey, lineitem.l_linenumber] }
+                |   | |   └─StreamFilter { predicate: (supplier.s_suppkey = partsupp.ps_suppkey) AND (part.p_partkey = partsupp.ps_partkey) AND (lineitem.l_partkey = part.p_partkey) AND (supplier.s_nationkey = nation.n_nationkey) AND (nation.n_regionkey = region.r_regionkey) AND (lineitem.l_orderkey = orders.o_orderkey) AND (orders.o_custkey = customer.c_custkey) }
+                |   | |     └─StreamShare { id = 30 }
+                |   | |       └─StreamHashJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey AND partsupp.ps_partkey = lineitem.l_partkey, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, part.p_partkey, part.p_mfgr, partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost, customer.c_custkey, orders.o_orderkey, orders.o_custkey, lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, nation.n_nationkey, nation.n_name, nation.n_regionkey, region.r_regionkey, lineitem.l_linenumber] }
+                |   | |         ├─StreamExchange { dist: HashShard(partsupp.ps_partkey) }
+                |   | |         | └─StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = partsupp.ps_suppkey, output: all }
+                |   | |         |   ├─StreamExchange { dist: HashShard(supplier.s_suppkey) }
+                |   | |         |   | └─StreamHashJoin { type: Inner, predicate: nation.n_nationkey = supplier.s_nationkey, output: all }
+                |   | |         |   |   ├─StreamExchange { dist: HashShard(nation.n_nationkey) }
+                |   | |         |   |   | └─StreamHashJoin { type: Inner, predicate: region.r_regionkey = nation.n_regionkey, output: all }
+                |   | |         |   |   |   ├─StreamExchange { dist: HashShard(region.r_regionkey) }
+                |   | |         |   |   |   | └─StreamTableScan { table: region, columns: [region.r_regionkey], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) }
+                |   | |         |   |   |   └─StreamExchange { dist: HashShard(nation.n_regionkey) }
+                |   | |         |   |   |     └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
+                |   | |         |   |   └─StreamExchange { dist: HashShard(supplier.s_nationkey) }
+                |   | |         |   |     └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
+                |   | |         |   └─StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
+                |   | |         |     └─StreamFilter { predicate: (partsupp.ps_partkey = partsupp.ps_partkey) }
+                |   | |         |       └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+                |   | |         └─StreamHashJoin { type: Inner, predicate: part.p_partkey = lineitem.l_partkey, output: all }
+                |   | |           ├─StreamExchange { dist: HashShard(part.p_partkey) }
+                |   | |           | └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_mfgr], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
+                |   | |           └─StreamExchange { dist: HashShard(lineitem.l_partkey) }
+                |   | |             └─StreamHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey, output: all }
+                |   | |               ├─StreamExchange { dist: HashShard(orders.o_orderkey) }
+                |   | |               | └─StreamHashJoin { type: Inner, predicate: customer.c_custkey = orders.o_custkey, output: all }
+                |   | |               |   ├─StreamExchange { dist: HashShard(customer.c_custkey) }
+                |   | |               |   | └─StreamTableScan { table: customer, columns: [customer.c_custkey], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) }
+                |   | |               |   └─StreamExchange { dist: HashShard(orders.o_custkey) }
+                |   | |               |     └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
+                |   | |               └─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
+                |   | |                 └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                |   | └─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
+                |   |   └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                |   └─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
+                |     └─StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber] }
+                |       └─StreamFilter { predicate: (lineitem.l_receiptdate > lineitem.l_commitdate) }
+                |         └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                └─StreamExchange { dist: HashShard(min(min(partsupp.ps_supplycost))) }
+                  └─StreamProject { exprs: [min(min(partsupp.ps_supplycost))] }
+                    └─StreamGlobalSimpleAgg { aggs: [min(min(partsupp.ps_supplycost)), count] }
+                      └─StreamExchange { dist: Single }
+                        └─StreamHashAgg { group_key: [$expr1], aggs: [min(partsupp.ps_supplycost), count] }
+                          └─StreamProject { exprs: [partsupp.ps_supplycost, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey, customer.c_custkey, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber, Vnode(lineitem.l_orderkey) as $expr1] }
+                            └─StreamHashJoin { type: LeftAnti, predicate: lineitem.l_orderkey = lineitem.l_orderkey AND (lineitem.l_suppkey <> lineitem.l_suppkey), output: [partsupp.ps_supplycost, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey, customer.c_custkey, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber] }
+                              ├─StreamHashJoin { type: LeftSemi, predicate: lineitem.l_orderkey = lineitem.l_orderkey AND (lineitem.l_suppkey <> lineitem.l_suppkey), output: all }
+                              | ├─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
+                              | | └─StreamProject { exprs: [partsupp.ps_supplycost, lineitem.l_orderkey, lineitem.l_suppkey, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey, customer.c_custkey, orders.o_orderkey, lineitem.l_linenumber] }
+                              | |   └─StreamFilter { predicate: (supplier.s_suppkey = partsupp.ps_suppkey) AND (part.p_partkey = partsupp.ps_partkey) AND (lineitem.l_partkey = part.p_partkey) AND (supplier.s_nationkey = nation.n_nationkey) AND (nation.n_regionkey = region.r_regionkey) AND (lineitem.l_orderkey = orders.o_orderkey) AND (orders.o_custkey = customer.c_custkey) }
+                              | |     └─StreamShare { id = 30 }
+                              | |       └─StreamHashJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey AND partsupp.ps_partkey = lineitem.l_partkey, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, part.p_partkey, part.p_mfgr, partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost, customer.c_custkey, orders.o_orderkey, orders.o_custkey, lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, nation.n_nationkey, nation.n_name, nation.n_regionkey, region.r_regionkey, lineitem.l_linenumber] }
+                              | |         ├─StreamExchange { dist: HashShard(partsupp.ps_partkey) }
+                              | |         | └─StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = partsupp.ps_suppkey, output: all }
+                              | |         |   ├─StreamExchange { dist: HashShard(supplier.s_suppkey) }
+                              | |         |   | └─StreamHashJoin { type: Inner, predicate: nation.n_nationkey = supplier.s_nationkey, output: all }
+                              | |         |   |   ├─StreamExchange { dist: HashShard(nation.n_nationkey) }
+                              | |         |   |   | └─StreamHashJoin { type: Inner, predicate: region.r_regionkey = nation.n_regionkey, output: all }
+                              | |         |   |   |   ├─StreamExchange { dist: HashShard(region.r_regionkey) }
+                              | |         |   |   |   | └─StreamTableScan { table: region, columns: [region.r_regionkey], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) }
+                              | |         |   |   |   └─StreamExchange { dist: HashShard(nation.n_regionkey) }
+                              | |         |   |   |     └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
+                              | |         |   |   └─StreamExchange { dist: HashShard(supplier.s_nationkey) }
+                              | |         |   |     └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
+                              | |         |   └─StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
+                              | |         |     └─StreamFilter { predicate: (partsupp.ps_partkey = partsupp.ps_partkey) }
+                              | |         |       └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+                              | |         └─StreamHashJoin { type: Inner, predicate: part.p_partkey = lineitem.l_partkey, output: all }
+                              | |           ├─StreamExchange { dist: HashShard(part.p_partkey) }
+                              | |           | └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_mfgr], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
+                              | |           └─StreamExchange { dist: HashShard(lineitem.l_partkey) }
+                              | |             └─StreamHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey, output: all }
+                              | |               ├─StreamExchange { dist: HashShard(orders.o_orderkey) }
+                              | |               | └─StreamHashJoin { type: Inner, predicate: customer.c_custkey = orders.o_custkey, output: all }
+                              | |               |   ├─StreamExchange { dist: HashShard(customer.c_custkey) }
+                              | |               |   | └─StreamTableScan { table: customer, columns: [customer.c_custkey], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) }
+                              | |               |   └─StreamExchange { dist: HashShard(orders.o_custkey) }
+                              | |               |     └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
+                              | |               └─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
+                              | |                 └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                              | └─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
+                              |   └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                              └─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
+                                └─StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber] }
+                                  └─StreamFilter { predicate: (lineitem.l_receiptdate > lineitem.l_commitdate) }
+                                    └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
   with_config_map:
     RW_STREAMING_ENABLE_BUSHY_JOIN: 'true'
