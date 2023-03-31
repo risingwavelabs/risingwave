@@ -21,7 +21,7 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-download_and_prepare_rw "$profile" source source
+download_and_prepare_rw "$profile" source
 
 download_java_binding "$profile"
 

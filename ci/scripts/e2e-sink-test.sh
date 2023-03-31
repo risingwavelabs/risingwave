@@ -21,6 +21,8 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
+download_and_prepare_rw "$profile" source
+
 download_java_binding "$profile"
 
 # TODO: Switch to stream_chunk encoding once it's completed, and then remove json encoding as well as this env var.

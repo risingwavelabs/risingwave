@@ -23,7 +23,7 @@ while getopts 'p:s:' opt; do
 done
 shift $((OPTIND -1))
 
-download_and_prepare_rw "$profile" source
+download_and_prepare_rw "$profile" common
 
 echo "--- starting risingwave cluster with connector node"
 cargo make ci-start ci-3cn-3fe-opendal-fs-backend
