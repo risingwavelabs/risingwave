@@ -30,7 +30,7 @@ use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Waterm
 /// `TopNExecutor` works with input with modification, it keeps all the data
 /// records/rows that have been seen, and returns topN records overall.
 pub type TopNExecutor<S, const WITH_TIES: bool> =
-    TopNExecutorWrapper<InnerTopNExecutorNew<S, WITH_TIES>>;
+    TopNExecutorWrapper<InnerTopNExecutor<S, WITH_TIES>>;
 
 impl<S: StateStore> TopNExecutor<S, false> {
     #[allow(clippy::too_many_arguments)]
@@ -48,7 +48,7 @@ impl<S: StateStore> TopNExecutor<S, false> {
         Ok(TopNExecutorWrapper {
             input,
             ctx,
-            inner: InnerTopNExecutorNew::new(
+            inner: InnerTopNExecutor::new(
                 info,
                 storage_key,
                 offset_and_limit,
@@ -76,7 +76,7 @@ impl<S: StateStore> TopNExecutor<S, true> {
         Ok(TopNExecutorWrapper {
             input,
             ctx,
-            inner: InnerTopNExecutorNew::new(
+            inner: InnerTopNExecutor::new(
                 info,
                 storage_key,
                 offset_and_limit,
@@ -102,7 +102,7 @@ impl<S: StateStore> TopNExecutor<S, true> {
     ) -> StreamResult<Self> {
         let info = input.info();
 
-        let mut inner = InnerTopNExecutorNew::new(
+        let mut inner = InnerTopNExecutor::new(
             info,
             storage_key,
             offset_and_limit,
@@ -111,13 +111,13 @@ impl<S: StateStore> TopNExecutor<S, true> {
             state_table,
         )?;
 
-        inner.cache.high_capacity = 1;
+        inner.cache.high_capacity = 2;
 
         Ok(TopNExecutorWrapper { input, ctx, inner })
     }
 }
 
-pub struct InnerTopNExecutorNew<S: StateStore, const WITH_TIES: bool> {
+pub struct InnerTopNExecutor<S: StateStore, const WITH_TIES: bool> {
     info: ExecutorInfo,
 
     /// The storage key indices of the `TopNExecutor`
@@ -132,7 +132,7 @@ pub struct InnerTopNExecutorNew<S: StateStore, const WITH_TIES: bool> {
     cache_key_serde: CacheKeySerde,
 }
 
-impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
+impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutor<S, WITH_TIES> {
     /// # Arguments
     ///
     /// `storage_key` -- the storage pk. It's composed of the ORDER BY columns and the missing
@@ -158,6 +158,7 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
         let cache_key_serde =
             create_cache_key_serde(&storage_key, &pk_indices, &schema, &order_by, &[]);
         let managed_state = ManagedTopNState::<S>::new(state_table, cache_key_serde.clone());
+        let data_types = schema.data_types();
 
         Ok(Self {
             info: ExecutorInfo {
@@ -167,14 +168,14 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
             },
             managed_state,
             storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
-            cache: TopNCache::new(num_offset, num_limit),
+            cache: TopNCache::new(num_offset, num_limit, data_types),
             cache_key_serde,
         })
     }
 }
 
 #[async_trait]
-impl<S: StateStore, const WITH_TIES: bool> TopNExecutorBase for InnerTopNExecutorNew<S, WITH_TIES>
+impl<S: StateStore, const WITH_TIES: bool> TopNExecutorBase for InnerTopNExecutor<S, WITH_TIES>
 where
     TopNCache<WITH_TIES>: TopNCacheTrait,
 {
@@ -1079,10 +1080,11 @@ mod tests {
                 ),
                 StreamChunk::from_pretty(
                     "  I I
-                    +  3 8
-                    +  1 6
-                    +  2 7
-                    + 10 9",
+                    +  3 6
+                    +  3 7
+                    +  1 8
+                    +  2 9
+                    + 10 10",
                 ),
                 StreamChunk::from_pretty(
                     " I I
@@ -1090,7 +1092,7 @@ mod tests {
                 ),
                 StreamChunk::from_pretty(
                     " I I
-                    - 1 6",
+                    - 1 8",
                 ),
             ];
             let schema = Schema {
@@ -1168,11 +1170,13 @@ mod tests {
                 *res.as_chunk().unwrap(),
                 StreamChunk::from_pretty(
                     " I I
-                    + 3 8
-                    - 3 8
+                    + 3 6
+                    + 3 7
+                    - 3 7
+                    - 3 6
                     - 3 2
-                    + 1 6
-                    + 2 7"
+                    + 1 8
+                    + 2 9"
                 )
             );
 
@@ -1185,15 +1189,16 @@ mod tests {
                 )
             );
 
-            // High cache has only one capacity, but we need to trigger 2 inserts here!
+            // High cache has only 2 capacity, but we need to trigger 3 inserts here!
             let res = top_n_executor.next().await.unwrap().unwrap();
             assert_eq!(
                 *res.as_chunk().unwrap(),
                 StreamChunk::from_pretty(
                     " I I
-                    - 1 6
+                    - 1 8
                     + 3 2
-                    + 3 8
+                    + 3 6
+                    + 3 7
                     "
                 )
             );
@@ -1219,10 +1224,11 @@ mod tests {
                 ),
                 StreamChunk::from_pretty(
                     "  I I
-                    +  3 8
-                    +  1 6
-                    +  2 7
-                    + 10 9",
+                    +  3 6
+                    +  3 7
+                    +  1 8
+                    +  2 9
+                    + 10 10",
                 ),
             ];
             let schema = Schema {
@@ -1251,7 +1257,7 @@ mod tests {
                 ),
                 StreamChunk::from_pretty(
                     " I I
-                    - 1 6",
+                    - 1 8",
                 ),
             ];
             let schema = Schema {
@@ -1314,11 +1320,13 @@ mod tests {
                 *res.as_chunk().unwrap(),
                 StreamChunk::from_pretty(
                     " I I
-                    + 3 8
-                    - 3 8
+                    + 3 6
+                    + 3 7
+                    - 3 7
+                    - 3 6
                     - 3 2
-                    + 1 6
-                    + 2 7"
+                    + 1 8
+                    + 2 9"
                 )
             );
 
@@ -1366,19 +1374,20 @@ mod tests {
                 )
             );
 
-            // High cache has only one capacity, but we need to trigger 2 inserts here!
+            // High cache has only 2 capacity, but we need to trigger 3 inserts here!
             let res = top_n_executor.next().await.unwrap().unwrap();
             assert_eq!(
                 *res.as_chunk().unwrap(),
                 StreamChunk::from_pretty(
                     " I I
-                    - 1 6
+                    - 1 8
                     + 3 2
-                    + 3 8
+                    + 3 6
+                    + 3 7
                     "
                 )
             );
-
+            println!("hello");
             // barrier
             assert_matches!(
                 top_n_executor.next().await.unwrap().unwrap(),

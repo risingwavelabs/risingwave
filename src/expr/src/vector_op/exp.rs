@@ -13,11 +13,13 @@
 // limitations under the License.
 
 use num_traits::{Float, Zero};
-use risingwave_common::types::OrderedF64;
+use risingwave_common::types::F64;
+use risingwave_expr_macro::function;
 
 use crate::{ExprError, Result};
 
-pub fn exp_f64(input: OrderedF64) -> Result<OrderedF64> {
+#[function("exp(float64) -> float64")]
+pub fn exp_f64(input: F64) -> Result<F64> {
     // The cases where the exponent value is Inf or NaN can be handled explicitly and without
     // evaluating the `exp` operation.
     if input.is_nan() {
@@ -46,7 +48,7 @@ pub fn exp_f64(input: OrderedF64) -> Result<OrderedF64> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::OrderedF64;
+    use risingwave_common::types::F64;
 
     use super::exp_f64;
     use crate::ExprError;
@@ -54,7 +56,7 @@ mod tests {
     #[test]
     fn legal_input() {
         let res = exp_f64(0.0.into()).unwrap();
-        assert_eq!(res, OrderedF64::from(1.0));
+        assert_eq!(res, F64::from(1.0));
     }
 
     #[test]
@@ -78,18 +80,18 @@ mod tests {
     #[test]
     fn nan() {
         let res = exp_f64(f64::NAN.into()).unwrap();
-        assert_eq!(res, OrderedF64::from(f64::NAN));
+        assert_eq!(res, F64::from(f64::NAN));
 
         let res = exp_f64((-f64::NAN).into()).unwrap();
-        assert_eq!(res, OrderedF64::from(-f64::NAN));
+        assert_eq!(res, F64::from(-f64::NAN));
     }
 
     #[test]
     fn infinity() {
         let res = exp_f64(f64::INFINITY.into()).unwrap();
-        assert_eq!(res, OrderedF64::from(f64::INFINITY));
+        assert_eq!(res, F64::from(f64::INFINITY));
 
         let res = exp_f64(f64::NEG_INFINITY.into()).unwrap();
-        assert_eq!(res, OrderedF64::from(0.0));
+        assert_eq!(res, F64::from(0.0));
     }
 }

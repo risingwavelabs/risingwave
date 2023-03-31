@@ -1,0 +1,1 @@
+docker run --network host bitnami/kafka:latest /opt/bitnami/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic counts --from-beginning

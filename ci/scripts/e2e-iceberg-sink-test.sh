@@ -86,7 +86,7 @@ spark-3.3.1-bin-hadoop3/bin/spark-sql --packages $DEPENDENCIES \
 
 # check sink destination using shell
 if cat ./spark-output/*.csv | sort | awk -F "," '{
-if ($1 == 1 && $2 == 2 && $3 == "1-2") c1++;
+if ($1 == 1 && $2 == 50 && $3 == "1-50") c1++;
  if ($1 == 13 && $2 == 2 && $3 == "13-2") c2++;
   if ($1 == 21 && $2 == 2 && $3 == "21-2") c3++;
    if ($1 == 2 && $2 == 2 && $3 == "2-2") c4++;

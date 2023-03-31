@@ -27,6 +27,7 @@ use lru::LruCache;
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
@@ -42,6 +43,7 @@ use risingwave_pb::catalog::{
     Connection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
+use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
 use risingwave_pb::ddl_service::*;
@@ -58,6 +60,7 @@ use risingwave_pb::meta::reschedule_request::PbReschedule;
 use risingwave_pb::meta::scale_service_client::ScaleServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
+use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClient;
 use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -346,6 +349,19 @@ impl MetaClient {
         let resp = self.inner.create_table(request).await?;
         // TODO: handle error in `resp.status` here
         Ok((resp.table_id.into(), resp.version))
+    }
+
+    pub async fn alter_relation_name(
+        &self,
+        relation: Relation,
+        name: &str,
+    ) -> Result<CatalogVersion> {
+        let request = AlterRelationNameRequest {
+            relation: Some(relation),
+            new_name: name.to_string(),
+        };
+        let resp = self.inner.alter_relation_name(request).await?;
+        Ok(resp.version)
     }
 
     pub async fn replace_table(
@@ -799,6 +815,12 @@ impl MetaClient {
         Ok(resp.manifest.expect("should exist"))
     }
 
+    pub async fn get_telemetry_info(&self) -> Result<TelemetryInfoResponse> {
+        let req = GetTelemetryInfoRequest {};
+        let resp = self.inner.get_telemetry_info(req).await?;
+        Ok(resp)
+    }
+
     pub async fn get_system_params(&self) -> Result<SystemParamsReader> {
         let req = GetSystemParamsRequest {};
         let resp = self.inner.get_system_params(req).await?;
@@ -924,24 +946,28 @@ impl HummockMetaClient for MetaClient {
     async fn subscribe_compact_tasks(
         &self,
         max_concurrent_task_number: u64,
+        cpu_core_num: u32,
     ) -> Result<BoxStream<'static, CompactTaskItem>> {
         let req = SubscribeCompactTasksRequest {
             context_id: self.worker_id(),
             max_concurrent_task_number,
+            cpu_core_num,
         };
         let stream = self.inner.subscribe_compact_tasks(req).await?;
         Ok(Box::pin(stream))
     }
 
-    async fn report_compaction_task_progress(
+    async fn compactor_heartbeat(
         &self,
         progress: Vec<CompactTaskProgress>,
+        workload: CompactorWorkload,
     ) -> Result<()> {
-        let req = ReportCompactionTaskProgressRequest {
+        let req = CompactorHeartbeatRequest {
             context_id: self.worker_id(),
             progress,
+            workload: Some(workload),
         };
-        self.inner.report_compaction_task_progress(req).await?;
+        self.inner.compactor_heartbeat(req).await?;
         Ok(())
     }
 
@@ -989,6 +1015,15 @@ impl HummockMetaClient for MetaClient {
     }
 }
 
+#[async_trait]
+impl TelemetryInfoFetcher for MetaClient {
+    async fn fetch_telemetry_info(&self) -> anyhow::Result<Option<String>> {
+        let resp = self.get_telemetry_info().await?;
+        let tracking_id = resp.get_tracking_id().ok();
+        Ok(tracking_id.map(|id| id.to_owned()))
+    }
+}
+
 #[derive(Debug, Clone)]
 struct GrpcMetaClientCore {
     cluster_client: ClusterServiceClient<Channel>,
@@ -1001,6 +1036,7 @@ struct GrpcMetaClientCore {
     user_client: UserServiceClient<Channel>,
     scale_client: ScaleServiceClient<Channel>,
     backup_client: BackupServiceClient<Channel>,
+    telemetry_client: TelemetryInfoServiceClient<Channel>,
     system_params_client: SystemParamsServiceClient<Channel>,
 }
 
@@ -1016,7 +1052,9 @@ impl GrpcMetaClientCore {
         let user_client = UserServiceClient::new(channel.clone());
         let scale_client = ScaleServiceClient::new(channel.clone());
         let backup_client = BackupServiceClient::new(channel.clone());
+        let telemetry_client = TelemetryInfoServiceClient::new(channel.clone());
         let system_params_client = SystemParamsServiceClient::new(channel);
+
         GrpcMetaClientCore {
             cluster_client,
             meta_member_client,
@@ -1028,6 +1066,7 @@ impl GrpcMetaClientCore {
             user_client,
             scale_client,
             backup_client,
+            telemetry_client,
             system_params_client,
         }
     }
@@ -1321,7 +1360,6 @@ impl GrpcMetaClient {
             )))
         })
         .await?;
-
         Ok(channel)
     }
 
@@ -1356,6 +1394,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
+             ,{ ddl_client, alter_relation_name, AlterRelationNameRequest, AlterRelationNameResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
@@ -1394,7 +1433,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, report_compaction_tasks, ReportCompactionTasksRequest, ReportCompactionTasksResponse }
             ,{ hummock_client, get_new_sst_ids, GetNewSstIdsRequest, GetNewSstIdsResponse }
             ,{ hummock_client, subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }
-            ,{ hummock_client, report_compaction_task_progress, ReportCompactionTaskProgressRequest, ReportCompactionTaskProgressResponse }
+            ,{ hummock_client, compactor_heartbeat, CompactorHeartbeatRequest, CompactorHeartbeatResponse }
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
             ,{ hummock_client, report_full_scan_task, ReportFullScanTaskRequest, ReportFullScanTaskResponse }
@@ -1420,6 +1459,7 @@ macro_rules! for_all_meta_rpc {
             ,{ backup_client, get_backup_job_status, GetBackupJobStatusRequest, GetBackupJobStatusResponse }
             ,{ backup_client, delete_meta_snapshot, DeleteMetaSnapshotRequest, DeleteMetaSnapshotResponse}
             ,{ backup_client, get_meta_snapshot_manifest, GetMetaSnapshotManifestRequest, GetMetaSnapshotManifestResponse}
+            ,{ telemetry_client, get_telemetry_info, GetTelemetryInfoRequest, TelemetryInfoResponse}
             ,{ system_params_client, get_system_params, GetSystemParamsRequest, GetSystemParamsResponse }
             ,{ system_params_client, set_system_param, SetSystemParamRequest, SetSystemParamResponse }
         }

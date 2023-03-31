@@ -147,7 +147,9 @@ where
             // get split assignments for all actors
             let source_split_assignments = self.source_manager.list_assignments().await;
             let command = Command::Plain(Some(Mutation::Add(AddMutation {
+                // Actors built during recovery is not treated as newly added actors.
                 actor_dispatchers: Default::default(),
+                added_actors: Default::default(),
                 actor_splits: build_actor_connector_splits(&source_split_assignments),
             })));
 
@@ -183,17 +185,17 @@ where
 
             let (barrier_complete_tx, mut barrier_complete_rx) =
                 tokio::sync::mpsc::unbounded_channel();
-            self.inject_barrier(command_ctx.clone(), barrier_complete_tx)
+            self.inject_barrier(command_ctx.clone(), &barrier_complete_tx)
                 .await;
-            match barrier_complete_rx.recv().await.unwrap() {
-                (_, Ok(response)) => {
+            match barrier_complete_rx.recv().await.unwrap().result {
+                Ok(response) => {
                     if let Err(err) = command_ctx.post_collect().await {
                         error!(err = ?err, "post_collect failed");
                         return Err(err);
                     }
                     Ok((new_epoch, response))
                 }
-                (_, Err(err)) => {
+                Err(err) => {
                     error!(err = ?err, "inject_barrier failed");
                     Err(err)
                 }

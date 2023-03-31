@@ -274,6 +274,26 @@ impl JsonbRef<'_> {
     }
 }
 
+impl FromIterator<Option<JsonbVal>> for JsonbArray {
+    fn from_iter<I: IntoIterator<Item = Option<JsonbVal>>>(iter: I) -> Self {
+        let iter = iter.into_iter();
+        let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
+        for i in iter {
+            match i {
+                Some(x) => builder.append(Some(x.as_scalar_ref())),
+                None => builder.append(None),
+            }
+        }
+        builder.finish()
+    }
+}
+
+impl FromIterator<JsonbVal> for JsonbArray {
+    fn from_iter<I: IntoIterator<Item = JsonbVal>>(iter: I) -> Self {
+        iter.into_iter().map(Some).collect()
+    }
+}
+
 #[derive(Debug)]
 pub struct JsonbArrayBuilder {
     bitmap: BitmapBuilder,

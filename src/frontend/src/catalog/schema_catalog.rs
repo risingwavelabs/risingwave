@@ -81,8 +81,46 @@ impl SchemaCatalog {
         let table: TableCatalog = prost.into();
         let table_ref = Arc::new(table);
 
+        let old_table = self.table_by_id.get(&id).unwrap();
+        // check if table name get updated.
+        if old_table.name() != name {
+            self.table_by_name.remove(old_table.name());
+        }
         self.table_by_name.insert(name, table_ref.clone());
         self.table_by_id.insert(id, table_ref);
+    }
+
+    pub fn update_index(&mut self, prost: &PbIndex) {
+        let name = prost.name.clone();
+        let id = prost.id.into();
+        let old_index = self.index_by_id.get(&id).unwrap();
+        let index_table = self.get_table_by_id(&prost.index_table_id.into()).unwrap();
+        let primary_table = self
+            .get_table_by_id(&prost.primary_table_id.into())
+            .unwrap();
+        let index: IndexCatalog = IndexCatalog::build_from(prost, index_table, primary_table);
+        let index_ref = Arc::new(index);
+
+        // check if index name get updated.
+        if old_index.name != name {
+            self.index_by_name.remove(&old_index.name);
+        }
+        self.index_by_name.insert(name, index_ref.clone());
+        self.index_by_id.insert(id, index_ref.clone());
+
+        match self.indexes_by_table_id.entry(index_ref.primary_table.id) {
+            Occupied(mut entry) => {
+                let pos = entry
+                    .get()
+                    .iter()
+                    .position(|x| x.id == index_ref.id)
+                    .unwrap();
+                *entry.get_mut().get_mut(pos).unwrap() = index_ref;
+            }
+            Vacant(_entry) => {
+                unreachable!()
+            }
+        };
     }
 
     pub fn drop_table(&mut self, id: TableId) {
@@ -149,6 +187,22 @@ impl SchemaCatalog {
         self.source_by_name.remove(&source_ref.name).unwrap();
     }
 
+    pub fn update_source(&mut self, prost: &PbSource) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let source = SourceCatalog::from(prost);
+        let source_ref = Arc::new(source);
+
+        let old_source = self.source_by_id.get(&id).unwrap();
+        // check if source name get updated.
+        if old_source.name != name {
+            self.source_by_name.remove(&old_source.name);
+        }
+
+        self.source_by_name.insert(name, source_ref.clone());
+        self.source_by_id.insert(id, source_ref);
+    }
+
     pub fn create_sink(&mut self, prost: &PbSink) {
         let name = prost.name.clone();
         let id = prost.id;
@@ -166,6 +220,22 @@ impl SchemaCatalog {
         self.sink_by_name.remove(&sink_ref.name).unwrap();
     }
 
+    pub fn update_sink(&mut self, prost: &PbSink) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let sink = SinkCatalog::from(prost);
+        let sink_ref = Arc::new(sink);
+
+        let old_sink = self.sink_by_id.get(&id).unwrap();
+        // check if sink name get updated.
+        if old_sink.name != name {
+            self.sink_by_name.remove(&old_sink.name);
+        }
+
+        self.sink_by_name.insert(name, sink_ref.clone());
+        self.sink_by_id.insert(id, sink_ref);
+    }
+
     pub fn create_view(&mut self, prost: &PbView) {
         let name = prost.name.clone();
         let id = prost.id;
@@ -181,6 +251,22 @@ impl SchemaCatalog {
     pub fn drop_view(&mut self, id: ViewId) {
         let view_ref = self.view_by_id.remove(&id).unwrap();
         self.view_by_name.remove(&view_ref.name).unwrap();
+    }
+
+    pub fn update_view(&mut self, prost: &PbView) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let view = ViewCatalog::from(prost);
+        let view_ref = Arc::new(view);
+
+        let old_view = self.view_by_id.get(&id).unwrap();
+        // check if view name get updated.
+        if old_view.name != name {
+            self.view_by_name.remove(&old_view.name);
+        }
+
+        self.view_by_name.insert(name, view_ref.clone());
+        self.view_by_id.insert(id, view_ref);
     }
 
     pub fn create_function(&mut self, prost: &PbFunction) {

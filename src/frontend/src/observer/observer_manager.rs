@@ -20,6 +20,7 @@ use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeFrontend};
 use risingwave_pb::common::WorkerNode;
+use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{FragmentParallelUnitMapping, SubscribeResponse};
 use tokio::sync::watch::Sender;
@@ -49,14 +50,7 @@ impl ObserverState for FrontendObserverNode {
         };
 
         match info.to_owned() {
-            Info::Database(_)
-            | Info::Schema(_)
-            | Info::Table(_)
-            | Info::Source(_)
-            | Info::Index(_)
-            | Info::Sink(_)
-            | Info::Function(_)
-            | Info::View(_) => {
+            Info::Database(_) | Info::Schema(_) | Info::RelationGroup(_) => {
                 self.handle_catalog_notification(resp);
             }
             Info::Node(node) => {
@@ -193,51 +187,80 @@ impl FrontendObserverNode {
                 Operation::Delete => catalog_guard.drop_schema(schema.database_id, schema.id),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
-            Info::Table(table) => match resp.operation() {
-                Operation::Add => catalog_guard.create_table(table),
-                Operation::Delete => {
-                    catalog_guard.drop_table(table.database_id, table.schema_id, table.id.into())
+            Info::RelationGroup(relation_group) => {
+                for relation in &relation_group.relations {
+                    let Some(relation) = relation.relation_info.as_ref() else {
+                        continue;
+                    };
+                    match relation {
+                        RelationInfo::Table(table) => match resp.operation() {
+                            Operation::Add => catalog_guard.create_table(table),
+                            Operation::Delete => catalog_guard.drop_table(
+                                table.database_id,
+                                table.schema_id,
+                                table.id.into(),
+                            ),
+                            Operation::Update => {
+                                let old_table =
+                                    catalog_guard.get_table_by_id(&table.id.into()).unwrap();
+                                catalog_guard.update_table(table);
+                                if old_table.fragment_id != table.fragment_id {
+                                    // FIXME: the frontend node delete its fragment for the update
+                                    // operation by itself.
+                                    self.worker_node_manager
+                                        .remove_fragment_mapping(&old_table.fragment_id);
+                                }
+                            }
+                            _ => panic!("receive an unsupported notify {:?}", resp),
+                        },
+                        RelationInfo::Source(source) => match resp.operation() {
+                            Operation::Add => catalog_guard.create_source(source),
+                            Operation::Delete => catalog_guard.drop_source(
+                                source.database_id,
+                                source.schema_id,
+                                source.id,
+                            ),
+                            Operation::Update => catalog_guard.update_source(source),
+                            _ => panic!("receive an unsupported notify {:?}", resp),
+                        },
+                        RelationInfo::Sink(sink) => match resp.operation() {
+                            Operation::Add => catalog_guard.create_sink(sink),
+                            Operation::Delete => {
+                                catalog_guard.drop_sink(sink.database_id, sink.schema_id, sink.id)
+                            }
+                            Operation::Update => catalog_guard.update_sink(sink),
+                            _ => panic!("receive an unsupported notify {:?}", resp),
+                        },
+                        RelationInfo::Index(index) => match resp.operation() {
+                            Operation::Add => catalog_guard.create_index(index),
+                            Operation::Delete => catalog_guard.drop_index(
+                                index.database_id,
+                                index.schema_id,
+                                index.id.into(),
+                            ),
+                            Operation::Update => catalog_guard.update_index(index),
+                            _ => panic!("receive an unsupported notify {:?}", resp),
+                        },
+                        RelationInfo::View(view) => match resp.operation() {
+                            Operation::Add => catalog_guard.create_view(view),
+                            Operation::Delete => {
+                                catalog_guard.drop_view(view.database_id, view.schema_id, view.id)
+                            }
+                            Operation::Update => catalog_guard.update_view(view),
+                            _ => panic!("receive an unsupported notify {:?}", resp),
+                        },
+                        RelationInfo::Function(function) => match resp.operation() {
+                            Operation::Add => catalog_guard.create_function(function),
+                            Operation::Delete => catalog_guard.drop_function(
+                                function.database_id,
+                                function.schema_id,
+                                function.id.into(),
+                            ),
+                            _ => panic!("receive an unsupported notify {:?}", resp),
+                        },
+                    }
                 }
-                Operation::Update => catalog_guard.update_table(table),
-                _ => panic!("receive an unsupported notify {:?}", resp),
-            },
-            Info::Source(source) => match resp.operation() {
-                Operation::Add => catalog_guard.create_source(source),
-                Operation::Delete => {
-                    catalog_guard.drop_source(source.database_id, source.schema_id, source.id)
-                }
-                _ => panic!("receive an unsupported notify {:?}", resp),
-            },
-            Info::Sink(sink) => match resp.operation() {
-                Operation::Add => catalog_guard.create_sink(sink),
-                Operation::Delete => {
-                    catalog_guard.drop_sink(sink.database_id, sink.schema_id, sink.id)
-                }
-                _ => panic!("receive an unsupported notify {:?}", resp),
-            },
-            Info::Index(index) => match resp.operation() {
-                Operation::Add => catalog_guard.create_index(index),
-                Operation::Delete => {
-                    catalog_guard.drop_index(index.database_id, index.schema_id, index.id.into())
-                }
-                _ => panic!("receive an unsupported notify {:?}", resp),
-            },
-            Info::View(view) => match resp.operation() {
-                Operation::Add => catalog_guard.create_view(view),
-                Operation::Delete => {
-                    catalog_guard.drop_view(view.database_id, view.schema_id, view.id)
-                }
-                _ => panic!("receive an unsupported notify {:?}", resp),
-            },
-            Info::Function(function) => match resp.operation() {
-                Operation::Add => catalog_guard.create_function(function),
-                Operation::Delete => catalog_guard.drop_function(
-                    function.database_id,
-                    function.schema_id,
-                    function.id.into(),
-                ),
-                _ => panic!("receive an unsupported notify {:?}", resp),
-            },
+            }
             _ => unreachable!(),
         }
         assert!(

@@ -21,10 +21,10 @@ use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::executor::TopNExecutor;
 
-pub struct TopNExecutorNewBuilder;
+pub struct TopNExecutorBuilder;
 
 #[async_trait::async_trait]
-impl ExecutorBuilder for TopNExecutorNewBuilder {
+impl ExecutorBuilder for TopNExecutorBuilder {
     type Node = TopNNode;
 
     async fn new_boxed_executor(

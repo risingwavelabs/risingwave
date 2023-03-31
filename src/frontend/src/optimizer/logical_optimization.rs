@@ -209,6 +209,7 @@ lazy_static! {
             ProjectEliminateRule::create(),
             TrivialProjectToValuesRule::create(),
             UnionInputValuesMergeRule::create(),
+            JoinProjectTransposeRule::create(),
             // project-join merge should be applied after merge
             // eliminate and to values
             ProjectJoinMergeRule::create(),
@@ -246,6 +247,12 @@ lazy_static! {
         "TopN/SimpleAgg on Index",
         vec![TopNOnIndexRule::create(),
              MinMaxOnIndexRule::create()],
+        ApplyOrder::TopDown,
+    );
+
+    static ref ALWAYS_FALSE_FILTER: OptimizationStage = OptimizationStage::new(
+        "Void always-false filter's downstream",
+        vec![AlwaysFalseFilterRule::create()],
         ApplyOrder::TopDown,
     );
 }
@@ -440,6 +447,7 @@ impl LogicalOptimizer {
 
         plan = plan.optimize_by_rules(&REWRITE_LIKE_EXPR);
         plan = plan.optimize_by_rules(&UNION_MERGE);
+        plan = plan.optimize_by_rules(&ALWAYS_FALSE_FILTER);
 
         plan = Self::subquery_unnesting(plan, false, explain_trace, &ctx)?;
 
