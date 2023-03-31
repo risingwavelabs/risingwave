@@ -252,8 +252,8 @@ pub struct BatchConfig {
     #[serde(default)]
     pub worker_threads_num: Option<usize>,
 
-    #[serde(default)]
-    pub developer: DeveloperConfig,
+    #[serde(with = "batch_prefix")]
+    pub developer: BatchDeveloperConfig,
 
     #[serde(default)]
     pub distributed_query_limit: Option<u64>,
@@ -288,8 +288,8 @@ pub struct StreamingConfig {
     #[serde(default = "default::streaming::async_stack_trace")]
     pub async_stack_trace: AsyncStackTraceOption,
 
-    #[serde(default)]
-    pub developer: DeveloperConfig,
+    #[serde(with = "streaming_prefix")]
+    pub developer: StreamingDeveloperConfig,
 
     /// Max unique user stream errors per actor
     #[serde(default = "default::streaming::unique_user_stream_errors")]
@@ -424,47 +424,62 @@ pub enum AsyncStackTraceOption {
     Verbose,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StreamingDeveloperConfig {
+    /// Set to true to enable per-executor row count metrics. This will produce a lot of timeseries
+    /// and might affect the prometheus performance. If you only need actor input and output
+    /// rows data, see `stream_actor_in_record_cnt` and `stream_actor_out_record_cnt` instead.
+    #[serde(default = "default::developer::stream_enable_executor_row_count")]
+    pub enable_executor_row_count: bool,
+
+    /// The capacity of the chunks in the channel that connects between `ConnectorSource` and
+    /// `SourceExecutor`.
+    #[serde(default = "default::developer::stream_connector_message_buffer_size")]
+    pub connector_message_buffer_size: usize,
+
+    /// Limit number of the cached entries in an extreme aggregation call.
+    #[serde(default = "default::developer::unsafe_stream_extreme_cache_size")]
+    pub unsafe_extreme_cache_size: usize,
+
+    /// The maximum size of the chunk produced by executor at a time.
+    #[serde(default = "default::developer::stream_chunk_size")]
+    pub chunk_size: usize,
+
+    /// The initial permits that a channel holds, i.e., the maximum row count can be buffered in
+    /// the channel.
+    #[serde(default = "default::developer::stream_exchange_initial_permits")]
+    pub exchange_initial_permits: usize,
+
+    /// The permits that are batched to add back, for reducing the backward `AddPermits` messages
+    /// in remote exchange.
+    #[serde(default = "default::developer::stream_exchange_batched_permits")]
+    pub exchange_batched_permits: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BatchDeveloperConfig {
+    /// The size of the channel used for output to exchange/shuffle.
+    #[serde(default = "default::developer::batch_output_channel_size")]
+    pub output_channel_size: usize,
+
+    /// The size of a chunk produced by `RowSeqScanExecutor`
+    #[serde(default = "default::developer::batch_chunk_size")]
+    pub chunk_size: usize,
+}
+
+serde_with::with_prefix!(streaming_prefix "stream_");
+serde_with::with_prefix!(batch_prefix "batch_");
+
 /// The subsections `[batch.developer]` and `[streaming.developer]`.
 ///
 /// It is put at [`BatchConfig::developer`] and [`StreamingConfig::developer`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DeveloperConfig {
-    /// The size of the channel used for output to exchange/shuffle.
-    #[serde(default = "default::developer::batch_output_channel_size")]
-    pub batch_output_channel_size: usize,
+    #[serde(flatten, with = "streaming_prefix")]
+    streaming: StreamingDeveloperConfig,
 
-    /// The size of a chunk produced by `RowSeqScanExecutor`
-    #[serde(default = "default::developer::batch_chunk_size")]
-    pub batch_chunk_size: usize,
-
-    /// Set to true to enable per-executor row count metrics. This will produce a lot of timeseries
-    /// and might affect the prometheus performance. If you only need actor input and output
-    /// rows data, see `stream_actor_in_record_cnt` and `stream_actor_out_record_cnt` instead.
-    #[serde(default = "default::developer::stream_enable_executor_row_count")]
-    pub stream_enable_executor_row_count: bool,
-
-    /// The capacity of the chunks in the channel that connects between `ConnectorSource` and
-    /// `SourceExecutor`.
-    #[serde(default = "default::developer::stream_connector_message_buffer_size")]
-    pub stream_connector_message_buffer_size: usize,
-
-    /// Limit number of the cached entries in an extreme aggregation call.
-    #[serde(default = "default::developer::unsafe_stream_extreme_cache_size")]
-    pub unsafe_stream_extreme_cache_size: usize,
-
-    /// The maximum size of the chunk produced by executor at a time.
-    #[serde(default = "default::developer::stream_chunk_size")]
-    pub stream_chunk_size: usize,
-
-    /// The initial permits that a channel holds, i.e., the maximum row count can be buffered in
-    /// the channel.
-    #[serde(default = "default::developer::stream_exchange_initial_permits")]
-    pub stream_exchange_initial_permits: usize,
-
-    /// The permits that are batched to add back, for reducing the backward `AddPermits` messages
-    /// in remote exchange.
-    #[serde(default = "default::developer::stream_exchange_batched_permits")]
-    pub stream_exchange_batched_permits: usize,
+    #[serde(flatten, with = "batch_prefix")]
+    batch: BatchDeveloperConfig,
 
     #[serde(flatten)]
     pub unrecognized: HashMap<String, Value>,

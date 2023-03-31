@@ -5884,6 +5884,7 @@ dependencies = [
  "ryu",
  "serde",
  "serde_json",
+ "serde_with 2.3.1",
  "static_assertions",
  "strum",
  "strum_macros",
