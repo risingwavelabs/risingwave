@@ -25,6 +25,7 @@ use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{Either, Itertools};
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
@@ -40,6 +41,7 @@ use tracing::trace;
 
 use super::iter_utils;
 use crate::error::{StorageError, StorageResult};
+use crate::hummock::CachePolicy;
 use crate::row_serde::row_serde_util::{
     parse_raw_key_to_vnode_and_key, serialize_pk, serialize_pk_with_vnode,
 };
@@ -292,6 +294,10 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             .map(|&i| self.output_indices.iter().position(|&j| i == j))
             .collect()
     }
+
+    pub fn table_id(&self) -> TableId {
+        self.table_id
+    }
 }
 
 /// Point get
@@ -337,6 +343,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             table_id: self.table_id,
             read_version_from_backup: read_backup,
             prefetch_options: Default::default(),
+            cache_policy: CachePolicy::Fill(CachePriority::High),
         };
         if let Some(value) = self.store.get(serialized_pk, epoch, read_options).await? {
             // Refer to [`StorageTableInnerIterInner::new`] for necessity of `validate_read_epoch`.
@@ -379,6 +386,13 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             Ok(None)
         }
     }
+
+    /// Update the vnode bitmap of the storage table, returns the previous vnode bitmap.
+    #[must_use = "the executor should decide whether to manipulate the cache based on the previous vnode bitmap"]
+    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
+        assert_eq!(self.vnodes.len(), new_vnodes.len());
+        std::mem::replace(&mut self.vnodes, new_vnodes)
+    }
 }
 
 pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, OwnedRow)>> + Send;
@@ -410,6 +424,16 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         ordered: bool,
         prefetch_options: PrefetchOptions,
     ) -> StorageResult<StorageTableInnerIter<S, SD>> {
+        let cache_policy = match (
+            encoded_key_range.start_bound(),
+            encoded_key_range.end_bound(),
+        ) {
+            // To prevent unbounded range scan queries from polluting the block cache, use the
+            // low priority fill policy.
+            (Unbounded, _) | (_, Unbounded) => CachePolicy::Fill(CachePriority::Low),
+            _ => CachePolicy::Fill(CachePriority::High),
+        };
+
         let raw_key_ranges = if !ordered
             && matches!(encoded_key_range.start_bound(), Unbounded)
             && matches!(encoded_key_range.end_bound(), Unbounded)
@@ -453,6 +477,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                     table_id: self.table_id,
                     read_version_from_backup: read_backup,
                     prefetch_options,
+                    cache_policy,
                 };
                 let pk_serializer = match self.output_row_in_key_indices.is_empty() {
                     true => None,

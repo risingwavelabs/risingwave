@@ -57,8 +57,6 @@ impl EtcdService {
             .arg(&advertise_peer_urls)
             .arg("--listen-metrics-urls")
             .arg(&exporter_urls)
-            .arg("--name")
-            .arg("risedev-meta")
             .arg("--max-txn-ops")
             .arg("999999")
             .arg("--max-request-bytes")

@@ -573,9 +573,9 @@ mod tests {
             Some(ScalarImpl::Bool(true)),
             Some(ScalarImpl::Decimal(10.into())),
             Some(ScalarImpl::Interval(Default::default())),
-            Some(ScalarImpl::NaiveDate(Default::default())),
-            Some(ScalarImpl::NaiveDateTime(Default::default())),
-            Some(ScalarImpl::NaiveTime(Default::default())),
+            Some(ScalarImpl::Date(Default::default())),
+            Some(ScalarImpl::Timestamp(Default::default())),
+            Some(ScalarImpl::Time(Default::default())),
             Some(ScalarImpl::Struct(StructValue::new(vec![
                 Some(ScalarImpl::Int32(1)),
                 Some(ScalarImpl::Float32(3.0.into())),
@@ -595,9 +595,9 @@ mod tests {
             Some(ScalarImpl::Bool(true)),
             Some(ScalarImpl::Decimal(10.into())),
             Some(ScalarImpl::Interval(Default::default())),
-            Some(ScalarImpl::NaiveDate(Default::default())),
-            Some(ScalarImpl::NaiveDateTime(Default::default())),
-            Some(ScalarImpl::NaiveTime(Default::default())),
+            Some(ScalarImpl::Date(Default::default())),
+            Some(ScalarImpl::Timestamp(Default::default())),
+            Some(ScalarImpl::Time(Default::default())),
             Some(ScalarImpl::Struct(StructValue::new(vec![
                 Some(ScalarImpl::Int32(1)),
                 Some(ScalarImpl::Float32(33333.0.into())), // larger than row1

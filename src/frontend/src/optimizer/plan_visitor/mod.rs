@@ -29,6 +29,10 @@ mod execution_mode_decider;
 pub use execution_mode_decider::*;
 mod temporal_join_validator;
 pub use temporal_join_validator::*;
+mod relation_collector_visitor;
+mod sys_table_visitor;
+pub use relation_collector_visitor::*;
+pub use sys_table_visitor::*;
 
 use crate::for_all_plan_nodes;
 use crate::optimizer::plan_node::*;

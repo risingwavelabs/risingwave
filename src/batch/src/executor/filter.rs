@@ -124,17 +124,11 @@ impl FilterExecutor {
 mod tests {
     use assert_matches::assert_matches;
     use futures::stream::StreamExt;
-    use risingwave_common::array::{Array, DataChunk, ListValue};
+    use risingwave_common::array::{Array, DataChunk};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_common::types::{DataType, Scalar};
-    use risingwave_common::util::value_encoding::serialize_datum;
-    use risingwave_expr::expr::build_from_prost;
-    use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::PbDatum;
-    use risingwave_pb::expr::expr_node::Type::InputRef;
-    use risingwave_pb::expr::expr_node::{RexNode, Type};
-    use risingwave_pb::expr::{ExprNode, FunctionCall};
+    use risingwave_common::types::DataType;
+    use risingwave_expr::expr::build_from_pretty;
 
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::{Executor, FilterExecutor};
@@ -174,9 +168,8 @@ mod tests {
         mock_executor.add(chunk);
 
         // Initialize filter executor
-        let expr = make_filter_expression(Type::GreaterThan);
         let filter_executor = Box::new(FilterExecutor {
-            expr: build_from_prost(&expr).unwrap(),
+            expr: build_from_pretty("(greater_than:boolean $0:int4[] {2}:int4[])"),
             child: Box::new(mock_executor),
             identity: "FilterExecutor".to_string(),
             chunk_size: CHUNK_SIZE,
@@ -217,54 +210,6 @@ mod tests {
         assert_matches!(res, None);
     }
 
-    fn make_filter_expression(kind: Type) -> ExprNode {
-        use risingwave_common::types::ScalarImpl;
-        let lhs = ExprNode {
-            expr_type: InputRef as i32,
-            return_type: Some(risingwave_pb::data::DataType {
-                type_name: TypeName::List as i32,
-                field_type: vec![risingwave_pb::data::DataType {
-                    type_name: TypeName::Int32 as i32,
-                    is_nullable: true,
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::InputRef(0)),
-        };
-        let rhs = ExprNode {
-            expr_type: Type::ConstantValue as i32,
-            return_type: Some(risingwave_pb::data::DataType {
-                type_name: TypeName::List as i32,
-                field_type: vec![risingwave_pb::data::DataType {
-                    type_name: TypeName::Int32 as i32,
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::Constant(PbDatum {
-                body: serialize_datum(
-                    Some(ScalarImpl::List(ListValue::new(vec![Some(
-                        2.to_scalar_value(),
-                    )])))
-                    .as_ref(),
-                ),
-            })),
-        };
-        let function_call = FunctionCall {
-            children: vec![lhs, rhs],
-        };
-        let return_type = risingwave_pb::data::DataType {
-            type_name: risingwave_pb::data::data_type::TypeName::Boolean as i32,
-            ..Default::default()
-        };
-        ExprNode {
-            expr_type: kind as i32,
-            return_type: Some(return_type),
-            rex_node: Some(RexNode::FuncCall(function_call)),
-        }
-    }
-
     #[tokio::test]
     async fn test_filter_executor() {
         let schema = Schema {
@@ -281,9 +226,8 @@ mod tests {
              4 1
              3 3",
         ));
-        let expr = make_expression(Type::Equal);
         let filter_executor = Box::new(FilterExecutor {
-            expr: build_from_prost(&expr).unwrap(),
+            expr: build_from_pretty("(equal:boolean $0:int4 $1:int4)"),
             child: Box::new(mock_executor),
             identity: "FilterExecutor".to_string(),
             chunk_size: CHUNK_SIZE,
@@ -304,33 +248,5 @@ mod tests {
         }
         let res = stream.next().await;
         assert_matches!(res, None);
-    }
-
-    fn make_expression(kind: Type) -> ExprNode {
-        let lhs = make_inputref(0);
-        let rhs = make_inputref(1);
-        let function_call = FunctionCall {
-            children: vec![lhs, rhs],
-        };
-        let return_type = risingwave_pb::data::DataType {
-            type_name: risingwave_pb::data::data_type::TypeName::Boolean as i32,
-            ..Default::default()
-        };
-        ExprNode {
-            expr_type: kind as i32,
-            return_type: Some(return_type),
-            rex_node: Some(RexNode::FuncCall(function_call)),
-        }
-    }
-
-    fn make_inputref(idx: usize) -> ExprNode {
-        ExprNode {
-            expr_type: InputRef as i32,
-            return_type: Some(risingwave_pb::data::DataType {
-                type_name: TypeName::Int32 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::InputRef(idx as _)),
-        }
     }
 }

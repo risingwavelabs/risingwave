@@ -94,10 +94,6 @@ impl fmt::Display for LogicalJoin {
     }
 }
 
-pub(crate) fn has_repeated_element(slice: &[usize]) -> bool {
-    (1..slice.len()).any(|i| slice[i..].contains(&slice[i - 1]))
-}
-
 impl LogicalJoin {
     pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
         let core = generic::Join::with_full_output(left, right, join_type, on);
@@ -111,15 +107,7 @@ impl LogicalJoin {
         on: Condition,
         output_indices: Vec<usize>,
     ) -> Self {
-        // We cannot deal with repeated output indices in join
-        debug_assert!(!has_repeated_element(&output_indices));
-        let core = generic::Join {
-            left,
-            right,
-            on,
-            join_type,
-            output_indices,
-        };
+        let core = generic::Join::new(left, right, on, join_type, output_indices);
         Self::with_core(core)
     }
 
@@ -141,26 +129,12 @@ impl LogicalJoin {
         self.core.internal_column_num()
     }
 
-    /// Get the Mapping of columnIndex from left column index to internal column index.
-    pub fn l2i_col_mapping(&self) -> ColIndexMapping {
-        self.core.l2i_col_mapping()
+    pub fn i2l_col_mapping_ignore_join_type(&self) -> ColIndexMapping {
+        self.core.i2l_col_mapping_ignore_join_type()
     }
 
-    /// Get the Mapping of columnIndex from right column index to internal column index.
-    pub fn r2i_col_mapping(&self) -> ColIndexMapping {
-        self.core.r2i_col_mapping()
-    }
-
-    /// get the Mapping of columnIndex from internal column index to output column index
-    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        ColIndexMapping::with_remaining_columns(self.output_indices(), self.internal_column_num())
-    }
-
-    /// get the Mapping of columnIndex from output column index to internal column index
-    pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        // If output_indices = [0, 0, 1], we should use it as `o2i_col_mapping` directly.
-        // If we use `self.i2o_col_mapping().inverse()`, we will lose the first 0.
-        ColIndexMapping::new(self.output_indices().iter().map(|x| Some(*x)).collect())
+    pub fn i2r_col_mapping_ignore_join_type(&self) -> ColIndexMapping {
+        self.core.i2r_col_mapping_ignore_join_type()
     }
 
     /// Get a reference to the logical join's on.
@@ -206,6 +180,10 @@ impl LogicalJoin {
 
     pub fn is_right_join(&self) -> bool {
         matches!(self.join_type(), JoinType::RightSemi | JoinType::RightAnti)
+    }
+
+    pub fn is_full_out(&self) -> bool {
+        self.core.is_full_out()
     }
 
     /// Try to split and pushdown `predicate` into a join's left/right child or the on clause.
@@ -477,11 +455,11 @@ impl LogicalJoin {
         let new_scan_output_column_ids = new_scan.output_column_ids();
 
         // Construct a new logical join, because we have change its RHS.
-        let new_logical_join = LogicalJoin::with_output_indices(
+        let new_logical_join = generic::Join::new(
             logical_join.left(),
             new_scan.into(),
-            logical_join.join_type(),
             new_join_on,
+            logical_join.join_type(),
             new_join_output_indices,
         );
 
@@ -558,7 +536,7 @@ impl PlanTreeNodeBinary for LogicalJoin {
             join.internal_column_num(),
         );
 
-        let old_o2i = self.o2i_col_mapping();
+        let old_o2i = self.core.o2i_col_mapping();
 
         let old_o2l = old_o2i
             .composite(&self.core.i2l_col_mapping())
@@ -800,7 +778,7 @@ impl PredicatePushdown for LogicalJoin {
         let join_type = LogicalJoin::simplify_outer(&predicate, left_col_num, self.join_type());
 
         // rewrite output col referencing indices as internal cols
-        let mut mapping = self.o2i_col_mapping();
+        let mut mapping = self.core.o2i_col_mapping();
 
         predicate = predicate.rewrite_expr(&mut mapping);
 
@@ -871,7 +849,7 @@ impl PredicatePushdown for LogicalJoin {
             self.output_indices().clone(),
         );
 
-        let mut mapping = self.i2o_col_mapping();
+        let mut mapping = self.core.i2o_col_mapping();
         predicate = predicate.rewrite_expr(&mut mapping);
         LogicalFilter::create(new_join.into(), predicate)
     }
@@ -944,9 +922,10 @@ impl LogicalJoin {
                 Condition::true_cond(),
                 predicate.eq_keys().to_vec(),
                 self.left().schema().len(),
+                self.right().schema().len(),
             );
             let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
-            let hash_join = StreamHashJoin::new(logical_join, eq_cond).into();
+            let hash_join = StreamHashJoin::new(logical_join.core, eq_cond).into();
             let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
             let plan = StreamFilter::new(logical_filter).into();
             if self.output_indices() != &default_indices {
@@ -962,7 +941,7 @@ impl LogicalJoin {
                 Ok(plan)
             }
         } else {
-            Ok(StreamHashJoin::new(logical_join, predicate).into())
+            Ok(StreamHashJoin::new(logical_join.core, predicate).into())
         }
     }
 
@@ -1083,9 +1062,8 @@ impl LogicalJoin {
         // rewrite.
         let new_join_output_indices = self
             .output_indices()
-            .clone()
-            .into_iter()
-            .map(|x| {
+            .iter()
+            .map(|&x| {
                 if x < left_schema_len {
                     x
                 } else {
@@ -1099,11 +1077,11 @@ impl LogicalJoin {
         let right = RequiredDist::no_shuffle(new_stream_table_scan.into());
 
         // Construct a new logical join, because we have change its RHS.
-        let new_logical_join = LogicalJoin::with_output_indices(
+        let new_logical_join = generic::Join::new(
             left,
             right,
-            self.join_type(),
             new_join_on,
+            self.join_type(),
             new_join_output_indices,
         );
 
@@ -1201,13 +1179,9 @@ impl LogicalJoin {
         }
     }
 
-    fn to_batch_hash_join(
-        &self,
-        predicate: EqJoinPredicate,
-        logical_join: LogicalJoin,
-    ) -> Result<PlanRef> {
+    fn into_batch_hash_join(self, predicate: EqJoinPredicate) -> Result<PlanRef> {
         assert!(predicate.has_eq());
-        Ok(BatchHashJoin::new(logical_join, predicate).into())
+        Ok(BatchHashJoin::new(self.core, predicate).into())
     }
 
     pub fn index_lookup_join_to_batch_lookup_join(&self) -> Result<PlanRef> {
@@ -1228,13 +1202,9 @@ impl LogicalJoin {
             .into())
     }
 
-    fn to_batch_nested_loop_join(
-        &self,
-        predicate: EqJoinPredicate,
-        logical_join: LogicalJoin,
-    ) -> Result<PlanRef> {
+    fn into_batch_nested_loop_join(self, predicate: EqJoinPredicate) -> Result<PlanRef> {
         assert!(!predicate.has_eq());
-        Ok(BatchNestedLoopJoin::new(logical_join).into())
+        Ok(BatchNestedLoopJoin::new(self.core).into())
     }
 }
 
@@ -1268,10 +1238,10 @@ impl ToBatch for LogicalJoin {
                 }
             }
 
-            self.to_batch_hash_join(predicate, logical_join)
+            logical_join.into_batch_hash_join(predicate)
         } else {
             // Convert to Nested-loop Join for non-equal joins
-            self.to_batch_nested_loop_join(predicate, logical_join)
+            logical_join.into_batch_nested_loop_join(predicate)
         }
     }
 }
@@ -1397,11 +1367,13 @@ impl ToStream for LogicalJoin {
             // ignore the all NULL to maintain the stream key's uniqueness, see https://github.com/risingwavelabs/risingwave/issues/8084 for more information
 
             let l2o = join_with_pk
+                .core
                 .l2i_col_mapping()
-                .composite(&join_with_pk.i2o_col_mapping());
+                .composite(&join_with_pk.core.i2o_col_mapping());
             let r2o = join_with_pk
+                .core
                 .r2i_col_mapping()
-                .composite(&join_with_pk.i2o_col_mapping());
+                .composite(&join_with_pk.core.i2o_col_mapping());
             let left_right_stream_keys = join_with_pk
                 .left()
                 .logical_pk()

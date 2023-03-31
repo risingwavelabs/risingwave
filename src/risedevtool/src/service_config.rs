@@ -186,6 +186,7 @@ pub struct PrometheusConfig {
     pub provide_etcd: Option<Vec<EtcdConfig>>,
     pub provide_redpanda: Option<Vec<RedPandaConfig>>,
     pub provide_frontend: Option<Vec<FrontendConfig>>,
+    pub provide_connector_node: Option<Vec<ConnectorNodeConfig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -320,6 +321,7 @@ pub struct ConnectorNodeConfig {
     phantom_use: Option<String>,
     pub id: String,
     pub port: u16,
+    pub exporter_port: u16,
     pub address: String,
 }
 

@@ -42,7 +42,6 @@ use super::group_top_n::GroupTopNCache;
 use super::top_n_cache::AppendOnlyTopNCacheTrait;
 use super::utils::*;
 use super::TopNCache;
-use crate::cache::cache_may_stale;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
@@ -207,12 +206,12 @@ where
     }
 
     fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
-        let previous_vnode_bitmap = self
+        let (_previous_vnode_bitmap, cache_may_stale) = self
             .managed_state
             .state_table
-            .update_vnode_bitmap(vnode_bitmap.clone());
+            .update_vnode_bitmap(vnode_bitmap);
 
-        if cache_may_stale(&previous_vnode_bitmap, &vnode_bitmap) {
+        if cache_may_stale {
             self.caches.clear();
         }
     }
@@ -230,7 +229,7 @@ where
         if watermark.col_idx == self.group_by[0] {
             self.managed_state
                 .state_table
-                .update_watermark(watermark.val.clone());
+                .update_watermark(watermark.val.clone(), false);
             Some(watermark)
         } else {
             None

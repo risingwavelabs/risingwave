@@ -14,13 +14,12 @@
 
 use std::fmt::Write;
 
-use crate::Result;
+use risingwave_expr_macro::function;
 
-#[inline(always)]
-pub fn concat_op(left: &str, right: &str, writer: &mut dyn Write) -> Result<()> {
+#[function("concat_op(varchar, varchar) -> varchar")]
+pub fn concat_op(left: &str, right: &str, writer: &mut dyn Write) {
     writer.write_str(left).unwrap();
     writer.write_str(right).unwrap();
-    Ok(())
 }
 
 #[cfg(test)]
@@ -30,7 +29,7 @@ mod tests {
     #[test]
     fn test_concat_op() {
         let mut s = String::new();
-        concat_op("114", "514", &mut s).unwrap();
+        concat_op("114", "514", &mut s);
         assert_eq!(s, "114514")
     }
 }

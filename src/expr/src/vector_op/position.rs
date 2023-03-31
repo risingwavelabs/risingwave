@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_expr_macro::function;
+
 use crate::Result;
 
-#[inline(always)]
 /// Location of specified substring
 ///
 /// Note: According to pgsql, position will return 0 rather -1 when substr is not in the target str
+#[function("position(varchar, varchar) -> int32")]
 pub fn position(str: &str, sub_str: &str) -> Result<i32> {
     match str.find(sub_str) {
         Some(byte_idx) => Ok((str[..byte_idx].chars().count() + 1) as i32),

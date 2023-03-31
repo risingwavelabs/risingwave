@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use async_trait::async_trait;
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use risingwave_common::array::Op;
 use risingwave_common::catalog::Schema;
+use risingwave_common::field_generator::FieldGeneratorImpl;
 use risingwave_common::types::{DataType, ScalarImpl};
 use tokio::sync::mpsc;
 
@@ -45,6 +48,20 @@ impl MessageSender {
     #[allow(dead_code)]
     pub fn push_barrier(&mut self, epoch: u64, stop: bool) {
         let mut barrier = Barrier::new_test_barrier(epoch);
+        if stop {
+            barrier = barrier.with_stop();
+        }
+        self.0.send(Message::Barrier(barrier)).unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub fn push_barrier_with_prev_epoch_for_test(
+        &mut self,
+        cur_epoch: u64,
+        prev_epoch: u64,
+        stop: bool,
+    ) {
+        let mut barrier = Barrier::with_prev_epoch_for_test(cur_epoch, prev_epoch);
         if stop {
             barrier = barrier.with_stop();
         }
@@ -165,6 +182,7 @@ macro_rules! row_nonnull {
 /// With `next_unwrap_ready`, we can retrieve the next message from the executor without `await`ing,
 /// so that we can immediately panic if the executor is not ready instead of getting stuck. This is
 /// useful for testing.
+#[async_trait]
 pub trait StreamExecutorTestExt: MessageStream + Unpin {
     /// Asserts that the executor is pending (not ready) now.
     ///
@@ -201,6 +219,29 @@ pub trait StreamExecutorTestExt: MessageStream + Unpin {
         self.next_unwrap_ready()
             .map(|msg| msg.into_barrier().expect("expect barrier"))
     }
+
+    /// Asserts that the executor is ready on a [`Watermark`] now, returning the next barrier.
+    ///
+    /// Panics if it is pending or the next message is not a [`Watermark`].
+    fn next_unwrap_ready_watermark(&mut self) -> StreamExecutorResult<Watermark> {
+        self.next_unwrap_ready()
+            .map(|msg| msg.into_watermark().expect("expect watermark"))
+    }
+
+    async fn expect_barrier(&mut self) -> Barrier {
+        let msg = self.next().await.unwrap().unwrap();
+        msg.into_barrier().unwrap()
+    }
+
+    async fn expect_chunk(&mut self) -> StreamChunk {
+        let msg = self.next().await.unwrap().unwrap();
+        msg.into_chunk().unwrap()
+    }
+
+    async fn expect_watermark(&mut self) -> Watermark {
+        let msg = self.next().await.unwrap().unwrap();
+        msg.into_watermark().unwrap()
+    }
 }
 
 // FIXME: implement on any `impl MessageStream` if the analyzer works well.
@@ -211,6 +252,7 @@ pub mod agg_executor {
     use std::sync::Arc;
 
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use risingwave_common::hash::SerializedKey;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::expr::AggKind;
@@ -218,10 +260,14 @@ pub mod agg_executor {
 
     use crate::common::table::state_table::StateTable;
     use crate::common::StateTableColumnMapping;
-    use crate::executor::agg_common::AggExecutorArgs;
+    use crate::executor::agg_common::{
+        AggExecutorArgs, GroupAggExecutorExtraArgs, SimpleAggExecutorExtraArgs,
+    };
     use crate::executor::aggregation::{AggCall, AggStateStorage};
+    use crate::executor::monitor::StreamingMetrics;
     use crate::executor::{
-        ActorContextRef, BoxedExecutor, Executor, GlobalSimpleAggExecutor, PkIndices,
+        ActorContext, ActorContextRef, BoxedExecutor, Executor, GlobalSimpleAggExecutor,
+        HashAggExecutor, PkIndices,
     };
 
     /// Create state storage for the given agg call.
@@ -333,6 +379,69 @@ pub mod agg_executor {
         .await
     }
 
+    /// NOTE(kwannoel): This should only be used by `test` or `bench`.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn new_boxed_hash_agg_executor<S: StateStore>(
+        store: S,
+        input: Box<dyn Executor>,
+        agg_calls: Vec<AggCall>,
+        row_count_index: usize,
+        group_key_indices: Vec<usize>,
+        pk_indices: PkIndices,
+        extreme_cache_size: usize,
+        emit_on_window_close: bool,
+        executor_id: u64,
+    ) -> Box<dyn Executor> {
+        let mut storages = Vec::with_capacity(agg_calls.iter().len());
+        for (idx, agg_call) in agg_calls.iter().enumerate() {
+            storages.push(
+                create_agg_state_storage(
+                    store.clone(),
+                    TableId::new(idx as u32),
+                    agg_call,
+                    &group_key_indices,
+                    &pk_indices,
+                    input.as_ref(),
+                )
+                .await,
+            )
+        }
+
+        let result_table = create_result_table(
+            store,
+            TableId::new(agg_calls.len() as u32),
+            &agg_calls,
+            &group_key_indices,
+            input.as_ref(),
+        )
+        .await;
+
+        HashAggExecutor::<SerializedKey, S>::new(AggExecutorArgs {
+            input,
+            actor_ctx: ActorContext::create(123),
+            pk_indices,
+            executor_id,
+
+            extreme_cache_size,
+
+            agg_calls,
+            row_count_index,
+            storages,
+            result_table,
+            distinct_dedup_tables: Default::default(),
+            watermark_epoch: Arc::new(AtomicU64::new(0)),
+
+            extra: GroupAggExecutorExtraArgs {
+                group_key_indices,
+                chunk_size: 1024,
+                emit_on_window_close,
+                metrics: Arc::new(StreamingMetrics::unused()),
+            },
+        })
+        .unwrap()
+        .boxed()
+    }
+
     pub async fn new_boxed_simple_agg_executor<S: StateStore>(
         actor_ctx: ActorContextRef,
         store: S,
@@ -381,7 +490,7 @@ pub mod agg_executor {
             distinct_dedup_tables: Default::default(),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
 
-            extra: None,
+            extra: SimpleAggExecutorExtraArgs {},
         })
         .unwrap()
         .boxed()
@@ -431,4 +540,38 @@ pub mod top_n_executor {
         )
         .await
     }
+}
+
+/// Generate `num_of_chunks` data chunks with type `data_types`,
+/// where each data chunk has cardinality of `chunk_size`.
+/// TODO(kwannoel): Generate different types of op, different vis.
+pub fn gen_data(
+    num_of_chunks: usize,
+    chunk_size: usize,
+    data_types: &[DataType],
+) -> Vec<StreamChunk> {
+    const SEED: u64 = 0xFF67FEABBAEF76FF;
+
+    let mut ret = Vec::<StreamChunk>::with_capacity(num_of_chunks);
+
+    for i in 0..num_of_chunks {
+        let mut ops = Vec::new();
+        let mut columns = Vec::new();
+        for _ in 0..chunk_size {
+            ops.push(Op::Insert);
+        }
+        for data_type in data_types {
+            let mut data_gen =
+                FieldGeneratorImpl::with_number_random(data_type.clone(), None, None, SEED)
+                    .unwrap();
+            let mut array_builder = data_type.create_array_builder(chunk_size);
+            for j in 0..chunk_size {
+                array_builder.append_datum(&data_gen.generate_datum(((i + 1) * (j + 1)) as u64));
+            }
+            columns.push(array_builder.finish().into());
+        }
+        let chunk = StreamChunk::new(ops, columns, None);
+        ret.push(chunk);
+    }
+    ret
 }
