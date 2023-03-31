@@ -80,7 +80,7 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
     fn value_serialize(&self) -> Vec<u8> {
         let estimate_size = self
             .iter()
-            .map(|item| value_encoding::estimate_serialize_datum_size(item))
+            .map(value_encoding::estimate_serialize_datum_size)
             .sum();
         let mut buf = Vec::with_capacity(estimate_size);
         self.value_serialize_into(&mut buf);
@@ -92,7 +92,7 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
     fn value_serialize_bytes(&self) -> Bytes {
         let estimate_size = self
             .iter()
-            .map(|item| value_encoding::estimate_serialize_datum_size(item))
+            .map(value_encoding::estimate_serialize_datum_size)
             .sum();
         let mut buf = BytesMut::with_capacity(estimate_size);
         self.value_serialize_into(&mut buf);
