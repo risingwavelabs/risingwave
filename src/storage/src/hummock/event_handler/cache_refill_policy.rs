@@ -44,6 +44,7 @@ impl CacheRefillPolicy {
         if self.max_preload_wait_time_mill > 0 {
             let policy = self.clone();
             let handle = tokio::spawn(async move {
+                let timer = policy.metrics.refill_cache_duration.start_timer();
                 let mut preload_count = 0;
                 let stats = StoreLocalStatistic::default();
                 let mut flatten_reqs = Vec::new();
@@ -73,6 +74,7 @@ impl CacheRefillPolicy {
                 }
                 policy.metrics.preload_io_count.inc_by(preload_count as u64);
                 let _ = try_join_all(flatten_reqs).await;
+                timer.observe_duration();
             });
             let _ = tokio::time::timeout(
                 Duration::from_millis(self.max_preload_wait_time_mill),

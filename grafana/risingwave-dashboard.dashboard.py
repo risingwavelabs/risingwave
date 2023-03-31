@@ -645,7 +645,7 @@ def section_compaction(outer_panels):
                             [90, "max"],
                         ),
                         panels.target(
-                            f"histogram_quantile(0.99, sum(rate({metric('compute_apply_version_duration_bucket')}[$__rate_interval])) by (le, instance))",
+                            f"histogram_quantile(0.99, sum(rate({metric('compute_refill_cache_duration_bucket')}[$__rate_interval])) by (le, instance))",
                             "compute_apply_version_duration_p99 - {{instance}}",
                         ),
                         panels.target(

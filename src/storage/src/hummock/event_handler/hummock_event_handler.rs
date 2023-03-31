@@ -159,7 +159,7 @@ impl HummockEventHandler {
         );
         let cache_fill_policy = Arc::new(CacheRefillPolicy::new(
             sstable_store,
-            metrics.clone(),
+            metrics,
             max_preload_wait_time_mill,
         ));
 

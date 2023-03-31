@@ -44,7 +44,7 @@ pub struct CompactorMetrics {
     pub write_build_l0_bytes: GenericCounter<AtomicU64>,
     pub sstable_distinct_epoch_count: Histogram,
     pub preload_io_count: GenericCounter<AtomicU64>,
-    pub apply_version_duration: Histogram,
+    pub refill_cache_duration: Histogram,
 }
 
 impl CompactorMetrics {
@@ -85,11 +85,11 @@ impl CompactorMetrics {
         let get_table_id_total_time_duration =
             register_histogram_with_registry!(opts, registry).unwrap();
         let opts = histogram_opts!(
-            "compute_apply_version_duration",
+            "compute_refill_cache_duration",
             "Total time of compact that have been issued to state store",
             exponential_buckets(0.001, 1.6, 20).unwrap() // max 520s
         );
-        let apply_version_duration = register_histogram_with_registry!(opts, registry).unwrap();
+        let refill_cache_duration = register_histogram_with_registry!(opts, registry).unwrap();
         let opts = histogram_opts!(
             "compactor_remote_read_time",
             "Total time of operations which read from remote storage when enable prefetch",
@@ -244,7 +244,7 @@ impl CompactorMetrics {
             write_build_l0_bytes,
             sstable_distinct_epoch_count,
             preload_io_count,
-            apply_version_duration,
+            refill_cache_duration,
         }
     }
 
