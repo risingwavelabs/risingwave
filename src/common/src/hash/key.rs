@@ -158,7 +158,7 @@ pub trait HashKey:
 pub struct FixedSizeKey<const N: usize> {
     key: [u8; N],
     hash_code: u64,
-    null_bitmap: FixedBitSet,
+    null_bitmap: Set8,
 }
 
 /// Designed for hash keys which can't be represented by [`FixedSizeKey`].
@@ -174,7 +174,8 @@ pub struct SerializedKey {
 
 impl<const N: usize> EstimateSize for FixedSizeKey<N> {
     fn estimated_heap_size(&self) -> usize {
-        self.null_bitmap.estimated_heap_size()
+        8
+        // self.null_bitmap.estimated_heap_size()
     }
 }
 
@@ -493,7 +494,7 @@ impl<'a> HashKeySerDe<'a> for ListRef<'a> {
 
 pub struct FixedSizeKeySerializer<const N: usize> {
     buffer: [u8; N],
-    null_bitmap: FixedBitSet,
+    null_bitmap: Set8,
     null_bitmap_idx: usize,
     data_len: usize,
     hash_code: u64,
@@ -513,7 +514,7 @@ impl<const N: usize> HashKeySerializer for FixedSizeKeySerializer<N> {
     fn from_hash_code(hash_code: HashCode, _estimated_key_size: usize) -> Self {
         Self {
             buffer: [0u8; N],
-            null_bitmap: FixedBitSet::with_capacity(u8::BITS as usize),
+            null_bitmap: Set8::empty(),
             null_bitmap_idx: 0,
             data_len: 0,
             hash_code: hash_code.0,
@@ -530,7 +531,7 @@ impl<const N: usize> HashKeySerializer for FixedSizeKeySerializer<N> {
                 self.buffer[self.data_len..(self.data_len + ret.len())].copy_from_slice(ret);
                 self.data_len += ret.len();
             }
-            None => self.null_bitmap.insert(self.null_bitmap_idx),
+            None => { self.null_bitmap.add_inplace(self.null_bitmap_idx); }
         };
         self.null_bitmap_idx += 1;
     }
@@ -546,7 +547,7 @@ impl<const N: usize> HashKeySerializer for FixedSizeKeySerializer<N> {
 
 pub struct FixedSizeKeyDeserializer<const N: usize> {
     cursor: Cursor<[u8; N]>,
-    null_bitmap: FixedBitSet,
+    null_bitmap: Set8,
     null_bitmap_idx: usize,
 }
 
