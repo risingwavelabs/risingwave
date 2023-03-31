@@ -62,11 +62,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 source.properties.clone(),
                 source.get_info()?.clone(),
                 params.env.connector_params(),
-                params
-                    .env
-                    .config()
-                    .developer
-                    .stream_connector_message_buffer_size,
+                params.env.config().developer.connector_message_buffer_size,
             );
 
             let column_ids: Vec<_> = source

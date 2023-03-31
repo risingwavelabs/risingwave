@@ -434,7 +434,7 @@ pub struct StreamingDeveloperConfig {
 
     /// The capacity of the chunks in the channel that connects between `ConnectorSource` and
     /// `SourceExecutor`.
-    #[serde(default = "default::developer::stream_connector_message_buffer_size")]
+    #[serde(default = "default::developer::connector_message_buffer_size")]
     pub connector_message_buffer_size: usize,
 
     /// Limit number of the cached entries in an extreme aggregation call.
@@ -458,6 +458,11 @@ pub struct StreamingDeveloperConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BatchDeveloperConfig {
+    /// The capacity of the chunks in the channel that connects between `ConnectorSource` and
+    /// `SourceExecutor`.
+    #[serde(default = "default::developer::connector_message_buffer_size")]
+    pub connector_message_buffer_size: usize,
+
     /// The size of the channel used for output to exchange/shuffle.
     #[serde(default = "default::developer::batch_output_channel_size")]
     pub output_channel_size: usize,
@@ -767,7 +772,7 @@ mod default {
             false
         }
 
-        pub fn stream_connector_message_buffer_size() -> usize {
+        pub fn connector_message_buffer_size() -> usize {
             16
         }
 
