@@ -1,5 +1,5 @@
 import socket
-from typing import Iterator, Tuple
+from typing import Iterator, Optional, Tuple
 from risingwave.udf import udf, udtf, UdfServer
 import random
 import struct
@@ -43,6 +43,14 @@ def extract_tcp_info(tcp_packet: bytes):
     return src_addr, dst_addr, src_port, dst_port
 
 
+@udf(input_types='VARCHAR', result_type='DECIMAL')
+def hex_to_int(hex: Optional[str]) -> Optional[int]:
+    if not hex:
+        return None
+    else:
+        return int(hex, 16)
+
+
 if __name__ == '__main__':
     server = UdfServer(location="0.0.0.0:8815")
     server.add_function(random_int)
@@ -51,4 +59,5 @@ if __name__ == '__main__':
     server.add_function(series)
     server.add_function(series2)
     server.add_function(extract_tcp_info)
+    server.add_function(hex_to_int)
     server.serve()
