@@ -15,7 +15,6 @@
 use std::pin::Pin;
 use std::task::Poll;
 
-use await_tree::InstrumentAwait;
 use either::Either;
 use futures::stream::{select_with_strategy, BoxStream, PollNext, SelectWithStrategy};
 use futures::{Stream, StreamExt, TryStreamExt};
