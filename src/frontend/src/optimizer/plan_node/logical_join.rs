@@ -1294,9 +1294,8 @@ impl ToStream for LogicalJoin {
         let mut right_to_add = right
             .logical_pk()
             .iter()
-            .cloned()
-            .filter(|i| r2o.try_map(*i).is_none())
-            .map(|i| i + left_len)
+            .filter(|&&i| r2o.try_map(i).is_none())
+            .map(|&i| i + left_len)
             .collect_vec();
 
         // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
