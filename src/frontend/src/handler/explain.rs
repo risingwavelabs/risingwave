@@ -120,7 +120,7 @@ pub async fn handle_explain(
                 .0
             }
 
-            stmt => gen_batch_query_plan(&session, context.into(), stmt)?.0,
+            stmt => gen_batch_query_plan(&session, context.into(), stmt)?.plan,
         };
 
         let ctx = plan.plan_base().ctx.clone();
@@ -152,7 +152,7 @@ pub async fn handle_explain(
                 Convention::Stream => {
                     let graph = build_graph(plan);
                     rows.extend(
-                        explain_stream_graph(&graph, explain_verbose)?
+                        explain_stream_graph(&graph, explain_verbose)
                             .lines()
                             .map(|s| Row::new(vec![Some(s.to_string().into())])),
                     );

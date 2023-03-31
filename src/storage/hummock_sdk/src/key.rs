@@ -372,9 +372,7 @@ pub struct TableKey<T: AsRef<[u8]>>(pub T);
 
 impl<T: AsRef<[u8]>> Debug for TableKey<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TableKey")
-            .field("table_key", &self.0.as_ref().to_vec())
-            .finish()
+        write!(f, "TableKey {{ {} }}", hex::encode(self.0.as_ref()))
     }
 }
 
@@ -408,12 +406,22 @@ pub fn map_table_key_range(range: (Bound<KeyPayloadType>, Bound<KeyPayloadType>)
 /// will group these two values into one struct for convenient filtering.
 ///
 /// The encoded format is | `table_id` | `table_key` |.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct UserKey<T: AsRef<[u8]>> {
     // When comparing `UserKey`, we first compare `table_id`, then `table_key`. So the order of
     // declaration matters.
     pub table_id: TableId,
     pub table_key: TableKey<T>,
+}
+
+impl<T: AsRef<[u8]>> Debug for UserKey<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "UserKey {{ {}, {:?} }}",
+            self.table_id.table_id, self.table_key
+        )
+    }
 }
 
 impl<T: AsRef<[u8]>> UserKey<T> {
@@ -547,10 +555,16 @@ impl UserKey<Vec<u8>> {
 /// [`FullKey`] is an internal concept in storage. It associates [`UserKey`] with an epoch.
 ///
 /// The encoded format is | `user_key` | `epoch` |.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct FullKey<T: AsRef<[u8]>> {
     pub user_key: UserKey<T>,
     pub epoch: HummockEpoch,
+}
+
+impl<T: AsRef<[u8]>> Debug for FullKey<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "FullKey {{ {:?}, {} }}", self.user_key, self.epoch)
+    }
 }
 
 impl<T: AsRef<[u8]>> FullKey<T> {
@@ -624,7 +638,7 @@ impl<'a> FullKey<&'a [u8]> {
         }
     }
 
-    /// Construct a [`FullKey`] from a byte slice without  `table_id` encoded.
+    /// Construct a [`FullKey`] from a byte slice without `table_id` encoded.
     pub fn from_slice_without_table_id(
         table_id: TableId,
         slice_without_table_id: &'a [u8],

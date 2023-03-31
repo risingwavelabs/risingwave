@@ -3,6 +3,7 @@ import pyarrow as pa
 import pyarrow.flight
 import pyarrow.parquet
 import inspect
+import traceback
 
 
 class UserDefinedFunction:
@@ -26,17 +27,17 @@ class ScalarFunction(UserDefinedFunction):
     or multiple scalar values to a new scalar value.
     """
 
-    def eval(self, *args):
+    def eval(self, *args) -> Any:
         """
         Method which defines the logic of the scalar function.
         """
         pass
 
     def eval_batch(self, batch: pa.RecordBatch) -> pa.RecordBatch:
-        result = pa.array([self.eval(*[col[i].as_py() for col in batch])
-                           for i in range(batch.num_rows)],
-                          type=self._result_schema.types[0])
-        return pa.RecordBatch.from_arrays([result], schema=self._result_schema)
+        column = [self.eval(*[col[i].as_py() for col in batch])
+                  for i in range(batch.num_rows)]
+        array = pa.array(column, type=self._result_schema.types[0])
+        return pa.RecordBatch.from_arrays([array], schema=self._result_schema)
 
 
 class TableFunction(UserDefinedFunction):
@@ -45,18 +46,26 @@ class TableFunction(UserDefinedFunction):
     or multiple table values to a new table value.
     """
 
-    def eval(self, *args):
+    def eval(self, *args) -> Iterator:
         """
         Method which defines the logic of the table function.
         """
-        pass
+        yield
 
     def eval_batch(self, batch: pa.RecordBatch) -> pa.RecordBatch:
-        # only the first row from batch is used
-        res = self.eval(*[col[0].as_py() for col in batch])
-        columns = zip(*res) if len(self._result_schema) > 1 else [res]
-        arrays = [pa.array(col, type)
-                  for col, type in zip(columns, self._result_schema.types)]
+        result_rows = []
+        # Iterate through rows in the input RecordBatch
+        for row_index in range(batch.num_rows):
+            row = tuple(column[row_index].as_py() for column in batch)
+            result_rows.extend(self.eval(*row))
+
+        result_columns = zip(
+            *result_rows) if len(self._result_schema) > 1 else [result_rows]
+
+        # Convert the result columns to arrow arrays
+        arrays = [
+            pa.array(col, type) for col, type in zip(result_columns, self._result_schema.types)
+        ]
         return pa.RecordBatch.from_arrays(arrays, schema=self._result_schema)
 
 
@@ -119,7 +128,21 @@ def udf(input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType
         result_type: Union[str, pa.DataType],
         name: Optional[str] = None,) -> Union[Callable, UserDefinedFunction]:
     """
-    Annotation for creating a user-defined function.
+    Annotation for creating a user-defined scalar function.
+
+    Parameters:
+    - input_types: A list of strings or Arrow data types that specifies the input data types.
+    - result_type: A string or an Arrow data type that specifies the return value type.
+    - name: An optional string specifying the function name. If not provided, the original name will be used.
+
+    Example:
+    ```
+    @udf(input_types=['INT', 'INT'], result_type='INT')
+    def gcd(x, y):
+        while y != 0:
+            (x, y) = (y, x % y)
+        return x
+    ```
     """
 
     return lambda f: UserDefinedScalarFunctionWrapper(f, input_types, result_type, name)
@@ -130,6 +153,19 @@ def udtf(input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataTyp
          name: Optional[str] = None,) -> Union[Callable, UserDefinedFunction]:
     """
     Annotation for creating a user-defined table function.
+
+    Parameters:
+    - input_types: A list of strings or Arrow data types that specifies the input data types.
+    - result_types A list of strings or Arrow data types that specifies the return value types.
+    - name: An optional string specifying the function name. If not provided, the original name will be used.
+
+    Example:
+    ```
+    @udtf(input_types='INT', result_types='INT')
+    def series(n):
+        for i in range(n):
+            yield i
+    ```
     """
 
     return lambda f: UserDefinedTableFunctionWrapper(f, input_types, result_types, name)
@@ -137,13 +173,22 @@ def udtf(input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataTyp
 
 class UdfServer(pa.flight.FlightServerBase):
     """
-    UDF server based on Apache Arrow Flight protocol.
-    Reference: https://arrow.apache.org/cookbook/py/flight.html#simple-parquet-storage-service-with-arrow-flight
+    A server that provides user-defined functions to clients.
+
+    Example:
+    ```
+    server = UdfServer(location="0.0.0.0:8815")
+    server.add_function(my_udf)
+    server.serve()
+    ```
     """
+    # UDF server based on Apache Arrow Flight protocol.
+    # Reference: https://arrow.apache.org/cookbook/py/flight.html#simple-parquet-storage-service-with-arrow-flight
+
     _functions: Dict[str, UserDefinedFunction]
 
-    def __init__(self, location="grpc://0.0.0.0:8815", **kwargs):
-        super(UdfServer, self).__init__(location, **kwargs)
+    def __init__(self, location="0.0.0.0:8815", **kwargs):
+        super(UdfServer, self).__init__('grpc://' + location, **kwargs)
         self._functions = {}
 
     def get_flight_info(self, context, descriptor):
@@ -169,7 +214,11 @@ class UdfServer(pa.flight.FlightServerBase):
         writer.begin(udf._result_schema)
         for chunk in reader:
             # print(pa.Table.from_batches([chunk.data]))
-            result = udf.eval_batch(chunk.data)
+            try:
+                result = udf.eval_batch(chunk.data)
+            except Exception as e:
+                print(traceback.print_exc())
+                raise e
             writer.write_batch(result)
 
     def serve(self):
@@ -217,5 +266,15 @@ def _string_to_data_type(type_str: str):
             return pa.string()
         case 'BINARY' | 'VARBINARY':
             return pa.binary()
-        case _:
-            raise ValueError(f'Unsupported type: {type_str}')
+
+    # extract 'STRUCT<a INT, b VARCHAR, ...>'
+    if type_str.startswith('STRUCT'):
+        type_str = type_str[6:].strip('<>')
+        fields = []
+        for field in type_str.split(','):
+            field = field.strip()
+            name, type_str = field.split(' ')
+            fields.append(pa.field(name, _string_to_data_type(type_str)))
+        return pa.struct(fields)
+
+    raise ValueError(f'Unsupported type: {type_str}')

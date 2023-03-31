@@ -32,7 +32,7 @@ use risingwave_pb::hummock::SstableInfo;
 
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
-use crate::table_stats::{to_prost_table_stats_map, ProstTableStatsMap, TableStatsMap};
+use crate::table_stats::{to_prost_table_stats_map, PbTableStatsMap, TableStatsMap};
 
 pub mod compact;
 pub mod compaction_group;
@@ -52,6 +52,9 @@ pub type HummockCompactionTaskId = u64;
 pub type CompactionGroupId = u64;
 pub const INVALID_VERSION_ID: HummockVersionId = 0;
 pub const FIRST_VERSION_ID: HummockVersionId = 1;
+pub const SPLIT_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 1u64 << 56;
+pub const SINGLE_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 2u64 << 56;
+pub const OBJECT_SUFFIX: &str = "data";
 
 #[macro_export]
 /// This is wrapper for `info` log.
@@ -131,14 +134,14 @@ impl LocalSstableInfo {
 pub struct ExtendedSstableInfo {
     pub compaction_group_id: CompactionGroupId,
     pub sst_info: SstableInfo,
-    pub table_stats: ProstTableStatsMap,
+    pub table_stats: PbTableStatsMap,
 }
 
 impl ExtendedSstableInfo {
     pub fn new(
         compaction_group_id: CompactionGroupId,
         sst_info: SstableInfo,
-        table_stats: ProstTableStatsMap,
+        table_stats: PbTableStatsMap,
     ) -> Self {
         Self {
             compaction_group_id,
@@ -151,7 +154,7 @@ impl ExtendedSstableInfo {
         compaction_group_id: CompactionGroupId,
         sst_info: SstableInfo,
     ) -> Self {
-        Self::new(compaction_group_id, sst_info, ProstTableStatsMap::default())
+        Self::new(compaction_group_id, sst_info, PbTableStatsMap::default())
     }
 }
 
@@ -251,4 +254,15 @@ pub fn can_concat(ssts: &[SstableInfo]) -> bool {
         }
     }
     true
+}
+
+const CHECKPOINT_DIR: &str = "checkpoint";
+const CHECKPOINT_NAME: &str = "0";
+
+pub fn version_checkpoint_path(root_dir: &str) -> String {
+    format!("{}/{}/{}", root_dir, CHECKPOINT_DIR, CHECKPOINT_NAME)
+}
+
+pub fn version_checkpoint_dir(checkpoint_path: &str) -> String {
+    checkpoint_path.trim_end_matches(|c| c != '/').to_string()
 }

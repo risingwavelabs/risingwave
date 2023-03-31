@@ -24,7 +24,7 @@ use petgraph::dot::{Config, Dot};
 use petgraph::Graph;
 use pgwire::pg_server::SessionId;
 use risingwave_common::array::DataChunk;
-use risingwave_pb::batch_plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
+use risingwave_pb::batch_plan::{TaskId as TaskIdPb, TaskOutputId as TaskOutputIdPb};
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -359,13 +359,13 @@ impl QueryRunner {
     /// of shutdown sender so that shutdown receiver won't be triggered.
     fn send_root_stage_info(&mut self, chunk_rx: Receiver<SchedulerResult<DataChunk>>) {
         let root_task_output_id = {
-            let root_task_id_prost = TaskIdProst {
+            let root_task_id_prost = TaskIdPb {
                 query_id: self.query.query_id.clone().id,
                 stage_id: self.query.root_stage_id(),
                 task_id: ROOT_TASK_ID,
             };
 
-            TaskOutputIdProst {
+            TaskOutputIdPb {
                 task_id: Some(root_task_id_prost),
                 output_id: ROOT_TASK_OUTPUT_ID,
             }
@@ -454,7 +454,7 @@ pub(crate) mod tests {
     use crate::catalog::root_catalog::Catalog;
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
-        BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalFilter, LogicalJoin,
+        generic, BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalFilter,
         LogicalScan, ToBatch,
     };
     use crate::optimizer::property::{Distribution, Order};
@@ -519,29 +519,11 @@ pub(crate) mod tests {
                 stream_key: vec![],
                 pk: vec![],
                 columns: vec![
-                    ColumnDesc {
-                        data_type: DataType::Int32,
-                        column_id: 0.into(),
-                        name: "a".to_string(),
-                        type_name: String::new(),
-                        field_descs: vec![],
-                    },
-                    ColumnDesc {
-                        data_type: DataType::Float64,
-                        column_id: 1.into(),
-                        name: "b".to_string(),
-                        type_name: String::new(),
-                        field_descs: vec![],
-                    },
-                    ColumnDesc {
-                        data_type: DataType::Int64,
-                        column_id: 2.into(),
-                        name: "_row_id".to_string(),
-                        type_name: String::new(),
-                        field_descs: vec![],
-                    },
+                    ColumnDesc::new_atomic(DataType::Int32, "a", 0),
+                    ColumnDesc::new_atomic(DataType::Float64, "b", 1),
+                    ColumnDesc::new_atomic(DataType::Int64, "c", 2),
                 ],
-                distribution_key: vec![2],
+                distribution_key: vec![],
                 append_only: false,
                 retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
                 value_indices: vec![0, 1, 2],
@@ -576,43 +558,38 @@ pub(crate) mod tests {
             Distribution::HashShard(vec![0, 1]),
         )
         .into();
-        let hash_join_node: PlanRef = BatchHashJoin::new(
-            LogicalJoin::new(
-                batch_exchange_node1.clone(),
-                batch_exchange_node2.clone(),
-                JoinType::Inner,
-                Condition::true_cond(),
-            ),
-            EqJoinPredicate::new(
-                Condition::true_cond(),
-                vec![
-                    (
-                        InputRef {
-                            index: 0,
-                            data_type: DataType::Int32,
-                        },
-                        InputRef {
-                            index: 2,
-                            data_type: DataType::Int32,
-                        },
-                        false,
-                    ),
-                    (
-                        InputRef {
-                            index: 1,
-                            data_type: DataType::Float64,
-                        },
-                        InputRef {
-                            index: 3,
-                            data_type: DataType::Float64,
-                        },
-                        false,
-                    ),
-                ],
-                2,
-            ),
-        )
-        .into();
+        let logical_join_node = generic::Join::with_full_output(
+            batch_exchange_node1.clone(),
+            batch_exchange_node2.clone(),
+            JoinType::Inner,
+            Condition::true_cond(),
+        );
+        let eq_key_1 = (
+            InputRef {
+                index: 0,
+                data_type: DataType::Int32,
+            },
+            InputRef {
+                index: 2,
+                data_type: DataType::Int32,
+            },
+            false,
+        );
+        let eq_key_2 = (
+            InputRef {
+                index: 1,
+                data_type: DataType::Float64,
+            },
+            InputRef {
+                index: 3,
+                data_type: DataType::Float64,
+            },
+            false,
+        );
+        let eq_join_predicate =
+            EqJoinPredicate::new(Condition::true_cond(), vec![eq_key_1, eq_key_2], 2, 2);
+        let hash_join_node: PlanRef =
+            BatchHashJoin::new(logical_join_node, eq_join_predicate).into();
         let batch_exchange_node: PlanRef = BatchExchange::new(
             hash_join_node.clone(),
             Order::default(),

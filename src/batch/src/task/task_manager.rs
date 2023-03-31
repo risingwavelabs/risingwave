@@ -21,9 +21,7 @@ use parking_lot::Mutex;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::error::ErrorCode::{self, TaskNotFound};
 use risingwave_common::error::Result;
-use risingwave_pb::batch_plan::{
-    PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstTaskOutputId,
-};
+use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use tokio::runtime::Runtime;
@@ -84,7 +82,7 @@ impl BatchManager {
 
     pub async fn fire_task(
         &self,
-        tid: &ProstTaskId,
+        tid: &PbTaskId,
         plan: PlanFragment,
         epoch: BatchQueryEpoch,
         context: ComputeNodeContext,
@@ -116,7 +114,7 @@ impl BatchManager {
         &self,
         tx: Sender<std::result::Result<GetDataResponse, Status>>,
         peer_addr: SocketAddr,
-        pb_task_output_id: &ProstTaskOutputId,
+        pb_task_output_id: &PbTaskOutputId,
     ) -> Result<()> {
         let task_id = TaskOutputId::try_from(pb_task_output_id)?;
         tracing::trace!(target: "events::compute::exchange", peer_addr = %peer_addr, from = ?task_id, "serve exchange RPC");
@@ -138,7 +136,7 @@ impl BatchManager {
         Ok(())
     }
 
-    pub fn take_output(&self, output_id: &ProstTaskOutputId) -> Result<TaskOutput> {
+    pub fn take_output(&self, output_id: &PbTaskOutputId) -> Result<TaskOutput> {
         let task_id = TaskId::from(output_id.get_task_id()?);
         self.tasks
             .lock()
@@ -147,12 +145,14 @@ impl BatchManager {
             .get_task_output(output_id)
     }
 
-    pub fn abort_task(&self, sid: &ProstTaskId, msg: String) {
+    pub fn cancel_task(&self, sid: &PbTaskId) {
         let sid = TaskId::from(sid);
         match self.tasks.lock().remove(&sid) {
             Some(task) => {
                 tracing::trace!("Removed task: {:?}", task.get_task_id());
-                task.abort_task(msg);
+                // Use `cancel` rather than `abort` here since this is not an error which should be
+                // propagated to upstream.
+                task.cancel();
                 self.metrics.task_num.dec()
             }
             None => {
@@ -234,7 +234,7 @@ impl BatchManager {
             let t = guard.get(&id).unwrap();
             // FIXME: `Abort` will not report error but truncated results to user. We should
             // consider throw error.
-            t.abort_task(reason);
+            t.abort(reason);
         }
     }
 
@@ -260,8 +260,8 @@ mod tests {
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
     use risingwave_pb::batch_plan::{
-        ExchangeInfo, PlanFragment, PlanNode, TableFunctionNode, TaskId as ProstTaskId,
-        TaskOutputId as ProstTaskOutputId, ValuesNode,
+        ExchangeInfo, PbTaskId, PbTaskOutputId, PlanFragment, PlanNode, TableFunctionNode,
+        ValuesNode,
     };
     use risingwave_pb::expr::table_function::Type;
     use risingwave_pb::expr::TableFunction;
@@ -285,7 +285,7 @@ mod tests {
             Code::Internal
         );
 
-        let output_id = ProstTaskOutputId {
+        let output_id = PbTaskOutputId {
             task_id: Some(risingwave_pb::batch_plan::TaskId {
                 stage_id: 0,
                 task_id: 0,
@@ -317,7 +317,7 @@ mod tests {
             }),
         };
         let context = ComputeNodeContext::for_test();
-        let task_id = ProstTaskId {
+        let task_id = PbTaskId {
             query_id: "".to_string(),
             stage_id: 0,
             task_id: 0,
@@ -373,7 +373,7 @@ mod tests {
             }),
         };
         let context = ComputeNodeContext::for_test();
-        let task_id = ProstTaskId {
+        let task_id = PbTaskId {
             query_id: "".to_string(),
             stage_id: 0,
             task_id: 0,
@@ -388,7 +388,7 @@ mod tests {
             )
             .await
             .unwrap();
-        manager.abort_task(&task_id, "".to_string());
+        manager.cancel_task(&task_id);
         let task_id = TaskId::from(&task_id);
         assert!(!manager.tasks.lock().contains_key(&task_id));
     }

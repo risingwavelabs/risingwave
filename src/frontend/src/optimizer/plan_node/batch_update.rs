@@ -19,7 +19,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::UpdateNode;
 
 use super::{
-    ExprRewritable, LogicalUpdate, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst,
+    ExprRewritable, LogicalUpdate, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb,
     ToDistributedBatch,
 };
 use crate::expr::{Expr, ExprRewriter};
@@ -72,7 +72,7 @@ impl ToDistributedBatch for BatchUpdate {
     }
 }
 
-impl ToBatchProst for BatchUpdate {
+impl ToBatchPb for BatchUpdate {
     fn to_batch_prost_body(&self) -> NodeBody {
         let exprs = self
             .logical

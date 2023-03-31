@@ -264,7 +264,7 @@ SELECT * from v limit 0;
 statement ok
 insert into t values (1);
 
-statement ok
+statement error QueryError: Bind error: update modifying the PK column is banned
 update t set v = 2;
 
 statement ok

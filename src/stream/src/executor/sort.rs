@@ -217,7 +217,7 @@ impl<S: StateStore> SortExecutor<S> {
 
                     // Update the vnode bitmap for the state table if asked. Also update the buffer.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.context.id) {
-                        let prev_vnode_bitmap =
+                        let (prev_vnode_bitmap, _cache_may_stale) =
                             self.state_table.update_vnode_bitmap(vnode_bitmap.clone());
                         self.fill_buffer(Some(&prev_vnode_bitmap), &vnode_bitmap)
                             .await?;
@@ -247,7 +247,7 @@ impl<S: StateStore> SortExecutor<S> {
             let no_longer_owned_vnodes =
                 Bitmap::bit_saturate_subtract(prev_vnode_bitmap, curr_vnode_bitmap);
             self.buffer.retain(|(_, pk), _| {
-                let vnode = self.state_table.compute_vnode(pk);
+                let vnode = self.state_table.compute_vnode_by_pk(pk);
                 !no_longer_owned_vnodes.is_set(vnode.to_index())
             });
         }

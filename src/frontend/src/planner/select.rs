@@ -77,7 +77,7 @@ impl Planner {
                     }
                     None => {
                         return Err(ErrorCode::InvalidInputSyntax(
-                            "the SELECT DISTINCT ON expressions must match the leftmost SELECT DISTINCT ON expressions"
+                            "the SELECT DISTINCT ON expressions must match the leftmost ORDER BY expressions"
                                 .into(),
                         )
                         .into());

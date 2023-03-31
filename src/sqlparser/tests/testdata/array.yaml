@@ -7,15 +7,15 @@
   formatted_sql: CREATE TABLE t (a INT[][][])
 - input: CREATE TABLE t(a int[);
   error_msg: |-
-    sql parser error: Expected ], found: )
+    sql parser error: Expected ], found: ) at line:1, column:23
     Near "CREATE TABLE t(a int["
 - input: CREATE TABLE t(a int[[]);
   error_msg: |-
-    sql parser error: Expected ], found: [
+    sql parser error: Expected ], found: [ at line:1, column:23
     Near "CREATE TABLE t(a int["
 - input: CREATE TABLE t(a int]);
   error_msg: |-
-    sql parser error: Expected ',' or ')' after column definition, found: ]
+    sql parser error: Expected ',' or ')' after column definition, found: ] at line:1, column:22
     Near "CREATE TABLE t(a int"
 - input: SELECT foo[0] FROM foos
   formatted_sql: SELECT foo[0] FROM foos

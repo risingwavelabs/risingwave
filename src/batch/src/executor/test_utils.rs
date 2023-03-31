@@ -27,7 +27,7 @@ use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, ToOwnedDatum};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_expr::expr::BoxedExpression;
-use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
+use risingwave_pb::batch_plan::PbExchangeSource;
 
 use crate::exchange_source::{ExchangeSource, ExchangeSourceImpl};
 use crate::executor::{
@@ -66,6 +66,7 @@ pub fn gen_sorted_data(
     batch_num: usize,
     start: String,
     step: u64,
+    offset: u64,
 ) -> Vec<DataChunk> {
     let mut data_gen = FieldGeneratorImpl::with_number_sequence(
         DataType::Int64,
@@ -73,6 +74,7 @@ pub fn gen_sorted_data(
         Some(i64::MAX.to_string()),
         0,
         step,
+        offset,
     )
     .unwrap();
     let mut ret = Vec::<DataChunk>::with_capacity(batch_num);
@@ -288,7 +290,7 @@ impl CreateSource for FakeCreateSource {
     async fn create_source(
         &self,
         _: impl BatchTaskContext,
-        _: &ProstExchangeSource,
+        _: &PbExchangeSource,
     ) -> Result<ExchangeSourceImpl> {
         Ok(ExchangeSourceImpl::Fake(self.fake_exchange_source.clone()))
     }

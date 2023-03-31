@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{DatabaseId, SchemaId, UserId};
 use risingwave_common::error::Result;
@@ -25,9 +26,10 @@ use risingwave_sqlparser::ast::{
 use super::create_mv::get_column_names;
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::Explain;
-use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
@@ -78,12 +80,16 @@ pub fn gen_sink_plan(
 
     let definition = context.normalized_sql().to_owned();
 
-    let bound = {
+    let (dependent_relations, bound) = {
         let mut binder = Binder::new(session);
-        binder.bind_query(*query)?
+        let bound = binder.bind_query(*query)?;
+        (binder.included_relations(), bound)
     };
 
-    // If colume names not specified, use the name in materialized view.
+    let check_items = resolve_query_privileges(&bound);
+    session.check_privileges(&check_items)?;
+
+    // If column names not specified, use the name in materialized view.
     let col_names = get_column_names(&bound, session, stmt.columns)?;
 
     let properties = context.with_options().clone();
@@ -94,24 +100,25 @@ pub fn gen_sink_plan(
     };
 
     let sink_plan = plan_root.gen_sink_plan(sink_table_name, definition, properties)?;
-
     let sink_desc = sink_plan.sink_desc().clone();
-    let sink_catalog = sink_desc.into_catalog(
-        SchemaId::new(sink_schema_id),
-        DatabaseId::new(sink_database_id),
-        UserId::new(session.user_id()),
-        vec![],
-    );
-
     let sink_plan: PlanRef = sink_plan.into();
 
     let ctx = sink_plan.ctx();
-
     let explain_trace = ctx.is_explain_trace();
     if explain_trace {
         ctx.trace("Create Sink:");
         ctx.trace(sink_plan.explain_to_string().unwrap());
     }
+
+    let dependent_relations =
+        RelationCollectorVisitor::collect_with(dependent_relations, sink_plan.clone());
+
+    let sink_catalog = sink_desc.into_catalog(
+        SchemaId::new(sink_schema_id),
+        DatabaseId::new(sink_database_id),
+        UserId::new(session.user_id()),
+        dependent_relations.into_iter().collect_vec(),
+    );
 
     Ok((sink_plan, sink_catalog))
 }
@@ -177,7 +184,7 @@ pub mod tests {
         let sql = r#"CREATE SINK snk1 FROM mv1
                     WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table =
                         '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>',
-                        mysql.password = '<password>', format = 'append_only', force_append_only = 'true');"#.to_string();
+                        mysql.password = '<password>', type = 'append-only', force_append_only = 'true');"#.to_string();
         frontend.run_sql(sql).await.unwrap();
 
         let session = frontend.session_ref();

@@ -50,6 +50,7 @@ pub fn default_opts_for_test() -> StorageOpts {
         write_conflict_detection_enabled: true,
         block_cache_capacity_mb: 64,
         meta_cache_capacity_mb: 64,
+        high_priority_ratio: 0,
         disable_remote_compactor: false,
         enable_local_spill: false,
         local_object_store: "memory".to_string(),
@@ -204,7 +205,7 @@ pub async fn gen_test_sstable_inner<B: AsRef<[u8]>>(
     range_tombstones: Vec<DeleteRangeTombstone>,
     sstable_store: SstableStoreRef,
     policy: CachePolicy,
-) -> Sstable {
+) -> (Sstable, SstableInfo) {
     let writer_opts = SstableWriterOptions {
         capacity_hint: None,
         tracker: None,
@@ -227,7 +228,7 @@ pub async fn gen_test_sstable_inner<B: AsRef<[u8]>>(
         )
         .await
         .unwrap();
-    table.value().as_ref().clone()
+    (table.value().as_ref().clone(), output.sst_info.sst_info)
 }
 
 /// Generate a test table from the given `kv_iter` and put the kv value to `sstable_store`
@@ -237,6 +238,25 @@ pub async fn gen_test_sstable<B: AsRef<[u8]>>(
     kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,
     sstable_store: SstableStoreRef,
 ) -> Sstable {
+    gen_test_sstable_inner(
+        opts,
+        object_id,
+        kv_iter,
+        vec![],
+        sstable_store,
+        CachePolicy::NotFill,
+    )
+    .await
+    .0
+}
+
+/// Generate a test table from the given `kv_iter` and put the kv value to `sstable_store`
+pub async fn gen_test_sstable_and_info<B: AsRef<[u8]>>(
+    opts: SstableBuilderOptions,
+    object_id: HummockSstableObjectId,
+    kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,
+    sstable_store: SstableStoreRef,
+) -> (Sstable, SstableInfo) {
     gen_test_sstable_inner(
         opts,
         object_id,
@@ -265,6 +285,7 @@ pub async fn gen_test_sstable_with_range_tombstone(
         CachePolicy::NotFill,
     )
     .await
+    .0
 }
 
 /// Generates a user key with table id 0 and the given `table_key`
@@ -324,5 +345,5 @@ pub async fn count_stream<T>(s: impl Stream<Item = StorageResult<T>> + Send) -> 
 }
 
 pub fn create_small_table_cache() -> Arc<LruCache<HummockSstableObjectId, Box<Sstable>>> {
-    Arc::new(LruCache::new(1, 4))
+    Arc::new(LruCache::new(1, 4, 0))
 }

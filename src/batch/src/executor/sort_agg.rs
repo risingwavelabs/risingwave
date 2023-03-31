@@ -287,13 +287,11 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::build_from_prost;
+    use risingwave_expr::expr::build_from_pretty;
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType as ProstDataType;
+    use risingwave_pb::data::PbDataType;
     use risingwave_pb::expr::agg_call::Type;
-    use risingwave_pb::expr::expr_node::RexNode;
-    use risingwave_pb::expr::expr_node::Type::InputRef;
-    use risingwave_pb::expr::{AggCall, ExprNode, InputRef as ProstInputRef};
+    use risingwave_pb::expr::{AggCall, PbInputRef};
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -439,17 +437,8 @@ mod tests {
 
         let count_star = AggStateFactory::new(&prost)?.create_agg_state();
         let group_exprs: Vec<_> = (1..=2)
-            .map(|idx| {
-                build_from_prost(&ExprNode {
-                    expr_type: InputRef as i32,
-                    return_type: Some(ProstDataType {
-                        type_name: TypeName::Int32 as i32,
-                        ..Default::default()
-                    }),
-                    rex_node: Some(RexNode::InputRef(idx as _)),
-                })
-            })
-            .try_collect()?;
+            .map(|idx| build_from_pretty(format!("${idx}:int4")))
+            .collect();
 
         let sorted_groupers: Vec<_> = group_exprs
             .iter()
@@ -550,14 +539,14 @@ mod tests {
 
         let prost = AggCall {
             r#type: Type::Sum as i32,
-            args: vec![ProstInputRef {
+            args: vec![PbInputRef {
                 index: 0,
-                r#type: Some(ProstDataType {
+                r#type: Some(PbDataType {
                     type_name: TypeName::Int32 as i32,
                     ..Default::default()
                 }),
             }],
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
@@ -635,14 +624,14 @@ mod tests {
 
         let prost = AggCall {
             r#type: Type::Sum as i32,
-            args: vec![ProstInputRef {
+            args: vec![PbInputRef {
                 index: 0,
-                r#type: Some(ProstDataType {
+                r#type: Some(PbDataType {
                     type_name: TypeName::Int32 as i32,
                     ..Default::default()
                 }),
             }],
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
@@ -653,17 +642,8 @@ mod tests {
 
         let sum_agg = AggStateFactory::new(&prost)?.create_agg_state();
         let group_exprs: Vec<_> = (1..=2)
-            .map(|idx| {
-                build_from_prost(&ExprNode {
-                    expr_type: InputRef as i32,
-                    return_type: Some(ProstDataType {
-                        type_name: TypeName::Int32 as i32,
-                        ..Default::default()
-                    }),
-                    rex_node: Some(RexNode::InputRef(idx as _)),
-                })
-            })
-            .try_collect()?;
+            .map(|idx| build_from_pretty(format!("${idx}:int4")))
+            .collect();
 
         let sorted_groupers: Vec<_> = group_exprs
             .iter()
@@ -759,14 +739,14 @@ mod tests {
 
         let prost = AggCall {
             r#type: Type::Sum as i32,
-            args: vec![ProstInputRef {
+            args: vec![PbInputRef {
                 index: 0,
-                r#type: Some(ProstDataType {
+                r#type: Some(PbDataType {
                     type_name: TypeName::Int32 as i32,
                     ..Default::default()
                 }),
             }],
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
@@ -777,17 +757,8 @@ mod tests {
 
         let sum_agg = AggStateFactory::new(&prost)?.create_agg_state();
         let group_exprs: Vec<_> = (1..=2)
-            .map(|idx| {
-                build_from_prost(&ExprNode {
-                    expr_type: InputRef as i32,
-                    return_type: Some(ProstDataType {
-                        type_name: TypeName::Int32 as i32,
-                        ..Default::default()
-                    }),
-                    rex_node: Some(RexNode::InputRef(idx as _)),
-                })
-            })
-            .try_collect()?;
+            .map(|idx| build_from_pretty(format!("${idx}:int4")))
+            .collect();
 
         let sorted_groupers: Vec<_> = group_exprs
             .iter()

@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
@@ -59,7 +59,7 @@ impl SplitReader for DatagenSplitReader {
         let mut events_so_far = u64::default();
         tracing::debug!("Splits for datagen found! {:?}", splits);
 
-        assert!(splits.len() == 1);
+        debug_assert!(splits.len() == 1);
         let split = splits.into_iter().next().unwrap();
         // TODO: currently, assume there's only on split in one reader
         let split_id = split.id();
@@ -114,6 +114,7 @@ impl SplitReader for DatagenSplitReader {
                     &column.name,
                     split_index,
                     split_num,
+                    events_so_far,
                 )?)
             } else {
                 FieldDesc::Invisible
@@ -172,6 +173,7 @@ fn generator_from_data_type(
     name: &String,
     split_index: u64,
     split_num: u64,
+    offset: u64,
 ) -> Result<FieldGeneratorImpl> {
     let random_seed_key = format!("fields.{}.seed", name);
     let random_seed: u64 = match fields_option_map
@@ -204,8 +206,22 @@ fn generator_from_data_type(
             let max_past_mode_value = fields_option_map
                 .get(&max_past_mode_key)
                 .map(|s| s.to_lowercase());
+            let basetime = match fields_option_map.get(format!("fields.{}.basetime", name).as_str())
+            {
+                Some(base) => {
+                    Some(chrono::DateTime::parse_from_rfc3339(base).map_err(|e| {
+                        anyhow!("cannot parse {:?} to rfc3339 due to {:?}", base, e)
+                    })?)
+                }
+                None => None,
+            };
 
-            FieldGeneratorImpl::with_timestamp(max_past_value, max_past_mode_value, random_seed)
+            FieldGeneratorImpl::with_timestamp(
+                basetime,
+                max_past_value,
+                max_past_mode_value,
+                random_seed,
+            )
         }
         DataType::Varchar => {
             let length_key = format!("fields.{}.length", name);
@@ -222,6 +238,7 @@ fn generator_from_data_type(
                             &format!("{}.{}", name, field_name),
                             split_index,
                             split_num,
+                            offset,
                         )?;
                         Ok((field_name, gen))
                     })
@@ -237,6 +254,7 @@ fn generator_from_data_type(
                 &format!("{}._", name),
                 split_index,
                 split_num,
+                offset,
             )?;
             FieldGeneratorImpl::with_list(generator, length_value)
         }
@@ -253,7 +271,8 @@ fn generator_from_data_type(
                     start_value,
                     end_value,
                     split_index,
-                    split_num
+                    split_num,
+                    offset,
                 )
             } else {
                 let min_key = format!("fields.{}.min", name);

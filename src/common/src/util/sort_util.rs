@@ -17,17 +17,17 @@ use std::fmt;
 use std::sync::Arc;
 
 use parse_display::Display;
-use risingwave_pb::common::{PbColumnOrder, PbDirection, PbOrderType};
+use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
 
 use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::catalog::{FieldDisplay, Schema};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
+use crate::types::ToDatumRef;
 
-// TODO(rc): to support `NULLS FIRST | LAST`, we may need to hide this enum, forcing developers use
-// `OrderType` instead.
+/// Sort direction, ascending/descending.
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Display, Default)]
-pub enum Direction {
+enum Direction {
     #[default]
     #[display("ASC")]
     Ascending,
@@ -36,25 +36,25 @@ pub enum Direction {
 }
 
 impl Direction {
-    pub fn from_protobuf(order_type: &PbDirection) -> Direction {
-        match order_type {
-            PbDirection::Ascending => Direction::Ascending,
-            PbDirection::Descending => Direction::Descending,
+    pub fn from_protobuf(direction: &PbDirection) -> Self {
+        match direction {
+            PbDirection::Ascending => Self::Ascending,
+            PbDirection::Descending => Self::Descending,
             PbDirection::Unspecified => unreachable!(),
         }
     }
 
     pub fn to_protobuf(self) -> PbDirection {
         match self {
-            Direction::Ascending => PbDirection::Ascending,
-            Direction::Descending => PbDirection::Descending,
+            Self::Ascending => PbDirection::Ascending,
+            Self::Descending => PbDirection::Descending,
         }
     }
 }
 
-#[allow(dead_code)]
+/// Nulls are largest/smallest.
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Display, Default)]
-pub enum NullsAre {
+enum NullsAre {
     #[default]
     #[display("LARGEST")]
     Largest,
@@ -62,55 +62,159 @@ pub enum NullsAre {
     Smallest,
 }
 
+impl NullsAre {
+    pub fn from_protobuf(nulls_are: &PbNullsAre) -> Self {
+        match nulls_are {
+            PbNullsAre::Largest => Self::Largest,
+            PbNullsAre::Smallest => Self::Smallest,
+            PbNullsAre::Unspecified => unreachable!(),
+        }
+    }
+
+    pub fn to_protobuf(self) -> PbNullsAre {
+        match self {
+            Self::Largest => PbNullsAre::Largest,
+            Self::Smallest => PbNullsAre::Smallest,
+        }
+    }
+}
+
+/// Order type of a column.
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Default)]
 pub struct OrderType {
     direction: Direction,
-    // TODO(rc): enable `NULLS FIRST | LAST`
-    // nulls_are: NullsAre,
+    nulls_are: NullsAre,
 }
 
 impl OrderType {
     pub fn from_protobuf(order_type: &PbOrderType) -> OrderType {
         OrderType {
             direction: Direction::from_protobuf(&order_type.direction()),
+            nulls_are: NullsAre::from_protobuf(&order_type.nulls_are()),
         }
     }
 
     pub fn to_protobuf(self) -> PbOrderType {
         PbOrderType {
             direction: self.direction.to_protobuf() as _,
+            nulls_are: self.nulls_are.to_protobuf() as _,
         }
     }
 }
 
 impl OrderType {
-    pub const fn new(direction: Direction) -> Self {
-        Self { direction }
+    fn new(direction: Direction, nulls_are: NullsAre) -> Self {
+        Self {
+            direction,
+            nulls_are,
+        }
     }
 
-    /// Create an ascending order type, with other options set to default.
-    pub const fn ascending() -> Self {
+    fn nulls_first(direction: Direction) -> Self {
+        match direction {
+            Direction::Ascending => Self::new(direction, NullsAre::Smallest),
+            Direction::Descending => Self::new(direction, NullsAre::Largest),
+        }
+    }
+
+    fn nulls_last(direction: Direction) -> Self {
+        match direction {
+            Direction::Ascending => Self::new(direction, NullsAre::Largest),
+            Direction::Descending => Self::new(direction, NullsAre::Smallest),
+        }
+    }
+
+    pub fn from_bools(asc: Option<bool>, nulls_first: Option<bool>) -> Self {
+        let direction = match asc {
+            None => Direction::default(),
+            Some(true) => Direction::Ascending,
+            Some(false) => Direction::Descending,
+        };
+        match nulls_first {
+            None => Self::new(direction, NullsAre::default()),
+            Some(true) => Self::nulls_first(direction),
+            Some(false) => Self::nulls_last(direction),
+        }
+    }
+
+    // TODO(rc): Many places that call `ascending` should've call `default`.
+    /// Create an `ASC` order type.
+    pub fn ascending() -> Self {
         Self {
             direction: Direction::Ascending,
+            nulls_are: NullsAre::default(),
         }
     }
 
-    /// Create an descending order type, with other options set to default.
-    pub const fn descending() -> Self {
+    /// Create a `DESC` order type.
+    pub fn descending() -> Self {
         Self {
             direction: Direction::Descending,
+            nulls_are: NullsAre::default(),
         }
     }
 
-    /// Get the order direction.
-    pub fn direction(&self) -> Direction {
-        self.direction
+    /// Create an `ASC NULLS FIRST` order type.
+    pub fn ascending_nulls_first() -> Self {
+        Self::nulls_first(Direction::Ascending)
+    }
+
+    /// Create an `ASC NULLS LAST` order type.
+    pub fn ascending_nulls_last() -> Self {
+        Self::nulls_last(Direction::Ascending)
+    }
+
+    /// Create a `DESC NULLS FIRST` order type.
+    pub fn descending_nulls_first() -> Self {
+        Self::nulls_first(Direction::Descending)
+    }
+
+    /// Create a `DESC NULLS LAST` order type.
+    pub fn descending_nulls_last() -> Self {
+        Self::nulls_last(Direction::Descending)
+    }
+
+    pub fn is_ascending(&self) -> bool {
+        self.direction == Direction::Ascending
+    }
+
+    pub fn is_descending(&self) -> bool {
+        self.direction == Direction::Descending
+    }
+
+    pub fn nulls_are_largest(&self) -> bool {
+        self.nulls_are == NullsAre::Largest
+    }
+
+    pub fn nulls_are_smallest(&self) -> bool {
+        self.nulls_are == NullsAre::Smallest
+    }
+
+    pub fn nulls_are_first(&self) -> bool {
+        self.is_ascending() && self.nulls_are_smallest()
+            || self.is_descending() && self.nulls_are_largest()
+    }
+
+    pub fn nulls_are_last(&self) -> bool {
+        !self.nulls_are_first()
     }
 }
 
 impl fmt::Display for OrderType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.direction)
+        write!(f, "{}", self.direction)?;
+        if self.nulls_are != NullsAre::default() {
+            write!(
+                f,
+                " NULLS {}",
+                if self.nulls_are_first() {
+                    "FIRST"
+                } else {
+                    "LAST"
+                }
+            )?;
+        }
+        Ok(())
     }
 }
 
@@ -232,18 +336,19 @@ impl PartialEq for HeapElem {
 
 impl Eq for HeapElem {}
 
-fn compare_values<T>(lhs: Option<&T>, rhs: Option<&T>, order_type: &OrderType) -> Ordering
+fn compare_values<T>(lhs: Option<&T>, rhs: Option<&T>, order_type: OrderType) -> Ordering
 where
     T: Ord,
 {
-    let ord = match (lhs, rhs) {
-        (Some(l), Some(r)) => l.cmp(r),
-        (None, None) => Ordering::Equal,
-        // TODO(yuchao): `null first` / `null last` is not supported yet.
-        (Some(_), None) => Ordering::Less,
-        (None, Some(_)) => Ordering::Greater,
+    let ord = match (lhs, rhs, order_type.nulls_are) {
+        (Some(l), Some(r), _) => l.cmp(r),
+        (None, None, _) => Ordering::Equal,
+        (Some(_), None, NullsAre::Largest) => Ordering::Less,
+        (Some(_), None, NullsAre::Smallest) => Ordering::Greater,
+        (None, Some(_), NullsAre::Largest) => Ordering::Greater,
+        (None, Some(_), NullsAre::Smallest) => Ordering::Less,
     };
-    if order_type.direction == Direction::Descending {
+    if order_type.is_descending() {
         ord.reverse()
     } else {
         ord
@@ -255,7 +360,7 @@ fn compare_values_in_array<'a, T>(
     lhs_idx: usize,
     rhs_array: &'a T,
     rhs_idx: usize,
-    order_type: &'a OrderType,
+    order_type: OrderType,
 ) -> Ordering
 where
     T: Array,
@@ -281,7 +386,7 @@ pub fn compare_rows_in_chunk(
         macro_rules! gen_match {
             ( $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
                 match (lhs_array.as_ref(), rhs_array.as_ref()) {
-                    $((ArrayImpl::$variant_name(lhs_inner), ArrayImpl::$variant_name(rhs_inner)) => Ok(compare_values_in_array(lhs_inner, lhs_idx, rhs_inner, rhs_idx, &column_order.order_type)),)*
+                    $((ArrayImpl::$variant_name(lhs_inner), ArrayImpl::$variant_name(rhs_inner)) => Ok(compare_values_in_array(lhs_inner, lhs_idx, rhs_inner, rhs_idx, column_order.order_type)),)*
                     (l_arr, r_arr) => Err(InternalError(format!("Unmatched array types, lhs array is: {}, rhs array is: {}", l_arr.get_ident(), r_arr.get_ident()))),
                 }?
             }
@@ -294,17 +399,67 @@ pub fn compare_rows_in_chunk(
     Ok(Ordering::Equal)
 }
 
+/// Compare two `Datum`s with specified order type.
+pub fn compare_datum(
+    lhs: impl ToDatumRef,
+    rhs: impl ToDatumRef,
+    order_type: OrderType,
+) -> Ordering {
+    compare_values(
+        lhs.to_datum_ref().as_ref(),
+        rhs.to_datum_ref().as_ref(),
+        order_type,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::cmp::Ordering;
 
     use itertools::Itertools;
 
-    use super::{ColumnOrder, OrderType};
+    use super::*;
     use crate::array::{DataChunk, ListValue, StructValue};
     use crate::row::{OwnedRow, Row};
-    use crate::types::{DataType, ScalarImpl};
-    use crate::util::sort_util::compare_rows_in_chunk;
+    use crate::types::{DataType, Datum, ScalarImpl};
+
+    #[test]
+    fn test_order_type() {
+        assert_eq!(OrderType::default(), OrderType::ascending());
+        assert_eq!(
+            OrderType::default(),
+            OrderType::new(Direction::Ascending, NullsAre::Largest)
+        );
+        assert_eq!(
+            OrderType::default(),
+            OrderType::from_bools(Some(true), Some(false))
+        );
+        assert_eq!(OrderType::default(), OrderType::from_bools(None, None));
+
+        assert!(OrderType::ascending().is_ascending());
+        assert!(OrderType::ascending().nulls_are_largest());
+        assert!(OrderType::ascending().nulls_are_last());
+
+        assert!(OrderType::descending().is_descending());
+        assert!(OrderType::descending().nulls_are_largest());
+        assert!(OrderType::descending().nulls_are_first());
+
+        assert!(OrderType::ascending_nulls_first().is_ascending());
+        assert!(OrderType::ascending_nulls_first().nulls_are_smallest());
+        assert!(OrderType::ascending_nulls_first().nulls_are_first());
+
+        assert!(OrderType::ascending_nulls_last().is_ascending());
+        assert!(OrderType::ascending_nulls_last().nulls_are_largest());
+        assert!(OrderType::ascending_nulls_last().nulls_are_last());
+
+        assert!(OrderType::descending_nulls_first().is_descending());
+        assert!(OrderType::descending_nulls_first().nulls_are_largest());
+        assert!(OrderType::descending_nulls_first().nulls_are_first());
+
+        assert!(OrderType::descending_nulls_last().is_descending());
+        assert!(OrderType::descending_nulls_last().nulls_are_smallest());
+        assert!(OrderType::descending_nulls_last().nulls_are_last());
+    }
 
     #[test]
     fn test_compare_rows_in_chunk() {
@@ -348,9 +503,9 @@ mod tests {
             Some(ScalarImpl::Bool(true)),
             Some(ScalarImpl::Decimal(10.into())),
             Some(ScalarImpl::Interval(Default::default())),
-            Some(ScalarImpl::NaiveDate(Default::default())),
-            Some(ScalarImpl::NaiveDateTime(Default::default())),
-            Some(ScalarImpl::NaiveTime(Default::default())),
+            Some(ScalarImpl::Date(Default::default())),
+            Some(ScalarImpl::Timestamp(Default::default())),
+            Some(ScalarImpl::Time(Default::default())),
             Some(ScalarImpl::Struct(StructValue::new(vec![
                 Some(ScalarImpl::Int32(1)),
                 Some(ScalarImpl::Float32(3.0.into())),
@@ -370,9 +525,9 @@ mod tests {
             Some(ScalarImpl::Bool(true)),
             Some(ScalarImpl::Decimal(10.into())),
             Some(ScalarImpl::Interval(Default::default())),
-            Some(ScalarImpl::NaiveDate(Default::default())),
-            Some(ScalarImpl::NaiveDateTime(Default::default())),
-            Some(ScalarImpl::NaiveTime(Default::default())),
+            Some(ScalarImpl::Date(Default::default())),
+            Some(ScalarImpl::Timestamp(Default::default())),
+            Some(ScalarImpl::Time(Default::default())),
             Some(ScalarImpl::Struct(StructValue::new(vec![
                 Some(ScalarImpl::Int32(1)),
                 Some(ScalarImpl::Float32(33333.0.into())), // larger than row1
@@ -415,6 +570,62 @@ mod tests {
         assert_eq!(
             Ordering::Less,
             compare_rows_in_chunk(&chunk, 0, &chunk, 1, &column_orders).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_compare_datum() {
+        assert_eq!(
+            Ordering::Equal,
+            compare_datum(
+                Some(ScalarImpl::from(42)),
+                Some(ScalarImpl::from(42)),
+                OrderType::default(),
+            )
+        );
+        assert_eq!(
+            Ordering::Equal,
+            compare_datum(None as Datum, None as Datum, OrderType::default(),)
+        );
+        assert_eq!(
+            Ordering::Less,
+            compare_datum(
+                Some(ScalarImpl::from(42)),
+                Some(ScalarImpl::from(100)),
+                OrderType::ascending(),
+            )
+        );
+        assert_eq!(
+            Ordering::Greater,
+            compare_datum(
+                Some(ScalarImpl::from(42)),
+                None as Datum,
+                OrderType::ascending_nulls_first(),
+            )
+        );
+        assert_eq!(
+            Ordering::Less,
+            compare_datum(
+                Some(ScalarImpl::from(42)),
+                None as Datum,
+                OrderType::ascending_nulls_last(),
+            )
+        );
+        assert_eq!(
+            Ordering::Greater,
+            compare_datum(
+                Some(ScalarImpl::from(42)),
+                None as Datum,
+                OrderType::descending_nulls_first(),
+            )
+        );
+        assert_eq!(
+            Ordering::Less,
+            compare_datum(
+                Some(ScalarImpl::from(42)),
+                None as Datum,
+                OrderType::descending_nulls_last(),
+            )
         );
     }
 }

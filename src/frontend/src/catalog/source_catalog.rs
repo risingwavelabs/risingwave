@@ -15,14 +15,16 @@
 use std::collections::BTreeMap;
 
 use risingwave_common::catalog::ColumnCatalog;
-use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo, WatermarkDesc};
+use risingwave_pb::catalog::source::OptionalAssociatedTableId;
+use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 
 use super::{ColumnId, RelationCatalog, SourceId};
+use crate::catalog::TableId;
 use crate::user::UserId;
 use crate::WithOptions;
 
 /// This struct `SourceCatalog` is used in frontend.
-/// Compared with `ProstSource`, it only maintains information used during optimization.
+/// Compared with `PbSource`, it only maintains information used during optimization.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SourceCatalog {
     pub id: SourceId,
@@ -35,10 +37,11 @@ pub struct SourceCatalog {
     pub row_id_index: Option<usize>,
     pub properties: BTreeMap<String, String>,
     pub watermark_descs: Vec<WatermarkDesc>,
+    pub associated_table_id: Option<TableId>,
 }
 
-impl From<&ProstSource> for SourceCatalog {
-    fn from(prost: &ProstSource) -> Self {
+impl From<&PbSource> for SourceCatalog {
+    fn from(prost: &PbSource) -> Self {
         let id = prost.id;
         let name = prost.name.clone();
         let prost_columns = prost.columns.clone();
@@ -56,6 +59,13 @@ impl From<&ProstSource> for SourceCatalog {
         let owner = prost.owner;
         let watermark_descs = prost.get_watermark_descs().clone();
 
+        let associated_table_id = prost
+            .optional_associated_table_id
+            .clone()
+            .map(|id| match id {
+                OptionalAssociatedTableId::AssociatedTableId(id) => id,
+            });
+
         Self {
             id,
             name,
@@ -67,6 +77,7 @@ impl From<&ProstSource> for SourceCatalog {
             row_id_index,
             properties: with_options.into_inner(),
             watermark_descs,
+            associated_table_id: associated_table_id.map(|x| x.into()),
         }
     }
 }

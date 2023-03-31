@@ -19,12 +19,13 @@ use itertools::Itertools;
 use risingwave_common::catalog::IndexId;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::Index as ProstIndex;
+use risingwave_pb::catalog::PbIndex;
 use risingwave_pb::expr::expr_node::RexNode;
 
 use super::ColumnId;
-use crate::catalog::{DatabaseId, SchemaId, TableCatalog};
+use crate::catalog::{DatabaseId, RelationCatalog, SchemaId, TableCatalog};
 use crate::expr::{Expr, InputRef};
+use crate::user::UserId;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IndexCatalog {
@@ -50,7 +51,7 @@ pub struct IndexCatalog {
 
 impl IndexCatalog {
     pub fn build_from(
-        index_prost: &ProstIndex,
+        index_prost: &PbIndex,
         index_table: &TableCatalog,
         primary_table: &TableCatalog,
     ) -> Self {
@@ -134,8 +135,8 @@ impl IndexCatalog {
         &self.primary_to_secondary_mapping
     }
 
-    pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstIndex {
-        ProstIndex {
+    pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> PbIndex {
+        PbIndex {
             id: self.id.index_id,
             schema_id,
             database_id,
@@ -150,5 +151,11 @@ impl IndexCatalog {
                 .collect_vec(),
             original_columns: self.original_columns.iter().map(Into::into).collect_vec(),
         }
+    }
+}
+
+impl RelationCatalog for IndexCatalog {
+    fn owner(&self) -> UserId {
+        self.index_table.owner
     }
 }

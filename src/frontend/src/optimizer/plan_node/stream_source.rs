@@ -16,8 +16,8 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
-use risingwave_pb::stream_plan::{SourceNode, StreamSource as ProstStreamSource};
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::{PbStreamSource, SourceNode};
 
 use super::{ExprRewritable, LogicalSource, PlanBase, StreamNode};
 use crate::optimizer::property::Distribution;
@@ -56,6 +56,10 @@ impl StreamSource {
         Self { base, logical }
     }
 
+    pub fn logical(&self) -> &LogicalSource {
+        &self.logical
+    }
+
     pub fn column_names(&self) -> Vec<String> {
         self.schema()
             .fields()
@@ -80,9 +84,9 @@ impl fmt::Display for StreamSource {
 }
 
 impl StreamNode for StreamSource {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         let source_catalog = self.logical.source_catalog();
-        let source_inner = source_catalog.map(|source_catalog| ProstStreamSource {
+        let source_inner = source_catalog.map(|source_catalog| PbStreamSource {
             source_id: source_catalog.id,
             source_name: source_catalog.name.clone(),
             state_table: Some(
@@ -105,7 +109,7 @@ impl StreamNode for StreamSource {
                 .collect_vec(),
             properties: source_catalog.properties.clone().into_iter().collect(),
         });
-        ProstStreamNode::Source(SourceNode { source_inner })
+        PbNodeBody::Source(SourceNode { source_inner })
     }
 }
 

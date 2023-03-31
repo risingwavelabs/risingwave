@@ -18,7 +18,7 @@ use std::ops::BitAnd;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::FieldDisplay;
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::UnionNode;
 
 use super::{ExprRewritable, PlanRef};
@@ -105,8 +105,8 @@ impl PlanTreeNode for StreamUnion {
 }
 
 impl StreamNode for StreamUnion {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
-        ProstStreamNode::Union(UnionNode {})
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
+        PbNodeBody::Union(UnionNode {})
     }
 }
 

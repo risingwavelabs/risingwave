@@ -38,10 +38,11 @@ macro_rules! for_all_undeprecated_params {
             { sstable_size_mb, u32, 256_u32 },
             { block_size_kb, u32, 64_u32 },
             { bloom_false_positive, f64, 0.001_f64 },
-            { state_store, String, "hummock+memory".to_string() },
+            { state_store, String, "".to_string() },
             { data_directory, String, "hummock_001".to_string() },
             { backup_storage_url, String, "memory".to_string() },
             { backup_storage_directory, String, "backup".to_string() },
+            { telemetry_enabled, bool, true},
             $({ $field, $type, $default },)*
         }
     };
@@ -291,6 +292,10 @@ impl ValidateOnSet for OverrideValidateOnSet {
         // TODO
         Ok(())
     }
+
+    fn telemetry_enabled(_: &bool) -> Result<()> {
+        Ok(())
+    }
 }
 
 for_all_undeprecated_params!(impl_default_from_other_params);
@@ -315,6 +320,7 @@ mod tests {
             (DATA_DIRECTORY_KEY, "a"),
             (BACKUP_STORAGE_URL_KEY, "a"),
             (BACKUP_STORAGE_DIRECTORY_KEY, "a"),
+            (TELEMETRY_ENABLED_KEY, "false"),
         ];
 
         // To kv - missing field.

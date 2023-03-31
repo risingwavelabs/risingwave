@@ -28,6 +28,7 @@ pub mod memory_management;
 pub mod observer;
 pub mod rpc;
 pub mod server;
+pub mod telemetry;
 
 use clap::Parser;
 use risingwave_common::config::AsyncStackTraceOption;
@@ -65,14 +66,9 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_CONNECTOR_RPC_ENDPOINT")]
     pub connector_rpc_endpoint: Option<String>,
 
-    /// One of:
-    /// 1. `hummock+{object_store}` where `object_store`
-    /// is one of `s3://{path}`, `s3-compatible://{path}`, `minio://{path}`, `disk://{path}`,
-    /// `memory` or `memory-shared`.
-    /// 2. `in-memory`
-    /// 3. `sled://{path}`
-    #[clap(long, env = "RW_STATE_STORE")]
-    pub state_store: Option<String>,
+    /// Payload format of connector sink rpc
+    #[clap(long, env = "RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT")]
+    pub connector_rpc_sink_payload_format: Option<String>,
 
     /// The path of `risingwave.toml` configuration file.
     ///
@@ -168,7 +164,6 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
     // slow compile in release mode.
     Box::pin(async move {
         tracing::info!("options: {:?}", opts);
-        warn_future_deprecate_options(&opts);
         validate_opts(&opts);
 
         let listen_addr = opts.listen_addr.parse().unwrap();
@@ -200,10 +195,4 @@ fn default_total_memory_bytes() -> usize {
 
 fn default_parallelism() -> usize {
     total_cpu_available().ceil() as usize
-}
-
-fn warn_future_deprecate_options(opts: &ComputeNodeOpts) {
-    if opts.state_store.is_some() {
-        tracing::warn!("`--state-store` will not be accepted by compute node in the next release. Please consider moving this argument to the meta node.");
-    }
 }

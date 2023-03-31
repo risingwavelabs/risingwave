@@ -72,7 +72,7 @@ RiseDev is the development mode of RisingWave. To develop RisingWave, you need t
 * OpenSSL
 * PostgreSQL (psql) (>= 14.1)
 * Tmux (>= v3.2a)
-* LLVM 15 (To workaround some bugs in macOS toolchain, see https://github.com/risingwavelabs/risingwave/issues/6205).
+* LLVM 15 (For macOS only, to workaround some bugs in macOS toolchain. See https://github.com/risingwavelabs/risingwave/issues/6205).
 
 To install the dependencies on macOS, run:
 
@@ -89,6 +89,10 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
 Then you'll be able to compile and start RiseDev!
+
+> **Note**
+>
+> `.cargo/config.toml` contains `rustflags` configurations like `-Clink-arg` and `-Ctarget-feature`. Since it will be [merged](https://doc.rust-lang.org/cargo/reference/config.html#hierarchical-structure) with `$HOME/.cargo/config.toml`, check the config files and make sure they don't conflict if you have global `rustflags` configurations for e.g. linker there.
 
 ## Start and monitor a dev cluster
 

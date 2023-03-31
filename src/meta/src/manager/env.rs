@@ -73,6 +73,13 @@ pub struct MetaOpts {
 
     /// Interval of GC metadata in meta store and stale SSTs in object store.
     pub vacuum_interval_sec: u64,
+    /// Interval of hummock version checkpoint.
+    pub hummock_version_checkpoint_interval_sec: u64,
+    /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
+    /// attempt is rejected. Greater value reduces object store IO, meanwhile it results in
+    /// more loss of in memory `HummockVersionCheckpoint::stale_objects` state when meta node is
+    /// restarted.
+    pub min_delta_log_num_for_hummock_version_checkpoint: u64,
     /// Threshold used by worker node to filter out new SSTs when scanning object store.
     pub min_sst_retention_time_sec: u64,
     /// The spin interval when collecting global GC watermark in hummock
@@ -87,6 +94,12 @@ pub struct MetaOpts {
     /// The prometheus endpoint for dashboard service.
     pub prometheus_endpoint: Option<String>,
 
+    /// The VPC id of the cluster.
+    pub vpc_id: Option<String>,
+
+    /// A usable security group id to assign to a vpc endpoint
+    pub security_group_id: Option<String>,
+
     /// Endpoint of the connector node, there will be a sidecar connector node
     /// colocated with Meta node in the cloud environment
     pub connector_rpc_endpoint: Option<String>,
@@ -94,8 +107,13 @@ pub struct MetaOpts {
     /// Schedule space_reclaim_compaction for all compaction groups with this interval.
     pub periodic_space_reclaim_compaction_interval_sec: u64,
 
+    /// telemetry enabled in config file or not
+    pub telemetry_enabled: bool,
     /// Schedule ttl_reclaim_compaction for all compaction groups with this interval.
     pub periodic_ttl_reclaim_compaction_interval_sec: u64,
+
+    ///  compactor task limit = max_compactor_task_multiplier * cpu_core_num
+    pub max_compactor_task_multiplier: u32,
 }
 
 impl MetaOpts {
@@ -107,15 +125,21 @@ impl MetaOpts {
             max_idle_ms: 0,
             compaction_deterministic_test: false,
             vacuum_interval_sec: 30,
+            hummock_version_checkpoint_interval_sec: 30,
+            min_delta_log_num_for_hummock_version_checkpoint: 1,
             min_sst_retention_time_sec: 3600 * 24 * 7,
             collect_gc_watermark_spin_interval_sec: 5,
             enable_committed_sst_sanity_check: false,
             periodic_compaction_interval_sec: 60,
             node_num_monitor_interval_sec: 10,
             prometheus_endpoint: None,
+            vpc_id: None,
+            security_group_id: None,
             connector_rpc_endpoint: None,
             periodic_space_reclaim_compaction_interval_sec: 60,
+            telemetry_enabled: false,
             periodic_ttl_reclaim_compaction_interval_sec: 60,
+            max_compactor_task_multiplier: 2,
         }
     }
 }

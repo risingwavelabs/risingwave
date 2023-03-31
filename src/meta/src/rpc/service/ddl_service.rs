@@ -12,10 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
+use anyhow::anyhow;
+use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_connector::common::AwsPrivateLinks;
+use risingwave_connector::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
+use risingwave_connector::source::KAFKA_CONNECTOR;
+use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
+use risingwave_pb::catalog::{connection, Connection};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
-use risingwave_pb::ddl_service::drop_table_request::SourceId as ProstSourceId;
+use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use tonic::{Request, Response, Status};
@@ -25,10 +35,11 @@ use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, IdCategoryType,
     MetaSrvEnv, StreamingJob,
 };
+use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::ddl_controller::{DdlCommand, DdlController, StreamingJobId};
 use crate::storage::MetaStore;
 use crate::stream::{visit_fragment, GlobalStreamManagerRef, SourceManagerRef};
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 #[derive(Clone)]
 pub struct DdlServiceImpl<S: MetaStore> {
@@ -36,6 +47,7 @@ pub struct DdlServiceImpl<S: MetaStore> {
 
     catalog_manager: CatalogManagerRef<S>,
     ddl_controller: DdlController<S>,
+    aws_client: Option<AwsEc2Client>,
 }
 
 impl<S> DdlServiceImpl<S>
@@ -45,6 +57,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         env: MetaSrvEnv<S>,
+        aws_client: Option<AwsEc2Client>,
         catalog_manager: CatalogManagerRef<S>,
         stream_manager: GlobalStreamManagerRef<S>,
         source_manager: SourceManagerRef<S>,
@@ -65,7 +78,27 @@ where
             env,
             catalog_manager,
             ddl_controller,
+            aws_client,
         }
+    }
+}
+
+#[inline(always)]
+fn is_kafka_connector(with_properties: &HashMap<String, String>) -> bool {
+    const UPSTREAM_SOURCE_KEY: &str = "connector";
+    with_properties
+        .get(UPSTREAM_SOURCE_KEY)
+        .unwrap_or(&"".to_string())
+        .to_lowercase()
+        .eq_ignore_ascii_case(KAFKA_CONNECTOR)
+}
+
+#[inline(always)]
+fn kafka_props_broker_key(with_properties: &HashMap<String, String>) -> &str {
+    if with_properties.contains_key(KAFKA_PROPS_BROKER_KEY) {
+        KAFKA_PROPS_BROKER_KEY
+    } else {
+        KAFKA_PROPS_BROKER_KEY_ALIAS
     }
 }
 
@@ -154,6 +187,10 @@ where
     ) -> Result<Response<CreateSourceResponse>, Status> {
         let mut source = request.into_inner().get_source()?.clone();
 
+        // resolve private links before starting the DDL procedure
+        self.resolve_private_link_info(&mut source.properties)
+            .await?;
+
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         source.id = id;
 
@@ -200,7 +237,7 @@ where
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreatingStreamingJob(stream_job, fragment_graph))
+            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
             .await?;
 
         Ok(Response::new(CreateSinkResponse {
@@ -243,7 +280,7 @@ where
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreatingStreamingJob(stream_job, fragment_graph))
+            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
             .await?;
 
         Ok(Response::new(CreateMaterializedViewResponse {
@@ -292,7 +329,7 @@ where
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreatingStreamingJob(stream_job, fragment_graph))
+            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
             .await?;
 
         Ok(Response::new(CreateIndexResponse {
@@ -367,7 +404,7 @@ where
         let mut source = request.source;
         let mut mview = request.materialized_view.unwrap();
         let mut fragment_graph = request.fragment_graph.unwrap();
-
+        let table_id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         // If we're creating a table with connector, we should additionally fill its ID first.
         if let Some(source) = &mut source {
             // Generate source id.
@@ -389,23 +426,27 @@ where
                 "require exactly 1 external stream source when creating table with a connector"
             );
 
+            // Fill in the correct table id for source.
+            source.optional_associated_table_id =
+                Some(OptionalAssociatedTableId::AssociatedTableId(table_id));
+
             // Fill in the correct source id for mview.
             mview.optional_associated_source_id =
                 Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
         }
 
         let mut stream_job = StreamingJob::Table(source, mview);
-        let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
-        stream_job.set_id(id);
+
+        stream_job.set_id(table_id);
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreatingStreamingJob(stream_job, fragment_graph))
+            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
             .await?;
 
         Ok(Response::new(CreateTableResponse {
             status: None,
-            table_id: id,
+            table_id,
             version,
         }))
     }
@@ -421,7 +462,7 @@ where
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob(StreamingJobId::Table(
-                source_id.map(|ProstSourceId::Id(id)| id),
+                source_id.map(|PbSourceId::Id(id)| id),
                 table_id,
             )))
             .await?;
@@ -527,6 +568,21 @@ where
         }
     }
 
+    async fn alter_relation_name(
+        &self,
+        request: Request<AlterRelationNameRequest>,
+    ) -> Result<Response<AlterRelationNameResponse>, Status> {
+        let AlterRelationNameRequest { relation, new_name } = request.into_inner();
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterRelationName(relation.unwrap(), new_name))
+            .await?;
+        Ok(Response::new(AlterRelationNameResponse {
+            status: None,
+            version,
+        }))
+    }
+
     async fn get_ddl_progress(
         &self,
         _request: Request<GetDdlProgressRequest>,
@@ -534,6 +590,71 @@ where
         Ok(Response::new(GetDdlProgressResponse {
             ddl_progress: self.ddl_controller.get_ddl_progress().await,
         }))
+    }
+
+    async fn create_connection(
+        &self,
+        request: Request<CreateConnectionRequest>,
+    ) -> Result<Response<CreateConnectionResponse>, Status> {
+        if self.aws_client.is_none() {
+            return Err(Status::from(MetaError::unavailable(
+                "AWS client is not configured".into(),
+            )));
+        }
+
+        let req = request.into_inner();
+        if req.payload.is_none() {
+            return Err(Status::invalid_argument("request is empty"));
+        }
+
+        match req.payload.unwrap() {
+            create_connection_request::Payload::PrivateLink(link) => {
+                let cli = self.aws_client.as_ref().unwrap();
+                let private_link_svc = cli
+                    .create_aws_private_link(&link.service_name, &link.availability_zones)
+                    .await?;
+
+                let id = self.gen_unique_id::<{ IdCategory::Connection }>().await?;
+                let connection = Connection {
+                    id,
+                    name: link.service_name.clone(),
+                    info: Some(connection::Info::PrivateLinkService(private_link_svc)),
+                };
+
+                // save private link info to catalog
+                self.ddl_controller
+                    .run_command(DdlCommand::CreateConnection(connection))
+                    .await?;
+
+                Ok(Response::new(CreateConnectionResponse {
+                    connection_id: id,
+                    version: 0,
+                }))
+            }
+        }
+    }
+
+    async fn list_connections(
+        &self,
+        _request: Request<ListConnectionsRequest>,
+    ) -> Result<Response<ListConnectionsResponse>, Status> {
+        let conns = self.catalog_manager.list_connections().await;
+        Ok(Response::new(ListConnectionsResponse {
+            connections: conns,
+        }))
+    }
+
+    async fn drop_connection(
+        &self,
+        request: Request<DropConnectionRequest>,
+    ) -> Result<Response<DropConnectionResponse>, Status> {
+        let req = request.into_inner();
+
+        self.ddl_controller
+            .run_command(DdlCommand::DropConnection(req.connection_name))
+            .await?;
+
+        Ok(Response::new(DropConnectionResponse {}))
     }
 }
 
@@ -544,5 +665,73 @@ where
     async fn gen_unique_id<const C: IdCategoryType>(&self) -> MetaResult<u32> {
         let id = self.env.id_gen_manager().generate::<C>().await? as u32;
         Ok(id)
+    }
+
+    async fn resolve_private_link_info(
+        &self,
+        properties: &mut HashMap<String, String>,
+    ) -> MetaResult<()> {
+        let mut broker_rewrite_map = HashMap::new();
+        const UPSTREAM_SOURCE_PRIVATE_LINK_KEY: &str = "private.links";
+        if let Some(prop) = properties.get(UPSTREAM_SOURCE_PRIVATE_LINK_KEY) {
+            if !is_kafka_connector(properties) {
+                return Err(MetaError::from(anyhow!(
+                    "Private link is only supported for Kafka connector",
+                )));
+            }
+
+            let servers = properties
+                .get(kafka_props_broker_key(properties))
+                .cloned()
+                .ok_or(MetaError::from(anyhow!(
+                    "Must specify brokers in WITH clause",
+                )))?;
+
+            let broker_addrs = servers.split(',').collect_vec();
+            let link_info: AwsPrivateLinks = serde_json::from_str(prop).map_err(|e| anyhow!(e))?;
+            // construct the rewrite mapping for brokers
+            for (link, broker) in link_info.infos.iter().zip_eq_fast(broker_addrs.into_iter()) {
+                let conn = self
+                    .catalog_manager
+                    .get_connection_by_name(&link.service_name)
+                    .await?;
+
+                if let Some(info) = conn.info {
+                    match info {
+                        connection::Info::PrivateLinkService(svc) => {
+                            if svc.dns_entries.is_empty() {
+                                return Err(MetaError::from(anyhow!(
+                                    "No available private link endpoints for Kafka broker {}",
+                                    broker
+                                )));
+                            }
+                            let default_dns = svc.dns_entries.values().next().unwrap();
+                            let target_dns = svc.dns_entries.get(&link.availability_zone);
+                            match target_dns {
+                                None => {
+                                    broker_rewrite_map.insert(
+                                        broker.to_string(),
+                                        format!("{}:{}", default_dns, link.port),
+                                    );
+                                }
+                                Some(dns_name) => {
+                                    broker_rewrite_map.insert(
+                                        broker.to_string(),
+                                        format!("{}:{}", dns_name, link.port),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // save private link dns names into source properties, which
+            // will be extracted into KafkaProperties
+            let json = serde_json::to_string(&broker_rewrite_map).map_err(|e| anyhow!(e))?;
+            const BROKER_REWRITE_MAP_KEY: &str = "broker.rewrite.endpoints";
+            properties.insert(BROKER_REWRITE_MAP_KEY.to_string(), json);
+        }
+        Ok(())
     }
 }

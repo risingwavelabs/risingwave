@@ -7,10 +7,12 @@ def gen_row(index):
     v4 = float(index)
     v5 = float(index)
     v6 = index % 3 == 0
-    v7 = str(index) * ((index % 10) + 1)
+    v7 = '\'' + str(index) * ((index % 10) + 1) + '\''
+    v8 = "to_timestamp(" + str(index) + ")"
+    v9 = index
     may_null = None if index % 5 == 0 else int(index)
-    row_data = [v1, v2, v3, v4, v5, v6, v7, may_null]
-    repr = [o.__repr__() if o is not None else 'null' for o in row_data]
+    row_data = [v1, v2, v3, v4, v5, v6, v7, v8, v9, may_null]
+    repr = [str(o) if o is not None else 'null' for o in row_data]
     return '(' + ', '.join(repr) + ')'
 
 

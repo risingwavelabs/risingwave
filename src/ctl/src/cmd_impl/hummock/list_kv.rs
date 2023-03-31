@@ -15,12 +15,21 @@
 use core::ops::Bound::Unbounded;
 
 use risingwave_common::catalog::TableId;
+use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::store::{PrefetchOptions, ReadOptions, StateStoreReadExt};
 
+use crate::common::HummockServiceOpts;
 use crate::CtlContext;
 
-pub async fn list_kv(context: &CtlContext, epoch: u64, table_id: u32) -> anyhow::Result<()> {
-    let hummock = context.hummock_store().await?;
+pub async fn list_kv(
+    context: &CtlContext,
+    epoch: u64,
+    table_id: u32,
+    data_dir: Option<String>,
+) -> anyhow::Result<()> {
+    let hummock = context
+        .hummock_store(HummockServiceOpts::from_env(data_dir)?)
+        .await?;
     if epoch == u64::MAX {
         tracing::info!("using u64::MAX as epoch");
     }
@@ -38,6 +47,7 @@ pub async fn list_kv(context: &CtlContext, epoch: u64, table_id: u32) -> anyhow:
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    cache_policy: CachePolicy::NotFill,
                 },
             )
             .await?

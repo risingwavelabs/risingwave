@@ -21,11 +21,10 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
-use risingwave_pb::meta::TableFragments as ProstTableFragments;
+use risingwave_pb::meta::PbTableFragments;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    FragmentTypeFlag, SourceNode, StreamActor, StreamEnvironment as ProstStreamEnvironment,
-    StreamNode,
+    FragmentTypeFlag, PbStreamEnvironment, SourceNode, StreamActor, StreamNode,
 };
 
 use super::{ActorId, FragmentId};
@@ -68,13 +67,13 @@ pub struct StreamEnvironment {
 }
 
 impl StreamEnvironment {
-    pub fn to_protobuf(&self) -> ProstStreamEnvironment {
-        ProstStreamEnvironment {
+    pub fn to_protobuf(&self) -> PbStreamEnvironment {
+        PbStreamEnvironment {
             timezone: self.timezone.clone().unwrap_or("".into()),
         }
     }
 
-    pub fn from_protobuf(prost: &ProstStreamEnvironment) -> Self {
+    pub fn from_protobuf(prost: &PbStreamEnvironment) -> Self {
         Self {
             timezone: if prost.get_timezone().is_empty() {
                 None
@@ -87,14 +86,14 @@ impl StreamEnvironment {
 
 impl MetadataModel for TableFragments {
     type KeyType = u32;
-    type ProstType = ProstTableFragments;
+    type PbType = PbTableFragments;
 
     fn cf_name() -> String {
         TABLE_FRAGMENTS_CF_NAME.to_string()
     }
 
-    fn to_protobuf(&self) -> Self::ProstType {
-        Self::ProstType {
+    fn to_protobuf(&self) -> Self::PbType {
+        Self::PbType {
             table_id: self.table_id.table_id(),
             state: self.state as _,
             fragments: self.fragments.clone().into_iter().collect(),
@@ -104,7 +103,7 @@ impl MetadataModel for TableFragments {
         }
     }
 
-    fn from_protobuf(prost: Self::ProstType) -> Self {
+    fn from_protobuf(prost: Self::PbType) -> Self {
         let env = StreamEnvironment::from_protobuf(prost.get_env().unwrap());
         Self {
             table_id: TableId::new(prost.table_id),
@@ -259,7 +258,11 @@ impl TableFragments {
     /// Returns barrier inject actor ids.
     pub fn barrier_inject_actor_ids(&self) -> Vec<ActorId> {
         Self::filter_actor_ids(self, |fragment_type_mask| {
-            (fragment_type_mask & (FragmentTypeFlag::Source as u32 | FragmentTypeFlag::Now as u32))
+            (fragment_type_mask
+                & (FragmentTypeFlag::Source as u32
+                    | FragmentTypeFlag::Now as u32
+                    | FragmentTypeFlag::Values as u32
+                    | FragmentTypeFlag::BarrierRecv as u32))
                 != 0
         })
     }
@@ -268,6 +271,13 @@ impl TableFragments {
     pub fn mview_actor_ids(&self) -> Vec<ActorId> {
         Self::filter_actor_ids(self, |fragment_type_mask| {
             (fragment_type_mask & FragmentTypeFlag::Mview as u32) != 0
+        })
+    }
+
+    /// Returns values actor ids.
+    pub fn values_actor_ids(&self) -> Vec<ActorId> {
+        Self::filter_actor_ids(self, |fragment_type_mask| {
+            (fragment_type_mask & FragmentTypeFlag::Values as u32) != 0
         })
     }
 

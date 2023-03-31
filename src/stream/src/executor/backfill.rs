@@ -14,6 +14,7 @@
 
 use std::cmp::Ordering;
 use std::ops::Bound;
+use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use either::Either;
@@ -25,7 +26,7 @@ use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::sort_util::{Direction, OrderType};
+use risingwave_common::util::sort_util::{compare_datum, OrderType};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -34,6 +35,7 @@ use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
 use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndicesRef};
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{PkIndices, Watermark};
 use crate::task::{ActorId, CreateMviewProgress};
 
@@ -72,6 +74,8 @@ pub struct BackfillExecutor<S: StateStore> {
     actor_id: ActorId,
 
     info: ExecutorInfo,
+
+    metrics: Arc<StreamingMetrics>,
 }
 
 const CHUNK_SIZE: usize = 1024;
@@ -87,6 +91,7 @@ where
         progress: CreateMviewProgress,
         schema: Schema,
         pk_indices: PkIndices,
+        metrics: Arc<StreamingMetrics>,
     ) -> Self {
         Self {
             info: ExecutorInfo {
@@ -99,6 +104,7 @@ where
             output_indices,
             actor_id: progress.actor_id(),
             progress,
+            metrics,
         }
     }
 
@@ -107,6 +113,8 @@ where
         // The primary key columns, in the output columns of the table scan.
         let pk_in_output_indices = self.table.pk_in_output_indices().unwrap();
         let pk_order = self.table.pk_serializer().get_order_types();
+
+        let table_id = self.table.table_id().table_id;
 
         let mut upstream = self.upstream.execute();
 
@@ -117,7 +125,7 @@ where
         // If the barrier is a conf change of creating this mview, we follow the procedure of
         // backfill. Otherwise, it means we've recovered and we can forward the upstream messages
         // directly.
-        let to_create_mv = first_barrier.is_add_dispatcher(self.actor_id);
+        let to_create_mv = first_barrier.is_newly_added(self.actor_id);
         // If the snapshot is empty, we don't need to backfill.
         let is_snapshot_empty: bool = {
             let snapshot = Self::snapshot_read(&self.table, init_epoch, None, false);
@@ -153,8 +161,8 @@ where
         // `None` means it starts from the beginning.
         let mut current_pos: Option<OwnedRow> = None;
 
-        // Keep track of rows from the upstream and snapshot.
-        let mut processed_rows: u64 = 0;
+        // Keep track of rows from the snapshot.
+        let mut total_snapshot_processed_rows: u64 = 0;
 
         // Backfill Algorithm:
         //
@@ -196,6 +204,9 @@ where
                     stream::PollNext::Left
                 });
 
+            let mut cur_barrier_snapshot_processed_rows: u64 = 0;
+            let mut cur_barrier_upstream_processed_rows: u64 = 0;
+
             #[for_await]
             for either in backfill_stream {
                 match either {
@@ -207,6 +218,8 @@ where
 
                                 // Consume upstream buffer chunk
                                 for chunk in upstream_chunk_buffer.drain(..) {
+                                    cur_barrier_upstream_processed_rows +=
+                                        chunk.cardinality() as u64;
                                     if let Some(current_pos) = &current_pos {
                                         yield Message::Chunk(Self::mapping_chunk(
                                             Self::mark_chunk(
@@ -220,13 +233,29 @@ where
                                     }
                                 }
 
+                                self.metrics
+                                    .backfill_snapshot_read_row_count
+                                    .with_label_values(&[
+                                        table_id.to_string().as_str(),
+                                        self.actor_id.to_string().as_str(),
+                                    ])
+                                    .inc_by(cur_barrier_snapshot_processed_rows);
+
+                                self.metrics
+                                    .backfill_upstream_output_row_count
+                                    .with_label_values(&[
+                                        table_id.to_string().as_str(),
+                                        self.actor_id.to_string().as_str(),
+                                    ])
+                                    .inc_by(cur_barrier_upstream_processed_rows);
+
                                 // Update snapshot read epoch.
                                 snapshot_read_epoch = barrier.epoch.prev;
 
                                 self.progress.update(
                                     barrier.epoch.curr,
                                     snapshot_read_epoch,
-                                    processed_rows,
+                                    total_snapshot_processed_rows,
                                 );
 
                                 yield Message::Barrier(barrier);
@@ -251,7 +280,9 @@ where
                                 // in the buffer. Here we choose to never mark the chunk.
                                 // Consume with the renaming stream buffer chunk without mark.
                                 for chunk in upstream_chunk_buffer.drain(..) {
-                                    processed_rows += chunk.cardinality() as u64;
+                                    let chunk_cardinality = chunk.cardinality() as u64;
+                                    cur_barrier_snapshot_processed_rows += chunk_cardinality;
+                                    total_snapshot_processed_rows += chunk_cardinality;
                                     yield Message::Chunk(Self::mapping_chunk(
                                         chunk,
                                         &self.output_indices,
@@ -274,7 +305,9 @@ where
                                         .project(&pk_in_output_indices)
                                         .into_owned_row(),
                                 );
-                                processed_rows += chunk.cardinality() as u64;
+                                let chunk_cardinality = chunk.cardinality() as u64;
+                                cur_barrier_snapshot_processed_rows += chunk_cardinality;
+                                total_snapshot_processed_rows += chunk_cardinality;
                                 yield Message::Chunk(Self::mapping_chunk(
                                     chunk,
                                     &self.output_indices,
@@ -373,12 +406,9 @@ where
             match row
                 .project(pk_in_output_indices)
                 .iter()
-                .zip_eq_fast(pk_order.iter())
+                .zip_eq_fast(pk_order.iter().copied())
                 .cmp_by(current_pos.iter(), |(x, order), y| {
-                    match order.direction() {
-                        Direction::Ascending => x.cmp(&y),
-                        Direction::Descending => y.cmp(&x),
-                    }
+                    compare_datum(x, y, order)
                 }) {
                 Ordering::Less | Ordering::Equal => true,
                 Ordering::Greater => false,

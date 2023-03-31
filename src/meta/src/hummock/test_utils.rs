@@ -24,7 +24,7 @@ use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
-use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{
@@ -86,9 +86,16 @@ where
     {
         hummock_manager
             .compactor_manager_ref_for_test()
-            .add_compactor(context_id, u64::MAX);
+            .add_compactor(context_id, u64::MAX, 16);
         temp_compactor = true;
     }
+    let test_tables_2 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
+    register_sstable_infos_to_compaction_group(
+        hummock_manager,
+        &test_tables_2,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
     let compactor = hummock_manager.get_idle_compactor().await.unwrap();
     let mut selector = default_level_selector();
     let mut compact_task = hummock_manager
@@ -104,19 +111,13 @@ where
     if temp_compactor {
         assert_eq!(compactor.context_id(), context_id);
     }
-    let test_tables_2 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
-    register_sstable_infos_to_compaction_group(
-        hummock_manager,
-        &test_tables_2,
-        StaticCompactionGroupId::StateDefault.into(),
-    )
-    .await;
     compact_task.sorted_output_ssts = test_tables_2.clone();
     compact_task.set_task_status(TaskStatus::Success);
-    hummock_manager
+    let ret = hummock_manager
         .report_compact_task(context_id, &mut compact_task, None)
         .await
         .unwrap();
+    assert!(ret);
     if temp_compactor {
         hummock_manager
             .compactor_manager_ref_for_test()
@@ -239,7 +240,7 @@ pub fn update_filter_key_extractor_for_table_ids(
 
 pub fn update_filter_key_extractor_for_tables(
     filter_key_extractor_manager_ref: &FilterKeyExtractorManagerRef,
-    tables: &[ProstTable],
+    tables: &[PbTable],
 ) {
     for table in tables {
         filter_key_extractor_manager_ref.update(
@@ -338,6 +339,7 @@ pub async fn setup_compute_env(
 ) {
     let config = CompactionConfigBuilder::new()
         .level0_tier_compact_file_number(1)
+        .level0_max_compact_file_number(130)
         .build();
     setup_compute_env_with_config(port, config).await
 }

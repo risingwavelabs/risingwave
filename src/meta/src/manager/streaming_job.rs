@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use risingwave_common::catalog::{TableId, TableVersionId};
+use risingwave_common::catalog::TableVersionId;
 use risingwave_pb::catalog::{Index, Sink, Source, Table};
 
 use crate::model::FragmentId;
@@ -69,27 +69,6 @@ impl StreamingJob {
                 Some(table)
             }
             Self::Sink(_) => None,
-        }
-    }
-
-    /// Set the dependent relations of the job, not including the associated source being created.
-    pub fn set_dependent_relations(
-        &mut self,
-        dependent_relations: impl IntoIterator<Item = TableId>,
-    ) {
-        let dependent_relations = dependent_relations
-            .into_iter()
-            .map(|t| t.table_id())
-            .collect();
-
-        match self {
-            Self::MaterializedView(table) => table.dependent_relations = dependent_relations,
-            Self::Sink(sink) => sink.dependent_relations = dependent_relations,
-            Self::Index(_, index_table) => index_table.dependent_relations = dependent_relations,
-
-            // Note: For creating tables with connectors, the associated source (connector) itself
-            // should not be in this list, as it's also in the creating procedure.
-            Self::Table(_, _) => assert!(dependent_relations.is_empty()),
         }
     }
 

@@ -12,12 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use clap::Parser;
 use itertools::Itertools;
 use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::meta_snapshot::MetaSnapshot;
 use risingwave_backup::storage::MetaSnapshotStorageRef;
 use risingwave_common::config::MetaBackend;
+use risingwave_hummock_sdk::version_checkpoint_path;
+use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+use risingwave_object_store::object::parse_remote_object_store;
+use risingwave_pb::hummock::{HummockVersion, HummockVersionCheckpoint};
 
 use crate::backup_restore::utils::{get_backup_store, get_meta_store, MetaStoreBackendImpl};
 use crate::dispatch_meta_store;
@@ -49,14 +55,48 @@ pub struct RestoreOpts {
     #[clap(long, default_value = "")]
     pub etcd_password: String,
     /// Url of storage to fetch meta snapshot from.
-    #[clap(long, default_value_t = String::from("memory"))]
-    pub storage_url: String,
+    #[clap(long)]
+    pub backup_storage_url: String,
     /// Directory of storage to fetch meta snapshot from.
     #[clap(long, default_value_t = String::from("backup"))]
-    pub storage_directory: String,
+    pub backup_storage_directory: String,
+    /// Url of storage to restore hummock version to.
+    #[clap(long)]
+    pub hummock_storage_url: String,
+    /// Directory of storage to restore hummock version to.
+    #[clap(long, default_value_t = String::from("hummock_001"))]
+    pub hummock_storage_dir: String,
     /// Print the target snapshot, but won't restore to meta store.
     #[clap(long)]
     pub dry_run: bool,
+}
+
+async fn restore_hummock_version(
+    hummock_storage_url: &str,
+    hummock_storage_dir: &str,
+    hummock_version: &HummockVersion,
+) -> BackupResult<()> {
+    let object_store = Arc::new(
+        parse_remote_object_store(
+            hummock_storage_url,
+            Arc::new(ObjectStoreMetrics::unused()),
+            "Version Checkpoint",
+        )
+        .await,
+    );
+    let checkpoint_path = version_checkpoint_path(hummock_storage_dir);
+    let checkpoint = HummockVersionCheckpoint {
+        version: Some(hummock_version.clone()),
+        // Ignore stale objects. Full GC will clear them.
+        stale_objects: Default::default(),
+    };
+    use prost::Message;
+    let buf = checkpoint.encode_to_vec();
+    object_store
+        .upload(&checkpoint_path, buf.into())
+        .await
+        .map_err(|e| BackupError::StateStorage(e.into()))?;
+    Ok(())
 }
 
 async fn restore_metadata_model<S: MetaStore, T: MetadataModel + Send + Sync>(
@@ -205,6 +245,12 @@ async fn restore_impl(
     if opts.dry_run {
         return Ok(());
     }
+    restore_hummock_version(
+        &opts.hummock_storage_url,
+        &opts.hummock_storage_dir,
+        &target_snapshot.metadata.hummock_version,
+    )
+    .await?;
     dispatch_meta_store!(meta_store.clone(), store, {
         restore_metadata(store.clone(), target_snapshot.clone()).await?;
     });
@@ -250,7 +296,9 @@ mod tests {
             "1",
             "--meta-store-type",
             "mem",
-            "--storage-url",
+            "--backup-storage-url",
+            "memory",
+            "--hummock-storage-url",
             "memory",
         ])
     }
@@ -266,6 +314,7 @@ mod tests {
             data_directory: Some("data_directory".to_string()),
             backup_storage_url: Some("backup_storage_url".to_string()),
             backup_storage_directory: Some("backup_storage_directory".to_string()),
+            telemetry_enabled: Some(false),
         }
     }
 

@@ -19,20 +19,12 @@ use risingwave_batch::executor::hash_join::HashJoinExecutor;
 use risingwave_batch::executor::test_utils::{gen_projected_data, MockExecutor};
 use risingwave_batch::executor::{BoxedExecutor, JoinType};
 use risingwave_common::catalog::schema_test_utils::field_n;
-use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_common::util::value_encoding::serialize_datum;
-use risingwave_common::{enable_jemalloc_on_linux, hash};
-use risingwave_expr::expr::build_from_prost;
-use risingwave_pb::data::data_type::TypeName;
-use risingwave_pb::data::Datum as ProstDatum;
-use risingwave_pb::expr::expr_node::RexNode;
-use risingwave_pb::expr::expr_node::Type::{
-    ConstantValue as TConstValue, GreaterThan, InputRef, Modulus,
-};
-use risingwave_pb::expr::{ExprNode, FunctionCall};
+use risingwave_common::types::DataType;
+use risingwave_common::{enable_jemalloc_on_unix, hash};
+use risingwave_expr::expr::build_from_pretty;
 use utils::bench_join;
 
-enable_jemalloc_on_linux!();
+enable_jemalloc_on_unix!();
 
 fn create_hash_join_executor(
     join_type: JoinType,
@@ -43,75 +35,16 @@ fn create_hash_join_executor(
     right_chunk_num: usize,
 ) -> BoxedExecutor {
     const CHUNK_SIZE: usize = 1024;
-    let left_mod123 = {
-        let input_ref = ExprNode {
-            expr_type: InputRef as i32,
-            return_type: Some(risingwave_pb::data::DataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::InputRef(0)),
-        };
-        let literal123 = ExprNode {
-            expr_type: TConstValue as i32,
-            return_type: Some(risingwave_pb::data::DataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::Constant(ProstDatum {
-                body: serialize_datum(Some(ScalarImpl::Int64(123)).as_ref()),
-            })),
-        };
-        ExprNode {
-            expr_type: Modulus as i32,
-            return_type: Some(risingwave_pb::data::DataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children: vec![input_ref, literal123],
-            })),
-        }
-    };
-    let right_mod456 = {
-        let input_ref = ExprNode {
-            expr_type: InputRef as i32,
-            return_type: Some(risingwave_pb::data::DataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::InputRef(0)),
-        };
-        let literal456 = ExprNode {
-            expr_type: TConstValue as i32,
-            return_type: Some(risingwave_pb::data::DataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::Constant(ProstDatum {
-                body: serialize_datum(Some(ScalarImpl::Int64(456)).as_ref()),
-            })),
-        };
-        ExprNode {
-            expr_type: Modulus as i32,
-            return_type: Some(risingwave_pb::data::DataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children: vec![input_ref, literal456],
-            })),
-        }
-    };
+
     let left_input = gen_projected_data(
         left_chunk_size,
         left_chunk_num,
-        build_from_prost(&left_mod123).unwrap(),
+        build_from_pretty("(modulus:int8 $0:int8 123:int8)"),
     );
     let right_input = gen_projected_data(
         right_chunk_size,
         right_chunk_num,
-        build_from_prost(&right_mod456).unwrap(),
+        build_from_pretty("(modulus:int8 $0:int8 456:int8)"),
     );
 
     let mut left_child = Box::new(MockExecutor::new(field_n::<1>(DataType::Int64)));
@@ -126,39 +59,7 @@ fn create_hash_join_executor(
         _ => vec![0, 1],
     };
 
-    let cond = if with_cond {
-        let left_input_ref = ExprNode {
-            expr_type: InputRef as i32,
-            return_type: Some(risingwave_pb::data::DataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::InputRef(0)),
-        };
-        let literal100 = ExprNode {
-            expr_type: TConstValue as i32,
-            return_type: Some(risingwave_pb::data::DataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::Constant(ProstDatum {
-                body: serialize_datum(Some(ScalarImpl::Int64(100)).as_ref()),
-            })),
-        };
-        Some(ExprNode {
-            expr_type: GreaterThan as i32,
-            return_type: Some(risingwave_pb::data::DataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children: vec![left_input_ref, literal100],
-            })),
-        })
-    } else {
-        None
-    }
-    .map(|expr| build_from_prost(&expr).unwrap());
+    let cond = with_cond.then(|| build_from_pretty("(greater_than:int8 $0:int8 100:int8)"));
 
     Box::new(HashJoinExecutor::<hash::Key64>::new(
         join_type,

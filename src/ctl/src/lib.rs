@@ -95,6 +95,9 @@ enum HummockCommands {
 
         #[clap(short, long = "table-id")]
         table_id: u32,
+
+        // data directory for hummock state store. None: use default
+        data_dir: Option<String>,
     },
     SstDump(SstDumpArgs),
     /// trigger a targeted compaction through compaction_group_id
@@ -158,11 +161,15 @@ enum TableCommands {
     Scan {
         /// name of the materialized view to operate on
         mv_name: String,
+        // data directory for hummock state store. None: use default
+        data_dir: Option<String>,
     },
     /// scan a state table using Id
     ScanById {
         /// id of the state table to operate on
         table_id: u32,
+        // data directory for hummock state store. None: use default
+        data_dir: Option<String>,
     },
     /// list all state tables
     List,
@@ -176,6 +183,8 @@ enum MetaCommands {
     Resume,
     /// get cluster info
     ClusterInfo,
+    /// get source split info
+    SourceSplitInfo,
     /// Reschedule the parallel unit in the stream graph
     ///
     /// The format is `fragment_id-[removed]+[added]`
@@ -203,6 +212,25 @@ enum MetaCommands {
     BackupMeta,
     /// delete meta snapshots
     DeleteMetaSnapshots { snapshot_ids: Vec<u64> },
+
+    /// Create a new connection object
+    CreateConnection {
+        #[clap(long)]
+        provider: String,
+        #[clap(long)]
+        service_name: String,
+        #[clap(long)]
+        availability_zones: String,
+    },
+
+    /// List all existing connections in the catalog
+    ListConnections,
+
+    /// Drop a connection by its name
+    DropConnection {
+        #[clap(long)]
+        connection_name: String,
+    },
 }
 
 pub async fn start(opts: CliOpts) -> Result<()> {
@@ -229,8 +257,12 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }) => {
             cmd_impl::hummock::list_version_deltas(context, start_id, num_epochs).await?;
         }
-        Commands::Hummock(HummockCommands::ListKv { epoch, table_id }) => {
-            cmd_impl::hummock::list_kv(context, epoch, table_id).await?;
+        Commands::Hummock(HummockCommands::ListKv {
+            epoch,
+            table_id,
+            data_dir,
+        }) => {
+            cmd_impl::hummock::list_kv(context, epoch, table_id, data_dir).await?;
         }
         Commands::Hummock(HummockCommands::SstDump(args)) => {
             cmd_impl::hummock::sst_dump(context, args).await.unwrap()
@@ -296,23 +328,40 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::hummock::split_compaction_group(context, compaction_group_id, &table_ids)
                 .await?;
         }
-        Commands::Table(TableCommands::Scan { mv_name }) => {
-            cmd_impl::table::scan(context, mv_name).await?
+        Commands::Table(TableCommands::Scan { mv_name, data_dir }) => {
+            cmd_impl::table::scan(context, mv_name, data_dir).await?
         }
-        Commands::Table(TableCommands::ScanById { table_id }) => {
-            cmd_impl::table::scan_id(context, table_id).await?
+        Commands::Table(TableCommands::ScanById { table_id, data_dir }) => {
+            cmd_impl::table::scan_id(context, table_id, data_dir).await?
         }
         Commands::Table(TableCommands::List) => cmd_impl::table::list(context).await?,
         Commands::Bench(cmd) => cmd_impl::bench::do_bench(context, cmd).await?,
         Commands::Meta(MetaCommands::Pause) => cmd_impl::meta::pause(context).await?,
         Commands::Meta(MetaCommands::Resume) => cmd_impl::meta::resume(context).await?,
         Commands::Meta(MetaCommands::ClusterInfo) => cmd_impl::meta::cluster_info(context).await?,
+        Commands::Meta(MetaCommands::SourceSplitInfo) => {
+            cmd_impl::meta::source_split_info(context).await?
+        }
         Commands::Meta(MetaCommands::Reschedule { plan, dry_run }) => {
             cmd_impl::meta::reschedule(context, plan, dry_run).await?
         }
         Commands::Meta(MetaCommands::BackupMeta) => cmd_impl::meta::backup_meta(context).await?,
         Commands::Meta(MetaCommands::DeleteMetaSnapshots { snapshot_ids }) => {
             cmd_impl::meta::delete_meta_snapshots(context, &snapshot_ids).await?
+        }
+        Commands::Meta(MetaCommands::CreateConnection {
+            provider,
+            service_name,
+            availability_zones,
+        }) => {
+            cmd_impl::meta::create_connection(context, provider, service_name, availability_zones)
+                .await?
+        }
+        Commands::Meta(MetaCommands::ListConnections) => {
+            cmd_impl::meta::list_connections(context).await?
+        }
+        Commands::Meta(MetaCommands::DropConnection { connection_name }) => {
+            cmd_impl::meta::drop_connection(context, connection_name).await?
         }
         Commands::Trace => cmd_impl::trace::trace(context).await?,
         Commands::Profile { sleep } => cmd_impl::profile::profile(context, sleep).await?,

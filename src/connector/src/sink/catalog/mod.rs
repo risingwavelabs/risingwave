@@ -21,7 +21,7 @@ use risingwave_common::catalog::{
     ColumnCatalog, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
 };
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::{Sink as ProstSink, SinkType as ProstSinkType};
+use risingwave_pb::catalog::{PbSink, PbSinkType};
 
 #[derive(Clone, Copy, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
 pub struct SinkId {
@@ -77,20 +77,20 @@ impl SinkType {
         self == &Self::Upsert
     }
 
-    pub fn to_proto(self) -> ProstSinkType {
+    pub fn to_proto(self) -> PbSinkType {
         match self {
-            SinkType::AppendOnly => ProstSinkType::AppendOnly,
-            SinkType::ForceAppendOnly => ProstSinkType::ForceAppendOnly,
-            SinkType::Upsert => ProstSinkType::Upsert,
+            SinkType::AppendOnly => PbSinkType::AppendOnly,
+            SinkType::ForceAppendOnly => PbSinkType::ForceAppendOnly,
+            SinkType::Upsert => PbSinkType::Upsert,
         }
     }
 
-    pub fn from_proto(pb: ProstSinkType) -> Self {
+    pub fn from_proto(pb: PbSinkType) -> Self {
         match pb {
-            ProstSinkType::AppendOnly => SinkType::AppendOnly,
-            ProstSinkType::ForceAppendOnly => SinkType::ForceAppendOnly,
-            ProstSinkType::Upsert => SinkType::Upsert,
-            ProstSinkType::Unspecified => unreachable!(),
+            PbSinkType::AppendOnly => SinkType::AppendOnly,
+            PbSinkType::ForceAppendOnly => SinkType::ForceAppendOnly,
+            PbSinkType::Upsert => SinkType::Upsert,
+            PbSinkType::Unspecified => unreachable!(),
         }
     }
 }
@@ -115,12 +115,11 @@ pub struct SinkCatalog {
     /// All columns of the sink. Note that this is NOT sorted by columnId in the vector.
     pub columns: Vec<ColumnCatalog>,
 
-    /// Primiary keys of the sink (connector). Now the sink does not care about a field's
-    /// order (ASC/DESC).
-    pub pk: Vec<ColumnOrder>,
+    /// Primary keys of the sink. Derived by the frontend.
+    pub plan_pk: Vec<ColumnOrder>,
 
-    /// Primary key indices of the corresponding sink operator's output.
-    pub stream_key: Vec<usize>,
+    /// User-defined primary key indices for upsert sink.
+    pub downstream_pk: Vec<usize>,
 
     /// Distribution key indices of the sink. For example, if `distribution_key = [1, 2]`, then the
     /// distribution keys will be `columns[1]` and `columns[2]`.
@@ -142,16 +141,20 @@ pub struct SinkCatalog {
 }
 
 impl SinkCatalog {
-    pub fn to_proto(&self) -> ProstSink {
-        ProstSink {
+    pub fn to_proto(&self) -> PbSink {
+        PbSink {
             id: self.id.into(),
             schema_id: self.schema_id.schema_id,
             database_id: self.database_id.database_id,
             name: self.name.clone(),
             definition: self.definition.clone(),
             columns: self.columns.iter().map(|c| c.to_protobuf()).collect_vec(),
-            pk: self.pk.iter().map(|o| o.to_protobuf()).collect(),
-            stream_key: self.stream_key.iter().map(|idx| *idx as i32).collect_vec(),
+            plan_pk: self.plan_pk.iter().map(|o| o.to_protobuf()).collect(),
+            downstream_pk: self
+                .downstream_pk
+                .iter()
+                .map(|idx| *idx as i32)
+                .collect_vec(),
             dependent_relations: self
                 .dependent_relations
                 .iter()
@@ -177,29 +180,37 @@ impl SinkCatalog {
         Schema { fields }
     }
 
-    pub fn pk_indices(&self) -> Vec<usize> {
-        self.pk.iter().map(|k| k.column_index).collect_vec()
+    pub fn downstream_pk_indices(&self) -> Vec<usize> {
+        self.downstream_pk.clone()
     }
 }
 
-impl From<ProstSink> for SinkCatalog {
-    fn from(pb: ProstSink) -> Self {
+impl From<PbSink> for SinkCatalog {
+    fn from(pb: PbSink) -> Self {
         let sink_type = pb.get_sink_type().unwrap();
         SinkCatalog {
             id: pb.id.into(),
-            name: pb.name.clone(),
+            name: pb.name,
             schema_id: pb.schema_id.into(),
             database_id: pb.database_id.into(),
-            definition: pb.definition.clone(),
+            definition: pb.definition,
             columns: pb
                 .columns
                 .into_iter()
                 .map(ColumnCatalog::from)
                 .collect_vec(),
-            pk: pb.pk.iter().map(ColumnOrder::from_protobuf).collect_vec(),
-            stream_key: pb.stream_key.iter().map(|k| *k as _).collect_vec(),
-            distribution_key: pb.distribution_key.iter().map(|k| *k as _).collect_vec(),
-            properties: pb.properties.clone(),
+            plan_pk: pb
+                .plan_pk
+                .iter()
+                .map(ColumnOrder::from_protobuf)
+                .collect_vec(),
+            downstream_pk: pb.downstream_pk.into_iter().map(|k| k as _).collect_vec(),
+            distribution_key: pb
+                .distribution_key
+                .into_iter()
+                .map(|k| k as _)
+                .collect_vec(),
+            properties: pb.properties,
             owner: pb.owner.into(),
             dependent_relations: pb
                 .dependent_relations
@@ -211,8 +222,8 @@ impl From<ProstSink> for SinkCatalog {
     }
 }
 
-impl From<&ProstSink> for SinkCatalog {
-    fn from(pb: &ProstSink) -> Self {
+impl From<&PbSink> for SinkCatalog {
+    fn from(pb: &PbSink) -> Self {
         pb.clone().into()
     }
 }

@@ -16,8 +16,8 @@ use std::cmp::Ordering::{Equal, Less};
 use std::future::Future;
 use std::sync::Arc;
 
+use risingwave_common::cache::CachePriority;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::KeyComparator;
 
 use crate::hummock::iterator::{Backward, HummockIterator};
 use crate::hummock::sstable::SstableIteratorReadOptions;
@@ -68,7 +68,7 @@ impl BackwardSstableIterator {
                 .get(
                     self.sst.value(),
                     idx as usize,
-                    crate::hummock::CachePolicy::Fill,
+                    crate::hummock::CachePolicy::Fill(CachePriority::High),
                     &mut self.stats,
                 )
                 .await?;
@@ -132,8 +132,6 @@ impl HummockIterator for BackwardSstableIterator {
 
     fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async move {
-            let encoded_key = key.encode();
-            let encoded_key_slice = encoded_key.as_slice();
             let block_idx = self
                 .sst
                 .value()
@@ -143,10 +141,7 @@ impl HummockIterator for BackwardSstableIterator {
                     // Compare by version comparator
                     // Note: we are comparing against the `smallest_key` of the `block`, thus the
                     // partition point should be `prev(<=)` instead of `<`.
-                    let ord = KeyComparator::compare_encoded_full_key(
-                        block_meta.smallest_key.as_slice(),
-                        encoded_key_slice,
-                    );
+                    let ord = FullKey::decode(&block_meta.smallest_key).cmp(&key);
                     ord == Less || ord == Equal
                 })
                 .saturating_sub(1); // considering the boundary of 0
@@ -203,7 +198,7 @@ mod tests {
         // path.
         assert!(sstable.meta.block_metas.len() > 10);
         let cache = create_small_table_cache();
-        let handle = cache.insert(0, 0, 1, Box::new(sstable));
+        let handle = cache.insert(0, 0, 1, Box::new(sstable), CachePriority::High);
         let mut sstable_iter = BackwardSstableIterator::new(handle, sstable_store);
         let mut cnt = TEST_KEYS_COUNT;
         sstable_iter.rewind().await.unwrap();
@@ -230,7 +225,7 @@ mod tests {
         // path.
         assert!(sstable.meta.block_metas.len() > 10);
         let cache = create_small_table_cache();
-        let handle = cache.insert(0, 0, 1, Box::new(sstable));
+        let handle = cache.insert(0, 0, 1, Box::new(sstable), CachePriority::High);
         let mut sstable_iter = BackwardSstableIterator::new(handle, sstable_store);
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();

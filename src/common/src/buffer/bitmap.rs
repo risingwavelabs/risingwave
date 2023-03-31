@@ -40,7 +40,7 @@ use std::iter::{self, TrustedLen};
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, Not, RangeInclusive};
 
 use risingwave_pb::common::buffer::CompressionType;
-use risingwave_pb::common::Buffer as ProstBuffer;
+use risingwave_pb::common::PbBuffer;
 
 #[derive(Default, Debug)]
 pub struct BitmapBuilder {
@@ -173,13 +173,15 @@ impl BitmapBuilder {
 /// An immutable bitmap. Use [`BitmapBuilder`] to build it.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Bitmap {
-    // The useful bits in the bitmap. The total number of bits will usually
-    // be larger than the useful bits due to byte-padding.
+    /// The useful bits in the bitmap. The total number of bits will usually
+    /// be larger than the useful bits due to byte-padding.
     num_bits: usize,
 
-    // The number of high bits in the bitmap.
+    /// The number of high bits in the bitmap.
     count_ones: usize,
 
+    /// Bits are stored in a compact form.
+    /// They are packed into `usize`s.
     bits: Box<[usize]>,
 }
 
@@ -310,6 +312,7 @@ impl Bitmap {
             bits: &self.bits,
             idx: 0,
             num_bits: self.num_bits,
+            current_usize: 0,
         }
     }
 
@@ -525,21 +528,21 @@ impl FromIterator<Option<bool>> for Bitmap {
 }
 
 impl Bitmap {
-    pub fn to_protobuf(&self) -> ProstBuffer {
+    pub fn to_protobuf(&self) -> PbBuffer {
         let mut body = Vec::with_capacity((self.num_bits + 7) % 8 + 1);
         body.push((self.num_bits % 8) as u8);
         body.extend_from_slice(unsafe {
             std::slice::from_raw_parts(self.bits.as_ptr() as *const u8, (self.num_bits + 7) / 8)
         });
-        ProstBuffer {
+        PbBuffer {
             body,
             compression: CompressionType::None as i32,
         }
     }
 }
 
-impl From<&ProstBuffer> for Bitmap {
-    fn from(buf: &ProstBuffer) -> Self {
+impl From<&PbBuffer> for Bitmap {
+    fn from(buf: &PbBuffer) -> Self {
         let last_byte_num_bits = buf.body[0];
         let num_bits = ((buf.body.len() - 1) * 8) - ((8 - last_byte_num_bits) % 8) as usize;
 
@@ -556,6 +559,27 @@ pub struct BitmapIter<'a> {
     bits: &'a [usize],
     idx: usize,
     num_bits: usize,
+    current_usize: usize,
+}
+
+impl<'a> BitmapIter<'a> {
+    fn next_always_load_usize(&mut self) -> Option<bool> {
+        if self.idx >= self.num_bits {
+            return None;
+        }
+
+        // Offset of the bit within the usize.
+        let usize_offset = self.idx % BITS;
+
+        // Get the index of usize which the bit is located in
+        let usize_index = self.idx / BITS;
+        self.current_usize = unsafe { *self.bits.get_unchecked(usize_index) };
+
+        let bit_mask = 1 << usize_offset;
+        let bit_flag = self.current_usize & bit_mask != 0;
+        self.idx += 1;
+        Some(bit_flag)
+    }
 }
 
 impl<'a> iter::Iterator for BitmapIter<'a> {
@@ -565,9 +589,21 @@ impl<'a> iter::Iterator for BitmapIter<'a> {
         if self.idx >= self.num_bits {
             return None;
         }
-        let b = unsafe { self.bits.get_unchecked(self.idx / BITS) } & (1 << (self.idx % BITS)) != 0;
+
+        // Offset of the bit within the usize.
+        let usize_offset = self.idx % BITS;
+
+        if usize_offset == 0 {
+            // Get the index of usize which the bit is located in
+            let usize_index = self.idx / BITS;
+            self.current_usize = unsafe { *self.bits.get_unchecked(usize_index) };
+        }
+
+        let bit_mask = 1 << usize_offset;
+
+        let bit_flag = self.current_usize & bit_mask != 0;
         self.idx += 1;
-        Some(b)
+        Some(bit_flag)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -577,7 +613,7 @@ impl<'a> iter::Iterator for BitmapIter<'a> {
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         self.idx += n;
-        self.next()
+        self.next_always_load_usize()
     }
 }
 
@@ -762,7 +798,7 @@ mod tests {
     #[test]
     fn test_bitmap_from_protobuf() {
         let bitmap_bytes = vec![3u8 /* len % BITS */, 0b0101_0010, 0b110];
-        let buf = ProstBuffer {
+        let buf = PbBuffer {
             body: bitmap_bytes,
             compression: CompressionType::None as _,
         };

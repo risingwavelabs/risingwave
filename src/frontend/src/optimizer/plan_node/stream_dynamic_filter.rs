@@ -44,7 +44,7 @@ impl StreamDynamicFilter {
             let mut watermark_columns = FixedBitSet::with_capacity(left.schema().len());
             if right.watermark_columns()[0] {
                 match comparator {
-                    ExprType::GreaterThan | ExprType::GreaterThanOrEqual => {
+                    ExprType::Equal | ExprType::GreaterThan | ExprType::GreaterThanOrEqual => {
                         watermark_columns.set(left_index, true)
                     }
                     _ => {}

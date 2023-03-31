@@ -40,7 +40,7 @@ use bytes::{Buf, BufMut};
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
-use risingwave_hummock_sdk::key::{next_full_key, KeyPayloadType, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType, TableKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 #[cfg(test)]
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -62,6 +62,8 @@ use xxhash_rust::{xxh32, xxh64};
 
 use self::utils::{xxhash64_checksum, xxhash64_verify};
 use super::{HummockError, HummockResult};
+use crate::hummock::CachePolicy;
+use crate::store::ReadOptions;
 
 const DEFAULT_META_BUFFER_CAPACITY: usize = 4096;
 const MAGIC: u32 = 0x5785ab73;
@@ -253,6 +255,10 @@ impl BlockMeta {
     pub fn encoded_size(&self) -> usize {
         16 /* offset + len + key len + uncompressed size */ + self.smallest_key.len()
     }
+
+    pub fn table_id(&self) -> TableId {
+        FullKey::decode(&self.smallest_key).user_key.table_id
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -279,6 +285,7 @@ impl SstableMeta {
     /// | estimated size (4B) | key count (4B) |
     /// | smallest key len (4B) | smallest key |
     /// | largest key len (4B) | largest key |
+    /// | M (4B) |
     /// | range-tombstone 0 | ... | range-tombstone M-1 |
     /// | file offset of this meta block (8B) |
     /// | checksum (8B) | version (4B) | magic (4B) |
@@ -458,8 +465,17 @@ impl<'a> SstableBlockIterator<'a> {
 
 #[derive(Default)]
 pub struct SstableIteratorReadOptions {
-    pub prefetch: bool,
+    pub cache_policy: CachePolicy,
     pub must_iterated_end_user_key: Option<Bound<UserKey<KeyPayloadType>>>,
+}
+
+impl From<&ReadOptions> for SstableIteratorReadOptions {
+    fn from(read_options: &ReadOptions) -> Self {
+        Self {
+            cache_policy: read_options.cache_policy,
+            must_iterated_end_user_key: None,
+        }
+    }
 }
 
 #[cfg(test)]

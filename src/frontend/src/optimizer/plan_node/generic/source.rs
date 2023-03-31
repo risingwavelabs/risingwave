@@ -49,15 +49,20 @@ pub struct Source {
 
 impl GenericPlanNode for Source {
     fn schema(&self) -> Schema {
-        let fields = self.column_descs.iter().map(Into::into).collect();
+        let fields = self.non_generated_columns().map(Into::into).collect();
+        // let fields = self.column_descs.iter().map(Into::into).collect();
         Schema { fields }
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
         let mut id_to_idx = HashMap::new();
-        self.column_descs.iter().enumerate().for_each(|(idx, c)| {
-            id_to_idx.insert(c.column_id, idx);
-        });
+        // self.column_descs.iter().filter(|c| !c.is_generated_column()).enumerate().for_each(|(idx,
+        // c)| {
+        self.non_generated_columns()
+            .enumerate()
+            .for_each(|(idx, c)| {
+                id_to_idx.insert(c.column_id, idx);
+            });
         self.pk_col_ids
             .iter()
             .map(|c| id_to_idx.get(c).copied())
@@ -70,11 +75,12 @@ impl GenericPlanNode for Source {
 
     fn functional_dependency(&self) -> FunctionalDependencySet {
         let pk_indices = self.logical_pk();
+        let non_generated_columns_count = self.non_generated_columns().count();
         match pk_indices {
             Some(pk_indices) => {
-                FunctionalDependencySet::with_key(self.column_descs.len(), &pk_indices)
+                FunctionalDependencySet::with_key(non_generated_columns_count, &pk_indices)
             }
-            None => FunctionalDependencySet::new(self.column_descs.len()),
+            None => FunctionalDependencySet::new(non_generated_columns_count),
         }
     }
 }
@@ -96,8 +102,8 @@ impl Source {
             type_name: "".to_string(),
         };
         let value = Field {
-            data_type: DataType::Bytea,
-            name: "offset".to_string(),
+            data_type: DataType::Jsonb,
+            name: "offset_info".to_string(),
             sub_fields: vec![],
             type_name: "".to_string(),
         };
@@ -107,5 +113,12 @@ impl Source {
         builder.add_order_column(ordered_col_idx, OrderType::ascending());
 
         builder.build(vec![], 1)
+    }
+
+    /// Non-generated columns
+    fn non_generated_columns(&self) -> impl Iterator<Item = &ColumnDesc> {
+        self.column_descs
+            .iter()
+            .filter(|c| !c.is_generated_column())
     }
 }

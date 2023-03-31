@@ -19,13 +19,13 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{DistributedLookupJoinNode, LocalLookupJoinNode};
 
-use super::generic::GenericPlanRef;
+use super::generic::{self, GenericPlanRef};
 use super::ExprRewritable;
 use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
-    EqJoinPredicate, EqJoinPredicateDisplay, LogicalJoin, PlanBase, PlanTreeNodeBinary,
-    PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch, ToLocalBatch,
+    EqJoinPredicate, EqJoinPredicateDisplay, PlanBase, PlanTreeNodeUnary, ToBatchPb,
+    ToDistributedBatch, ToLocalBatch,
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::optimizer::PlanRef;
@@ -34,7 +34,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchLookupJoin {
     pub base: PlanBase,
-    logical: LogicalJoin,
+    logical: generic::Join<PlanRef>,
 
     /// The join condition must be equivalent to `logical.on`, but separated into equal and
     /// non-equal parts to facilitate execution later
@@ -50,26 +50,26 @@ pub struct BatchLookupJoin {
     lookup_prefix_len: usize,
 
     /// If `distributed_lookup` is true, it will generate `DistributedLookupJoinNode` for
-    /// `ToBatchProst`. Otherwise, it will generate `LookupJoinNode`.
+    /// `ToBatchPb`. Otherwise, it will generate `LookupJoinNode`.
     distributed_lookup: bool,
 }
 
 impl BatchLookupJoin {
     pub fn new(
-        logical: LogicalJoin,
+        logical: generic::Join<PlanRef>,
         eq_join_predicate: EqJoinPredicate,
         right_table_desc: TableDesc,
         right_output_column_ids: Vec<ColumnId>,
         lookup_prefix_len: usize,
         distributed_lookup: bool,
     ) -> Self {
+        let base = PlanBase::new_logical_with_core(&logical);
         // We cannot create a `BatchLookupJoin` without any eq keys. We require eq keys to do the
         // lookup.
         assert!(eq_join_predicate.has_eq());
         assert!(eq_join_predicate.eq_keys_are_type_aligned());
-        let ctx = logical.base.ctx.clone();
-        let dist = Self::derive_dist(logical.left().distribution(), &logical);
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
+        let dist = Self::derive_dist(logical.left.distribution(), &logical);
+        let base = PlanBase::new_batch(base.ctx, base.schema, dist, Order::any());
         Self {
             base,
             logical,
@@ -81,7 +81,7 @@ impl BatchLookupJoin {
         }
     }
 
-    fn derive_dist(left: &Distribution, logical: &LogicalJoin) -> Distribution {
+    fn derive_dist(left: &Distribution, logical: &generic::Join<PlanRef>) -> Distribution {
         match left {
             Distribution::Single => Distribution::Single,
             Distribution::HashShard(_) | Distribution::UpstreamHashShard(_, _) => {
@@ -117,10 +117,10 @@ impl fmt::Display for BatchLookupJoin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("BatchLookupJoin");
-        builder.field("type", &self.logical.join_type());
+        builder.field("type", &self.logical.join_type);
 
-        let mut concat_schema = self.logical.left().schema().fields.clone();
-        concat_schema.extend(self.logical.right().schema().fields.clone());
+        let mut concat_schema = self.logical.left.schema().fields.clone();
+        concat_schema.extend(self.logical.right.schema().fields.clone());
         let concat_schema = Schema::new(concat_schema);
         builder.field(
             "predicate",
@@ -133,7 +133,7 @@ impl fmt::Display for BatchLookupJoin {
         if verbose {
             if self
                 .logical
-                .output_indices()
+                .output_indices
                 .iter()
                 .copied()
                 .eq(0..self.logical.internal_column_num())
@@ -143,7 +143,7 @@ impl fmt::Display for BatchLookupJoin {
                 builder.field(
                     "output",
                     &IndicesDisplay {
-                        indices: self.logical.output_indices(),
+                        indices: &self.logical.output_indices,
                         input_schema: &concat_schema,
                     },
                 );
@@ -156,14 +156,15 @@ impl fmt::Display for BatchLookupJoin {
 
 impl PlanTreeNodeUnary for BatchLookupJoin {
     fn input(&self) -> PlanRef {
-        self.logical.left()
+        self.logical.left.clone()
     }
 
     // Only change left side
     fn clone_with_input(&self, input: PlanRef) -> Self {
+        let mut logical = self.logical.clone();
+        logical.left = input;
         Self::new(
-            self.logical
-                .clone_with_left_right(input, self.logical.right()),
+            logical,
             self.eq_join_predicate.clone(),
             self.right_table_desc.clone(),
             self.right_output_column_ids.clone(),
@@ -192,11 +193,11 @@ impl ToDistributedBatch for BatchLookupJoin {
     }
 }
 
-impl ToBatchProst for BatchLookupJoin {
+impl ToBatchPb for BatchLookupJoin {
     fn to_batch_prost_body(&self) -> NodeBody {
         if self.distributed_lookup {
             NodeBody::DistributedLookupJoin(DistributedLookupJoinNode {
-                join_type: self.logical.join_type() as i32,
+                join_type: self.logical.join_type as i32,
                 condition: self
                     .eq_join_predicate
                     .other_cond()
@@ -222,7 +223,7 @@ impl ToBatchProst for BatchLookupJoin {
                     .collect(),
                 output_indices: self
                     .logical
-                    .output_indices()
+                    .output_indices
                     .iter()
                     .map(|&x| x as u32)
                     .collect(),
@@ -231,7 +232,7 @@ impl ToBatchProst for BatchLookupJoin {
             })
         } else {
             NodeBody::LocalLookupJoin(LocalLookupJoinNode {
-                join_type: self.logical.join_type() as i32,
+                join_type: self.logical.join_type as i32,
                 condition: self
                     .eq_join_predicate
                     .other_cond()
@@ -258,7 +259,7 @@ impl ToBatchProst for BatchLookupJoin {
                     .collect(),
                 output_indices: self
                     .logical
-                    .output_indices()
+                    .output_indices
                     .iter()
                     .map(|&x| x as u32)
                     .collect(),
@@ -285,14 +286,12 @@ impl ExprRewritable for BatchLookupJoin {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let base = self.base.clone_with_new_plan_id();
+        let mut logical = self.logical.clone();
+        logical.rewrite_exprs(r);
         Self {
-            base: self.base.clone_with_new_plan_id(),
-            logical: self
-                .logical
-                .rewrite_exprs(r)
-                .as_logical_join()
-                .unwrap()
-                .clone(),
+            base,
+            logical,
             eq_join_predicate: self.eq_join_predicate.rewrite_exprs(r),
             ..Self::clone(self)
         }
