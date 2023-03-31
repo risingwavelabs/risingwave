@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod rw_ddl_progress;
-mod rw_meta_snapshot;
-mod rw_table_stats;
+use risingwave_common::types::DataType;
 
-pub use rw_ddl_progress::*;
-pub use rw_meta_snapshot::*;
-pub use rw_table_stats::*;
+use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+
+pub const RW_TABLE_STATS_TABLE_NAME: &str = "rw_table_stats";
+
+pub const RW_TABLE_STATS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[(DataType::Int64, "foobar")];

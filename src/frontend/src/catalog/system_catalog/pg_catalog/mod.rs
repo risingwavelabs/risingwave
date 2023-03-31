@@ -244,6 +244,11 @@ impl SysCatalogReaderImpl {
         Ok(ddl_grogress)
     }
 
+    pub(super) async fn read_table_stats(&self) -> Result<Vec<OwnedRow>> {
+        let row = OwnedRow::new(vec![Some(ScalarImpl::Int64(0))]);
+        Ok(vec![row])
+    }
+
     // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
     pub(super) fn read_opclass_info(&self) -> Result<Vec<OwnedRow>> {
         Ok(vec![])
