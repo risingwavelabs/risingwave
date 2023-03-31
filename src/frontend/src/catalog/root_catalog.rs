@@ -544,6 +544,19 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("function", function_name.to_string()))
     }
 
+    pub fn get_connection_by_name(
+        &self,
+        connection_name: &str,
+    ) -> CatalogResult<&ConnectionCatalog> {
+        let connection_id = self
+            .connection_id_by_name
+            .get(connection_name)
+            .ok_or_else(|| CatalogError::NotFound("connection", connection_name.to_string()))?;
+        self.connection_by_id
+            .get(connection_id)
+            .ok_or_else(|| CatalogError::NotFound("connection", connection_name.to_string()))
+    }
+
     /// Check the name if duplicated with existing table, materialized view or source.
     pub fn check_relation_name_duplicated(
         &self,

@@ -51,6 +51,7 @@ pub mod create_table_as;
 pub mod create_user;
 pub mod create_view;
 mod describe;
+mod drop_connection;
 mod drop_database;
 pub mod drop_function;
 mod drop_index;
@@ -317,6 +318,9 @@ pub async fn handle(
             }
             ObjectType::View => {
                 drop_view::handle_drop_view(handler_args, object_name, if_exists).await
+            }
+            ObjectType::Connection => {
+                drop_connection::handle_drop_connection(handler_args, object_name, if_exists).await
             }
         },
         Statement::DropFunction {

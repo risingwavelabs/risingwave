@@ -214,6 +214,8 @@ enum MetaCommands {
     /// Create a new connection object
     CreateConnection {
         #[clap(long)]
+        connection_name: String,
+        #[clap(long)]
         provider: String,
         #[clap(long)]
         service_name: String,
@@ -345,12 +347,19 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::meta::delete_meta_snapshots(context, &snapshot_ids).await?
         }
         Commands::Meta(MetaCommands::CreateConnection {
+            connection_name,
             provider,
             service_name,
             availability_zones,
         }) => {
-            cmd_impl::meta::create_connection(context, provider, service_name, availability_zones)
-                .await?
+            cmd_impl::meta::create_connection(
+                context,
+                connection_name,
+                provider,
+                service_name,
+                availability_zones,
+            )
+            .await?
         }
         Commands::Meta(MetaCommands::ListConnections) => {
             cmd_impl::meta::list_connections(context).await?

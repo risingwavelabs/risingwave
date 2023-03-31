@@ -612,7 +612,7 @@ where
                 let id = self.gen_unique_id::<{ IdCategory::Connection }>().await?;
                 let connection = Connection {
                     id,
-                    name: link.service_name.clone(),
+                    name: req.connection_name,
                     info: Some(connection::Info::PrivateLinkService(private_link_svc)),
                 };
 
@@ -645,11 +645,15 @@ where
     ) -> Result<Response<DropConnectionResponse>, Status> {
         let req = request.into_inner();
 
-        self.ddl_controller
+        let version = self
+            .ddl_controller
             .run_command(DdlCommand::DropConnection(req.connection_name))
             .await?;
 
-        Ok(Response::new(DropConnectionResponse {}))
+        Ok(Response::new(DropConnectionResponse {
+            status: None,
+            version,
+        }))
     }
 }
 

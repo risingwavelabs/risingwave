@@ -1945,6 +1945,7 @@ pub enum ObjectType {
     Sink,
     Database,
     User,
+    Connection,
 }
 
 impl fmt::Display for ObjectType {
@@ -1959,6 +1960,7 @@ impl fmt::Display for ObjectType {
             ObjectType::Sink => "SINK",
             ObjectType::Database => "DATABASE",
             ObjectType::User => "USER",
+            ObjectType::Connection => "CONNECTION",
         })
     }
 }
@@ -1983,9 +1985,11 @@ impl ParseTo for ObjectType {
             ObjectType::Database
         } else if parser.parse_keyword(Keyword::USER) {
             ObjectType::User
+        } else if parser.parse_keyword(Keyword::CONNECTION) {
+            ObjectType::Connection
         } else {
             return parser.expected(
-                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SCHEMA, DATABASE or USER after DROP",
+                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SCHEMA, DATABASE, USER or CONNECTION after DROP",
                 parser.peek_token(),
             );
         };

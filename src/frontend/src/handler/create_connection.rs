@@ -91,7 +91,7 @@ pub async fn handle_create_connection(
 
     session.check_relation_name_duplicated(stmt.connection_name.clone())?;
 
-    Binder::resolve_connection_name(stmt.connection_name)?;
+    let connection_name = Binder::resolve_connection_name(stmt.connection_name)?;
 
     let with_properties = handler_args
         .with_options
@@ -104,7 +104,7 @@ pub async fn handle_create_connection(
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
-        .create_connection(create_connection_payload)
+        .create_connection(connection_name, create_connection_payload)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_CONNECTION))

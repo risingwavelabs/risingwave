@@ -127,9 +127,13 @@ impl MetaClient {
 
     pub async fn create_connection(
         &self,
+        connection_name: String,
         req: create_connection_request::Payload,
     ) -> Result<(ConnectionId, CatalogVersion)> {
-        let request = CreateConnectionRequest { payload: Some(req) };
+        let request = CreateConnectionRequest {
+            connection_name,
+            payload: Some(req),
+        };
         let resp = self.inner.create_connection(request).await?;
         Ok((resp.connection_id, resp.version))
     }
@@ -140,12 +144,12 @@ impl MetaClient {
         Ok(resp.connections)
     }
 
-    pub async fn drop_connection(&self, connection_name: &str) -> Result<()> {
+    pub async fn drop_connection(&self, connection_name: &str) -> Result<CatalogVersion> {
         let request = DropConnectionRequest {
             connection_name: connection_name.to_string(),
         };
-        let _ = self.inner.drop_connection(request).await?;
-        Ok(())
+        let resp = self.inner.drop_connection(request).await?;
+        Ok(resp.version)
     }
 
     pub(crate) fn parse_meta_addr(meta_addr: &str) -> Result<MetaAddressStrategy> {

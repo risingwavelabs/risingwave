@@ -299,6 +299,7 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn create_connection(
         &self,
+        _connection_name: String,
         _connection: create_connection_request::Payload,
     ) -> Result<()> {
         unreachable!()
@@ -390,6 +391,10 @@ impl CatalogWriter for MockCatalogWriter {
     }
 
     async fn drop_function(&self, _function_id: FunctionId) -> Result<()> {
+        unreachable!()
+    }
+
+    async fn drop_connection(&self, _connection_name: &str) -> Result<()> {
         unreachable!()
     }
 

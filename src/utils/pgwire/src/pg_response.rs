@@ -64,6 +64,7 @@ pub enum StatementType {
     DROP_SCHEMA,
     DROP_DATABASE,
     DROP_USER,
+    DROP_CONNECTION,
     ALTER_INDEX,
     ALTER_VIEW,
     ALTER_TABLE,
@@ -193,6 +194,9 @@ impl StatementType {
                 risingwave_sqlparser::ast::ObjectType::Sink => Ok(StatementType::DROP_SINK),
                 risingwave_sqlparser::ast::ObjectType::Database => Ok(StatementType::DROP_DATABASE),
                 risingwave_sqlparser::ast::ObjectType::User => Ok(StatementType::DROP_USER),
+                risingwave_sqlparser::ast::ObjectType::Connection => {
+                    Ok(StatementType::DROP_CONNECTION)
+                }
             },
             Statement::Explain { .. } => Ok(StatementType::EXPLAIN),
             Statement::Flush => Ok(StatementType::FLUSH),

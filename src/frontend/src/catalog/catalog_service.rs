@@ -99,8 +99,11 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn create_function(&self, function: PbFunction) -> Result<()>;
 
-    async fn create_connection(&self, connection: create_connection_request::Payload)
-        -> Result<()>;
+    async fn create_connection(
+        &self,
+        connection_name: String,
+        connection: create_connection_request::Payload,
+    ) -> Result<()>;
 
     async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()>;
 
@@ -120,7 +123,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn drop_function(&self, function_id: FunctionId) -> Result<()>;
 
-    // async fn drop_connection(&self, connection_name: String) -> Result<()>;
+    async fn drop_connection(&self, connection_name: &str) -> Result<()>;
 
     async fn alter_table_name(&self, table_id: u32, table_name: &str) -> Result<()>;
 
@@ -237,9 +240,13 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn create_connection(
         &self,
+        connection_name: String,
         connection: create_connection_request::Payload,
     ) -> Result<()> {
-        let (_, version) = self.meta_client.create_connection(connection).await?;
+        let (_, version) = self
+            .meta_client
+            .create_connection(connection_name, connection)
+            .await?;
         self.wait_version(version).await
     }
 
@@ -288,10 +295,10 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    // async fn drop_connection(&self, connection_name: &str) -> Result<()> {
-    //     let version = self.meta_client.drop_connection(connection_name).await?;
-    //     self.wait_version(version).await
-    // }
+    async fn drop_connection(&self, connection_name: &str) -> Result<()> {
+        let version = self.meta_client.drop_connection(connection_name).await?;
+        self.wait_version(version).await
+    }
 
     async fn alter_table_name(&self, table_id: u32, table_name: &str) -> Result<()> {
         let version = self
