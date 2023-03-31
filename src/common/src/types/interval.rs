@@ -1221,43 +1221,35 @@ fn convert_hms(c: &mut Vec<String>, t: &mut Vec<TimeStrToken>) -> Option<()> {
     if c.len() > 3 {
         return None;
     }
-    const HOUR: usize = 0;
-    const MINUTE: usize = 1;
-    const SECOND: usize = 2;
     let mut is_neg = false;
-    for (i, s) in c.iter().enumerate() {
-        match i {
-            HOUR => {
-                let v = s.parse().ok()?;
-                is_neg = v < 0;
-                t.push(TimeStrToken::Num(v));
-                t.push(TimeStrToken::TimeUnit(DateTimeField::Hour))
-            }
-            MINUTE => {
-                let mut v: i64 = s.parse().ok()?;
-                if !(0..60).contains(&v) {
-                    return None;
-                }
-                if is_neg {
-                    v = v.checked_neg()?;
-                }
-                t.push(TimeStrToken::Num(v));
-                t.push(TimeStrToken::TimeUnit(DateTimeField::Minute))
-            }
-            SECOND => {
-                let mut v: F64 = s.parse().ok()?;
-                // PostgreSQL allows '60.x' for seconds.
-                if !(0f64 <= *v && *v < 61f64) {
-                    return None;
-                }
-                if is_neg {
-                    v = v.checked_neg()?;
-                }
-                t.push(TimeStrToken::Second(v));
-                t.push(TimeStrToken::TimeUnit(DateTimeField::Second))
-            }
-            _ => unreachable!(),
+    if let Some(s) = c.get(0) {
+        let v = s.parse().ok()?;
+        is_neg = s.starts_with('-');
+        t.push(TimeStrToken::Num(v));
+        t.push(TimeStrToken::TimeUnit(DateTimeField::Hour))
+    }
+    if let Some(s) = c.get(1) {
+        let mut v: i64 = s.parse().ok()?;
+        if !(0..60).contains(&v) {
+            return None;
         }
+        if is_neg {
+            v = v.checked_neg()?;
+        }
+        t.push(TimeStrToken::Num(v));
+        t.push(TimeStrToken::TimeUnit(DateTimeField::Minute))
+    }
+    if let Some(s) = c.get(2) {
+        let mut v: F64 = s.parse().ok()?;
+        // PostgreSQL allows '60.x' for seconds.
+        if !(0f64 <= *v && *v < 61f64) {
+            return None;
+        }
+        if is_neg {
+            v = v.checked_neg()?;
+        }
+        t.push(TimeStrToken::Second(v));
+        t.push(TimeStrToken::TimeUnit(DateTimeField::Second))
     }
     Some(())
 }
