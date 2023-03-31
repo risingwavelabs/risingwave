@@ -40,4 +40,12 @@ For instance, if the channel in the exchange executor is full,
 upstream messages cannot be sent through this channel.
 This means the upstream executor will be unable to continue processing new stream messages, until some space on the buffer is freed.
 
-The buffer size can currently be adjusted
+The various buffer sizes can currently be adjusted via options in the developer configuration file.
+For instance, options to configure buffer size of the exchange executor can be found [here](https://github.com/risingwavelabs/risingwave/blob/a36e01307d60491b91870ac5a37049a378fe986f/src/config/example.toml#L49-L50).
+
+Another subtle cause is that large buffer size can also worsen barrier latency.
+Suppose stream message processing is at its limit, and there's high latency as a result.
+Typically, backpressure kicks in, the source is throttled.
+If buffer sizes are too large, or if there are many buffers, there will not be backpressure applied to source immediately.
+During this delay, we will continue to see high barrier latency.
+A heuristic algorithm is on the way to deal with this: https://github.com/risingwavelabs/risingwave/issues/8654. 
