@@ -118,6 +118,9 @@ impl ObserverState for FrontendObserverNode {
         for view in snapshot.views {
             catalog_guard.create_view(&view)
         }
+        for function in snapshot.functions {
+            catalog_guard.create_function(&function)
+        }
         self.worker_node_manager.refresh(
             snapshot.nodes,
             snapshot
