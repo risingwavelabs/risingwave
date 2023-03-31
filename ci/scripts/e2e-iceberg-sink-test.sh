@@ -3,7 +3,7 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-source ci/scripts/common.env.sh
+source ci/scripts/common.sh
 
 while getopts 'p:' opt; do
     case ${opt} in
@@ -21,13 +21,10 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
+download_and_prepare_rw "$profile"
+
 echo "--- Download artifacts"
-mkdir -p target/debug
-buildkite-agent artifact download risingwave-"$profile" target/debug/
-buildkite-agent artifact download risedev-dev-"$profile" target/debug/
 buildkite-agent artifact download librisingwave_java_binding.so-"$profile" target/debug
-mv target/debug/risingwave-"$profile" target/debug/risingwave
-mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
 mv target/debug/librisingwave_java_binding.so-"$profile" target/debug/librisingwave_java_binding.so
 
 export RW_JAVA_BINDING_LIB_PATH=${PWD}/target/debug
@@ -37,17 +34,6 @@ echo "--- Download connector node package"
 buildkite-agent artifact download risingwave-connector.tar.gz ./
 mkdir ./connector-node
 tar xf ./risingwave-connector.tar.gz -C ./connector-node
-
-echo "--- Adjust permission"
-chmod +x ./target/debug/risingwave
-chmod +x ./target/debug/risedev-dev
-
-echo "--- Generate RiseDev CI config"
-cp ci/risedev-components.ci.source.env risedev-components.user.env
-
-echo "--- Prepare RiseDev dev cluster"
-cargo make pre-start-dev
-cargo make link-all-in-one-binaries
 
 echo "--- starting risingwave cluster with connector node"
 mkdir -p .risingwave/log

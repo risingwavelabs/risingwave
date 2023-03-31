@@ -15,7 +15,7 @@ for script in ci/**/*.sh; do
     fi
 done
 
-source ci/scripts/common.env.sh
+source ci/scripts/common.sh
 
 echo "--- Run clippy check (dev, all features)"
 cargo clippy --all-targets --all-features --locked -- -D warnings

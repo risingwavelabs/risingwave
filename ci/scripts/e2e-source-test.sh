@@ -3,7 +3,7 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-source ci/scripts/common.env.sh
+source ci/scripts/common.sh
 
 # prepare environment
 export CONNECTOR_RPC_ENDPOINT="localhost:50051"
@@ -24,13 +24,10 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
+download_and_prepare_rw "$profile"
+
 echo "--- Download artifacts"
-mkdir -p target/debug
-buildkite-agent artifact download risingwave-"$profile" target/debug/
-buildkite-agent artifact download risedev-dev-"$profile" target/debug/
 buildkite-agent artifact download librisingwave_java_binding.so-"$profile" target/debug
-mv target/debug/risingwave-"$profile" target/debug/risingwave
-mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
 mv target/debug/librisingwave_java_binding.so-"$profile" target/debug/librisingwave_java_binding.so
 
 export RW_JAVA_BINDING_LIB_PATH=${PWD}/target/debug
@@ -46,16 +43,7 @@ cp src/connector/src/test_data/simple-schema.avsc ./avro-simple-schema.avsc
 cp src/connector/src/test_data/complex-schema.avsc ./avro-complex-schema.avsc
 cp src/connector/src/test_data/complex-schema ./proto-complex-schema
 
-echo "--- Adjust permission"
-chmod +x ./target/debug/risingwave
-chmod +x ./target/debug/risedev-dev
 
-echo "--- Generate RiseDev CI config"
-cp ci/risedev-components.ci.source.env risedev-components.user.env
-
-echo "--- Prepare RiseDev dev cluster"
-cargo make pre-start-dev
-cargo make link-all-in-one-binaries
 
 echo "--- e2e, ci-1cn-1fe, mysql & postgres cdc"
 
