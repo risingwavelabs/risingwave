@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::panic;
 use std::fmt;
 
 use risingwave_pb::stream_plan::stream_node::NodeBody;
