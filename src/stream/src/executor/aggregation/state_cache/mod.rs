@@ -18,11 +18,10 @@ use risingwave_common::array::Op;
 use risingwave_common::types::{Datum, DatumRef};
 use smallvec::SmallVec;
 
-use self::cache::OrderedCache;
 use super::minput::StateCacheInputBatch;
+use crate::common::cache::OrderedCache;
 
 pub mod array_agg;
-mod cache;
 pub mod extreme;
 pub mod string_agg;
 
