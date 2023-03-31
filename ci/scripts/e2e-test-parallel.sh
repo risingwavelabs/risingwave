@@ -21,12 +21,10 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-download_and_prepare_rw "$profile"
+download_and_prepare_rw "$profile" common
 
 echo "--- Download artifacts"
 buildkite-agent artifact download "e2e_test/generated/*" ./
-
-
 
 host_args="-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567"
 

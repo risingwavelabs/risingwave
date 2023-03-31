@@ -21,11 +21,8 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-echo "--- Download artifacts"
-buildkite-agent artifact download librisingwave_java_binding.so-"$profile" target/debug
-mv target/debug/librisingwave_java_binding.so-"$profile" target/debug/librisingwave_java_binding.so
+download_java_binding "$profile"
 
-export RW_JAVA_BINDING_LIB_PATH=${PWD}/target/debug
 # TODO: Switch to stream_chunk encoding once it's completed, and then remove json encoding as well as this env var.
 export RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT=json
 

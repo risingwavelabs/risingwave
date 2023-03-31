@@ -24,14 +24,9 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-download_and_prepare_rw "$profile"
+download_and_prepare_rw "$profile" source
 
-echo "--- Download artifacts"
-buildkite-agent artifact download librisingwave_java_binding.so-"$profile" target/debug
-mv target/debug/librisingwave_java_binding.so-"$profile" target/debug/librisingwave_java_binding.so
-
-export RW_JAVA_BINDING_LIB_PATH=${PWD}/target/debug
-
+download_java_binding "$profile"
 
 echo "--- Download connector node package"
 buildkite-agent artifact download risingwave-connector.tar.gz ./

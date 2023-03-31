@@ -23,9 +23,6 @@ shift $((OPTIND -1))
 
 download_and_prepare_rw "$profile" common
 
-
-
-
 host_args="-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567"
 
 echo "--- e2e, ci-3cn-3fe-in-memory, streaming"
