@@ -27,9 +27,9 @@ use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{SetExpr, Statement};
 
-use super::extended_handle::{Portal, PrepareStatement};
+use super::extended_handle::{PortalResult, PrepareStatement, PreparedResult};
 use super::{PgResponseStream, RwPgResponse};
-use crate::binder::Binder;
+use crate::binder::{Binder, BoundStatement};
 use crate::catalog::TableId;
 use crate::handler::flush::do_flush;
 use crate::handler::privilege::resolve_privileges;
@@ -368,6 +368,8 @@ pub async fn local_execute(
     Ok(execution.stream_rows())
 }
 
+// TODO: Following code have redundant code with `handle_query`, we may need to refactor them in
+// future.
 pub fn handle_parse(
     handler_args: HandlerArgs,
     statement: Statement,
@@ -382,15 +384,58 @@ pub fn handle_parse(
 
     let param_types = binder.export_param_types()?;
 
-    Ok(PrepareStatement {
+    Ok(PrepareStatement::Prepared(PreparedResult {
         statement,
         bound_statement,
         param_types,
-    })
+    }))
 }
 
-pub async fn handle_execute(handler_args: HandlerArgs, portal: Portal) -> Result<RwPgResponse> {
-    let Portal {
+pub fn gen_batch_query_plan_for_bound(
+    session: &SessionImpl,
+    context: OptimizerContextRef,
+    stmt: Statement,
+    bound: BoundStatement,
+) -> Result<(PlanRef, QueryMode, Schema)> {
+    let must_dist = must_run_in_distributed_mode(&stmt)?;
+
+    let mut planner = Planner::new(context);
+
+    let mut logical = planner.plan(bound)?;
+    let schema = logical.schema();
+    let batch_plan = logical.gen_batch_plan()?;
+
+    let must_local = must_run_in_local_mode(batch_plan.clone());
+
+    let query_mode = match (must_dist, must_local) {
+        (true, true) => {
+            return Err(ErrorCode::InternalError(
+                "the query is forced to both local and distributed mode by optimizer".to_owned(),
+            )
+            .into())
+        }
+        (true, false) => QueryMode::Distributed,
+        (false, true) => QueryMode::Local,
+        (false, false) => match session.config().get_query_mode() {
+            QueryMode::Auto => determine_query_mode(batch_plan.clone()),
+            QueryMode::Local => QueryMode::Local,
+            QueryMode::Distributed => QueryMode::Distributed,
+        },
+    };
+
+    let physical = match query_mode {
+        QueryMode::Auto => unreachable!(),
+        QueryMode::Local => logical.gen_batch_local_plan(batch_plan)?,
+        QueryMode::Distributed => logical.gen_batch_distributed_plan(batch_plan)?,
+    };
+    Ok((physical, query_mode, schema))
+}
+
+pub async fn handle_execute(
+    handler_args: HandlerArgs,
+    portal: PortalResult,
+) -> Result<RwPgResponse> {
+    let PortalResult {
         statement,
         bound_statement,
         result_formats,
@@ -407,38 +452,8 @@ pub async fn handle_execute(handler_args: HandlerArgs, portal: Portal) -> Result
     let (plan_fragmenter, query_mode, output_schema) = {
         let context = OptimizerContext::from_handler_args(handler_args);
 
-        let must_dist = must_run_in_distributed_mode(&statement)?;
-
-        let mut planner = Planner::new(context.into());
-
-        let mut logical = planner.plan(bound_statement)?;
-        let schema = logical.schema();
-        let batch_plan = logical.gen_batch_plan()?;
-
-        let must_local = must_run_in_local_mode(batch_plan.clone());
-
-        let query_mode = match (must_dist, must_local) {
-            (true, true) => {
-                return Err(ErrorCode::InternalError(
-                    "the query is forced to both local and distributed mode by optimizer"
-                        .to_owned(),
-                )
-                .into())
-            }
-            (true, false) => QueryMode::Distributed,
-            (false, true) => QueryMode::Local,
-            (false, false) => match session.config().get_query_mode() {
-                QueryMode::Auto => determine_query_mode(batch_plan.clone()),
-                QueryMode::Local => QueryMode::Local,
-                QueryMode::Distributed => QueryMode::Distributed,
-            },
-        };
-
-        let physical = match query_mode {
-            QueryMode::Auto => unreachable!(),
-            QueryMode::Local => logical.gen_batch_local_plan(batch_plan)?,
-            QueryMode::Distributed => logical.gen_batch_distributed_plan(batch_plan)?,
-        };
+        let (physical, query_mode, schema) =
+            gen_batch_query_plan_for_bound(&session, context.into(), statement, bound_statement)?;
 
         let context = physical.plan_base().ctx.clone();
         tracing::trace!(
