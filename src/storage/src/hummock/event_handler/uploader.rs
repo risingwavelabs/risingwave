@@ -711,7 +711,6 @@ impl HummockUploader {
             if let Some(tracker) =
                 memory_limiter.try_require_memory((imm_size + kv_count * EPOCH_LEN) as u64)
             {
-                // Some(tracker)
                 self.sealed_data
                     .merging_tasks
                     .push_front(MergingImmTask::new(
