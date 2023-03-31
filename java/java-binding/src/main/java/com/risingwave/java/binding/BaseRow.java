@@ -36,6 +36,7 @@ public class BaseRow implements AutoCloseable {
     }
 
     public long getLong(int index) {
+        System.err.println(Binding.rowGetInt64Value(pointer, index));
         return Binding.rowGetInt64Value(pointer, index);
     }
 
