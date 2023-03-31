@@ -57,7 +57,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             let source_desc_builder = SourceDescBuilder::new(
                 source.columns.clone(),
                 params.env.source_metrics(),
-                source.pk_column_ids.clone(),
                 source.row_id_index.map(|x| x as _),
                 source.properties.clone(),
                 source.get_info()?.clone(),
