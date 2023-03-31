@@ -551,7 +551,7 @@ def section_compaction(outer_panels):
             [
                 panels.timeseries_count(
                     "SSTable Count",
-                    "The num of SSTables at each level",
+                    "The number of SSTables at each level",
                     [
                         panels.target(
                             f"sum({metric('storage_level_sst_num')}) by (instance, level_index)",
@@ -561,7 +561,7 @@ def section_compaction(outer_panels):
                 ),
                 panels.timeseries_kilobytes(
                     "SSTable Size(KB)",
-                    "The size(KB) of SSTables aggregated at each level",
+                    "The size(KB) of SSTables at each level",
                     [
                         panels.target(
                             f"sum({metric('storage_level_total_file_size')}) by (instance, level_index)",
@@ -1184,7 +1184,9 @@ def section_streaming_actors(outer_panels):
                 ),
                 panels.timeseries_percentage(
                     "Actor Backpressure",
-                    "",
+                    "We first record the total blocking duration(ns) of output buffer of each actor. It shows how "
+                    "much time it takes an actor to process a message, i.e. a barrier, a watermark or rows of data, "
+                    "on average. Then we divide this duration by 1 second and show it as a percentage.",
                     [
                         panels.target(
                             f"rate({metric('stream_actor_output_buffer_blocking_duration_ns')}[$__rate_interval]) / 1000000000",
@@ -1790,7 +1792,7 @@ def section_hummock(panels):
         ),
         panels.timeseries_latency(
             "Read Duration - Get",
-            "",
+            "Histogram of the latency of Get operations that have been issued to the state store.",
             [
                 *quantile(
                     lambda quantile, legend: panels.target(
@@ -1807,17 +1809,18 @@ def section_hummock(panels):
         ),
         panels.timeseries_latency(
             "Read Duration - Iter",
-            "",
+            "Histogram of the time spent on iterator initialization."
+            "Histogram of the time spent on iterator scanning.",
             [
                 *quantile(
                     lambda quantile, legend: panels.target(
-                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_iter_duration_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
+                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_iter_init_duration_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
                         f"create_iter_time p{legend} - {{{{table_id}}}} @ {{{{job}}}} @ {{{{instance}}}}",
                     ),
                     [90, 99, 999, "max"],
                 ),
                 panels.target(
-                    f"sum by(le, job, instance)(rate({metric('state_store_iter_duration_sum')}[$__rate_interval])) / sum by(le, job,instance) (rate({metric('state_store_iter_duration_count')}[$__rate_interval]))",
+                    f"sum by(le, job, instance)(rate({metric('state_store_iter_init_duration_sum')}[$__rate_interval])) / sum by(le, job,instance) (rate({metric('state_store_iter_init_duration_count')}[$__rate_interval]))",
                     "create_iter_time avg - {{job}} @ {{instance}}",
                 ),
                 *quantile(
@@ -1874,7 +1877,9 @@ def section_hummock(panels):
         ),
         panels.timeseries_bytes_per_sec(
             "Read Throughput - Get",
-            "",
+            "The size of a single key-value pair when reading by operation Get."
+            "Operation Get gets a single key-value pair with respect to a caller-specified key. If the key does not "
+            "exist in the storage, the size of key is counted into this metric and the size of value is 0.",
             [
                 panels.target(
                     f"sum(rate({metric('state_store_get_key_size_sum')}[$__rate_interval])) by(job, instance) + sum(rate({metric('state_store_get_value_size_sum')}[$__rate_interval])) by(job, instance)",
@@ -1884,7 +1889,8 @@ def section_hummock(panels):
         ),
         panels.timeseries_bytes_per_sec(
             "Read Throughput - Iter",
-            "",
+            "The size of all the key-value paris when reading by operation Iter."
+            "Operation Iter scans a range of key-value pairs.",
             [
                 panels.target(
                     f"sum(rate({metric('state_store_iter_size_sum')}[$__rate_interval])) by(job, instance)",
@@ -2078,7 +2084,8 @@ def section_hummock(panels):
         ),
         panels.timeseries_bytes(
             "Cache Size",
-            "",
+            "Hummock has three parts of memory usage: 1. Meta Cache 2. Block Cache 3. Uploader."
+            "This metric shows the real memory usage of each of these three caches.",
             [
                 panels.target(
                     f"avg({metric('state_store_meta_cache_size')}) by (job,instance)",

@@ -28,7 +28,7 @@ pub struct MonitoredStorageMetrics {
 
     pub iter_size: HistogramVec,
     pub iter_item: HistogramVec,
-    pub iter_duration: HistogramVec,
+    pub iter_init_duration: HistogramVec,
     pub iter_scan_duration: HistogramVec,
     pub may_exist_duration: HistogramVec,
 
@@ -89,16 +89,16 @@ impl MonitoredStorageMetrics {
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
 
         let opts = histogram_opts!(
-            "state_store_iter_duration",
-            "Histogram of iterator scan and initialization time that have been issued to state store",
+            "state_store_iter_init_duration",
+            "Histogram of the time spent on iterator initialization.",
             buckets.clone(),
         );
-        let iter_duration =
+        let iter_init_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
 
         let opts = histogram_opts!(
             "state_store_iter_scan_duration",
-            "Histogram of iterator scan time that have been issued to state store",
+            "Histogram of the time spent on iterator scanning.",
             buckets.clone(),
         );
         let iter_scan_duration =
@@ -140,7 +140,7 @@ impl MonitoredStorageMetrics {
             get_value_size,
             iter_size,
             iter_item,
-            iter_duration,
+            iter_init_duration,
             iter_scan_duration,
             may_exist_duration,
             iter_in_process_counts,
