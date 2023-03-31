@@ -497,7 +497,7 @@ def section_cluster_node(panels):
         panels.row("Cluster Node"),
         panels.timeseries_count(
             "Node Count",
-            "The number of each type of RisingWave components alive",
+            "The number of each type of RisingWave components alive.",
             [
                 panels.target(f"sum({metric('worker_num')}) by (worker_type)",
                               "{{worker_type}}")
@@ -506,7 +506,7 @@ def section_cluster_node(panels):
         ),
         panels.timeseries_memory(
             "Node Memory",
-            "The memory usage of each RisingWave component",
+            "The memory usage of each RisingWave component.",
             [
                 panels.target(
                     f"avg({metric('process_resident_memory_bytes')}) by (job,instance)",
@@ -516,7 +516,7 @@ def section_cluster_node(panels):
         ),
         panels.timeseries_cpu(
             "Node CPU",
-            "The CPU usage of each RisingWave component",
+            "The CPU usage of each RisingWave component.",
             [
                 panels.target(
                     f"sum(rate({metric('process_cpu_seconds_total')}[$__rate_interval])) by (job,instance)",
@@ -1942,7 +1942,7 @@ def section_hummock(panels):
             ],
         ),
         panels.timeseries_percentage(
-            " Filter/Cache Miss Rate",
+            "Filter/Cache Miss Rate",
             "",
             [
                 panels.target(
