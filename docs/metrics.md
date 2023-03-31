@@ -18,11 +18,13 @@ There are two contributing factors to it:
 1. Time taken to actually process the streaming messages.
 2. Bandwidth for streaming messages.
 
-First, we keep total order for streaming messages.
-This means that all streaming messages currently in the stream graph have to be processed
+When injecting a new barrier,
+there will usually be streaming messages in the stream graph (unless it's the initial barrier).
+Since we keep total order for streaming messages,
+this means that all streaming messages currently in the stream graph have to be processed
 before the barrier can pass through.
 If barrier latency is high, it could mean a long time is taken to process these streaming messages.
-Concretely, here are some costs of processing:
+Concretely, here are some costs of processing streaming messages:
 1. CPU cost of evaluating expressions.
 2. I/O remote exchange between fragments.
 3. hash-join / hash-agg cache-miss (results in extra costs to access state on s3).
