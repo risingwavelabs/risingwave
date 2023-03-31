@@ -223,56 +223,6 @@ impl SstableStore {
             .map_err(HummockError::object_io_error)
     }
 
-    pub fn prefetch(
-        self: &Arc<Self>,
-        sst: &Sstable,
-        start_block_index: usize,
-        end_block_index: usize,
-    ) -> Option<JoinHandle<HummockResult<()>>> {
-        if self
-            .block_cache
-            .exists_block(sst.id, start_block_index as u64)
-        {
-            return None;
-        }
-        let block_meta = &sst.meta.block_metas[start_block_index];
-        let mut block_loc = BlockLocation {
-            offset: block_meta.offset as usize,
-            size: 0,
-        };
-        let mut blocks_info = vec![];
-        for block_idx in start_block_index..end_block_index {
-            let size = sst.meta.block_metas[block_idx].len as usize;
-            blocks_info.push((
-                block_idx,
-                size,
-                sst.meta.block_metas[block_idx].uncompressed_size as usize,
-            ));
-            block_loc.size += size;
-        }
-        let sst_id = sst.id;
-        let data_path = self.get_sst_data_path(sst.id);
-        let sstable_store = self.clone();
-        Some(tokio::spawn(async move {
-            let block_data = sstable_store
-                .store
-                .read(&data_path, Some(block_loc))
-                .await?;
-            let mut last_offset = 0;
-            for (block_idx, size, uncompressed_capacity) in blocks_info {
-                let block = Block::decode(
-                    block_data.slice(last_offset..(last_offset + size)),
-                    uncompressed_capacity,
-                )?;
-                last_offset += size;
-                sstable_store
-                    .block_cache
-                    .insert(sst_id, block_idx as u64, Box::new(block));
-            }
-            Ok(())
-        }))
-    }
-
     pub async fn get_block_response(
         &self,
         sst: &Sstable,

@@ -33,7 +33,6 @@ stream_chunk_size = 1024
 stream_exchange_initial_permits = 8192
 stream_exchange_batched_permits = 1024
 
-
 [streaming]
 in_flight_barrier_nums = 10000
 enable_jaeger_tracing = false
@@ -74,7 +73,6 @@ total_buffer_capacity_mb = 128
 cache_file_fallocate_unit_mb = 512
 cache_meta_fallocate_unit_mb = 16
 cache_file_max_write_size_mb = 4
-
 
 [system]
 barrier_interval_ms = 1000

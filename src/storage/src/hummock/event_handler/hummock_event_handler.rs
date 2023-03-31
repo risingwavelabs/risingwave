@@ -32,7 +32,7 @@ use tracing::{error, info};
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::hummock::compactor::{compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::event_handler::cache_fill_policy::CacheFillPolicy;
+use crate::hummock::event_handler::cache_refill_policy::CacheRefillPolicy;
 use crate::hummock::event_handler::uploader::{
     HummockUploader, UploadTaskInfo, UploadTaskPayload, UploaderEvent,
 };
@@ -109,7 +109,7 @@ pub struct HummockEventHandler {
 
     last_instance_id: LocalInstanceId,
 
-    cache_fill_policy: Arc<CacheFillPolicy>,
+    cache_fill_policy: Arc<CacheRefillPolicy>,
     sstable_object_id_manager: SstableObjectIdManagerRef,
 }
 
@@ -144,7 +144,7 @@ impl HummockEventHandler {
         let version_update_notifier_tx = Arc::new(version_update_notifier_tx);
         let read_version_mapping = Arc::new(RwLock::new(HashMap::default()));
         let buffer_tracker = BufferTracker::from_storage_opts(&compactor_context.storage_opts);
-        let cache_refill_io_count_limit = compactor_context.storage_opts.cache_refill_max_io_count;
+        let max_preload_wait_time_mill = compactor_context.storage_opts.max_preload_wait_time_mill;
         let write_conflict_detector =
             ConflictDetector::new_from_config(&compactor_context.storage_opts);
         let sstable_store = compactor_context.sstable_store.clone();
@@ -157,10 +157,10 @@ impl HummockEventHandler {
             }),
             buffer_tracker,
         );
-        let cache_fill_policy = Arc::new(CacheFillPolicy::new(
+        let cache_fill_policy = Arc::new(CacheRefillPolicy::new(
             sstable_store,
             metrics.clone(),
-            cache_refill_io_count_limit,
+            max_preload_wait_time_mill,
         ));
 
         Self {
@@ -381,17 +381,25 @@ impl HummockEventHandler {
         });
     }
 
-    fn handle_version_update(&mut self, version_payload: Payload) {
+    async fn handle_version_update(&mut self, version_payload: Payload) {
         let pinned_version = self.pinned_version.load().clone();
 
         let prev_max_committed_epoch = pinned_version.max_committed_epoch();
         let newly_pinned_version = match version_payload {
             Payload::VersionDeltas(version_deltas) => {
                 let mut version_to_apply = pinned_version.version();
+                let max_level = version_to_apply
+                    .levels
+                    .values()
+                    .map(|levels| levels.levels.last().unwrap().level_idx)
+                    .max()
+                    .unwrap();
                 for version_delta in &version_deltas.version_deltas {
                     assert_eq!(version_to_apply.id, version_delta.prev_id);
                     if version_to_apply.max_committed_epoch == version_delta.max_committed_epoch {
-                        self.cache_fill_policy.execute(version_delta.clone());
+                        self.cache_fill_policy
+                            .execute(version_delta.clone(), max_level)
+                            .await;
                     }
                     version_to_apply.apply_version_delta(version_delta);
                 }
@@ -476,7 +484,7 @@ impl HummockEventHandler {
                         }
 
                         HummockEvent::VersionUpdate(version_payload) => {
-                            self.handle_version_update(version_payload);
+                            self.handle_version_update(version_payload).await;
                         }
 
                         HummockEvent::ImmToUploader(imm) => {

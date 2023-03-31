@@ -26,7 +26,7 @@ use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::HummockResult;
 use crate::store::SyncResult;
 
-mod cache_fill_policy;
+mod cache_refill_policy;
 pub mod hummock_event_handler;
 pub mod uploader;
 
