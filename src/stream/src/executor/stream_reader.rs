@@ -58,10 +58,7 @@ impl<const BIASED: bool> StreamReaderWithPause<BIASED> {
             match chunk {
                 Ok(chunk) => yield chunk,
                 Err(err) => {
-                    error!("hang up stream reader due to polling error: {}", err);
-                    futures::future::pending()
-                        .instrument_await("source_error")
-                        .await
+                    return Err(StreamExecutorError::connector_error(err));
                 }
             }
         }
