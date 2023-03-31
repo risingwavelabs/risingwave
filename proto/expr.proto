@@ -113,6 +113,13 @@ message ExprNode {
     ACOS = 250;
     ATAN = 251;
     ATAN2 = 252;
+    SINH = 261;
+    COSH = 262;
+    TANH = 263;
+    COTH = 264;
+    ASINH = 265;
+    ACOSH = 266;
+    ATANH = 267;
 
     // Boolean comparison
     IS_TRUE = 301;

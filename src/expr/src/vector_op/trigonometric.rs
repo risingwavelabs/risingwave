@@ -56,6 +56,45 @@ pub fn atan2_f64(input_x: F64, input_y: F64) -> F64 {
     input_x.0.atan2(input_y.0).into()
 }
 
+#[function("sinh(float64) -> float64")]
+pub fn sinh_f64(input: F64) -> F64 {
+    f64::sinh(input.0).into()
+}
+
+#[function("cosh(float64) -> float64")]
+pub fn cosh_f64(input: F64) -> F64 {
+    f64::cosh(input.0).into()
+}
+
+#[function("tanh(float64) -> float64")]
+pub fn tanh_f64(input: F64) -> F64 {
+    f64::tanh(input.0).into()
+}
+
+// TODO: correct definition?
+#[function("coth(float64) -> float64")]
+pub fn coth_f64(input: F64) -> F64 {
+    let res = 1.0 / f64::tanh(input.0);
+    res.into()
+}
+
+#[function("asinh(float64) -> float64")]
+pub fn asinh_f64(input: F64) -> F64 {
+    f64::asinh(input.0).into()
+}
+
+#[function("acosh(float64) -> float64")]
+pub fn acosh_f64(input: F64) -> F64 {
+    f64::acosh(input.0).into()
+}
+
+#[function("atanh(float64) -> float64")]
+pub fn atanh_f64(input: F64) -> F64 {
+    f64::atanh(input.0).into()
+}
+
+
+
 #[cfg(test)]
 mod tests {
 
@@ -104,4 +143,6 @@ mod tests {
             two * atan_f64(y / (F64::from(F64::from(x.powi(2) + y.powi(2)).sqrt()) + x)),
         )
     }
+
+    // TODO: add tests here
 }
