@@ -153,3 +153,138 @@ SELECT abs(atan2(pi(), -3.8) - 2.4507611878363194) < 0.000000000000001
 ----
 t
 
+query R
+SELECT abs(sinh(1) - 1.1752011936438014) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(cosh(1) - 1.5430806348152437) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(tanh(1) -0.7615941559557649) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(coth(1) -  1.3130352854993312) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(asinh(1) -  0.881373587019543) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(acosh(1)) < 0.000000000000001
+----
+t
+
+query R
+SELECT atanh(1)
+----
+Infinity
+
+query R
+SELECT abs(sinh(1.1) - 1.335647470124177) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(cosh(1.1) -  1.6685185538222564) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(tanh(1.1) - 0.8004990217606297) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(coth(1.1) -  1.2492207645683124) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(asinh(1.1) - 0.9503469298211343) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(acosh(1.1) -  0.4435682543851153) < 0.000000000000001
+----
+t
+
+query R
+SELECT atanh(1.1)
+----
+NaN
+
+query R
+SELECT abs(sinh(-1.1) + 1.335647470124177) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(cosh(-1.1) - 1.6685185538222564) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(tanh(-1.1) + 0.8004990217606297) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(coth(-1.1)  + 1.2492207645683124) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(asinh(-1.1) + 0.9503469298211343) < 0.000000000000001
+----
+t
+
+query R
+SELECT acosh(-1.1)
+----
+NaN
+
+query R
+SELECT atanh(-1.1)
+----
+NaN
+
+query R
+SELECT abs(sinh(pi()) -  11.548739357257746) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(cosh(pi()) -  11.591953275521519 ) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(tanh(pi()) -  0.99627207622075) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(asinh(pi()) -  1.8622957433108482) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(acosh(pi()) - 1.8115262724608532) < 0.000000000000001
+----
+t
+
+query R
+SELECT atanh(pi())
+----
+NaN
+
