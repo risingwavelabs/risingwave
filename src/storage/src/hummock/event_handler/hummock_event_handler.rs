@@ -451,10 +451,7 @@ impl HummockEventHandler {
                     }
 
                     UploaderEvent::ImmMerged(merge_output) => {
-                        // add the merged imm into sealed data
-                        self.uploader.update_sealed_data(&merge_output.merged_imm);
-
-                        // update read version for corresponding table shard
+                        // update read version for corresponding table shards
                         let read_guard = self.read_version_mapping.read();
                         read_guard.get(&merge_output.table_id).map_or((), |shards| {
                             shards

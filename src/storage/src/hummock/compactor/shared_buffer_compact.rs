@@ -23,7 +23,7 @@ use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
-use risingwave_hummock_sdk::key::{FullKey, UserKey, EPOCH_LEN};
+use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
@@ -41,10 +41,10 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
 };
 use crate::hummock::sstable::DeleteRangeAggregatorBuilder;
 use crate::hummock::store::memtable::ImmutableMemtable;
+use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    CachePolicy, HummockError, HummockResult, MemoryLimiter, RangeTombstonesCollector,
-    SstableBuilderOptions,
+    CachePolicy, HummockError, HummockResult, RangeTombstonesCollector, SstableBuilderOptions,
 };
 
 const GC_DELETE_KEYS_FOR_FLUSH: bool = false;
@@ -252,7 +252,7 @@ pub async fn merge_imms_in_memory(
     table_id: TableId,
     instance_id: LocalInstanceId,
     imms: Vec<ImmutableMemtable>,
-    memory_limiter: Option<Arc<MemoryLimiter>>,
+    memory_tracker: Option<MemoryTracker>,
 ) -> HummockResult<ImmutableMemtable> {
     let mut range_tombstone_list = Vec::new();
     let mut kv_count = 0;
@@ -314,9 +314,6 @@ pub async fn merge_imms_in_memory(
         merged_payload.push((pivot, versions));
     }
 
-    let tracker = memory_limiter.and_then(|limiter| {
-        limiter.try_require_memory((merged_size + kv_count * EPOCH_LEN) as u64)
-    });
     Ok(SharedBufferBatch {
         inner: Arc::new(SharedBufferBatchInner::new_with_multi_epoch_batches(
             epochs,
@@ -325,7 +322,7 @@ pub async fn merge_imms_in_memory(
             merged_imm_ids,
             range_tombstone_list,
             merged_size,
-            tracker,
+            memory_tracker,
         )),
         table_id,
         instance_id,

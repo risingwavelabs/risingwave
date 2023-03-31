@@ -27,6 +27,7 @@ use futures::future::{try_join_all, TryJoinAll};
 use futures::FutureExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::key::EPOCH_LEN;
 use risingwave_hummock_sdk::{info_in_release, CompactionGroupId, HummockEpoch, LocalSstableInfo};
 use tokio::task::JoinHandle;
 use tracing::error;
@@ -37,6 +38,7 @@ use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
 use crate::hummock::store::version::StagingSstableInfo;
+use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{HummockError, HummockResult};
 use crate::opts::StorageOpts;
 
@@ -97,12 +99,12 @@ impl MergingImmTask {
         table_id: TableId,
         instance_id: LocalInstanceId,
         imms: Vec<ImmutableMemtable>,
+        memory_tracker: Option<MemoryTracker>,
         context: &UploaderContext,
     ) -> Self {
-        let memory_limiter = context.buffer_tracker.get_memory_limiter().clone();
         let input_imms = imms.clone();
         let join_handle = context.compaction_executor.spawn(async move {
-            merge_imms_in_memory(table_id, instance_id, imms, Some(memory_limiter)).await
+            merge_imms_in_memory(table_id, instance_id, imms, memory_tracker).await
         });
 
         MergingImmTask {
@@ -377,21 +379,6 @@ impl SealedData {
             .append(&mut self.spilled_data.uploaded_data);
         self.spilled_data.uploading_tasks = unseal_epoch_data.spilled_data.uploading_tasks;
         self.spilled_data.uploaded_data = unseal_epoch_data.spilled_data.uploaded_data;
-    }
-
-    /// Scan imms of each table shard to generate merging task
-    /// if the number of imms exceeds the merge threshold
-    fn gen_merging_tasks(&mut self, sealed_epoch: HummockEpoch, context: &UploaderContext) {
-        self.imms_by_table_shard
-            .iter_mut()
-            .filter(|(_, imms)| imms.len() >= context.imm_merge_threshold)
-            .map(|((table_id, shard_id), imms)| {
-                let imms = imms.drain(..).collect_vec();
-                // ensure imms are sealed
-                assert!(imms.iter().all(|imm| imm.max_epoch() <= sealed_epoch));
-                MergingImmTask::new(*table_id, *shard_id, imms, context)
-            })
-            .for_each(|task| self.merging_tasks.push_front(task));
     }
 
     fn add_merged_imm(&mut self, merged_imm: &ImmutableMemtable) {
@@ -695,9 +682,46 @@ impl HummockUploader {
     }
 
     pub(crate) fn start_merge_imms(&mut self, sealed_epoch: HummockEpoch) {
-        if self.context.imm_merge_threshold > 1 {
-            self.sealed_data
-                .gen_merging_tasks(sealed_epoch, &self.context);
+        // skip merging if merge threshold is 1
+        if self.context.imm_merge_threshold <= 1 {
+            return;
+        }
+
+        let memory_limiter = self.context.buffer_tracker.get_memory_limiter();
+        // scan imms of each table shard to generate merging task
+        // when the number of imms exceeds the merge threshold
+        for ((table_id, shard_id), imms) in self
+            .sealed_data
+            .imms_by_table_shard
+            .iter_mut()
+            .filter(|(_, imms)| imms.len() >= self.context.imm_merge_threshold)
+        {
+            let imms = imms.drain(..).collect_vec();
+            let mut kv_count = 0;
+            let mut imm_size = 0;
+            imms.iter().for_each(|imm| {
+                // ensure imms are sealed
+                assert!(imm.max_epoch() <= sealed_epoch);
+                kv_count += imm.kv_count();
+                imm_size += imm.size();
+            });
+
+            // acquire memory before generate merge task
+            // if acquire memory failed, the task will not be generated
+            if let Some(tracker) =
+                memory_limiter.try_require_memory((imm_size + kv_count * EPOCH_LEN) as u64)
+            {
+                // Some(tracker)
+                self.sealed_data
+                    .merging_tasks
+                    .push_front(MergingImmTask::new(
+                        *table_id,
+                        *shard_id,
+                        imms,
+                        Some(tracker),
+                        &self.context,
+                    ));
+            }
         }
     }
 
@@ -944,6 +968,8 @@ impl<'a> Future for NextUploaderEvent<'a> {
         }
 
         if let Some(merge_output) = ready!(uploader.poll_sealed_merge_imm_task(cx)) {
+            // add the merged imm into sealed data
+            uploader.update_sealed_data(&merge_output.merged_imm);
             return Poll::Ready(UploaderEvent::ImmMerged(merge_output));
         }
         Poll::Pending
@@ -1338,7 +1364,6 @@ mod tests {
                 // poll the merging task and check the result
                 match uploader.next_event().await {
                     UploaderEvent::ImmMerged(output) => {
-                        uploader.update_sealed_data(&output.merged_imm);
                         println!("merging task success for epoch {}", epoch);
                         merged_imms.push_front(output.merged_imm);
                     }
@@ -1447,7 +1472,7 @@ mod tests {
         // newer data comes first
         let imms = vec![imm3, imm2, imm1];
         let context = test_uploader_context(dummy_success_upload_future);
-        let mut task = MergingImmTask::new(table_id, 0, imms, &context);
+        let mut task = MergingImmTask::new(table_id, 0, imms, None, &context);
         let sleep = tokio::time::sleep(Duration::from_millis(500));
         tokio::select! {
             _ = sleep => {
