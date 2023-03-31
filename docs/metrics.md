@@ -16,7 +16,7 @@ Usually when examining barrier latency, we look at **high barrier latency**.
 
 There are two contributing factors to it:
 1. Time taken to actually process the streaming messages.
-2. Bandwidth for streaming messages.
+2. Buffer capacity for streaming messages.
 
 When injecting a new barrier,
 there will usually be streaming messages in the stream graph (unless it's the initial barrier).
@@ -29,6 +29,9 @@ Concretely, here are some costs of processing streaming messages:
 2. I/O remote exchange between fragments.
 3. hash-join / hash-agg cache-miss (results in extra costs to access state on s3).
 
-Next, high barrier latency could also be caused by buffers in the graph,
-for instance the channel in the exchanges. These buffers determine the bandwidth for the streaming messages.
+Next, high barrier latency could also be caused by buffers in the graph.
 If some downstream buffer is congested, we will be unable to queue and continue processing upstream messages.
+
+For instance, if the channel in the exchange executor is full,
+upstream messages cannot be sent through this channel.
+This means the upstream executor will be unable to continue processing new stream messages, until some space on the buffer is freed.
