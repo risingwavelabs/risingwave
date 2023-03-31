@@ -31,7 +31,6 @@ use super::{
     ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::ColumnId;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
@@ -60,7 +59,6 @@ impl LogicalSource {
     pub fn new(
         source_catalog: Option<Rc<SourceCatalog>>,
         column_catalog: Vec<ColumnCatalog>,
-        pk_col_ids: Vec<ColumnId>,
         row_id_index: Option<usize>,
         gen_row_id: bool,
         for_table: bool,
@@ -69,7 +67,6 @@ impl LogicalSource {
         let core = generic::Source {
             catalog: source_catalog,
             column_catalog,
-            pk_col_ids,
             row_id_index,
             gen_row_id,
             for_table,
@@ -92,14 +89,12 @@ impl LogicalSource {
         ctx: OptimizerContextRef,
     ) -> Self {
         let column_catalogs = source_catalog.columns.clone();
-        let pk_col_ids = source_catalog.pk_col_ids.clone();
         let row_id_index = source_catalog.row_id_index;
         let gen_row_id = source_catalog.append_only;
 
         Self::new(
             Some(source_catalog),
             column_catalogs,
-            pk_col_ids,
             row_id_index,
             gen_row_id,
             for_table,
@@ -118,14 +113,12 @@ impl LogicalSource {
             .map(|c| &c.column_desc)
             .cloned()
             .collect();
-        let pk_col_ids = source_catalog.pk_col_ids.clone();
         let row_id_index = source_catalog.row_id_index;
         let gen_row_id = source_catalog.append_only;
 
         let source = Self::new(
             Some(source_catalog),
             column_catalogs,
-            pk_col_ids,
             row_id_index,
             gen_row_id,
             for_table,
@@ -256,7 +249,6 @@ impl LogicalSource {
         let core = generic::Source {
             catalog: self.core.catalog.clone(),
             column_catalog: source_column_catalogs,
-            pk_col_ids: self.core.pk_col_ids.clone(),
             row_id_index,
             gen_row_id: self.core.gen_row_id,
             for_table: self.core.for_table,
@@ -273,7 +265,6 @@ impl LogicalSource {
 
     fn wrap_with_optional_generated_columns_stream_proj(&self) -> Result<PlanRef> {
         let column_catalogs = self.core.column_catalog.clone();
-        let pk_indices = self.logical_pk();
         let exprs = Self::gen_optional_generated_column_project_exprs(
             column_catalogs
                 .iter()
@@ -283,7 +274,7 @@ impl LogicalSource {
         )?;
         if let Some(exprs) = exprs {
             let source = StreamSource::new(self.rewrite_to_stream_batch_source());
-            let logical_project = LogicalProject::with_pk_indices(source.into(), exprs, pk_indices);
+            let logical_project = LogicalProject::new(source.into(), exprs);
             Ok(StreamProject::new(logical_project).into())
         } else {
             let source = StreamSource::new(self.clone());
@@ -293,7 +284,6 @@ impl LogicalSource {
 
     fn wrap_with_optional_generated_columns_batch_proj(&self) -> Result<PlanRef> {
         let column_catalogs = self.core.column_catalog.clone();
-        let pk_indices = self.logical_pk();
         let exprs = Self::gen_optional_generated_column_project_exprs(
             column_catalogs
                 .iter()
@@ -303,7 +293,7 @@ impl LogicalSource {
         )?;
         if let Some(exprs) = exprs {
             let source = BatchSource::new(self.rewrite_to_stream_batch_source());
-            let logical_project = LogicalProject::with_pk_indices(source.into(), exprs, pk_indices);
+            let logical_project = LogicalProject::new(source.into(), exprs);
             Ok(BatchProject::new(logical_project).into())
         } else {
             let source = BatchSource::new(self.clone());

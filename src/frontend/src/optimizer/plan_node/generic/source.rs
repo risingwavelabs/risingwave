@@ -22,7 +22,6 @@ use risingwave_common::util::sort_util::OrderType;
 use super::super::utils::TableCatalogBuilder;
 use super::GenericPlanNode;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::ColumnId;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::{TableCatalog, WithOptions};
@@ -36,7 +35,6 @@ pub struct Source {
     /// NOTE(Yuanxin): Here we store column descriptions, pk column ids, and row id index for plan
     /// generating, even if there is no external stream source.
     pub column_catalog: Vec<ColumnCatalog>,
-    pub pk_col_ids: Vec<ColumnId>,
     pub row_id_index: Option<usize>,
     /// Whether the "SourceNode" should generate the row id column for append only source
     pub gen_row_id: bool,
@@ -58,15 +56,7 @@ impl GenericPlanNode for Source {
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
-        let mut id_to_idx = HashMap::new();
-
-        self.column_catalog.iter().enumerate().for_each(|(idx, c)| {
-            id_to_idx.insert(c.column_id(), idx);
-        });
-        self.pk_col_ids
-            .iter()
-            .map(|c| id_to_idx.get(c).copied())
-            .collect::<Option<Vec<_>>>()
+        self.row_id_index.map(|idx| vec![idx])
     }
 
     fn ctx(&self) -> OptimizerContextRef {

@@ -71,13 +71,6 @@ impl LogicalProject {
         Self::with_core(generic::Project::with_mapping(input, mapping))
     }
 
-    /// Creates a `LogicalProject` with given pk column indices,
-    /// overwrite the one calculated by `generic::Project` from `exprs`.
-    pub fn with_pk_indices(input: PlanRef, exprs: Vec<ExprImpl>, pk_indices: &[usize]) -> Self {
-        let core = generic::Project::with_pk_indices(input, exprs, pk_indices);
-        Self::with_core(core)
-    }
-
     /// Creates a `LogicalProject` which select some columns from the input.
     pub fn with_out_fields(input: PlanRef, out_fields: &FixedBitSet) -> Self {
         Self::with_core(generic::Project::with_out_fields(input, out_fields))

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 // Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -33,7 +34,7 @@ pub use logical_optimization::*;
 pub use optimizer_context::*;
 use plan_expr_rewriter::ConstEvalRewriter;
 use property::Order;
-use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, Field, Schema};
+use risingwave_common::catalog::{ColumnCatalog, ColumnId, ConflictBehavior, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -390,6 +391,7 @@ impl PlanRoot {
         table_name: String,
         columns: Vec<ColumnCatalog>,
         definition: String,
+        pk_column_ids: Vec<ColumnId>,
         row_id_index: Option<usize>,
         append_only: bool,
         watermark_descs: Vec<WatermarkDesc>,
@@ -431,14 +433,36 @@ impl PlanRoot {
             true => ConflictBehavior::NoCheck,
             false => ConflictBehavior::Overwrite,
         };
+
+        let pk_column_indices = {
+            let mut id_to_idx = HashMap::new();
+
+            columns.iter().enumerate().for_each(|(idx, c)| {
+                id_to_idx.insert(c.column_id(), idx);
+            });
+            pk_column_ids
+                .iter()
+                .map(|c| id_to_idx.get(c).copied().unwrap()) // pk column id must exist in table columns.
+                .collect_vec()
+        };
+
+        let table_required_dist = {
+            let mut bitset = FixedBitSet::with_capacity(columns.len());
+            for idx in &pk_column_indices {
+                bitset.insert(*idx);
+            }
+            RequiredDist::ShardByKey(bitset)
+        };
+
         StreamMaterialize::create_for_table(
             stream_plan,
             table_name,
-            self.required_dist.clone(),
-            self.required_order.clone(),
+            table_required_dist,
+            Order::any(),
             columns,
             definition,
             conflict_behavior,
+            pk_column_indices,
             row_id_index,
             version,
         )

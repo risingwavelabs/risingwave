@@ -537,7 +537,6 @@ fn gen_table_plan_inner(
     let source_node: PlanRef = LogicalSource::new(
         source_catalog,
         columns.clone(),
-        pk_column_ids,
         row_id_index,
         false,
         true,
@@ -545,7 +544,7 @@ fn gen_table_plan_inner(
     )
     .into();
 
-    let required_cols = FixedBitSet::with_capacity(source_node.schema().len());
+    let required_cols = FixedBitSet::with_capacity(columns.len());
     let mut plan_root = PlanRoot::new(
         source_node,
         RequiredDist::Any,
@@ -573,6 +572,7 @@ fn gen_table_plan_inner(
         name,
         columns,
         definition,
+        pk_column_ids,
         row_id_index,
         append_only,
         watermark_descs,
