@@ -5,8 +5,8 @@ set -euo pipefail
 
 # Check ci bash scripts contains `set -euo pipefail`.
 for script in ci/**/*.sh; do
-    # skip .env.sh
-    if [[ "$script" == *".env.sh" ]]; then
+    # skip .env.sh and common.sh
+    if [[ "$script" == *"common.sh" ]] || [[ "$script" == *".env.sh" ]]; then
         continue
     fi
     if ! grep -Fq 'set -euo pipefail' "$script"; then
