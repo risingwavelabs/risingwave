@@ -439,6 +439,22 @@ impl DataChunk {
             Vis::Bitmap(vis) => {
                 let rows_num = vis.len();
                 let mut buffers = vec![BytesMut::new(); rows_num];
+                for (i, buffer) in buffers.iter_mut().enumerate() {
+                    unsafe {
+                        if vis.is_set_unchecked(i) {
+                            buffer.reserve(
+                                self.columns()
+                                    .iter()
+                                    .map(|col| {
+                                        estimate_serialize_datum_size(
+                                            col.array_ref().value_at_unchecked(i),
+                                        )
+                                    })
+                                    .sum(),
+                            );
+                        }
+                    }
+                }
                 for c in &self.columns {
                     let c = c.array_ref();
                     assert_eq!(c.len(), rows_num);
@@ -455,6 +471,20 @@ impl DataChunk {
             }
             Vis::Compact(rows_num) => {
                 let mut buffers = vec![BytesMut::new(); *rows_num];
+                for (i, buffer) in buffers.iter_mut().enumerate() {
+                    unsafe {
+                        buffer.reserve(
+                            self.columns()
+                                .iter()
+                                .map(|col| {
+                                    estimate_serialize_datum_size(
+                                        col.array_ref().value_at_unchecked(i),
+                                    )
+                                })
+                                .sum(),
+                        );
+                    }
+                }
                 for c in &self.columns {
                     let c = c.array_ref();
                     assert_eq!(c.len(), *rows_num);
