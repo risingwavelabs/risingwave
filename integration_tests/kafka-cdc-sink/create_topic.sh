@@ -1,0 +1,1 @@
+docker exec message_queue /usr/bin/rpk topic create -p 2 counts
