@@ -320,7 +320,7 @@ pub async fn handle(
                 drop_view::handle_drop_view(handler_args, object_name, if_exists).await
             }
             ObjectType::Connection => {
-                drop_connection::handle_drop_connection(handler_args, object_name, if_exists).await
+                drop_connection::handle_drop_connection(handler_args, object_name, if_exists)
             }
         },
         Statement::DropFunction {
