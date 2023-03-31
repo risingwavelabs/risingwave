@@ -21,7 +21,7 @@ arrow-schema = "36"
 async-trait = "0.1"
 auto_enums = "0.8"
 bitflags = "2"
-bit-set = "0.5.3"
+smallbitset = "0.6.1"
 byteorder = "1"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = [

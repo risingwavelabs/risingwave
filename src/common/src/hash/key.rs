@@ -41,6 +41,7 @@ use crate::types::{DataType, Date, Decimal, ScalarRef, Time, Timestamp, F32, F64
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::iter_util::ZipEqFast;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum_into};
+use smallbitset::Set8;
 
 /// A wrapper for u64 hash result.
 #[derive(Default, Clone, Copy, Debug, PartialEq)]
@@ -143,15 +144,16 @@ pub trait HashKey:
     ) -> ArrayResult<()>;
 
     fn has_null(&self) -> bool {
-        !self.null_bitmap().is_clear()
+        !self.null_bitmap().is_empty()
     }
 
-    fn null_bitmap(&self) -> &FixedBitSet;
+    fn null_bitmap(&self) -> &Set8;
 }
 
 /// Designed for hash keys with at most `N` serialized bytes.
 ///
 /// See [`crate::hash::calc_hash_key_kind`]
+/// TODO(kwannoel): add benchmark and test, this should also use small bitset.
 #[derive(Clone, Debug)]
 pub struct FixedSizeKey<const N: usize> {
     key: [u8; N],
@@ -167,7 +169,7 @@ pub struct SerializedKey {
     // Key encoding.
     key: Vec<u8>,
     hash_code: u64,
-    null_bitmap: FixedBitSet,
+    null_bitmap: Set8,
 }
 
 impl<const N: usize> EstimateSize for FixedSizeKey<N> {
@@ -192,7 +194,7 @@ impl<const N: usize> Hash for FixedSizeKey<N> {
 
 impl EstimateSize for SerializedKey {
     fn estimated_heap_size(&self) -> usize {
-        self.key.estimated_heap_size() + self.null_bitmap.estimated_heap_size()
+        self.key.estimated_heap_size() + 8 //self.null_bitmap.estimated_heap_size()
     }
 }
 
@@ -575,7 +577,8 @@ impl<const N: usize> HashKeyDeserializer for FixedSizeKeyDeserializer<N> {
 pub struct SerializedKeySerializer {
     buffer: Vec<u8>,
     hash_code: u64,
-    null_bitmap: FixedBitSet,
+    null_bitmap: Set8,
+    null_bitmap_idx: usize,
 }
 
 impl HashKeySerializer for SerializedKeySerializer {
@@ -585,20 +588,21 @@ impl HashKeySerializer for SerializedKeySerializer {
         Self {
             buffer: Vec::with_capacity(estimated_value_encoding_size),
             hash_code: hash_code.0,
-            null_bitmap: FixedBitSet::new(),
+            null_bitmap: Set8::empty(),
+            null_bitmap_idx: 0,
         }
     }
 
     fn append<'a, D: HashKeySerDe<'a>>(&mut self, data: Option<D>) {
         let len_bitmap = self.null_bitmap.len();
-        self.null_bitmap.grow(len_bitmap + 1);
         match data {
             Some(v) => {
                 serialize_datum_into(&Some(v.to_owned_scalar().into()), &mut self.buffer);
             }
             None => {
                 serialize_datum_into(&None, &mut self.buffer);
-                self.null_bitmap.insert(len_bitmap);
+                self.null_bitmap.add_inplace(self.null_bitmap_idx);
+                self.null_bitmap_idx += 1;
             }
         }
     }
@@ -696,7 +700,7 @@ impl<const N: usize> HashKey for FixedSizeKey<N> {
         Ok(())
     }
 
-    fn null_bitmap(&self) -> &FixedBitSet {
+    fn null_bitmap(&self) -> &Set8 {
         &self.null_bitmap
     }
 }
@@ -726,7 +730,7 @@ impl HashKey for SerializedKey {
         Ok(())
     }
 
-    fn null_bitmap(&self) -> &FixedBitSet {
+    fn null_bitmap(&self) -> &Set8 {
         &self.null_bitmap
     }
 }
