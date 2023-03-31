@@ -23,6 +23,7 @@ use risingwave_common::catalog::{
     USER_COLUMN_ID_OFFSET,
 };
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::GeneratedColumnDesc;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
@@ -531,6 +532,9 @@ fn gen_table_plan_inner(
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs: watermark_descs.clone(),
+        optional_associated_table_id: Some(OptionalAssociatedTableId::AssociatedTableId(
+            TableId::placeholder().table_id,
+        )),
     });
 
     let source_catalog = source.as_ref().map(|source| Rc::new((source).into()));
@@ -555,7 +559,7 @@ fn gen_table_plan_inner(
 
     if append_only && row_id_index.is_none() {
         return Err(ErrorCode::InvalidInputSyntax(
-            "PRIMARY KEY constraint can not be appiled on a append only table.".to_owned(),
+            "PRIMARY KEY constraint can not be applied to an append-only table.".to_owned(),
         )
         .into());
     }

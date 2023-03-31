@@ -244,7 +244,7 @@ pub struct StreamFragmentGraph {
     upstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, StreamFragmentEdge>>,
 
     /// Dependent relations of this job.
-    dependent_relations: HashSet<TableId>,
+    dependent_table_ids: HashSet<TableId>,
 
     /// The default parallelism of the job, specified by the `STREAMING_PARALLELISM` session
     /// variable. If not specified, all active parallel units will be used.
@@ -303,11 +303,10 @@ impl StreamFragmentGraph {
                 .unwrap();
         }
 
-        // Note: Here we directly use the field `dependent_relation_ids` in the proto (resolved in
-        // frontend), instead of visiting the graph ourselves. Note that for creating table with a
-        // connector, the source itself is NOT INCLUDED in this list.
-        let dependent_relations = proto
-            .dependent_relation_ids
+        // Note: Here we directly use the field `dependent_table_ids` in the proto (resolved in
+        // frontend), instead of visiting the graph ourselves.
+        let dependent_table_ids = proto
+            .dependent_table_ids
             .iter()
             .map(TableId::from)
             .collect();
@@ -322,7 +321,7 @@ impl StreamFragmentGraph {
             fragments,
             downstreams,
             upstreams,
-            dependent_relations,
+            dependent_table_ids,
             default_parallelism,
         })
     }
@@ -350,9 +349,9 @@ impl StreamFragmentGraph {
             .expect("require exactly 1 materialize/sink node when creating the streaming job")
     }
 
-    /// Get the dependent relations of this job.
-    pub fn dependent_relations(&self) -> &HashSet<TableId> {
-        &self.dependent_relations
+    /// Get the dependent streaming job ids of this job.
+    pub fn dependent_table_ids(&self) -> &HashSet<TableId> {
+        &self.dependent_table_ids
     }
 
     /// Get the default parallelism of the job.

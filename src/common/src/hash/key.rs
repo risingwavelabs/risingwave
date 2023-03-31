@@ -60,7 +60,7 @@ impl HashCode {
 
 pub trait HashKeySerializer {
     type K: HashKey;
-    fn from_hash_code(hash_code: HashCode) -> Self;
+    fn from_hash_code(hash_code: HashCode, estimated_key_size: usize) -> Self;
     fn append<'a, D: HashKeySerDe<'a>>(&mut self, data: Option<D>);
     fn into_hash_key(self) -> Self::K;
 }
@@ -114,9 +114,11 @@ pub trait HashKey:
         data_chunk: &DataChunk,
         hash_codes: Vec<HashCode>,
     ) -> Vec<Self> {
+        let estimated_key_size = data_chunk.estimate_value_encoding_size(column_idxes);
+        // Construct serializers for each row.
         let mut serializers: Vec<Self::S> = hash_codes
             .into_iter()
-            .map(Self::S::from_hash_code)
+            .map(|hashcode| Self::S::from_hash_code(hashcode, estimated_key_size))
             .collect();
 
         for column_idx in column_idxes {
@@ -504,7 +506,9 @@ impl<const N: usize> FixedSizeKeySerializer<N> {
 impl<const N: usize> HashKeySerializer for FixedSizeKeySerializer<N> {
     type K = FixedSizeKey<N>;
 
-    fn from_hash_code(hash_code: HashCode) -> Self {
+    /// We already know the estimated key size statically, no need
+    /// to use runtime parameter: `estimated_key_size`.
+    fn from_hash_code(hash_code: HashCode, _estimated_key_size: usize) -> Self {
         Self {
             buffer: [0u8; N],
             null_bitmap: FixedBitSet::with_capacity(u8::BITS as usize),
@@ -577,9 +581,9 @@ pub struct SerializedKeySerializer {
 impl HashKeySerializer for SerializedKeySerializer {
     type K = SerializedKey;
 
-    fn from_hash_code(hash_code: HashCode) -> Self {
+    fn from_hash_code(hash_code: HashCode, estimated_value_encoding_size: usize) -> Self {
         Self {
-            buffer: Vec::new(),
+            buffer: Vec::with_capacity(estimated_value_encoding_size),
             hash_code: hash_code.0,
             null_bitmap: FixedBitSet::new(),
         }
