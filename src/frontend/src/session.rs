@@ -191,6 +191,7 @@ impl FrontendEnv {
             WorkerType::Frontend,
             &frontend_address,
             0,
+            &config.meta,
         )
         .await?;
 
