@@ -440,6 +440,7 @@ impl DataChunk {
                 let rows_num = vis.len();
                 let mut buffers = vec![BytesMut::new(); rows_num];
                 for (i, buffer) in buffers.iter_mut().enumerate() {
+                    // SAFETY(value_at_unchecked): the idx is always in bound.
                     unsafe {
                         if vis.is_set_unchecked(i) {
                             buffer.reserve(
@@ -472,6 +473,7 @@ impl DataChunk {
             Vis::Compact(rows_num) => {
                 let mut buffers = vec![BytesMut::new(); *rows_num];
                 for (i, buffer) in buffers.iter_mut().enumerate() {
+                    // SAFETY(value_at_unchecked): the idx is always in bound.
                     unsafe {
                         buffer.reserve(
                             self.columns()
