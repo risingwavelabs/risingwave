@@ -2441,12 +2441,17 @@ impl Parser {
             self.parse_alter_view(true)
         } else if self.parse_keyword(Keyword::SINK) {
             self.parse_alter_sink()
+        } else if self.parse_keyword(Keyword::SOURCE) {
+            self.parse_alter_source()
         } else if self.parse_keyword(Keyword::USER) {
             self.parse_alter_user()
         } else if self.parse_keyword(Keyword::SYSTEM) {
             self.parse_alter_system()
         } else {
-            self.expected("TABLE or USER after ALTER", self.peek_token())
+            self.expected(
+                "TABLE, INDEX, MATERIALIZED, VIEW, SINK, SOURCE, USER or SYSTEM after ALTER",
+                self.peek_token(),
+            )
         }
     }
 
@@ -2601,6 +2606,25 @@ impl Parser {
 
         Ok(Statement::AlterSink {
             name: sink_name,
+            operation,
+        })
+    }
+
+    pub fn parse_alter_source(&mut self) -> Result<Statement, ParserError> {
+        let source_name = self.parse_object_name()?;
+        let operation = if self.parse_keyword(Keyword::RENAME) {
+            if self.parse_keyword(Keyword::TO) {
+                let source_name = self.parse_object_name()?;
+                AlterSourceOperation::RenameSource { source_name }
+            } else {
+                return self.expected("TO after RENAME", self.peek_token());
+            }
+        } else {
+            return self.expected("RENAME after ALTER SOURCE", self.peek_token());
+        };
+
+        Ok(Statement::AlterSource {
+            name: source_name,
             operation,
         })
     }

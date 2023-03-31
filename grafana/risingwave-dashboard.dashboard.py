@@ -1026,6 +1026,26 @@ def section_streaming(panels):
                 )
             ]
         ),
+        panels.timeseries_rowsps(
+            "Backfill Snapshot Read Throughput(rows)",
+            "Total number of rows that have been read from the backfill snapshot",
+            [
+                panels.target(
+                    f"rate({metric('stream_backfill_snapshot_read_row_count')}[$__rate_interval])",
+                    "table_id={{table_id}} actor={{actor_id}} @ {{instance}}"
+                ),
+            ],
+        ),
+        panels.timeseries_rowsps(
+            "Backfill Upstream Throughput(rows)",
+            "Total number of rows that have been output from the backfill upstream",
+            [
+                panels.target(
+                    f"rate({metric('stream_backfill_upstream_output_row_count')}[$__rate_interval])",
+                    "table_id={{table_id}} actor={{actor_id}} @ {{instance}}"
+                ),
+            ],
+        ),
         panels.timeseries_count(
             "Barrier Number",
             "",
@@ -2258,6 +2278,30 @@ def section_hummock_manager(outer_panels):
                     [
                         panels.target(f"{metric('storage_stale_ssts_count')}",
                                       "stale SST total number"),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Delta Log Total Number",
+                    "total number of hummock version delta log",
+                    [
+                        panels.target(f"{metric('storage_delta_log_count')}",
+                                      "delta log total number"),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Version Checkpoint Latency",
+                    "hummock version checkpoint latency",
+                    quantile(
+                        lambda quantile, legend: panels.target(
+                            f"histogram_quantile({quantile}, sum(rate({metric('storage_version_checkpoint_latency_bucket')}[$__rate_interval])) by (le))",
+                            f"version_checkpoint_latency_p{legend}",
+                        ),
+                        [50, 90, 99, 999, "max"],
+                    ) + [
+                        panels.target(
+                            f"rate({metric('storage_version_checkpoint_latency_sum')}[$__rate_interval]) / rate({metric('storage_version_checkpoint_latency_count')}[$__rate_interval])",
+                            "version_checkpoint_latency_avg",
+                        ),
                     ],
                 ),
             ],

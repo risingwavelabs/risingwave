@@ -74,6 +74,15 @@ impl<R: Row> Record<R> {
             ),
         }
     }
+
+    /// Convert from `&Record<R>` to `Record<&R>`.
+    pub fn as_ref(&self) -> Record<&R> {
+        match self {
+            Record::Insert { new_row } => Record::Insert { new_row },
+            Record::Delete { old_row } => Record::Delete { old_row },
+            Record::Update { old_row, new_row } => Record::Update { old_row, new_row },
+        }
+    }
 }
 
 #[cfg(test)]

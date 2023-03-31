@@ -43,7 +43,9 @@ pub use self::query::{
 };
 pub use self::statement::*;
 pub use self::value::{DateTimeField, DollarQuotedString, TrimWhereField, Value};
-pub use crate::ast::ddl::{AlterIndexOperation, AlterSinkOperation, AlterViewOperation};
+pub use crate::ast::ddl::{
+    AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterViewOperation,
+};
 use crate::keywords::Keyword;
 use crate::parser::{Parser, ParserError};
 
@@ -1015,6 +1017,12 @@ pub enum Statement {
         name: ObjectName,
         operation: AlterSinkOperation,
     },
+    /// ALTER SOURCE
+    AlterSource {
+        /// Source name
+        name: ObjectName,
+        operation: AlterSourceOperation,
+    },
     /// DESCRIBE TABLE OR SOURCE
     Describe {
         /// Table or Source name
@@ -1419,6 +1427,9 @@ impl fmt::Display for Statement {
             }
             Statement::AlterSink { name, operation } => {
                 write!(f, "ALTER SINK {} {}", name, operation)
+            }
+            Statement::AlterSource { name, operation } => {
+                write!(f, "ALTER SOURCE {} {}", name, operation)
             }
             Statement::Drop(stmt) => write!(f, "DROP {}", stmt),
             Statement::DropFunction {

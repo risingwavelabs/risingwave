@@ -45,6 +45,7 @@ pub const STORAGE_BLOCK_CACHE_MEMORY_PROPORTION: f64 = 0.3;
 pub const STORAGE_META_CACHE_MEMORY_PROPORTION: f64 = 0.1;
 pub const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.5;
 pub const STORAGE_FILE_CACHE_MEMORY_PROPORTION: f64 = 0.1;
+pub const STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO: usize = 70;
 
 /// `MemoryControlStats` contains the necessary information for memory control, including both batch
 /// and streaming.
@@ -157,6 +158,9 @@ pub fn storage_memory_config(
             .ceil() as usize)
             >> 20,
     );
+    let high_priority_ratio_in_percent = storage_config
+        .high_priority_ratio_in_percent
+        .unwrap_or(STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO);
     let meta_cache_capacity_mb = storage_config.meta_cache_capacity_mb.unwrap_or(
         ((non_reserved_memory_bytes as f64
             * STORAGE_MEMORY_PROPORTION
@@ -191,6 +195,7 @@ pub fn storage_memory_config(
         shared_buffer_capacity_mb,
         file_cache_total_buffer_capacity_mb,
         compactor_memory_limit_mb,
+        high_priority_ratio_in_percent,
     }
 }
 

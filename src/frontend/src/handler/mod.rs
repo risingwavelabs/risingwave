@@ -438,6 +438,10 @@ pub async fn handle(
             name,
             operation: AlterSinkOperation::RenameSink { sink_name },
         } => alter_relation_rename::handle_rename_sink(handler_args, name, sink_name).await,
+        Statement::AlterSource {
+            name,
+            operation: AlterSourceOperation::RenameSource { source_name },
+        } => alter_relation_rename::handle_rename_source(handler_args, name, source_name).await,
         Statement::AlterSystem { param, value } => {
             alter_system::handle_alter_system(handler_args, param, value).await
         }

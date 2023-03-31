@@ -114,7 +114,7 @@ impl RearrangedChainExecutor {
         // If the barrier is a conf change of creating this mview, init snapshot from its epoch
         // and begin to consume the snapshot.
         // Otherwise, it means we've recovered and the snapshot is already consumed.
-        let to_consume_snapshot = first_barrier.is_add_dispatcher(self.actor_id);
+        let to_consume_snapshot = first_barrier.is_newly_added(self.actor_id);
 
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier.clone());

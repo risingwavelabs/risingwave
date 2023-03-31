@@ -1025,12 +1025,10 @@ impl HummockMetaClient for MetaClient {
 
 #[async_trait]
 impl TelemetryInfoFetcher for MetaClient {
-    async fn fetch_telemetry_info(&self) -> anyhow::Result<String> {
+    async fn fetch_telemetry_info(&self) -> anyhow::Result<Option<String>> {
         let resp = self.get_telemetry_info().await?;
-        let tracking_id = resp
-            .get_tracking_id()
-            .map_err(|e| anyhow::format_err!("failed to get tracking_id {:?}", e))?;
-        Ok(tracking_id.to_string())
+        let tracking_id = resp.get_tracking_id().ok();
+        Ok(tracking_id.map(|id| id.to_owned()))
     }
 }
 

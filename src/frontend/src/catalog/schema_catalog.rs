@@ -190,11 +190,12 @@ impl SchemaCatalog {
         let source = SourceCatalog::from(prost);
         let source_ref = Arc::new(source);
 
-        // check if source name get updated.
         let old_source = self.source_by_id.get(&id).unwrap();
+        // check if source name get updated.
         if old_source.name != name {
             self.source_by_name.remove(&old_source.name);
         }
+
         self.source_by_name.insert(name, source_ref.clone());
         self.source_by_id.insert(id, source_ref);
     }
