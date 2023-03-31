@@ -50,8 +50,8 @@ pub struct BuildFragmentGraphState {
     #[derivative(Default(value = "u32::MAX - 1"))]
     next_operator_id: u32,
 
-    /// dependent relation ids: including tables and sources.
-    dependent_relation_ids: HashSet<TableId>,
+    /// dependent streaming job ids.
+    dependent_table_ids: HashSet<TableId>,
 
     /// operator id to `LocalFragmentId` mapping used by share operator.
     share_mapping: HashMap<u32, LocalFragmentId>,
@@ -102,8 +102,8 @@ pub fn build_graph(plan_node: PlanRef) -> StreamFragmentGraphProto {
     let stream_node = plan_node.to_stream_prost(&mut state);
     generate_fragment_graph(&mut state, stream_node).unwrap();
     let mut fragment_graph = state.fragment_graph.to_protobuf();
-    fragment_graph.dependent_relation_ids = state
-        .dependent_relation_ids
+    fragment_graph.dependent_table_ids = state
+        .dependent_table_ids
         .into_iter()
         .map(|id| id.table_id)
         .collect();
@@ -235,13 +235,8 @@ fn build_fragment(
             current_fragment.fragment_type_mask |= FragmentTypeFlag::BarrierRecv as u32
         }
 
-        NodeBody::Source(src) => {
+        NodeBody::Source(_) => {
             current_fragment.fragment_type_mask |= FragmentTypeFlag::Source as u32;
-            // Note: For creating table with connector, the source id is left with placeholder and
-            // should not be recorded in dependent relation ids.
-            if let Some(inner) = &src.source_inner && inner.source_id != TableId::placeholder().table_id {
-                state.dependent_relation_ids.insert(TableId::new(inner.source_id));
-            }
         }
 
         NodeBody::Materialize(_) => {
@@ -256,7 +251,7 @@ fn build_fragment(
             current_fragment.fragment_type_mask |= FragmentTypeFlag::ChainNode as u32;
             // memorize table id for later use
             state
-                .dependent_relation_ids
+                .dependent_table_ids
                 .insert(TableId::new(node.table_id));
             current_fragment.upstream_table_ids.push(node.table_id);
         }
@@ -264,6 +259,11 @@ fn build_fragment(
         NodeBody::Now(_) => {
             // TODO: Remove this and insert a `BarrierRecv` instead.
             current_fragment.fragment_type_mask |= FragmentTypeFlag::Now as u32;
+            current_fragment.requires_singleton = true;
+        }
+
+        NodeBody::Values(_) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::Values as u32;
             current_fragment.requires_singleton = true;
         }
 

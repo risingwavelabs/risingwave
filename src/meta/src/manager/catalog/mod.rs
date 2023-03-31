@@ -438,7 +438,7 @@ where
         database_core.ensure_schema_id(view.schema_id)?;
         for dependent_id in &view.dependent_relations {
             // TODO(zehua): refactor when using SourceId.
-            database_core.ensure_table_or_source_id(dependent_id)?;
+            database_core.ensure_table_view_or_source_id(dependent_id)?;
         }
         let key = (view.database_id, view.schema_id, view.name.clone());
         database_core.check_relation_name_duplicated(&key)?;
@@ -634,7 +634,7 @@ where
         database_core.ensure_schema_id(table.schema_id)?;
         for dependent_id in &table.dependent_relations {
             // TODO(zehua): refactor when using SourceId.
-            database_core.ensure_table_or_source_id(dependent_id)?;
+            database_core.ensure_table_view_or_source_id(dependent_id)?;
         }
         #[cfg(not(test))]
         user_core.ensure_user_id(table.owner)?;
@@ -1024,8 +1024,6 @@ where
         to_update_tables.iter().for_each(|table| {
             tables.insert(table.id, table.clone());
         });
-        // TODO: there are some inconsistencies in the process of notifying the frontend, we need to
-        // support batch notification.
         to_update_views.iter().for_each(|view| {
             views.insert(view.id, view.clone());
         });
@@ -1137,6 +1135,41 @@ where
             .await;
 
         Ok(version)
+    }
+
+    pub async fn alter_source_name(
+        &self,
+        source_id: SourceId,
+        source_name: &str,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_source_id(source_id)?;
+
+        // 1. validate new source name.
+        let mut source = database_core.sources.get(&source_id).unwrap().clone();
+        database_core.check_relation_name_duplicated(&(
+            source.database_id,
+            source.schema_id,
+            source_name.to_string(),
+        ))?;
+
+        // 2. rename source and its definition.
+        let old_name = source.name.clone();
+        source.name = source_name.to_string();
+
+        // 3. update, commit and notify all relations that depend on this source.
+        self.alter_relation_name_refs_inner(
+            database_core,
+            source_id,
+            &old_name,
+            source_name,
+            vec![],
+            vec![],
+            vec![],
+            Some(source),
+        )
+        .await
     }
 
     pub async fn alter_index_name(
@@ -1673,7 +1706,7 @@ where
         database_core.ensure_schema_id(sink.schema_id)?;
         for dependent_id in &sink.dependent_relations {
             // TODO(zehua): refactor when using SourceId.
-            database_core.ensure_table_or_source_id(dependent_id)?;
+            database_core.ensure_table_view_or_source_id(dependent_id)?;
         }
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
         database_core.check_relation_name_duplicated(&key)?;

@@ -255,6 +255,10 @@ pub fn trigger_stale_ssts_stat(metrics: &MetaMetrics, total_number: usize) {
     metrics.stale_ssts_count.set(total_number as _);
 }
 
+pub fn trigger_delta_log_stats(metrics: &MetaMetrics, total_number: usize) {
+    metrics.delta_log_count.set(total_number as _);
+}
+
 // Triggers a report on compact_pending_bytes_needed
 pub fn trigger_lsm_stat(
     metrics: &MetaMetrics,

@@ -16,14 +16,16 @@ use std::collections::{HashMap, HashSet};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, TableDesc, TableId, TableVersionId};
+use risingwave_common::catalog::{
+    ColumnCatalog, ConflictBehavior, TableDesc, TableId, TableVersionId,
+};
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
 use risingwave_pb::catalog::PbTable;
 
-use super::{ColumnId, ConflictBehaviorType, DatabaseId, FragmentId, RelationCatalog, SchemaId};
+use super::{ColumnId, DatabaseId, FragmentId, RelationCatalog, SchemaId};
 use crate::user::UserId;
 use crate::WithOptions;
 
@@ -113,7 +115,10 @@ pub struct TableCatalog {
     /// The full `CREATE TABLE` or `CREATE MATERIALIZED VIEW` definition of the table.
     pub definition: String,
 
-    pub conflict_behavior_type: ConflictBehaviorType,
+    /// The behavior of handling incoming pk conflict from source executor, we can overwrite or
+    /// ignore conflict pk. For normal materialize executor and other executors, this field will be
+    /// `No Check`.
+    pub conflict_behavior: ConflictBehavior,
 
     pub read_prefix_len_hint: usize,
 
@@ -213,8 +218,8 @@ impl TableCatalog {
         self
     }
 
-    pub fn conflict_behavior_type(&self) -> ConflictBehaviorType {
-        self.conflict_behavior_type
+    pub fn conflict_behavior(&self) -> ConflictBehavior {
+        self.conflict_behavior
     }
 
     pub fn table_type(&self) -> TableType {
@@ -367,7 +372,7 @@ impl TableCatalog {
             version: self.version.as_ref().map(TableVersion::to_prost),
             watermark_indices: self.watermark_columns.ones().map(|x| x as _).collect_vec(),
             dist_key_in_pk: self.dist_key_in_pk.iter().map(|x| *x as _).collect(),
-            handle_pk_conflict_behavior: self.conflict_behavior_type,
+            handle_pk_conflict_behavior: self.conflict_behavior.to_protobuf().into(),
         }
     }
 
@@ -393,6 +398,7 @@ impl TableCatalog {
 impl From<PbTable> for TableCatalog {
     fn from(tb: PbTable) -> Self {
         let id = tb.id;
+        let tb_conflict_behavior = tb.handle_pk_conflict_behavior();
         let table_type = tb.get_table_type().unwrap();
         let associated_source_id = tb.optional_associated_source_id.map(|id| match id {
             OptionalAssociatedSourceId::AssociatedSourceId(id) => id,
@@ -400,6 +406,8 @@ impl From<PbTable> for TableCatalog {
         let name = tb.name.clone();
         let mut col_names = HashSet::new();
         let mut col_index: HashMap<i32, usize> = HashMap::new();
+
+        let conflict_behavior = ConflictBehavior::from_protobuf(&tb_conflict_behavior);
         let columns: Vec<ColumnCatalog> = tb.columns.into_iter().map(ColumnCatalog::from).collect();
         for (idx, catalog) in columns.clone().into_iter().enumerate() {
             let col_name = catalog.name();
@@ -413,11 +421,9 @@ impl From<PbTable> for TableCatalog {
 
         let pk = tb.pk.iter().map(ColumnOrder::from_protobuf).collect();
         let mut watermark_columns = FixedBitSet::with_capacity(columns.len());
-        for idx in tb.watermark_indices {
-            watermark_columns.insert(idx as _);
+        for idx in &tb.watermark_indices {
+            watermark_columns.insert(*idx as _);
         }
-
-        let conflict_behavior_type = tb.handle_pk_conflict_behavior;
 
         Self {
             id: id.into(),
@@ -440,7 +446,7 @@ impl From<PbTable> for TableCatalog {
             row_id_index: tb.row_id_index.map(|x| x as usize),
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
             definition: tb.definition,
-            conflict_behavior_type,
+            conflict_behavior,
             read_prefix_len_hint: tb.read_prefix_len_hint as usize,
             version: tb.version.map(TableVersion::from_prost),
             watermark_columns,
@@ -528,7 +534,7 @@ mod tests {
                 next_column_id: 2,
             }),
             watermark_indices: vec![],
-            handle_pk_conflict_behavior: 0,
+            handle_pk_conflict_behavior: 3,
             dist_key_in_pk: vec![],
         }
         .into();
@@ -574,7 +580,7 @@ mod tests {
                 row_id_index: None,
                 value_indices: vec![0],
                 definition: "".into(),
-                conflict_behavior_type: 0,
+                conflict_behavior: ConflictBehavior::NoCheck,
                 read_prefix_len_hint: 0,
                 version: Some(TableVersion::new_initial_for_test(ColumnId::new(1))),
                 watermark_columns: FixedBitSet::with_capacity(2),

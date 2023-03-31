@@ -171,12 +171,6 @@ impl StreamMaterialize {
 
         let (pk, stream_key) = derive_pk(input, user_order_by, &columns);
         let read_prefix_len_hint = stream_key.len();
-
-        let conflict_behavior_type = match conflict_behavior {
-            ConflictBehavior::NoCheck => 0,
-            ConflictBehavior::OverWrite => 1,
-            ConflictBehavior::IgnoreConflict => 2,
-        };
         Ok(TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
@@ -195,7 +189,7 @@ impl StreamMaterialize {
             row_id_index,
             value_indices,
             definition,
-            conflict_behavior_type,
+            conflict_behavior,
             read_prefix_len_hint,
             version,
             watermark_columns,
@@ -242,14 +236,8 @@ impl fmt::Display for StreamMaterialize {
             .field("stream_key", &format_args!("[{}]", stream_key))
             .field("pk_columns", &format_args!("[{}]", pk_columns));
 
-        let pk_conflict_behavior;
-        if self.table.conflict_behavior_type() == 0 {
-            pk_conflict_behavior = "no check";
-        } else if self.table.conflict_behavior_type() == 1 {
-            pk_conflict_behavior = "overwrite";
-        } else {
-            pk_conflict_behavior = "ignore conflict";
-        }
+        let pk_conflict_behavior = self.table.conflict_behavior().debug_to_string();
+
         builder.field("pk_conflict", &pk_conflict_behavior);
 
         let watermark_columns = &self.base.watermark_columns;
@@ -296,7 +284,6 @@ impl StreamNode for StreamMaterialize {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
 
-        let handle_pk_conflict_behavior = self.table.conflict_behavior_type();
         PbNodeBody::Materialize(MaterializeNode {
             // We don't need table id for materialize node in frontend. The id will be generated on
             // meta catalog service.
@@ -308,7 +295,6 @@ impl StreamNode for StreamMaterialize {
                 .map(ColumnOrder::to_protobuf)
                 .collect(),
             table: Some(self.table().to_internal_table_prost()),
-            handle_pk_conflict_behavior,
         })
     }
 }

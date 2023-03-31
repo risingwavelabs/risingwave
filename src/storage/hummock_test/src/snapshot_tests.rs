@@ -17,9 +17,11 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::TryStreamExt;
+use risingwave_common::cache::CachePriority;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, WriteOptions,
@@ -46,6 +48,7 @@ macro_rules! assert_count_range_scan {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await

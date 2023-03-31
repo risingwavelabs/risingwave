@@ -147,6 +147,15 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::vacuum_interval_sec")]
     pub vacuum_interval_sec: u64,
 
+    /// Interval of hummock version checkpoint.
+    #[serde(default = "default::meta::hummock_version_checkpoint_interval_sec")]
+    pub hummock_version_checkpoint_interval_sec: u64,
+
+    /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
+    /// attempt is rejected.
+    #[serde(default = "default::meta::min_delta_log_num_for_hummock_version_checkpoint")]
+    pub min_delta_log_num_for_hummock_version_checkpoint: u64,
+
     /// Maximum allowed heartbeat interval in seconds.
     #[serde(default = "default::meta::max_heartbeat_interval_sec")]
     pub max_heartbeat_interval_secs: u32,
@@ -320,6 +329,9 @@ pub struct StorageConfig {
     /// Capacity of sstable block cache.
     #[serde(default)]
     pub block_cache_capacity_mb: Option<usize>,
+
+    #[serde(default)]
+    pub high_priority_ratio_in_percent: Option<usize>,
 
     /// Capacity of sstable meta cache.
     #[serde(default)]
@@ -549,6 +561,14 @@ mod default {
             30
         }
 
+        pub fn hummock_version_checkpoint_interval_sec() -> u64 {
+            30
+        }
+
+        pub fn min_delta_log_num_for_hummock_version_checkpoint() -> u64 {
+            10
+        }
+
         pub fn max_heartbeat_interval_sec() -> u32 {
             300
         }
@@ -621,6 +641,10 @@ mod default {
 
         pub fn block_cache_capacity_mb() -> usize {
             512
+        }
+
+        pub fn high_priority_ratio_in_percent() -> usize {
+            70
         }
 
         pub fn meta_cache_capacity_mb() -> usize {
@@ -800,6 +824,7 @@ pub struct StorageMemoryConfig {
     pub shared_buffer_capacity_mb: usize,
     pub file_cache_total_buffer_capacity_mb: usize,
     pub compactor_memory_limit_mb: usize,
+    pub high_priority_ratio_in_percent: usize,
 }
 
 pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
@@ -824,6 +849,10 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         .storage
         .compactor_memory_limit_mb
         .unwrap_or(default::storage::compactor_memory_limit_mb());
+    let high_priority_ratio_in_percent = s
+        .storage
+        .high_priority_ratio_in_percent
+        .unwrap_or(default::storage::high_priority_ratio_in_percent());
 
     StorageMemoryConfig {
         block_cache_capacity_mb,
@@ -831,5 +860,6 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         shared_buffer_capacity_mb,
         file_cache_total_buffer_capacity_mb,
         compactor_memory_limit_mb,
+        high_priority_ratio_in_percent,
     }
 }

@@ -171,6 +171,7 @@ For `./risedev apply-compose-deploy` users,
             opts.data_directory,
             opts.block_cache_capacity_mb * (1 << 20),
             opts.meta_cache_capacity_mb * (1 << 20),
+            0,
             TieredCache::none(),
         )))
     }

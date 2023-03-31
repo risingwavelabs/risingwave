@@ -1,0 +1,51 @@
+[tasks.build-image]
+script = "docker compose build"
+dependencies = ["clean-all"]
+
+[tasks.start-cluster]
+script = """
+docker compose up -d;
+sleep 10
+"""
+dependencies = ["build-image"]
+
+[tasks.setup-kafka]
+script = """
+docker compose exec message_queue \
+    /usr/bin/rpk topic create -p 2 counts
+"""
+dependencies = ["start-cluster"]
+
+[tasks.setup-pg]
+script = """
+PGPASSWORD=123456 psql -h localhost -p 5432 -d mydb -U myuser -f pg.sql
+"""
+dependencies = ["start-cluster"]
+
+[tasks.setup-risingwave]
+script = """
+psql -h localhost -p 4566 -d dev -U root -f risingwave.sql
+"""
+dependencies = ["setup-kafka"]
+
+[tasks.setup-flink]
+script = """
+docker compose run -v `pwd`:/tmp flink-sql-client /opt/flink/bin/sql-client.sh -f /tmp/flink.sql
+"""
+dependencies = ["setup-kafka", "setup-pg"]
+
+[tasks.setup]
+dependencies = [
+    "clean-all",
+    "build-image",
+    "start-cluster",
+    "setup-pg",
+    "setup-kafka",
+    "setup-risingwave",
+    "setup-flink"
+]
+
+[tasks.clean-all]
+script = """
+docker compose down --remove-orphans -v
+"""

@@ -23,7 +23,7 @@ use risingwave_pb::hummock::ValidationTask;
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::SstableIterator;
+use crate::hummock::{CachePolicy, SstableIterator};
 use crate::monitor::StoreLocalStatistic;
 
 /// Validate SSTs in terms of Ordered, Locally unique and Globally unique.
@@ -58,7 +58,10 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
         let mut iter = SstableIterator::new(
             holder,
             sstable_store.clone(),
-            Arc::new(SstableIteratorReadOptions::default()),
+            Arc::new(SstableIteratorReadOptions {
+                cache_policy: CachePolicy::NotFill,
+                must_iterated_end_user_key: None,
+            }),
         );
         let mut previous_key: Option<FullKey<Vec<u8>>> = None;
         if let Err(err) = iter.rewind().await {

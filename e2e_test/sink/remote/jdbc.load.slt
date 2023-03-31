@@ -6,8 +6,8 @@ create table t_remote (
     v_integer integer,
     v_bigint bigint,
     v_decimal decimal,
-    v_float float,
-    v_double double,
+    v_float real,
+    v_double double precision,
     v_timestamp timestamp
 );
 
