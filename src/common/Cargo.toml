@@ -61,6 +61,7 @@ risingwave_pb = { path = "../prost" }
 rust_decimal = { version = "1", features = ["db-tokio-postgres"] }
 ryu = "1.0"
 serde = { version = "1", features = ["derive"] }
+serde_default = "0.1"
 serde_json = "1"
 serde_with = "2"
 static_assertions = "1"
