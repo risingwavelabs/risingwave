@@ -955,7 +955,10 @@ def section_object_storage(outer_panels):
                 ),
                 panels.timeseries_dollar(
                     "Estimated S3 Cost (Realtime)",
-                    "",
+                    "There are two types of operations: 1. GET, SELECT, and DELETE, they cost 0.0004 USD per 1000 "
+                    "requests. 2. PUT, COPY, POST, LIST, they cost 0.005 USD per 1000 requests."
+                    "Reading from S3 across different regions impose extra cost. This metric assumes 0.01 USD per 1GB "
+                    "data transfer. Please checkout AWS's pricing model for more accurate calculation.",
                     [
                         panels.target(
                             f"sum({metric('object_store_read_bytes')}) * 0.01 / 1000 / 1000 / 1000",
@@ -974,7 +977,9 @@ def section_object_storage(outer_panels):
                 ),
                 panels.timeseries_dollar(
                     "Estimated S3 Cost (Monthly)",
-                    "",
+                    "This metric uses the total size of data in S3 at this second to derive the cost of storing data "
+                    "for a whole month. The price is 0.023 USD per GB. Please checkout AWS's pricing model for more "
+                    "accurate calculation.", 
                     [
                         panels.target(
                             f"sum({metric('storage_level_total_file_size')}) by (instance) * 0.023 / 1000 / 1000",
