@@ -363,7 +363,7 @@ impl LogicalJoin {
                     max_pos,
                     order_key
                         .iter()
-                        .position(|x| *x == d)
+                        .position(|&x| x == d)
                         .expect("dist_key must in order_key"),
                 );
             }
@@ -371,7 +371,7 @@ impl LogicalJoin {
         };
 
         // Reorder the join equal predicate to match the order key.
-        let mut reorder_idx = vec![];
+        let mut reorder_idx = Vec::with_capacity(at_least_prefix_len);
         for order_col_id in order_col_ids {
             for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
                 if order_col_id == output_column_ids[eq_idx] {
