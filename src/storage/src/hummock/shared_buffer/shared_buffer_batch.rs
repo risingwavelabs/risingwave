@@ -155,6 +155,9 @@ impl SharedBufferBatchInner {
             range_tombstone_list.sort();
             let mut range_tombstones: Vec<DeleteRangeTombstone> = vec![];
             for tombstone in range_tombstone_list {
+                if tombstone.start_user_key.ge(&tombstone.end_user_key) {
+                    continue;
+                }
                 // Although `end_user_key` of tombstone is exclusive, we still use it as a boundary
                 // of `SharedBufferBatch` because it just expands an useless query
                 // and does not affect correctness.
@@ -168,7 +171,7 @@ impl SharedBufferBatchInner {
                     smallest_empty = false;
                 }
                 if let Some(last) = range_tombstones.last_mut() {
-                    if last.end_user_key.gt(&tombstone.start_user_key) {
+                    if last.end_user_key.ge(&tombstone.start_user_key) {
                         if last.end_user_key.lt(&tombstone.end_user_key) {
                             last.end_user_key = tombstone.end_user_key;
                         }
@@ -749,52 +752,62 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
 
 pub struct SharedBufferDeleteRangeIterator {
     inner: Arc<SharedBufferBatchInner>,
-    current_idx: usize,
+    next_absolute_idx: usize,
 }
 
 impl SharedBufferDeleteRangeIterator {
     pub(crate) fn new(inner: Arc<SharedBufferBatchInner>) -> Self {
         Self {
             inner,
-            current_idx: 0,
+            next_absolute_idx: 0,
+        }
+    }
+
+    fn absolute_idx(&self, idx: usize) -> &UserKey<Vec<u8>> {
+        if (idx & 1) == 0 {
+            &self.inner.range_tombstone_list[idx >> 1].start_user_key
+        } else {
+            &self.inner.range_tombstone_list[idx >> 1].end_user_key
         }
     }
 }
 
 impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
-    fn start_user_key(&self) -> UserKey<&[u8]> {
-        self.inner.range_tombstone_list_for_query[self.current_idx]
-            .start_user_key
-            .as_ref()
-    }
-
-    fn end_user_key(&self) -> UserKey<&[u8]> {
-        self.inner.range_tombstone_list_for_query[self.current_idx]
-            .end_user_key
-            .as_ref()
+    fn next_user_key(&self) -> UserKey<&[u8]> {
+        self.absolute_idx(self.next_absolute_idx).as_ref()
     }
 
     fn current_epoch(&self) -> HummockEpoch {
-        self.inner.range_tombstone_list_for_query[self.current_idx].sequence
+        if (self.next_absolute_idx & 1) == 1 {
+            self.inner.range_tombstone_list[self.next_absolute_idx >> 1].sequence
+        } else {
+            HummockEpoch::MAX
+        }
     }
 
     fn next(&mut self) {
-        self.current_idx += 1;
+        self.next_absolute_idx += 1;
     }
 
     fn rewind(&mut self) {
-        self.current_idx = 0;
+        self.next_absolute_idx = 0;
     }
 
     fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
-        self.current_idx = self
-            .inner
-            .range_tombstone_list_for_query
-            .partition_point(|tombstone| tombstone.end_user_key.as_ref().le(&target_user_key));
+        let (mut lft, mut rht) = (0, self.inner.range_tombstone_list.len() << 1);
+        while lft < rht {
+            let mid = (lft + rht) >> 1;
+            if self.absolute_idx(mid).as_ref().le(&target_user_key) {
+                lft = mid + 1;
+            } else {
+                rht = mid;
+            }
+        }
+        self.next_absolute_idx = lft;
     }
 
     fn is_valid(&self) -> bool {
-        self.current_idx < self.inner.range_tombstone_list_for_query.len()
+        self.next_absolute_idx < (self.inner.range_tombstone_list.len() << 1)
     }
 }
 

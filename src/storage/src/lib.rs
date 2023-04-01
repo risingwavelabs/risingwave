@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![feature(allocator_api)]
+#![feature(arc_unwrap_or_clone)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(bound_as_ref)]
 #![feature(bound_map)]

@@ -43,7 +43,7 @@ use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
-use risingwave_hummock_sdk::LocalSstableInfo;
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
@@ -58,7 +58,8 @@ use tokio::task::JoinHandle;
 pub use self::compaction_utils::{CompactionStatistics, RemoteBuilderFactory, TaskConfig};
 use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
-use super::{HummockResult, SstableBuilderOptions, XorFilterBuilder};
+use super::value::HummockValue;
+use super::{CompactionDeleteRanges, HummockResult, SstableBuilderOptions, XorFilterBuilder};
 use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_state_for_compaction, generate_splits,
 };
@@ -68,8 +69,8 @@ use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
-    validate_ssts, BatchSstableWriterFactory, DeleteRangeAggregator, HummockError,
-    RangeTombstonesCollector, SstableWriterFactory, StreamingSstableWriterFactory,
+    validate_ssts, BatchSstableWriterFactory, HummockError, SstableWriterFactory,
+    StreamingSstableWriterFactory,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -542,16 +543,15 @@ impl Compactor {
     where
         F: TableBuilderFactory,
     {
-        let del_iter = sst_builder.del_agg.iter();
-        let mut del_agg = DeleteRangeAggregator::new(del_iter, task_config.watermark);
+        let mut del_iter = sst_builder.del_agg.iter();
 
         if !task_config.key_range.left.is_empty() {
             let full_key = FullKey::decode(&task_config.key_range.left);
             iter.seek(full_key).await?;
-            del_agg.seek(full_key.user_key);
+            del_iter.seek(full_key.user_key);
         } else {
             iter.rewind().await?;
-            del_agg.rewind();
+            del_iter.rewind();
         }
 
         let max_key = if task_config.key_range.right.is_empty() {
@@ -563,6 +563,7 @@ impl Compactor {
 
         let mut last_key = FullKey::default();
         let mut watermark_can_see_last_key = false;
+        let mut user_key_last_delete_epoch = HummockEpoch::MAX;
         let mut local_stats = StoreLocalStatistic::default();
 
         // Keep table stats changes due to dropping KV.
@@ -571,10 +572,10 @@ impl Compactor {
         let mut last_table_id = None;
         let mut compaction_statistics = CompactionStatistics::default();
         while iter.is_valid() {
-            let iter_key = iter.key();
+            let mut iter_key = iter.key();
             compaction_statistics.iter_total_key_counts += 1;
 
-            let is_new_user_key =
+            let mut is_new_user_key =
                 last_key.is_empty() || iter_key.user_key != last_key.user_key.as_ref();
 
             let mut drop = false;
@@ -586,6 +587,7 @@ impl Compactor {
                 }
                 last_key.set(iter_key);
                 watermark_can_see_last_key = false;
+                user_key_last_delete_epoch = HummockEpoch::MAX;
                 if value.is_delete() {
                     local_stats.skip_delete_key_count += 1;
                 }
@@ -602,6 +604,9 @@ impl Compactor {
                 last_table_id = Some(last_key.user_key.table_id.table_id);
             }
 
+            let earliest_range_delete_which_can_see_iter_key =
+                del_iter.earliest_delete_which_can_see_key(&iter_key.user_key, epoch);
+
             // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`.
             // If there is no keys whose epoch is equal or greater than `watermark`, keep the latest
             // key which satisfies `epoch` < `watermark`
@@ -611,7 +616,7 @@ impl Compactor {
             if (epoch <= task_config.watermark && task_config.gc_delete_keys && value.is_delete())
                 || (epoch < task_config.watermark
                     && (watermark_can_see_last_key
-                        || del_agg.should_delete(&iter_key.user_key, epoch)))
+                        || earliest_range_delete_which_can_see_iter_key <= task_config.watermark))
             {
                 drop = true;
             }
@@ -639,6 +644,28 @@ impl Compactor {
                 }
                 iter.next().await?;
                 continue;
+            }
+
+            if value.is_delete() {
+                user_key_last_delete_epoch = epoch;
+            } else if earliest_range_delete_which_can_see_iter_key < user_key_last_delete_epoch {
+                debug_assert!(
+                    iter_key.epoch < earliest_range_delete_which_can_see_iter_key
+                        && earliest_range_delete_which_can_see_iter_key
+                            < user_key_last_delete_epoch
+                );
+                user_key_last_delete_epoch = earliest_range_delete_which_can_see_iter_key;
+
+                // In each SST, since a union set of delete ranges is constructed and thus original
+                // delete ranges are not used in read, we lose exact information about whether a key
+                // is deleted by a delete range in the same SST. Therefore we need to construct a
+                // corresponding delete key to represent this.
+                iter_key.epoch = earliest_range_delete_which_can_see_iter_key;
+                sst_builder
+                    .add_full_key(iter_key, HummockValue::Delete, is_new_user_key)
+                    .await?;
+                iter_key.epoch = epoch;
+                is_new_user_key = false;
             }
 
             // Don't allow two SSTs to share same user key
@@ -682,7 +709,7 @@ impl Compactor {
         &self,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
-        del_agg: Arc<RangeTombstonesCollector>,
+        del_agg: Arc<CompactionDeleteRanges>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
@@ -778,7 +805,7 @@ impl Compactor {
         writer_factory: F,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
-        del_agg: Arc<RangeTombstonesCollector>,
+        del_agg: Arc<CompactionDeleteRanges>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<(Vec<SplitTableOutput>, CompactionStatistics)> {

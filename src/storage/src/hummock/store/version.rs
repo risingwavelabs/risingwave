@@ -48,8 +48,8 @@ use crate::hummock::utils::{
     prune_overlapping_ssts, range_overlap, search_sst_idx,
 };
 use crate::hummock::{
-    get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, DeleteRangeAggregator,
-    Sstable, SstableDeleteRangeIterator, SstableIterator,
+    get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, Sstable,
+    SstableDeleteRangeIterator, SstableIterator,
 };
 use crate::monitor::{
     GetLocalMetricsGuard, HummockStateStoreMetrics, MayExistLocalMetricsGuard, StoreLocalStatistic,
@@ -649,7 +649,7 @@ impl HummockVersionReader {
 
         let mut local_stats = StoreLocalStatistic::default();
         let mut staging_iters = Vec::with_capacity(imms.len() + uncommitted_ssts.len());
-        let mut delete_range_iter = ForwardMergeRangeIterator::default();
+        let mut delete_range_iter = ForwardMergeRangeIterator::new(epoch);
         local_stats.staging_imm_iter_count = imms.len() as u64;
         for imm in imms {
             if imm.has_range_tombstone() && !read_options.ignore_range_tombstone {
@@ -687,7 +687,7 @@ impl HummockVersionReader {
             staging_iters.push(HummockIteratorUnion::Second(SstableIterator::new(
                 table_holder,
                 self.sstable_store.clone(),
-                Arc::new(SstableIteratorReadOptions::from(&read_options)),
+                Arc::new(SstableIteratorReadOptions::from_read_options(&read_options)),
             )));
         }
         local_stats.staging_sst_iter_count = staging_sst_iter_count;
@@ -776,7 +776,7 @@ impl HummockVersionReader {
                 .set(local_cache_meta_block_unhit as i64);
         }
 
-        let mut sst_read_options = SstableIteratorReadOptions::from(&read_options);
+        let mut sst_read_options = SstableIteratorReadOptions::from_read_options(&read_options);
         if read_options.prefetch_options.exhaust_iter {
             sst_read_options.must_iterated_end_user_key =
                 Some(user_key_range.1.map(|key| key.cloned()));
@@ -870,7 +870,7 @@ impl HummockVersionReader {
             epoch,
             min_epoch,
             Some(committed),
-            DeleteRangeAggregator::new(delete_range_iter, epoch),
+            delete_range_iter,
         );
         user_iter
             .rewind()

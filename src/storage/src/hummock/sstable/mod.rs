@@ -17,6 +17,7 @@
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 mod block;
 
+use std::collections::BTreeSet;
 use std::fmt::{Debug, Formatter};
 use std::ops::{BitXor, Bound};
 
@@ -51,8 +52,8 @@ mod sstable_object_id_manager;
 mod utils;
 
 pub use delete_range_aggregator::{
-    get_delete_range_epoch_from_sstable, DeleteRangeAggregator, DeleteRangeAggregatorBuilder,
-    RangeTombstonesCollector, SingleDeleteRangeIterator, SstableDeleteRangeIterator,
+    get_min_delete_range_epoch_from_sstable, CompactionDeleteRanges, DeleteRangeAggregatorBuilder,
+    SstableDeleteRangeIterator,
 };
 pub use filter::FilterBuilder;
 pub use sstable_object_id_manager::*;
@@ -60,6 +61,7 @@ pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
 use xxhash_rust::{xxh32, xxh64};
 
+use self::delete_range_aggregator::apply_event;
 use self::utils::{xxhash64_checksum, xxhash64_verify};
 use super::{HummockError, HummockResult};
 use crate::hummock::CachePolicy;
@@ -130,6 +132,12 @@ pub struct Sstable {
     pub id: HummockSstableObjectId,
     pub meta: SstableMeta,
     pub filter_reader: XorFilterReader,
+    /// Assume that watermark1 is 5, watermark2 is 7, watermark3 is 11, delete ranges
+    /// `{ [0, wmk1) in epoch1, [wmk1, wmk2) in epoch2, [wmk2, wmk3) in epoch3 }`
+    /// can be transformed into events below:
+    /// `{ <0, +epoch1> <wmk1, -epoch1> <wmk1, +epoch2> <wmk2, -epoch2> <wmk2, +epoch3> <wmk3,
+    /// -epoch3> }`
+    pub monotonic_tombstone_events: Vec<(UserKey<Vec<u8>>, HummockEpoch)>,
 }
 
 impl Debug for Sstable {
@@ -145,10 +153,24 @@ impl Sstable {
     pub fn new(id: HummockSstableObjectId, mut meta: SstableMeta) -> Self {
         let filter_data = std::mem::take(&mut meta.bloom_filter);
         let filter_reader = XorFilterReader::new(filter_data);
+
+        let (events, _) = DeleteRangeAggregatorBuilder::build_events(&meta.range_tombstone_list);
+        let mut epochs = BTreeSet::new();
+        let mut monotonic_tombstone_events = Vec::with_capacity(events.len());
+        for event in events {
+            apply_event(&mut epochs, &event);
+            monotonic_tombstone_events.push((
+                event.0,
+                epochs.first().map_or(HummockEpoch::MAX, |epoch| *epoch),
+            ));
+        }
+        monotonic_tombstone_events.dedup_by_key(|(_, epoch)| *epoch);
+
         Self {
             id,
             meta,
             filter_reader,
+            monotonic_tombstone_events,
         }
     }
 
@@ -404,8 +426,8 @@ pub struct SstableIteratorReadOptions {
     pub must_iterated_end_user_key: Option<Bound<UserKey<KeyPayloadType>>>,
 }
 
-impl From<&ReadOptions> for SstableIteratorReadOptions {
-    fn from(read_options: &ReadOptions) -> Self {
+impl SstableIteratorReadOptions {
+    pub fn from_read_options(read_options: &ReadOptions) -> Self {
         Self {
             cache_policy: read_options.cache_policy,
             must_iterated_end_user_key: None,
