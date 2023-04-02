@@ -66,10 +66,10 @@ impl PlanTreeNodeUnary for BatchSimpleAgg {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(From::from(generic::Agg {
+        Self::new(generic::Agg {
             input,
             ..self.logical.clone()
-        }))
+        })
     }
 }
 impl_plan_tree_node_for_unary! { BatchSimpleAgg }
