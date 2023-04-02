@@ -79,7 +79,7 @@ impl LogicalAgg {
         let local_agg = StreamLocalSimpleAgg::new(self.clone_with_input(stream_input));
         let exchange =
             RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
-        let global_agg = new_stream_global_simple_agg(LogicalAgg::new(
+        let global_agg = new_stream_global_simple_agg(generic::Agg::new(
             self.agg_calls()
                 .iter()
                 .enumerate()
@@ -129,7 +129,7 @@ impl LogicalAgg {
         local_group_key.push(vnode_col_idx);
         let n_local_group_key = local_group_key.len();
         let local_agg = new_stream_hash_agg(
-            LogicalAgg::new(self.agg_calls().to_vec(), local_group_key, project.into()),
+            generic::Agg::new(self.agg_calls().to_vec(), local_group_key, project.into()),
             Some(vnode_col_idx),
         );
         // Global group key excludes vnode.
@@ -144,7 +144,7 @@ impl LogicalAgg {
         if self.group_key().is_empty() {
             let exchange =
                 RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
-            let global_agg = new_stream_global_simple_agg(LogicalAgg::new(
+            let global_agg = new_stream_global_simple_agg(generic::Agg::new(
                 self.agg_calls()
                     .iter()
                     .enumerate()
@@ -162,7 +162,7 @@ impl LogicalAgg {
             // Local phase should have reordered the group keys into their required order.
             // we can just follow it.
             let global_agg = new_stream_hash_agg(
-                LogicalAgg::new(
+                generic::Agg::new(
                     self.agg_calls()
                         .iter()
                         .enumerate()
@@ -181,21 +181,18 @@ impl LogicalAgg {
     }
 
     fn gen_single_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
-        Ok(new_stream_global_simple_agg(self.clone_with_input(
-            RequiredDist::single().enforce_if_not_satisfies(stream_input, &Order::any())?,
-        ))
-        .into())
+        let mut logical = self.core.clone();
+        let input = RequiredDist::single().enforce_if_not_satisfies(stream_input, &Order::any())?;
+        logical.input = input;
+        Ok(new_stream_global_simple_agg(logical).into())
     }
 
     fn gen_shuffle_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
-        Ok(new_stream_hash_agg(
-            self.clone_with_input(
-                RequiredDist::shard_by_key(stream_input.schema().len(), self.group_key())
-                    .enforce_if_not_satisfies(stream_input, &Order::any())?,
-            ),
-            None,
-        )
-        .into())
+        let input = RequiredDist::shard_by_key(stream_input.schema().len(), self.group_key())
+            .enforce_if_not_satisfies(stream_input, &Order::any())?;
+        let mut logical = self.core.clone();
+        logical.input = input;
+        Ok(new_stream_hash_agg(logical, None).into())
     }
 
     /// See if all stream aggregation calls have a stateless local agg counterpart.
@@ -1164,32 +1161,33 @@ impl ToBatch for LogicalAgg {
     }
 }
 
-fn find_or_append_row_count(mut logical: LogicalAgg) -> (LogicalAgg, usize) {
+fn find_or_append_row_count(mut logical: generic::Agg<PlanRef>) -> (generic::Agg<PlanRef>, usize) {
     // `HashAgg`/`GlobalSimpleAgg` executors require a `count(*)` to correctly build changes, so
     // append a `count(*)` if not exists.
     let count_star = PlanAggCall::count_star();
     let row_count_idx = if let Some((idx, _)) = logical
-        .agg_calls()
+        .agg_calls
         .iter()
         .find_position(|&c| c == &count_star)
     {
         idx
     } else {
-        let (mut agg_calls, group_key, input) = logical.decompose();
-        let idx = agg_calls.len();
-        agg_calls.push(count_star);
-        logical = LogicalAgg::new(agg_calls, group_key, input);
+        let idx = logical.agg_calls.len();
+        logical.agg_calls.push(count_star);
         idx
     };
     (logical, row_count_idx)
 }
 
-fn new_stream_global_simple_agg(logical: LogicalAgg) -> StreamGlobalSimpleAgg {
+fn new_stream_global_simple_agg(logical: generic::Agg<PlanRef>) -> StreamGlobalSimpleAgg {
     let (logical, row_count_idx) = find_or_append_row_count(logical);
     StreamGlobalSimpleAgg::new(logical, row_count_idx)
 }
 
-fn new_stream_hash_agg(logical: LogicalAgg, vnode_col_idx: Option<usize>) -> StreamHashAgg {
+fn new_stream_hash_agg(
+    logical: generic::Agg<PlanRef>,
+    vnode_col_idx: Option<usize>,
+) -> StreamHashAgg {
     let (logical, row_count_idx) = find_or_append_row_count(logical);
     StreamHashAgg::new(logical, vnode_col_idx, row_count_idx)
 }

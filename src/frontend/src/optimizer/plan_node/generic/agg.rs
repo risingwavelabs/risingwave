@@ -205,6 +205,22 @@ pub struct MaterializedInputState {
 }
 
 impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
+    pub fn infer_tables(
+        &self,
+        me: &impl stream::StreamPlanRef,
+        vnode_col_idx: Option<usize>,
+    ) -> (
+        TableCatalog,
+        Vec<AggCallState>,
+        HashMap<usize, TableCatalog>,
+    ) {
+        (
+            self.infer_result_table(me, vnode_col_idx),
+            self.infer_stream_agg_state(me, vnode_col_idx),
+            self.infer_distinct_dedup_tables(me, vnode_col_idx),
+        )
+    }
+
     /// Infer `AggCallState`s for streaming agg.
     pub fn infer_stream_agg_state(
         &self,
