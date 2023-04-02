@@ -284,13 +284,6 @@ impl LogicalAgg {
         }
     }
 
-    /// Check if the aggregation result will be affected by order by clause, if any.
-    pub(crate) fn is_agg_result_affected_by_order(&self) -> bool {
-        self.agg_calls()
-            .iter()
-            .any(|call| matches!(call.agg_kind, AggKind::StringAgg | AggKind::ArrayAgg))
-    }
-
     pub(crate) fn two_phase_agg_forced(&self) -> bool {
         self.base
             .ctx()
@@ -313,15 +306,7 @@ impl LogicalAgg {
     }
 
     pub(crate) fn can_two_phase_agg(&self) -> bool {
-        !self.agg_calls().is_empty()
-            && self.agg_calls().iter().all(|call| {
-                matches!(
-                    call.agg_kind,
-                    AggKind::Min | AggKind::Max | AggKind::Sum | AggKind::Count
-                ) && !call.distinct
-            })
-            && !self.is_agg_result_affected_by_order()
-            && self.two_phase_agg_enabled()
+        self.core.can_two_phase_agg() && self.two_phase_agg_enabled()
     }
 
     // Check if the output of the aggregation needs to be sorted and return ordering req by group
@@ -870,21 +855,16 @@ impl ExprRewriter for LogicalAggBuilder {
     }
 }
 
-impl LogicalAgg {
-    pub fn new(agg_calls: Vec<PlanAggCall>, group_key: Vec<usize>, input: PlanRef) -> Self {
-        let core = generic::Agg {
-            agg_calls,
-            group_key,
-            input,
-        };
+impl From<generic::Agg<PlanRef>> for LogicalAgg {
+    fn from(core: generic::Agg<PlanRef>) -> Self {
         let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
     }
+}
 
-    /// get the Mapping of columnIndex from input column index to output column index,if a input
-    /// column corresponds more than one out columns, mapping to any one
-    pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        self.core.o2i_col_mapping()
+impl LogicalAgg {
+    pub fn new(agg_calls: Vec<PlanAggCall>, group_key: Vec<usize>, input: PlanRef) -> Self {
+        Self::from(generic::Agg::new(agg_calls, group_key, input))
     }
 
     /// get the Mapping of columnIndex from input column index to out column index
@@ -978,8 +958,11 @@ impl LogicalAgg {
     }
 
     fn to_batch_simple_agg(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_batch()?;
-        let new_logical = self.clone_with_input(new_input);
+        let input = self.input().to_batch()?;
+        let new_logical = generic::Agg {
+            input,
+            ..self.core.clone()
+        };
         Ok(BatchSimpleAgg::new(new_logical).into())
     }
 }
@@ -1159,6 +1142,7 @@ impl ToBatch for LogicalAgg {
             if output_requires_order {
                 // Push down sort before aggregation
                 input_order = self
+                    .core
                     .o2i_col_mapping()
                     .rewrite_provided_order(&group_key_order);
             }

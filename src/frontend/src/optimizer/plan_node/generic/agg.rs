@@ -72,6 +72,35 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
         self.o2i_col_mapping().inverse()
     }
+
+    pub(crate) fn can_two_phase_agg(&self) -> bool {
+        self.call_support_two_phase() && !self.is_agg_result_affected_by_order()
+    }
+
+    fn call_support_two_phase(&self) -> bool {
+        !self.agg_calls.is_empty()
+            && self.agg_calls.iter().all(|call| {
+                matches!(
+                    call.agg_kind,
+                    AggKind::Min | AggKind::Max | AggKind::Sum | AggKind::Count
+                ) && !call.distinct
+            })
+    }
+
+    /// Check if the aggregation result will be affected by order by clause, if any.
+    pub(crate) fn is_agg_result_affected_by_order(&self) -> bool {
+        self.agg_calls
+            .iter()
+            .any(|call| matches!(call.agg_kind, AggKind::StringAgg | AggKind::ArrayAgg))
+    }
+
+    pub fn new(agg_calls: Vec<PlanAggCall>, group_key: Vec<usize>, input: PlanRef) -> Self {
+        Self {
+            agg_calls,
+            group_key,
+            input,
+        }
+    }
 }
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
