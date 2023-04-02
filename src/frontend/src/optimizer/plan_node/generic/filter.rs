@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt;
+
 use risingwave_common::catalog::Schema;
 
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::ExprRewriter;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::utils::Condition;
+use crate::utils::{Condition, ConditionDisplay};
 
 /// [`Filter`] iterates over its input and returns elements for which `predicate` evaluates to
 /// true, filtering out the others.
@@ -30,7 +32,20 @@ pub struct Filter<PlanRef> {
     pub input: PlanRef,
 }
 
-impl<PlanRef: GenericPlanRef> Filter<PlanRef> {}
+impl<PlanRef: GenericPlanRef> Filter<PlanRef> {
+    pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+        let input_schema = self.input.schema();
+        write!(
+            f,
+            "{} {{ predicate: {} }}",
+            name,
+            ConditionDisplay {
+                condition: &self.predicate,
+                input_schema
+            }
+        )
+    }
+}
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Filter<PlanRef> {
     fn schema(&self) -> Schema {
         self.input.schema().clone()
