@@ -34,7 +34,7 @@ impl StreamFilter {
     pub fn new(logical: generic::Filter<PlanRef>) -> Self {
         let base = PlanBase::new_logical_with_core(&logical);
         let ctx = base.ctx;
-        let input = logical.input;
+        let input = logical.input.clone();
         let pk_indices = base.logical_pk;
         let dist = input.distribution().clone();
         // Filter executor won't change the append-only behavior of the stream.
@@ -44,8 +44,8 @@ impl StreamFilter {
             pk_indices,
             base.functional_dependency,
             dist,
-            logical.input.append_only(),
-            logical.input.watermark_columns().clone(),
+            input.append_only(),
+            input.watermark_columns().clone(),
         );
         StreamFilter { base, logical }
     }

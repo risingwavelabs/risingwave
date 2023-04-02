@@ -45,6 +45,10 @@ impl<PlanRef: GenericPlanRef> Filter<PlanRef> {
             }
         )
     }
+
+    pub fn new(predicate: Condition, input: PlanRef) -> Self {
+        Filter { predicate, input }
+    }
 }
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Filter<PlanRef> {
     fn schema(&self) -> Schema {

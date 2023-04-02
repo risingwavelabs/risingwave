@@ -94,10 +94,6 @@ impl LogicalFilter {
     pub fn predicate(&self) -> &Condition {
         &self.core.predicate
     }
-
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        self.core.fmt_with_name(f, name)
-    }
 }
 
 impl PlanTreeNodeUnary for LogicalFilter {
@@ -124,7 +120,7 @@ impl_plan_tree_node_for_unary! {LogicalFilter}
 
 impl fmt::Display for LogicalFilter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalFilter")
+        self.core.fmt_with_name(f, "LogicalFilter")
     }
 }
 
@@ -200,7 +196,8 @@ impl PredicatePushdown for LogicalFilter {
 impl ToBatch for LogicalFilter {
     fn to_batch(&self) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
-        let new_logical = self.clone_with_input(new_input);
+        let mut new_logical = self.core.clone();
+        new_logical.input = new_input;
         Ok(BatchFilter::new(new_logical).into())
     }
 }
