@@ -22,7 +22,7 @@ use risingwave_pb::batch_plan::ExpandNode;
 
 use super::{generic, ExprRewritable};
 use crate::optimizer::plan_node::{
-    LogicalExpand, PlanBase, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, ToLocalBatch,
+    PlanBase, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
 use crate::optimizer::property::{Distribution, Order};
 use crate::optimizer::PlanRef;

@@ -539,11 +539,11 @@ pub(crate) mod tests {
         .unwrap()
         .to_distributed()
         .unwrap();
-        let batch_filter = BatchFilter::new(LogicalFilter::new(
-            batch_plan_node.clone(),
+        let batch_filter = BatchFilter::new(generic::Filter::new(
             Condition {
                 conjunctions: vec![],
             },
+            batch_plan_node.clone(),
         ))
         .into();
         let batch_exchange_node1: PlanRef = BatchExchange::new(
