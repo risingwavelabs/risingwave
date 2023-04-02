@@ -143,7 +143,8 @@ impl PredicatePushdown for LogicalExpand {
 impl ToBatch for LogicalExpand {
     fn to_batch(&self) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
-        let new_logical = self.clone_with_input(new_input);
+        let mut new_logical = self.core.clone();
+        new_logical.input = new_input;
         Ok(BatchExpand::new(new_logical).into())
     }
 }

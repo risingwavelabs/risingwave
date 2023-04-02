@@ -49,7 +49,7 @@ impl BatchExpand {
     }
 
     pub fn column_subsets(&self) -> &[Vec<usize>] {
-       & self.logical.column_subsets
+        &self.logical.column_subsets
     }
 }
 
@@ -61,11 +61,13 @@ impl fmt::Display for BatchExpand {
 
 impl PlanTreeNodeUnary for BatchExpand {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let mut logical = self.logical.clone();
+        logical.input = input;
+        Self::new(logical)
     }
 }
 
