@@ -101,5 +101,5 @@ else
 fi
 
 echo "--- Kill cluster"
-pkill -f connector-node
 cargo make ci-kill
+pkill -f connector-node
