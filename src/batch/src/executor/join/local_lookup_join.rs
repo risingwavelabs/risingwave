@@ -367,7 +367,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
         let vnode_mapping = lookup_join_node.get_inner_side_vnode_mapping().to_vec();
         assert!(!vnode_mapping.is_empty());
 
-        let chunk_size = source.context.get_config().developer.batch_chunk_size;
+        let chunk_size = source.context.get_config().developer.chunk_size;
 
         let inner_side_builder = InnerSideExecutorBuilder {
             table_desc: table_desc.clone(),

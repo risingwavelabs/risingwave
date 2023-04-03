@@ -138,7 +138,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             column_mapping: lookup.column_mapping.iter().map(|x| *x as usize).collect(),
             storage_table,
             watermark_epoch: stream_manager.get_watermark_epoch(),
-            chunk_size: params.env.config().developer.stream_chunk_size,
+            chunk_size: params.env.config().developer.chunk_size,
         })))
     }
 }

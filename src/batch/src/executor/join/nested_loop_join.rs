@@ -163,7 +163,7 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
             left_child,
             right_child,
             source.plan_node().get_identity().clone(),
-            source.context.get_config().developer.batch_chunk_size,
+            source.context.get_config().developer.chunk_size,
         )))
     }
 }

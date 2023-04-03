@@ -124,7 +124,7 @@ impl BoxedExecutorBuilder for ExpandExecutor {
         Ok(Box::new(Self::new(
             input,
             column_subsets,
-            source.context.get_config().developer.batch_chunk_size,
+            source.context.get_config().developer.chunk_size,
         )))
     }
 }

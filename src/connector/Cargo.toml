@@ -34,6 +34,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 globset = "0.4.8"
 google-cloud-pubsub = "0.7.0"
+hex = "0.4"
 http = "0.2"
 http-serde = "1.1.0"
 hyper = "0.14"
