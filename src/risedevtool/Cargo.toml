@@ -20,6 +20,7 @@ clap = { version = "4", features = ["derive"] }
 console = "0.15"
 dialoguer = "0.10"
 enum-iterator = "1"
+fs-err = "2.9.0"
 google-cloud-pubsub = "0.7.0"
 indicatif = "0.17"
 isahc = { version = "1", default-features = false, features = ["text-decoding"] }
