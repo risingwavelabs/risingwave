@@ -156,10 +156,6 @@ def validate_jdbc_sink(input_file):
                 exit(1)
 
 
-def test_print_sink(input_file):
-    test_sink("print", {}, input_file)
-
-
 def test_iceberg_sink(input_file):
     test_sink("iceberg",
               {"type":"append-only",
@@ -195,7 +191,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--file_sink', action='store_true', help="run file sink test")
     parser.add_argument('--jdbc_sink', action='store_true', help="run jdbc sink test")
-    parser.add_argument('--print_sink', action='store_true', help="run print sink test")
     parser.add_argument('--iceberg_sink', action='store_true', help="run iceberg sink test")
     parser.add_argument('--upsert_iceberg_sink', action='store_true', help="run upsert iceberg sink test")
     parser.add_argument('--deltalake_sink', action='store_true', help="run deltalake sink test")
@@ -205,8 +200,6 @@ if __name__ == "__main__":
         test_file_sink(args.input_file)
     if args.jdbc_sink:
         test_jdbc_sink(args.input_file)
-    if args.print_sink:
-        test_print_sink(args.input_file)
     if args.iceberg_sink:
         test_iceberg_sink(args.input_file)
     if args.upsert_iceberg_sink:
