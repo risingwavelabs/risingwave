@@ -93,11 +93,11 @@ do
 done
 sleep 2
 
-echo "---- mysql & postgres cdc validate test"
+echo "--- mysql & postgres cdc validate test"
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.validate.mysql.slt'
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.validate.postgres.slt'
 
-echo "---- mysql & postgres load and check"
+echo "--- mysql & postgres load and check"
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.load.slt'
 # wait for cdc loading
 sleep 10
@@ -118,8 +118,8 @@ echo "check mviews after cluster recovery"
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check_new_rows.slt'
 
 echo "--- Kill cluster"
-pkill -f connector-node
 cargo make ci-kill
+pkill -f connector-node
 
 echo "--- e2e, ci-1cn-1fe, nexmark endless"
 cargo make ci-start ci-1cn-1fe

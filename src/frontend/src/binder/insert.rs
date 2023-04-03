@@ -120,7 +120,7 @@ impl Binder {
 
         // TODO(yuhao): refine this if row_id is always the last column.
         //
-        // `row_id_index` in bin insert operation should rule out generated column
+        // `row_id_index` in insert operation should rule out generated column
         let row_id_index = {
             if let Some(row_id_index) = table_catalog.row_id_index {
                 let mut cnt = 0;
