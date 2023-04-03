@@ -458,10 +458,15 @@ where
     /// returns an empty set.
     pub fn actors_to_track(&self) -> HashSet<ActorId> {
         match &self.command {
-            Command::CreateStreamingJob { dispatchers, .. } => dispatchers
+            Command::CreateStreamingJob {
+                dispatchers,
+                table_fragments,
+                ..
+            } => dispatchers
                 .values()
                 .flatten()
                 .flat_map(|dispatcher| dispatcher.downstream_actor_id.iter().copied())
+                .chain(table_fragments.values_actor_ids().into_iter())
                 .collect(),
 
             _ => Default::default(),
