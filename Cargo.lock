@@ -3533,6 +3533,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lru"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03f1160296536f10c833a82dca22267d5486734230d47bf00bf435885814ba1e"
+dependencies = [
+ "hashbrown 0.13.2",
+]
+
+[[package]]
 name = "lz4"
 version = "1.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6464,7 +6473,7 @@ dependencies = [
  "either",
  "futures",
  "itertools",
- "lru",
+ "lru 0.10.0",
  "madsim-tokio",
  "madsim-tonic",
  "moka",
@@ -6507,7 +6516,7 @@ dependencies = [
  "futures",
  "glob",
  "itertools",
- "lru",
+ "lru 0.10.0",
  "madsim",
  "madsim-aws-sdk-s3",
  "madsim-etcd-client",
@@ -6712,7 +6721,7 @@ dependencies = [
  "iter-chunks",
  "itertools",
  "local_stats_alloc",
- "lru",
+ "lru 0.7.6",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
