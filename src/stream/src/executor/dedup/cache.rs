@@ -32,12 +32,7 @@ impl<K: Hash + Eq> DedupCache<K> {
     /// Insert a `key` into the cache only if the `key` doesn't exist in the cache before. Return
     /// whether the `key` is successfully inserted.
     pub fn dedup_insert(&mut self, key: K) -> bool {
-        if !self.inner.contains(&key) {
-            self.inner.push(key, ());
-            true
-        } else {
-            false
-        }
+        self.inner.put(key, ()).is_none()
     }
 
     /// Insert a `key` into the cache without checking for duplication.
