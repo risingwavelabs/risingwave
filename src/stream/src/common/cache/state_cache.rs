@@ -64,6 +64,7 @@ pub trait StateCacheFiller {
 /// An implementation of [`StateCache`] that uses a [`TopNCache`] as the underlying cache, with
 /// limited capacity.
 pub struct TopNStateCache<K: Ord, V> {
+    table_row_count: Option<usize>,
     cache: TopNCache<K, V>,
     synced: bool,
 }
@@ -71,20 +72,48 @@ pub struct TopNStateCache<K: Ord, V> {
 impl<K: Ord, V> TopNStateCache<K, V> {
     pub fn new(capacity: usize) -> Self {
         Self {
+            table_row_count: None,
             cache: TopNCache::new(capacity),
             synced: false,
         }
     }
 
-    fn insert_unchecked(&mut self, key: K, value: V) {
-        self.cache.insert(key, value);
+    pub fn new_with_row_count(capacity: usize, table_row_count: usize) -> Self {
+        Self {
+            table_row_count: Some(table_row_count),
+            cache: TopNCache::new(capacity),
+            synced: false,
+        }
     }
 
-    fn delete_unchecked(&mut self, key: K) {
+    pub fn set_table_row_count(&mut self, table_row_count: usize) {
+        self.table_row_count = Some(table_row_count);
+    }
+
+    fn row_count_matched(&self) -> bool {
+        self.table_row_count
+            .map(|n| n == self.cache.len())
+            .unwrap_or(false)
+    }
+
+    fn insert_synced(&mut self, key: K, value: V) {
+        if self.row_count_matched()
+            || self.cache.is_empty()
+            || &key <= self.cache.last_key().unwrap()
+        {
+            self.cache.insert(key, value);
+        }
+        // In other cases, we can't insert this key because we're not sure whether there're keys
+        // less than it in the table. So we only update table row count.
+        self.table_row_count = self.table_row_count.map(|n| n + 1);
+    }
+
+    fn delete_synced(&mut self, key: K) {
         self.cache.remove(key);
-        if self.cache.is_empty() {
-            // The cache becomes empty, but we don't know if there're still rows in the table,
-            // so mark it as not synced conservatively.
+        self.table_row_count = self.table_row_count.map(|n| n - 1);
+        if self.cache.is_empty() && !self.row_count_matched() {
+            // The cache becomes empty, but there're still rows in the table, so mark it as not
+            // synced.
             self.synced = false;
         }
     }
@@ -107,18 +136,13 @@ impl<K: Ord, V> StateCache for TopNStateCache<K, V> {
 
     fn insert(&mut self, key: Self::Key, value: Self::Value) {
         if self.synced {
-            if let Some(last_key) = self.cache.last_key() && &key > last_key {
-                // We can't insert this key because we're not sure whether there're
-                // keys less than it in the table.
-                return
-            }
-            self.insert_unchecked(key, value);
+            self.insert_synced(key, value);
         }
     }
 
     fn delete(&mut self, key: Self::Key) {
         if self.synced {
-            self.delete_unchecked(key);
+            self.delete_synced(key);
         }
     }
 
@@ -127,15 +151,10 @@ impl<K: Ord, V> StateCache for TopNStateCache<K, V> {
             for (op, key, value) in batch {
                 match op {
                     Op::Insert | Op::UpdateInsert => {
-                        if let Some(last_key) = self.cache.last_key() && &key > last_key {
-                            // We can't insert this key because we're not sure whether there're
-                            // keys less than it in the table.
-                            continue;
-                        }
-                        self.insert_unchecked(key, value);
+                        self.insert_synced(key, value);
                     }
                     Op::Delete | Op::UpdateDelete => {
-                        self.delete_unchecked(key);
+                        self.delete_synced(key);
                         if !self.synced {
                             break;
                         }
@@ -161,7 +180,7 @@ impl<K: Ord, V> StateCacheFiller for &mut TopNStateCache<K, V> {
 
     fn append(&mut self, key: Self::Key, value: Self::Value) {
         debug_assert!(&key >= self.cache.last_key().unwrap_or(&key));
-        self.insert_unchecked(key, value);
+        self.cache.insert(key, value);
     }
 
     fn finish(self) {
