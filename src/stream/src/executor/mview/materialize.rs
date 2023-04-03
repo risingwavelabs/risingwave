@@ -593,6 +593,10 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
     ) -> StreamExecutorResult<()> {
         let mut futures = vec![];
         for key in keys {
+            self.metrics
+                .materialize_cache_total_count
+                .with_label_values(&[&self.actor_id])
+                .inc();
             if self.data.contains(key) {
                 self.metrics
                     .materialize_cache_hit_count
@@ -600,10 +604,6 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                     .inc();
                 continue;
             }
-            self.metrics
-                .materialize_cache_total_count
-                .with_label_values(&[&self.actor_id])
-                .inc();
             futures.push(async {
                 let key_row = table.pk_serde().deserialize(key).unwrap();
                 (key.to_vec(), table.get_compacted_row(&key_row).await)
