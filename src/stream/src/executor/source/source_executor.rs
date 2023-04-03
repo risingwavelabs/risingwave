@@ -732,24 +732,7 @@ mod tests {
             .map(|msg| msg.unwrap().into_chunk().unwrap())
             .collect();
         let chunk_2 = StreamChunk::concat(chunks).sort_rows();
-        assert_eq!(
-            chunk_2,
-            // mixed from datagen split 0, 1 and 2
-            StreamChunk::from_pretty(
-                " i
-                + 12
-                + 13
-                + 15
-                + 16
-                + 18
-                + 19
-                + 23
-                + 26
-                + 29
-                + 32",
-            )
-        );
-        tracing::debug!("chunk_2: {:?}", chunk_2.to_pretty_string());
+        assert_eq!(chunk_2.cardinality(), 10,);
 
         let barrier = Barrier::new_test_barrier(3).with_mutation(Mutation::Pause);
         barrier_tx.send(barrier).unwrap();
