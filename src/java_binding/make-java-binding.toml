@@ -22,7 +22,7 @@ script = '''
 set -ex
 cd java
 mvn clean install --no-transfer-progress --pl java-binding-integration-test --am -DskipTests=true
-mvn dependency:copy-dependencies --pl java-binding-integration-test
+mvn dependency:copy-dependencies --no-transfer-progress --pl java-binding-integration-test
 '''
 
 [tasks.start-java-binding-demo-cluster]
