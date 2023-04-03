@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="risingwave",
-    version="0.0.3",
+    version="0.0.4",
     author="RisingWave Labs",
     description="RisingWave Python API",
     long_description=long_description,
