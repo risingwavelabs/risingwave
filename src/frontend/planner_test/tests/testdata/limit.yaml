@@ -45,6 +45,11 @@
       └─LogicalScan { table: t, columns: [t.v, t._row_id] }
 - sql: |
     create table t (v int);
+    select generate_series(1, 10000, 1) from values(1), (2), (3), (4) limit 1;
+  logical_plan: |
+  batch_plan: |
+- sql: |
+    create table t (v int);
     select * from t order by v fetch next 2 rows with ties;
   logical_plan: |
     LogicalTopN { order: "[t.v ASC]", limit: 2, offset: 0, with_ties: true }

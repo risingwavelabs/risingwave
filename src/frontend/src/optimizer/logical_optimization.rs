@@ -255,6 +255,12 @@ lazy_static! {
         vec![AlwaysFalseFilterRule::create()],
         ApplyOrder::TopDown,
     );
+
+    static ref LIMIT_PUSH_DOWN: OptimizationStage = OptimizationStage::new(
+        "Push Down Limit",
+        vec![LimitPushDownRule::create()],
+        ApplyOrder::TopDown,
+    );
 }
 
 impl LogicalOptimizer {
@@ -494,6 +500,8 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&DEDUP_GROUP_KEYS);
 
         plan = plan.optimize_by_rules(&TOP_N_AGG_ON_INDEX);
+
+        plan = plan.optimize_by_rules(&LIMIT_PUSH_DOWN);
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
