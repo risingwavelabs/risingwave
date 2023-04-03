@@ -56,11 +56,18 @@ const fn _default_use_transaction() -> bool {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct KafkaConfig {
+    #[serde(skip_serializing)]
+    pub connector: String, // Must be "kafka" here.
+
     #[serde(flatten)]
     pub common: KafkaCommon,
 
     pub r#type: String, // accept "append-only", "debezium", or "upsert"
+
+    #[serde(default)]
+    pub force_append_only: Option<bool>,
 
     pub identifier: String,
 
@@ -554,14 +561,15 @@ mod test {
     #[test]
     fn parse_kafka_config() {
         let properties: HashMap<String, String> = hashmap! {
+            "connector".to_string() => "kafka".to_string(),
             "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
             "topic".to_string() => "test".to_string(),
             "type".to_string() => "append-only".to_string(),
             "use_transaction".to_string() => "False".to_string(),
-            "security_protocol".to_string() => "SASL".to_string(),
-            "sasl_mechanism".to_string() => "SASL".to_string(),
-            "sasl_username".to_string() => "test".to_string(),
-            "sasl_password".to_string() => "test".to_string(),
+            "properties.security.protocol".to_string() => "SASL".to_string(),
+            "properties.sasl.mechanism".to_string() => "SASL".to_string(),
+            "properties.sasl.username".to_string() => "test".to_string(),
+            "properties.sasl.password".to_string() => "test".to_string(),
             "identifier".to_string() => "test_sink_1".to_string(),
             "properties.timeout".to_string() => "5s".to_string(),
         };
@@ -574,10 +582,10 @@ mod test {
     #[tokio::test]
     async fn test_kafka_producer() -> Result<()> {
         let properties = hashmap! {
-            "kafka.brokers".to_string() => "localhost:29092".to_string(),
+            "properties.bootstrap.server".to_string() => "localhost:29092".to_string(),
             "identifier".to_string() => "test_sink_1".to_string(),
             "type".to_string() => "append-only".to_string(),
-            "kafka.topic".to_string() => "test_topic".to_string(),
+            "topic".to_string() => "test_topic".to_string(),
         };
         let schema = Schema::new(vec![
             Field {
