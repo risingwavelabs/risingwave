@@ -1410,6 +1410,20 @@ def section_streaming_actors(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_actor_ops(
+                    "Materialize Executor Cache",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])",
+                            "cache miss {{actor_id}} ",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])",
+                            "total lookups {{actor_id}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_actor_latency(
                     "Join Executor Barrier Align",
                     "",
