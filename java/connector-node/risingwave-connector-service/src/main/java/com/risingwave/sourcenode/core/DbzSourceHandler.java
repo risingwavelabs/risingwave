@@ -55,6 +55,7 @@ public class DbzSourceHandler implements SourceHandler {
                                 "Engine#{}: Connection broken detected, stop the engine",
                                 config.getSourceId());
                         runner.stop();
+                        return;
                     }
                     // check whether the send queue has room for new messages
                     if (responseObserver.isReady()) {
