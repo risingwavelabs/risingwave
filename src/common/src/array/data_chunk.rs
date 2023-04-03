@@ -33,7 +33,8 @@ use crate::types::{DataType, ToOwnedDatum};
 use crate::util::hash_util::finalize_hashers;
 use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::util::value_encoding::{
-    estimate_serialize_datum_size, serialize_datum_into, ValueRowSerializer,
+    estimate_serialize_datum_size, serialize_datum_into, try_get_exact_serialize_datum_size,
+    ValueRowSerializer,
 };
 
 /// [`DataChunk`] is a collection of Columns,
@@ -439,20 +440,29 @@ impl DataChunk {
             Vis::Bitmap(vis) => {
                 let rows_num = vis.len();
                 let mut buffers = vec![BytesMut::new(); rows_num];
+                let mut row_len_variable: Vec<usize> = vec![0; rows_num];
+                let mut row_len_fixed: usize = 0;
+                for c in &self.columns {
+                    if let Some(field_len) = try_get_exact_serialize_datum_size(&c.array()) {
+                        row_len_fixed += field_len;
+                    } else {
+                        for (i, row_len) in row_len_variable.iter_mut().enumerate() {
+                            // SAFETY(value_at_unchecked): the idx is always in bound.
+                            unsafe {
+                                if vis.is_set_unchecked(i) {
+                                    *row_len += estimate_serialize_datum_size(
+                                        c.array_ref().value_at_unchecked(i),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
                 for (i, buffer) in buffers.iter_mut().enumerate() {
                     // SAFETY(value_at_unchecked): the idx is always in bound.
                     unsafe {
                         if vis.is_set_unchecked(i) {
-                            buffer.reserve(
-                                self.columns()
-                                    .iter()
-                                    .map(|col| {
-                                        estimate_serialize_datum_size(
-                                            col.array_ref().value_at_unchecked(i),
-                                        )
-                                    })
-                                    .sum(),
-                            );
+                            buffer.reserve(row_len_fixed + row_len_variable[i]);
                         }
                     }
                 }
@@ -472,20 +482,24 @@ impl DataChunk {
             }
             Vis::Compact(rows_num) => {
                 let mut buffers = vec![BytesMut::new(); *rows_num];
-                for (i, buffer) in buffers.iter_mut().enumerate() {
-                    // SAFETY(value_at_unchecked): the idx is always in bound.
-                    unsafe {
-                        buffer.reserve(
-                            self.columns()
-                                .iter()
-                                .map(|col| {
-                                    estimate_serialize_datum_size(
-                                        col.array_ref().value_at_unchecked(i),
-                                    )
-                                })
-                                .sum(),
-                        );
+                let mut row_len_variable: Vec<usize> = vec![0; *rows_num];
+                let mut row_len_fixed: usize = 0;
+                for c in &self.columns {
+                    if let Some(field_len) = try_get_exact_serialize_datum_size(&c.array()) {
+                        row_len_fixed += field_len;
+                    } else {
+                        for (i, row_len) in row_len_variable.iter_mut().enumerate() {
+                            // SAFETY(value_at_unchecked): the idx is always in bound.
+                            unsafe {
+                                *row_len += estimate_serialize_datum_size(
+                                    c.array_ref().value_at_unchecked(i),
+                                );
+                            }
+                        }
                     }
+                }
+                for (i, buffer) in buffers.iter_mut().enumerate() {
+                    buffer.reserve(row_len_fixed + row_len_variable[i]);
                 }
                 for c in &self.columns {
                     let c = c.array_ref();

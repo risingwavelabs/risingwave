@@ -24,7 +24,7 @@ use either::{for_both, Either};
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 
-use crate::array::{serial_array, JsonbVal, ListRef, ListValue, StructRef, StructValue};
+use crate::array::{serial_array, ArrayImpl, JsonbVal, ListRef, ListValue, StructRef, StructValue};
 use crate::catalog::ColumnId;
 use crate::row::{Row, RowDeserializer as BasicDeserializer};
 use crate::types::struct_type::StructType;
@@ -163,6 +163,20 @@ impl ValueRowDeserializer for BasicSerde {
 impl ValueRowSerde for BasicSerde {
     fn kind(&self) -> ValueRowSerdeKind {
         ValueRowSerdeKind::Basic
+    }
+}
+
+pub fn try_get_exact_serialize_datum_size(arr: &ArrayImpl) -> Option<usize> {
+    match arr {
+        ArrayImpl::Int16(_) => Some(2),
+        ArrayImpl::Int32(_) => Some(4),
+        ArrayImpl::Int64(_) => Some(8),
+        ArrayImpl::Serial(_) => Some(8),
+        ArrayImpl::Float32(_) => Some(4),
+        ArrayImpl::Float64(_) => Some(8),
+        ArrayImpl::Bool(_) => Some(1),
+        ArrayImpl::Jsonb(_) => Some(8),
+        _ => None,
     }
 }
 
