@@ -61,8 +61,10 @@ def hex_to_dec(hex: Optional[str]) -> Optional[Decimal]:
 
 
 @udf(input_types=["VARCHAR[]", "INT"], result_type="VARCHAR")
-def array_access(list: list[str], idx: int) -> str:
-    return list[idx]
+def array_access(list: list[str], idx: int) -> Optional[str]:
+    if idx == 0 or idx > len(list):
+        return None
+    return list[idx - 1]
 
 
 if __name__ == '__main__':

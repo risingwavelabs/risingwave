@@ -22,10 +22,6 @@ use arrow_schema::Schema;
 use futures_util::{stream, Stream, StreamExt, TryStreamExt};
 use tonic::transport::Channel;
 
-use self::type_::data_types_match;
-
-mod type_;
-
 /// Client for external function service based on Arrow Flight.
 #[derive(Debug)]
 pub struct ArrowFlightUdfClient {
@@ -165,4 +161,12 @@ pub enum Error {
     NoReturned,
     #[error("UDF service returned a batch with no column")]
     NoColumn,
+}
+
+/// Check if two list of data types match, ignoring field names.
+fn data_types_match(a: &[&arrow_schema::DataType], b: &[&arrow_schema::DataType]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    (a.iter().zip(b.iter())).all(|(a, b)| a.equals_datatype(b))
 }

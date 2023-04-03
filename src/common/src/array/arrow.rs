@@ -154,7 +154,7 @@ impl From<&DataType> for arrow_schema::DataType {
                 Self::Struct(get_field_vector_from_struct_type(struct_type))
             }
             DataType::List { datatype } => {
-                Self::List(Box::new(Field::new("", datatype.as_ref().into(), true)))
+                Self::List(Box::new(Field::new("item", datatype.as_ref().into(), true)))
             }
             _ => todo!("Unsupported arrow data type: {value:?}"),
         }
