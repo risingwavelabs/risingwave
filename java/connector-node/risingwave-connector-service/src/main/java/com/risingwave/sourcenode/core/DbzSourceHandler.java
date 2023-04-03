@@ -78,7 +78,7 @@ public class DbzSourceHandler implements SourceHandler {
                         return;
                     }
                 } catch (Exception e) {
-                    throw new RuntimeException(e);
+                    LOG.error("Poll engine output channel fail. ", e);
                 }
             }
         }
