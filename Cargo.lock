@@ -3593,7 +3593,7 @@ dependencies = [
  "rand_xoshiro",
  "rustversion",
  "serde",
- "spin 0.9.6",
+ "spin 0.9.8",
  "tokio",
  "tokio-util",
  "toml 0.7.3",
@@ -3614,7 +3614,7 @@ dependencies = [
  "bytes",
  "http",
  "madsim",
- "spin 0.9.6",
+ "spin 0.9.8",
  "tracing",
 ]
 
@@ -3630,7 +3630,7 @@ dependencies = [
  "madsim",
  "serde",
  "serde_with 2.3.1",
- "spin 0.9.6",
+ "spin 0.9.8",
  "thiserror",
  "tokio",
  "toml 0.7.3",
@@ -3667,7 +3667,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "slab",
- "spin 0.9.6",
+ "spin 0.9.8",
  "thiserror",
  "tokio",
  "tracing",
@@ -6400,7 +6400,7 @@ dependencies = [
  "prometheus",
  "random-string",
  "risingwave_common",
- "spin 0.9.6",
+ "spin 0.9.8",
  "tempfile",
  "thiserror",
  "tracing",
@@ -6676,7 +6676,7 @@ dependencies = [
  "risingwave_tracing",
  "scopeguard",
  "sled",
- "spin 0.9.6",
+ "spin 0.9.8",
  "sync-point",
  "sysinfo",
  "tempfile",
@@ -7474,9 +7474,9 @@ checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
 
 [[package]]
 name = "spin"
-version = "0.9.6"
+version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5d6e0250b93c8427a177b849d144a96d5acc57006149479403d7861ab721e34"
+checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
 dependencies = [
  "lock_api",
 ]
@@ -7639,7 +7639,7 @@ version = "0.1.0"
 dependencies = [
  "futures-util",
  "madsim-tokio",
- "spin 0.9.6",
+ "spin 0.9.8",
  "thiserror",
 ]
 
