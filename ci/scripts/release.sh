@@ -11,7 +11,8 @@ if [ "${BUILDKITE_SOURCE}" != "schedule" ] && [ "${BUILDKITE_SOURCE}" != "webhoo
 fi
 
 echo "--- Install java and maven"
-yum install -y java-11-openjdk wget
+yum install -y java-11-openjdk wget python3
+pip3 install toml-cli
 wget https://dlcdn.apache.org/maven/maven-3/3.9.1/binaries/apache-maven-3.9.1-bin.tar.gz && tar -zxvf apache-maven-3.9.1-bin.tar.gz
 export PATH="${REPO_ROOT}/apache-maven-3.9.1/bin:$PATH"
 mvn -v
@@ -35,6 +36,9 @@ source /opt/rh/llvm-toolset-7.0/enable
 echo "--- Install aws cli"
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
 unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
+
+echo "--- Update risingwave release version"
+toml set --toml-path Cargo.toml workspace.package.version ${BUILDKITE_TAG#*v}
 
 echo "--- Build risingwave release binary"
 cargo build -p risingwave_cmd_all --features "static-link static-log-level" --profile release
