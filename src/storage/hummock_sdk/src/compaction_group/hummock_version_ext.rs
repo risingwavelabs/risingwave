@@ -818,6 +818,16 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: Vec<SstableInfo>) 
     if operand.level_type == LevelType::Overlapping as i32 {
         operand.level_type = LevelType::Nonoverlapping as i32;
     }
+
+    if !can_concat(&operand.table_infos) {
+        tracing::info!(
+            "level {} {} operand.table_infos {:?}",
+            operand.level_idx,
+            operand.sub_level_id,
+            operand.table_infos
+        );
+    }
+
     debug_assert!(can_concat(&operand.table_infos));
 }
 

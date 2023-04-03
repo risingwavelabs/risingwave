@@ -850,7 +850,7 @@ where
             compact_task.set_task_status(TaskStatus::Success);
             self.report_compact_task_impl(None, &mut compact_task, Some(compaction_guard), None)
                 .await?;
-            tracing::debug!(
+            tracing::info!(
                 "TrivialMove for compaction group {}: pick up {} tables in level {} to compact to target_level {}  cost time: {:?}",
                 compaction_group_id,
                 compact_task.input_ssts[0].table_infos.len(),
@@ -884,7 +884,7 @@ where
                 compaction_group_id,
             );
 
-            tracing::trace!(
+            tracing::info!(
                 "For compaction group {}: pick up {} tables in level {} to compact.  cost time: {:?}",
                 compaction_group_id,
                 compact_task.input_ssts[0].table_infos.len(),

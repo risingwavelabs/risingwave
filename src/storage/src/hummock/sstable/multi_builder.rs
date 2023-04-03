@@ -16,6 +16,8 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
 
+use num_integer::Integer;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::LocalSstableInfo;
@@ -72,6 +74,9 @@ where
     key_range: KeyRange,
     last_table_id: u32,
     split_by_table: bool,
+
+    last_vnode_point: usize,
+    split_by_vnode: bool,
 }
 
 impl<F> CapacitySplitTableBuilder<F>
@@ -86,6 +91,7 @@ where
         del_agg: Arc<RangeTombstonesCollector>,
         key_range: KeyRange,
         split_by_table: bool,
+        split_by_vnode: bool,
     ) -> Self {
         let start_key = if key_range.left.is_empty() {
             UserKey::default()
@@ -104,6 +110,8 @@ where
             key_range,
             last_table_id: 0,
             split_by_table,
+            last_vnode_point: VirtualNode::COUNT / 4 - 1,
+            split_by_vnode,
         }
     }
 
@@ -119,6 +127,8 @@ where
             key_range: KeyRange::inf(),
             last_table_id: 0,
             split_by_table: false,
+            last_vnode_point: usize::MAX,
+            split_by_vnode: false,
         }
     }
 
@@ -149,7 +159,34 @@ where
         if self.split_by_table && full_key.user_key.table_id.table_id != self.last_table_id {
             self.last_table_id = full_key.user_key.table_id.table_id;
             switch_builder = true;
+            self.last_vnode_point = VirtualNode::COUNT / 4 - 1;
         }
+
+        if self.last_vnode_point != VirtualNode::MAX.to_index() && self.split_by_vnode {
+            let key_vnode = full_key.user_key.get_vnode_id();
+            if key_vnode > self.last_vnode_point {
+                switch_builder = true;
+                let old_last_vnode_point = self.last_vnode_point;
+                let table_weight = 4 as usize;
+                let (basic, remainder) = VirtualNode::COUNT.div_rem(&table_weight);
+                let small_segments_area = basic * (table_weight - remainder);
+                self.last_vnode_point = (if key_vnode < small_segments_area {
+                    (key_vnode / basic + 1) * basic
+                } else {
+                    ((key_vnode - small_segments_area) / (basic + 1) + 1) * (basic + 1)
+                        + small_segments_area
+                }) - 1;
+                debug_assert!(key_vnode <= self.last_vnode_point);
+
+                tracing::info!(
+                    "switch_builder by vnode {:?} last {:?} old_last_vnode_point {:?}",
+                    key_vnode,
+                    self.last_vnode_point,
+                    old_last_vnode_point
+                );
+            }
+        }
+
         if let Some(builder) = self.current_builder.as_ref() {
             if is_new_user_key && (switch_builder || builder.reach_capacity()) {
                 let delete_ranges = self
@@ -429,6 +466,7 @@ mod tests {
             builder.build(0, false),
             KeyRange::inf(),
             false,
+            false,
         );
         builder
             .add_full_key(
@@ -479,6 +517,7 @@ mod tests {
             None,
             builder.build(0, false),
             KeyRange::inf(),
+            false,
             false,
         );
         let results = builder.finish().await.unwrap();

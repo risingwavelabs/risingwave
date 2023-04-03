@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::sync::Arc;
 
 use rand::thread_rng;
@@ -20,7 +21,8 @@ use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, Overlappin
 
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::{
-    CompactionInput, CompactionPicker, LocalPickerStatistic, MinOverlappingPicker,
+    create_overlap_strategy, CompactionInput, CompactionPicker, LocalPickerStatistic,
+    MinOverlappingPicker,
 };
 use crate::hummock::level_handler::LevelHandler;
 
@@ -42,15 +44,103 @@ impl TierCompactionPicker {
 }
 
 impl TierCompactionPicker {
+    fn pick_multi_level(
+        &self,
+        l0: &OverlappingLevel,
+        level_handler: &LevelHandler,
+        stats: &mut LocalPickerStatistic,
+    ) -> Option<CompactionInput> {
+        for (idx, level) in l0.sub_levels.iter().enumerate() {
+            if level.level_type() != LevelType::Nonoverlapping
+                || level.total_file_size > self.config.sub_level_max_compaction_bytes
+            {
+                continue;
+            }
+
+            if level_handler.is_level_all_pending_compact(level) {
+                continue;
+            }
+
+            let min_overlap_picker = MinOverlappingPicker::new(
+                0,
+                0,
+                self.config.max_compaction_bytes,
+                false,
+                self.overlap_strategy.clone(),
+            );
+            let level_select_files =
+                min_overlap_picker.pick_l0_multi_level(&l0.sub_levels[idx..], level_handler);
+
+            if level_select_files.is_empty() {
+                return None;
+            }
+
+            let level_select_table = &level_select_files.first().unwrap().1;
+
+            {
+                use itertools::Itertools;
+                let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
+                let l0_select_tables = level_select_table
+                    .iter()
+                    .flat_map(|select_tables| select_tables.clone())
+                    .collect_vec();
+
+                let target_level_files = overlap_strategy
+                    .check_base_level_overlap(&l0_select_tables, &l0.sub_levels[idx].table_infos);
+
+                if level_select_table[0] != target_level_files {
+                    tracing::info!(
+                        "Error sub_level_index {} total_sub_level_len {} level_select_table_len {}",
+                        idx,
+                        l0.sub_levels.len(),
+                        level_select_table.len()
+                    );
+
+                    for l in &l0.sub_levels {
+                        let sst_ids = l.table_infos.iter().map(|sst| sst.sst_id).collect_vec();
+                        tracing::info!("sub_l {} sst_ids {:?}", l.sub_level_id, sst_ids);
+                    }
+                }
+
+                assert_eq!(level_select_table[0], target_level_files);
+            }
+
+            let mut select_level_inputs = Vec::with_capacity(level_select_table.len());
+            for select_tables in level_select_table.into_iter() {
+                select_level_inputs.push(InputLevel {
+                    level_idx: 0,
+                    level_type: LevelType::Nonoverlapping as i32,
+                    table_infos: select_tables.to_vec(),
+                });
+            }
+
+            select_level_inputs.reverse();
+
+            tracing::info!("TRACK tier_compaction level_count {}", select_level_inputs.len());
+
+            // println!(
+            //     "pick TierCompaction level.sub_level_id {}",
+            //     level.sub_level_id
+            // );
+
+            return Some(CompactionInput {
+                input_levels: select_level_inputs,
+                target_level: 0,
+                target_sub_level_id: level.sub_level_id,
+            });
+        }
+
+        None
+    }
+
     fn pick_whole_level(
         &self,
         l0: &OverlappingLevel,
         level_handler: &LevelHandler,
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
-        let non_overlapping_type = LevelType::Nonoverlapping as i32;
         for (idx, level) in l0.sub_levels.iter().enumerate() {
-            if level.level_type != non_overlapping_type
+            if level.level_type() != LevelType::Nonoverlapping
                 || level.total_file_size > self.config.sub_level_max_compaction_bytes
             {
                 continue;
@@ -78,7 +168,7 @@ impl TierCompactionPicker {
                 if compact_file_count > self.config.level0_max_compact_file_number {
                     break;
                 }
-                if other.level_type != non_overlapping_type
+                if other.level_type() != LevelType::Nonoverlapping
                     || other.total_file_size > self.config.sub_level_max_compaction_bytes
                 {
                     break;
@@ -108,7 +198,7 @@ impl TierCompactionPicker {
             // do not pick a compact task with large write amplification. But if the total bytes is
             // too large,  we can not check write amplification because it may cause
             // compact task never be trigger.
-            if level.level_type == non_overlapping_type
+            if level.level_type() == LevelType::Nonoverlapping
                 && is_write_amp_large
                 && select_level_inputs.len() < self.config.level0_tier_compact_file_number as usize
                 && compact_file_count < self.config.level0_max_compact_file_number
@@ -376,9 +466,7 @@ impl CompactionPicker for TierCompactionPicker {
         if let Some(ret) = self.pick_overlapping_level(l0, &level_handlers[0], stats) {
             return Some(ret);
         }
-        if !self.config.split_by_state_table {
-            return self.pick_whole_level(l0, &level_handlers[0], stats);
-        }
+
         let mut member_table_ids = levels.member_table_ids.clone();
         for level in &l0.sub_levels {
             if level.level_type != LevelType::Nonoverlapping as i32 {
@@ -390,6 +478,16 @@ impl CompactionPicker for TierCompactionPicker {
                 }
             }
         }
+
+        if member_table_ids.len() == 1 {
+            return self.pick_multi_level(l0, &level_handlers[0], stats);
+        }
+
+        if !self.config.split_by_state_table {
+            return self.pick_multi_level(l0, &level_handlers[0], stats);
+            // return self.pick_whole_level(l0, &level_handlers[0], stats);
+        }
+
         member_table_ids.sort();
         member_table_ids.dedup();
         use rand::prelude::SliceRandom;
@@ -408,6 +506,7 @@ pub mod tests {
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::level_selector::tests::{
+        generate_l0_nonoverlapping_sublevels, generate_l0_nonoverlapping_sublevels2,
         generate_l0_overlapping_sublevels, generate_table,
     };
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
@@ -541,6 +640,177 @@ pub mod tests {
     }
 
     #[test]
+    fn test_pick_multi_level_basic() {
+        {
+            let l0 = generate_l0_nonoverlapping_sublevels2(vec![
+                vec![
+                    generate_table(6, 1, 50, 99, 1),
+                    generate_table(1, 1, 100, 200, 1),
+                    generate_table(2, 1, 150, 250, 1),
+                ],
+                vec![generate_table(3, 1, 10, 90, 1)],
+                vec![
+                    generate_table(4, 1, 100, 200, 1),
+                    generate_table(5, 1, 50, 150, 1),
+                ],
+            ]);
+            let levels = Levels {
+                l0: Some(l0),
+                levels: vec![],
+                member_table_ids: vec![1],
+                ..Default::default()
+            };
+            let mut levels_handler = vec![LevelHandler::new(0)];
+            let config = Arc::new(
+                CompactionConfigBuilder::new()
+                    .level0_tier_compact_file_number(2)
+                    .build(),
+            );
+            let mut picker =
+                TierCompactionPicker::new(config, Arc::new(RangeOverlapStrategy::default()));
+            let mut local_stats = LocalPickerStatistic::default();
+            let ret = picker
+                .pick_compaction(&levels, &levels_handler, &mut local_stats)
+                .unwrap();
+            ret.add_pending_task(1, &mut levels_handler);
+            // assert_eq!(ret.input_levels.len(), 3);
+            println!("ret1 {:?}", ret.input_levels[0].table_infos);
+            assert_eq!(
+                ret.input_levels
+                    .iter()
+                    .map(|i| i.table_infos.len())
+                    .sum::<usize>(),
+                6
+            );
+            // all pending
+            assert!(picker
+                .pick_compaction(&levels, &levels_handler, &mut local_stats)
+                .is_none());
+        }
+
+        {
+            // Suppose keyguard [100, 200] [300, 400]
+            // will pick sst [1, 3, 4]
+            let l0 = generate_l0_nonoverlapping_sublevels2(vec![
+                vec![
+                    generate_table(1, 1, 100, 200, 1),
+                    generate_table(2, 1, 300, 400, 1),
+                ],
+                vec![generate_table(3, 1, 100, 150, 1)],
+                vec![
+                    generate_table(4, 1, 100, 200, 1),
+                    generate_table(5, 1, 300, 350, 1),
+                ],
+            ]);
+            let levels = Levels {
+                l0: Some(l0),
+                levels: vec![],
+                member_table_ids: vec![1],
+                ..Default::default()
+            };
+            let mut levels_handler = vec![LevelHandler::new(0)];
+            let config = Arc::new(
+                CompactionConfigBuilder::new()
+                    .level0_tier_compact_file_number(2)
+                    .build(),
+            );
+            let mut picker =
+                TierCompactionPicker::new(config, Arc::new(RangeOverlapStrategy::default()));
+            let mut local_stats = LocalPickerStatistic::default();
+            let ret = picker
+                .pick_compaction(&levels, &levels_handler, &mut local_stats)
+                .unwrap();
+            ret.add_pending_task(1, &mut levels_handler);
+            println!("ret1 {:?}", ret.input_levels[0].table_infos);
+            assert_eq!(
+                ret.input_levels
+                    .iter()
+                    .map(|i| i.table_infos.len())
+                    .sum::<usize>(),
+                3
+            );
+
+            // will pick sst [2, 5]
+            let ret2 = picker
+                .pick_compaction(&levels, &levels_handler, &mut local_stats)
+                .unwrap();
+
+            assert_eq!(
+                ret2.input_levels
+                    .iter()
+                    .map(|i| i.table_infos.len())
+                    .sum::<usize>(),
+                2
+            );
+        }
+
+        {
+            println!("test pick 3");
+            // Suppose keyguard [100, 250] [300, 400]
+            // will pick sst [1, 3, 4]
+            let l0 = generate_l0_nonoverlapping_sublevels2(vec![
+                vec![
+                    generate_table(1, 1, 100, 150, 1),
+                    generate_table(6, 1, 150, 200, 1),
+                    generate_table(7, 1, 200, 250, 1),
+                    generate_table(2, 1, 300, 400, 1),
+                ],
+                vec![
+                    generate_table(3, 1, 100, 150, 1),
+                    generate_table(8, 1, 150, 200, 1),
+                    generate_table(9, 1, 200, 250, 1),
+                    generate_table(10, 1, 300, 400, 1),
+                ],
+                vec![
+                    generate_table(4, 1, 100, 200, 1),
+                    generate_table(11, 1, 200, 250, 1),
+                    generate_table(5, 1, 300, 350, 1),
+                ],
+            ]);
+            let levels = Levels {
+                l0: Some(l0),
+                levels: vec![],
+                member_table_ids: vec![1],
+                ..Default::default()
+            };
+            let mut levels_handler = vec![LevelHandler::new(0)];
+            let config = Arc::new(
+                CompactionConfigBuilder::new()
+                    .level0_tier_compact_file_number(2)
+                    .build(),
+            );
+            let mut picker =
+                TierCompactionPicker::new(config, Arc::new(RangeOverlapStrategy::default()));
+            let mut local_stats = LocalPickerStatistic::default();
+            let ret = picker
+                .pick_compaction(&levels, &levels_handler, &mut local_stats)
+                .unwrap();
+            ret.add_pending_task(1, &mut levels_handler);
+            println!("ret1 {:?}", ret.input_levels[0].table_infos);
+            assert_eq!(
+                ret.input_levels
+                    .iter()
+                    .map(|i| i.table_infos.len())
+                    .sum::<usize>(),
+                3
+            );
+
+            // will pick sst [1, 6, 7, 3, 8, 9, 4, 11]
+            let ret2 = picker
+                .pick_compaction(&levels, &levels_handler, &mut local_stats)
+                .unwrap();
+
+            assert_eq!(
+                ret2.input_levels
+                    .iter()
+                    .map(|i| i.table_infos.len())
+                    .sum::<usize>(),
+                8
+            );
+        }
+    }
+
+    #[test]
     fn test_pick_whole_level_skip_sublevel() {
         let l0 = generate_l0_overlapping_sublevels(vec![
             vec![
@@ -550,6 +820,7 @@ pub mod tests {
             vec![generate_table(6, 1, 1, 100, 1)],
             vec![generate_table(7, 1, 1, 100, 1)],
         ]);
+
         let mut levels = Levels {
             l0: Some(l0),
             levels: vec![],

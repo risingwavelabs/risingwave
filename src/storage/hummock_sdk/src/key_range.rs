@@ -58,6 +58,7 @@ pub trait KeyRangeCommon {
     fn full_key_overlap(&self, other: &Self) -> bool;
     fn full_key_extend(&mut self, other: &Self);
     fn sstable_overlap(&self, other: &Self) -> bool;
+    fn sstable_include(&self, other: &Self) -> bool;
     fn compare_right_with(&self, full_key: &[u8]) -> std::cmp::Ordering {
         self.compare_right_with_user_key(FullKey::decode(full_key).user_key)
     }
@@ -104,6 +105,17 @@ macro_rules! impl_key_range_common {
                     && (other.end_bound_inf()
                         || self.start_bound_inf()
                         || other.compare_right_with(&self.left) != std::cmp::Ordering::Less)
+            }
+
+            fn sstable_include(&self, other: &Self) -> bool {
+                use $crate::key::FullKey;
+                (self.end_bound_inf()
+                    || self.start_bound_inf()
+                    || (self.compare_right_with(&other.right) != std::cmp::Ordering::Less
+                        && FullKey::decode(&self.left)
+                            .user_key
+                            .cmp(&FullKey::decode(&other.left).user_key)
+                            != std::cmp::Ordering::Greater))
             }
 
             fn compare_right_with_user_key(

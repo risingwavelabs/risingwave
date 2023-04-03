@@ -250,6 +250,13 @@ pub fn can_concat(ssts: &[SstableInfo]) -> bool {
             .compare_right_with(&ssts[i + 1].key_range.as_ref().unwrap().left)
             != Ordering::Less
         {
+            tracing::info!(
+                "Mismatch sst {} {:?} sst+1 {} {:?}",
+                ssts[i].sst_id,
+                ssts[i],
+                ssts[i + 1].sst_id,
+                ssts[i + 1]
+            );
             return false;
         }
     }
