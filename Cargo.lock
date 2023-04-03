@@ -8923,7 +8923,6 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tonic",
- "tonic-build",
  "tower",
  "tracing",
  "tracing-core",

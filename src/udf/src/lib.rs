@@ -168,5 +168,6 @@ fn data_types_match(a: &[&arrow_schema::DataType], b: &[&arrow_schema::DataType]
     if a.len() != b.len() {
         return false;
     }
-    (a.iter().zip(b.iter())).all(|(a, b)| a.equals_datatype(b))
+    #[allow(clippy::disallowed_methods)]
+    a.iter().zip(b.iter()).all(|(a, b)| a.equals_datatype(b))
 }
