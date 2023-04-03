@@ -14,15 +14,15 @@
 
 use std::collections::BTreeMap;
 
-/// Common cache structure for [`super::StateCache`] (non-append-only `min`/`max`, `string_agg`).
-pub struct OrderedCache<K: Ord, V> {
+/// Inner top-N cache structure for [`super::TopNStateCache`].
+pub struct TopNCache<K: Ord, V> {
     /// The capacity of the cache.
     capacity: usize,
     /// Ordered cache entries.
     entries: BTreeMap<K, V>,
 }
 
-impl<K: Ord, V> OrderedCache<K, V> {
+impl<K: Ord, V> TopNCache<K, V> {
     /// Create a new cache with specified capacity and order requirements.
     /// To create a cache with unlimited capacity, use `usize::MAX` for `capacity`.
     pub fn new(capacity: usize) -> Self {
@@ -85,8 +85,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_ordered_cache() {
-        let mut cache = OrderedCache::new(3);
+    fn test_top_n_cache() {
+        let mut cache = TopNCache::new(3);
         assert_eq!(cache.capacity(), 3);
         assert_eq!(cache.len(), 0);
         assert!(cache.is_empty());
