@@ -14,14 +14,9 @@
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::serial_array::SerialArray;
-use risingwave_common::array::{
-    ArrayBuilderImpl, BoolArray, DataChunk, DateArray, DecimalArray, F32Array, F64Array, I16Array,
-    I32Array, I64Array, IntervalArray, TimeArray, TimestampArray, Utf8Array,
-};
+use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
-use risingwave_common::test_utils::rand_array::seed_rand_array_ref;
+use risingwave_common::test_utils::rand_chunk;
 use risingwave_common::types::DataType;
 
 static SEED: u64 = 998244353u64;
@@ -56,7 +51,8 @@ impl HashKeyDispatcher for HashKeyBenchCaseBuilder {
                     chunk_size,
                     null_ratio
                 );
-                let input_chunk = gen_chunk(self.data_types(), *chunk_size, SEED, *null_ratio);
+                let input_chunk =
+                    rand_chunk::gen_chunk(self.data_types(), *chunk_size, SEED, *null_ratio);
                 ret.push(Box::new(HashKeyBenchCase::<K>::new(
                     id,
                     input_chunk,
@@ -137,37 +133,6 @@ impl<K: HashKey> Case for HashKeyBenchCase<K> {
         self.bench_vec_deser(c);
         self.bench_deser(c);
     }
-}
-
-fn gen_chunk(data_types: &[DataType], size: usize, seed: u64, null_ratio: f64) -> DataChunk {
-    let mut columns = vec![];
-
-    for d in data_types {
-        columns.push(Column::new(match d {
-            DataType::Boolean => seed_rand_array_ref::<BoolArray>(size, seed, null_ratio),
-            DataType::Int16 => seed_rand_array_ref::<I16Array>(size, seed, null_ratio),
-            DataType::Int32 => seed_rand_array_ref::<I32Array>(size, seed, null_ratio),
-            DataType::Int64 => seed_rand_array_ref::<I64Array>(size, seed, null_ratio),
-            DataType::Float32 => seed_rand_array_ref::<F32Array>(size, seed, null_ratio),
-            DataType::Float64 => seed_rand_array_ref::<F64Array>(size, seed, null_ratio),
-            DataType::Decimal => seed_rand_array_ref::<DecimalArray>(size, seed, null_ratio),
-            DataType::Date => seed_rand_array_ref::<DateArray>(size, seed, null_ratio),
-            DataType::Varchar => seed_rand_array_ref::<Utf8Array>(size, seed, null_ratio),
-            DataType::Time => seed_rand_array_ref::<TimeArray>(size, seed, null_ratio),
-            DataType::Serial => seed_rand_array_ref::<SerialArray>(size, seed, null_ratio),
-            DataType::Timestamp => seed_rand_array_ref::<TimestampArray>(size, seed, null_ratio),
-            DataType::Timestamptz => seed_rand_array_ref::<I64Array>(size, seed, null_ratio),
-            DataType::Interval => seed_rand_array_ref::<IntervalArray>(size, seed, null_ratio),
-            DataType::Struct(_) | DataType::Bytea | DataType::Jsonb => {
-                todo!()
-            }
-            DataType::List { datatype: _ } => {
-                todo!()
-            }
-        }));
-    }
-    risingwave_common::util::schema_check::schema_check(data_types, &columns).unwrap();
-    DataChunk::new(columns, size)
 }
 
 fn case_builders() -> Vec<HashKeyBenchCaseBuilder> {
