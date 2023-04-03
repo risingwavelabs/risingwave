@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prometheus::core::{
-    AtomicF64, AtomicI64, AtomicU64, GenericCounter, GenericCounterVec, GenericGaugeVec,
-};
+use prometheus::core::{AtomicF64, AtomicI64, AtomicU64, GenericCounterVec, GenericGaugeVec};
 use prometheus::{
     exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
     register_histogram_vec_with_registry, register_histogram_with_registry,
@@ -94,8 +92,8 @@ pub struct StreamingMetrics {
     pub user_compute_error_count: GenericCounterVec<AtomicU64>,
 
     // Materialize
-    pub materialize_cache_hit_count: GenericCounter<AtomicU64>,
-    pub materialize_cache_total_count: GenericCounter<AtomicU64>,
+    pub materialize_cache_hit_count: GenericCounterVec<AtomicU64>,
+    pub materialize_cache_total_count: GenericCounterVec<AtomicU64>,
 }
 
 impl StreamingMetrics {
@@ -475,16 +473,18 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let materialize_cache_hit_count = register_int_counter_with_registry!(
+        let materialize_cache_hit_count = register_int_counter_vec_with_registry!(
             "stream_materialize_cache_hit_count",
-            "Materialize executor cache miss count",
+            "Materialize executor cache hit count",
+            &["actor_id"],
             registry
         )
         .unwrap();
 
-        let materialize_cache_total_count = register_int_counter_with_registry!(
+        let materialize_cache_total_count = register_int_counter_vec_with_registry!(
             "stream_materialize_cache_total_count",
             "Materialize executor cache total operation",
+            &["actor_id"],
             registry
         )
         .unwrap();
