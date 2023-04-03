@@ -325,6 +325,10 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         let epoch = wait_epoch.get_epoch();
         let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
         self.store.try_wait_epoch(wait_epoch).await?;
+        let vnode = self.compute_vnode_by_pk(&pk);
+        if !self.vnodes.is_set(vnode.to_index()) {
+            return Ok(None);
+        }
         let serialized_pk =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
         assert!(pk.len() <= self.pk_indices.len());
@@ -455,9 +459,11 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             // Vnodes that are set and should be accessed.
             let vnodes = match vnode_hint {
                 // If `vnode_hint` is set, we can only access this single vnode.
-                Some(vnode) => Either::Left(std::iter::once(vnode)),
+                Some(vnode) if self.vnodes.is_set(vnode.to_index()) => {
+                    Either::Left(std::iter::once(vnode))
+                }
                 // Otherwise, we need to access all vnodes of this table.
-                None => Either::Right(self.vnodes.iter_vnodes()),
+                _ => Either::Right(self.vnodes.iter_vnodes()),
             };
             Either::Right(
                 vnodes.map(|vnode| prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes())),

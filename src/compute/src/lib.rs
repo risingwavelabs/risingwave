@@ -84,6 +84,14 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_PARALLELISM", default_value_t = default_parallelism())]
     pub parallelism: usize,
 
+    /// Whether used for streaming.
+    #[clap(long)]
+    pub disable_streaming: bool,
+
+    /// Whether used for streaming.
+    #[clap(long)]
+    pub disable_serving: bool,
+
     /// The policy for compute node memory control. Valid values:
     /// - streaming-only
     /// - streaming-batch
@@ -140,6 +148,11 @@ fn validate_opts(opts: &ComputeNodeOpts) {
     }
     if opts.parallelism == 0 {
         let error_msg = "parallelism should not be zero";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
+    if opts.disable_streaming && opts.disable_serving {
+        let error_msg = "disable_streaming and disable_serving should not both be true";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }

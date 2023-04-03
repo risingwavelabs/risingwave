@@ -58,7 +58,7 @@ Note: the default value of `RW_META_ADDR` is 'http://127.0.0.1:5690'.";
             &self.meta_addr,
             WorkerType::RiseCtl,
             &get_new_ctl_identity(),
-            0,
+            Default::default(),
             &MetaConfig::default(),
         )
         .await?;

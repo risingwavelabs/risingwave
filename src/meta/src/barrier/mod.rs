@@ -26,8 +26,6 @@ use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
-use risingwave_pb::common::worker_node::State::Running;
-use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -1014,7 +1012,7 @@ where
         };
         let all_nodes = self
             .cluster_manager
-            .list_worker_node(WorkerType::ComputeNode, Some(Running))
+            .list_active_streaming_compute_nodes()
             .await;
         let all_actor_infos = self.fragment_manager.load_all_actors(check_state).await;
 

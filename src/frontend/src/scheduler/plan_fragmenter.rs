@@ -164,7 +164,11 @@ impl BatchPlanFragmenter {
     fn split_into_stage(&mut self, batch_node: PlanRef) -> SchedulerResult<()> {
         let root_stage = self.new_stage(
             batch_node,
-            Some(Distribution::Single.to_prost(1, &self.catalog_reader, &self.worker_node_manager)),
+            Some(Distribution::Single.to_prost(
+                1,
+                &self.catalog_reader,
+                &self.worker_node_manager,
+            )?),
         )?;
         self.stage_graph = Some(
             self.stage_graph_builder
@@ -354,8 +358,8 @@ pub struct QueryStage {
     pub source_info: Option<SourceScanInfo>,
     pub has_lookup_join: bool,
 
-    /// Used to generage exchange information when complete source scan information.
-    children_exhchange_distribution: Option<HashMap<StageId, Distribution>>,
+    /// Used to generate exchange information when complete source scan information.
+    children_exchange_distribution: Option<HashMap<StageId, Distribution>>,
 }
 
 impl QueryStage {
@@ -383,7 +387,7 @@ impl QueryStage {
                 table_scan_info: self.table_scan_info.clone(),
                 source_info: self.source_info.clone(),
                 has_lookup_join: self.has_lookup_join,
-                children_exhchange_distribution: self.children_exhchange_distribution.clone(),
+                children_exchange_distribution: self.children_exchange_distribution.clone(),
             };
         }
         self.clone()
@@ -410,7 +414,7 @@ impl QueryStage {
             table_scan_info: self.table_scan_info.clone(),
             source_info: Some(source_info),
             has_lookup_join: self.has_lookup_join,
-            children_exhchange_distribution: None,
+            children_exchange_distribution: None,
         }
     }
 }
@@ -454,7 +458,7 @@ struct QueryStageBuilder {
     source_info: Option<SourceScanInfo>,
     has_lookup_join: bool,
 
-    children_exhchange_distribution: HashMap<StageId, Distribution>,
+    children_exchange_distribution: HashMap<StageId, Distribution>,
 }
 
 impl QueryStageBuilder {
@@ -477,13 +481,13 @@ impl QueryStageBuilder {
             table_scan_info,
             source_info,
             has_lookup_join,
-            children_exhchange_distribution: HashMap::new(),
+            children_exchange_distribution: HashMap::new(),
         }
     }
 
     fn finish(self, stage_graph_builder: &mut StageGraphBuilder) -> QueryStageRef {
-        let children_exhchange_distribution = if self.parallelism.is_none() {
-            Some(self.children_exhchange_distribution)
+        let children_exchange_distribution = if self.parallelism.is_none() {
+            Some(self.children_exchange_distribution)
         } else {
             None
         };
@@ -496,7 +500,7 @@ impl QueryStageBuilder {
             table_scan_info: self.table_scan_info,
             source_info: self.source_info,
             has_lookup_join: self.has_lookup_join,
-            children_exhchange_distribution,
+            children_exchange_distribution,
         });
 
         stage_graph_builder.add_node(stage.clone());
@@ -609,7 +613,7 @@ impl StageGraph {
         for child_stage_id in self.child_edges.get(&stage.id).unwrap_or(&HashSet::new()) {
             let exchange_info = if let Some(parallelism) = parallelism {
                 let exchange_distribution = stage
-                    .children_exhchange_distribution
+                    .children_exchange_distribution
                     .as_ref()
                     .unwrap()
                     .get(child_stage_id)
@@ -618,7 +622,7 @@ impl StageGraph {
                     parallelism,
                     catalog_reader,
                     worker_node_manager,
-                ))
+                )?)
             } else {
                 None
             };
@@ -708,7 +712,7 @@ impl BatchPlanFragmenter {
 
         let mut table_scan_info = self.collect_stage_table_scan(root.clone())?;
         // For current implementation, we can guarantee that each stage has only one table
-        // scan(except System table) or ont source.
+        // scan(except System table) or one source.
         let source_info = if table_scan_info.is_none() {
             Self::collect_stage_source(root.clone())?
         } else {
@@ -831,7 +835,7 @@ impl BatchPlanFragmenter {
                 parallelism,
                 &self.catalog_reader,
                 &self.worker_node_manager,
-            ))
+            )?)
         } else {
             None
         };
@@ -839,7 +843,7 @@ impl BatchPlanFragmenter {
         execution_plan_node.source_stage_id = Some(child_stage.id);
         if builder.parallelism.is_none() {
             builder
-                .children_exhchange_distribution
+                .children_exchange_distribution
                 .insert(child_stage.id, node.distribution().clone());
         }
 
@@ -907,13 +911,7 @@ impl BatchPlanFragmenter {
                     .map_err(RwError::from)?;
                 let vnode_mapping = self
                     .worker_node_manager
-                    .get_fragment_mapping(&table_catalog.fragment_id)
-                    .ok_or_else(|| {
-                        anyhow!(
-                            "failed to get the vnode mapping for the `Materialize` of {}",
-                            table_catalog.name()
-                        )
-                    })?;
+                    .serving_vnode_mapping(Some(table_catalog.fragment_id))?;
                 let partitions =
                     derive_partitions(scan_node.scan_ranges(), table_desc, &vnode_mapping);
                 TableScanInfo::new(name, partitions)
@@ -935,7 +933,6 @@ impl BatchPlanFragmenter {
             // Do not visit next stage.
             return Ok(None);
         }
-
         if let Some(lookup_join) = node.as_batch_lookup_join() {
             let table_desc = lookup_join.right_table_desc();
             let table_catalog = self
@@ -946,13 +943,7 @@ impl BatchPlanFragmenter {
                 .map_err(RwError::from)?;
             let vnode_mapping = self
                 .worker_node_manager
-                .get_fragment_mapping(&table_catalog.fragment_id)
-                .ok_or_else(|| {
-                    anyhow!(
-                        "failed to get the vnode mapping for the `Materialize` of {}",
-                        table_catalog.name()
-                    )
-                })?;
+                .serving_vnode_mapping(Some(table_catalog.fragment_id))?;
             let parallelism = vnode_mapping.iter().sorted().dedup().count();
             Ok(Some(parallelism))
         } else {

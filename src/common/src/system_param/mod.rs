@@ -34,7 +34,7 @@ macro_rules! for_all_undeprecated_params {
         $(, { $field:ident, $type:ty, $default:expr })*) => {
         $macro! {
             { barrier_interval_ms, u32, 1000_u32 },
-            { checkpoint_frequency, u64, 10_u64 },
+            { checkpoint_frequency, u64, 1_u64 },
             { sstable_size_mb, u32, 256_u32 },
             { block_size_kb, u32, 64_u32 },
             { bloom_false_positive, f64, 0.001_f64 },

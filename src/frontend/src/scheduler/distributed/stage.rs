@@ -51,7 +51,7 @@ use tracing::{error, warn};
 use StageEvent::Failed;
 
 use crate::catalog::catalog_service::CatalogReader;
-use crate::catalog::TableId;
+use crate::catalog::{FragmentId, TableId};
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::distributed::stage::StageState::Pending;
 use crate::scheduler::distributed::QueryMessage;
@@ -635,6 +635,15 @@ impl StageRunner {
     }
 
     #[inline(always)]
+    fn get_fragment_id(&self, table_id: &TableId) -> Option<FragmentId> {
+        self.catalog_reader
+            .read_guard()
+            .get_table_by_id(table_id)
+            .map(|table| table.fragment_id)
+            .ok()
+    }
+
+    #[inline(always)]
     fn get_vnode_mapping(&self, table_id: &TableId) -> Option<ParallelUnitMapping> {
         self.catalog_reader
             .read_guard()
@@ -656,6 +665,7 @@ impl StageRunner {
         let node_body = plan_node.node_body.as_ref().expect("fail to get node body");
 
         let vnode_mapping = match node_body {
+            // #8940 dml should use streaming vnode mapping
             Insert(insert_node) => self.get_vnode_mapping(&insert_node.table_id.into()),
             Update(update_node) => self.get_vnode_mapping(&update_node.table_id.into()),
             Delete(delete_node) => self.get_vnode_mapping(&delete_node.table_id.into()),
@@ -663,16 +673,17 @@ impl StageRunner {
                 if let Some(distributed_lookup_join_node) =
                     Self::find_distributed_lookup_join_node(plan_node)
                 {
-                    // Choose worker for distributed lookup join based on inner side vnode_mapping
+                    let fragment_id = self.get_fragment_id(
+                        &distributed_lookup_join_node
+                            .inner_side_table_desc
+                            .as_ref()
+                            .unwrap()
+                            .table_id
+                            .into(),
+                    );
                     let id2pu_vec = self
-                        .get_vnode_mapping(&TableId::new(
-                            distributed_lookup_join_node
-                                .inner_side_table_desc
-                                .as_ref()
-                                .unwrap()
-                                .table_id,
-                        ))
-                        .unwrap()
+                        .worker_node_manager
+                        .serving_vnode_mapping(fragment_id)?
                         .iter_unique()
                         .collect_vec();
 

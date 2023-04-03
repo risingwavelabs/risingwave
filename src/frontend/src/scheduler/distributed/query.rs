@@ -439,6 +439,7 @@ pub(crate) mod tests {
     use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
     use risingwave_common::hash::ParallelUnitMapping;
     use risingwave_common::types::DataType;
+    use risingwave_pb::common::worker_node::Property;
     use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
     use risingwave_pb::plan_common::JoinType;
     use risingwave_rpc_client::ComputeClientPool;
@@ -598,6 +599,10 @@ pub(crate) mod tests {
             }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(0, 0),
+            property: Some(Property {
+                is_streaming: true,
+                is_serving: true,
+            }),
         };
         let worker2 = WorkerNode {
             id: 1,
@@ -608,6 +613,10 @@ pub(crate) mod tests {
             }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(8, 1),
+            property: Some(Property {
+                is_streaming: true,
+                is_serving: true,
+            }),
         };
         let worker3 = WorkerNode {
             id: 2,
@@ -618,6 +627,10 @@ pub(crate) mod tests {
             }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(16, 2),
+            property: Some(Property {
+                is_streaming: true,
+                is_serving: true,
+            }),
         };
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));

@@ -270,7 +270,7 @@ impl Compactor {
         sync_point::sync_point!("AFTER_COMPACT_REPORT");
         let cost_time = timer.stop_and_record() * 1000.0;
         tracing::info!(
-            "Finished compaction task in {:?}ms: \n{}",
+            "Finished compaction task in {:?}ms: {}",
             cost_time,
             compact_task_to_string(&compact_task)
         );

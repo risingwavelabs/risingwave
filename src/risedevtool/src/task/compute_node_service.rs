@@ -67,6 +67,13 @@ impl ComputeNodeService {
             .arg("--streaming-memory-proportion")
             .arg(&config.streaming_memory_proportion.to_string());
 
+        if config.disable_streaming {
+            cmd.arg("--disable-streaming");
+        }
+        if config.disable_serving {
+            cmd.arg("--disable-serving");
+        }
+
         let provide_jaeger = config.provide_jaeger.as_ref().unwrap();
         match provide_jaeger.len() {
             0 => {}

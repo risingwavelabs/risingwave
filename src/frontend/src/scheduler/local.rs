@@ -16,7 +16,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::Context;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -45,7 +44,7 @@ use tracing::debug;
 use uuid::Uuid;
 
 use super::plan_fragmenter::{PartitionInfo, QueryStage, QueryStageRef};
-use crate::catalog::TableId;
+use crate::catalog::{FragmentId, TableId};
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
@@ -403,9 +402,9 @@ impl LocalQueryExecution {
                             .inner_side_table_desc
                             .as_ref()
                             .expect("no side table desc");
-                        let mapping = self
-                            .get_vnode_mapping(&side_table_desc.table_id.into())
-                            .context("side table not found")?;
+                        let mapping = self.front_env.worker_node_manager().serving_vnode_mapping(
+                            self.get_fragment_id(&side_table_desc.table_id.into()),
+                        )?;
 
                         // TODO: should we use `pb::ParallelUnitMapping` here?
                         node.inner_side_vnode_mapping = mapping.to_expanded();
@@ -445,6 +444,15 @@ impl LocalQueryExecution {
     }
 
     #[inline(always)]
+    fn get_fragment_id(&self, table_id: &TableId) -> Option<FragmentId> {
+        let reader = self.front_env.catalog_reader().read_guard();
+        reader
+            .get_table_by_id(table_id)
+            .map(|table| table.fragment_id)
+            .ok()
+    }
+
+    #[inline(always)]
     fn get_vnode_mapping(&self, table_id: &TableId) -> Option<ParallelUnitMapping> {
         let reader = self.front_env.catalog_reader().read_guard();
         reader
@@ -462,6 +470,7 @@ impl LocalQueryExecution {
         if stage.parallelism.unwrap() == 1 {
             if let NodeBody::Insert(insert_node) = &stage.root.node
                 && let Some(vnode_mapping) = self.get_vnode_mapping(&insert_node.table_id.into()) {
+                // #8940 dml should use streaming vnode mapping
                     let worker_node = {
                         let parallel_unit_ids = vnode_mapping.iter_unique().collect_vec();
                         let candidates = self.front_env
