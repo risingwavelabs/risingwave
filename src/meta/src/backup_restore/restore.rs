@@ -173,6 +173,7 @@ async fn restore_metadata<S: MetaStore>(meta_store: S, snapshot: MetaSnapshot) -
     restore_metadata_model(&meta_store, &snapshot.metadata.view).await?;
     restore_metadata_model(&meta_store, &snapshot.metadata.source).await?;
     restore_metadata_model(&meta_store, &snapshot.metadata.function).await?;
+    restore_metadata_model(&meta_store, &snapshot.metadata.connection).await?;
     restore_system_param_model(&meta_store, &[snapshot.metadata.system_param]).await?;
     Ok(())
 }

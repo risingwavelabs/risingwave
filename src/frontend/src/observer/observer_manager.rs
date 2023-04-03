@@ -102,6 +102,7 @@ impl ObserverState for FrontendObserverNode {
             indexes,
             views,
             functions,
+            connections,
             users,
             parallel_unit_mappings,
             nodes,
@@ -118,26 +119,29 @@ impl ObserverState for FrontendObserverNode {
         for schema in schemas {
             catalog_guard.create_schema(&schema)
         }
-        for table in tables {
-            catalog_guard.create_table(&table)
-        }
         for source in sources {
             catalog_guard.create_source(&source)
         }
-        for user in users {
-            user_guard.create_user(user)
+        for sink in sinks {
+            catalog_guard.create_sink(&sink)
+        }
+        for table in tables {
+            catalog_guard.create_table(&table)
         }
         for index in indexes {
             catalog_guard.create_index(&index)
-        }
-        for sink in sinks {
-            catalog_guard.create_sink(&sink)
         }
         for view in views {
             catalog_guard.create_view(&view)
         }
         for function in functions {
             catalog_guard.create_function(&function)
+        }
+        for connection in connections {
+            catalog_guard.create_connection(&connection)
+        }
+        for user in users {
+            user_guard.create_user(user)
         }
         self.worker_node_manager.refresh(
             nodes,
