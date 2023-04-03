@@ -67,11 +67,14 @@ impl NullBitmap {
     fn estimated_heap_size(&self) -> usize {
         8
     }
-    fn len(&mut self) -> usize {
+    fn len(&self) -> usize {
         self.inner.len()
     }
-    fn contains(&mut self, x: usize) -> bool {
+    fn contains(&self, x: usize) -> bool {
         self.inner.contains(x)
+    }
+    pub fn is_subset(&self, other: &FixedBitSet) -> bool {
+        todo!()
     }
 }
 
