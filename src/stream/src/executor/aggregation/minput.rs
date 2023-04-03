@@ -33,8 +33,9 @@ use smallvec::SmallVec;
 use super::state_cache::array_agg::ArrayAgg;
 use super::state_cache::extreme::ExtremeAgg;
 use super::state_cache::string_agg::StringAgg;
-use super::state_cache::{CacheKey, SortedStateCache, StateCache, TopNStateCache};
+use super::state_cache::{AggStateCache, CacheKey, GenericAggStateCache};
 use super::AggCall;
+use crate::common::cache::{OrderedStateCache, TopNStateCache};
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
 use crate::executor::{PkIndices, StreamExecutorResult};
@@ -58,7 +59,7 @@ pub struct MaterializedInputState<S: StateStore> {
     state_table_order_col_indices: Vec<usize>,
 
     /// Cache of state table.
-    cache: Box<dyn StateCache>,
+    cache: Box<dyn AggStateCache + Send + Sync>,
 
     /// Serializer for cache key.
     cache_key_serializer: OrderedRowSerde,
@@ -124,12 +125,18 @@ impl<S: StateStore> MaterializedInputState<S> {
             .collect_vec();
         let cache_key_serializer = OrderedRowSerde::new(cache_key_data_types, order_types);
 
-        let cache: Box<dyn StateCache> = match agg_call.kind {
-            AggKind::Min | AggKind::Max | AggKind::FirstValue => {
-                Box::new(TopNStateCache::new(ExtremeAgg, extreme_cache_size))
-            }
-            AggKind::StringAgg => Box::new(SortedStateCache::new(StringAgg)),
-            AggKind::ArrayAgg => Box::new(SortedStateCache::new(ArrayAgg)),
+        let cache: Box<dyn AggStateCache + Send + Sync> = match agg_call.kind {
+            AggKind::Min | AggKind::Max | AggKind::FirstValue => Box::new(
+                GenericAggStateCache::new(TopNStateCache::new(extreme_cache_size), ExtremeAgg),
+            ),
+            AggKind::StringAgg => Box::new(GenericAggStateCache::new(
+                OrderedStateCache::new(),
+                StringAgg,
+            )),
+            AggKind::ArrayAgg => Box::new(GenericAggStateCache::new(
+                OrderedStateCache::new(),
+                ArrayAgg,
+            )),
             _ => panic!(
                 "Agg kind `{}` is not expected to have materialized input state",
                 agg_call.kind
@@ -178,14 +185,14 @@ impl<S: StateStore> MaterializedInputState<S> {
                 .iter_with_pk_prefix(
                     &group_key,
                     PrefetchOptions {
-                        exhaust_iter: cache_filler.capacity() == usize::MAX,
+                        exhaust_iter: cache_filler.capacity().is_none(),
                     },
                 )
                 .await?;
             pin_mut!(all_data_iter);
 
             #[for_await]
-            for state_row in all_data_iter.take(cache_filler.capacity()) {
+            for state_row in all_data_iter.take(cache_filler.capacity().unwrap_or(usize::MAX)) {
                 let state_row: OwnedRow = state_row?;
                 let cache_key = {
                     let mut cache_key = Vec::new();
@@ -202,7 +209,7 @@ impl<S: StateStore> MaterializedInputState<S> {
                     .iter()
                     .map(|i| state_row[*i].as_ref().map(ScalarImpl::as_scalar_ref_impl))
                     .collect();
-                cache_filler.insert(cache_key, cache_value);
+                cache_filler.append(cache_key, cache_value);
             }
             cache_filler.finish();
         }

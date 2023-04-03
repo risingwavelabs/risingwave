@@ -15,14 +15,14 @@
 use risingwave_common::types::{Datum, DatumRef, ScalarRefImpl};
 use smallvec::SmallVec;
 
-use super::StateCacheAggregator;
+use super::MInputAggregator;
 
 /// Common aggregator for `min`/`max`. The behavior is simply to choose the
 /// first value as aggregation result, so the value order in the given cache
 /// is important and should be maintained outside.
 pub struct ExtremeAgg;
 
-impl StateCacheAggregator for ExtremeAgg {
+impl MInputAggregator for ExtremeAgg {
     // TODO(yuchao): We can generate an `ExtremeAgg` for each data type to save memory.
     type Value = Datum;
 
@@ -38,13 +38,13 @@ impl StateCacheAggregator for ExtremeAgg {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::executor::aggregation::state_cache::cache::OrderedCache;
+    use crate::common::cache::TopNCache;
 
     #[test]
     fn test_extreme_agg_aggregate() {
         let agg = ExtremeAgg;
 
-        let mut cache = OrderedCache::new(10);
+        let mut cache = TopNCache::new(10);
         assert_eq!(agg.aggregate(cache.iter_values()), None);
 
         cache.insert(vec![1, 2, 3], Some("hello".to_string().into()));
