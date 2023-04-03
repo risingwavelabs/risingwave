@@ -5662,6 +5662,7 @@ dependencies = [
  "console",
  "dialoguer",
  "enum-iterator",
+ "fs-err",
  "google-cloud-pubsub",
  "indicatif",
  "isahc",
