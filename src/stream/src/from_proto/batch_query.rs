@@ -110,7 +110,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         let schema = table.schema().clone();
         let executor = BatchQueryExecutor::new(
             table,
-            stream.config.developer.stream_chunk_size,
+            stream.config.developer.chunk_size,
             ExecutorInfo {
                 schema,
                 pk_indices: params.pk_indices,
