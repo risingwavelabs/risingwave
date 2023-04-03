@@ -18,9 +18,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::FilterNode;
 
-use super::{
-    ExprRewritable, LogicalFilter, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
-};
+use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
 use crate::utils::Condition;
@@ -29,24 +27,25 @@ use crate::utils::Condition;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchFilter {
     pub base: PlanBase,
-    logical: LogicalFilter,
+    logical: generic::Filter<PlanRef>,
 }
 
 impl BatchFilter {
-    pub fn new(logical: LogicalFilter) -> Self {
-        let ctx = logical.base.ctx.clone();
+    pub fn new(logical: generic::Filter<PlanRef>) -> Self {
+        let base = PlanBase::new_logical_with_core(&logical);
+        let ctx = base.ctx;
         // TODO: derive from input
         let base = PlanBase::new_batch(
             ctx,
-            logical.schema().clone(),
-            logical.input().distribution().clone(),
-            logical.input().order().clone(),
+            base.schema,
+            logical.input.distribution().clone(),
+            logical.input.order().clone(),
         );
         BatchFilter { base, logical }
     }
 
     pub fn predicate(&self) -> &Condition {
-        self.logical.predicate()
+        &self.logical.predicate
     }
 }
 
@@ -58,11 +57,13 @@ impl fmt::Display for BatchFilter {
 
 impl PlanTreeNodeUnary for BatchFilter {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let mut logical = self.logical.clone();
+        logical.input = input;
+        Self::new(logical)
     }
 }
 
@@ -78,9 +79,7 @@ impl ToDistributedBatch for BatchFilter {
 impl ToBatchPb for BatchFilter {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Filter(FilterNode {
-            search_condition: Some(
-                ExprImpl::from(self.logical.predicate().clone()).to_expr_proto(),
-            ),
+            search_condition: Some(ExprImpl::from(self.logical.predicate.clone()).to_expr_proto()),
         })
     }
 }
@@ -98,13 +97,8 @@ impl ExprRewritable for BatchFilter {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self::new(
-            self.logical
-                .rewrite_exprs(r)
-                .as_logical_filter()
-                .unwrap()
-                .clone(),
-        )
-        .into()
+        let mut logical = self.logical.clone();
+        logical.rewrite_exprs(r);
+        Self::new(logical).into()
     }
 }

@@ -454,8 +454,7 @@ pub(crate) mod tests {
     use crate::catalog::root_catalog::Catalog;
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
-        generic, BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalFilter,
-        LogicalScan, ToBatch,
+        generic, BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalScan, ToBatch,
     };
     use crate::optimizer::property::{Distribution, Order};
     use crate::optimizer::{OptimizerContext, PlanRef};
@@ -539,11 +538,11 @@ pub(crate) mod tests {
         .unwrap()
         .to_distributed()
         .unwrap();
-        let batch_filter = BatchFilter::new(LogicalFilter::new(
-            batch_plan_node.clone(),
+        let batch_filter = BatchFilter::new(generic::Filter::new(
             Condition {
                 conjunctions: vec![],
             },
+            batch_plan_node.clone(),
         ))
         .into();
         let batch_exchange_node1: PlanRef = BatchExchange::new(
