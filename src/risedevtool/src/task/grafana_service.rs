@@ -57,28 +57,28 @@ impl GrafanaService {
     ) -> Result<()> {
         let config_root = config_root.as_ref();
 
-        std::fs::write(
+        fs_err::write(
             config_root.join("custom.ini"),
             GrafanaGen.gen_custom_ini(config),
         )?;
 
         let config_datasources_dir = config_root.join("provisioning").join("datasources");
-        std::fs::remove_dir_all(&config_datasources_dir)?;
-        std::fs::create_dir_all(&config_datasources_dir)?;
-        std::fs::write(
+        fs_err::remove_dir_all(&config_datasources_dir)?;
+        fs_err::create_dir_all(&config_datasources_dir)?;
+        fs_err::write(
             config_datasources_dir.join("risedev-prometheus.yml"),
             GrafanaGen.gen_datasource_yml(config)?,
         )?;
 
         let prefix_config = prefix_config.as_ref();
         let config_dashboards_dir = config_root.join("provisioning").join("dashboards");
-        std::fs::remove_dir_all(&config_dashboards_dir)?;
-        std::fs::create_dir_all(&config_dashboards_dir)?;
-        std::fs::write(
+        fs_err::remove_dir_all(&config_dashboards_dir)?;
+        fs_err::create_dir_all(&config_dashboards_dir)?;
+        fs_err::write(
             config_dashboards_dir.join("risingwave-dashboard.yaml"),
             GrafanaGen.gen_dashboard_yml(config, prefix_config, prefix_config)?,
         )?;
-        // std::fs::write(
+        // fs_err::write(
         //     config_dashboards_dir.join("aws-s3-dashboards.yaml"),
         //     &GrafanaGen.gen_s3_dashboard_yml(config, prefix_config)?,
         // )?;
