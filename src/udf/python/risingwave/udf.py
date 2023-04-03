@@ -251,7 +251,7 @@ def _string_to_data_type(type_str: str):
     elif type_str in ('FLOAT8', 'DOUBLE PRECISION'):
         return pa.float64()
     elif type_str.startswith('DECIMAL') or type_str.startswith('NUMERIC'):
-        return pa.decimal128(38)
+        return pa.decimal128(28)
     elif type_str in ('DATE'):
         return pa.date32()
     elif type_str in ('TIME', 'TIME WITHOUT TIME ZONE'):
@@ -264,14 +264,15 @@ def _string_to_data_type(type_str: str):
         return pa.string()
     elif type_str in ('BYTEA'):
         return pa.binary()
+    elif type_str.endswith('[]'):
+        return pa.list_(_string_to_data_type(type_str[:-2]))
     elif type_str.startswith('STRUCT'):
-        # extract 'STRUCT<a INT, b VARCHAR, ...>'
-        type_str = type_str[6:].strip('<>')
+        # extract 'STRUCT<INT, VARCHAR, ...>'
+        type_list = type_str[6:].strip('<>')
         fields = []
-        for field in type_str.split(','):
-            field = field.strip()
-            name, type_str = field.split(' ')
-            fields.append(pa.field(name, _string_to_data_type(type_str)))
+        for type_str in type_list.split(','):
+            type_str = type_str.strip()
+            fields.append(pa.field('', _string_to_data_type(type_str)))
         return pa.struct(fields)
 
     raise ValueError(f'Unsupported type: {type_str}')

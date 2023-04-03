@@ -149,7 +149,7 @@ impl From<&DataType> for arrow_schema::DataType {
             DataType::Interval => Self::Interval(arrow_schema::IntervalUnit::DayTime),
             DataType::Varchar => Self::Utf8,
             DataType::Bytea => Self::Binary,
-            DataType::Decimal => Self::Decimal128(0, 0),
+            DataType::Decimal => Self::Decimal128(28, 0), // arrow precision can not be 0
             DataType::Struct(struct_type) => {
                 Self::Struct(get_field_vector_from_struct_type(struct_type))
             }
