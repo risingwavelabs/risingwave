@@ -307,7 +307,6 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
             json!(v)
         }
         (DataType::Decimal, ScalarRefImpl::Decimal(v)) => {
-            // fixme
             json!(v.to_text())
         }
         (DataType::Timestamptz, ScalarRefImpl::Timestamp(v)) => {
