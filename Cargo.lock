@@ -2290,6 +2290,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ethnum"
+version = "1.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0198b9d0078e0f30dedc7acbb21c974e838fc8fae3ee170128658a98cb2c1c04"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "event-listener"
 version = "2.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5862,6 +5871,7 @@ dependencies = [
  "easy-ext",
  "either",
  "enum-as-inner",
+ "ethnum",
  "fixedbitset",
  "futures",
  "futures-async-stream",
