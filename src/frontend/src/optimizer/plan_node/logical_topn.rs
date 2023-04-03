@@ -30,7 +30,7 @@ use crate::optimizer::plan_node::{
     BatchTopN, ColumnPruningContext, LogicalProject, PredicatePushdownContext,
     RewriteStreamContext, StreamTopN, ToStreamContext,
 };
-use crate::optimizer::property::{Distribution, Order, OrderDisplay, RequiredDist};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::planner::LIMIT_ALL_COUNT;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 use crate::TableCatalog;
@@ -121,32 +121,6 @@ impl LogicalTopN {
 
     pub fn group_key(&self) -> &[usize] {
         &self.core.group_key
-    }
-
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        let input = self.input();
-        let input_schema = input.schema();
-        builder.field(
-            "order",
-            &format!(
-                "{}",
-                OrderDisplay {
-                    order: self.topn_order(),
-                    input_schema
-                }
-            ),
-        );
-        builder
-            .field("limit", &self.limit())
-            .field("offset", &self.offset());
-        if self.with_ties() {
-            builder.field("with_ties", &true);
-        }
-        if !self.group_key().is_empty() {
-            builder.field("group_key", &self.group_key());
-        }
-        builder.finish()
     }
 
     /// Infers the state table catalog for [`StreamTopN`] and [`StreamGroupTopN`].
@@ -278,7 +252,7 @@ impl PlanTreeNodeUnary for LogicalTopN {
 impl_plan_tree_node_for_unary! {LogicalTopN}
 impl fmt::Display for LogicalTopN {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalTopN")
+        self.core.fmt_with_name(f, "LogicalTopN")
     }
 }
 
@@ -368,7 +342,8 @@ impl PredicatePushdown for LogicalTopN {
 impl ToBatch for LogicalTopN {
     fn to_batch(&self) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
-        let new_logical = self.clone_with_input(new_input);
+        let mut new_logical = self.core.clone();
+        new_logical.input = new_input;
         if self.group_key().is_empty() {
             Ok(BatchTopN::new(new_logical).into())
         } else {

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashSet;
+use std::fmt;
 
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::sort_util::OrderType;
@@ -20,7 +21,7 @@ use risingwave_common::util::sort_util::OrderType;
 use super::super::utils::TableCatalogBuilder;
 use super::{stream, GenericPlanNode, GenericPlanRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::{FunctionalDependencySet, Order};
+use crate::optimizer::property::{FunctionalDependencySet, Order, OrderDisplay};
 use crate::TableCatalog;
 /// `TopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -85,6 +86,34 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
             self.input.distribution().dist_column_indices().to_vec(),
             read_prefix_len_hint,
         )
+    }
+}
+
+impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
+    pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+        let mut builder = f.debug_struct(name);
+        let input = self.input;
+        let input_schema = input.schema();
+        builder.field(
+            "order",
+            &format!(
+                "{}",
+                OrderDisplay {
+                    order: &self.order,
+                    input_schema
+                }
+            ),
+        );
+        builder
+            .field("limit", &self.limit)
+            .field("offset", &self.offset);
+        if self.with_ties {
+            builder.field("with_ties", &true);
+        }
+        if !self.group_key.is_empty() {
+            builder.field("group_key", &self.group_key);
+        }
+        builder.finish()
     }
 }
 
