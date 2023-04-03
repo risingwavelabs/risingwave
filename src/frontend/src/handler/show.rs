@@ -134,7 +134,7 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
                     let properties = match c.info {
                         connection::Info::PrivateLinkService(i) => {
                             format!(
-                                "provider: {}\nservice_name: {}\nendpoint_id: {}\ndns_entries: {}",
+                                "provider: {}\nservice_name: {}\nendpoint_id: {}\navailability_zones: {}",
                                 i.provider,
                                 i.service_name,
                                 i.endpoint_id,

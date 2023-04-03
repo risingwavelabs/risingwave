@@ -88,11 +88,8 @@ pub async fn handle_create_connection(
     stmt: CreateConnectionStatement,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-
     session.check_relation_name_duplicated(stmt.connection_name.clone())?;
-
     let connection_name = Binder::resolve_connection_name(stmt.connection_name)?;
-
     let with_properties = handler_args
         .with_options
         .inner()
