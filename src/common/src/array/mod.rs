@@ -29,6 +29,7 @@ mod iterator;
 mod jsonb_array;
 pub mod list_array;
 mod macros;
+mod num256_array;
 mod primitive_array;
 pub mod serial_array;
 pub mod stream_chunk;
@@ -58,7 +59,7 @@ pub use jsonb_array::{JsonbArray, JsonbArrayBuilder, JsonbRef, JsonbVal};
 pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
-use risingwave_pb::data::{PbArray, PbArrayType};
+use risingwave_pb::data::{ArrayType, PbArray, PbArrayType};
 pub use serial_array::{Serial, SerialArray, SerialArrayBuilder};
 pub use stream_chunk::{Op, StreamChunk, StreamChunkTestExt};
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
@@ -66,6 +67,7 @@ pub use utf8_array::*;
 pub use vis::{Vis, VisRef};
 
 pub use self::error::ArrayError;
+use crate::array::num256_array::{Int256Array, Int256ArrayBuilder};
 use crate::buffer::Bitmap;
 use crate::types::*;
 use crate::util::iter_util::ZipEqFast;
@@ -338,6 +340,7 @@ macro_rules! for_all_variants {
             { Int16, int16, I16Array, I16ArrayBuilder },
             { Int32, int32, I32Array, I32ArrayBuilder },
             { Int64, int64, I64Array, I64ArrayBuilder },
+            { Int256, int256, Int256Array, Int256ArrayBuilder },
             { Float32, float32, F32Array, F32ArrayBuilder },
             { Float64, float64, F64Array, F64ArrayBuilder },
             { Utf8, utf8, Utf8Array, Utf8ArrayBuilder },
@@ -372,6 +375,12 @@ for_all_variants! { array_impl_enum }
 impl<T: PrimitiveArrayItemType> From<PrimitiveArray<T>> for ArrayImpl {
     fn from(arr: PrimitiveArray<T>) -> Self {
         T::erase_array_type(arr)
+    }
+}
+
+impl From<Int256Array> for ArrayImpl {
+    fn from(arr: Int256Array) -> Self {
+        Self::Int256(arr)
     }
 }
 
@@ -695,6 +704,8 @@ impl ArrayImpl {
             PbArrayType::Bytea => {
                 read_string_array::<BytesArrayBuilder, BytesValueReader>(array, cardinality)?
             }
+            ArrayType::Int256 => todo!(),
+            ArrayType::Uint256 => todo!(),
         };
         Ok(array)
     }

@@ -37,6 +37,7 @@ use crate::array::{
 };
 use crate::collection::estimate_size::EstimateSize;
 use crate::row::{OwnedRow, RowDeserializer};
+use crate::types::num256::Int256;
 use crate::types::{DataType, Date, Decimal, ScalarRef, Time, Timestamp, F32, F64};
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::iter_util::ZipEqFast;
@@ -362,6 +363,20 @@ impl<'a> HashKeySerDe<'a> for &'a str {
     /// This should never be called
     fn deserialize<R: Read>(_source: &mut R) -> Self {
         panic!("Should not serialize str for hash!")
+    }
+}
+
+impl<'a> HashKeySerDe<'a> for &'a Int256 {
+    type S = [u8; 32];
+
+    fn serialize(self) -> Self::S {
+        self.to_ne_bytes()
+    }
+
+    fn deserialize<R: Read>(source: &mut R) -> Self {
+        todo!()
+        // let value = Self::read_fixed_size_bytes::<R, 32>(source);
+        // Self::from_ne_bytes(value)
     }
 }
 
