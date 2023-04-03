@@ -194,14 +194,14 @@ impl MetaMetrics {
 
         let compact_frequency = register_int_counter_vec_with_registry!(
             "storage_level_compact_frequency",
-            "num of compactions from each level to next level",
+            "The number of compactions from one level to another level that have completed or failed.",
             &["compactor", "group", "task_type", "result"],
             registry
         )
         .unwrap();
         let compact_skip_frequency = register_int_counter_vec_with_registry!(
             "storage_skip_compact_frequency",
-            "num of compactions from each level to next level",
+            "The number of compactions from one level to another level that have been skipped.",
             &["level", "type"],
             registry
         )
