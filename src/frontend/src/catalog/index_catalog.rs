@@ -17,14 +17,12 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::IndexId;
-use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::PbIndex;
-use risingwave_pb::expr::expr_node::RexNode;
 
 use super::ColumnId;
 use crate::catalog::{DatabaseId, RelationCatalog, SchemaId, TableCatalog};
-use crate::expr::{Expr, InputRef};
+use crate::expr::{Expr, ExprImpl};
 use crate::user::UserId;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -33,10 +31,11 @@ pub struct IndexCatalog {
 
     pub name: String,
 
-    /// Only `InputRef` type index is supported Now.
+    /// Only `InputRef` and `FuncCall` type index is supported Now.
     /// The index of `InputRef` is the column index of the primary table.
-    /// index_item size is equal to index table columns size
-    pub index_item: Vec<InputRef>,
+    /// The index_item size is equal to the index table columns size
+    /// The input args of `FuncCall` is also the column index of the primary table.
+    pub index_item: Vec<ExprImpl>,
 
     pub index_table: Arc<TableCatalog>,
 
@@ -55,30 +54,29 @@ impl IndexCatalog {
         index_table: &TableCatalog,
         primary_table: &TableCatalog,
     ) -> Self {
-        let index_item = index_prost
+        let index_item: Vec<ExprImpl> = index_prost
             .index_item
             .iter()
-            .map(|x| match x.rex_node.as_ref().unwrap() {
-                RexNode::InputRef(input_col_idx) => InputRef {
-                    index: *input_col_idx as usize,
-                    data_type: DataType::from(x.return_type.as_ref().unwrap()),
-                },
-                RexNode::FuncCall(_) => unimplemented!(),
+            .map(ExprImpl::from_expr_proto)
+            .try_collect()
+            .unwrap();
+
+        let primary_to_secondary_mapping: BTreeMap<usize, usize> = index_item
+            .iter()
+            .enumerate()
+            .filter_map(|(i, expr)| match expr {
+                ExprImpl::InputRef(input_ref) => Some((input_ref.index, i)),
+                ExprImpl::FunctionCall(_) => None,
                 _ => unreachable!(),
             })
-            .collect_vec();
-
-        let primary_to_secondary_mapping = index_item
-            .iter()
-            .enumerate()
-            .map(|(i, input_ref)| (input_ref.index, i))
             .collect();
 
-        let secondary_to_primary_mapping = index_item
-            .iter()
-            .enumerate()
-            .map(|(i, input_ref)| (i, input_ref.index))
-            .collect();
+        let secondary_to_primary_mapping = BTreeMap::from_iter(
+            primary_to_secondary_mapping
+                .clone()
+                .into_iter()
+                .map(|(x, y)| (y, x)),
+        );
 
         let original_columns = index_prost
             .original_columns
@@ -147,7 +145,7 @@ impl IndexCatalog {
             index_item: self
                 .index_item
                 .iter()
-                .map(InputRef::to_expr_proto)
+                .map(|expr| expr.to_expr_proto())
                 .collect_vec(),
             original_columns: self.original_columns.iter().map(Into::into).collect_vec(),
         }
