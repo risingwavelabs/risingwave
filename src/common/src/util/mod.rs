@@ -33,6 +33,7 @@ pub mod ordered;
 pub mod prost;
 pub mod resource_util;
 pub mod row_id;
+pub mod runtime;
 pub mod scan_range;
 pub mod schema_check;
 pub mod sort_util;
