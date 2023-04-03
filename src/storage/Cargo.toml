@@ -76,7 +76,7 @@ nix = { version = "0.25", features = ["fs", "mman"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
 libc = "0.2.72"
-mach2 = "0.4.1"
+mach2 = "0.4"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
