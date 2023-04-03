@@ -40,4 +40,11 @@ public class ConnectorServiceImpl extends ConnectorServiceGrpc.ConnectorServiceI
             StreamObserver<ConnectorServiceProto.GetEventStreamResponse> responseObserver) {
         new SourceRequestHandler(responseObserver).handle(request);
     }
+
+    @Override
+    public void validateSource(
+            ConnectorServiceProto.ValidateSourceRequest request,
+            StreamObserver<ConnectorServiceProto.ValidateSourceResponse> responseObserver) {
+        new SourceValidateHandler(responseObserver).handle(request);
+    }
 }

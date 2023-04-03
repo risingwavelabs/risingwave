@@ -22,7 +22,7 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::catalog::SinkType;
 use risingwave_pb::connector_service::connector_service_client::ConnectorServiceClient;
 use risingwave_pb::connector_service::get_event_stream_request::{
-    Request as SourceRequest, StartSource, ValidateProperties,
+    Request as SourceRequest, StartSource,
 };
 use risingwave_pb::connector_service::sink_stream_request::{Request as SinkRequest, StartSink};
 use risingwave_pb::connector_service::*;
@@ -92,17 +92,15 @@ impl ConnectorClient {
         source_type: SourceType,
         properties: HashMap<String, String>,
         table_schema: Option<TableSchema>,
-    ) -> Result<Streaming<GetEventStreamResponse>> {
+    ) -> Result<ValidateSourceResponse> {
         Ok(self
             .0
             .to_owned()
-            .get_event_stream(GetEventStreamRequest {
-                request: Some(SourceRequest::Validate(ValidateProperties {
-                    source_id,
-                    source_type: source_type as _,
-                    properties,
-                    table_schema,
-                })),
+            .validate_source(ValidateSourceRequest {
+                source_id,
+                source_type: source_type as _,
+                properties,
+                table_schema,
             })
             .await
             .inspect_err(|err| {
