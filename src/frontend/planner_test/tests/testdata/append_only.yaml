@@ -3,7 +3,7 @@
     create table t1 (v1 int, v2 int) append only;
     select v1, max(v2) as mx2 from t1 group by v1;
   stream_plan: |
-    StreamMaterialize { columns: [v1, mx2], stream_key: [v1], pk_columns: [v1], pk_conflict: "no check" }
+    StreamMaterialize { columns: [v1, mx2], stream_key: [v1], pk_columns: [v1], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [t1.v1, max(t1.v2)] }
       └─StreamAppendOnlyHashAgg { group_key: [t1.v1], aggs: [max(t1.v2), count] }
         └─StreamExchange { dist: HashShard(t1.v1) }
@@ -13,7 +13,7 @@
     create table t2 (v1 int, v3 int) append only;
     select t1.v1 as id, v2, v3 from t1 join t2 on t1.v1=t2.v1;
   stream_plan: |
-    StreamMaterialize { columns: [id, v2, v3, t1._row_id(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, id], pk_columns: [t1._row_id, t2._row_id, id], pk_conflict: "no check" }
+    StreamMaterialize { columns: [id, v2, v3, t1._row_id(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, id], pk_columns: [t1._row_id, t2._row_id, id], pk_conflict: "NoCheck" }
     └─StreamAppendOnlyHashJoin { type: Inner, predicate: t1.v1 = t2.v1, output: [t1.v1, t1.v2, t2.v3, t1._row_id, t2._row_id] }
       ├─StreamExchange { dist: HashShard(t1.v1) }
       | └─StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
@@ -23,7 +23,7 @@
     create table t1 (v1 int, v2 int) append only;
     select v1 from t1 order by v1 limit 3 offset 3;
   stream_plan: |
-    StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [v1, t1._row_id], pk_conflict: "no check" }
+    StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [v1, t1._row_id], pk_conflict: "NoCheck" }
     └─StreamAppendOnlyTopN { order: "[t1.v1 ASC]", limit: 3, offset: 3 }
       └─StreamExchange { dist: Single }
         └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
@@ -31,7 +31,7 @@
     create table t1 (v1 int, v2 int) append only;
     select max(v1) as max_v1 from t1;
   stream_plan: |
-    StreamMaterialize { columns: [max_v1], stream_key: [], pk_columns: [], pk_conflict: "no check" }
+    StreamMaterialize { columns: [max_v1], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [max(max(t1.v1))] }
       └─StreamAppendOnlyGlobalSimpleAgg { aggs: [max(max(t1.v1)), count] }
         └─StreamExchange { dist: Single }

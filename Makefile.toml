@@ -371,7 +371,6 @@ cp "src/risedevtool/welcome.sh" "${PREFIX_BIN}/welcome.sh"
 category = "RiseDev - Components"
 description = "Download all available components at once"
 dependencies = [
-  "download-connector",
   "download-maven",
   "download-etcd",
   "download-grafana",
@@ -443,7 +442,7 @@ alias = "playground"
 [tasks.playground]
 category = "RiseDev - Start"
 description = "Start a lite RisingWave playground using risingwave all-in-one binary"
-dependencies = ["download-connector"]
+dependencies = ["build-connector-node"]
 script = '''
 #!/usr/bin/env bash
 
@@ -590,7 +589,7 @@ description = "Run unit tests"
 [tasks.build-connector-node]
 category = "RiseDev - Components"
 dependencies = ["prepare"]
-condition = { env_set = [ "ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
+condition = { env_set = ["ENABLE_BUILD_RW_CONNECTOR"] }
 description = "Build RisingWave Connector from source"
 script = '''
 #!/usr/bin/env bash
@@ -610,13 +609,12 @@ if [[ ! -f ${TARGET_PATH} ]] || [[ ! -z ${REBUILD_CONNECTOR_NODE} ]]; then
   cd "${JAVA_DIR}"
   "${MAVEN_PATH}" --batch-mode --update-snapshots clean package -Dmaven.test.skip
 else
-  echo "Connector node was built already. Skipped. Set REBUILD_CONNECTOR_NODE=1 to enable rebuild"
+  echo "$(tput setaf 4)$(tput bold)[Reminder]$(tput sgr0) Connector node was built already, skipped build. Set $(tput setaf 4)REBUILD_CONNECTOR_NODE=1$(tput sgr0) to enable rebuild"
 fi
 rm -rf ${PREFIX_BIN}/connector-node
 mkdir -p "${PREFIX_BIN}/connector-node"
 tar xf ${TARGET_PATH} -C "${PREFIX_BIN}/connector-node"
 '''
-
 
 [tasks.sbuild]
 category = "RiseDev - Build in simulation mode"
@@ -803,9 +801,8 @@ script = """
 
 echo "Running $(tput setaf 4)cargo hakari$(tput sgr0) checks and attempting to fix"
 
-# cargo hakari will generate new Cargo.toml regardless whether the original Cargo.toml is correct or not.
-# So we always verify before generate, so as not to change the modified time of Cargo.toml.
-(cargo hakari verify > /dev/null) || cargo hakari generate
+cargo hakari generate --diff --quiet || cargo hakari generate
+cargo hakari verify > /dev/null
 test $? -eq 0 || exit 1
 """
 

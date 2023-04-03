@@ -5883,7 +5883,9 @@ dependencies = [
  "rust_decimal",
  "ryu",
  "serde",
+ "serde_default",
  "serde_json",
+ "serde_with 2.3.1",
  "static_assertions",
  "strum",
  "strum_macros",
@@ -6102,6 +6104,7 @@ dependencies = [
  "madsim-tokio",
  "regex",
  "risingwave_common",
+ "risingwave_connector",
  "risingwave_frontend",
  "risingwave_hummock_sdk",
  "risingwave_object_store",
@@ -6298,6 +6301,7 @@ dependencies = [
  "itertools",
  "jni",
  "madsim-tokio",
+ "once_cell",
  "prost 0.11.8",
  "risingwave_common",
  "risingwave_hummock_sdk",
@@ -6695,6 +6699,7 @@ dependencies = [
  "async-trait",
  "await-tree",
  "bytes",
+ "criterion",
  "derivative",
  "dyn-clone",
  "either",
@@ -7056,6 +7061,18 @@ checksum = "f3a1a3341211875ef120e117ea7fd5228530ae7e7036a779fdc9117be6b3282c"
 dependencies = [
  "ordered-float 2.10.0",
  "serde",
+]
+
+[[package]]
+name = "serde_default"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9fd4c77b86d9fb10363e52607ca6dc3043d8dfde6c790b702ed4ffafb34e7b99"
+dependencies = [
+ "darling 0.13.4",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

@@ -1694,7 +1694,7 @@ impl BoxedExecutorBuilder for HashJoinExecutor<()> {
             cond,
             identity: context.plan_node().get_identity().clone(),
             right_key_types,
-            chunk_size: context.context.get_config().developer.batch_chunk_size,
+            chunk_size: context.context.get_config().developer.chunk_size,
         }
         .dispatch())
     }

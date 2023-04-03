@@ -261,6 +261,7 @@ impl TableFragments {
             (fragment_type_mask
                 & (FragmentTypeFlag::Source as u32
                     | FragmentTypeFlag::Now as u32
+                    | FragmentTypeFlag::Values as u32
                     | FragmentTypeFlag::BarrierRecv as u32))
                 != 0
         })
@@ -270,6 +271,13 @@ impl TableFragments {
     pub fn mview_actor_ids(&self) -> Vec<ActorId> {
         Self::filter_actor_ids(self, |fragment_type_mask| {
             (fragment_type_mask & FragmentTypeFlag::Mview as u32) != 0
+        })
+    }
+
+    /// Returns values actor ids.
+    pub fn values_actor_ids(&self) -> Vec<ActorId> {
+        Self::filter_actor_ids(self, |fragment_type_mask| {
+            (fragment_type_mask & FragmentTypeFlag::Values as u32) != 0
         })
     }
 

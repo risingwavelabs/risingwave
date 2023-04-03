@@ -24,6 +24,7 @@ use prometheus::{
     register_int_gauge_with_registry, Histogram, HistogramVec, IntCounterVec, IntGauge,
     IntGaugeVec, Registry,
 };
+use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::common::WorkerType;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -33,7 +34,7 @@ use crate::rpc::server::ElectionClientRef;
 use crate::storage::MetaStore;
 
 pub struct MetaMetrics {
-    registry: Registry,
+    pub registry: Registry,
 
     /// gRPC latency of meta services
     pub grpc_latency: HistogramVec,
@@ -80,6 +81,10 @@ pub struct MetaMetrics {
     /// Total number of SSTs that is no longer referenced by versions but is not yet deleted from
     /// storage.
     pub stale_ssts_count: IntGauge,
+    /// The number of hummock version delta log.
+    pub delta_log_count: IntGauge,
+    /// latency of version checkpoint
+    pub version_checkpoint_latency: Histogram,
 
     /// Latency for hummock manager to acquire lock
     pub hummock_manager_lock_time: HistogramVec,
@@ -102,6 +107,9 @@ pub struct MetaMetrics {
 
     /// The number of compactor CPU need to be scale.
     pub scale_compactor_core_num: IntGauge,
+
+    pub level_compact_task_cnt: IntGaugeVec,
+    pub object_store_metric: Arc<ObjectStoreMetrics>,
 }
 
 impl MetaMetrics {
@@ -253,6 +261,20 @@ impl MetaMetrics {
             registry
         ).unwrap();
 
+        let delta_log_count = register_int_gauge_with_registry!(
+            "storage_delta_log_count",
+            "total number of hummock version delta log",
+            registry
+        )
+        .unwrap();
+
+        let opts = histogram_opts!(
+            "storage_version_checkpoint_latency",
+            "hummock version checkpoint latency",
+            exponential_buckets(0.1, 1.5, 20).unwrap()
+        );
+        let version_checkpoint_latency = register_histogram_with_registry!(opts, registry).unwrap();
+
         let hummock_manager_lock_time = register_histogram_vec_with_registry!(
             "hummock_manager_lock_time",
             "latency for hummock manager to acquire the rwlock",
@@ -307,6 +329,15 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let level_compact_task_cnt = register_int_gauge_vec_with_registry!(
+            "storage_level_compact_task_cnt",
+            "num of compact_task organized by group and level",
+            &["task"],
+            registry
+        )
+        .unwrap();
+        let object_store_metric = Arc::new(ObjectStoreMetrics::new(registry.clone()));
+
         Self {
             registry,
 
@@ -328,6 +359,8 @@ impl MetaMetrics {
             version_size,
             version_stats,
             stale_ssts_count,
+            delta_log_count,
+            version_checkpoint_latency,
             current_version_id,
             checkpoint_version_id,
             min_pinned_version_id,
@@ -340,6 +373,8 @@ impl MetaMetrics {
             compact_pending_bytes,
             compact_level_compression_ratio,
             scale_compactor_core_num,
+            level_compact_task_cnt,
+            object_store_metric,
         }
     }
 

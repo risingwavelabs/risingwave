@@ -194,7 +194,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             insert_node.table_version_id,
             source.context().dml_manager(),
             child,
-            source.context.get_config().developer.batch_chunk_size,
+            source.context.get_config().developer.chunk_size,
             source.plan_node().get_identity().clone(),
             column_indices,
             insert_node.row_id_index.as_ref().map(|index| *index as _),
@@ -211,12 +211,14 @@ mod tests {
     use futures::StreamExt;
     use itertools::Itertools;
     use risingwave_common::array::{Array, ArrayImpl, I32Array, StructArray};
+    use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::{
         schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
     };
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
     use risingwave_source::dml_manager::DmlManager;
+    use risingwave_storage::hummock::CachePolicy;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::store::{ReadOptions, StateStoreReadExt};
 
@@ -353,6 +355,7 @@ mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await?;

@@ -299,6 +299,11 @@ where
         core_guard.local_senders.push(sender);
     }
 
+    #[cfg(test)]
+    pub async fn clear_local_sender(&self) {
+        self.core.lock().await.local_senders.clear();
+    }
+
     pub async fn current_version(&self) -> NotificationVersion {
         let version_guard = self.current_version.lock().await;
         version_guard.version()

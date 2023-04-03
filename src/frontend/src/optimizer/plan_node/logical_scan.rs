@@ -202,10 +202,6 @@ impl LogicalScan {
         ids
     }
 
-    pub fn output_column_indices(&self) -> &[usize] {
-        &self.core.output_col_idx
-    }
-
     /// Get all indexes on this table
     pub fn indexes(&self) -> &[Rc<IndexCatalog>] {
         &self.core.indexes
