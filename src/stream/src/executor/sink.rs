@@ -273,7 +273,7 @@ mod test {
         use crate::executor::Barrier;
 
         let properties = maplit::hashmap! {
-            "connector".into() => "console".into(),
+            "connector".into() => "blackhole".into(),
             "format".into() => "append_only".into(),
             "force_append_only".into() => "true".into()
         };
