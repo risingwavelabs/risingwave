@@ -23,27 +23,30 @@ INSERT INTO departments (department_name, department_id) VALUES
     ('Engineering', 1),
     ('HR', 2);
 
-# Create materialized view with NATURAL JOIN
-statement ok
-CREATE MATERIALIZED VIEW employee_department_natural_join AS
-SELECT e.employee_name, d.department_name
-FROM employees e NATURAL JOIN departments d
-ORDER BY employee_name;
-
 statement ok
 flush
 
-# Test NATURAL JOIN
 query TT rowsort
-SELECT employee_name, department_name FROM employee_department_natural_join;
+SELECT e.employee_name, d.department_name
+FROM employees e NATURAL JOIN departments d
+ORDER BY employee_name;
 ----
 Alice Engineering
 Bob HR
 Charlie Engineering
 
-# Cleanup
-statement ok
-DROP MATERIALIZED VIEW employee_department_natural_join;
+# Test cross join
+query TT rowsort
+SELECT e.employee_name, d.department_name
+FROM employees e CROSS JOIN departments d
+ORDER BY e.employee_name, d.department_name;
+----
+Alice Engineering
+Alice HR
+Bob Engineering
+Bob HR
+Charlie Engineering
+Charlie HR
 
 statement ok
 DROP TABLE employees;

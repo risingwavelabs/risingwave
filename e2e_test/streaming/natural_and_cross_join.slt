@@ -23,17 +23,34 @@ INSERT INTO departments (department_name, department_id) VALUES
     ('Engineering', 1),
     ('HR', 2);
 
+# Create materialized view with NATURAL JOIN
 statement ok
-flush
-
-query TT rowsort
+CREATE MATERIALIZED VIEW employee_department_natural_join AS
 SELECT e.employee_name, d.department_name
 FROM employees e NATURAL JOIN departments d
 ORDER BY employee_name;
+
+# Nested-loop joins are not supported in the streaming mode.
+statement error 
+CREATE MATERIALIZED VIEW employee_department_cross_join AS
+SELECT e.employee_name, d.department_name
+FROM employees e CROSS JOIN departments d
+ORDER BY e.employee_name, d.department_name;
+
+statement ok
+flush
+
+# Test NATURAL JOIN
+query TT rowsort
+SELECT employee_name, department_name FROM employee_department_natural_join;
 ----
 Alice Engineering
 Bob HR
 Charlie Engineering
+
+# Cleanup
+statement ok
+DROP MATERIALIZED VIEW employee_department_natural_join;
 
 statement ok
 DROP TABLE employees;
