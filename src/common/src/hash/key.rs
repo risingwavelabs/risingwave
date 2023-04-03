@@ -634,9 +634,9 @@ impl HashKeySerializer for SerializedKeySerializer {
             None => {
                 serialize_datum_into(&None, &mut self.buffer);
                 self.null_bitmap.set_true(self.null_bitmap_idx);
-                self.null_bitmap_idx += 1;
             }
         }
+        self.null_bitmap_idx += 1;
     }
 
     fn into_hash_key(self) -> SerializedKey {
