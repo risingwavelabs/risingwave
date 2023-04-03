@@ -131,7 +131,7 @@ impl MetaClient {
         req: create_connection_request::Payload,
     ) -> Result<(ConnectionId, CatalogVersion)> {
         let request = CreateConnectionRequest {
-            connection_name,
+            name: connection_name,
             payload: Some(req),
         };
         let resp = self.inner.create_connection(request).await?;

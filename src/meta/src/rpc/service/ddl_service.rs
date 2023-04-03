@@ -617,7 +617,7 @@ where
                 let id = self.gen_unique_id::<{ IdCategory::Connection }>().await?;
                 let connection = Connection {
                     id,
-                    name: req.connection_name,
+                    name: req.name,
                     info: Some(connection::Info::PrivateLinkService(private_link_svc)),
                 };
 

@@ -259,7 +259,7 @@ message CreateConnectionRequest {
     string service_name = 2;
     repeated string availability_zones = 3;
   }
-  string connection_name = 1;
+  string name = 1;
   oneof payload {
     PrivateLink private_link = 2;
   }
