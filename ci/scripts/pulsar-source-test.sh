@@ -47,6 +47,7 @@ cargo make ci-start ci-1cn-1fe
 echo "--- Run test"
 python3 -m pip install psycopg2-binary
 python3 e2e_test/source/pulsar/astra-streaming.py
+python3 e2e_test/source/pulsar/streamnative-cloud.py
 
 echo "--- Kill cluster"
 cargo make ci-kill

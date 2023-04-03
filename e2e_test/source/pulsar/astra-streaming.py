@@ -2,7 +2,7 @@ import os
 import json
 from time import sleep
 import psycopg2
-
+import re
 
 def do_test(config):
     conn = psycopg2.connect(
@@ -26,41 +26,21 @@ def do_test(config):
                     ROW FORMAT JSON''')
     sleep(5)
 
-    # Execute SELECT statements
-    cur.execute('select count(*) from t')
-    result = cur.fetchone()
-    print(result[0])
-    assert result == (5,)
-
-    expected_data = [1, "name0",
-                     2, "name0",
-                     6, "name3",
-                     0, "name5",
-                     5, "name8"]
-
-    cur.execute('select * from t')
-    for i in range(5):
-        sleep(1)
-        result = cur.fetchone()
-        print(result)
-        assert result[0] == expected_data[i * 2]
-        assert result[1] == expected_data[i * 2 + 1]
+    # Do test with slt
+    ret = os.popen(
+        "sqllogictest -p 4566 -d dev './e2e_test/source/pulsar/pulsar.slt'").read()
+    result = re.match(
+        'e2e_test/source/pulsar/pulsar.slt +.. \[OK\] in [0-9]+ ms', ret)
 
     # Clean up
     cur.execute('drop table t')
 
     cur.close()
     conn.close()
+    assert result != None
 
 
 if __name__ == "__main__":
     config = json.loads(os.environ["ASTRA_STREAMING_TEST_TOKEN"])
 
-    return_code = 0
-    try:
-        do_test(config)
-    except Exception as e:
-        print("Test failed", e)
-        return_code = 1
-
-    exit(return_code)
+    do_test(config)
