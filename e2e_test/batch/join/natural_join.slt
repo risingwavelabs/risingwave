@@ -1,0 +1,42 @@
+# Test setup
+statement ok
+CREATE TABLE employees (
+    id INTEGER,
+    employee_name VARCHAR,
+    department_id INTEGER
+);
+
+statement ok
+CREATE TABLE departments (
+    department_name VARCHAR,
+    department_id INTEGER
+);
+
+statement ok
+INSERT INTO employees (id, employee_name, department_id) VALUES
+    (1, 'Alice', 1),
+    (2, 'Bob', 2),
+    (3, 'Charlie', 1);
+
+statement ok
+INSERT INTO departments (department_name, department_id) VALUES
+    ('Engineering', 1),
+    ('HR', 2);
+
+statement ok
+flush
+
+query TT rowsort
+SELECT e.employee_name, d.department_name
+FROM employees e NATURAL JOIN departments d
+ORDER BY employee_name;
+----
+Alice Engineering
+Bob HR
+Charlie Engineering
+
+statement ok
+DROP TABLE employees;
+
+statement ok
+DROP TABLE departments;

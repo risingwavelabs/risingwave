@@ -1,0 +1,52 @@
+# Test setup
+statement ok
+CREATE TABLE employees (
+    id INTEGER,
+    employee_name VARCHAR,
+    department_id INTEGER
+);
+
+statement ok
+CREATE TABLE departments (
+    department_name VARCHAR,
+    department_id INTEGER
+);
+
+statement ok
+INSERT INTO employees (id, employee_name, department_id) VALUES
+    (1, 'Alice', 1),
+    (2, 'Bob', 2),
+    (3, 'Charlie', 1);
+
+statement ok
+INSERT INTO departments (department_name, department_id) VALUES
+    ('Engineering', 1),
+    ('HR', 2);
+
+# Create materialized view with NATURAL JOIN
+statement ok
+CREATE MATERIALIZED VIEW employee_department_natural_join AS
+SELECT e.employee_name, d.department_name
+FROM employees e NATURAL JOIN departments d
+ORDER BY employee_name;
+
+statement ok
+flush
+
+# Test NATURAL JOIN
+query TT rowsort
+SELECT employee_name, department_name FROM employee_department_natural_join;
+----
+Alice Engineering
+Bob HR
+Charlie Engineering
+
+# Cleanup
+statement ok
+DROP MATERIALIZED VIEW employee_department_natural_join;
+
+statement ok
+DROP TABLE employees;
+
+statement ok
+DROP TABLE departments;

@@ -1,0 +1,47 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# Test setup
+statement ok
+CREATE TABLE employees (
+  name VARCHAR,
+  department_id INTEGER
+);
+
+statement ok
+CREATE TABLE departments (
+  name VARCHAR
+);
+
+statement ok
+INSERT INTO employees (name, department_id) VALUES
+  ('Alice', 1),
+  ('Bob', 1),
+  ('Charlie', 2),
+  ('David', 2);
+
+statement ok
+INSERT INTO departments (name) VALUES
+  ('HR'),
+  ('Engineering');
+
+# Test cross join
+query TT rowsort
+SELECT e.name AS employee_name, d.name AS department_name
+FROM employees e CROSS JOIN departments d
+ORDER BY employee_name, department_name;
+----
+Alice Engineering
+Alice HR
+Bob Engineering
+Bob HR
+Charlie Engineering
+Charlie HR
+David Engineering
+David HR
+
+statement ok
+drop table employees;
+
+statement ok
+drop table departments;
