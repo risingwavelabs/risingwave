@@ -275,13 +275,15 @@ impl FromIntoArrow for Decimal {
             NAN => Decimal::NaN,
             i128::MAX => Decimal::PositiveInf,
             i128::MIN => Decimal::NegativeInf,
-            _ => Decimal::Normalized(rust_decimal::Decimal::deserialize(value.to_be_bytes())),
+            // FIXME: support non-zero scale
+            _ => Decimal::Normalized(rust_decimal::Decimal::from_i128_with_scale(value, 0)),
         }
     }
 
     fn into_arrow(self) -> Self::ArrowType {
         match self {
-            Decimal::Normalized(d) => i128::from_be_bytes(d.serialize()),
+            // FIXME: support non-zero scale
+            Decimal::Normalized(d) => d.mantissa(),
             Decimal::NaN => i128::MIN + 1,
             Decimal::PositiveInf => i128::MAX,
             Decimal::NegativeInf => i128::MIN,

@@ -3,6 +3,7 @@ from typing import Iterator, Optional, Tuple
 from risingwave.udf import udf, udtf, UdfServer
 import random
 import struct
+from decimal import Decimal
 
 
 @udf(input_types=[], result_type='INT')
@@ -44,11 +45,24 @@ def extract_tcp_info(tcp_packet: bytes):
 
 
 @udf(input_types='VARCHAR', result_type='DECIMAL')
-def hex_to_int(hex: Optional[str]) -> Optional[int]:
+def hex_to_dec(hex: Optional[str]) -> Optional[Decimal]:
     if not hex:
         return None
-    else:
-        return int(hex, 16)
+
+    hex = hex.strip()
+    dec = Decimal(0)
+
+    while hex:
+        chunk = hex[:16]
+        chunk_value = int(hex[:16], 16)
+        dec = dec * (1 << (4 * len(chunk))) + chunk_value
+        hex = hex[16:]
+    return dec
+
+
+@udf(input_types=["VARCHAR[]", "INT"], result_type="VARCHAR")
+def array_access(list: list[str], idx: int) -> str:
+    return list[idx]
 
 
 if __name__ == '__main__':
@@ -59,5 +73,6 @@ if __name__ == '__main__':
     server.add_function(series)
     server.add_function(series2)
     server.add_function(extract_tcp_info)
-    server.add_function(hex_to_int)
+    server.add_function(hex_to_dec)
+    server.add_function(array_access)
     server.serve()
