@@ -84,6 +84,7 @@ fn values_column_name(values_id: usize, col_id: usize) -> String {
 impl Binder {
     /// Bind [`Values`] with given `expected_types`. If no types are expected, a compatible type for
     /// all rows will be used.
+    /// If values are shorter than expected, `NULL`s will be filled.
     pub(super) fn bind_values(
         &mut self,
         values: Values,
