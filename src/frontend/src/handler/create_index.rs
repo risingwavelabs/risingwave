@@ -89,8 +89,11 @@ pub(crate) fn gen_create_index_plan(
             ExprImpl::InputRef(_) => {}
             ExprImpl::FunctionCall(func) => {
                 match func.get_expr_type() {
-                    // TODO: support more functions
-                    ExprType::Lower | ExprType::Upper | ExprType::JsonbAccessInner | ExprType::JsonbAccessStr => {}
+                    // TODO: support more functions after verification
+                    ExprType::Lower
+                    | ExprType::Upper
+                    | ExprType::JsonbAccessInner
+                    | ExprType::JsonbAccessStr => {}
                     _ => {
                         return Err(ErrorCode::NotSupported(
                             "this function is not supported for indexes".into(),
@@ -103,7 +106,7 @@ pub(crate) fn gen_create_index_plan(
                     matches!(input, ExprImpl::InputRef(_)) || matches!(input, ExprImpl::Literal(_))
                 }) {
                     return Err(ErrorCode::NotSupported(
-                        "complex inputs for functions are not supported".into(),
+                        "complex arguments for functions are not supported".into(),
                         "use columns or literals instead".into(),
                     )
                     .into());
