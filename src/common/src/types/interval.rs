@@ -197,7 +197,7 @@ impl Interval {
         (self.usecs % (USECS_PER_SEC * 60)) as i32
     }
 
-    /// Returns the total number of microseconds since 1970-01-01 00:00:00+00.
+    /// Returns the total number of microseconds, as defined by PostgreSQL `extract`.
     ///
     /// Note this value is not used by interval ordering (`IntervalCmpValue`) and is not consistent
     /// with it.
