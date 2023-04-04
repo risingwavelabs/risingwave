@@ -125,6 +125,7 @@ enum SourceType {
   UNSPECIFIED = 0;
   MYSQL = 1;
   POSTGRES = 2;
+  CITUS = 3;
 }
 
 message GetEventStreamRequest {
@@ -153,8 +154,35 @@ message GetEventStreamResponse {
   repeated CdcMessage events = 2;
 }
 
+message ListSourceSplitsRequest {
+  message ListCitusSplitsRequest {
+    string coordinator_host = 1;
+    string coordinator_port = 2;
+  }
+
+  oneof request {
+    ListCitusSplitsRequest citus_list_req = 1;
+  }
+}
+
+message ListSourceSplitsResponse {
+  message CitusSplit {
+    string hostname = 1;
+    string port = 2;
+  }
+
+  message CitusSplitInfo {
+    repeated CitusSplit worker_nodes = 1;
+  }
+
+  oneof split_info {
+    CitusSplitInfo citus_split_info = 1;
+  }
+}
+
 service ConnectorService {
   rpc SinkStream(stream SinkStreamRequest) returns (stream SinkResponse);
   rpc ValidateSink(ValidateSinkRequest) returns (ValidateSinkResponse);
   rpc GetEventStream(GetEventStreamRequest) returns (stream GetEventStreamResponse);
+  rpc ListSourceSplits(ListSourceSplitsRequest) returns (ListSourceSplitsResponse);
 }

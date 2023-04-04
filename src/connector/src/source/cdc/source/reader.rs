@@ -36,6 +36,7 @@ impl_common_split_reader_logic!(CdcSplitReader, CdcProperties);
 pub struct CdcSplitReader {
     source_id: u64,
     start_offset: Option<String>,
+    split_node_addr: Option<String>,
     conn_props: CdcProperties,
 
     split_id: SplitId,
@@ -60,13 +61,24 @@ impl SplitReader for CdcSplitReader {
         let split_id = split.id();
         match split {
             SplitImpl::MySqlCdc(split) | SplitImpl::PostgresCdc(split) => Ok(Self {
-                source_id: split.source_id as u64,
+                source_id: split.split_id as u64,
                 start_offset: split.start_offset,
+                split_node_addr: None,
                 conn_props,
                 split_id,
                 parser_config,
                 source_ctx,
             }),
+            SplitImpl::CitusCdc(split) => Ok(Self {
+                source_id: split.split_id as u64,
+                start_offset: split.start_offset,
+                split_node_addr: split.server_addr.clone(),
+                conn_props,
+                split_id,
+                parser_config,
+                source_ctx,
+            }),
+
             _ => Err(anyhow!(
                 "failed to create cdc split reader: invalid splis info"
             )),
@@ -85,12 +97,30 @@ impl CdcSplitReader {
         let cdc_client =
             ConnectorClient::new(HostAddr::from_str(&self.conn_props.connector_node_addr)?).await?;
 
+        // use split node addr to rewrite hostname and port
+        let mut properties = self.conn_props.props.clone();
+        if self.split_node_addr.is_some() {
+            let node_addr = self.split_node_addr.unwrap();
+            let split_node_addr = HostAddr::from_str(&node_addr)?;
+            properties.insert("hostname".to_string(), split_node_addr.host);
+            properties.insert("port".to_string(), split_node_addr.port.to_string());
+
+            // rewrite distributed table to table shards
+            let mut table_name = properties
+                .remove("table.name")
+                .ok_or_else(|| anyhow!("missing field 'table.name'".to_string()))?;
+
+            table_name.push_str("_[0-9]+");
+            properties.insert("table.name".into(), table_name);
+        }
+
+        tracing::info!("cdc properties: {:?}", properties);
         let cdc_stream = cdc_client
             .start_source_stream(
                 self.source_id,
-                self.conn_props.source_type_enum()?,
+                self.conn_props.get_source_type()?,
                 self.start_offset,
-                self.conn_props.props,
+                properties,
             )
             .await
             .inspect_err(|err| tracing::error!("connector node start stream error: {}", err))?;

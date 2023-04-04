@@ -36,6 +36,8 @@ public class DbzConnectorConfig {
     public static final String DB_NAME = "database.name";
     public static final String TABLE_NAME = "table.name";
 
+    public static final String DB_SERVERS = "database.servers";
+
     /* MySQL specified configs */
     public static final String MYSQL_SERVER_ID = "server.id";
 
@@ -104,7 +106,7 @@ public class DbzConnectorConfig {
             }
 
             dbzProps.putAll(mysqlProps);
-        } else if (source == SourceTypeE.POSTGRES) {
+        } else if (source == SourceTypeE.POSTGRES || source == SourceTypeE.CITUS) {
             var postgresProps = initiateDbConfig(POSTGRES_CONFIG_FILE, substitutor);
 
             // if offset is specified, we will continue reading changes from the specified offset
