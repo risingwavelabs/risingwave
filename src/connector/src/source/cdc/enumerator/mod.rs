@@ -52,7 +52,7 @@ impl SplitEnumerator for DebeziumSplitEnumerator {
             .get(DATABASE_SERVERS_KEY)
             .map(|s| {
                 s.split(',')
-                    .map(|s| HostAddr::from_str(s))
+                    .map(HostAddr::from_str)
                     .collect::<Result<Vec<_>, _>>()
             })
             .transpose()?

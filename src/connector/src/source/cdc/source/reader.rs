@@ -36,7 +36,7 @@ impl_common_split_reader_logic!(CdcSplitReader, CdcProperties);
 pub struct CdcSplitReader {
     source_id: u64,
     start_offset: Option<String>,
-    split_node_addr: Option<String>,
+    server_addr: Option<String>,
     conn_props: CdcProperties,
 
     split_id: SplitId,
@@ -63,7 +63,7 @@ impl SplitReader for CdcSplitReader {
             SplitImpl::MySqlCdc(split) | SplitImpl::PostgresCdc(split) => Ok(Self {
                 source_id: split.split_id as u64,
                 start_offset: split.start_offset,
-                split_node_addr: None,
+                server_addr: None,
                 conn_props,
                 split_id,
                 parser_config,
@@ -72,7 +72,7 @@ impl SplitReader for CdcSplitReader {
             SplitImpl::CitusCdc(split) => Ok(Self {
                 source_id: split.split_id as u64,
                 start_offset: split.start_offset,
-                split_node_addr: split.server_addr.clone(),
+                server_addr: split.server_addr,
                 conn_props,
                 split_id,
                 parser_config,
@@ -97,19 +97,18 @@ impl CdcSplitReader {
         let cdc_client =
             ConnectorClient::new(HostAddr::from_str(&self.conn_props.connector_node_addr)?).await?;
 
-        // use split node addr to rewrite hostname and port
+        // rewrite the hostname and port for the split
         let mut properties = self.conn_props.props.clone();
-        if self.split_node_addr.is_some() {
-            let node_addr = self.split_node_addr.unwrap();
-            let split_node_addr = HostAddr::from_str(&node_addr)?;
-            properties.insert("hostname".to_string(), split_node_addr.host);
-            properties.insert("port".to_string(), split_node_addr.port.to_string());
-
-            // rewrite distributed table to table shards
+        if self.server_addr.is_some() {
+            let addr = self.server_addr.unwrap();
+            let host_addr = HostAddr::from_str(&addr)
+                .map_err(|err| anyhow!("invalid server address for cdc split. {}", err))?;
+            properties.insert("hostname".to_string(), host_addr.host);
+            properties.insert("port".to_string(), host_addr.port.to_string());
+            // rewrite table name with suffix to capture all shards in the split
             let mut table_name = properties
                 .remove("table.name")
                 .ok_or_else(|| anyhow!("missing field 'table.name'".to_string()))?;
-
             table_name.push_str("_[0-9]+");
             properties.insert("table.name".into(), table_name);
         }

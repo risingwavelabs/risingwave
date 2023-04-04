@@ -43,6 +43,14 @@ impl SplitMetaData for CdcSplit {
 }
 
 impl CdcSplit {
+    pub fn new(split_id: u32, start_offset: String) -> CdcSplit {
+        Self {
+            split_id,
+            server_addr: None,
+            start_offset: Some(start_offset),
+        }
+    }
+
     pub fn copy_with_offset(&self, start_offset: String) -> Self {
         Self {
             split_id: self.split_id,
