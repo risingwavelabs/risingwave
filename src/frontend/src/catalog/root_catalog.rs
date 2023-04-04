@@ -23,6 +23,8 @@ use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::catalog::{
     PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
 };
+use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_storage::hummock::store::version::HummockVersionReader;
 
 use super::function_catalog::FunctionCatalog;
 use super::source_catalog::SourceCatalog;
@@ -94,6 +96,7 @@ pub struct Catalog {
     db_name_by_id: HashMap<DatabaseId, String>,
     /// all table catalogs in the cluster identified by universal unique table id.
     table_by_id: HashMap<TableId, TableCatalog>,
+    table_stats: HummockVersionStats,
 }
 
 #[expect(clippy::derivable_impls)]
@@ -104,6 +107,7 @@ impl Default for Catalog {
             database_by_name: HashMap::new(),
             db_name_by_id: HashMap::new(),
             table_by_id: HashMap::new(),
+            table_stats: HummockVersionStats::default(),
         }
     }
 }
@@ -568,6 +572,14 @@ impl Catalog {
     /// Set the catalog cache's catalog version.
     pub fn set_version(&mut self, catalog_version: CatalogVersion) {
         self.version = catalog_version;
+    }
+
+    pub fn table_stats(&self) -> &HummockVersionStats {
+        &self.table_stats
+    }
+
+    pub fn set_table_stats(&mut self, table_stats: HummockVersionStats) {
+        self.table_stats = table_stats;
     }
 
     pub fn get_all_indexes_related_to_object(
