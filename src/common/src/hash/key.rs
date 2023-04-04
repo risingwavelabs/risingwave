@@ -29,6 +29,7 @@ use std::io::{Cursor, Read};
 
 use chrono::{Datelike, Timelike};
 use fixedbitset::FixedBitSet;
+use smallbitset::{Set64, Set8};
 
 use crate::array::serial_array::Serial;
 use crate::array::{
@@ -41,7 +42,6 @@ use crate::types::{DataType, Date, Decimal, ScalarRef, Time, Timestamp, F32, F64
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::iter_util::ZipEqFast;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum_into};
-use smallbitset::{Set64, Set8};
 
 /// Bitmap for null values in key.
 /// This is specialized for key,
@@ -58,21 +58,27 @@ impl NullBitmap {
             inner: Set64::empty(),
         }
     }
+
     fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
+
     fn set_true(&mut self, idx: usize) {
         self.inner.add_inplace(idx);
     }
+
     fn estimated_heap_size(&self) -> usize {
         self.inner.capacity()
     }
+
     fn len(&self) -> usize {
         self.inner.len()
     }
+
     fn contains(&self, x: usize) -> bool {
         self.inner.contains(x)
     }
+
     pub fn is_subset(&self, other: &FixedBitSet) -> bool {
         todo!()
     }
@@ -565,7 +571,9 @@ impl<const N: usize> HashKeySerializer for FixedSizeKeySerializer<N> {
                 self.buffer[self.data_len..(self.data_len + ret.len())].copy_from_slice(ret);
                 self.data_len += ret.len();
             }
-            None => { self.null_bitmap.set_true(self.null_bitmap_idx); }
+            None => {
+                self.null_bitmap.set_true(self.null_bitmap_idx);
+            }
         };
         self.null_bitmap_idx += 1;
     }
