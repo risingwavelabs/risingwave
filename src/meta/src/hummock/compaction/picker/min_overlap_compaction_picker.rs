@@ -50,131 +50,32 @@ impl MinOverlappingPicker {
         }
     }
 
-    pub fn pick_l0_multi_level_to_base(
-        &self,
-        l0: &[Level],
-        target_level: &Level,
-        level_handlers: &[LevelHandler],
-    ) -> (Vec<Vec<SstableInfo>>, Vec<SstableInfo>) {
-        let l0_select_tables_vec = self.pick_l0_multi_level(l0, &level_handlers[0]);
-        if l0_select_tables_vec.is_empty() {
-            return (vec![], vec![]);
-        }
-
-        tracing::info!("plan num {}", l0_select_tables_vec.len());
-
-        for (plan_index, (total_select_size, level_select_table)) in
-            l0_select_tables_vec.into_iter().enumerate()
-        {
-            let mut sst_id_set = BTreeSet::default();
-
-            {
-                let l0_select_tables = level_select_table
-                    .iter()
-                    .flat_map(|select_tables| select_tables.clone())
-                    .collect_vec();
-
-                let target_level_files = self
-                    .overlap_strategy
-                    .check_base_level_overlap(&l0_select_tables, &l0[0].table_infos);
-                assert_eq!(level_select_table[0], target_level_files);
-            }
-
-            let l0_select_tables = level_select_table
-                .iter()
-                .flat_map(|select_tables| select_tables.clone())
-                .collect_vec();
-
-            let target_level_files = self
-                .overlap_strategy
-                .check_base_level_overlap(&l0_select_tables, &target_level.table_infos);
-
-            for sst in &l0_select_tables {
-                sst_id_set.insert(sst.sst_id);
-            }
-
-            let mut target_level_size = 0;
-            let mut pending_compact = false;
-            let mut target_overlap_sst_ids = BTreeSet::default();
-            for sst in &target_level_files {
-                if level_handlers[target_level.level_idx as usize].is_pending_compact(&sst.sst_id) {
-                    tracing::info!(
-                        "TRACK target overlap {} pending sst_id_set {:?}",
-                        &sst.sst_id,
-                        sst_id_set
-                    );
-                    pending_compact = true;
-                    break;
-                }
-
-                target_overlap_sst_ids.insert(sst.sst_id);
-                target_level_size += sst.file_size;
-            }
-
-            if pending_compact {
-                tracing::info!("CANCEL pending_compact");
-                continue;
-            }
-
-            let write_amp = target_level_size * 100 / total_select_size;
-            if write_amp > 1000 {
-                tracing::info!(
-                    "CANCEL write_amp too large {} total_select_size {} target_level_size {} target_level_files_count {} =",
-                    write_amp,
-                    total_select_size,
-                    target_level_size,
-                    target_level_files.len(),
-                );
-                continue;
-            }
-
-            tracing::info!(
-                "TRACK choose plan {} base level compaction sst_id_set {:?} target_overlap_sst_ids {:?} level_count {} target_level_file_count {} overlap_file_len {}",
-                plan_index,
-                sst_id_set,
-                target_overlap_sst_ids,
-                level_select_table.len(),
-                target_level.table_infos.len(),
-                target_level_files.len(),
-            );
-            return (level_select_table, target_level_files);
-        }
-
-        (vec![], vec![])
-    }
-
-    pub fn pick_l0_multi_level(
+    pub fn pick_l0_multi_non_overlap_level(
         &self,
         l0: &[Level],
         level_handler: &LevelHandler,
-    ) -> Vec<(u64, Vec<Vec<SstableInfo>>)> {
+        min_depth: usize,
+        min_compaction_bytes: u64,
+    ) -> Vec<(u64, usize, Vec<Vec<SstableInfo>>)> {
         let mut scores = vec![];
         let select_tables = &l0[0].table_infos;
-        let select_level_size = &l0[0].total_file_size;
-        tracing::debug!(
-            "select_level_size {:?} select_tables.len() {:?}",
-            select_level_size,
-            select_tables.len()
-        );
         for left in 0..select_tables.len() {
             if level_handler.is_pending_compact(&select_tables[left].sst_id) {
                 continue;
             }
 
             let mut select_file_size = 0;
-            let mut total_file_size = 0;
             let mut all_file_size = 0;
+            let mut all_file_count = 0;
             for (right, table) in select_tables.iter().enumerate().skip(left) {
                 if level_handler.is_pending_compact(&table.sst_id) {
                     break;
                 }
-                // if self.split_by_table && table.table_ids != select_tables[left].table_ids {
-                //     break;
-                // }
+
+                select_file_size += table.file_size;
                 if select_file_size > self.max_select_bytes {
                     break;
                 }
-                select_file_size += table.file_size;
 
                 let mut select_sst_id_set = BTreeSet::default();
                 let mut level_select_files: Vec<Vec<SstableInfo>> = vec![vec![]; l0.len()];
@@ -187,6 +88,8 @@ impl MinOverlappingPicker {
                     all_file_size += sst.file_size;
                 }
 
+                all_file_count += right - left + 1;
+
                 let mut select_level_count = 1;
                 let mut last_level_index = 0;
 
@@ -196,28 +99,19 @@ impl MinOverlappingPicker {
                         break;
                     }
 
-                    // if level_handler.is_level_all_pending_compact(target_level) {
-                    //     break;
-                    // }
-
                     let target_tables = &target_level.table_infos;
                     let overlap_files = overlap_info.check_multiple_overlap(target_tables);
-                    // println!(
-                    //     "target_index {} overlap_files_len {}",
-                    //     target_index,
-                    //     overlap_files.len(),
-                    // )
 
                     for other in &overlap_files {
                         if level_handler.is_pending_compact(&other.sst_id) {
                             pending_compact = true;
                             break;
                         }
-                        total_file_size += other.file_size;
                         overlap_info.update(other);
                         select_sst_id_set.insert(other.sst_id);
 
                         all_file_size += other.file_size;
+                        all_file_count += 1;
                     }
 
                     if pending_compact {
@@ -227,7 +121,8 @@ impl MinOverlappingPicker {
                     last_level_index = target_index;
 
                     if overlap_files.is_empty() {
-                        // break;
+                        // We allow a layer in the middle without overlap, so we need to continue to
+                        // the next layer to search for overlap
                         continue;
                     }
 
@@ -239,55 +134,49 @@ impl MinOverlappingPicker {
                     break;
                 }
 
-                // println!(
-                //     "last_level_index {:?} select_level_count {:?} left {} right {}",
-                //     last_level_index, select_level_count, left, right
-                // );
-
                 // check reverse overlap
-                if last_level_index != 0 {
-                    for reverse_index in (0..last_level_index).rev() {
-                        let target_tables = &l0[reverse_index].table_infos;
-                        let overlap_files = overlap_info.check_multiple_overlap(target_tables);
-                        // println!(
-                        //     "reverse_index {:?} overlap_files_len {} overlap_files {:?}",
-                        //     reverse_index,
-                        //     overlap_files.len(),
-                        //     overlap_files
-                        // );
-
-                        let mut extra_overlap_sst = Vec::with_capacity(overlap_files.len());
-                        for other in overlap_files {
-                            if level_handler.is_pending_compact(&other.sst_id) {
-                                pending_compact = true;
-                                break;
-                            }
-
-                            if select_sst_id_set.contains(&other.sst_id) {
-                                continue;
-                            }
-
-                            total_file_size += other.file_size;
-
-                            all_file_size += other.file_size;
-
-                            overlap_info.update(&other);
-                            select_sst_id_set.insert(other.sst_id);
-                            extra_overlap_sst.push(other);
-                        }
-
-                        if pending_compact {
+                for reverse_index in (0..last_level_index).rev() {
+                    let target_tables = &l0[reverse_index].table_infos;
+                    let overlap_files = overlap_info.check_multiple_overlap(target_tables);
+                    let mut extra_overlap_sst = Vec::with_capacity(overlap_files.len());
+                    for other in overlap_files {
+                        if level_handler.is_pending_compact(&other.sst_id) {
+                            pending_compact = true;
                             break;
                         }
 
-                        if !extra_overlap_sst.is_empty() {
-                            level_select_files[reverse_index].extend(extra_overlap_sst.into_iter());
+                        if select_sst_id_set.contains(&other.sst_id) {
+                            // Since some of the files have already been selected when selecting
+                            // upwards, we filter here to avoid adding sst repeatedly
+                            continue;
                         }
+
+                        all_file_size += other.file_size;
+                        all_file_count += 1;
+
+                        overlap_info.update(&other);
+                        select_sst_id_set.insert(other.sst_id);
+                        extra_overlap_sst.push(other);
+                    }
+
+                    if pending_compact {
+                        break;
+                    }
+
+                    if !extra_overlap_sst.is_empty() {
+                        level_select_files[reverse_index].extend(extra_overlap_sst.into_iter());
                     }
                 }
 
                 if pending_compact {
+                    // encountering a pending file means we don't need to continue processing this
+                    // interval
                     break;
+                }
+
+                if all_file_size < min_compaction_bytes || select_level_count < min_depth {
+                    // Avoiding too small compaction and number of layers
+                    continue;
                 }
 
                 // sort sst per level due to reverse expand
@@ -305,8 +194,8 @@ impl MinOverlappingPicker {
                     })
                     .collect_vec();
 
-                // level_select_files.retain(|level_ssts| !level_ssts.is_empty());
                 if level_select_files.is_empty() {
+                    // No files are selected in all layers
                     break;
                 }
 
@@ -320,20 +209,16 @@ impl MinOverlappingPicker {
                     (select_level_size, overlap_level_size)
                 };
 
+                // The algorithm is not aware of the existence of partitions, which means that we
+                // can cope with partition changes without additional processing. The reason for
+                // computing write_amp in l0 is that we can assume that when partitions are aligned,
+                // a file partitioned at the bottom sub_level will select the smallest possible file
+                // write_map. When we select files that span two partitions, in the expected case,
+                // the overlap range is larger and more files are selected at the top level,
+                // resulting in a larger write_amp. So measuring an interval by write_amp allows us
+                // to prefer interval-aligned files.
                 let write_amp_delta =
                     (overlap_level_size as f64 * 100.0 / select_level_size as f64) as u64;
-
-                println!(
-                    "select_level_count {} write_amp_delta {} level_select_files_len {} level_select_files select_level_file_size {} overlap_file_size {} left {} right {}",
-                    select_level_count,
-                    write_amp_delta,
-                    level_select_files.len(),
-                    // level_select_files,
-                    select_file_size,
-                    total_file_size,
-                    left,
-                    right,
-                );
 
                 scores.push((
                     (
@@ -341,6 +226,7 @@ impl MinOverlappingPicker {
                         write_amp_delta,
                         level_select_files[0].len(),
                         all_file_size,
+                        all_file_count,
                     ),
                     level_select_files,
                 ));
@@ -350,11 +236,21 @@ impl MinOverlappingPicker {
             return vec![];
         }
 
-        let scores2 = scores
+        // The logic of sorting depends on the interval we expect to select.
+        // 1. contain as many levels as possible
+        // 2. fewer write amps, in other words more independent intervals to ensure parallelism
+        // 3. fewer files in the bottom sub level, containing as many smaller intervals as possible.
+        scores
             .into_iter()
             .sorted_by(
                 |(
-                    (select_level_count, write_amp_delta, select_level_file_count, _all_file_size),
+                    (
+                        select_level_count,
+                        write_amp_delta,
+                        select_level_file_count,
+                        _all_file_size,
+                        _select_file_count,
+                    ),
                     _x,
                 ),
                  (
@@ -363,6 +259,7 @@ impl MinOverlappingPicker {
                         write_amp_delta2,
                         select_level_file_count2,
                         _all_file_size2,
+                        _select_file_count2,
                     ),
                     _y,
                 )| {
@@ -370,7 +267,6 @@ impl MinOverlappingPicker {
                         .cmp(select_level_count)
                         .then_with(|| write_amp_delta.cmp(write_amp_delta2)) // a way to choose a small guard
                         .then_with(|| select_level_file_count.cmp(select_level_file_count2))
-                    // .then_with(|| y.len().cmp(&x.len()))
                 },
             )
             .map(
@@ -380,27 +276,12 @@ impl MinOverlappingPicker {
                         _write_amp_delta,
                         _select_level_file_count,
                         all_file_size,
+                        select_file_count,
                     ),
                     x,
-                )| { (all_file_size, x) },
+                )| { (all_file_size, select_file_count, x) },
             )
-            .collect_vec();
-
-        for (a, b) in &scores2 {
-            let mut sst_id_vec = vec![];
-            for x in b.iter() {
-                for y in x {
-                    sst_id_vec.push(y.sst_id);
-                }
-            }
-
-            tracing::info!("select ctx {:?} sst_id_vec {:?}", a, sst_id_vec);
-        }
-
-        // select_files
-        // scores2.first().unwrap().1.clone()
-
-        scores2
+            .collect_vec()
     }
 
     pub fn pick_tables(
@@ -653,7 +534,7 @@ pub mod tests {
 
     #[test]
     fn test_pick_l0_multi_level() {
-        let mut picker = MinOverlappingPicker::new(
+        let picker = MinOverlappingPicker::new(
             0,
             0,
             10000,
@@ -723,10 +604,6 @@ pub mod tests {
             LevelHandler::new(2),
         ];
 
-        // pick a non-overlapping files. It means that this file could be trivial move to next
-        // level.
-        let ret = picker.pick_l0_multi_level(&levels, &levels_handlers[0]);
-
-        tracing::debug!("ret_len {:?}", ret.len());
+        picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0], 1, u64::MAX);
     }
 }

@@ -167,7 +167,7 @@ where
             if key_vnode > self.last_vnode_point {
                 switch_builder = true;
                 let old_last_vnode_point = self.last_vnode_point;
-                let table_weight = 4 as usize;
+                let table_weight = 4_usize;
                 let (basic, remainder) = VirtualNode::COUNT.div_rem(&table_weight);
                 let small_segments_area = basic * (table_weight - remainder);
                 self.last_vnode_point = (if key_vnode < small_segments_area {

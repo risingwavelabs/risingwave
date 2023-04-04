@@ -35,7 +35,7 @@ pub(crate) mod tests {
         FilterKeyExtractorImpl, FilterKeyExtractorManagerRef, FixedLengthFilterKeyExtractor,
         FullKeyFilterKeyExtractor,
     };
-    use risingwave_hummock_sdk::key::{next_key, FullKey, TableKey, UserKey, TABLE_PREFIX_LEN};
+    use risingwave_hummock_sdk::key::{next_key, FullKey, TableKey, TABLE_PREFIX_LEN};
     use risingwave_meta::hummock::compaction::{default_level_selector, ManualCompactionOption};
     use risingwave_meta::hummock::test_utils::{
         register_table_ids_to_compaction_group, setup_compute_env,
