@@ -25,7 +25,7 @@ use risingwave_common::test_utils::rand_array::seed_rand_array_ref;
 use risingwave_common::types::DataType;
 
 static SEED: u64 = 998244353u64;
-static CHUNK_SIZES: &[usize] = &[128, 1024, 8192];
+static CHUNK_SIZES: &[usize] = &[128, 1024];
 static NULL_RATIOS: &[f64] = &[0.0, 0.01, 0.1];
 
 trait Case: Send + 'static {
