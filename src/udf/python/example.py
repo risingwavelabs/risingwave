@@ -1,5 +1,5 @@
 import socket
-from typing import Iterator, Optional, Tuple
+from typing import Iterator, List, Optional, Tuple
 from risingwave.udf import udf, udtf, UdfServer
 import random
 import struct
@@ -61,7 +61,7 @@ def hex_to_dec(hex: Optional[str]) -> Optional[Decimal]:
 
 
 @udf(input_types=["VARCHAR[]", "INT"], result_type="VARCHAR")
-def array_access(list: list[str], idx: int) -> Optional[str]:
+def array_access(list: List[str], idx: int) -> Optional[str]:
     if idx == 0 or idx > len(list):
         return None
     return list[idx - 1]

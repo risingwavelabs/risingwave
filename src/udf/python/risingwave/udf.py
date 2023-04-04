@@ -126,7 +126,7 @@ def _to_list(x):
 
 def udf(input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType]],
         result_type: Union[str, pa.DataType],
-        name: Optional[str] = None,) -> Union[Callable, UserDefinedFunction]:
+        name: Optional[str] = None,) -> Callable:
     """
     Annotation for creating a user-defined scalar function.
 
@@ -150,7 +150,7 @@ def udf(input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType
 
 def udtf(input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType]],
          result_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType]],
-         name: Optional[str] = None,) -> Union[Callable, UserDefinedFunction]:
+         name: Optional[str] = None,) -> Callable:
     """
     Annotation for creating a user-defined table function.
 
