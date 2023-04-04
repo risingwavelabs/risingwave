@@ -19,7 +19,9 @@ use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME, RW_CATAL
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_sqlparser::ast::{DataType as AstDataType, Distinct, Expr, Select, SelectItem};
+use risingwave_sqlparser::ast::{
+    DataType as AstDataType, Distinct, Expr, Ident, ObjectName, Select, SelectItem,
+};
 
 use super::bind_context::{Clause, ColumnBinding};
 use super::statement::RewriteExprsRecursive;
@@ -382,8 +384,14 @@ impl Binder {
     pub fn bind_get_table_size_by_id_select(&mut self, input: &ExprImpl) -> Result<BoundSelect> {
         let table_name = input.as_literal().unwrap();
         let data = table_name.get_data().as_ref().unwrap().as_utf8();
+        let names: Vec<_> = data
+            .split(".")
+            .map(|tok| Ident::new_unchecked(tok.to_string()))
+            .collect();
+        let table = ObjectName(names);
+        let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, table)?;
 
-        let table = self.bind_table(None, &data, None)?;
+        let table = self.bind_table(schema_name.as_deref(), &table_name, None)?;
         let table_id = table.table_id;
         let input = ExprImpl::Literal(Box::new(Literal::new(
             Some(ScalarImpl::Int32(table_id.table_id as i32)),
