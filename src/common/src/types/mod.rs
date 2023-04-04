@@ -20,7 +20,7 @@ use bytes::{Buf, BufMut, Bytes};
 use num_traits::Float;
 use parse_display::{Display, FromStr};
 use postgres_types::FromSql;
-use risingwave_pb::data::data_type::{PbTypeName, TypeName};
+use risingwave_pb::data::data_type::{PbTypeName};
 use risingwave_pb::data::PbDataType;
 use serde::{Deserialize, Serialize};
 
@@ -405,7 +405,7 @@ impl DataType {
             DataType::Int16 => ScalarImpl::Int16(i16::MIN),
             DataType::Int32 => ScalarImpl::Int32(i32::MIN),
             DataType::Int64 => ScalarImpl::Int64(i64::MIN),
-            DataType::Int256 => ScalarImpl::Int256(Box::new(Int256::default())),
+            DataType::Int256 => todo!(),
             DataType::Serial => ScalarImpl::Serial(Serial::from(i64::MIN)),
             DataType::Float32 => ScalarImpl::Float32(F32::neg_infinity()),
             DataType::Float64 => ScalarImpl::Float64(F64::neg_infinity()),
@@ -831,7 +831,7 @@ impl ScalarImpl {
                 Self::Jsonb(JsonbVal::value_deserialize(bytes).ok_or_else(|| {
                     ErrorCode::InvalidInputSyntax("Invalid value of Jsonb".to_string())
                 })?)
-            },
+            }
             DataType::Int256 => todo!(),
             DataType::Struct(_) | DataType::List { .. } => {
                 return Err(ErrorCode::NotSupported(
@@ -1268,6 +1268,7 @@ mod tests {
                 DataTypeName::Int16 => (ScalarImpl::Int16(233), DataType::Int16),
                 DataTypeName::Int32 => (ScalarImpl::Int32(233333), DataType::Int32),
                 DataTypeName::Int64 => (ScalarImpl::Int64(233333333333), DataType::Int64),
+                DataTypeName::Int256 => todo!(),
                 DataTypeName::Serial => (ScalarImpl::Serial(233333333333.into()), DataType::Serial),
                 DataTypeName::Float32 => (ScalarImpl::Float32(23.33.into()), DataType::Float32),
                 DataTypeName::Float64 => (
