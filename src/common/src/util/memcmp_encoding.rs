@@ -132,6 +132,7 @@ fn calculate_encoded_size_inner(
             DataType::Int16 => size_of::<i16>(),
             DataType::Int32 => size_of::<i32>(),
             DataType::Int64 => size_of::<i64>(),
+            DataType::Int256 => todo!(),
             DataType::Serial => size_of::<Serial>(),
             DataType::Float32 => size_of::<F32>(),
             DataType::Float64 => size_of::<F64>(),

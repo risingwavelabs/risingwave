@@ -42,6 +42,7 @@ impl std::fmt::Debug for Literal {
                     DataType::Int16
                     | DataType::Int32
                     | DataType::Int64
+                    | DataType::Int256
                     | DataType::Serial
                     | DataType::Decimal
                     | DataType::Float32

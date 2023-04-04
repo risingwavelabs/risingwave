@@ -35,6 +35,7 @@ impl DataType {
             | DataType::Jsonb
             | DataType::Struct(_)
             | DataType::List { .. } => -1,
+            _ => todo!()
         }
     }
 
@@ -115,6 +116,7 @@ impl DataType {
             DataType::Int16 => 21,
             DataType::Int32 => 23,
             DataType::Int64 => 20,
+            DataType::Int256 => todo!(),
             DataType::Serial => 20,
             DataType::Float32 => 700,
             DataType::Float64 => 701,
@@ -135,6 +137,7 @@ impl DataType {
                 DataType::Int16 => 1005,
                 DataType::Int32 => 1007,
                 DataType::Int64 => 1016,
+                DataType::Int256 => todo!(),
                 DataType::Serial => 1016,
                 DataType::Float32 => 1021,
                 DataType::Float64 => 1022,

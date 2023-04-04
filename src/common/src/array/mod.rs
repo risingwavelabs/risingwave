@@ -63,6 +63,7 @@ use risingwave_pb::data::{PbArray, PbArrayType};
 pub use serial_array::{Serial, SerialArray, SerialArrayBuilder};
 pub use stream_chunk::{Op, StreamChunk, StreamChunkTestExt};
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
+pub use num256_array::*;
 pub use utf8_array::*;
 pub use vis::{Vis, VisRef};
 

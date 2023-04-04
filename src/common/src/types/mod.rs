@@ -20,7 +20,7 @@ use bytes::{Buf, BufMut, Bytes};
 use num_traits::Float;
 use parse_display::{Display, FromStr};
 use postgres_types::FromSql;
-use risingwave_pb::data::data_type::PbTypeName;
+use risingwave_pb::data::data_type::{PbTypeName, TypeName};
 use risingwave_pb::data::PbDataType;
 use serde::{Deserialize, Serialize};
 
@@ -136,6 +136,9 @@ pub enum DataType {
     #[display("serial")]
     #[from_str(regex = "(?i)^serial$")]
     Serial,
+    #[display("int256")]
+    #[from_str(regex = "(?i)^int256$")]
+    Int256,
 }
 
 impl std::str::FromStr for Box<DataType> {
@@ -153,6 +156,7 @@ impl DataTypeName {
             | DataTypeName::Int16
             | DataTypeName::Int32
             | DataTypeName::Int64
+            | DataTypeName::Int256
             | DataTypeName::Serial
             | DataTypeName::Decimal
             | DataTypeName::Float32
@@ -176,6 +180,7 @@ impl DataTypeName {
             DataTypeName::Int16 => DataType::Int16,
             DataTypeName::Int32 => DataType::Int32,
             DataTypeName::Int64 => DataType::Int64,
+            DataTypeName::Int256 => DataType::Int256,
             DataTypeName::Serial => DataType::Serial,
             DataTypeName::Decimal => DataType::Decimal,
             DataTypeName::Float32 => DataType::Float32,
@@ -238,6 +243,7 @@ impl From<&PbDataType> for DataType {
                 datatype: Box::new((&proto.field_type[0]).into()),
             },
             PbTypeName::TypeUnspecified => unreachable!(),
+            PbTypeName::Int256 => DataType::Int256,
         }
     }
 }
@@ -263,6 +269,7 @@ impl From<DataTypeName> for PbTypeName {
             DataTypeName::Jsonb => PbTypeName::Jsonb,
             DataTypeName::Struct => PbTypeName::Struct,
             DataTypeName::List => PbTypeName::List,
+            DataTypeName::Int256 => PbTypeName::Int256,
         }
     }
 }
@@ -286,6 +293,7 @@ impl DataType {
             DataType::Timestamptz => PrimitiveArrayBuilder::<i64>::new(capacity).into(),
             DataType::Interval => IntervalArrayBuilder::new(capacity).into(),
             DataType::Jsonb => JsonbArrayBuilder::new(capacity).into(),
+            DataType::Int256 => Int256ArrayBuilder::new(capacity).into(),
             DataType::Struct(t) => {
                 StructArrayBuilder::with_meta(capacity, t.to_array_meta()).into()
             }
@@ -305,6 +313,7 @@ impl DataType {
             DataType::Int16 => PbTypeName::Int16,
             DataType::Int32 => PbTypeName::Int32,
             DataType::Int64 => PbTypeName::Int64,
+            DataType::Int256 => PbTypeName::Int256,
             DataType::Serial => PbTypeName::Serial,
             DataType::Float32 => PbTypeName::Float,
             DataType::Float64 => PbTypeName::Double,
@@ -396,6 +405,7 @@ impl DataType {
             DataType::Int16 => ScalarImpl::Int16(i16::MIN),
             DataType::Int32 => ScalarImpl::Int32(i32::MIN),
             DataType::Int64 => ScalarImpl::Int64(i64::MIN),
+            DataType::Int256 => ScalarImpl::Int256(Box::new(Int256::default())),
             DataType::Serial => ScalarImpl::Serial(Serial::from(i64::MIN)),
             DataType::Float32 => ScalarImpl::Float32(F32::neg_infinity()),
             DataType::Float64 => ScalarImpl::Float64(F64::neg_infinity()),
@@ -821,7 +831,8 @@ impl ScalarImpl {
                 Self::Jsonb(JsonbVal::value_deserialize(bytes).ok_or_else(|| {
                     ErrorCode::InvalidInputSyntax("Invalid value of Jsonb".to_string())
                 })?)
-            }
+            },
+            DataType::Int256 => todo!(),
             DataType::Struct(_) | DataType::List { .. } => {
                 return Err(ErrorCode::NotSupported(
                     format!("param type: {}", data_type),
@@ -860,6 +871,7 @@ impl ScalarImpl {
             DataType::Int64 => Self::Int64(i64::from_str(str).map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
             })?),
+            DataType::Int256 => todo!(),
             DataType::Serial => Self::Serial(Serial::from(i64::from_str(str).map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
             })?)),
@@ -1077,6 +1089,7 @@ impl ScalarImpl {
             Ty::Int16 => Self::Int16(i16::deserialize(de)?),
             Ty::Int32 => Self::Int32(i32::deserialize(de)?),
             Ty::Int64 => Self::Int64(i64::deserialize(de)?),
+            Ty::Int256 => todo!(),
             Ty::Serial => Self::Serial(Serial::from(i64::deserialize(de)?)),
             Ty::Float32 => Self::Float32(f32::deserialize(de)?.into()),
             Ty::Float64 => Self::Float64(f64::deserialize(de)?.into()),
@@ -1133,6 +1146,7 @@ macro_rules! for_all_type_pairs {
             { Int16,       Int16 },
             { Int32,       Int32 },
             { Int64,       Int64 },
+            { Int256,      Int256 },
             { Float32,     Float32 },
             { Float64,     Float64 },
             { Varchar,     Utf8 },
