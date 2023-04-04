@@ -158,14 +158,12 @@ impl SplitReader for DatagenSplitReader {
                 spawn_data_generation_stream(
                     self.generator
                         .into_native_stream()
-                        .map_ok(move |chunk_with_states| {
+                        .inspect_ok(move |chunk_with_states| {
                             metrics
                                 .partition_input_count
                                 .with_label_values(&[&actor_id, &source_id, &split_id])
                                 .inc_by(chunk_with_states.chunk.cardinality() as u64);
-                            chunk_with_states
-                        })
-                        .boxed(),
+                        }),
                     BUFFER_SIZE,
                 )
                 .boxed()
