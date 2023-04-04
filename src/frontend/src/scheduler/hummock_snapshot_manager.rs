@@ -248,34 +248,6 @@ impl HummockSnapshotManagerCore {
         }
     }
 
-    /// Retrieve max committed epoch from meta with an rpc. This method provides
-    /// better epoch freshness.
-    async fn get_epoch_for_query_from_rpc(
-        &mut self,
-        batches: &mut Vec<(QueryId, Callback<SchedulerResult<HummockSnapshot>>)>,
-    ) -> HummockSnapshot {
-        let ret = self.meta_client.get_epoch().await;
-        match ret {
-            Ok(snapshot) => {
-                self.notify_epoch_assigned_for_queries(&snapshot, batches);
-                snapshot
-            }
-            Err(e) => {
-                for (id, cb) in batches.drain(..) {
-                    let _ = cb.send(Err(SchedulerError::Internal(anyhow!(
-                        "Failed to get epoch for query: {:?} because of RPC Error: {:?}",
-                        id,
-                        e
-                    ))));
-                }
-                HummockSnapshot {
-                    committed_epoch: INVALID_EPOCH,
-                    current_epoch: INVALID_EPOCH,
-                }
-            }
-        }
-    }
-
     /// Retrieve max committed epoch and max current epoch from locally cached value, which is
     /// maintained by meta's notification service.
     fn get_epoch_for_query_from_push(
