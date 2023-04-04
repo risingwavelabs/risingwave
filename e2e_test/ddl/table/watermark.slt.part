@@ -1,0 +1,6 @@
+# Create a table with watermark.
+statement ok
+create table t1 (v1 int, v2 timestamp with time zone, watermark for v2 as v2 - INTERVAL '10 MINUTES') append only;
+
+statement ok
+drop table t1;
