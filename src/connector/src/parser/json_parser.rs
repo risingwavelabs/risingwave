@@ -23,7 +23,7 @@ use crate::impl_common_parser_logic;
 use crate::parser::common::simd_json_parse_value;
 use crate::parser::util::at_least_one_ok;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContextRef};
+use crate::source::{SourceColumnDesc, SourceContextRef, SourceFormat};
 
 impl_common_parser_logic!(JsonParser);
 
@@ -69,11 +69,15 @@ impl JsonParser {
         writer: &mut SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         writer.insert(|desc| {
-            simd_json_parse_value(&desc.data_type, value.get(desc.name_in_lower_case.as_str()))
-                .map_err(|e| {
-                    tracing::error!("failed to process value ({}): {}", value, e);
-                    e.into()
-                })
+            simd_json_parse_value(
+                &SourceFormat::Json,
+                &desc.data_type,
+                value.get(desc.name_in_lower_case.as_str()),
+            )
+            .map_err(|e| {
+                tracing::error!("failed to process value ({}): {}", value, e);
+                e.into()
+            })
         })
     }
 
@@ -113,6 +117,7 @@ impl JsonParser {
         } else {
             let fill_fn = |desc: &SourceColumnDesc| {
                 simd_json_parse_value(
+                    &SourceFormat::Json,
                     &desc.data_type,
                     value.get(desc.name_in_lower_case.as_str()),
                 )

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::str::FromStr;
+
 use anyhow::{anyhow, Result};
 use num_traits::FromPrimitive;
 use risingwave_common::array::{ListValue, StructValue};
@@ -24,9 +26,14 @@ use risingwave_expr::vector_op::cast::{
 use simd_json::value::StaticNode;
 use simd_json::{BorrowedValue, ValueAccess};
 
+use crate::source::SourceFormat;
 use crate::{ensure_i16, ensure_i32, ensure_i64, ensure_str, simd_json_ensure_float};
 
-fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<ScalarImpl> {
+fn do_parse_simd_json_value(
+    format: &SourceFormat,
+    dtype: &DataType,
+    v: &BorrowedValue<'_>,
+) -> Result<ScalarImpl> {
     let v = match dtype {
         DataType::Boolean => match v {
             BorrowedValue::Static(StaticNode::Bool(b)) => (*b).into(),
@@ -89,9 +96,16 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
             _ => anyhow::bail!("expect timestamptz, but found {v}"),
         },
         DataType::Jsonb => {
-            let v: serde_json::Value = v.clone().try_into()?;
-            #[expect(clippy::disallowed_methods)]
-            ScalarImpl::Jsonb(risingwave_common::array::JsonbVal::from_serde(v))
+            // jsonb will be output as a string in debezium format
+            if *format == SourceFormat::DebeziumJson {
+                ScalarImpl::Jsonb(risingwave_common::array::JsonbVal::from_str(ensure_str!(
+                    v, "jsonb"
+                ))?)
+            } else {
+                let v: serde_json::Value = v.clone().try_into()?;
+                #[expect(clippy::disallowed_methods)]
+                ScalarImpl::Jsonb(risingwave_common::array::JsonbVal::from_serde(v))
+            }
         }
         DataType::Struct(struct_type_info) => {
             let fields = struct_type_info
@@ -99,7 +113,11 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
                 .iter()
                 .zip_eq_fast(struct_type_info.fields.iter())
                 .map(|field| {
-                    simd_json_parse_value(field.1, v.get(field.0.to_ascii_lowercase().as_str()))
+                    simd_json_parse_value(
+                        format,
+                        field.1,
+                        v.get(field.0.to_ascii_lowercase().as_str()),
+                    )
                 })
                 .collect::<Result<Vec<Datum>>>()?;
             ScalarImpl::Struct(StructValue::new(fields))
@@ -110,7 +128,7 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
             if let BorrowedValue::Array(values) = v {
                 let values = values
                     .iter()
-                    .map(|v| simd_json_parse_value(item_type, Some(v)))
+                    .map(|v| simd_json_parse_value(format, item_type, Some(v)))
                     .collect::<Result<Vec<Datum>>>()?;
                 ScalarImpl::List(ListValue::new(values))
             } else {
@@ -129,13 +147,14 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
 #[inline]
 pub(crate) fn simd_json_parse_value(
     // column: &ColumnDesc,
+    format: &SourceFormat,
     dtype: &DataType,
     value: Option<&BorrowedValue<'_>>,
 ) -> Result<Datum> {
     match value {
         None | Some(BorrowedValue::Static(StaticNode::Null)) => Ok(None),
-        Some(v) => Ok(Some(do_parse_simd_json_value(dtype, v).map_err(|e| {
-            anyhow!("failed to parse type '{}' from json: {}", dtype, e)
-        })?)),
+        Some(v) => Ok(Some(do_parse_simd_json_value(format, dtype, v).map_err(
+            |e| anyhow!("failed to parse type '{}' from json: {}", dtype, e),
+        )?)),
     }
 }

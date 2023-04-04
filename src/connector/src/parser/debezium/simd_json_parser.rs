@@ -23,7 +23,7 @@ use super::operators::*;
 use crate::impl_common_parser_logic;
 use crate::parser::common::simd_json_parse_value;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContextRef};
+use crate::source::{SourceColumnDesc, SourceContextRef, SourceFormat};
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
@@ -76,6 +76,7 @@ impl DebeziumJsonParser {
             ))
         })?;
 
+        let format = SourceFormat::DebeziumJson;
         match op {
             DEBEZIUM_UPDATE_OP => {
                 let before = payload.get(BEFORE).and_then(ensure_not_null).ok_or_else(|| {
@@ -95,10 +96,12 @@ impl DebeziumJsonParser {
 
                 writer.update(|column| {
                     let before = simd_json_parse_value(
+                        &format,
                         &column.data_type,
                         before.get(column.name_in_lower_case.as_str()),
                     )?;
                     let after = simd_json_parse_value(
+                        &format,
                         &column.data_type,
                         after.get(column.name_in_lower_case.as_str()),
                     )?;
@@ -118,6 +121,7 @@ impl DebeziumJsonParser {
 
                 writer.insert(|column| {
                     simd_json_parse_value(
+                        &format,
                         &column.data_type,
                         after.get(column.name_in_lower_case.as_str()),
                     )
@@ -136,6 +140,7 @@ impl DebeziumJsonParser {
 
                 writer.delete(|column| {
                     simd_json_parse_value(
+                        &format,
                         &column.data_type,
                         before.get(column.name_in_lower_case.as_str()),
                     )
