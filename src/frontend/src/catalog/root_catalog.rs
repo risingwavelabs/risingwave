@@ -107,8 +107,8 @@ impl Default for Catalog {
             database_by_name: HashMap::new(),
             db_name_by_id: HashMap::new(),
             table_by_id: HashMap::new(),
-            connection_by_id: HashMap::new(),
-            connection_id_by_name: HashMap::new(),
+            connection_by_id: HashMap::new(), // TODO: move to schema_catalog
+            connection_id_by_name: HashMap::new(), // TODO: move to schema_catalog
         }
     }
 }

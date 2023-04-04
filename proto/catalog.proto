@@ -89,6 +89,7 @@ message Sink {
   string definition = 13;
 }
 
+// TODO: add database_id and schema_id
 message Connection {
   message PrivateLinkService {
     string provider = 1;

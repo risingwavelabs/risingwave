@@ -777,7 +777,9 @@ impl fmt::Display for ShowObject {
             ShowObject::Source { schema } => write!(f, "SOURCES{}", fmt_schema(schema)),
             ShowObject::Sink { schema } => write!(f, "SINKS{}", fmt_schema(schema)),
             ShowObject::Columns { table } => write!(f, "COLUMNS FROM {}", table),
-            ShowObject::Connection => f.write_str("CONNECTIONS"),
+            ShowObject::Connection => f.write_str("CONNECTIONS"), /* TODO: format schema after
+                                                                   * adding database_id and
+                                                                   * schema_id */
         }
     }
 }
