@@ -35,16 +35,22 @@ pub trait StateCache {
     fn begin_syncing(&mut self) -> Self::Filler<'_>;
 
     /// Insert an entry into the cache. Should not break cache validity.
-    fn insert(&mut self, key: Self::Key, value: Self::Value);
+    fn insert(&mut self, key: Self::Key, value: Self::Value) -> Option<Self::Value>;
 
     /// Delete an entry from the cache. Should not break cache validity.
-    fn delete(&mut self, key: Self::Key);
+    fn delete(&mut self, key: &Self::Key) -> Option<Self::Value>;
 
     /// Apply a batch of operations to the cache. Should not break cache validity.
     fn apply_batch(&mut self, batch: impl IntoIterator<Item = (Op, Self::Key, Self::Value)>);
 
+    /// Clear the cache.
+    fn clear(&mut self);
+
     /// Iterate over the values in the cache.
     fn values(&self) -> impl Iterator<Item = &Self::Value>;
+
+    /// Get the reference of first key-value pair in the cache.
+    fn first_key_value(&self) -> Option<(&Self::Key, &Self::Value)>;
 }
 
 pub trait StateCacheFiller {
@@ -55,7 +61,7 @@ pub trait StateCacheFiller {
     fn capacity(&self) -> Option<usize>;
 
     /// Append an entry to the cache. The key is expected to be larger than all existing keys.
-    fn append(&mut self, key: Self::Key, value: Self::Value);
+    fn insert_unchecked(&mut self, key: Self::Key, value: Self::Value);
 
     /// Finish syncing the cache with the state table. This should mark the cache as synced.
     fn finish(self);
@@ -96,26 +102,32 @@ impl<K: Ord, V> TopNStateCache<K, V> {
             .unwrap_or(false)
     }
 
-    fn insert_synced(&mut self, key: K, value: V) {
-        if self.row_count_matched()
+    /// Insert an entry with the assumption that the cache is SYNCED.
+    fn insert_synced(&mut self, key: K, value: V) -> Option<V> {
+        let old_v = if self.row_count_matched()
             || self.cache.is_empty()
             || &key <= self.cache.last_key().unwrap()
         {
-            self.cache.insert(key, value);
-        }
+            self.cache.insert(key, value)
+        } else {
+            None
+        };
         // In other cases, we can't insert this key because we're not sure whether there're keys
         // less than it in the table. So we only update table row count.
         self.table_row_count = self.table_row_count.map(|n| n + 1);
+        old_v
     }
 
-    fn delete_synced(&mut self, key: K) {
-        self.cache.remove(key);
+    /// Delete an entry with the assumption that the cache is SYNCED.
+    fn delete_synced(&mut self, key: &K) -> Option<V> {
+        let old_val = self.cache.remove(key);
         self.table_row_count = self.table_row_count.map(|n| n - 1);
         if self.cache.is_empty() && !self.row_count_matched() {
             // The cache becomes empty, but there're still rows in the table, so mark it as not
             // synced.
             self.synced = false;
         }
+        old_val
     }
 }
 
@@ -134,15 +146,19 @@ impl<K: Ord, V> StateCache for TopNStateCache<K, V> {
         self
     }
 
-    fn insert(&mut self, key: Self::Key, value: Self::Value) {
+    fn insert(&mut self, key: Self::Key, value: Self::Value) -> Option<Self::Value> {
         if self.synced {
-            self.insert_synced(key, value);
+            self.insert_synced(key, value)
+        } else {
+            None
         }
     }
 
-    fn delete(&mut self, key: Self::Key) {
+    fn delete(&mut self, key: &Self::Key) -> Option<Self::Value> {
         if self.synced {
-            self.delete_synced(key);
+            self.delete_synced(key)
+        } else {
+            None
         }
     }
 
@@ -154,7 +170,7 @@ impl<K: Ord, V> StateCache for TopNStateCache<K, V> {
                         self.insert_synced(key, value);
                     }
                     Op::Delete | Op::UpdateDelete => {
-                        self.delete_synced(key);
+                        self.delete_synced(&key);
                         if !self.synced {
                             break;
                         }
@@ -164,9 +180,19 @@ impl<K: Ord, V> StateCache for TopNStateCache<K, V> {
         }
     }
 
+    fn clear(&mut self) {
+        self.cache.clear();
+        self.synced = false;
+    }
+
     fn values(&self) -> impl Iterator<Item = &Self::Value> {
         assert!(self.synced);
-        self.cache.iter_values()
+        self.cache.values()
+    }
+
+    fn first_key_value(&self) -> Option<(&Self::Key, &Self::Value)> {
+        assert!(self.synced);
+        self.cache.first_key_value()
     }
 }
 
@@ -178,8 +204,7 @@ impl<K: Ord, V> StateCacheFiller for &mut TopNStateCache<K, V> {
         Some(self.cache.capacity())
     }
 
-    fn append(&mut self, key: Self::Key, value: Self::Value) {
-        debug_assert!(&key >= self.cache.last_key().unwrap_or(&key));
+    fn insert_unchecked(&mut self, key: Self::Key, value: Self::Value) {
         self.cache.insert(key, value);
     }
 
@@ -225,15 +250,19 @@ impl<K: Ord, V> StateCache for OrderedStateCache<K, V> {
         self
     }
 
-    fn insert(&mut self, key: Self::Key, value: Self::Value) {
+    fn insert(&mut self, key: Self::Key, value: Self::Value) -> Option<Self::Value> {
         if self.synced {
-            self.cache.insert(key, value);
+            self.cache.insert(key, value)
+        } else {
+            None
         }
     }
 
-    fn delete(&mut self, key: Self::Key) {
+    fn delete(&mut self, key: &Self::Key) -> Option<Self::Value> {
         if self.synced {
-            self.cache.remove(&key);
+            self.cache.remove(key)
+        } else {
+            None
         }
     }
 
@@ -252,9 +281,19 @@ impl<K: Ord, V> StateCache for OrderedStateCache<K, V> {
         }
     }
 
+    fn clear(&mut self) {
+        self.cache.clear();
+        self.synced = false;
+    }
+
     fn values(&self) -> impl Iterator<Item = &Self::Value> {
         assert!(self.synced);
         self.cache.values()
+    }
+
+    fn first_key_value(&self) -> Option<(&Self::Key, &Self::Value)> {
+        assert!(self.synced);
+        self.cache.first_key_value()
     }
 }
 
@@ -266,8 +305,7 @@ impl<K: Ord, V> StateCacheFiller for &mut OrderedStateCache<K, V> {
         None
     }
 
-    fn append(&mut self, key: Self::Key, value: Self::Value) {
-        debug_assert!(&key >= self.cache.last_key_value().map(|(k, _)| k).unwrap_or(&key));
+    fn insert_unchecked(&mut self, key: Self::Key, value: Self::Value) {
         self.cache.insert(key, value);
     }
 

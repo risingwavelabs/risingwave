@@ -46,12 +46,12 @@ mod tests {
         let agg = ArrayAgg;
 
         let mut cache = TopNCache::new(10);
-        assert_eq!(agg.aggregate(cache.iter_values()), None);
+        assert_eq!(agg.aggregate(cache.values()), None);
 
         cache.insert(vec![1, 2, 3], Some("hello".to_string().into()));
         cache.insert(vec![1, 2, 4], Some("world".to_string().into()));
         assert_eq!(
-            agg.aggregate(cache.iter_values()),
+            agg.aggregate(cache.values()),
             Some(
                 ListValue::new(vec![
                     Some("hello".to_string().into()),
@@ -63,7 +63,7 @@ mod tests {
 
         cache.insert(vec![0, 1, 2], Some("emmm".to_string().into()));
         assert_eq!(
-            agg.aggregate(cache.iter_values()),
+            agg.aggregate(cache.values()),
             Some(
                 ListValue::new(vec![
                     Some("emmm".to_string().into()),
@@ -76,7 +76,7 @@ mod tests {
 
         cache.insert(vec![6, 6, 6], None);
         assert_eq!(
-            agg.aggregate(cache.iter_values()),
+            agg.aggregate(cache.values()),
             Some(
                 ListValue::new(vec![
                     Some("emmm".to_string().into()),

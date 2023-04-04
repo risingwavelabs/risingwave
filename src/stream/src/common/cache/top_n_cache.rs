@@ -54,26 +54,42 @@ impl<K: Ord, V> TopNCache<K, V> {
     }
 
     /// Insert an entry into the cache.
-    pub fn insert(&mut self, key: K, value: V) {
-        self.entries.insert(key, value);
+    pub fn insert(&mut self, key: K, value: V) -> Option<V> {
+        let old_val = self.entries.insert(key, value);
         // evict if capacity is reached
         while self.entries.len() > self.capacity {
             self.entries.pop_last();
         }
+        old_val
     }
 
     /// Remove an entry from the cache.
-    pub fn remove(&mut self, key: K) {
-        self.entries.remove(&key);
+    pub fn remove(&mut self, key: &K) -> Option<V> {
+        self.entries.remove(key)
     }
 
-    /// Get the last (largest) key in the cache
+    /// Get the first (smallest) key-value pair in the cache.
+    pub fn first_key_value(&self) -> Option<(&K, &V)> {
+        self.entries.first_key_value()
+    }
+
+    /// Get the first (smallest) key in the cache.
+    pub fn first_key(&self) -> Option<&K> {
+        self.first_key_value().map(|(k, _)| k)
+    }
+
+    /// Get the last (largest) key-value pair in the cache.
+    pub fn last_key_value(&self) -> Option<(&K, &V)> {
+        self.entries.last_key_value()
+    }
+
+    /// Get the last (largest) key in the cache.
     pub fn last_key(&self) -> Option<&K> {
-        self.entries.last_key_value().map(|(k, _)| k)
+        self.last_key_value().map(|(k, _)| k)
     }
 
     /// Iterate over the values in the cache.
-    pub fn iter_values(&self) -> impl Iterator<Item = &V> {
+    pub fn values(&self) -> impl Iterator<Item = &V> {
         self.entries.values()
     }
 }
@@ -90,44 +106,60 @@ mod tests {
         assert_eq!(cache.capacity(), 3);
         assert_eq!(cache.len(), 0);
         assert!(cache.is_empty());
+        assert!(cache.first_key_value().is_none());
+        assert!(cache.first_key().is_none());
+        assert!(cache.last_key_value().is_none());
         assert!(cache.last_key().is_none());
-        assert!(cache.iter_values().collect_vec().is_empty());
+        assert!(cache.values().collect_vec().is_empty());
 
-        cache.insert(5, "hello".to_string());
+        let old_val = cache.insert(5, "hello".to_string());
+        assert!(old_val.is_none());
         assert_eq!(cache.len(), 1);
         assert!(!cache.is_empty());
-        assert_eq!(cache.iter_values().collect_vec(), vec!["hello"]);
+        assert_eq!(cache.values().collect_vec(), vec!["hello"]);
 
         cache.insert(3, "world".to_string());
         cache.insert(1, "risingwave!".to_string());
         assert_eq!(cache.len(), 3);
+        assert_eq!(
+            cache.first_key_value(),
+            Some((&1, &"risingwave!".to_string()))
+        );
+        assert_eq!(cache.first_key(), Some(&1));
+        assert_eq!(cache.last_key_value(), Some((&5, &"hello".to_string())));
         assert_eq!(cache.last_key(), Some(&5));
         assert_eq!(
-            cache.iter_values().collect_vec(),
+            cache.values().collect_vec(),
             vec!["risingwave!", "world", "hello"]
         );
 
         cache.insert(0, "foo".to_string());
         assert_eq!(cache.capacity(), 3);
         assert_eq!(cache.len(), 3);
+        assert_eq!(cache.first_key(), Some(&0));
         assert_eq!(cache.last_key(), Some(&3));
         assert_eq!(
-            cache.iter_values().collect_vec(),
+            cache.values().collect_vec(),
             vec!["foo", "risingwave!", "world"]
         );
 
-        cache.remove(0);
+        let old_val = cache.remove(&0);
+        assert_eq!(old_val, Some("foo".to_string()));
         assert_eq!(cache.len(), 2);
+        assert_eq!(cache.first_key(), Some(&1));
         assert_eq!(cache.last_key(), Some(&3));
-        cache.remove(3);
+        cache.remove(&3);
         assert_eq!(cache.len(), 1);
+        assert_eq!(cache.first_key(), Some(&1));
         assert_eq!(cache.last_key(), Some(&1));
-        cache.remove(100); // can remove non-existing key
+        let old_val = cache.remove(&100); // can remove non-existing key
+        assert!(old_val.is_none());
         assert_eq!(cache.len(), 1);
 
         cache.clear();
         assert_eq!(cache.len(), 0);
         assert_eq!(cache.capacity(), 3);
+        assert_eq!(cache.first_key(), None);
         assert_eq!(cache.last_key(), None);
     }
 }

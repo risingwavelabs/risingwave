@@ -137,7 +137,7 @@ where
 
     fn append(&mut self, key: CacheKey, value: SmallVec<[DatumRef<'_>; 2]>) {
         self.cache_filler
-            .append(key, self.aggregator.convert_cache_value(value));
+            .insert_unchecked(key, self.aggregator.convert_cache_value(value));
     }
 
     fn finish(self: Box<Self>) {

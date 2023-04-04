@@ -45,18 +45,18 @@ mod tests {
         let agg = ExtremeAgg;
 
         let mut cache = TopNCache::new(10);
-        assert_eq!(agg.aggregate(cache.iter_values()), None);
+        assert_eq!(agg.aggregate(cache.values()), None);
 
         cache.insert(vec![1, 2, 3], Some("hello".to_string().into()));
         cache.insert(vec![1, 3, 4], Some("world".to_string().into()));
         assert_eq!(
-            agg.aggregate(cache.iter_values()),
+            agg.aggregate(cache.values()),
             Some("hello".to_string().into())
         );
 
         cache.insert(vec![0, 1, 2], Some("emmm".to_string().into()));
         assert_eq!(
-            agg.aggregate(cache.iter_values()),
+            agg.aggregate(cache.values()),
             Some("emmm".to_string().into())
         );
     }
