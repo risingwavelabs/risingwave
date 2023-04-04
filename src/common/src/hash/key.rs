@@ -29,7 +29,7 @@ use std::io::{Cursor, Read};
 
 use chrono::{Datelike, Timelike};
 use fixedbitset::FixedBitSet;
-use smallbitset::{Set64, Set8};
+use smallbitset::Set64;
 
 use crate::array::serial_array::Serial;
 use crate::array::{
@@ -79,7 +79,7 @@ impl NullBitmap {
         self.inner.contains(x)
     }
 
-    pub fn is_subset(&self, other: &FixedBitSet) -> bool {
+    pub fn is_subset(&self, _other: &FixedBitSet) -> bool {
         todo!()
     }
 }
@@ -637,7 +637,7 @@ impl HashKeySerializer for SerializedKeySerializer {
     }
 
     fn append<'a, D: HashKeySerDe<'a>>(&mut self, data: Option<D>) {
-        let len_bitmap = self.null_bitmap.len();
+        let _len_bitmap = self.null_bitmap.len();
         match data {
             Some(v) => {
                 serialize_datum_into(&Some(v.to_owned_scalar().into()), &mut self.buffer);
