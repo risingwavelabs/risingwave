@@ -17,13 +17,16 @@ use std::ops::{Deref, DerefMut};
 
 use function_name::named;
 use itertools::Itertools;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
+    object_size_map, summarize_group_deltas,
+};
 use risingwave_hummock_sdk::version_checkpoint_dir;
 use risingwave_pb::hummock::hummock_version_checkpoint::StaleObjects;
 use risingwave_pb::hummock::HummockVersionCheckpoint;
 
 use crate::hummock::error::Result;
 use crate::hummock::manager::{read_lock, write_lock};
-use crate::hummock::metrics_utils::trigger_stale_ssts_stat;
+use crate::hummock::metrics_utils::trigger_gc_stat;
 use crate::hummock::HummockManager;
 use crate::storage::{MetaStore, MetaStoreError, DEFAULT_COLUMN_FAMILY};
 
@@ -88,18 +91,34 @@ where
             return Ok(0);
         }
         let mut stale_objects = old_checkpoint.stale_objects.clone();
+        // `object_sizes` is used to calculate size of stale objects.
+        let mut object_sizes = object_size_map(old_checkpoint.version.as_ref().unwrap());
         for (_, version_delta) in versioning
             .hummock_version_deltas
             .range((Excluded(old_checkpoint_id), Included(new_checkpoint_id)))
         {
+            for group_deltas in version_delta.group_deltas.values() {
+                let summary = summarize_group_deltas(group_deltas);
+                object_sizes.extend(
+                    summary
+                        .insert_table_infos
+                        .iter()
+                        .map(|t| (t.object_id, t.file_size)),
+                );
+            }
             let removed_object_ids = version_delta.gc_object_ids.clone();
             if removed_object_ids.is_empty() {
                 continue;
             }
+            let total_file_size = removed_object_ids
+                .iter()
+                .map(|t| object_sizes.get(t).copied().unwrap())
+                .sum::<u64>();
             stale_objects.insert(
                 version_delta.id,
                 StaleObjects {
                     id: removed_object_ids,
+                    total_file_size,
                 },
             );
         }
@@ -120,13 +139,14 @@ where
         );
         versioning.checkpoint = new_checkpoint;
         versioning.mark_objects_for_deletion();
-        let remain = versioning.objects_to_delete.len();
+
+        let min_pinned_version_id = versioning.min_pinned_version_id();
+        trigger_gc_stat(&self.metrics, &versioning.checkpoint, min_pinned_version_id);
         drop(versioning_guard);
         timer.observe_duration();
         self.metrics
             .checkpoint_version_id
             .set(new_checkpoint_id as i64);
-        trigger_stale_ssts_stat(&self.metrics, remain);
 
         Ok(new_checkpoint_id - old_checkpoint_id)
     }

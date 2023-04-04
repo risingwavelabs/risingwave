@@ -2313,11 +2313,27 @@ def section_hummock_manager(outer_panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "Stale SST Total Number",
-                    "total number of SSTs that is no longer referenced by versions but is not yet deleted from storage",
+                    "Object Total Number",
+                    "total number of objects",
                     [
-                        panels.target(f"{metric('storage_stale_ssts_count')}",
-                                      "stale SST total number"),
+                        panels.target(f"{metric('storage_stale_object_count')}",
+                                      "not referenced by versions"),
+                        panels.target(f"{metric('storage_old_version_object_count')}",
+                                      "referenced by non-current versions"),
+                        panels.target(f"{metric('storage_current_version_object_count')}",
+                                      "referenced by current version"),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Object Total Size",
+                    "total size of objects",
+                    [
+                        panels.target(f"{metric('storage_stale_object_size')}",
+                                      "not referenced by versions"),
+                        panels.target(f"{metric('storage_old_version_object_size')}",
+                                      "referenced by non-current versions"),
+                        panels.target(f"{metric('storage_current_version_object_size')}",
+                                      "referenced by current version"),
                     ],
                 ),
                 panels.timeseries_count(
