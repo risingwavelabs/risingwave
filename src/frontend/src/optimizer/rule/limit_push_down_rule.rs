@@ -17,70 +17,19 @@
 // COPYING file in the root directory) and Apache 2.0 License
 // (found in the LICENSE.Apache file in the root directory).
 
-use paste::paste;
-
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalLimit, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{LogicalLimit, LogicalProject, PlanTreeNodeUnary};
 use crate::optimizer::PlanRef;
-
-const _LEAF_OR_BREAKERS: &[&str] = &[
-    "as_logical_scan",
-    "as_logical_filter",
-    "as_logical_top_n",
-    "as_logical_join",
-    "as_logical_multi_join",
-    "as_logical_values",
-];
-
-macro_rules! cannot_push_down {
-    ($plan:ident, $type:literal) => {
-        paste! {match $plan.[<as_logical_ $type>]() {
-                Some(_) => true,
-                None => false,
-            }
-        }
-    };
-}
-
-macro_rules! try_match {
-    ($plan:ident, $macro:ident) => {
-        if ($macro!($plan, "scan")) {
-            true
-        } else if ($macro!($plan, "filter")) {
-            true
-        } else if ($macro!($plan, "top_n")) {
-            true
-        } else if ($macro!($plan, "join")) {
-            true
-        } else if ($macro!($plan, "multi_join")) {
-            true
-        } else if ($macro!($plan, "values")) {
-            true
-        } else if ($macro!($plan, "now")) {
-            true
-        } else if ($macro!($plan, "source")) {
-            true
-        } else {
-            false
-        }
-    };
-}
 
 pub struct LimitPushDownRule {}
 
 impl Rule for LimitPushDownRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let limit: &LogicalLimit = plan.as_logical_limit()?;
-        let input = limit.input();
-        if try_match!(input, cannot_push_down) {
-            return None;
-        }
-        if input.inputs().len() > 1 {
-            return None;
-        }
-        let logical_limit = limit.clone_with_input(input.inputs()[0].clone());
-        let new_input = input.clone_with_inputs(&[logical_limit.into()]);
-        Some(limit.clone_with_input(new_input).into())
+        let project: LogicalProject = limit.input().as_logical_project()?.to_owned();
+        let input = project.input();
+        let logical_limit = limit.clone_with_input(input);
+        Some(project.clone_with_input(logical_limit.into()).into())
     }
 }
 
