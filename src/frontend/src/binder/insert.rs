@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Schema, TableVersionId};
+use risingwave_common::catalog::{ColumnCatalog, Schema, TableVersionId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -132,166 +132,104 @@ impl Binder {
 
         let (returning_list, fields) = self.bind_returning_list(returning_items)?;
         let is_returning = !returning_list.is_empty();
-        let mut col_indices_to_insert: Vec<usize> = vec![];
+
+        let col_indices_to_insert = get_col_indices_to_insert(
+            &cols_to_insert_in_table,
+            &cols_to_insert_by_user,
+            &table_name,
+        )?;
+        let expected_types: Vec<DataType> = col_indices_to_insert
+            .iter()
+            .map(|idx| cols_to_insert_in_table[*idx].data_type().clone())
+            .collect();
+
+        // When the column types of `source` query do not match `expected_types`,
+        // casting is needed.
+        //
+        // In PG, when the `source` is a `VALUES` without order / limit / offset,
+        // special treatment is given and it is NOT equivalent to
+        // assignment cast over potential implicit cast inside. For
+        // example, the following is valid:
+        //
+        // ```
+        //   create table t (v1 time);
+        //   insert into t values (timestamp '2020-01-01 01:02:03'), (time '03:04:05');
+        // ```
+        //
+        // But the followings are not:
+        //
+        // ```
+        //   values (timestamp '2020-01-01 01:02:03'), (time '03:04:05');
+        //   insert into t values (timestamp '2020-01-01 01:02:03'), (time '03:04:05')
+        // limit 1;
+        // ```
+        //
+        // Because `timestamp` can cast to `time` in assignment context, but no casting
+        // between them is allowed implicitly.
+        //
+        // In this case, assignment cast should be used directly in `VALUES`,
+        // suppressing its internal implicit cast.
+        // In other cases, the `source` query is handled on its own and assignment cast
+        // is done afterwards.
         let bound_query;
         let cast_exprs;
 
-        if !cols_to_insert_by_user.is_empty() {
-            let mut col_name_to_idx: HashMap<String, usize> = HashMap::new();
-            for (col_idx, col) in cols_to_insert_in_table.iter().enumerate() {
-                col_name_to_idx.insert(col.name().to_string(), col_idx);
+        match source.as_simple_values() {
+            None => {
+                bound_query = self.bind_query(source)?;
+                let actual_types = bound_query.data_types();
+                cast_exprs = match expected_types == actual_types {
+                    true => vec![],
+                    false => Self::cast_on_insert(
+                        &expected_types,
+                        actual_types
+                            .into_iter()
+                            .enumerate()
+                            .map(|(i, t)| InputRef::new(i, t).into())
+                            .collect(),
+                    )?,
+                };
             }
-
-            for col_name in &cols_to_insert_by_user {
-                let col_name = &col_name.real_value();
-                match col_name_to_idx.get_mut(col_name) {
-                    Some(value_ref) => {
-                        if *value_ref == usize::MAX {
-                            return Err(RwError::from(ErrorCode::BindError(
-                                "Column specified more than once".to_string(),
-                            )));
+            Some(values) => {
+                assert!(!values.0.is_empty());
+                let num_value_cols = values.0[0].len();
+                let has_user_specified_columns = !cols_to_insert_by_user.is_empty();
+                let num_target_cols = if has_user_specified_columns {
+                    cols_to_insert_by_user.len()
+                } else {
+                    cols_to_insert_in_table.len()
+                };
+                let err_msg = match num_target_cols.cmp(&num_value_cols) {
+                    std::cmp::Ordering::Equal => None,
+                    std::cmp::Ordering::Greater => {
+                        if has_user_specified_columns {
+                            // e.g. insert into t (v1, v2) values (7)
+                            Some("INSERT has more target columns than expressions")
+                        } else {
+                            // e.g. create table t (a int, b real)
+                            //      insert into t values (7)
+                            // this kind of usage is fine, null values will be provided
+                            // implicitly.
+                            None
                         }
-                        col_indices_to_insert.push(*value_ref);
-                        *value_ref = usize::MAX; // mark this column name, for duplicate detection
                     }
-                    None => {
-                        // Invalid column name found
-                        return Err(RwError::from(ErrorCode::BindError(format!(
-                            "Column {} not found in table {}",
-                            col_name, table_name
-                        ))));
-                    }
-                }
-            }
-
-            // columns that are in the target table but not in the provided target columns
-            if col_indices_to_insert.len() != cols_to_insert_in_table.len() {
-                for col in &cols_to_insert_in_table {
-                    if let Some(col_to_insert_idx) = col_name_to_idx.get(col.name()) {
-                        if *col_to_insert_idx != usize::MAX {
-                            col_indices_to_insert.push(*col_to_insert_idx);
-                        }
-                    } else {
-                        unreachable!();
-                    }
-                }
-            }
-
-            let expected_types: Vec<DataType> = col_indices_to_insert
-                .iter()
-                .map(|idx| cols_to_insert_in_table[*idx].data_type().clone())
-                .collect();
-
-            // When the column types of `source` query do not match `expected_types`, casting is
-            // needed.
-            //
-            // In PG, when the `source` is a `VALUES` without order / limit / offset, special
-            // treatment is given and it is NOT equivalent to assignment cast over
-            // potential implicit cast inside. For example, the following is valid:
-            // ```
-            //   create table t (v1 time);
-            //   insert into t values (timestamp '2020-01-01 01:02:03'), (time '03:04:05');
-            // ```
-            // But the followings are not:
-            // ```
-            //   values (timestamp '2020-01-01 01:02:03'), (time '03:04:05');
-            //   insert into t values (timestamp '2020-01-01 01:02:03'), (time '03:04:05') limit 1;
-            // ```
-            // Because `timestamp` can cast to `time` in assignment context, but no casting between
-            // them is allowed implicitly.
-            //
-            // In this case, assignment cast should be used directly in `VALUES`, suppressing its
-            // internal implicit cast.
-            // In other cases, the `source` query is handled on its own and assignment cast is done
-            // afterwards.
-            (bound_query, cast_exprs) = match source.as_simple_values() {
-                Some(values) => {
-                    assert!(!values.0.is_empty());
-                    let err_msg = match cols_to_insert_by_user.len().cmp(&values.0[0].len()) {
-                        std::cmp::Ordering::Equal => None,
-                        // e.g. create table t (a int, b real)
-                        //      insert into t (v1, v2) values (7)
-                        std::cmp::Ordering::Greater => {
-                            Some("INSERT has more target columns than values")
-                        }
+                    std::cmp::Ordering::Less => {
                         // e.g. create table t (a int, b real)
                         //      insert into t (v1) values (7, 13)
-                        std::cmp::Ordering::Less => {
-                            Some("INSERT has less target columns than values")
-                        }
-                    };
-
-                    if let Some(msg) = err_msg {
-                        return Err(RwError::from(ErrorCode::BindError(msg.to_string())));
+                        // or   insert into t values (7, 13, 17)
+                        Some("INSERT has more expressions than target columns")
                     }
+                };
+                if let Some(msg) = err_msg {
+                    return Err(RwError::from(ErrorCode::BindError(msg.to_string())));
+                }
 
-                    let values = self.bind_values(values.clone(), Some(expected_types))?;
-                    (BoundQuery::with_values(values), vec![])
-                }
-                None => {
-                    let bound = self.bind_query(source)?;
-                    let actual_types = bound.data_types();
-                    let cast_exprs = match expected_types == actual_types {
-                        true => vec![],
-                        false => Self::cast_on_insert(
-                            &expected_types,
-                            actual_types
-                                .into_iter()
-                                .enumerate()
-                                .map(|(i, t)| InputRef::new(i, t).into())
-                                .collect(),
-                        )?,
-                    };
-                    (bound, cast_exprs)
-                }
-            };
-        } else {
-            let expected_types: Vec<DataType> = cols_to_insert_in_table
-                .iter()
-                .map(|c| c.data_type().clone())
-                .collect();
-            col_indices_to_insert = (0..cols_to_insert_in_table.len()).collect();
-            (bound_query, cast_exprs) = match source.as_simple_values() {
-                Some(values) => {
-                    assert!(!values.0.is_empty());
-                    let err_msg = match cols_to_insert_in_table.len().cmp(&values.0[0].len()) {
-                        std::cmp::Ordering::Equal => None,
-                        // e.g. create table t (a int, b real)
-                        //      insert into t values (7)
-                        // this kind of usage is fine, null values will be provided implicitly.
-                        std::cmp::Ordering::Greater => None,
-                        // e.g. create table t (a int, b real)
-                        //      insert into t values (7, 13, 17)
-                        std::cmp::Ordering::Less => {
-                            Some("INSERT has more expressions than target columns")
-                        }
-                    };
-
-                    if let Some(msg) = err_msg {
-                        return Err(RwError::from(ErrorCode::BindError(msg.to_string())));
-                    }
-
-                    let values = self.bind_values(values.clone(), Some(expected_types))?;
-                    (BoundQuery::with_values(values), vec![])
-                }
-                None => {
-                    let bound = self.bind_query(source)?;
-                    let actual_types = bound.data_types();
-                    let cast_exprs = match expected_types == actual_types {
-                        true => vec![],
-                        false => Self::cast_on_insert(
-                            &expected_types,
-                            actual_types
-                                .into_iter()
-                                .enumerate()
-                                .map(|(i, t)| InputRef::new(i, t).into())
-                                .collect(),
-                        )?,
-                    };
-                    (bound, cast_exprs)
-                }
-            };
+                let values = self.bind_values(values.clone(), Some(expected_types))?;
+                bound_query = BoundQuery::with_values(values);
+                cast_exprs = vec![];
+            }
         }
+
         let insert = BoundInsert {
             table_id,
             table_version_id,
@@ -330,4 +268,64 @@ impl Binder {
         };
         Err(ErrorCode::BindError(msg.into()).into())
     }
+}
+
+/// Returned indices have the same length as `cols_to_insert_in_table`.
+/// The first elements have the same order as `cols_to_insert_by_user`.
+/// The rest are what's not specified by the user.
+///
+/// Also checks there are no duplicate nor unknown columns provided by the user.
+fn get_col_indices_to_insert(
+    cols_to_insert_in_table: &[ColumnCatalog],
+    cols_to_insert_by_user: &[Ident],
+    table_name: &str,
+) -> Result<Vec<usize>> {
+    if cols_to_insert_by_user.is_empty() {
+        return Ok((0..cols_to_insert_in_table.len()).collect());
+    }
+
+    let mut col_indices_to_insert: Vec<usize> = Vec::new();
+
+    let mut col_name_to_idx: HashMap<String, usize> = HashMap::new();
+    for (col_idx, col) in cols_to_insert_in_table.iter().enumerate() {
+        col_name_to_idx.insert(col.name().to_string(), col_idx);
+    }
+
+    for col_name in cols_to_insert_by_user {
+        let col_name = &col_name.real_value();
+        match col_name_to_idx.get_mut(col_name) {
+            Some(value_ref) => {
+                if *value_ref == usize::MAX {
+                    return Err(RwError::from(ErrorCode::BindError(
+                        "Column specified more than once".to_string(),
+                    )));
+                }
+                col_indices_to_insert.push(*value_ref);
+                *value_ref = usize::MAX; // mark this column name, for duplicate
+                                         // detection
+            }
+            None => {
+                // Invalid column name found
+                return Err(RwError::from(ErrorCode::BindError(format!(
+                    "Column {} not found in table {}",
+                    col_name, table_name
+                ))));
+            }
+        }
+    }
+
+    // columns that are in the target table but not in the provided target columns
+    if col_indices_to_insert.len() != cols_to_insert_in_table.len() {
+        for col in cols_to_insert_in_table {
+            if let Some(col_to_insert_idx) = col_name_to_idx.get(col.name()) {
+                if *col_to_insert_idx != usize::MAX {
+                    col_indices_to_insert.push(*col_to_insert_idx);
+                }
+            } else {
+                unreachable!();
+            }
+        }
+    }
+
+    Ok(col_indices_to_insert)
 }
