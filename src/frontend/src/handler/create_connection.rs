@@ -24,6 +24,7 @@ use serde_json;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::CatalogError;
 use crate::handler::HandlerArgs;
 
 pub(crate) const CONNECTION_TYPE_PROP: &str = "type";
@@ -88,8 +89,23 @@ pub async fn handle_create_connection(
     stmt: CreateConnectionStatement,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-    session.check_relation_name_duplicated(stmt.connection_name.clone())?;
     let connection_name = Binder::resolve_connection_name(stmt.connection_name)?;
+
+    {
+        let catalog_reader = session.env().catalog_reader();
+        let reader = catalog_reader.read_guard();
+        if reader.get_connection_by_name(&connection_name).is_ok() {
+            return if stmt.if_not_exists {
+                Ok(PgResponse::empty_result_with_notice(
+                    StatementType::CREATE_CONNECTION,
+                    format!("connection \"{}\" exists, skipping", connection_name),
+                ))
+            } else {
+                Err(CatalogError::Duplicated("connection", connection_name).into())
+            };
+        }
+    }
+
     let with_properties = handler_args
         .with_options
         .inner()
