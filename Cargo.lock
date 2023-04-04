@@ -3573,10 +3573,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "mach"
-version = "0.3.2"
+name = "mach2"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b823e83b2affd8f40a9ee8c29dbc56404c1e34cd2710921f2801e2cf29527afa"
+checksum = "6d0d1830bcd151a6fc4aea1369af235b36c1528fe976b8ff678683c9995eade8"
 dependencies = [
  "libc",
 ]
@@ -3900,9 +3900,9 @@ dependencies = [
 
 [[package]]
 name = "moka"
-version = "0.9.7"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19b9268097a2cf211ac9955b1cc95e80fa84fff5c2d13ba292916445dc8a311f"
+checksum = "e0d3b8e76a2e4b17de765db9432e377a171c42fbe0512b8bc860ff1bfe2e273b"
 dependencies = [
  "async-io",
  "async-lock",
@@ -5294,15 +5294,15 @@ dependencies = [
 
 [[package]]
 name = "quanta"
-version = "0.10.1"
-source = "git+https://github.com/madsim-rs/quanta.git?rev=a819877#a819877978ef542a6e0c626e0220030fd7c3e717"
+version = "0.11.0"
+source = "git+https://github.com/madsim-rs/quanta.git?rev=948bdc3#948bdc3d4cd3fcfe3d52d03dd83deee96d97d770"
 dependencies = [
  "crossbeam-utils",
  "libc",
- "mach",
+ "mach2",
  "once_cell",
  "raw-cpuid",
- "wasi 0.10.0+wasi-snapshot-preview1",
+ "wasi 0.11.0+wasi-snapshot-preview1",
  "web-sys",
  "winapi",
 ]
@@ -5873,7 +5873,7 @@ dependencies = [
  "itertools",
  "itoa",
  "libc",
- "mach",
+ "mach2",
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
@@ -6662,7 +6662,7 @@ dependencies = [
  "itertools",
  "libc",
  "lz4",
- "mach",
+ "mach2",
  "madsim-tokio",
  "memcomparable",
  "minitrace",
