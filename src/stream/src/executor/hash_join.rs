@@ -55,7 +55,7 @@ use crate::task::AtomicU64Ref;
 pub type JoinTypePrimitive = u8;
 
 /// Evict the cache every n rows.
-const EVICT_EVERY_N_ROWS: u32 = 1024;
+const EVICT_EVERY_N_ROWS: u32 = 16;
 
 #[allow(non_snake_case, non_upper_case_globals)]
 pub mod JoinType {

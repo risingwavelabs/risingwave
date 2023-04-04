@@ -77,7 +77,7 @@ impl GlobalMemoryManager {
         stream_manager: Arc<LocalStreamManager>,
     ) {
         let mut tick_interval =
-            tokio::time::interval(Duration::from_millis(self.barrier_interval_ms as u64));
+            tokio::time::interval(Duration::from_millis((self.barrier_interval_ms / 10) as u64));
         let mut memory_control_stats = MemoryControlStats {
             batch_memory_usage: 0,
             streaming_memory_usage: 0,
