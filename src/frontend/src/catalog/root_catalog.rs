@@ -198,9 +198,9 @@ impl Catalog {
     pub fn drop_database(&mut self, db_id: DatabaseId) {
         let name = self.db_name_by_id.remove(&db_id).unwrap();
         let database = self.database_by_name.remove(&name).unwrap();
-        for table in database.iter_all_table_ids() {
+        database.iter_all_table_ids().for_each(|table| {
             self.table_by_id.remove(&table);
-        }
+        });
     }
 
     pub fn drop_schema(&mut self, db_id: DatabaseId, schema_id: SchemaId) {
