@@ -57,7 +57,7 @@ pub struct SchemaCatalog {
 }
 
 impl SchemaCatalog {
-    pub fn create_table(&mut self, prost: &PbTable) {
+    pub fn create_table(&mut self, prost: &PbTable) -> Arc<TableCatalog> {
         let name = prost.name.clone();
         let id = prost.id.into();
         let table: TableCatalog = prost.into();
@@ -66,7 +66,8 @@ impl SchemaCatalog {
         self.table_by_name
             .try_insert(name, table_ref.clone())
             .unwrap();
-        self.table_by_id.try_insert(id, table_ref).unwrap();
+        self.table_by_id.try_insert(id, table_ref.clone()).unwrap();
+        table_ref
     }
 
     pub fn create_sys_table(&mut self, sys_table: SystemCatalog) {
@@ -75,7 +76,7 @@ impl SchemaCatalog {
             .unwrap();
     }
 
-    pub fn update_table(&mut self, prost: &PbTable) {
+    pub fn update_table(&mut self, prost: &PbTable) -> Arc<TableCatalog> {
         let name = prost.name.clone();
         let id = prost.id.into();
         let table: TableCatalog = prost.into();
@@ -87,7 +88,8 @@ impl SchemaCatalog {
             self.table_by_name.remove(old_table.name());
         }
         self.table_by_name.insert(name, table_ref.clone());
-        self.table_by_id.insert(id, table_ref);
+        self.table_by_id.insert(id, table_ref.clone());
+        table_ref
     }
 
     pub fn update_index(&mut self, prost: &PbIndex) {
@@ -299,7 +301,7 @@ impl SchemaCatalog {
     }
 
     pub fn iter_all(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
-        self.table_by_name.iter().map(|(_, v)| v)
+        self.table_by_name.values()
     }
 
     pub fn iter_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {

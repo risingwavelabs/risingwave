@@ -93,7 +93,7 @@ pub struct Catalog {
     database_by_name: HashMap<String, DatabaseCatalog>,
     db_name_by_id: HashMap<DatabaseId, String>,
     /// all table catalogs in the cluster identified by universal unique table id.
-    table_by_id: HashMap<TableId, TableCatalog>,
+    table_by_id: HashMap<TableId, Arc<TableCatalog>>,
 }
 
 #[expect(clippy::derivable_impls)]
@@ -147,12 +147,13 @@ impl Catalog {
     }
 
     pub fn create_table(&mut self, proto: &PbTable) {
-        self.table_by_id.insert(proto.id.into(), proto.into());
-        self.get_database_mut(proto.database_id)
+        let table = self
+            .get_database_mut(proto.database_id)
             .unwrap()
             .get_schema_mut(proto.schema_id)
             .unwrap()
             .create_table(proto);
+        self.table_by_id.insert(proto.id.into(), table);
     }
 
     pub fn create_index(&mut self, proto: &PbIndex) {
@@ -217,12 +218,13 @@ impl Catalog {
     }
 
     pub fn update_table(&mut self, proto: &PbTable) {
-        self.table_by_id.insert(proto.id.into(), proto.into());
-        self.get_database_mut(proto.database_id)
+        let table = self
+            .get_database_mut(proto.database_id)
             .unwrap()
             .get_schema_mut(proto.schema_id)
             .unwrap()
             .update_table(proto);
+        self.table_by_id.insert(proto.id.into(), table);
     }
 
     pub fn update_index(&mut self, proto: &PbIndex) {
@@ -348,7 +350,8 @@ impl Catalog {
     }
 
     pub fn get_table_name_by_id(&self, table_id: TableId) -> CatalogResult<String> {
-        self.get_table_by_id(&table_id).map(|table| table.name)
+        self.get_table_by_id(&table_id)
+            .map(|table| table.name.clone())
     }
 
     pub fn get_schema_by_id(
@@ -399,10 +402,9 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()))
     }
 
-    pub fn get_table_by_id(&self, table_id: &TableId) -> CatalogResult<TableCatalog> {
+    pub fn get_table_by_id(&self, table_id: &TableId) -> CatalogResult<&Arc<TableCatalog>> {
         self.table_by_id
             .get(table_id)
-            .cloned()
             .ok_or_else(|| CatalogError::NotFound("table id", table_id.to_string()))
     }
 
@@ -424,9 +426,12 @@ impl Catalog {
         }
 
         if found {
-            let mut table = self.get_table_by_id(table_id).unwrap();
+            let mut table = self
+                .get_table_by_id(table_id)
+                .unwrap()
+                .to_prost(schema_id, database_id);
             table.name = table_name.to_string();
-            self.update_table(&table.to_prost(schema_id, database_id));
+            self.update_table(&table);
         }
     }
 
@@ -434,10 +439,10 @@ impl Catalog {
     pub fn insert_table_id_mapping(&mut self, table_id: TableId, fragment_id: super::FragmentId) {
         self.table_by_id.insert(
             table_id,
-            TableCatalog {
+            Arc::new(TableCatalog {
                 fragment_id,
                 ..Default::default()
-            },
+            }),
         );
     }
 

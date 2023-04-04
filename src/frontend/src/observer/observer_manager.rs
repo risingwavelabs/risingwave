@@ -221,14 +221,16 @@ impl FrontendObserverNode {
                                 table.id.into(),
                             ),
                             Operation::Update => {
-                                let old_table =
-                                    catalog_guard.get_table_by_id(&table.id.into()).unwrap();
+                                let old_fragment_id = catalog_guard
+                                    .get_table_by_id(&table.id.into())
+                                    .unwrap()
+                                    .fragment_id;
                                 catalog_guard.update_table(table);
-                                if old_table.fragment_id != table.fragment_id {
+                                if old_fragment_id != table.fragment_id {
                                     // FIXME: the frontend node delete its fragment for the update
                                     // operation by itself.
                                     self.worker_node_manager
-                                        .remove_fragment_mapping(&old_table.fragment_id);
+                                        .remove_fragment_mapping(&old_fragment_id);
                                 }
                             }
                             _ => panic!("receive an unsupported notify {:?}", resp),
