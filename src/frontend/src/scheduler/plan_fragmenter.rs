@@ -960,14 +960,6 @@ impl BatchPlanFragmenter {
                 .transpose()
         }
     }
-
-    pub fn worker_node_manager(&self) -> &WorkerNodeManagerRef {
-        &self.worker_node_manager
-    }
-
-    pub fn catalog_reader(&self) -> &CatalogReader {
-        &self.catalog_reader
-    }
 }
 
 /// Try to derive the partition to read from the scan range.
@@ -1047,9 +1039,7 @@ fn derive_partitions(
 mod tests {
     use std::collections::{HashMap, HashSet};
 
-    use risingwave_common::hash::ParallelUnitId;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
-    use risingwave_pb::common::ParallelUnit;
 
     use crate::optimizer::plan_node::PlanNodeType;
     use crate::scheduler::plan_fragmenter::StageId;
@@ -1133,18 +1123,5 @@ mod tests {
         assert_eq!(scan_node2.root.source_stage_id, None);
         assert_eq!(1, scan_node2.root.children.len());
         assert!(scan_node2.has_table_scan());
-    }
-
-    fn generate_parallel_units(
-        start_id: ParallelUnitId,
-        node_id: ParallelUnitId,
-    ) -> Vec<ParallelUnit> {
-        let parallel_degree = 8;
-        (start_id..start_id + parallel_degree)
-            .map(|id| ParallelUnit {
-                id,
-                worker_node_id: node_id,
-            })
-            .collect()
     }
 }

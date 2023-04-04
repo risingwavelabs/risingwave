@@ -64,9 +64,6 @@ enum QueryState {
 
     /// Failed
     Failed,
-
-    /// Completed
-    Completed,
 }
 
 pub struct QueryExecution {
@@ -86,8 +83,6 @@ struct QueryRunner {
 
     /// Will be set to `None` after all stage scheduled.
     root_stage_sender: Option<oneshot::Sender<SchedulerResult<QueryResultFetcher>>>,
-
-    compute_client_pool: ComputeClientPoolRef,
 
     // Used for cleaning up `QueryExecution` after execution.
     query_execution_info: QueryExecutionInfoRef,
@@ -155,7 +150,6 @@ impl QueryExecution {
                     msg_receiver,
                     root_stage_sender: Some(root_stage_sender),
                     scheduled_stages_count: 0,
-                    compute_client_pool,
                     query_execution_info,
                     query_metrics,
                 };
@@ -377,7 +371,6 @@ impl QueryRunner {
             HostAddress {
                 ..Default::default()
             },
-            self.compute_client_pool.clone(),
             chunk_rx,
             self.query.query_id.clone(),
             self.query_execution_info.clone(),
