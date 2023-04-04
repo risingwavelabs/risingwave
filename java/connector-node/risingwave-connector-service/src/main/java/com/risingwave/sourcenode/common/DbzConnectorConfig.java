@@ -109,6 +109,11 @@ public class DbzConnectorConfig {
         } else if (source == SourceTypeE.POSTGRES || source == SourceTypeE.CITUS) {
             var postgresProps = initiateDbConfig(POSTGRES_CONFIG_FILE, substitutor);
 
+            // citus needs all_tables publication to capture all shards
+            if (source == SourceTypeE.CITUS) {
+                postgresProps.setProperty("publication.autocreate.mode", "all_tables");
+            }
+
             // if offset is specified, we will continue reading changes from the specified offset
             if (null != startOffset && !startOffset.isBlank()) {
                 postgresProps.setProperty("snapshot.mode", "never");
