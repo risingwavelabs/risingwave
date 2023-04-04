@@ -915,7 +915,7 @@ impl LogicalJoin {
             );
             let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
             let hash_join = StreamHashJoin::new(logical_join.core, eq_cond).into();
-            let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
+            let logical_filter = generic::Filter::new(predicate.non_eq_cond(), hash_join);
             let plan = StreamFilter::new(logical_filter).into();
             if self.output_indices() != &default_indices {
                 let logical_project = LogicalProject::with_mapping(
