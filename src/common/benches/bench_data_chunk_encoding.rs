@@ -54,7 +54,5 @@ fn bench_data_chunk_encoding(c: &mut Criterion) {
     }
 }
 
-// `cargo bench -- "vec ser[\s\S]*KeySerialized[\s\S]*null ratio 0$"` bench all the
-// `KeySerialized` hash key vectorized serialize cases with data's null ratio is 0,001
 criterion_group!(benches, bench_data_chunk_encoding);
 criterion_main!(benches);
