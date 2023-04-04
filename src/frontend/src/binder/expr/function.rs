@@ -397,7 +397,7 @@ impl Binder {
                 ("lpad", raw_call(ExprType::Lpad)),
                 ("rpad", raw_call(ExprType::Rpad)),
                 ("reverse", raw_call(ExprType::Reverse)),
-                ("strpos", raw_call(ExprType::Strpos)),
+                ("strpos", raw_call(ExprType::Position)),
                 ("to_ascii", raw_call(ExprType::ToAscii)),
                 ("to_hex", raw_call(ExprType::ToHex)),
                 ("quote_ident", raw_call(ExprType::QuoteIdent)),
