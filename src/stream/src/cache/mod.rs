@@ -13,22 +13,23 @@
 // limitations under the License.
 
 use std::alloc::{Allocator, Global};
+use std::borrow::Borrow;
 use std::hash::{BuildHasher, Hash};
-use std::ops::{Deref, DerefMut};
 
-use lru::{DefaultHasher, LruCache};
+use lru::{DefaultHasher, KeyRef};
 
 mod managed_lru;
 pub use managed_lru::*;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::collection::estimate_size::EstimateSize;
 use risingwave_common::util::iter_util::ZipEqFast;
 
-pub struct ExecutorCache<K, V, S = DefaultHasher, A: Clone + Allocator = Global> {
+pub struct ExecutorCache<K: EstimateSize, V: EstimateSize, S = DefaultHasher, A: Clone + Allocator = Global> {
     /// An managed cache. Eviction depends on the node memory usage.
     cache: ManagedLruCache<K, V, S, A>,
 }
 
-impl<K: Hash + Eq, V, S: BuildHasher, A: Clone + Allocator> ExecutorCache<K, V, S, A> {
+impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Allocator> ExecutorCache<K, V, S, A> {
     pub fn new(cache: ManagedLruCache<K, V, S, A>) -> Self {
         Self { cache }
     }
@@ -56,19 +57,43 @@ impl<K: Hash + Eq, V, S: BuildHasher, A: Clone + Allocator> ExecutorCache<K, V, 
         let get_val = |(_k, v)| v;
         self.cache.iter_mut().map(get_val)
     }
-}
 
-impl<K, V, S, A: Clone + Allocator> Deref for ExecutorCache<K, V, S, A> {
-    type Target = LruCache<K, V, S, A>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.cache.inner
+    pub fn put(&mut self, k: K, v: V) {
+        self.cache.put(k, v);
     }
-}
 
-impl<K, V, S, A: Clone + Allocator> DerefMut for ExecutorCache<K, V, S, A> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.cache.inner
+    pub fn get_mut(&mut self, k: &K) -> Option<&mut V> {
+        self.cache.get_mut(k)
+    }
+
+    pub fn get<Q>(&mut self, k: &Q) -> Option<&V> 
+    where KeyRef<K>: Borrow<Q>,
+    Q: Hash + Eq + ?Sized,
+    {
+        self.cache.get(k)
+    }
+
+    pub fn peek_mut(&mut self, k: &K) -> Option<&mut V> {
+        self.cache.peek_mut(k)
+    }
+
+    pub fn push(&mut self, k: K, v: V) -> Option<(K, V)> {
+        self.cache.push(k, v)
+    }
+
+    pub fn contains<Q>(&self, k: &Q) -> bool 
+    where KeyRef<K>: Borrow<Q>,
+    Q: Hash + Eq + ?Sized,
+    {
+        self.cache.contains(k)
+    }
+
+    pub fn len(&self) -> usize {
+        self.cache.len()
+    }
+
+    pub fn clear(&mut self) {
+        self.cache.clear();
     }
 }
 
