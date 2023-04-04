@@ -38,7 +38,7 @@ pub struct Int256Ref<'a>(&'a I256);
 macro_rules! impl_common_for_num256 {
     ($scalar:ident, $scalar_ref:ident < $gen:tt > , $inner:ty) => {
         impl Scalar for $scalar {
-            type ScalarRefType<'a> = $scalar_ref<$gen>;
+            type ScalarRefType<$gen> = $scalar_ref<$gen>;
 
             fn as_scalar_ref(&self) -> Self::ScalarRefType<'_> {
                 $scalar_ref(self.0.as_ref())
