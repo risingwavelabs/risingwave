@@ -2314,7 +2314,12 @@ def section_hummock_manager(outer_panels):
                 ),
                 panels.timeseries_count(
                     "Object Total Number",
-                    "total number of objects",
+                    """
+Objects are classified into 3 groups:
+- not referenced by versions: these object are being deleted from object store.
+- referenced by non-current versions: these objects are stale (not in the latest version), but those old versions may still be in use (e.g. long-running pinning). Thus those objects cannot be deleted at the moment.
+- referenced by current version: these objects are in the latest version.
+                    """,
                     [
                         panels.target(f"{metric('storage_stale_object_count')}",
                                       "not referenced by versions"),
@@ -2326,7 +2331,7 @@ def section_hummock_manager(outer_panels):
                 ),
                 panels.timeseries_bytes(
                     "Object Total Size",
-                    "total size of objects",
+                    "Refer to `Object Total Number` panel for classification of objects.",
                     [
                         panels.target(f"{metric('storage_stale_object_size')}",
                                       "not referenced by versions"),
