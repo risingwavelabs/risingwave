@@ -12,14 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::io::{Cursor, Read};
+
 use ethnum::{I256, U256};
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::PbArray;
 
-use crate::array::{Array, ArrayBuilder};
+use crate::array::{Array, ArrayBuilder, ArrayImpl, ArrayResult};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::num256::{Int256, Int256Ref, Uint256, Uint256Ref};
+use crate::types::Scalar;
 
 #[derive(Debug)]
 pub struct Int256ArrayBuilder {
@@ -46,7 +49,7 @@ pub struct Uint256Array {
 }
 
 #[rustfmt::skip]
-macro_rules! impl_common_for_num256 {
+macro_rules! impl_array_for_num256 {
     (
         $array:ty,
         $array_builder:ty,
@@ -153,10 +156,40 @@ macro_rules! impl_common_for_num256 {
                 }
             }
         }
+
+        impl $array {
+            pub fn from_protobuf(array: &PbArray, cardinality:usize) -> ArrayResult<ArrayImpl> {
+                ensure!(
+                    array.get_values().len() == 1,
+                    "Must have only 1 buffer in array"
+                );
+
+                let buf = array.get_values()[0].get_body().as_slice();
+
+                let mut builder = <$array_builder>::new(cardinality);
+                let bitmap: Bitmap = array.get_null_bitmap()?.into();
+                let mut cursor = Cursor::new(buf);
+                for not_null in bitmap.iter() {
+                    if not_null {
+                        let mut buf = [0u8; $scalar::size()];
+                        cursor.read_exact(&mut buf)?;
+                        let item = <$scalar>::from_be_bytes(buf);
+                        builder.append(Some(item.as_scalar_ref()));
+                    } else {
+                        builder.append(None);
+                    }
+                }
+                let arr = builder.finish();
+                ensure_eq!(arr.len(), cardinality);
+
+                Ok(arr.into())
+            }
+        }
+
     };
 }
 
-impl_common_for_num256!(
+impl_array_for_num256!(
     Uint256Array,
     Uint256ArrayBuilder,
     Uint256,
@@ -164,7 +197,7 @@ impl_common_for_num256!(
     Uint256
 );
 
-impl_common_for_num256!(
+impl_array_for_num256!(
     Int256Array,
     Int256ArrayBuilder,
     Int256,

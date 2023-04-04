@@ -713,8 +713,8 @@ impl ArrayImpl {
             PbArrayType::Bytea => {
                 read_string_array::<BytesArrayBuilder, BytesValueReader>(array, cardinality)?
             }
-            ArrayType::Int256 => todo!(),
-            ArrayType::Uint256 => todo!(),
+            ArrayType::Int256 => Int256Array::from_protobuf(array, cardinality)?,
+            ArrayType::Uint256 => Uint256Array::from_protobuf(array, cardinality)?,
         };
         Ok(array)
     }

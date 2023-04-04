@@ -37,8 +37,6 @@ pub struct Int256(Box<I256>);
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
 pub struct Int256Ref<'a>(pub &'a I256);
 
-impl Int256 {}
-
 macro_rules! impl_common_for_num256 {
     ($scalar:ident, $scalar_ref:ident < $gen:tt > , $inner:ty, $array_type:ident) => {
         impl Scalar for $scalar {
@@ -78,7 +76,7 @@ macro_rules! impl_common_for_num256 {
             }
 
             #[inline]
-            pub fn size() -> usize {
+            pub const fn size() -> usize {
                 mem::size_of::<$inner>()
             }
 
@@ -90,6 +88,11 @@ macro_rules! impl_common_for_num256 {
             #[inline]
             pub fn from_ne_bytes(bytes: [u8; mem::size_of::<$inner>()]) -> Self {
                 Self(Box::new(<$inner>::from_ne_bytes(bytes)))
+            }
+
+            #[inline]
+            pub fn from_be_bytes(bytes: [u8; mem::size_of::<$inner>()]) -> Self {
+                Self(Box::new(<$inner>::from_be_bytes(bytes)))
             }
         }
 
