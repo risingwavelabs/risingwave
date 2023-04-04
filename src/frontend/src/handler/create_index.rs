@@ -228,7 +228,7 @@ pub(crate) fn gen_create_index_plan(
     index_table_prost.owner = session.user_id();
     index_table_prost.dependent_relations = vec![table.id.table_id];
 
-    // FIXME: why telemetry need these information?
+    // FIXME: why sqlalchemy need these information?
     let original_columns = index_table
         .columns
         .iter()
