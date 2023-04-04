@@ -202,11 +202,11 @@ fn case_builders() -> Vec<HashKeyBenchCaseBuilder> {
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int32, DataType::Varchar],
-            describe: "mix fixed and not1".to_string(),
+            describe: "mix fixed and not fixed, case 1".to_string(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int64, DataType::Varchar],
-            describe: "mix fixed and not2".to_string(),
+            describe: "mix fixed and not fixed, case 2".to_string(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int64; 8],
