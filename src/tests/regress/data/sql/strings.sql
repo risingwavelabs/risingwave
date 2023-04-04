@@ -712,13 +712,13 @@ SELECT lpad('hi', 5, 'xy');
 SELECT lpad('hi', 5);
 SELECT lpad('hi', -5, 'xy');
 SELECT lpad('hello', 2);
---@ SELECT lpad('hi', 5, '');
+SELECT lpad('hi', 5, '');
 
 SELECT rpad('hi', 5, 'xy');
 SELECT rpad('hi', 5);
 SELECT rpad('hi', -5, 'xy');
 SELECT rpad('hello', 2);
---@ SELECT rpad('hi', 5, '');
+SELECT rpad('hi', 5, '');
 
 SELECT ltrim('zzzytrim', 'xyz');
 
