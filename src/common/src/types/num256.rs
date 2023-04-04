@@ -19,24 +19,28 @@ use std::mem;
 use bytes::Bytes;
 use ethnum::{I256, U256};
 use postgres_types::{ToSql, Type};
+use risingwave_pb::data::ArrayType;
 use serde::{Serialize, Serializer};
 use to_text::ToText;
 
+use crate::array::ArrayResult;
 use crate::types::to_binary::ToBinary;
 use crate::types::{to_text, DataType, Scalar, ScalarRef};
 
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
 pub struct Uint256(Box<U256>);
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
-pub struct Uint256Ref<'a>(&'a U256);
+pub struct Uint256Ref<'a>(pub &'a U256);
 
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
 pub struct Int256(Box<I256>);
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
-pub struct Int256Ref<'a>(&'a I256);
+pub struct Int256Ref<'a>(pub &'a I256);
+
+impl Int256 {}
 
 macro_rules! impl_common_for_num256 {
-    ($scalar:ident, $scalar_ref:ident < $gen:tt > , $inner:ty) => {
+    ($scalar:ident, $scalar_ref:ident < $gen:tt > , $inner:ty, $array_type:ident) => {
         impl Scalar for $scalar {
             type ScalarRefType<$gen> = $scalar_ref<$gen>;
 
@@ -67,10 +71,46 @@ macro_rules! impl_common_for_num256 {
             }
         }
 
+        impl $scalar {
+            #[inline]
+            pub fn into_inner(self) -> $inner {
+                *self.0
+            }
+
+            #[inline]
+            pub fn size() -> usize {
+                mem::size_of::<$inner>()
+            }
+
+            #[inline]
+            pub fn array_type() -> ArrayType {
+                ArrayType::$array_type
+            }
+
+            #[inline]
+            pub fn from_ne_bytes(bytes: [u8; mem::size_of::<$inner>()]) -> Self {
+                Self(Box::new(<$inner>::from_ne_bytes(bytes)))
+            }
+        }
+
         impl $scalar_ref<'_> {
             #[inline]
             pub fn to_le_bytes(self) -> [u8; mem::size_of::<$inner>()] {
                 self.0.to_le_bytes()
+            }
+
+            #[inline]
+            pub fn to_be_bytes(self) -> [u8; mem::size_of::<$inner>()] {
+                self.0.to_be_bytes()
+            }
+
+            #[inline]
+            pub fn to_ne_bytes(self) -> [u8; mem::size_of::<$inner>()] {
+                self.0.to_ne_bytes()
+            }
+
+            pub fn to_protobuf<T: std::io::Write>(self, output: &mut T) -> ArrayResult<usize> {
+                output.write(&self.to_be_bytes()).map_err(Into::into)
             }
         }
 
@@ -98,5 +138,5 @@ macro_rules! impl_common_for_num256 {
     };
 }
 
-impl_common_for_num256!(Uint256, Uint256Ref<'a>, U256);
-impl_common_for_num256!(Int256, Int256Ref<'a>, I256);
+impl_common_for_num256!(Uint256, Uint256Ref<'a>, U256, Uint256);
+impl_common_for_num256!(Int256, Int256Ref<'a>, I256, Int256);

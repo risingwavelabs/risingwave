@@ -16,7 +16,6 @@ use std::fmt::Debug;
 use std::io::Write;
 use std::mem::size_of;
 
-use crate::types::num256::Int256;
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{ArrayType, PbArray};
