@@ -123,16 +123,11 @@ impl MetaClient {
             true,
         );
 
-        let result = tokio_retry::Retry::spawn(retry_strategy, || async {
+        tokio_retry::Retry::spawn(retry_strategy, || async {
             let request = request.clone();
             self.inner.subscribe(request).await
         })
-        .await;
-        if let Err(_e) = result.as_ref() {
-            tracing::error!("debug error {}", self.host_addr.to_string())
-        }
-
-        result
+        .await
     }
 
     pub async fn create_connection(&self, req: create_connection_request::Payload) -> Result<u32> {
