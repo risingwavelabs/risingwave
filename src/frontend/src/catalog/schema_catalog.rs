@@ -298,6 +298,10 @@ impl SchemaCatalog {
             .expect("function not found by argument types");
     }
 
+    pub fn iter_all(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
+        self.table_by_name.iter().map(|(_, v)| v)
+    }
+
     pub fn iter_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
             .iter()
