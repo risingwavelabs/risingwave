@@ -132,9 +132,11 @@ impl Binder {
 
         let (returning_list, fields) = self.bind_returning_list(returning_items)?;
         let is_returning = !returning_list.is_empty();
+        let mut target_table_col_indices: Vec<usize> = vec![];
+        let bound_query;
+        let cast_exprs;
 
         if !target_col_idents.is_empty() {
-            let mut target_table_col_indices: Vec<usize> = vec![];
             let mut cols_to_insert_name_idx_map: HashMap<String, usize> = HashMap::new();
             for (col_idx, col) in columns_to_insert.iter().enumerate() {
                 cols_to_insert_name_idx_map.insert(col.name().to_string(), col_idx);
@@ -201,7 +203,7 @@ impl Binder {
             // internal implicit cast.
             // In other cases, the `source` query is handled on its own and assignment cast is done
             // afterwards.
-            let (source, cast_exprs) = match source {
+            (bound_query, cast_exprs) = match source {
                 Query {
                     with: None,
                     body: SetExpr::Values(values),
@@ -260,29 +262,13 @@ impl Binder {
                     (bound, cast_exprs)
                 }
             };
-            let insert = BoundInsert {
-                table_id,
-                table_version_id,
-                table_name,
-                owner,
-                row_id_index,
-                column_indices: target_table_col_indices,
-                source,
-                cast_exprs,
-                returning_list,
-                returning_schema: if is_returning {
-                    Some(Schema { fields })
-                } else {
-                    None
-                },
-            };
-            Ok(insert)
         } else {
             let expected_types: Vec<DataType> = columns_to_insert
                 .iter()
                 .map(|c| c.data_type().clone())
                 .collect();
-            let (source, cast_exprs) = match source {
+            target_table_col_indices = (0..columns_to_insert.len()).collect();
+            (bound_query, cast_exprs) = match source {
                 Query {
                     with: None,
                     body: SetExpr::Values(values),
@@ -340,24 +326,24 @@ impl Binder {
                     (bound, cast_exprs)
                 }
             };
-            let insert = BoundInsert {
-                table_id,
-                table_version_id,
-                table_name,
-                owner,
-                row_id_index,
-                column_indices: (0..columns_to_insert.len()).collect::<Vec<usize>>(),
-                source,
-                cast_exprs,
-                returning_list,
-                returning_schema: if is_returning {
-                    Some(Schema { fields })
-                } else {
-                    None
-                },
-            };
-            Ok(insert)
         }
+        let insert = BoundInsert {
+            table_id,
+            table_version_id,
+            table_name,
+            owner,
+            row_id_index,
+            column_indices: target_table_col_indices,
+            source: bound_query,
+            cast_exprs,
+            returning_list,
+            returning_schema: if is_returning {
+                Some(Schema { fields })
+            } else {
+                None
+            },
+        };
+        Ok(insert)
     }
 
     /// Cast a list of `exprs` to corresponding `expected_types` IN ASSIGNMENT CONTEXT. Make sure
