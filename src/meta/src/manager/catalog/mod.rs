@@ -525,10 +525,7 @@ where
         user_core.increase_ref(function.owner);
 
         let version = self
-            .notify_frontend_relation_info(
-                Operation::Add,
-                RelationInfo::Function(function.to_owned()),
-            )
+            .notify_frontend(Operation::Add, Info::Function(function.to_owned()))
             .await;
 
         Ok(version)
@@ -558,7 +555,7 @@ where
         }
 
         let version = self
-            .notify_frontend_relation_info(Operation::Delete, RelationInfo::Function(function))
+            .notify_frontend(Operation::Delete, Info::Function(function))
             .await;
 
         Ok(version)

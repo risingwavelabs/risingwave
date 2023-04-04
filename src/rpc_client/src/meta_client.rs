@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::fmt::{Debug, Formatter};
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -1150,7 +1151,7 @@ impl ElectionMemberManagement {
                             None => {
                                 let endpoint = GrpcMetaClient::addr_to_endpoint(addr.clone())?;
                                 let channel = GrpcMetaClient::connect_to_endpoint(endpoint).await?;
-                                let new_client: MetaMemberServiceClient<Channel> =
+                                let new_client: MetaMemberClient =
                                     MetaMemberServiceClient::new(channel);
                                 *client = Some(new_client.clone());
 
@@ -1307,7 +1308,7 @@ impl GrpcMetaClient {
         let members = match &strategy {
             MetaAddressStrategy::LoadBalance(_) => Either::Left(meta_member_client),
             MetaAddressStrategy::List(addrs) => {
-                let mut members = LruCache::new(20);
+                let mut members = LruCache::new(NonZeroUsize::new(20).unwrap());
                 for addr in addrs {
                     members.put(addr.clone(), None);
                 }

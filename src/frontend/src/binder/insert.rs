@@ -28,7 +28,7 @@ use crate::catalog::TableId;
 use crate::expr::{ExprImpl, InputRef};
 use crate::user::UserId;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundInsert {
     /// Id of the table to perform inserting.
     pub table_id: TableId,

@@ -120,7 +120,8 @@ where
             | Info::Schema(_)
             | Info::RelationGroup(_)
             | Info::User(_)
-            | Info::Connection(_) => {
+            | Info::Connection(_)
+            | Info::Function(_) => {
                 notification.version > info.version.as_ref().unwrap().catalog_version
             }
             Info::ParallelUnitMapping(_) => {

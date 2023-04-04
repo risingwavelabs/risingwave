@@ -50,7 +50,7 @@ impl ObserverState for FrontendObserverNode {
         };
 
         match info.to_owned() {
-            Info::Database(_) | Info::Schema(_) | Info::RelationGroup(_) => {
+            Info::Database(_) | Info::Schema(_) | Info::RelationGroup(_) | Info::Function(_) => {
                 self.handle_catalog_notification(resp);
             }
             Info::Node(node) => {
@@ -276,18 +276,18 @@ impl FrontendObserverNode {
                             Operation::Update => catalog_guard.update_view(view),
                             _ => panic!("receive an unsupported notify {:?}", resp),
                         },
-                        RelationInfo::Function(function) => match resp.operation() {
-                            Operation::Add => catalog_guard.create_function(function),
-                            Operation::Delete => catalog_guard.drop_function(
-                                function.database_id,
-                                function.schema_id,
-                                function.id.into(),
-                            ),
-                            _ => panic!("receive an unsupported notify {:?}", resp),
-                        },
                     }
                 }
             }
+            Info::Function(function) => match resp.operation() {
+                Operation::Add => catalog_guard.create_function(function),
+                Operation::Delete => catalog_guard.drop_function(
+                    function.database_id,
+                    function.schema_id,
+                    function.id.into(),
+                ),
+                _ => panic!("receive an unsupported notify {:?}", resp),
+            },
             _ => unreachable!(),
         }
         assert!(
