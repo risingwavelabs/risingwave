@@ -19,10 +19,10 @@ use risingwave_common::catalog::{Schema, TableVersionId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SelectItem, SetExpr};
+use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SelectItem};
 
 use super::statement::RewriteExprsRecursive;
-use super::{BoundQuery, BoundSetExpr};
+use super::BoundQuery;
 use crate::binder::Binder;
 use crate::catalog::TableId;
 use crate::expr::{ExprImpl, InputRef};
