@@ -381,6 +381,7 @@ impl Binder {
                     rewrite(ExprType::ConcatWs, Binder::rewrite_concat_to_concat_ws),
                 ),
                 ("concat_ws", raw_call(ExprType::ConcatWs)),
+                ("translate", raw_call(ExprType::Translate)),
                 ("split_part", raw_call(ExprType::SplitPart)),
                 ("char_length", raw_call(ExprType::CharLength)),
                 ("character_length", raw_call(ExprType::CharLength)),
