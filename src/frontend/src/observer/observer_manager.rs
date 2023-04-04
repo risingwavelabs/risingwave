@@ -50,7 +50,11 @@ impl ObserverState for FrontendObserverNode {
         };
 
         match info.to_owned() {
-            Info::Database(_) | Info::Schema(_) | Info::RelationGroup(_) | Info::Function(_) => {
+            Info::Database(_)
+            | Info::Schema(_)
+            | Info::RelationGroup(_)
+            | Info::Function(_)
+            | Info::Connection(_) => {
                 self.handle_catalog_notification(resp);
             }
             Info::Node(node) => {
@@ -80,9 +84,6 @@ impl ObserverState for FrontendObserverNode {
             }
             Info::SystemParams(p) => {
                 self.system_params_manager.try_set_params(p);
-            }
-            Info::Connection(_) => {
-                self.handle_connection_notification(resp);
             }
         }
     }
@@ -288,6 +289,11 @@ impl FrontendObserverNode {
                 ),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
+            Info::Connection(connection) => match resp.operation() {
+                Operation::Add => catalog_guard.create_connection(connection),
+                Operation::Delete => catalog_guard.drop_connection(connection.get_name().as_str()),
+                _ => panic!("receive an unsupported notify {:?}", resp),
+            },
             _ => unreachable!(),
         }
         assert!(
@@ -323,31 +329,6 @@ impl FrontendObserverNode {
         );
         user_guard.set_version(resp.version);
         self.user_info_updated_tx.send(resp.version).unwrap();
-    }
-
-    // TODO: move connection to schema_catalog
-    fn handle_connection_notification(&mut self, resp: SubscribeResponse) {
-        let Some(info) = resp.info.as_ref() else {
-            return;
-        };
-
-        let mut catalog_guard = self.catalog.write();
-        match info {
-            Info::Connection(connection) => match resp.operation() {
-                Operation::Add => catalog_guard.create_connection(connection),
-                Operation::Delete => catalog_guard.drop_connection(connection.get_name().as_str()),
-                _ => panic!("receive an unsupported notify {:?}", resp),
-            },
-            _ => unreachable!(),
-        }
-        assert!(
-            resp.version > catalog_guard.version(),
-            "resp version={:?}, current version={:?}",
-            resp.version,
-            catalog_guard.version()
-        );
-        catalog_guard.set_version(resp.version);
-        self.catalog_updated_tx.send(resp.version).unwrap();
     }
 
     fn handle_fragment_mapping_notification(&mut self, resp: SubscribeResponse) {
