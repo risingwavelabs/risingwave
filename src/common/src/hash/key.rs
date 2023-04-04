@@ -79,8 +79,20 @@ impl NullBitmap {
         self.inner.contains(x)
     }
 
-    pub fn is_subset(&self, _other: &FixedBitSet) -> bool {
-        todo!()
+    pub fn is_subset(&self, other: &NullBitmap) -> bool {
+        self.inner.contains_all(other.inner)
+    }
+}
+
+impl From<Vec<bool>> for NullBitmap {
+    fn from(value: Vec<bool>) -> Self {
+        let mut bitmap = NullBitmap::empty();
+        for (idx, is_true) in value.into_iter().enumerate() {
+            if is_true {
+                null_matched.add_inplace(idx);
+            }
+        }
+        bitmap
     }
 }
 
