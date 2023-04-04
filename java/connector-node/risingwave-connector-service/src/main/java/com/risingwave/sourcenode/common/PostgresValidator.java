@@ -14,13 +14,11 @@ import org.slf4j.LoggerFactory;
 public class PostgresValidator implements AutoCloseable {
     static final Logger LOG = LoggerFactory.getLogger(PostgresValidator.class);
 
-    private Properties sqlStmts;
-    private Map<String, String> props;
-
+    private final Properties sqlStmts;
+    private final Map<String, String> props;
     // todo: refactor to the class in connector-api
-    private ConnectorServiceProto.TableSchema tableSchema;
-
-    private Connection conn;
+    private final ConnectorServiceProto.TableSchema tableSchema;
+    private final Connection conn;
 
     public PostgresValidator(
             String jdbcUrl,
