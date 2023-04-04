@@ -24,7 +24,6 @@ use risingwave_pb::catalog::{
     PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
 };
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_storage::hummock::store::version::HummockVersionReader;
 
 use super::function_catalog::FunctionCatalog;
 use super::source_catalog::SourceCatalog;
