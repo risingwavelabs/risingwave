@@ -28,7 +28,7 @@ use std::hash::{BuildHasher, Hash, Hasher};
 use std::io::{Cursor, Read};
 
 use chrono::{Datelike, Timelike};
-use fixedbitset::FixedBitSet;
+
 use smallbitset::Set64;
 
 use crate::array::serial_array::Serial;
@@ -89,7 +89,7 @@ impl From<Vec<bool>> for NullBitmap {
         let mut bitmap = NullBitmap::empty();
         for (idx, is_true) in value.into_iter().enumerate() {
             if is_true {
-                null_matched.add_inplace(idx);
+                bitmap.set_true(idx);
             }
         }
         bitmap

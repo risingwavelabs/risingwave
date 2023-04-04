@@ -18,7 +18,7 @@ use std::alloc::Global;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-use fixedbitset::FixedBitSet;
+
 use futures::future::try_join;
 use futures::StreamExt;
 use futures_async_stream::for_await;
@@ -26,7 +26,7 @@ pub(super) use join_entry_state::JoinEntryState;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::collection::estimate_size::EstimateSize;
-use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
+use risingwave_common::hash::{HashKey, NullBitmap, PrecomputedBuildHasher};
 use risingwave_common::row;
 use risingwave_common::row::{CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
@@ -200,7 +200,7 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// Data types of the join key columns
     join_key_data_types: Vec<DataType>,
     /// Null safe bitmap for each join pair
-    null_matched: FixedBitSet,
+    null_matched: NullBitmap,
     /// The memcomparable serializer of primary key.
     pk_serializer: OrderedRowSerde,
     /// State table. Contains the data from upstream.
@@ -248,7 +248,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         degree_all_data_types: Vec<DataType>,
         degree_table: StateTable<S>,
         degree_pk_indices: Vec<usize>,
-        null_matched: FixedBitSet,
+        null_matched: NullBitmap,
         need_degree_table: bool,
         pk_contained_in_jk: bool,
         metrics: Arc<StreamingMetrics>,
@@ -562,7 +562,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.inner.len()
     }
 
-    pub fn null_matched(&self) -> &FixedBitSet {
+    pub fn null_matched(&self) -> &NullBitmap {
         &self.null_matched
     }
 }
