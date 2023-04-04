@@ -39,6 +39,7 @@ ethnum = { version = "1", features = ["serde"] }
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
+get-size = { workspace = true }
 hex = "0.4.3"
 humantime = "2.1"
 itertools = "0.10"

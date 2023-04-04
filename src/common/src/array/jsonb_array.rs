@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::mem::size_of;
+
+use get_size::GetSize;
 use postgres_types::{FromSql as _, ToSql as _, Type};
 use serde_json::Value;
 
@@ -468,5 +471,12 @@ impl serde_json::ser::Formatter for ToTextFormatter {
         W: ?Sized + std::io::Write,
     {
         writer.write_all(b": ")
+    }
+}
+
+// TODO: We need to fix this later.
+impl GetSize for JsonbArray {
+    fn get_heap_size(&self) -> usize {
+        self.bitmap.get_heap_size() + self.data.len() * size_of::<Value>()
     }
 }

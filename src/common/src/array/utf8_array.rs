@@ -14,6 +14,7 @@
 
 use std::fmt::{Display, Write};
 
+use get_size::GetSize;
 use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::bytes_array::{BytesWriter, PartialBytesWriter};
@@ -22,7 +23,7 @@ use crate::array::ArrayBuilderImpl;
 use crate::buffer::Bitmap;
 
 /// `Utf8Array` is a collection of Rust Utf8 `str`s. It's a wrapper of `BytesArray`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, GetSize)]
 pub struct Utf8Array {
     bytes: BytesArray,
 }

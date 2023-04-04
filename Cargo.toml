@@ -66,6 +66,7 @@ aws-smithy-http = "0.51"
 aws-smithy-types = "0.51"
 aws-endpoint = "0.51"
 aws-types = { version = "0.51", features = ["hardcoded-credentials"] }
+get-size = { version = "^0.1", features = ["derive"] }
 
 [profile.dev]
 lto = 'off'

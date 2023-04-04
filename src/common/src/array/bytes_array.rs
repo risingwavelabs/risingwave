@@ -15,6 +15,7 @@
 use std::iter;
 use std::mem::size_of;
 
+use get_size::GetSize;
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{ArrayType, PbArray};
@@ -25,7 +26,7 @@ use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::util::iter_util::ZipEqDebug;
 
 /// `BytesArray` is a collection of Rust `[u8]`s.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, GetSize)]
 pub struct BytesArray {
     offset: Vec<u32>,
     bitmap: Bitmap,

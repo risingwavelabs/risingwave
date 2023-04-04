@@ -16,6 +16,7 @@ use std::fmt::Debug;
 use std::io::Write;
 use std::mem::size_of;
 
+use get_size::GetSize;
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{ArrayType, PbArray};
@@ -270,6 +271,12 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
             bitmap: self.bitmap.finish(),
             data: self.data,
         }
+    }
+}
+
+impl<T: PrimitiveArrayItemType> GetSize for PrimitiveArray<T> {
+    fn get_heap_size(&self) -> usize {
+        self.bitmap.get_heap_size() + self.data.capacity() * size_of::<T>()
     }
 }
 

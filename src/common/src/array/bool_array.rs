@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use get_size::GetSize;
 use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::{Array, ArrayBuilder, ArrayMeta};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, GetSize)]
 pub struct BoolArray {
     bitmap: Bitmap,
     data: Bitmap,
@@ -194,6 +195,8 @@ mod tests {
             })
             .collect_vec();
         let array = helper_test_builder(v.clone());
+        assert_eq!(256, array.get_heap_size());
+        assert_eq!(320, array.get_size());
         let res = v.iter().zip_eq_fast(array.iter()).all(|(a, b)| *a == b);
         assert!(res);
     }

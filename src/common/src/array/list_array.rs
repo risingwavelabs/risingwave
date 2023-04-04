@@ -18,6 +18,7 @@ use std::fmt::Debug;
 use std::hash::Hash;
 
 use bytes::{Buf, BufMut};
+use get_size::GetSize;
 use itertools::EitherOrBoth::{Both, Left, Right};
 use itertools::Itertools;
 use risingwave_pb::data::{ListArrayData, PbArray, PbArrayType};
@@ -152,11 +153,12 @@ impl ListArrayBuilder {
 ///
 /// For example, `values (array[1]), (array[]::int[]), (null), (array[2, 3]);` stores an inner
 ///  `I32Array` with `[1, 2, 3]`, along with offsets `[0, 1, 1, 1, 3]` and null bitmap `TTFT`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, GetSize)]
 pub struct ListArray {
     bitmap: Bitmap,
     pub(super) offsets: Vec<u32>,
     pub(super) value: Box<ArrayImpl>,
+    #[get_size(ignore)]
     pub(super) value_type: DataType,
 }
 
