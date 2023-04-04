@@ -70,7 +70,7 @@ use crate::array::{
     StructValue,
 };
 use crate::error::Result as RwResult;
-use crate::types::num256::{Int256, Uint256, Uint256Ref};
+use crate::types::num256::{Int256, Int256Ref, Uint256, Uint256Ref};
 
 pub type F32 = ordered_float::OrderedFloat<f32>;
 pub type F64 = ordered_float::OrderedFloat<f64>;
@@ -501,7 +501,7 @@ macro_rules! for_all_scalar_variants {
             { Int16, int16, i16, i16 },
             { Int32, int32, i32, i32 },
             { Int64, int64, i64, i64 },
-            { Int256, int256, Box<Int256>, &'scalar Int256 },
+            { Int256, int256, Int256, Int256Ref<'scalar> },
             { Uint256, uint256, Uint256, Uint256Ref<'scalar> },
             { Serial, serial, Serial, Serial },
             { Float32, float32, F32, F32 },
