@@ -22,6 +22,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_sqlparser::ast::{Cte, Expr, Fetch, OrderByExpr, Query, Value, With};
 
 use super::statement::RewriteExprsRecursive;
+use super::BoundValues;
 use crate::binder::{Binder, BoundSetExpr};
 use crate::expr::{CorrelatedId, Depth, ExprImpl, ExprRewriter};
 
@@ -94,6 +95,18 @@ impl BoundQuery {
         // TODO: collect `correlated_input_ref` in `extra_order_exprs`.
         self.body
             .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+    }
+
+    /// Simple `VALUES` without other clauses.
+    pub fn with_values(values: BoundValues) -> Self {
+        BoundQuery {
+            body: BoundSetExpr::Values(values.into()),
+            order: vec![],
+            limit: None,
+            offset: None,
+            with_ties: false,
+            extra_order_exprs: vec![],
+        }
     }
 }
 

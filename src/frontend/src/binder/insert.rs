@@ -203,15 +203,8 @@ impl Binder {
             // internal implicit cast.
             // In other cases, the `source` query is handled on its own and assignment cast is done
             // afterwards.
-            (bound_query, cast_exprs) = match source {
-                Query {
-                    with: None,
-                    body: SetExpr::Values(values),
-                    order_by: order,
-                    limit: None,
-                    offset: None,
-                    fetch: None,
-                } if order.is_empty() => {
+            (bound_query, cast_exprs) = match source.as_simple_values() {
+                Some(values) => {
                     assert!(!values.0.is_empty());
                     let err_msg = match target_col_idents.len().cmp(&values.0[0].len()) {
                         std::cmp::Ordering::Equal => None,
@@ -231,22 +224,11 @@ impl Binder {
                         return Err(RwError::from(ErrorCode::BindError(msg.to_string())));
                     }
 
-                    let values = self.bind_values(values, Some(expected_types))?;
-                    let body = BoundSetExpr::Values(values.into());
-                    (
-                        BoundQuery {
-                            body,
-                            order: vec![],
-                            limit: None,
-                            offset: None,
-                            with_ties: false,
-                            extra_order_exprs: vec![],
-                        },
-                        vec![],
-                    )
+                    let values = self.bind_values(values.clone(), Some(expected_types))?;
+                    (BoundQuery::with_values(values), vec![])
                 }
-                query => {
-                    let bound = self.bind_query(query)?;
+                None => {
+                    let bound = self.bind_query(source)?;
                     let actual_types = bound.data_types();
                     let cast_exprs = match expected_types == actual_types {
                         true => vec![],
@@ -268,15 +250,8 @@ impl Binder {
                 .map(|c| c.data_type().clone())
                 .collect();
             target_table_col_indices = (0..columns_to_insert.len()).collect();
-            (bound_query, cast_exprs) = match source {
-                Query {
-                    with: None,
-                    body: SetExpr::Values(values),
-                    order_by: order,
-                    limit: None,
-                    offset: None,
-                    fetch: None,
-                } if order.is_empty() => {
+            (bound_query, cast_exprs) = match source.as_simple_values() {
+                Some(values) => {
                     assert!(!values.0.is_empty());
                     let err_msg = match columns_to_insert.len().cmp(&values.0[0].len()) {
                         std::cmp::Ordering::Equal => None,
@@ -295,22 +270,11 @@ impl Binder {
                         return Err(RwError::from(ErrorCode::BindError(msg.to_string())));
                     }
 
-                    let values = self.bind_values(values, Some(expected_types))?;
-                    let body = BoundSetExpr::Values(values.into());
-                    (
-                        BoundQuery {
-                            body,
-                            order: vec![],
-                            limit: None,
-                            offset: None,
-                            with_ties: false,
-                            extra_order_exprs: vec![],
-                        },
-                        vec![],
-                    )
+                    let values = self.bind_values(values.clone(), Some(expected_types))?;
+                    (BoundQuery::with_values(values), vec![])
                 }
-                query => {
-                    let bound = self.bind_query(query)?;
+                None => {
+                    let bound = self.bind_query(source)?;
                     let actual_types = bound.data_types();
                     let cast_exprs = match expected_types == actual_types {
                         true => vec![],
