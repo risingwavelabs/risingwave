@@ -45,6 +45,7 @@ public class DbzConnectorConfig {
     public static final String PG_SLOT_NAME = "slot.name";
     public static final String PG_SCHEMA_NAME = "schema.name";
 
+    private static final String DBZ_CONFIG_FILE = "debezium.properties";
     private static final String MYSQL_CONFIG_FILE = "mysql.properties";
     private static final String POSTGRES_CONFIG_FILE = "postgres.properties";
 
@@ -83,15 +84,8 @@ public class DbzConnectorConfig {
 
     public DbzConnectorConfig(
             SourceTypeE source, long sourceId, String startOffset, Map<String, String> userProps) {
-        var dbzProps = new Properties();
-        try (var input = getClass().getClassLoader().getResourceAsStream("debezium.properties")) {
-            assert input != null;
-            dbzProps.load(input);
-        } catch (IOException e) {
-            throw new RuntimeException("failed to load debezium.properties", e);
-        }
-
         StringSubstitutor substitutor = new StringSubstitutor(userProps);
+        var dbzProps = initiateDbConfig(DBZ_CONFIG_FILE, substitutor);
         if (source == SourceTypeE.MYSQL) {
             var mysqlProps = initiateDbConfig(MYSQL_CONFIG_FILE, substitutor);
             // if offset is specified, we will continue binlog reading from the specified offset
@@ -141,7 +135,7 @@ public class DbzConnectorConfig {
             var resolvedStr = substitutor.replace(inputStr);
             dbProps.load(new StringReader(resolvedStr));
         } catch (IOException e) {
-            throw new RuntimeException("failed to load " + fileName, e);
+            throw new RuntimeException("failed to load config file " + fileName, e);
         }
         return dbProps;
     }
