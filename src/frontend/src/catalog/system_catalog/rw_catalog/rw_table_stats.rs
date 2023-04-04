@@ -18,4 +18,9 @@ use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
 pub const RW_TABLE_STATS_TABLE_NAME: &str = "rw_table_stats";
 
-pub const RW_TABLE_STATS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[(DataType::Int64, "foobar")];
+pub const RW_TABLE_STATS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
+    (DataType::Int32, "id"),
+    (DataType::Int64, "total_key_count"),
+    (DataType::Int64, "total_key_size"),
+    (DataType::Int64, "total_value_size"),
+];
