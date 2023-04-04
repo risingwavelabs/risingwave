@@ -342,6 +342,7 @@ impl Binder {
                 // "power" is the function name used in PG.
                 ("power", raw_call(ExprType::Pow)),
                 ("ceil", raw_call(ExprType::Ceil)),
+                ("ceiling", raw_call(ExprType::Ceil)),
                 ("floor", raw_call(ExprType::Floor)),
                 ("abs", raw_call(ExprType::Abs)),
                 ("exp", raw_call(ExprType::Exp)),

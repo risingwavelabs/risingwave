@@ -94,7 +94,7 @@ SELECT f.f1, round(f.f1) AS round_f1
 
 -- ceil / ceiling
 select ceil(f1) as ceil_f1 from float8_tbl f;
---@ select ceiling(f1) as ceiling_f1 from float8_tbl f;
+select ceiling(f1) as ceiling_f1 from float8_tbl f;
 
 -- floor
 select floor(f1) as floor_f1 from float8_tbl f;
