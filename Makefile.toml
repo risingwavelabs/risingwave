@@ -476,8 +476,7 @@ alias = "dev"
 [tasks.dev]
 category = "RiseDev - Start"
 dependencies = ["pre-start-dev"]
-command = "target/${BUILD_MODE_DIR}/risedev-dev"
-args = ["${@}"]
+script = "RUST_BACKTRACE=full target/${BUILD_MODE_DIR}/risedev-dev ${@}"
 description = "Start a full RisingWave dev cluster using risedev-dev"
 
 [tasks.kafka]

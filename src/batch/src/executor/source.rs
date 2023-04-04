@@ -103,7 +103,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
                 .context()
                 .get_config()
                 .developer
-                .stream_connector_message_buffer_size,
+                .connector_message_buffer_size,
         };
 
         let column_ids: Vec<_> = source_node

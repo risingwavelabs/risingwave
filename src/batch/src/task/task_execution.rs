@@ -308,7 +308,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
         let (sender, receivers) = create_output_channel(
             plan.get_exchange_info()?,
-            context.get_config().developer.batch_output_channel_size,
+            context.get_config().developer.output_channel_size,
         )?;
 
         let mut rts = Vec::new();

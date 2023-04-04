@@ -20,7 +20,7 @@ use std::sync::Arc;
 use futures_async_stream::for_await;
 use parking_lot::RwLock;
 use pgwire::pg_response::StatementType;
-use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
+use pgwire::pg_server::{BoxedError, SessionId, SessionManager, UserAuthenticator};
 use pgwire::types::Row;
 use risingwave_common::catalog::{
     FunctionId, IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
@@ -47,6 +47,7 @@ use tempfile::{Builder, NamedTempFile};
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{DatabaseId, SchemaId};
+use crate::handler::extended_handle::{Portal, PrepareStatement};
 use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
 use crate::session::{AuthContext, FrontendEnv, SessionImpl};
@@ -61,7 +62,7 @@ pub struct LocalFrontend {
     env: FrontendEnv,
 }
 
-impl SessionManager<PgResponseStream> for LocalFrontend {
+impl SessionManager<PgResponseStream, PrepareStatement, Portal> for LocalFrontend {
     type Session = SessionImpl;
 
     fn connect(

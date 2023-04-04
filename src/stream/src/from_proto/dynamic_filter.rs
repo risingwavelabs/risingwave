@@ -79,7 +79,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             state_table_l,
             state_table_r,
             params.executor_stats,
-            params.env.config().developer.stream_chunk_size,
+            params.env.config().developer.chunk_size,
         )))
     }
 }

@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::derive::derive_columns;
@@ -76,6 +76,7 @@ impl StreamMaterialize {
             definition,
             ConflictBehavior::NoCheck,
             None,
+            None,
             table_type,
             None,
         )?;
@@ -97,6 +98,7 @@ impl StreamMaterialize {
         columns: Vec<ColumnCatalog>,
         definition: String,
         conflict_behavior: ConflictBehavior,
+        pk_column_indices: Vec<usize>,
         row_id_index: Option<usize>,
         version: Option<TableVersion>,
     ) -> Result<Self> {
@@ -109,6 +111,7 @@ impl StreamMaterialize {
             columns,
             definition,
             conflict_behavior,
+            Some(pk_column_indices),
             row_id_index,
             TableType::Table,
             version,
@@ -126,7 +129,11 @@ impl StreamMaterialize {
         let required_dist = match input.distribution() {
             Distribution::Single => RequiredDist::single(),
             _ => match table_type {
-                TableType::Table | TableType::MaterializedView => {
+                TableType::Table => {
+                    assert_matches!(user_distributed_by, RequiredDist::ShardByKey(_));
+                    user_distributed_by
+                }
+                TableType::MaterializedView => {
                     assert_matches!(user_distributed_by, RequiredDist::Any);
                     // ensure the same pk will not shuffle to different node
                     RequiredDist::shard_by_key(input.schema().len(), input.logical_pk())
@@ -157,6 +164,7 @@ impl StreamMaterialize {
         columns: Vec<ColumnCatalog>,
         definition: String,
         conflict_behavior: ConflictBehavior,
+        pk_column_indices: Option<Vec<usize>>, // Is some when create table
         row_id_index: Option<usize>,
         table_type: TableType,
         version: Option<TableVersion>,
@@ -169,7 +177,17 @@ impl StreamMaterialize {
         let append_only = input.append_only();
         let watermark_columns = input.watermark_columns().clone();
 
-        let (pk, stream_key) = derive_pk(input, user_order_by, &columns);
+        let (pk, stream_key) = if let Some(pk_column_indices) = pk_column_indices {
+            let pk = pk_column_indices
+                .iter()
+                .map(|idx| ColumnOrder::new(*idx, OrderType::ascending()))
+                .collect();
+            // No order by for create table, so stream key is identical to pk.
+            (pk, pk_column_indices)
+        } else {
+            derive_pk(input, user_order_by, &columns)
+        };
+
         let read_prefix_len_hint = stream_key.len();
         Ok(TableCatalog {
             id: TableId::placeholder(),
