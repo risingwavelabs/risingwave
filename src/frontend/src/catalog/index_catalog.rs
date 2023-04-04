@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::ops::Deref;
 use std::sync::Arc;
 
+use derivative::Derivative;
 use itertools::Itertools;
 use risingwave_common::catalog::IndexId;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -22,10 +24,11 @@ use risingwave_pb::catalog::PbIndex;
 
 use super::ColumnId;
 use crate::catalog::{DatabaseId, RelationCatalog, SchemaId, TableCatalog};
-use crate::expr::{Expr, ExprImpl};
+use crate::expr::{Expr, ExprImpl, FunctionCall};
 use crate::user::UserId;
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Derivative)]
+#[derivative(PartialEq, Eq, Hash)]
 pub struct IndexCatalog {
     pub id: IndexId,
 
@@ -44,6 +47,11 @@ pub struct IndexCatalog {
     pub primary_to_secondary_mapping: BTreeMap<usize, usize>,
 
     pub secondary_to_primary_mapping: BTreeMap<usize, usize>,
+
+    /// Map function call from the primary table to the index table.
+    #[derivative(PartialEq = "ignore")]
+    #[derivative(Hash = "ignore")]
+    pub function_mapping: HashMap<FunctionCall, usize>,
 
     pub original_columns: Vec<ColumnId>,
 }
@@ -78,6 +86,16 @@ impl IndexCatalog {
                 .map(|(x, y)| (y, x)),
         );
 
+        let function_mapping: HashMap<FunctionCall, usize> = index_item
+            .iter()
+            .enumerate()
+            .filter_map(|(i, expr)| match expr {
+                ExprImpl::InputRef(_) => None,
+                ExprImpl::FunctionCall(func) => Some((func.deref().clone(), i)),
+                _ => unreachable!(),
+            })
+            .collect();
+
         let original_columns = index_prost
             .original_columns
             .clone()
@@ -93,6 +111,7 @@ impl IndexCatalog {
             primary_table: Arc::new(primary_table.clone()),
             primary_to_secondary_mapping,
             secondary_to_primary_mapping,
+            function_mapping,
             original_columns,
         }
     }
@@ -131,6 +150,10 @@ impl IndexCatalog {
     /// index.
     pub fn primary_to_secondary_mapping(&self) -> &BTreeMap<usize, usize> {
         &self.primary_to_secondary_mapping
+    }
+
+    pub fn function_mapping(&self) -> &HashMap<FunctionCall, usize> {
+        &self.function_mapping
     }
 
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> PbIndex {
