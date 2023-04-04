@@ -34,6 +34,7 @@ use crate::common::table::state_table::StateTable;
 /// [`SortBuffer`]'s input and output. Generally, the component acts as a buffer that output the
 /// data it received with a delay, commonly used to implement emit-on-window-close policy.
 pub struct SortBuffer<S: StateStore> {
+    #[allow(dead_code)]
     sort_column_index: usize,
     _phantom: PhantomData<S>,
 }

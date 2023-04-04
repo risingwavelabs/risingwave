@@ -79,6 +79,7 @@ pub struct SortExecutor<S: StateStore> {
 }
 
 impl<S: StateStore> SortExecutor<S> {
+    #[allow(dead_code)]
     pub fn new(
         context: ActorContextRef,
         input: BoxedExecutor,
