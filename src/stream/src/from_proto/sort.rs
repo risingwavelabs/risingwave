@@ -42,7 +42,7 @@ impl ExecutorBuilder for SortExecutorBuilder {
             pk_indices: params.pk_indices,
             executor_id: params.executor_id,
             buffer_table: state_table,
-            chunk_size: params.env.config().developer.stream_chunk_size,
+            chunk_size: params.env.config().developer.chunk_size,
             sort_column_index: node.sort_column_index as _,
         })))
     }

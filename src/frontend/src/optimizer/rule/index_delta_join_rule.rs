@@ -136,7 +136,8 @@ impl Rule for IndexDeltaJoinRule {
                 // We already ensured that index and join use the same distribution, so we directly
                 // replace the children with stream index scan without inserting any exchanges.
                 Some(
-                    join.to_delta_join()
+                    join.clone()
+                        .into_delta_join()
                         .clone_with_left_right(left, right)
                         .into(),
                 )

@@ -11,6 +11,7 @@ cargo-cache: &cargo-cache
     - ".cargo/registry/index"
     - ".cargo/registry/cache"
     - ".cargo/git/db"
+    - ".cargo/advisory-db"
 
 steps:
   - label: "check ci image rebuild"
@@ -178,7 +179,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 5
+    timeout_in_minutes: 6
 
   - label: "regress test"
     command: "ci/scripts/regress-test.sh -p ci-dev"

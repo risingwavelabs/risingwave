@@ -21,7 +21,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
     columns_extend, is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId, ROW_ID_COLUMN_ID,
 };
-use risingwave_common::error::ErrorCode::{self, ProtocolError};
+use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::{
@@ -173,16 +173,19 @@ async fn extract_protobuf_table_schema(
 }
 
 #[inline(always)]
-fn get_connector(with_properties: &HashMap<String, String>) -> String {
+fn get_connector(with_properties: &HashMap<String, String>) -> Option<String> {
     with_properties
         .get(UPSTREAM_SOURCE_KEY)
-        .unwrap_or(&"".to_string())
-        .to_lowercase()
+        .map(|s| s.to_lowercase())
 }
 
 #[inline(always)]
 pub(crate) fn is_kafka_source(with_properties: &HashMap<String, String>) -> bool {
-    get_connector(with_properties).eq(KAFKA_CONNECTOR)
+    let Some(connector) = get_connector(with_properties) else {
+        return false;
+    };
+
+    connector == KAFKA_CONNECTOR
 }
 
 pub(crate) async fn resolve_source_schema(
@@ -528,7 +531,8 @@ fn validate_compatibility(
     source_schema: &SourceSchema,
     props: &mut HashMap<String, String>,
 ) -> Result<()> {
-    let connector = get_connector(props);
+    let connector = get_connector(props)
+        .ok_or_else(|| RwError::from(ProtocolError("missing field 'connector'".to_string())))?;
     let row_format = source_shema_to_row_format(source_schema);
 
     let compatible_formats = CONNECTORS_COMPATIBLE_FORMATS
@@ -583,7 +587,10 @@ fn check_nexmark_schema(
     row_id_index: Option<usize>,
     columns: &[ColumnCatalog],
 ) -> Result<()> {
-    let connector = get_connector(props);
+    let Some(connector) = get_connector(props) else {
+        return Ok(());
+    };
+
     if connector != NEXMARK_CONNECTOR {
         return Ok(());
     }
@@ -637,6 +644,12 @@ pub async fn handle_create_source(
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, stmt.source_name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
+    if handler_args.with_options.is_empty() {
+        return Err(RwError::from(InvalidInputSyntax(
+            "missing WITH clause".to_string(),
+        )));
+    }
+
     let mut with_properties = handler_args
         .with_options
         .inner()
@@ -680,10 +693,10 @@ pub async fn handle_create_source(
 
     bind_sql_column_constraints(&session, name.clone(), &mut columns, stmt.columns)?;
 
-    if columns.iter().any(|c| c.is_generated()) {
-        // TODO(yuhao): allow generated columns on source
+    if row_id_index.is_none() && columns.iter().any(|c| c.is_generated()) {
+        // TODO(yuhao): allow delete from a non append only source
         return Err(RwError::from(ErrorCode::BindError(
-            "Generated columns on source has not been implemented.".to_string(),
+            "Generated columns are only allowed in an append only source.".to_string(),
         )));
     }
 
@@ -704,6 +717,7 @@ pub async fn handle_create_source(
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs,
+        optional_associated_table_id: None,
     };
 
     let catalog_writer = session.env().catalog_writer();

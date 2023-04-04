@@ -247,8 +247,9 @@
               |         └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
               └─BatchValues { rows: [[]] }
   stream_error: |-
-    Feature is not yet implemented: Stream values executor is unimplemented!
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+    Not supported: streaming nested-loop join
+    HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
+    See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md
 - sql: |
     CREATE TABLE t (v int);
     SELECT 1 FROM t AS t_inner WHERE EXISTS ( SELECT 1 HAVING t_inner.v > 1);

@@ -134,7 +134,7 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
             child,
             source.task_id.clone(),
             identity,
-            source.context.get_config().developer.batch_chunk_size,
+            source.context.get_config().developer.chunk_size,
         )
     }
 }

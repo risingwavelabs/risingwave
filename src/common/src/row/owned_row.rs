@@ -144,6 +144,20 @@ impl OwnedRow {
             _ => unreachable!("type is not utf8 at index: {}", idx),
         }
     }
+
+    pub fn get_datetime(&self, idx: usize) -> &Timestamp {
+        match self[idx].as_ref().unwrap() {
+            ScalarImpl::Timestamp(dt) => dt,
+            _ => unreachable!("type is not NaiveDateTime at index: {}", idx),
+        }
+    }
+
+    pub fn get_decimal(&self, idx: usize) -> &Decimal {
+        match self[idx].as_ref().unwrap() {
+            ScalarImpl::Decimal(d) => d,
+            _ => unreachable!("type is not NaiveDateTime at index: {}", idx),
+        }
+    }
 }
 
 impl EstimateSize for OwnedRow {

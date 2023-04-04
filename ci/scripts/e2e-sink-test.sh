@@ -32,7 +32,7 @@ mv target/debug/librisingwave_java_binding.so-"$profile" target/debug/librisingw
 
 export RW_JAVA_BINDING_LIB_PATH=${PWD}/target/debug
 # TODO: Switch to stream_chunk encoding once it's completed, and then remove json encoding as well as this env var.
-export RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT=json
+export RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT=stream_chunk
 
 echo "--- Download connector node package"
 buildkite-agent artifact download risingwave-connector.tar.gz ./
@@ -117,5 +117,5 @@ else
 fi
 
 echo "--- Kill cluster"
-pkill -f connector-node
 cargo make ci-kill
+pkill -f connector-node

@@ -61,7 +61,9 @@ risingwave_pb = { path = "../prost" }
 rust_decimal = { version = "1", features = ["db-tokio-postgres"] }
 ryu = "1.0"
 serde = { version = "1", features = ["derive"] }
+serde_default = "0.1"
 serde_json = "1"
+serde_with = "2"
 static_assertions = "1"
 strum = "0.24"
 strum_macros = "0.24"
@@ -91,7 +93,7 @@ libc = "0.2"
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
 libc = "0.2.72"
-mach = "0.3.2"
+mach2 = "0.4"
 
 [dev-dependencies]
 criterion = "0.4"

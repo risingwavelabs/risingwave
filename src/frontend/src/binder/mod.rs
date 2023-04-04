@@ -222,6 +222,13 @@ impl Binder {
         Self::new_inner(session, true, vec![])
     }
 
+    pub fn new_for_stream_with_param_types(
+        session: &SessionImpl,
+        param_types: Vec<DataType>,
+    ) -> Binder {
+        Self::new_inner(session, true, param_types)
+    }
+
     /// Bind a [`Statement`].
     pub fn bind(&mut self, stmt: Statement) -> Result<BoundStatement> {
         self.bind_statement(stmt)
