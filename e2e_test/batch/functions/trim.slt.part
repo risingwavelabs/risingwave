@@ -67,3 +67,8 @@ query T
 select rtrim('abcxyzabc', 'bca');
 ----
 abcxyz
+
+query T
+select btrim('abcxyzabc', 'bca');
+----
+xyz

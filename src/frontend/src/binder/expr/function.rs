@@ -372,6 +372,7 @@ impl Binder {
                 ("replace", raw_call(ExprType::Replace)),
                 ("overlay", raw_call(ExprType::Overlay)),
                 ("position", raw_call(ExprType::Position)),
+                ("btrim", raw_call(ExprType::Trim)),
                 ("ltrim", raw_call(ExprType::Ltrim)),
                 ("rtrim", raw_call(ExprType::Rtrim)),
                 ("md5", raw_call(ExprType::Md5)),
