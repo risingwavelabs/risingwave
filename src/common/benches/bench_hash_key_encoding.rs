@@ -194,11 +194,11 @@ fn case_builders() -> Vec<HashKeyBenchCaseBuilder> {
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int32, DataType::Int32, DataType::Int32],
-            describe: "composite fixed".to_string(),
+            describe: "composite fixed, case 1".to_string(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int32, DataType::Int64, DataType::Int32],
-            describe: "composite fixed".to_string(),
+            describe: "composite fixed, case 2".to_string(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int32, DataType::Varchar],
