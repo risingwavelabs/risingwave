@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
 use std::hash::BuildHasher;
 use std::sync::Arc;
+use std::{fmt, usize};
 
 use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
@@ -440,29 +440,31 @@ impl DataChunk {
             Vis::Bitmap(vis) => {
                 let rows_num = vis.len();
                 let mut buffers = vec![BytesMut::new(); rows_num];
-                let mut row_len_variable: Vec<usize> = vec![0; rows_num];
+                let mut col_variable: Vec<&Column> = vec![];
+                col_variable.reserve(self.columns().len());
                 let mut row_len_fixed: usize = 0;
                 for c in &self.columns {
                     if let Some(field_len) = try_get_exact_serialize_datum_size(&c.array()) {
                         row_len_fixed += field_len;
                     } else {
-                        for (i, row_len) in row_len_variable.iter_mut().enumerate() {
-                            // SAFETY(value_at_unchecked): the idx is always in bound.
-                            unsafe {
-                                if vis.is_set_unchecked(i) {
-                                    *row_len += estimate_serialize_datum_size(
-                                        c.array_ref().value_at_unchecked(i),
-                                    );
-                                }
-                            }
-                        }
+                        col_variable.push(c);
                     }
                 }
                 for (i, buffer) in buffers.iter_mut().enumerate() {
                     // SAFETY(value_at_unchecked): the idx is always in bound.
                     unsafe {
                         if vis.is_set_unchecked(i) {
-                            buffer.reserve(row_len_fixed + row_len_variable[i]);
+                            buffer.reserve(
+                                row_len_fixed
+                                    + col_variable
+                                        .iter()
+                                        .map(|col| {
+                                            estimate_serialize_datum_size(
+                                                col.array_ref().value_at_unchecked(i),
+                                            )
+                                        })
+                                        .sum::<usize>(),
+                            );
                         }
                     }
                 }
@@ -482,24 +484,31 @@ impl DataChunk {
             }
             Vis::Compact(rows_num) => {
                 let mut buffers = vec![BytesMut::new(); *rows_num];
-                let mut row_len_variable: Vec<usize> = vec![0; *rows_num];
+                let mut col_variable: Vec<&Column> = vec![];
+                col_variable.reserve(self.columns().len());
                 let mut row_len_fixed: usize = 0;
                 for c in &self.columns {
                     if let Some(field_len) = try_get_exact_serialize_datum_size(&c.array()) {
                         row_len_fixed += field_len;
                     } else {
-                        for (i, row_len) in row_len_variable.iter_mut().enumerate() {
-                            // SAFETY(value_at_unchecked): the idx is always in bound.
-                            unsafe {
-                                *row_len += estimate_serialize_datum_size(
-                                    c.array_ref().value_at_unchecked(i),
-                                );
-                            }
-                        }
+                        col_variable.push(c);
                     }
                 }
                 for (i, buffer) in buffers.iter_mut().enumerate() {
-                    buffer.reserve(row_len_fixed + row_len_variable[i]);
+                    // SAFETY(value_at_unchecked): the idx is always in bound.
+                    unsafe {
+                        buffer.reserve(
+                            row_len_fixed
+                                + col_variable
+                                    .iter()
+                                    .map(|col| {
+                                        estimate_serialize_datum_size(
+                                            col.array_ref().value_at_unchecked(i),
+                                        )
+                                    })
+                                    .sum::<usize>(),
+                        );
+                    }
                 }
                 for c in &self.columns {
                     let c = c.array_ref();
