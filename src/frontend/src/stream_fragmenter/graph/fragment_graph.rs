@@ -107,7 +107,7 @@ impl StreamFragmentGraph {
             edges: self.edges.values().cloned().collect(),
             env: Some(self.env.clone()),
             // To be filled later
-            dependent_relation_ids: vec![],
+            dependent_table_ids: vec![],
             table_ids_cnt: 0,
             parallelism: None,
         }

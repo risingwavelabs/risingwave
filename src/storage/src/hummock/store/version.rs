@@ -18,7 +18,6 @@ use std::iter::once;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::{stream, StreamExt};
 use itertools::Itertools;
 use minitrace::future::FutureExt;
 use minitrace::Span;
@@ -655,12 +654,10 @@ impl HummockVersionReader {
             .with_label_values(&[table_id_label])
             .start_timer();
         let mut flatten_resps = vec![None; req_count];
-        let mut buffered = stream::iter(flatten_reqs).buffer_unordered(10);
-        while let Some(result) = buffered.next().await {
-            let (req_index, resp) = result?;
+        for flatten_req in flatten_reqs {
+            let (req_index, resp) = flatten_req.await?;
             flatten_resps[req_count - req_index - 1] = Some(resp);
         }
-        drop(buffered);
         timer.observe_duration();
 
         let mut sst_read_options = SstableIteratorReadOptions::from(&read_options);

@@ -247,8 +247,9 @@
               |         └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
               └─BatchValues { rows: [[]] }
   stream_error: |-
-    Feature is not yet implemented: Stream values executor is unimplemented!
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+    Not supported: streaming nested-loop join
+    HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
+    See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md
 - sql: |
     CREATE TABLE t (v int);
     SELECT 1 FROM t AS t_inner WHERE EXISTS ( SELECT 1 HAVING t_inner.v > 1);
@@ -356,3 +357,27 @@
 - sql: |
     SELECT 1, (SELECT regexp_matches('barbeque barbeque', '(bar)(beque)', 'g'))
   batch_error: 'internal error: Scalar subquery might produce more than one row.'
+- sql: |
+    create table t1 (a int, b int);
+    select a, (select count(*) from t1 where t1.a <> t.b) from t1 as t order by 1;
+  logical_plan: |
+    LogicalProject { exprs: [t1.a, count] }
+    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+      ├─LogicalScan { table: t1, columns: [t1.a, t1.b, t1._row_id] }
+      └─LogicalProject { exprs: [count] }
+        └─LogicalAgg { aggs: [count] }
+          └─LogicalProject { exprs: [] }
+            └─LogicalFilter { predicate: (t1.a <> CorrelatedInputRef { index: 1, correlated_id: 1 }) }
+              └─LogicalScan { table: t1, columns: [t1.a, t1.b, t1._row_id] }
+  optimized_logical_plan_for_batch: |
+    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t1.b, t1.b), output: [t1.a, count(1:Int32)] }
+    ├─LogicalScan { table: t1, columns: [t1.a, t1.b] }
+    └─LogicalAgg { group_key: [t1.b], aggs: [count(1:Int32)] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t1.b, t1.b), output: [t1.b, 1:Int32] }
+        ├─LogicalAgg { group_key: [t1.b], aggs: [] }
+        | └─LogicalScan { table: t1, columns: [t1.b] }
+        └─LogicalProject { exprs: [t1.b, 1:Int32] }
+          └─LogicalJoin { type: Inner, on: (t1.a <> t1.b), output: [t1.b] }
+            ├─LogicalAgg { group_key: [t1.b], aggs: [] }
+            | └─LogicalScan { table: t1, columns: [t1.b] }
+            └─LogicalScan { table: t1, columns: [t1.a] }

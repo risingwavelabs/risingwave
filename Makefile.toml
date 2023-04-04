@@ -476,8 +476,7 @@ alias = "dev"
 [tasks.dev]
 category = "RiseDev - Start"
 dependencies = ["pre-start-dev"]
-command = "target/${BUILD_MODE_DIR}/risedev-dev"
-args = ["${@}"]
+script = "RUST_BACKTRACE=full target/${BUILD_MODE_DIR}/risedev-dev ${@}"
 description = "Start a full RisingWave dev cluster using risedev-dev"
 
 [tasks.kafka]
@@ -801,9 +800,8 @@ script = """
 
 echo "Running $(tput setaf 4)cargo hakari$(tput sgr0) checks and attempting to fix"
 
-# cargo hakari will generate new Cargo.toml regardless whether the original Cargo.toml is correct or not.
-# So we always verify before generate, so as not to change the modified time of Cargo.toml.
-(cargo hakari verify > /dev/null) || cargo hakari generate
+cargo hakari generate --diff --quiet || cargo hakari generate
+cargo hakari verify > /dev/null
 test $? -eq 0 || exit 1
 """
 

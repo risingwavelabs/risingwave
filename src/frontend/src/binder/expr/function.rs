@@ -346,6 +346,15 @@ impl Binder {
                 ("abs", raw_call(ExprType::Abs)),
                 ("exp", raw_call(ExprType::Exp)),
                 ("mod", raw_call(ExprType::Modulus)),
+                ("sin", raw_call(ExprType::Sin)),
+                ("cos", raw_call(ExprType::Cos)), 
+                ("tan", raw_call(ExprType::Tan)), 
+                ("cot", raw_call(ExprType::Cot)), 
+                ("asin", raw_call(ExprType::Asin)), 
+                ("acos", raw_call(ExprType::Acos)), 
+                ("atan", raw_call(ExprType::Atan)), 
+                ("atan2", raw_call(ExprType::Atan2)),      
+
                 (
                     "to_timestamp",
                     dispatch_by_len(vec![
@@ -399,6 +408,7 @@ impl Binder {
                 ("array_to_string", raw_call(ExprType::ArrayToString)),
                 ("array_distinct", raw_call(ExprType::ArrayDistinct)),
                 ("array_length", raw_call(ExprType::ArrayLength)),
+                ("cardinality", raw_call(ExprType::Cardinality)),
                 // jsonb
                 ("jsonb_object_field", raw_call(ExprType::JsonbAccessInner)),
                 ("jsonb_array_element", raw_call(ExprType::JsonbAccessInner)),

@@ -14,7 +14,6 @@
 
 #![allow(clippy::needless_question_mark)]
 
-use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 
 use anyhow::{Context, Result};
@@ -22,6 +21,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use console::style;
 use dialoguer::MultiSelect;
 use enum_iterator::{all, Sequence};
+use fs_err::OpenOptions;
 use itertools::Itertools;
 use risedev::RISEDEV_CONFIG_FILE;
 

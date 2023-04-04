@@ -20,7 +20,7 @@ use bytes::{Buf, BufMut, Bytes};
 use fail::fail_point;
 use itertools::Itertools;
 use risingwave_common::cache::{CachePriority, LruCacheEventListener};
-use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_object_store::object::{
     BlockLocation, MonitoredStreamingReader, ObjectError, ObjectMetadata, ObjectStoreRef,
     ObjectStreamingUploader,
@@ -317,13 +317,16 @@ impl SstableStore {
 
     pub fn get_sst_data_path(&self, object_id: HummockSstableObjectId) -> String {
         let obj_prefix = self.store.get_object_prefix(object_id, true);
-        format!("{}/{}{}.data", self.path, obj_prefix, object_id)
+        format!(
+            "{}/{}{}.{}",
+            self.path, obj_prefix, object_id, OBJECT_SUFFIX
+        )
     }
 
     pub fn get_object_id_from_path(&self, path: &str) -> HummockSstableObjectId {
         let split = path.split(&['/', '.']).collect_vec();
-        debug_assert!(split.len() > 2);
-        debug_assert!(split[split.len() - 1] == "meta" || split[split.len() - 1] == "data");
+        assert!(split.len() > 2);
+        assert_eq!(split[split.len() - 1], OBJECT_SUFFIX);
         split[split.len() - 2]
             .parse::<HummockSstableObjectId>()
             .expect("valid sst id")
@@ -410,6 +413,11 @@ impl SstableStore {
         self.store
             .list(&format!("{}/", self.path))
             .await
+            .map(|v| {
+                v.into_iter()
+                    .filter(|m| m.key.ends_with(&format!(".{}", OBJECT_SUFFIX)))
+                    .collect()
+            })
             .map_err(HummockError::object_io_error)
     }
 

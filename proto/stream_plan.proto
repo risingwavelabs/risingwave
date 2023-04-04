@@ -127,7 +127,8 @@ message StreamSource {
   catalog.Table state_table = 2;
   optional uint32 row_id_index = 3;
   repeated plan_common.ColumnCatalog columns = 4;
-  repeated int32 pk_column_ids = 5;
+  reserved "pk_column_ids";
+  reserved 5;
   map<string, string> properties = 6;
   catalog.StreamSourceInfo info = 7;
   string source_name = 8;
@@ -530,6 +531,14 @@ message NowNode {
   catalog.Table state_table = 1;
 }
 
+message ValuesNode {
+  message ExprTuple {
+    repeated expr.ExprNode cells = 1;
+  }
+  repeated ExprTuple tuples = 1;
+  repeated plan_common.Field fields = 2;
+}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
@@ -565,6 +574,7 @@ message StreamNode {
     GroupTopNNode append_only_group_top_n = 130;
     TemporalJoinNode temporal_join = 131;
     BarrierRecvNode barrier_recv = 132;
+    ValuesNode values = 133;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -646,13 +656,14 @@ message StreamActor {
 }
 
 enum FragmentTypeFlag {
-  FRAGMENT_UNSPECIFIED = 0;
-  SOURCE = 1;
-  MVIEW = 2;
-  SINK = 4;
-  NOW = 8; // TODO: Remove this and insert a `BarrierRecv` instead.
-  CHAIN_NODE = 16;
-  BARRIER_RECV = 32;
+  FRAGMENT_TYPE_FLAG_FRAGMENT_UNSPECIFIED = 0;
+  FRAGMENT_TYPE_FLAG_SOURCE = 1;
+  FRAGMENT_TYPE_FLAG_MVIEW = 2;
+  FRAGMENT_TYPE_FLAG_SINK = 4;
+  FRAGMENT_TYPE_FLAG_NOW = 8; // TODO: Remove this and insert a `BarrierRecv` instead.
+  FRAGMENT_TYPE_FLAG_CHAIN_NODE = 16;
+  FRAGMENT_TYPE_FLAG_BARRIER_RECV = 32;
+  FRAGMENT_TYPE_FLAG_VALUES = 64;
 }
 
 // The environment associated with a stream plan
@@ -702,7 +713,7 @@ message StreamFragmentGraph {
   // edges between fragments.
   repeated StreamFragmentEdge edges = 2;
 
-  repeated uint32 dependent_relation_ids = 3;
+  repeated uint32 dependent_table_ids = 3;
   uint32 table_ids_cnt = 4;
   StreamEnvironment env = 5;
   // If none, default parallelism will be applied.

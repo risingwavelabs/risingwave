@@ -718,7 +718,6 @@ pub fn to_stream_prost_body(
                 info: Some(me.info.clone()),
                 row_id_index: me.row_id_index.map(|index| index as _),
                 columns: me.columns.iter().map(|c| c.to_protobuf()).collect(),
-                pk_column_ids: me.pk_col_ids.iter().map(Into::into).collect(),
                 properties: me.properties.clone().into_iter().collect(),
             });
             PbNodeBody::Source(SourceNode { source_inner })

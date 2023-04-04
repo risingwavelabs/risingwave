@@ -985,6 +985,28 @@ impl ToText for crate::types::Interval {
     }
 }
 
+impl Interval {
+    pub fn as_iso_8601(&self) -> String {
+        // ISO pattern - PnYnMnDTnHnMnS
+        let years = self.months / 12;
+        let months = self.months % 12;
+        let days = self.days;
+        let secs_fract = (self.usecs % USECS_PER_SEC).abs();
+        let total_secs = (self.usecs / USECS_PER_SEC).abs();
+        let hours = total_secs / 3600;
+        let minutes = (total_secs / 60) % 60;
+        let seconds = total_secs % 60;
+        let mut buf = [0u8; 7];
+        let fract_str = if secs_fract != 0 {
+            write!(buf.as_mut_slice(), ".{:06}", secs_fract).unwrap();
+            std::str::from_utf8(&buf).unwrap().trim_end_matches('0')
+        } else {
+            ""
+        };
+        format!("P{years}Y{months}M{days}DT{hours}H{minutes}M{seconds}{fract_str}S")
+    }
+}
+
 impl Display for Interval {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let years = self.months / 12;
