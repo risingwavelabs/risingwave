@@ -18,7 +18,6 @@ use std::iter::empty;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Array, DataChunk, RowRef};

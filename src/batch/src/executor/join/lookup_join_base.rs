@@ -14,7 +14,6 @@
 
 use std::marker::PhantomData;
 
-
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;

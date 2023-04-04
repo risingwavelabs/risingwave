@@ -28,7 +28,6 @@ use std::hash::{BuildHasher, Hash, Hasher};
 use std::io::{Cursor, Read};
 
 use chrono::{Datelike, Timelike};
-
 use smallbitset::Set64;
 
 use crate::array::serial_array::Serial;

@@ -17,7 +17,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use await_tree::InstrumentAwait;
-
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
