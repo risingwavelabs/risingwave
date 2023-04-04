@@ -134,7 +134,6 @@ impl FrontendEnv {
         let compute_client_pool = Arc::new(ComputeClientPool::default());
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
-            hummock_snapshot_manager.clone(),
             compute_client_pool,
             catalog_reader.clone(),
             Arc::new(DistributedQueryMetrics::for_test()),
@@ -223,7 +222,6 @@ impl FrontendEnv {
             Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
-            hummock_snapshot_manager.clone(),
             compute_client_pool,
             catalog_reader.clone(),
             Arc::new(DistributedQueryMetrics::new(registry.clone())),

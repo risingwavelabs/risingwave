@@ -617,7 +617,7 @@ impl LogicalScan {
 
             let mut plan: PlanRef = BatchSeqScan::new(scan, scan_ranges).into();
             if !predicate.always_true() {
-                plan = BatchFilter::new(LogicalFilter::new(plan, predicate)).into();
+                plan = BatchFilter::new(generic::Filter::new(predicate, plan)).into();
             }
             if let Some(exprs) = project_expr {
                 plan = BatchProject::new(LogicalProject::new(plan, exprs)).into()
