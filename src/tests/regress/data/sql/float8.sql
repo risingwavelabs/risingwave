@@ -81,8 +81,8 @@ SELECT f.f1, f.f1 - '-10' AS x
 --@    FROM FLOAT8_TBL f where f.f1 = '1004.3';
 
 -- absolute value
---@ SELECT f.f1, @f.f1 AS abs_f1
---@    FROM FLOAT8_TBL f;
+SELECT f.f1, @f.f1 AS abs_f1
+   FROM FLOAT8_TBL f;
 
 -- truncate
 --@ SELECT f.f1, trunc(f.f1) AS trunc_f1
