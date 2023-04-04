@@ -226,7 +226,6 @@ converts!(I32Array, arrow_array::Int32Array);
 converts!(I64Array, arrow_array::Int64Array);
 converts!(F32Array, arrow_array::Float32Array, @map);
 converts!(F64Array, arrow_array::Float64Array, @map);
-converts!(DecimalArray, arrow_array::Decimal128Array, @map);
 converts!(BytesArray, arrow_array::BinaryArray);
 converts!(Utf8Array, arrow_array::StringArray);
 converts!(DateArray, arrow_array::Date32Array, @map);
@@ -263,31 +262,6 @@ impl FromIntoArrow for F64 {
 
     fn into_arrow(self) -> Self::ArrowType {
         self.into()
-    }
-}
-
-impl FromIntoArrow for Decimal {
-    type ArrowType = i128;
-
-    fn from_arrow(value: Self::ArrowType) -> Self {
-        const NAN: i128 = i128::MIN + 1;
-        match value {
-            NAN => Decimal::NaN,
-            i128::MAX => Decimal::PositiveInf,
-            i128::MIN => Decimal::NegativeInf,
-            // FIXME: support non-zero scale
-            _ => Decimal::Normalized(rust_decimal::Decimal::from_i128_with_scale(value, 0)),
-        }
-    }
-
-    fn into_arrow(self) -> Self::ArrowType {
-        match self {
-            // FIXME: support non-zero scale
-            Decimal::Normalized(d) => d.mantissa(),
-            Decimal::NaN => i128::MIN + 1,
-            Decimal::PositiveInf => i128::MAX,
-            Decimal::NegativeInf => i128::MIN,
-        }
     }
 }
 
@@ -363,6 +337,56 @@ impl FromIntoArrow for Interval {
     }
 }
 
+// RisingWave Decimal type is self-contained, but Arrow is not.
+// In Arrow DecimalArray, the scale is stored in data type as metadata, and the mantissa is stored
+// as i128 in the array.
+impl From<&DecimalArray> for arrow_array::Decimal128Array {
+    fn from(array: &DecimalArray) -> Self {
+        let max_scale = array
+            .iter()
+            .filter_map(|o| o.map(|v| v.scale()))
+            .max()
+            .unwrap_or(0) as u32;
+        let mut builder = arrow_array::builder::Decimal128Builder::with_capacity(array.len())
+            .with_data_type(arrow_schema::DataType::Decimal128(28, max_scale as i8));
+        for value in array.iter() {
+            builder.append_option(value.map(|d| decimal_to_i128(d, max_scale)));
+        }
+        builder.finish()
+    }
+}
+
+fn decimal_to_i128(value: Decimal, scale: u32) -> i128 {
+    match value {
+        Decimal::Normalized(mut d) => {
+            d.rescale(scale);
+            d.mantissa()
+        }
+        Decimal::NaN => i128::MIN + 1,
+        Decimal::PositiveInf => i128::MAX,
+        Decimal::NegativeInf => i128::MIN,
+    }
+}
+
+impl From<&arrow_array::Decimal128Array> for DecimalArray {
+    fn from(array: &arrow_array::Decimal128Array) -> Self {
+        assert!(array.scale() >= 0, "todo: support negative scale");
+        let from_arrow = |value| {
+            const NAN: i128 = i128::MIN + 1;
+            match value {
+                NAN => Decimal::NaN,
+                i128::MAX => Decimal::PositiveInf,
+                i128::MIN => Decimal::NegativeInf,
+                _ => Decimal::Normalized(rust_decimal::Decimal::from_i128_with_scale(
+                    value,
+                    array.scale() as u32,
+                )),
+            }
+        };
+        array.iter().map(|o| o.map(from_arrow)).collect()
+    }
+}
+
 impl From<&ListArray> for arrow_array::ListArray {
     fn from(array: &ListArray) -> Self {
         use arrow_array::builder::*;
@@ -417,12 +441,20 @@ impl From<&ListArray> for arrow_array::ListArray {
                     b.append_option(v)
                 })
             }
-            ArrayImpl::Decimal(a) => build(
-                array,
-                a,
-                Decimal128Builder::with_capacity(a.len()),
-                |b, v| b.append_option(v.map(|d| d.into_arrow())),
-            ),
+            ArrayImpl::Decimal(a) => {
+                let max_scale = a
+                    .iter()
+                    .filter_map(|o| o.map(|v| v.scale()))
+                    .max()
+                    .unwrap_or(0) as u32;
+                build(
+                    array,
+                    a,
+                    Decimal128Builder::with_capacity(a.len())
+                        .with_data_type(arrow_schema::DataType::Decimal128(28, max_scale as i8)),
+                    |b, v| b.append_option(v.map(|d| decimal_to_i128(d, max_scale))),
+                )
+            }
             ArrayImpl::Interval(a) => build(
                 array,
                 a,
@@ -594,6 +626,7 @@ mod tests {
             Some(Decimal::NaN),
             Some(Decimal::PositiveInf),
             Some(Decimal::NegativeInf),
+            Some(Decimal::Normalized("123.4".parse().unwrap())),
             Some(Decimal::Normalized("123.456".parse().unwrap())),
         ]);
         let arrow = arrow_array::Decimal128Array::from(&array);
