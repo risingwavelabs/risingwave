@@ -338,6 +338,11 @@ pub enum Expr {
         substring_from: Option<Box<Expr>>,
         substring_for: Option<Box<Expr>>,
     },
+    /// POSITION(<expr> IN <expr>)
+    Position {
+        substring: Box<Expr>,
+        string: Box<Expr>,
+    },
     /// OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])
     Overlay {
         expr: Box<Expr>,
@@ -549,6 +554,9 @@ impl fmt::Display for Expr {
                 }
 
                 write!(f, ")")
+            }
+            Expr::Position { substring, string } => {
+                write!(f, "POSITION({} IN {})", substring, string)
             }
             Expr::Overlay {
                 expr,
