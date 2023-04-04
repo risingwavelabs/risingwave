@@ -2019,7 +2019,6 @@ where
     }
 
     fn notify_stats(&self, stats: &HummockVersionStats) {
-        println!("Sending stats");
         self.env
             .notification_manager()
             .notify_frontend_without_version(Operation::Update, Info::HummockStats(stats.clone()));
