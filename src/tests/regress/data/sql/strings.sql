@@ -722,8 +722,8 @@ SELECT rpad('hi', 5, '');
 
 SELECT ltrim('zzzytrim', 'xyz');
 
---@ SELECT translate('', '14', 'ax');
---@ SELECT translate('12345', '14', 'ax');
+SELECT translate('', '14', 'ax');
+SELECT translate('12345', '14', 'ax');
 
 SELECT ascii('x');
 SELECT ascii('');
