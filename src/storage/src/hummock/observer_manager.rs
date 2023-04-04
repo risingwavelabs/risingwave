@@ -86,8 +86,6 @@ impl ObserverState for HummockObserverNode {
                     .update_write_limits(write_limits.write_limits);
             }
 
-            Info::HummockStats(stats) => println!("STORAGE Stats {stats:?}"),
-
             _ => {
                 panic!("error type notification");
             }
