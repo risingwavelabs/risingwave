@@ -37,6 +37,7 @@ impl DataChunkBenchCase {
 fn bench_data_chunk_encoding(c: &mut Criterion) {
     let test_cases = vec![
         DataChunkBenchCase::new("Int16", vec![DataType::Int16]),
+        DataChunkBenchCase::new("String", vec![DataType::Varchar]),
         DataChunkBenchCase::new("Int16 and String", vec![DataType::Int16, DataType::Varchar]),
     ];
     for case in test_cases {
