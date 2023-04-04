@@ -51,11 +51,10 @@ impl DatabaseCatalog {
         self.schema_by_name.keys().cloned().collect_vec()
     }
 
-    pub fn get_all_table_ids(&self) -> Vec<TableId> {
+    pub fn iter_all_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
         self.schema_by_name
             .values()
             .flat_map(|schema| schema.iter_all().map(|t| t.id()))
-            .collect_vec()
     }
 
     pub fn get_all_schema_info(&self) -> Vec<PbSchema> {
