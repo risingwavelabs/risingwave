@@ -2865,7 +2865,7 @@ fn parse_trim() {
         "SELECT TRIM(TRAILING 'xyz' FROM 'xyzfooxyz')",
     );
 
-    one_statement_parses_to("SELECT TRIM('   foo   ')", "SELECT TRIM('   foo   ')");
+    one_statement_parses_to("SELECT TRIM('   foo   ')", "SELECT TRIM(FROM '   foo   ')");
 
     let res = parse_sql_statements("SELECT TRIM(FOO 'xyz' FROM 'xyzfooxyz')");
 

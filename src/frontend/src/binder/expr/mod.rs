@@ -111,7 +111,11 @@ impl Binder {
                 time_zone,
             } => self.bind_at_time_zone(*timestamp, time_zone),
             // special syntaxt for string
-            Expr::Trim { expr, trim_where } => self.bind_trim(*expr, trim_where),
+            Expr::Trim {
+                expr,
+                trim_where,
+                trim_what,
+            } => self.bind_trim(*expr, trim_where, trim_what),
             Expr::Substring {
                 expr,
                 substring_from,
@@ -243,21 +247,20 @@ impl Binder {
     pub(super) fn bind_trim(
         &mut self,
         expr: Expr,
-        // ([BOTH | LEADING | TRAILING], <expr>)
-        trim_where: Option<(TrimWhereField, Box<Expr>)>,
+        // BOTH | LEADING | TRAILING
+        trim_where: Option<TrimWhereField>,
+        trim_what: Option<Box<Expr>>,
     ) -> Result<ExprImpl> {
         let mut inputs = vec![self.bind_expr(expr)?];
         let func_type = match trim_where {
-            Some(t) => {
-                inputs.push(self.bind_expr(*t.1)?);
-                match t.0 {
-                    TrimWhereField::Both => ExprType::Trim,
-                    TrimWhereField::Leading => ExprType::Ltrim,
-                    TrimWhereField::Trailing => ExprType::Rtrim,
-                }
-            }
+            Some(TrimWhereField::Both) => ExprType::Trim,
+            Some(TrimWhereField::Leading) => ExprType::Ltrim,
+            Some(TrimWhereField::Trailing) => ExprType::Rtrim,
             None => ExprType::Trim,
         };
+        if let Some(t) = trim_what {
+            inputs.push(self.bind_expr(*t)?);
+        }
         Ok(FunctionCall::new(func_type, inputs)?.into())
     }
 

@@ -579,14 +579,15 @@ fn make_trim(func: ExprType, exprs: Vec<Expr>) -> Expr {
         E::Rtrim => TrimWhereField::Trailing,
         _ => unreachable!(),
     };
-    let trim_where = if exprs.len() > 1 {
-        Some((trim_type, Box::new(exprs[1].clone())))
+    let trim_what = if exprs.len() > 1 {
+        Some(Box::new(exprs[1].clone()))
     } else {
         None
     };
     Expr::Trim {
         expr: Box::new(exprs[0].clone()),
-        trim_where,
+        trim_where: Some(trim_type),
+        trim_what,
     }
 }
 
