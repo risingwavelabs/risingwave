@@ -146,10 +146,9 @@ impl Binder {
         // When the column types of `source` query do not match `expected_types`,
         // casting is needed.
         //
-        // In PG, when the `source` is a `VALUES` without order / limit / offset,
-        // special treatment is given and it is NOT equivalent to
-        // assignment cast over potential implicit cast inside. For
-        // example, the following is valid:
+        // In PG, when the `source` is a `VALUES` without order / limit / offset, special treatment
+        // is given and it is NOT equivalent to assignment cast over potential implicit cast inside.
+        // For example, the following is valid:
         //
         // ```
         //   create table t (v1 time);
@@ -160,17 +159,16 @@ impl Binder {
         //
         // ```
         //   values (timestamp '2020-01-01 01:02:03'), (time '03:04:05');
-        //   insert into t values (timestamp '2020-01-01 01:02:03'), (time '03:04:05')
-        // limit 1;
+        //   insert into t values (timestamp '2020-01-01 01:02:03'), (time '03:04:05') limit 1;
         // ```
         //
-        // Because `timestamp` can cast to `time` in assignment context, but no casting
-        // between them is allowed implicitly.
+        // Because `timestamp` can cast to `time` in assignment context, but no casting between them
+        // is allowed implicitly.
         //
-        // In this case, assignment cast should be used directly in `VALUES`,
-        // suppressing its internal implicit cast.
-        // In other cases, the `source` query is handled on its own and assignment cast
-        // is done afterwards.
+        // In this case, assignment cast should be used directly in `VALUES`, suppressing its
+        // internal implicit cast.
+        // In other cases, the `source` query is handled on its own and assignment cast is done
+        // afterwards.
         let bound_query;
         let cast_exprs;
 
