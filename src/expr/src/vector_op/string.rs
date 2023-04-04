@@ -109,6 +109,11 @@ pub fn lpad(s: &str, length: i32, writer: &mut dyn Write) {
 /// select lpad('hi', 5, 'xy');
 /// ----
 /// xyxhi
+///
+/// query T
+/// select lpad('hi', 5, '');
+/// ----
+/// hi
 /// ```
 #[function("lpad(varchar, int32, varchar) -> varchar")]
 pub fn lpad_fill(s: &str, length: i32, fill: &str, writer: &mut dyn Write) {
@@ -122,6 +127,8 @@ pub fn lpad_fill(s: &str, length: i32, fill: &str, writer: &mut dyn Write) {
         for c in s.chars().take(length as usize) {
             write!(writer, "{c}").unwrap();
         }
+    } else if fill_len == 0 {
+        write!(writer, "{s}").unwrap();
     } else {
         let mut remaining_length = length as usize - s_len;
         while remaining_length >= fill_len {
@@ -177,6 +184,12 @@ pub fn rpad(s: &str, length: i32, writer: &mut dyn Write) {
 /// select rpad('abcdef', 3, '0');
 /// ----
 /// abc
+///
+/// query T
+/// select rpad('hi', 5, '');
+/// ----
+/// hi
+/// ```
 #[function("rpad(varchar, int32, varchar) -> varchar")]
 pub fn rpad_fill(s: &str, length: i32, fill: &str, writer: &mut dyn Write) {
     let s_len = s.chars().count();
@@ -190,6 +203,8 @@ pub fn rpad_fill(s: &str, length: i32, fill: &str, writer: &mut dyn Write) {
         for c in s.chars().take(length as usize) {
             write!(writer, "{c}").unwrap();
         }
+    } else if fill_len == 0 {
+        write!(writer, "{s}").unwrap();
     } else {
         write!(writer, "{s}").unwrap();
         let mut remaining_length = length as usize - s_len;

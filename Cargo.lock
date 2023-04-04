@@ -3480,7 +3480,7 @@ checksum = "f051f77a7c8e6957c0696eac88f26b0117e54f52d3fc682ab19397a8812846a4"
 
 [[package]]
 name = "local_stats_alloc"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "workspace-hack",
 ]
@@ -3530,6 +3530,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lru"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03f1160296536f10c833a82dca22267d5486734230d47bf00bf435885814ba1e"
+dependencies = [
+ "hashbrown 0.13.2",
+]
+
+[[package]]
 name = "lz4"
 version = "1.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3561,10 +3570,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "mach"
-version = "0.3.2"
+name = "mach2"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b823e83b2affd8f40a9ee8c29dbc56404c1e34cd2710921f2801e2cf29527afa"
+checksum = "6d0d1830bcd151a6fc4aea1369af235b36c1528fe976b8ff678683c9995eade8"
 dependencies = [
  "libc",
 ]
@@ -3590,7 +3599,7 @@ dependencies = [
  "rand_xoshiro",
  "rustversion",
  "serde",
- "spin 0.9.6",
+ "spin 0.9.8",
  "tokio",
  "tokio-util",
  "toml 0.7.3",
@@ -3611,7 +3620,7 @@ dependencies = [
  "bytes",
  "http",
  "madsim",
- "spin 0.9.6",
+ "spin 0.9.8",
  "tracing",
 ]
 
@@ -3627,7 +3636,7 @@ dependencies = [
  "madsim",
  "serde",
  "serde_with 2.3.1",
- "spin 0.9.6",
+ "spin 0.9.8",
  "thiserror",
  "tokio",
  "toml 0.7.3",
@@ -3664,7 +3673,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "slab",
- "spin 0.9.6",
+ "spin 0.9.8",
  "thiserror",
  "tokio",
  "tracing",
@@ -3888,9 +3897,9 @@ dependencies = [
 
 [[package]]
 name = "moka"
-version = "0.9.7"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19b9268097a2cf211ac9955b1cc95e80fa84fff5c2d13ba292916445dc8a311f"
+checksum = "e0d3b8e76a2e4b17de765db9432e377a171c42fbe0512b8bc860ff1bfe2e273b"
 dependencies = [
  "async-io",
  "async-lock",
@@ -4668,7 +4677,7 @@ dependencies = [
 
 [[package]]
 name = "pgwire"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5282,15 +5291,15 @@ dependencies = [
 
 [[package]]
 name = "quanta"
-version = "0.10.1"
-source = "git+https://github.com/madsim-rs/quanta.git?rev=a819877#a819877978ef542a6e0c626e0220030fd7c3e717"
+version = "0.11.0"
+source = "git+https://github.com/madsim-rs/quanta.git?rev=948bdc3#948bdc3d4cd3fcfe3d52d03dd83deee96d97d770"
 dependencies = [
  "crossbeam-utils",
  "libc",
- "mach",
+ "mach2",
  "once_cell",
  "raw-cpuid",
- "wasi 0.10.0+wasi-snapshot-preview1",
+ "wasi 0.11.0+wasi-snapshot-preview1",
  "web-sys",
  "winapi",
 ]
@@ -5651,7 +5660,7 @@ dependencies = [
 
 [[package]]
 name = "risedev"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5659,6 +5668,7 @@ dependencies = [
  "console",
  "dialoguer",
  "enum-iterator",
+ "fs-err",
  "google-cloud-pubsub",
  "indicatif",
  "isahc",
@@ -5679,7 +5689,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_backup"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5699,7 +5709,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_backup_cmd"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "clap 4.1.11",
  "madsim-tokio",
@@ -5710,7 +5720,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_batch"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -5752,7 +5762,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_bench"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "async-trait",
  "aws-config",
@@ -5787,7 +5797,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_cmd"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "clap 4.1.11",
@@ -5807,7 +5817,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_cmd_all"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "clap 4.1.11",
@@ -5830,7 +5840,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -5860,7 +5870,7 @@ dependencies = [
  "itertools",
  "itoa",
  "libc",
- "mach",
+ "mach2",
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
@@ -5899,7 +5909,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_proc_macro"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "bae",
  "proc-macro-error",
@@ -5911,7 +5921,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_service"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "async-trait",
  "hyper",
@@ -5929,7 +5939,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compaction_test"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5956,7 +5966,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compactor"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5980,7 +5990,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compute"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6023,7 +6033,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_connector"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "apache-avro",
@@ -6045,6 +6055,7 @@ dependencies = [
  "futures-async-stream",
  "globset",
  "google-cloud-pubsub",
+ "hex",
  "http",
  "http-serde",
  "hyper",
@@ -6089,7 +6100,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_ctl"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "bytes",
@@ -6119,7 +6130,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_e2e_extended_mode_test"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6134,7 +6145,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_expr"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -6181,7 +6192,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_frontend"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -6244,7 +6255,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_hummock_sdk"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "bytes",
  "hex",
@@ -6262,7 +6273,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_hummock_test"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -6311,7 +6322,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -6376,7 +6387,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_object_store"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "async-trait",
  "await-tree",
@@ -6395,7 +6406,7 @@ dependencies = [
  "prometheus",
  "random-string",
  "risingwave_common",
- "spin 0.9.6",
+ "spin 0.9.8",
  "tempfile",
  "thiserror",
  "tracing",
@@ -6403,7 +6414,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_pb"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "enum-as-inner",
  "madsim-tonic",
@@ -6418,7 +6429,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_planner_test"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "backtrace",
@@ -6439,7 +6450,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_regress_test"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "clap 4.1.11",
@@ -6453,14 +6464,14 @@ dependencies = [
 
 [[package]]
 name = "risingwave_rpc_client"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
  "either",
  "futures",
  "itertools",
- "lru",
+ "lru 0.10.0",
  "madsim-tokio",
  "madsim-tonic",
  "moka",
@@ -6478,7 +6489,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_rt"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "await-tree",
  "console",
@@ -6503,7 +6514,7 @@ dependencies = [
  "futures",
  "glob",
  "itertools",
- "lru",
+ "lru 0.10.0",
  "madsim",
  "madsim-aws-sdk-s3",
  "madsim-etcd-client",
@@ -6534,7 +6545,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_source"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -6556,7 +6567,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_sqlparser"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "itertools",
  "matches",
@@ -6583,7 +6594,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_sqlsmith"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6606,7 +6617,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_state_cleaning_test"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6627,7 +6638,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_storage"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -6648,7 +6659,7 @@ dependencies = [
  "itertools",
  "libc",
  "lz4",
- "mach",
+ "mach2",
  "madsim-tokio",
  "memcomparable",
  "minitrace",
@@ -6671,7 +6682,7 @@ dependencies = [
  "risingwave_tracing",
  "scopeguard",
  "sled",
- "spin 0.9.6",
+ "spin 0.9.8",
  "sync-point",
  "sysinfo",
  "tempfile",
@@ -6687,7 +6698,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_stream"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -6708,7 +6719,7 @@ dependencies = [
  "iter-chunks",
  "itertools",
  "local_stats_alloc",
- "lru",
+ "lru 0.7.6",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -6745,7 +6756,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_test_runner"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "fail",
  "sync-point",
@@ -6754,7 +6765,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_tracing"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "futures",
@@ -7469,9 +7480,9 @@ checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
 
 [[package]]
 name = "spin"
-version = "0.9.6"
+version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5d6e0250b93c8427a177b849d144a96d5acc57006149479403d7861ab721e34"
+checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
 dependencies = [
  "lock_api",
 ]
@@ -7634,7 +7645,7 @@ version = "0.1.0"
 dependencies = [
  "futures-util",
  "madsim-tokio",
- "spin 0.9.6",
+ "spin 0.9.8",
  "thiserror",
 ]
 
@@ -8826,7 +8837,7 @@ dependencies = [
 
 [[package]]
 name = "workspace-config"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "isahc",
  "log",
@@ -8837,7 +8848,7 @@ dependencies = [
 
 [[package]]
 name = "workspace-hack"
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 dependencies = [
  "ahash 0.8.3",
  "anyhow",

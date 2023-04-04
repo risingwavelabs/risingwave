@@ -11,6 +11,7 @@ cargo-cache: &cargo-cache
     - ".cargo/registry/index"
     - ".cargo/registry/cache"
     - ".cargo/git/db"
+    - ".cargo/advisory-db"
 
 steps:
   - label: "check ci image rebuild"

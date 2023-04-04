@@ -27,7 +27,7 @@ use crate::catalog::TableId;
 use crate::expr::{Expr as _, ExprImpl};
 use crate::user::UserId;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundUpdate {
     /// Id of the table to perform updating.
     pub table_id: TableId,
