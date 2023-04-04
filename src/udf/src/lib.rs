@@ -52,14 +52,14 @@ impl ArrowFlightUdfClient {
         let actual_result_types: Vec<_> = return_fields.iter().map(|f| f.data_type()).collect();
         let expect_input_types: Vec<_> = args.fields.iter().map(|f| f.data_type()).collect();
         let expect_result_types: Vec<_> = returns.fields.iter().map(|f| f.data_type()).collect();
-        if expect_input_types != actual_input_types {
+        if !data_types_match(&expect_input_types, &actual_input_types) {
             return Err(Error::ArgumentMismatch {
                 function_id: id.into(),
                 expected: format!("{:?}", expect_input_types),
                 actual: format!("{:?}", actual_input_types),
             });
         }
-        if expect_result_types != actual_result_types {
+        if !data_types_match(&expect_result_types, &actual_result_types) {
             return Err(Error::ReturnTypeMismatch {
                 function_id: id.into(),
                 expected: format!("{:?}", expect_result_types),
@@ -161,4 +161,13 @@ pub enum Error {
     NoReturned,
     #[error("UDF service returned a batch with no column")]
     NoColumn,
+}
+
+/// Check if two list of data types match, ignoring field names.
+fn data_types_match(a: &[&arrow_schema::DataType], b: &[&arrow_schema::DataType]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    #[allow(clippy::disallowed_methods)]
+    a.iter().zip(b.iter()).all(|(a, b)| a.equals_datatype(b))
 }

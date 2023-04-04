@@ -6,8 +6,8 @@ create table t_remote (
     v_integer integer,
     v_bigint bigint,
     v_decimal decimal,
-    v_float float,
-    v_double double,
+    v_float real,
+    v_double double precision,
     v_timestamp timestamp
 );
 
@@ -18,14 +18,16 @@ statement ok
 CREATE SINK s_postgres FROM mv_remote WITH (
     connector='jdbc',
     jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
-    table.name='t_remote'
+    table.name='t_remote',
+    type='upsert'
 );
 
 statement ok
 CREATE SINK s_mysql FROM mv_remote WITH (
     connector='jdbc',
     jdbc.url='jdbc:mysql://mysql:3306/test?user=mysqluser&password=mysqlpw',
-    table.name='t_remote'
+    table.name='t_remote',
+    type='upsert'
 );
 
 statement ok

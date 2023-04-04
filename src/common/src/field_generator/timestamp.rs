@@ -22,7 +22,7 @@ use serde_json::{json, Value};
 use tracing::debug;
 
 use super::DEFAULT_MAX_PAST;
-use crate::types::{Datum, NaiveDateTimeWrapper, Scalar};
+use crate::types::{Datum, Scalar, Timestamp};
 
 #[derive(Debug)]
 enum LocalNow {
@@ -93,6 +93,6 @@ impl TimestampField {
     }
 
     pub fn generate_datum(&mut self, offset: u64) -> Datum {
-        Some(NaiveDateTimeWrapper::new(self.generate_data(offset)).to_scalar_value())
+        Some(Timestamp::new(self.generate_data(offset)).to_scalar_value())
     }
 }

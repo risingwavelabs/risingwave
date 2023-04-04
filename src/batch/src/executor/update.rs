@@ -209,7 +209,7 @@ impl BoxedExecutorBuilder for UpdateExecutor {
             source.context().dml_manager(),
             child,
             exprs,
-            source.context.get_config().developer.batch_chunk_size,
+            source.context.get_config().developer.chunk_size,
             source.plan_node().get_identity().clone(),
             update_node.returning,
         )))

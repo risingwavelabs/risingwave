@@ -291,6 +291,30 @@ macro_rules! impl_has_variant {
 
 impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery, TableFunction, WindowFunction}
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct InequalityInputPair {
+    /// Input index of greater side of inequality.
+    pub(crate) key_required_larger: usize,
+    /// Input index of less side of inequality.
+    pub(crate) key_required_smaller: usize,
+    /// greater >= less + delta_expression
+    pub(crate) delta_expression: Option<(ExprType, ExprImpl)>,
+}
+
+impl InequalityInputPair {
+    fn new(
+        key_required_larger: usize,
+        key_required_smaller: usize,
+        delta_expression: Option<(ExprType, ExprImpl)>,
+    ) -> Self {
+        Self {
+            key_required_larger,
+            key_required_smaller,
+            delta_expression,
+        }
+    }
+}
+
 impl ExprImpl {
     /// This function is not meant to be called. In most cases you would want
     /// [`ExprImpl::has_correlated_input_ref_by_depth`].
@@ -541,12 +565,13 @@ impl ExprImpl {
         }
     }
 
-    fn reverse_comparison(comparison: ExprType) -> ExprType {
+    pub fn reverse_comparison(comparison: ExprType) -> ExprType {
         match comparison {
             ExprType::LessThan => ExprType::GreaterThan,
             ExprType::LessThanOrEqual => ExprType::GreaterThanOrEqual,
             ExprType::GreaterThan => ExprType::LessThan,
             ExprType::GreaterThanOrEqual => ExprType::LessThanOrEqual,
+            ExprType::Equal | ExprType::IsNotDistinctFrom => comparison,
             _ => unreachable!(),
         }
     }
@@ -576,11 +601,11 @@ impl ExprImpl {
         }
     }
 
-    // Accepts expressions of the form `input_expr cmp now() [+- const_expr]` or
-    // `now() [+- const_expr] cmp input_expr`, where `input_expr` contains an
-    // `InputRef` and contains no `now()`.
-    //
-    // Canonicalizes to the first ordering and returns (input_expr, cmp, now_expr)
+    /// Accepts expressions of the form `input_expr cmp now() [+- const_expr]` or
+    /// `now() [+- const_expr] cmp input_expr`, where `input_expr` contains an
+    /// `InputRef` and contains no `now()`.
+    ///
+    /// Canonicalizes to the first ordering and returns `(input_expr, cmp, now_expr)`
     pub fn as_now_comparison_cond(&self) -> Option<(ExprImpl, ExprType, ExprImpl)> {
         if let ExprImpl::FunctionCall(function_call) = self {
             match function_call.get_expr_type() {
@@ -612,7 +637,55 @@ impl ExprImpl {
         }
     }
 
-    // Checks if expr is of the form `now() [+- const_expr]`
+    /// Accepts expressions of the form `InputRef cmp InputRef [+- const_expr]` or
+    /// `InputRef [+- const_expr] cmp InputRef`.
+    pub(crate) fn as_input_comparison_cond(&self) -> Option<InequalityInputPair> {
+        if let ExprImpl::FunctionCall(function_call) = self {
+            match function_call.get_expr_type() {
+                ty @ (ExprType::LessThan
+                | ExprType::LessThanOrEqual
+                | ExprType::GreaterThan
+                | ExprType::GreaterThanOrEqual) => {
+                    let (_, mut op1, mut op2) = function_call.clone().decompose_as_binary();
+                    if matches!(ty, ExprType::LessThan | ExprType::LessThanOrEqual) {
+                        std::mem::swap(&mut op1, &mut op2);
+                    }
+                    if let (Some((lft_input, lft_offset)), Some((rht_input, rht_offset))) =
+                        (op1.as_input_offset(), op2.as_input_offset())
+                    {
+                        match (lft_offset, rht_offset) {
+                            (Some(_), Some(_)) => None,
+                            (None, rht_offset @ Some(_)) => {
+                                Some(InequalityInputPair::new(lft_input, rht_input, rht_offset))
+                            }
+                            (Some((operator, operand)), None) => Some(InequalityInputPair::new(
+                                lft_input,
+                                rht_input,
+                                Some((
+                                    if operator == ExprType::Add {
+                                        ExprType::Subtract
+                                    } else {
+                                        ExprType::Add
+                                    },
+                                    operand,
+                                )),
+                            )),
+                            (None, None) => {
+                                Some(InequalityInputPair::new(lft_input, rht_input, None))
+                            }
+                        }
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Checks if expr is of the form `now() [+- const_expr]`
     fn is_now_offset(&self) -> bool {
         if let ExprImpl::FunctionCall(f) = self {
             match f.get_expr_type() {
@@ -628,6 +701,29 @@ impl ExprImpl {
             }
         } else {
             false
+        }
+    }
+
+    /// Returns the `InputRef` and offset of a predicate if it matches
+    /// the form `InputRef [+- const_expr]`, else returns None.
+    fn as_input_offset(&self) -> Option<(usize, Option<(ExprType, ExprImpl)>)> {
+        match self {
+            ExprImpl::InputRef(input_ref) => Some((input_ref.index(), None)),
+            ExprImpl::FunctionCall(function_call) => {
+                let expr_type = function_call.get_expr_type();
+                match expr_type {
+                    ExprType::Add | ExprType::Subtract => {
+                        let (_, lhs, rhs) = function_call.clone().decompose_as_binary();
+                        if let ExprImpl::InputRef(input_ref) = &lhs && rhs.is_const() {
+                            Some((input_ref.index(), Some((expr_type, rhs))))
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
         }
     }
 

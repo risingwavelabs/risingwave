@@ -63,6 +63,17 @@ select v1, v2 from t order by v2;
 45 810
 35 1919
 
+statement ok
+update t set v1 = DEFAULT where v2 = 810;
+
+query RI
+select v1, v2 from t order by v2;
+----
+114 10
+514 20
+NULL 810
+35 1919
+
 # Delete
 
 statement ok

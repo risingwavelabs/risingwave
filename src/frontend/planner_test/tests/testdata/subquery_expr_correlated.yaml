@@ -469,16 +469,15 @@
       ├─LogicalJoin { type: Inner, on: (a.a3 = b.b2), output: all }
       | ├─LogicalScan { table: a, columns: [a.a3] }
       | └─LogicalScan { table: b, columns: [b.b2] }
-      └─LogicalProject { exprs: [a.a3, b.b2] }
-        └─LogicalFilter { predicate: (3:Int32 = count(1:Int32)) }
-          └─LogicalAgg { group_key: [a.a3, b.b2], aggs: [count(1:Int32)] }
-            └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.a3, c.c3) AND IsNotDistinctFrom(b.b2, c.c2), output: [a.a3, b.b2, 1:Int32] }
-              ├─LogicalAgg { group_key: [a.a3, b.b2], aggs: [] }
-              | └─LogicalJoin { type: Inner, on: (a.a3 = b.b2), output: all }
-              |   ├─LogicalScan { table: a, columns: [a.a3] }
-              |   └─LogicalScan { table: b, columns: [b.b2] }
-              └─LogicalProject { exprs: [c.c3, c.c2, 1:Int32] }
-                └─LogicalScan { table: c, columns: [c.c2, c.c3], predicate: (c.c3 = c.c2) AND IsNotNull(c.c3) AND IsNotNull(c.c2) }
+      └─LogicalFilter { predicate: (3:Int32 = count(1:Int32)) }
+        └─LogicalAgg { group_key: [a.a3, b.b2], aggs: [count(1:Int32)] }
+          └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.a3, c.c3) AND IsNotDistinctFrom(b.b2, c.c2), output: [a.a3, b.b2, 1:Int32] }
+            ├─LogicalAgg { group_key: [a.a3, b.b2], aggs: [] }
+            | └─LogicalJoin { type: Inner, on: (a.a3 = b.b2), output: all }
+            |   ├─LogicalScan { table: a, columns: [a.a3] }
+            |   └─LogicalScan { table: b, columns: [b.b2] }
+            └─LogicalProject { exprs: [c.c3, c.c2, 1:Int32] }
+              └─LogicalScan { table: c, columns: [c.c2, c.c3], predicate: (c.c3 = c.c2) AND IsNotNull(c.c3) AND IsNotNull(c.c2) }
 - sql: |
     create table a(x int, y int, z int);
     create table b(x int, y int, z int);
@@ -577,10 +576,8 @@
     LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(t1.y, t2.y), output: all }
     ├─LogicalScan { table: t1, columns: [t1.x, t1.y] }
     └─LogicalJoin { type: Inner, on: (t2.x = t3.x) AND IsNotDistinctFrom(t2.y, t3.y), output: [t2.y] }
-      ├─LogicalProject { exprs: [t2.y, t2.x] }
-      | └─LogicalScan { table: t2, columns: [t2.x, t2.y], predicate: IsNotNull(t2.y) }
-      └─LogicalProject { exprs: [t3.y, t3.x] }
-        └─LogicalScan { table: t3, columns: [t3.x, t3.y], predicate: IsNotNull(t3.y) }
+      ├─LogicalScan { table: t2, columns: [t2.x, t2.y], predicate: IsNotNull(t2.y) }
+      └─LogicalScan { table: t3, columns: [t3.x, t3.y], predicate: IsNotNull(t3.y) }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -689,8 +686,7 @@
     LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(t1.y, t2.y), output: all }
     ├─LogicalScan { table: t1, columns: [t1.x, t1.y] }
     └─LogicalJoin { type: Inner, on: (t2.x = t3.x), output: [t2.y] }
-      ├─LogicalProject { exprs: [t2.y, t2.x] }
-      | └─LogicalScan { table: t2, columns: [t2.x, t2.y], predicate: IsNotNull(t2.y) }
+      ├─LogicalScan { table: t2, columns: [t2.x, t2.y], predicate: IsNotNull(t2.y) }
       └─LogicalScan { table: t3, columns: [t3.x] }
 - sql: |
     create table a (a1 int, a2 int);

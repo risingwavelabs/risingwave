@@ -397,7 +397,17 @@ impl TestCase {
                     .await?;
                 }
                 Statement::CreateSource { stmt } => {
-                    create_source::handle_create_source(handler_args, stmt).await?;
+                    if let Err(error) =
+                        create_source::handle_create_source(handler_args, stmt).await
+                    {
+                        let actual_result = TestCaseResult {
+                            planner_error: Some(error.to_string()),
+                            ..Default::default()
+                        };
+
+                        check_result(self, &actual_result)?;
+                        result = Some(actual_result);
+                    }
                 }
                 Statement::CreateIndex {
                     name,

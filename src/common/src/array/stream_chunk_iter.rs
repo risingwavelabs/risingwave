@@ -12,11 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::iter::once;
-
-use auto_enums::auto_enum;
-
 use super::data_chunk_iter::DataChunkRefIter;
+use super::stream_record::Record;
 use super::RowRef;
 use crate::array::{Op, StreamChunk};
 
@@ -50,7 +47,7 @@ pub struct StreamChunkRefIter<'a> {
 }
 
 impl<'a> Iterator for StreamChunkRefIter<'a> {
-    type Item = RecordRef<'a>;
+    type Item = Record<RowRef<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let row = self.inner.next()?;
@@ -58,17 +55,17 @@ impl<'a> Iterator for StreamChunkRefIter<'a> {
         let op = unsafe { self.chunk.ops().get_unchecked(row.index()) };
 
         match op {
-            Op::Insert => Some(RecordRef::Insert(row)),
-            Op::Delete => Some(RecordRef::Delete(row)),
+            Op::Insert => Some(Record::Insert { new_row: row }),
+            Op::Delete => Some(Record::Delete { old_row: row }),
             Op::UpdateDelete => {
                 let insert_row = self.inner.next().expect("expect a row after U-");
                 // SAFETY: index is checked since `insert_row` is `Some`.
                 let op = unsafe { *self.chunk.ops().get_unchecked(insert_row.index()) };
                 debug_assert_eq!(op, Op::UpdateInsert, "expect a U+ after U-");
 
-                Some(RecordRef::Update {
-                    delete: row,
-                    insert: insert_row,
+                Some(Record::Update {
+                    old_row: row,
+                    new_row: insert_row,
                 })
             }
             Op::UpdateInsert => panic!("expect a U- before U+"),
@@ -81,37 +78,13 @@ impl<'a> Iterator for StreamChunkRefIter<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum RecordRef<'a> {
-    Insert(RowRef<'a>),
-    Delete(RowRef<'a>),
-    Update {
-        delete: RowRef<'a>,
-        insert: RowRef<'a>,
-    },
-}
-
-impl<'a> RecordRef<'a> {
-    /// Convert this stream record to one or two rows with corresponding ops.
-    #[auto_enum(Iterator)]
-    pub fn into_row_refs(self) -> impl Iterator<Item = (Op, RowRef<'a>)> {
-        match self {
-            RecordRef::Insert(row_ref) => once((Op::Insert, row_ref)),
-            RecordRef::Delete(row_ref) => once((Op::Delete, row_ref)),
-            RecordRef::Update { delete, insert } => {
-                [(Op::UpdateDelete, delete), (Op::UpdateInsert, insert)].into_iter()
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     extern crate test;
     use itertools::Itertools;
     use test::Bencher;
 
-    use super::RecordRef;
+    use crate::array::stream_record::Record;
     use crate::row::Row;
     use crate::test_utils::test_stream_chunk::{
         BigStreamChunk, TestStreamChunk, WhatEverStreamChunk,
@@ -134,7 +107,7 @@ mod tests {
         let chunk = test.stream_chunk();
         let mut rows = chunk
             .records()
-            .flat_map(RecordRef::into_row_refs)
+            .flat_map(Record::into_rows)
             .map(|(op, row)| (op, row.into_owned_row()));
         assert_eq!(Some(test.row_with_op_at(0)), rows.next());
         assert_eq!(Some(test.row_with_op_at(1)), rows.next());
@@ -146,7 +119,7 @@ mod tests {
     fn bench_rows_iterator_from_records(b: &mut Bencher) {
         let chunk = BigStreamChunk::new(10000).stream_chunk();
         b.iter(|| {
-            for (_op, row) in chunk.records().flat_map(RecordRef::into_row_refs) {
+            for (_op, row) in chunk.records().flat_map(Record::into_rows) {
                 test::black_box(row.iter().count());
             }
         })
@@ -180,11 +153,11 @@ mod tests {
         b.iter(|| {
             for record in chunk.records() {
                 match record {
-                    RecordRef::Insert(row) => test::black_box(row.iter().count()),
-                    RecordRef::Delete(row) => test::black_box(row.iter().count()),
-                    RecordRef::Update { delete, insert } => {
-                        test::black_box(delete.iter().count());
-                        test::black_box(insert.iter().count())
+                    Record::Insert { new_row } => test::black_box(new_row.iter().count()),
+                    Record::Delete { old_row } => test::black_box(old_row.iter().count()),
+                    Record::Update { old_row, new_row } => {
+                        test::black_box(old_row.iter().count());
+                        test::black_box(new_row.iter().count())
                     }
                 };
             }

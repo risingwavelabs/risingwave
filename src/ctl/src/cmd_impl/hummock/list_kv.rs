@@ -15,6 +15,7 @@
 use core::ops::Bound::Unbounded;
 
 use risingwave_common::catalog::TableId;
+use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::store::{PrefetchOptions, ReadOptions, StateStoreReadExt};
 
 use crate::common::HummockServiceOpts;
@@ -46,6 +47,7 @@ pub async fn list_kv(
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    cache_policy: CachePolicy::NotFill,
                 },
             )
             .await?

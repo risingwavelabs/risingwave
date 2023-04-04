@@ -17,8 +17,8 @@ use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::serial_array::SerialArray;
 use risingwave_common::array::{
-    ArrayBuilderImpl, BoolArray, DataChunk, DecimalArray, F32Array, F64Array, I16Array, I32Array,
-    I64Array, IntervalArray, NaiveDateArray, NaiveDateTimeArray, NaiveTimeArray, Utf8Array,
+    ArrayBuilderImpl, BoolArray, DataChunk, DateArray, DecimalArray, F32Array, F64Array, I16Array,
+    I32Array, I64Array, IntervalArray, TimeArray, TimestampArray, Utf8Array,
 };
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_common::test_utils::rand_array::seed_rand_array_ref;
@@ -82,7 +82,7 @@ struct HashKeyBenchCase<K: HashKey> {
 
 impl<K: HashKey> HashKeyBenchCase<K> {
     pub fn new(id: String, input_chunk: DataChunk, data_types: Vec<DataType>) -> Self {
-        // please check the `bench_vec_dser` and `bench_deser` method when want to bench not full
+        // please reference the `bench_vec_deser` and `bench_deser` method for benchmarking partial
         // `col_idxes`
         let col_idxes = (0..input_chunk.columns().len()).collect_vec();
         let keys = HashKey::build(&col_idxes, &input_chunk).unwrap();
@@ -151,13 +151,11 @@ fn gen_chunk(data_types: &[DataType], size: usize, seed: u64, null_ratio: f64) -
             DataType::Float32 => seed_rand_array_ref::<F32Array>(size, seed, null_ratio),
             DataType::Float64 => seed_rand_array_ref::<F64Array>(size, seed, null_ratio),
             DataType::Decimal => seed_rand_array_ref::<DecimalArray>(size, seed, null_ratio),
-            DataType::Date => seed_rand_array_ref::<NaiveDateArray>(size, seed, null_ratio),
+            DataType::Date => seed_rand_array_ref::<DateArray>(size, seed, null_ratio),
             DataType::Varchar => seed_rand_array_ref::<Utf8Array>(size, seed, null_ratio),
-            DataType::Time => seed_rand_array_ref::<NaiveTimeArray>(size, seed, null_ratio),
+            DataType::Time => seed_rand_array_ref::<TimeArray>(size, seed, null_ratio),
             DataType::Serial => seed_rand_array_ref::<SerialArray>(size, seed, null_ratio),
-            DataType::Timestamp => {
-                seed_rand_array_ref::<NaiveDateTimeArray>(size, seed, null_ratio)
-            }
+            DataType::Timestamp => seed_rand_array_ref::<TimestampArray>(size, seed, null_ratio),
             DataType::Timestamptz => seed_rand_array_ref::<I64Array>(size, seed, null_ratio),
             DataType::Interval => seed_rand_array_ref::<IntervalArray>(size, seed, null_ratio),
             DataType::Struct(_) | DataType::Bytea | DataType::Jsonb => {
@@ -191,6 +189,10 @@ fn case_builders() -> Vec<HashKeyBenchCaseBuilder> {
             describe: "varchar".to_string(),
         },
         HashKeyBenchCaseBuilder {
+            data_types: vec![DataType::Varchar, DataType::Varchar],
+            describe: "composite varchar".to_string(),
+        },
+        HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int32, DataType::Int32, DataType::Int32],
             describe: "composite fixed".to_string(),
         },
@@ -200,11 +202,35 @@ fn case_builders() -> Vec<HashKeyBenchCaseBuilder> {
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int32, DataType::Varchar],
-            describe: "mix fixed and not1".to_string(),
+            describe: "mix fixed and not fixed, case 1".to_string(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int64, DataType::Varchar],
-            describe: "mix fixed and not2".to_string(),
+            describe: "mix fixed and not fixed, case 2".to_string(),
+        },
+        HashKeyBenchCaseBuilder {
+            data_types: vec![DataType::Int64; 8],
+            describe: "medium fixed".to_string(),
+        },
+        HashKeyBenchCaseBuilder {
+            data_types: {
+                let mut v = vec![DataType::Int64; 8];
+                v[7] = DataType::Varchar;
+                v
+            },
+            describe: "medium mixed".to_string(),
+        },
+        HashKeyBenchCaseBuilder {
+            data_types: vec![DataType::Int64; 16],
+            describe: "large fixed".to_string(),
+        },
+        HashKeyBenchCaseBuilder {
+            data_types: {
+                let mut v = vec![DataType::Int64; 16];
+                v[15] = DataType::Varchar;
+                v
+            },
+            describe: "large mixed".to_string(),
         },
     ]
 }

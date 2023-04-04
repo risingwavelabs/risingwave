@@ -29,7 +29,7 @@ services:
     environment:
       RUST_BACKTRACE: "1"
       # If ENABLE_TELEMETRY is not set, telemetry will start by default
-      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY}
+      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
     container_name: compactor-0
     healthcheck:
       test:
@@ -70,7 +70,7 @@ services:
     environment:
       RUST_BACKTRACE: "1"
       # If ENABLE_TELEMETRY is not set, telemetry will start by default
-      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY}
+      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
     container_name: compute-node-0
     healthcheck:
       test:
@@ -82,7 +82,7 @@ services:
       timeout: 5s
       retries: 5
   etcd-0:
-    image: "quay.io/coreos/etcd:latest"
+    image: "quay.io/coreos/etcd:v3.5.7"
     command:
       - /usr/local/bin/etcd
       - "--listen-client-urls"
@@ -99,6 +99,8 @@ services:
       - risedev-meta
       - "--max-txn-ops"
       - "999999"
+      - "--max-request-bytes"
+      - "10485760"
       - "--auto-compaction-mode"
       - periodic
       - "--auto-compaction-retention"
@@ -151,7 +153,7 @@ services:
     environment:
       RUST_BACKTRACE: "1"
       # If ENABLE_TELEMETRY is not set, telemetry will start by default
-      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY}
+      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
     container_name: frontend-node-0
     healthcheck:
       test:
@@ -223,7 +225,7 @@ services:
     environment:
       RUST_BACKTRACE: "1"
       # If ENABLE_TELEMETRY is not set, telemetry will start by default
-      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY}
+      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
     container_name: meta-node-0
     healthcheck:
       test:

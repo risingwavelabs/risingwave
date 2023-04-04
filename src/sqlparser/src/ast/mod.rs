@@ -43,6 +43,9 @@ pub use self::query::{
 };
 pub use self::statement::*;
 pub use self::value::{DateTimeField, DollarQuotedString, TrimWhereField, Value};
+pub use crate::ast::ddl::{
+    AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterViewOperation,
+};
 use crate::keywords::Keyword;
 use crate::parser::{Parser, ParserError};
 
@@ -991,6 +994,31 @@ pub enum Statement {
         name: ObjectName,
         operation: AlterTableOperation,
     },
+    /// ALTER INDEX
+    AlterIndex {
+        /// Index name
+        name: ObjectName,
+        operation: AlterIndexOperation,
+    },
+    /// ALTER VIEW
+    AlterView {
+        /// View name
+        name: ObjectName,
+        materialized: bool,
+        operation: AlterViewOperation,
+    },
+    /// ALTER SINK
+    AlterSink {
+        /// Sink name
+        name: ObjectName,
+        operation: AlterSinkOperation,
+    },
+    /// ALTER SOURCE
+    AlterSource {
+        /// Source name
+        name: ObjectName,
+        operation: AlterSourceOperation,
+    },
     /// DESCRIBE TABLE OR SOURCE
     Describe {
         /// Table or Source name
@@ -1363,7 +1391,7 @@ impl fmt::Display for Statement {
                 if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
                 name = name,
                 table_name = table_name,
-                columns = display_separated(columns, ","),
+                columns = display_comma_separated(columns),
                 include = if include.is_empty() {
                     "".to_string()
                 } else {
@@ -1385,6 +1413,18 @@ impl fmt::Display for Statement {
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
             Statement::AlterTable { name, operation } => {
                 write!(f, "ALTER TABLE {} {}", name, operation)
+            }
+            Statement::AlterIndex { name, operation } => {
+                write!(f, "ALTER INDEX {} {}", name, operation)
+            }
+            Statement::AlterView { materialized, name, operation } => {
+                write!(f, "ALTER {}VIEW {} {}", if *materialized { "MATERIALIZED " } else { "" }, name, operation)
+            }
+            Statement::AlterSink { name, operation } => {
+                write!(f, "ALTER SINK {} {}", name, operation)
+            }
+            Statement::AlterSource { name, operation } => {
+                write!(f, "ALTER SOURCE {} {}", name, operation)
             }
             Statement::Drop(stmt) => write!(f, "DROP {}", stmt),
             Statement::DropFunction {
@@ -1774,12 +1814,30 @@ impl fmt::Display for GrantObjects {
     }
 }
 
-/// SQL assignment `foo = expr` as used in SQLUpdate
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum AssignmentValue {
+    /// An expression, e.g. `foo = 1`
+    Expr(Expr),
+    /// The `DEFAULT` keyword, e.g. `foo = DEFAULT`
+    Default,
+}
+
+impl fmt::Display for AssignmentValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AssignmentValue::Expr(expr) => write!(f, "{}", expr),
+            AssignmentValue::Default => f.write_str("DEFAULT"),
+        }
+    }
+}
+
+/// SQL assignment `foo = { expr | DEFAULT }` as used in SQLUpdate
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Assignment {
     pub id: Vec<Ident>,
-    pub value: Expr,
+    pub value: AssignmentValue,
 }
 
 impl fmt::Display for Assignment {

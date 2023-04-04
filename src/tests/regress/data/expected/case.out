@@ -73,7 +73,7 @@ SELECT '6' AS "One",
 (1 row)
 
 SELECT '7' AS "None",
-   CASE WHEN random() < 0 THEN 1
+   CASE WHEN 1 < 0 THEN 1
    END AS "NULL on no matches";
  None | NULL on no matches 
 ------+--------------------
