@@ -41,7 +41,7 @@ use crate::types::{DataType, Date, Decimal, ScalarRef, Time, Timestamp, F32, F64
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::iter_util::ZipEqFast;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum_into};
-use smallbitset::Set8;
+use smallbitset::{Set64, Set8};
 
 /// Bitmap for null values in key.
 /// This is specialized for key,
@@ -49,13 +49,13 @@ use smallbitset::Set8;
 #[repr(transparent)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct NullBitmap {
-    inner: Set8,
+    inner: Set64,
 }
 
 impl NullBitmap {
     fn empty() -> Self {
         NullBitmap {
-            inner: Set8::empty(),
+            inner: Set64::empty(),
         }
     }
     fn is_empty(&self) -> bool {
@@ -65,7 +65,7 @@ impl NullBitmap {
         self.inner.add_inplace(idx);
     }
     fn estimated_heap_size(&self) -> usize {
-        8
+        self.inner.capacity()
     }
     fn len(&self) -> usize {
         self.inner.len()
