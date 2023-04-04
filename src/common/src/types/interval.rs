@@ -92,8 +92,8 @@ impl Interval {
     ///
     /// Note the difference between `usecs` and `seconds_in_micros`.
     ///
-    /// We have: `usecs = hours_field * 3600 + minutes_field * 60 + seconds_in_micros as f64 /
-    /// 1_000_000.0`.
+    /// We have: `usecs = (hours_field * 3600 + minutes_field * 60) * 1_000_000 +
+    /// seconds_in_micros`.
     pub fn usecs(&self) -> i64 {
         self.usecs
     }
@@ -162,8 +162,8 @@ impl Interval {
     /// let interval: Interval = "-25:00:00".parse().unwrap();
     /// assert_eq!(interval.hours_field(), -25);
     /// ```
-    pub fn hours_field(&self) -> i32 {
-        (self.usecs / USECS_PER_SEC / 3600) as i32
+    pub fn hours_field(&self) -> i64 {
+        self.usecs / USECS_PER_SEC / 3600
     }
 
     /// Returns the minutes field. range: `-59..=-59`
@@ -197,7 +197,10 @@ impl Interval {
         (self.usecs % (USECS_PER_SEC * 60)) as i32
     }
 
-    /// Returns the microseconds since 1970-01-01 00:00:00+00.
+    /// Returns the total number of microseconds since 1970-01-01 00:00:00+00.
+    ///
+    /// Note this value is not used by interval ordering (`IntervalCmpValue`) and is not consistent
+    /// with it.
     pub fn epoch_in_micros(&self) -> i128 {
         // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/timestamp.c#L5304
 
