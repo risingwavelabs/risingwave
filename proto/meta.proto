@@ -260,7 +260,6 @@ message Relation {
     catalog.Index index = 4;
     catalog.View view = 5;
     catalog.Function function = 6;
-    catalog.Connection connection = 7;
   }
 }
 
@@ -292,6 +291,7 @@ message SubscribeResponse {
     SystemParams system_params = 19;
     hummock.WriteLimits hummock_write_limits = 20;
     RelationGroup relation_group = 21;
+    catalog.Connection connection = 22;
   }
 }
 

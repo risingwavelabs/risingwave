@@ -359,7 +359,7 @@ where
         core.connection_by_name.insert(conn_name, conn_id);
 
         let version = self
-            .notify_frontend_relation_info(Operation::Add, RelationInfo::Connection(connection))
+            .notify_frontend(Operation::Add, Info::Connection(connection))
             .await;
         Ok(version)
     }
@@ -377,7 +377,7 @@ where
         commit_meta!(self, connections)?;
 
         let version = self
-            .notify_frontend_relation_info(Operation::Delete, RelationInfo::Connection(connection))
+            .notify_frontend(Operation::Delete, Info::Connection(connection))
             .await;
         Ok(version)
     }
