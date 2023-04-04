@@ -15,9 +15,9 @@
 use std::fmt::Debug;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME};
+use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{DataType as AstDataType, Distinct, Expr, Select, SelectItem};
 
@@ -29,8 +29,13 @@ use crate::catalog::check_valid_column_name;
 use crate::catalog::system_catalog::pg_catalog::{
     PG_USER_ID_INDEX, PG_USER_NAME_INDEX, PG_USER_TABLE_NAME,
 };
+use crate::catalog::system_catalog::rw_catalog::{
+    RW_TABLE_ID_INDEX, RW_TABLE_STATS_KEY_SIZE_INDEX, RW_TABLE_STATS_TABLE_NAME,
+    RW_TABLE_STATS_VALUE_SIZE_INDEX,
+};
 use crate::expr::{
     CorrelatedId, CorrelatedInputRef, Depth, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef,
+    Literal,
 };
 
 #[derive(Debug, Clone)]
@@ -357,6 +362,65 @@ impl Binder {
                 vec![
                     input,
                     InputRef::new(PG_USER_ID_INDEX, DataType::Int32).into(),
+                ],
+            )?
+            .into(),
+        );
+
+        Ok(BoundSelect {
+            distinct: BoundDistinct::All,
+            select_items,
+            aliases: vec![None],
+            from,
+            where_clause,
+            group_by: vec![],
+            having: None,
+            schema,
+        })
+    }
+
+    pub fn bind_get_table_size_by_id_select(&mut self, input: &ExprImpl) -> Result<BoundSelect> {
+        let table_name = input.as_literal().unwrap();
+        let data = table_name.get_data().as_ref().unwrap().as_utf8();
+
+        let table = self.bind_table(None, &data, None)?;
+        let table_id = table.table_id;
+        let input = ExprImpl::Literal(Box::new(Literal::new(
+            Some(ScalarImpl::Int32(table_id.table_id as i32)),
+            DataType::Int32,
+        )));
+        let key_value_size_sum = FunctionCall::new(
+            ExprType::Add,
+            vec![
+                InputRef::new(RW_TABLE_STATS_KEY_SIZE_INDEX, DataType::Int64).into(),
+                InputRef::new(RW_TABLE_STATS_VALUE_SIZE_INDEX, DataType::Int64).into(),
+            ],
+        )?
+        .into();
+        let select_items = vec![key_value_size_sum];
+
+        // Is this the schema for the input to the query or the output of the query?
+        let schema = Schema {
+            fields: vec![Field::with_name(
+                DataType::Int64,
+                UNNAMED_COLUMN.to_string(),
+            )],
+        };
+        // define the output schema
+        let from = Some(self.bind_relation_by_name_inner(
+            Some(RW_CATALOG_SCHEMA_NAME),
+            RW_TABLE_STATS_TABLE_NAME,
+            None,
+            false,
+        )?);
+
+        // Define the where clause
+        let where_clause = Some(
+            FunctionCall::new(
+                ExprType::Equal,
+                vec![
+                    input,
+                    InputRef::new(RW_TABLE_ID_INDEX, DataType::Int32).into(),
                 ],
             )?
             .into(),
