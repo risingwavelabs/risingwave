@@ -2313,11 +2313,32 @@ def section_hummock_manager(outer_panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "Stale SST Total Number",
-                    "total number of SSTs that is no longer referenced by versions but is not yet deleted from storage",
+                    "Object Total Number",
+                    """
+Objects are classified into 3 groups:
+- not referenced by versions: these object are being deleted from object store.
+- referenced by non-current versions: these objects are stale (not in the latest version), but those old versions may still be in use (e.g. long-running pinning). Thus those objects cannot be deleted at the moment.
+- referenced by current version: these objects are in the latest version.
+                    """,
                     [
-                        panels.target(f"{metric('storage_stale_ssts_count')}",
-                                      "stale SST total number"),
+                        panels.target(f"{metric('storage_stale_object_count')}",
+                                      "not referenced by versions"),
+                        panels.target(f"{metric('storage_old_version_object_count')}",
+                                      "referenced by non-current versions"),
+                        panels.target(f"{metric('storage_current_version_object_count')}",
+                                      "referenced by current version"),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Object Total Size",
+                    "Refer to `Object Total Number` panel for classification of objects.",
+                    [
+                        panels.target(f"{metric('storage_stale_object_size')}",
+                                      "not referenced by versions"),
+                        panels.target(f"{metric('storage_old_version_object_size')}",
+                                      "referenced by non-current versions"),
+                        panels.target(f"{metric('storage_current_version_object_size')}",
+                                      "referenced by current version"),
                     ],
                 ),
                 panels.timeseries_count(
