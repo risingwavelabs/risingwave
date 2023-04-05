@@ -48,14 +48,7 @@ impl LogicalTopN {
             assert!(offset == 0, "WITH TIES is not supported with OFFSET");
         }
 
-        let core = generic::TopN {
-            input,
-            limit,
-            offset,
-            with_ties,
-            order,
-            group_key: vec![],
-        };
+        let core = generic::TopN::without_group_key(input, limit, offset, with_ties, order);
 
         let ctx = core.ctx();
         let schema = core.schema();

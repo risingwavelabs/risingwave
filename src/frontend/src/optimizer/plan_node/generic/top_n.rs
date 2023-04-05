@@ -90,6 +90,23 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
+    pub fn without_group_key(
+        input: PlanRef,
+        limit: u64,
+        offset: u64,
+        with_ties: bool,
+        order: Order,
+    ) -> Self {
+        Self {
+            input,
+            limit,
+            offset,
+            with_ties,
+            order,
+            group_key: vec![],
+        }
+    }
+
     pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         let mut builder = f.debug_struct(name);
         let input = self.input;
