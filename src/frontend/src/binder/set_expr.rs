@@ -127,7 +127,7 @@ impl Binder {
                         let left = Box::new(self.bind_set_expr(*left)?);
                         // Reset context for right side, but keep `cte_to_relation`.
                         let new_context = std::mem::take(&mut self.context);
-                        self.context.cte_to_relation = new_context.cte_to_relation;
+                        self.context.cte_to_relation = new_context.cte_to_relation.clone();
                         let right = Box::new(self.bind_set_expr(*right)?);
 
                         if left.schema().fields.len() != right.schema().fields.len() {
@@ -160,6 +160,7 @@ impl Binder {
                         // select a from t2 union all select b from t2 order by a+1; should throw an
                         // error.
                         self.context = BindContext::default();
+                        self.context.cte_to_relation = new_context.cte_to_relation;
                         Ok(BoundSetExpr::SetOperation {
                             op: BoundSetOperation::Union,
                             all,
