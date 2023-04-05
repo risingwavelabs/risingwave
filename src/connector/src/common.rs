@@ -114,7 +114,7 @@ pub struct KafkaCommon {
     sasl_oathbearer_config: Option<String>,
 
     #[serde(
-        rename = "properties.sync.call.timeout.ms",
+        rename = "properties.sync.call.timeout",
         deserialize_with = "deserialize_duration_from_string",
         default = "default_kafka_sync_call_timeout"
     )]
