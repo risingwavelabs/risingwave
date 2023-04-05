@@ -5,11 +5,11 @@ extend = [
   { path = "src/risedevtool/etcd.toml" },
   { path = "src/risedevtool/jaeger.toml" },
   { path = "src/risedevtool/kafka.toml" },
-  { path = "src/risedevtool/gcloud-pubsub.toml"},
+  { path = "src/risedevtool/gcloud-pubsub.toml" },
   { path = "src/risedevtool/redis.toml" },
   { path = "src/risedevtool/connector.toml" },
   { path = "src/risedevtool/risedev-components.toml" },
-  { path = "src/sqlparser/test_runner/sqlparser_test.toml"},
+  { path = "src/sqlparser/test_runner/sqlparser_test.toml" },
   { path = "src/frontend/planner_test/planner_test.toml" },
   { path = "src/tests/compaction_test/Makefile.toml" },
   { path = "src/storage/backup/integration_tests/Makefile.toml" },
@@ -588,7 +588,11 @@ description = "Run unit tests"
 [tasks.build-connector-node]
 category = "RiseDev - Components"
 dependencies = ["prepare"]
-condition = { env_set = ["ENABLE_BUILD_RW_CONNECTOR"] }
+condition = { files_modified = { input = [
+  "./java/connector-node/**/*.java",
+], output = [
+  "./java/connector-node/assembly/target/*",
+] } }
 description = "Build RisingWave Connector from source"
 script = '''
 #!/usr/bin/env bash
@@ -603,13 +607,10 @@ fi
 ARTIFACT="risingwave-connector-1.0.0.tar.gz"
 TARGET_PATH="${JAVA_DIR}/connector-node/assembly/target/${ARTIFACT}"
 
-if [[ ! -f ${TARGET_PATH} ]] || [[ ! -z ${REBUILD_CONNECTOR_NODE} ]]; then
-  echo "Rebuild connector node"
-  cd "${JAVA_DIR}"
-  "${MAVEN_PATH}" --batch-mode --update-snapshots clean package -Dmaven.test.skip
-else
-  echo "$(tput setaf 4)$(tput bold)[Reminder]$(tput sgr0) Connector node was built already, skipped build. Set $(tput setaf 4)REBUILD_CONNECTOR_NODE=1$(tput sgr0) to enable rebuild"
-fi
+echo "Building connector node..."
+cd "${JAVA_DIR}"
+"${MAVEN_PATH}" --batch-mode --update-snapshots clean package -Dmaven.test.skip
+
 rm -rf ${PREFIX_BIN}/connector-node
 mkdir -p "${PREFIX_BIN}/connector-node"
 tar xf ${TARGET_PATH} -C "${PREFIX_BIN}/connector-node"
@@ -758,7 +759,7 @@ cargo llvm-cov run \
 category = "RiseDev - Check"
 description = "Run mvn spotless:check in connector-node"
 dependencies = ["warn-on-missing-tools"]
-condition = { env_set = [ "ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
+condition = { env_set = ["ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
 script = """
 #!/usr/bin/env bash
 set -e
@@ -777,7 +778,7 @@ cd "${JAVA_DIR}"
 category = "RiseDev - Check"
 description = "Run mvn spotless:apply in connector-node"
 dependencies = ["warn-on-missing-tools"]
-condition = { env_set = [ "ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
+condition = { env_set = ["ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
 script = """
 #!/usr/bin/env bash
 set -e
