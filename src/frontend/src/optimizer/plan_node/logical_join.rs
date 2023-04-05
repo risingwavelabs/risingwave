@@ -142,6 +142,28 @@ impl LogicalJoin {
         &self.core.on
     }
 
+    /// Collect all input ref in the on condition. And separate them into left and right.
+    pub fn input_idx_on_condition(&self) -> (Vec<usize>, Vec<usize>) {
+        let input_refs = self
+            .core
+            .on
+            .collect_input_refs(self.core.left.schema().len() + self.core.right.schema().len());
+        let index_group = input_refs
+            .ones()
+            .group_by(|i| *i < self.core.left.schema().len());
+        let left_index = index_group
+            .into_iter()
+            .next()
+            .map_or(vec![], |group| group.1.collect_vec());
+        let right_index = index_group.into_iter().next().map_or(vec![], |group| {
+            group
+                .1
+                .map(|i| i - self.core.left.schema().len())
+                .collect_vec()
+        });
+        (left_index, right_index)
+    }
+
     /// Get the join type of the logical join.
     pub fn join_type(&self) -> JoinType {
         self.core.join_type

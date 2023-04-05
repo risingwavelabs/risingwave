@@ -1814,12 +1814,30 @@ impl fmt::Display for GrantObjects {
     }
 }
 
-/// SQL assignment `foo = expr` as used in SQLUpdate
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum AssignmentValue {
+    /// An expression, e.g. `foo = 1`
+    Expr(Expr),
+    /// The `DEFAULT` keyword, e.g. `foo = DEFAULT`
+    Default,
+}
+
+impl fmt::Display for AssignmentValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AssignmentValue::Expr(expr) => write!(f, "{}", expr),
+            AssignmentValue::Default => f.write_str("DEFAULT"),
+        }
+    }
+}
+
+/// SQL assignment `foo = { expr | DEFAULT }` as used in SQLUpdate
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Assignment {
     pub id: Vec<Ident>,
-    pub value: Expr,
+    pub value: AssignmentValue,
 }
 
 impl fmt::Display for Assignment {

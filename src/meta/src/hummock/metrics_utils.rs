@@ -19,12 +19,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use itertools::{enumerate, Itertools};
 use prost::Message;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
+    object_size_map, HummockVersionExt,
+};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockEpoch, HummockVersionId};
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
     CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion,
-    HummockVersionStats,
+    HummockVersionCheckpoint, HummockVersionStats,
 };
 
 use super::compaction::{get_compression_algorithm, DynamicLevelSelectorCore};
@@ -251,8 +253,41 @@ pub fn trigger_safepoint_stat(metrics: &MetaMetrics, safepoints: &[HummockVersio
     }
 }
 
-pub fn trigger_stale_ssts_stat(metrics: &MetaMetrics, total_number: usize) {
-    metrics.stale_ssts_count.set(total_number as _);
+pub fn trigger_gc_stat(
+    metrics: &MetaMetrics,
+    checkpoint: &HummockVersionCheckpoint,
+    min_pinned_version_id: HummockVersionId,
+) {
+    let current_version_object_size_map = object_size_map(checkpoint.version.as_ref().unwrap());
+    let current_version_object_size = current_version_object_size_map.values().sum::<u64>();
+    let current_version_object_count = current_version_object_size_map.len();
+    let mut old_version_object_size = 0;
+    let mut old_version_object_count = 0;
+    let mut stale_object_size = 0;
+    let mut stale_object_count = 0;
+    checkpoint.stale_objects.iter().for_each(|(id, objects)| {
+        if *id <= min_pinned_version_id {
+            stale_object_size += objects.total_file_size;
+            stale_object_count += objects.id.len() as u64;
+        } else {
+            old_version_object_size += objects.total_file_size;
+            old_version_object_count += objects.id.len() as u64;
+        }
+    });
+    metrics
+        .current_version_object_size
+        .set(current_version_object_size as _);
+    metrics
+        .current_version_object_count
+        .set(current_version_object_count as _);
+    metrics
+        .old_version_object_size
+        .set(old_version_object_size as _);
+    metrics
+        .old_version_object_count
+        .set(old_version_object_count as _);
+    metrics.stale_object_size.set(stale_object_size as _);
+    metrics.stale_object_count.set(stale_object_count as _);
 }
 
 pub fn trigger_delta_log_stats(metrics: &MetaMetrics, total_number: usize) {

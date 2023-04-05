@@ -82,7 +82,7 @@ struct HashKeyBenchCase<K: HashKey> {
 
 impl<K: HashKey> HashKeyBenchCase<K> {
     pub fn new(id: String, input_chunk: DataChunk, data_types: Vec<DataType>) -> Self {
-        // please check the `bench_vec_dser` and `bench_deser` method when want to bench not full
+        // please reference the `bench_vec_deser` and `bench_deser` method for benchmarking partial
         // `col_idxes`
         let col_idxes = (0..input_chunk.columns().len()).collect_vec();
         let keys = HashKey::build(&col_idxes, &input_chunk).unwrap();
@@ -189,6 +189,10 @@ fn case_builders() -> Vec<HashKeyBenchCaseBuilder> {
             describe: "varchar".to_string(),
         },
         HashKeyBenchCaseBuilder {
+            data_types: vec![DataType::Varchar, DataType::Varchar],
+            describe: "composite varchar".to_string(),
+        },
+        HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int32, DataType::Int32, DataType::Int32],
             describe: "composite fixed".to_string(),
         },
@@ -198,11 +202,35 @@ fn case_builders() -> Vec<HashKeyBenchCaseBuilder> {
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int32, DataType::Varchar],
-            describe: "mix fixed and not1".to_string(),
+            describe: "mix fixed and not fixed, case 1".to_string(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int64, DataType::Varchar],
-            describe: "mix fixed and not2".to_string(),
+            describe: "mix fixed and not fixed, case 2".to_string(),
+        },
+        HashKeyBenchCaseBuilder {
+            data_types: vec![DataType::Int64; 8],
+            describe: "medium fixed".to_string(),
+        },
+        HashKeyBenchCaseBuilder {
+            data_types: {
+                let mut v = vec![DataType::Int64; 8];
+                v[7] = DataType::Varchar;
+                v
+            },
+            describe: "medium mixed".to_string(),
+        },
+        HashKeyBenchCaseBuilder {
+            data_types: vec![DataType::Int64; 16],
+            describe: "large fixed".to_string(),
+        },
+        HashKeyBenchCaseBuilder {
+            data_types: {
+                let mut v = vec![DataType::Int64; 16];
+                v[15] = DataType::Varchar;
+                v
+            },
+            describe: "large mixed".to_string(),
         },
     ]
 }

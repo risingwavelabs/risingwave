@@ -18,7 +18,7 @@ use pg_interval::Interval;
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use tokio_postgres::types::Type;
-use tokio_postgres::NoTls;
+use tokio_postgres::{Client, NoTls};
 
 use crate::opts::Opts;
 
@@ -32,8 +32,10 @@ macro_rules! test_eq {
             (left_val, right_val) => {
                 if !(*left_val == *right_val) {
                     return Err(anyhow!(
-                        "assertion failed: `(left == right)` \
+                        "{}:{} assertion failed: `(left == right)` \
                                 (left: `{:?}`, right: `{:?}`)",
+                        file!(),
+                        line!(),
                         left_val,
                         right_val
                     ));
@@ -67,11 +69,12 @@ impl TestSuite {
         self.binary_param_and_result().await?;
         self.dql_dml_with_param().await?;
         self.max_row().await?;
+        self.multiple_on_going_portal().await?;
+        self.create_with_parameter().await?;
         Ok(())
     }
 
-    pub async fn binary_param_and_result(&self) -> anyhow::Result<()> {
-        // Connect to the database.
+    async fn create_client(&self) -> anyhow::Result<Client> {
         let (client, connection) = tokio_postgres::connect(&self.config, NoTls).await?;
 
         // The connection object performs the actual communication with the database,
@@ -81,6 +84,12 @@ impl TestSuite {
                 eprintln!("connection error: {}", e);
             }
         });
+
+        Ok(client)
+    }
+
+    pub async fn binary_param_and_result(&self) -> anyhow::Result<()> {
+        let client = self.create_client().await?;
 
         for row in client.query("select $1::SMALLINT;", &[&1024_i16]).await? {
             let data: i16 = row.try_get(0)?;
@@ -192,15 +201,7 @@ impl TestSuite {
     }
 
     async fn dql_dml_with_param(&self) -> anyhow::Result<()> {
-        let (client, connection) = tokio_postgres::connect(&self.config, NoTls).await?;
-
-        // The connection object performs the actual communication with the database,
-        // so spawn it off to run on its own.
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                eprintln!("connection error: {}", e);
-            }
-        });
+        let client = self.create_client().await?;
 
         client.query("create table t(id int)", &[]).await?;
 
@@ -265,15 +266,7 @@ impl TestSuite {
     }
 
     async fn max_row(&self) -> anyhow::Result<()> {
-        let (mut client, connection) = tokio_postgres::connect(&self.config, NoTls).await?;
-
-        // The connection object performs the actual communication with the database,
-        // so spawn it off to run on its own.
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                eprintln!("connection error: {}", e);
-            }
-        });
+        let mut client = self.create_client().await?;
 
         client.query("create table t(id int)", &[]).await?;
 
@@ -318,6 +311,66 @@ impl TestSuite {
         transaction.rollback().await?;
 
         client.execute("drop table t", &[]).await?;
+
+        Ok(())
+    }
+
+    async fn multiple_on_going_portal(&self) -> anyhow::Result<()> {
+        let mut client = self.create_client().await?;
+
+        let transaction = client.transaction().await?;
+        let statement = transaction
+            .prepare_typed("SELECT generate_series(1,5,1)", &[])
+            .await?;
+        let portal_1 = transaction.bind(&statement, &[]).await?;
+        let portal_2 = transaction.bind(&statement, &[]).await?;
+
+        let rows = transaction.query_portal(&portal_1, 1).await?;
+        test_eq!(rows.len(), 1);
+        test_eq!(rows.get(0).unwrap().get::<usize, i32>(0), 1);
+
+        let rows = transaction.query_portal(&portal_2, 1).await?;
+        test_eq!(rows.len(), 1);
+        test_eq!(rows.get(0).unwrap().get::<usize, i32>(0), 1);
+
+        let rows = transaction.query_portal(&portal_2, 3).await?;
+        test_eq!(rows.len(), 3);
+        test_eq!(rows.get(0).unwrap().get::<usize, i32>(0), 2);
+        test_eq!(rows.get(1).unwrap().get::<usize, i32>(0), 3);
+        test_eq!(rows.get(2).unwrap().get::<usize, i32>(0), 4);
+
+        let rows = transaction.query_portal(&portal_1, 1).await?;
+        test_eq!(rows.len(), 1);
+        test_eq!(rows.get(0).unwrap().get::<usize, i32>(0), 2);
+
+        Ok(())
+    }
+
+    // Can't support these sql
+    async fn create_with_parameter(&self) -> anyhow::Result<()> {
+        let client = self.create_client().await?;
+
+        test_eq!(
+            client
+                .query("create table t as select $1", &[])
+                .await
+                .is_err(),
+            true
+        );
+        test_eq!(
+            client
+                .query("create view v as select $1", &[])
+                .await
+                .is_err(),
+            true
+        );
+        test_eq!(
+            client
+                .query("create materialized view v as select $1", &[])
+                .await
+                .is_err(),
+            true
+        );
 
         Ok(())
     }
