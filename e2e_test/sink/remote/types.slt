@@ -13,7 +13,7 @@ statement ok
 drop sink s;
 
 statement ok
-drop table t;
+drop table t5;
 
 statement ok
 create table t6 (v1 smallint primary key, v2 int, v3 bigint, v4 float, v5 double, v6 decimal, v7 varchar, v8 timestamp, v9 boolean, v10 date, v11 struct<v12 time, v13 timestamptz>, v14 varchar[]);
