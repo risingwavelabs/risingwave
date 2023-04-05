@@ -588,7 +588,7 @@ description = "Run unit tests"
 [tasks.build-connector-node]
 category = "RiseDev - Components"
 dependencies = ["prepare"]
-condition = { files_modified = { input = [
+condition = { env_set = ["ENABLE_BUILD_RW_CONNECTOR"], files_modified = { input = [
   "./java/connector-node/**/*.java",
 ], output = [
   "./java/connector-node/assembly/target/*",
