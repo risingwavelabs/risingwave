@@ -49,7 +49,7 @@ impl BatchTopN {
     fn two_phase_topn(&self, input: PlanRef) -> Result<PlanRef> {
         let new_limit = self.logical.limit + self.logical.offset;
         let new_offset = 0;
-        let logical_partial_topn = generic::TopN::without_group_key(
+        let logical_partial_topn = generic::TopN::without_group(
             input,
             new_limit,
             new_offset,

@@ -48,7 +48,7 @@ impl LogicalTopN {
             assert!(offset == 0, "WITH TIES is not supported with OFFSET");
         }
 
-        let core = generic::TopN::without_group_key(input, limit, offset, with_ties, order);
+        let core = generic::TopN::without_group(input, limit, offset, with_ties, order);
 
         let ctx = core.ctx();
         let schema = core.schema();
@@ -174,17 +174,15 @@ impl LogicalTopN {
         );
         let vnode_col_idx = exprs.len() - 1;
         let project = StreamProject::new(LogicalProject::new(stream_input, exprs.clone()));
-        let local_top_n = StreamGroupTopN::new(
-            LogicalTopN::with_group(
-                project.into(),
-                self.limit() + self.offset(),
-                0,
-                self.with_ties(),
-                self.topn_order().clone(),
-                vec![vnode_col_idx],
-            ),
-            Some(vnode_col_idx),
+        let mut logical_top_n = generic::TopN::without_group(
+            project.into(),
+            self.limit() + self.offset(),
+            0,
+            self.with_ties(),
+            self.topn_order().clone(),
         );
+        logical_top_n.group_key = vec![vnode_col_idx];
+        let local_top_n = StreamGroupTopN::new(logical_top_n, Some(vnode_col_idx));
         let exchange =
             RequiredDist::single().enforce_if_not_satisfies(local_top_n.into(), &Order::any())?;
         let global_top_n = StreamTopN::new(LogicalTopN::new(
@@ -361,7 +359,8 @@ impl ToStream for LogicalTopN {
             let input = self.input().to_stream(ctx)?;
             let input = RequiredDist::hash_shard(self.group_key())
                 .enforce_if_not_satisfies(input, &Order::any())?;
-            let logical = self.clone_with_input(input);
+            let mut logical = self.core.clone();
+            logical.input = input;
             StreamGroupTopN::new(logical, None).into()
         } else {
             self.gen_dist_stream_top_n_plan(self.input().to_stream(ctx)?)?

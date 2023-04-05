@@ -90,7 +90,7 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
-    pub fn without_group_key(
+    pub fn without_group(
         input: PlanRef,
         limit: u64,
         offset: u64,

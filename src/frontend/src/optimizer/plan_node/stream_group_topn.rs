@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::FieldDisplay;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::{ExprRewritable, LogicalTopN, PlanBase, PlanTreeNodeUnary, StreamNode};
+use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Order, OrderDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
@@ -27,24 +27,24 @@ use crate::PlanRef;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamGroupTopN {
     pub base: PlanBase,
-    logical: LogicalTopN,
+    logical: generic::TopN<PlanRef>,
     /// an optional column index which is the vnode of each row computed by the input's consistent
     /// hash distribution
     vnode_col_idx: Option<usize>,
 }
 
 impl StreamGroupTopN {
-    pub fn new(logical: LogicalTopN, vnode_col_idx: Option<usize>) -> Self {
-        assert!(!logical.group_key().is_empty());
-        assert!(logical.limit() > 0);
-        let input = logical.input();
+    pub fn new(logical: generic::TopN<PlanRef>, vnode_col_idx: Option<usize>) -> Self {
+        assert!(!logical.group_key.is_empty());
+        assert!(logical.limit > 0);
+        let input = logical.input;
         let schema = input.schema().clone();
 
         let watermark_columns = if input.append_only() {
             input.watermark_columns().clone()
         } else {
             let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
-            for &idx in logical.group_key() {
+            for idx in logical.group_key {
                 if input.watermark_columns().contains(idx) {
                     watermark_columns.insert(idx);
                 }
@@ -69,23 +69,23 @@ impl StreamGroupTopN {
     }
 
     pub fn limit(&self) -> u64 {
-        self.logical.limit()
+        self.logical.limit
     }
 
     pub fn offset(&self) -> u64 {
-        self.logical.offset()
+        self.logical.offset
     }
 
     pub fn topn_order(&self) -> &Order {
-        self.logical.topn_order()
+        &self.logical.order
     }
 
     pub fn group_key(&self) -> &[usize] {
-        self.logical.group_key()
+        &self.logical.group_key
     }
 
     pub fn with_ties(&self) -> bool {
-        self.logical.with_ties()
+        self.logical.with_ties
     }
 }
 
@@ -94,7 +94,7 @@ impl StreamNode for StreamGroupTopN {
         use risingwave_pb::stream_plan::*;
         let table = self
             .logical
-            .infer_internal_table_catalog(self.vnode_col_idx)
+            .infer_internal_table_catalog(&self.base, self.vnode_col_idx)
             .with_id(state.gen_table_id_wrapped());
         assert!(!self.group_key().is_empty());
         let group_topn_node = GroupTopNNode {
@@ -160,11 +160,13 @@ impl_plan_tree_node_for_unary! { StreamGroupTopN }
 
 impl PlanTreeNodeUnary for StreamGroupTopN {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input), self.vnode_col_idx)
+        let mut logical = self.logical.clone();
+        logical.input = input;
+        Self::new(logical, self.vnode_col_idx)
     }
 }
 
