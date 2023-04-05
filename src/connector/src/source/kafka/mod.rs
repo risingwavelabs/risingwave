@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::Duration;
-
 use serde::Deserialize;
 
 pub mod enumerator;
@@ -65,5 +63,3 @@ pub struct KafkaProperties {
     #[serde(flatten)]
     pub common: KafkaCommon,
 }
-
-const KAFKA_SYNC_CALL_TIMEOUT: Duration = Duration::from_secs(1);

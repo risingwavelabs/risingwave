@@ -83,9 +83,9 @@ pub(crate) fn deserialize_duration_from_string<'de, D>(
 where
     D: de::Deserializer<'de>,
 {
-    let s: String = de::Deserialize::deserialize(deserializer)?;
-    parse_std(&s).map_err(|_| de::Error::invalid_value(
-        de::Unexpected::Str(&s),
+    let s: &str = de::Deserialize::deserialize(deserializer)?;
+    parse_std(s).map_err(|_| de::Error::invalid_value(
+        de::Unexpected::Str(s),
         &"The String value unit support for one of:[“y”,“mon”,“w”,“d”,“h”,“m”,“s”, “ms”, “µs”, “ns”]",
     ))
 }
