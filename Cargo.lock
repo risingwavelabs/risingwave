@@ -8919,6 +8919,7 @@ dependencies = [
  "memchr",
  "miniz_oxide",
  "multimap",
+ "num",
  "num-bigint",
  "num-integer",
  "num-traits",
