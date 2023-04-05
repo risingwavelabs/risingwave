@@ -2,6 +2,30 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
+create table t1 (v1 real, v2 int, v3 varchar);
+
+
+# Insert
+
+statement ok
+insert into t1 (v2, v1, v3) values (1, 2, 'a'), (3, 4, 'b');
+
+query RI rowsort
+select * from t1;
+----
+2 1 a
+4 3 b
+
+statement ok
+insert into t1 (v2, v1) values (1, 2), (3, 4);
+
+statement ok
+insert into t1 values (1, 2), (3, 4);
+
+statement ok
+drop table t1;
+
+statement ok
 create table t (v1 real, v2 int);
 
 # Insert
