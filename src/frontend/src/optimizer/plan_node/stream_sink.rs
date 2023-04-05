@@ -20,6 +20,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkId, SinkType};
 use risingwave_connector::sink::{
@@ -120,6 +121,28 @@ impl StreamSink {
         let (pk, _) = derive_pk(input, user_order_by, &columns);
 
         let downstream_pk = Self::parse_downstream_pk(&columns, properties.get(DOWNSTREAM_PK_KEY))?;
+
+        // FIXME: support struct and array in stream sink
+        if columns.iter().any(|c| {
+            !matches!(
+                c.data_type(),
+                DataType::Int16
+                    | DataType::Int32
+                    | DataType::Int64
+                    | DataType::Float32
+                    | DataType::Float64
+                    | DataType::Boolean
+                    | DataType::Decimal
+                    | DataType::Timestamp
+                    | DataType::Varchar
+            )
+        }) {
+            return Err(ErrorCode::SinkError(Box::new(Error::new(
+                ErrorKind::InvalidInput,
+                "Stream sink only supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Timestamp, and Varchar",
+            )))
+            .into());
+        }
 
         Ok(SinkDesc {
             id: SinkId::placeholder(),
