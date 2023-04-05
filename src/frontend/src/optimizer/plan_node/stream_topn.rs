@@ -34,9 +34,9 @@ impl StreamTopN {
         assert!(logical.limit > 0);
         let base = PlanBase::new_logical_with_core(&logical);
         let ctx = base.ctx;
-        let input = logical.input.clone();
+        let input = &logical.input;
         let schema = base.schema;
-        let dist = match logical.input.distribution() {
+        let dist = match input.distribution() {
             Distribution::Single => Distribution::Single,
             _ => panic!(),
         };

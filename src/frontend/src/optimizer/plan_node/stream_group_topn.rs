@@ -37,7 +37,7 @@ impl StreamGroupTopN {
     pub fn new(logical: generic::TopN<PlanRef>, vnode_col_idx: Option<usize>) -> Self {
         assert!(!logical.group_key.is_empty());
         assert!(logical.limit > 0);
-        let input = logical.input;
+        let input = &logical.input;
         let schema = input.schema().clone();
 
         let watermark_columns = if input.append_only() {
