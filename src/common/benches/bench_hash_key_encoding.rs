@@ -50,10 +50,10 @@ impl HashKeyDispatcher for HashKeyBenchCaseBuilder {
         for null_ratio in NULL_RATIOS {
             for chunk_size in CHUNK_SIZES {
                 let id = format!(
-                    "{} {:?}, {} rows, Pr[null]={}",
+                    "{} rows, {} {:?}, Pr[null]={}",
+                    chunk_size,
                     self.describe,
                     calc_hash_key_kind(self.data_types()),
-                    chunk_size,
                     null_ratio
                 );
                 let input_chunk = gen_chunk(self.data_types(), *chunk_size, SEED, *null_ratio);
