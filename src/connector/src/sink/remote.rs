@@ -22,7 +22,6 @@ use risingwave_common::array::StreamChunk;
 #[cfg(test)]
 use risingwave_common::catalog::Field;
 use risingwave_common::catalog::Schema;
-#[cfg(test)]
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::connector_service::sink_stream_request::write_batch::json_payload::RowOp;
@@ -132,6 +131,26 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
             tracing::warn!(msg);
             SinkError::Remote(msg)
         })?;
+
+        // FIXME: support struct and array in stream sink
+        if schema.data_types().iter().any(|c| {
+            !matches!(
+                c,
+                DataType::Int16
+                    | DataType::Int32
+                    | DataType::Int64
+                    | DataType::Float32
+                    | DataType::Float64
+                    | DataType::Boolean
+                    | DataType::Decimal
+                    | DataType::Timestamp
+                    | DataType::Varchar
+            )
+        }) {
+            return Err(
+                SinkError::Remote(format!("remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Timestamp and Varchar, got {:?}", schema.fields()))
+            );
+        }
 
         let table_schema = Some(TableSchema {
             columns: schema
