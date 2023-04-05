@@ -109,8 +109,7 @@ impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
 
     pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         let mut builder = f.debug_struct(name);
-        let input = self.input;
-        let input_schema = input.schema();
+        let input_schema = self.input.schema();
         builder.field(
             "order",
             &format!(
