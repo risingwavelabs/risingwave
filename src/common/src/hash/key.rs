@@ -42,6 +42,8 @@ use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::iter_util::ZipEqFast;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum_into};
 
+pub static MAX_GROUP_KEYS: usize = 64;
+
 /// Bitmap for null values in key.
 /// This is specialized for key,
 /// since it usually has few group keys.
