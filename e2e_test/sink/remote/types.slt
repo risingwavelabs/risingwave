@@ -26,4 +26,5 @@ create sink s from t6 with (
     type = 'upsert'
 );
 
+statement ok
 drop table t6;
