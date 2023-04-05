@@ -159,8 +159,6 @@ pub enum Error {
     },
     #[error("UDF service returned no data")]
     NoReturned,
-    #[error("UDF service returned a batch with no column")]
-    NoColumn,
 }
 
 /// Check if two list of data types match, ignoring field names.
