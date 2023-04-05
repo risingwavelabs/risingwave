@@ -81,7 +81,7 @@ impl NullBitmap {
     }
 
     pub fn is_subset(&self, other: &NullBitmap) -> bool {
-        self.inner.contains_all(other.inner)
+        other.inner.contains_all(self.inner)
     }
 }
 
