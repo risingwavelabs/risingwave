@@ -19,9 +19,9 @@ use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME, RW_CATAL
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_sqlparser::ast::{
-    DataType as AstDataType, Distinct, Expr, Ident, ObjectName, Select, SelectItem,
-};
+use risingwave_sqlparser::ast::{DataType as AstDataType, Distinct, Expr, Select, SelectItem};
+use risingwave_sqlparser::parser::Parser;
+use risingwave_sqlparser::tokenizer::{Token, Tokenizer};
 
 use super::bind_context::{Clause, ColumnBinding};
 use super::statement::RewriteExprsRecursive;
@@ -382,19 +382,39 @@ impl Binder {
     }
 
     pub fn bind_get_table_size_by_id_select(&mut self, input: &ExprImpl) -> Result<BoundSelect> {
-        let table_name = input.as_literal().unwrap();
-        let data = table_name.get_data().as_ref().unwrap().as_utf8();
-        let names: Vec<_> = data
-            .split(".")
-            .map(|tok| Ident::new_unchecked(tok.to_string()))
-            .collect();
-        let table = ObjectName(names);
+        //_ => return Err(ErrorCode::BindError("Unsupported input type".to_string()).into()),
+        let arg = input.as_literal().ok_or_else(|| {
+            ErrorCode::BindError(
+                "pg_table_size only supports varchar literals as arguments".to_string(),
+            )
+        })?;
+        let table_identifier = arg
+            .get_data()
+            .as_ref()
+            .ok_or_else(|| ErrorCode::BindError("No Value".to_string()))?
+            .as_utf8();
+
+        // We use the full parser here because this function needs to accept every legal way of
+        // identifying a table in PG SQL as a valid value for the varchar literal.  For example:
+        // 'foo', 'public.foo', '"my table"', and '"my schema".foo' must all work as values passed
+        // pg_table_size.
+        let mut tokenizer = Tokenizer::new(table_identifier);
+        let tokens = tokenizer
+            .tokenize_with_location()
+            .map_err(|e| ErrorCode::BindError(e.to_string()))?;
+        let mut parser = Parser::new(tokens);
+        let table = parser
+            .parse_object_name()
+            .map_err(|e| ErrorCode::BindError(e.to_string()))?;
+        if parser.next_token().token != Token::EOF {
+            Err(ErrorCode::BindError("Invalid name syntax".to_string()))?
+        }
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, table)?;
 
         let table = self.bind_table(schema_name.as_deref(), &table_name, None)?;
-        let table_id = table.table_id;
+        let table_object_id = table.table_id;
         let input = ExprImpl::Literal(Box::new(Literal::new(
-            Some(ScalarImpl::Int32(table_id.table_id as i32)),
+            Some(ScalarImpl::Int32(table_object_id.table_id as i32)),
             DataType::Int32,
         )));
         let key_value_size_sum = FunctionCall::new(
