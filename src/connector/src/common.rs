@@ -14,7 +14,6 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::time::Duration;
 
 use aws_sdk_kinesis::Client as KinesisClient;
 use http::Uri;
@@ -23,7 +22,6 @@ use serde_derive::{Deserialize, Serialize};
 use serde_with::json::JsonString;
 use serde_with::serde_as;
 
-use crate::deserialize_duration_from_string;
 use crate::source::kinesis::config::AwsConfigInfo;
 
 // The file describes the common abstractions for each connector and can be used in both source and
@@ -112,17 +110,6 @@ pub struct KafkaCommon {
     /// Configurations for SASL/OAUTHBEARER.
     #[serde(rename = "properties.sasl.oauthbearer.config")]
     sasl_oathbearer_config: Option<String>,
-
-    #[serde(
-        rename = "properties.sync.call.timeout",
-        deserialize_with = "deserialize_duration_from_string",
-        default = "default_kafka_sync_call_timeout"
-    )]
-    pub sync_call_timeout: Duration,
-}
-
-const fn default_kafka_sync_call_timeout() -> Duration {
-    Duration::from_secs(1)
 }
 
 impl KafkaCommon {

@@ -92,7 +92,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             client,
             start_offset: scan_start_offset,
             stop_offset: KafkaEnumeratorOffset::None,
-            sync_call_timeout: properties.common.sync_call_timeout,
+            sync_call_timeout: properties.sync_call_timeout,
         })
     }
 

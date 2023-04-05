@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::Duration;
+
 use serde::Deserialize;
 
 pub mod enumerator;
@@ -25,6 +27,7 @@ pub use source::*;
 pub use split::*;
 
 use crate::common::KafkaCommon;
+use crate::deserialize_duration_from_string;
 pub const KAFKA_CONNECTOR: &str = "kafka";
 pub const KAFKA_PROPS_BROKER_KEY: &str = "properties.bootstrap.server";
 pub const KAFKA_PROPS_BROKER_KEY_ALIAS: &str = "kafka.brokers";
@@ -60,6 +63,17 @@ pub struct KafkaProperties {
     #[serde(rename = "upsert")]
     pub upsert: Option<String>,
 
+    #[serde(
+        rename = "properties.sync.call.timeout",
+        deserialize_with = "deserialize_duration_from_string",
+        default = "default_kafka_sync_call_timeout"
+    )]
+    pub sync_call_timeout: Duration,
+
     #[serde(flatten)]
     pub common: KafkaCommon,
+}
+
+const fn default_kafka_sync_call_timeout() -> Duration {
+    Duration::from_secs(1)
 }
