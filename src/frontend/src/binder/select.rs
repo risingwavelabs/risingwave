@@ -381,49 +381,6 @@ impl Binder {
         })
     }
 
-    /// Uses a literal value to look up the ID of an Object (e.g. a table). If the literal is an
-    /// integer (int16, int32, or int64) this will just return that number as an ObjectID value.
-    /// If the literal is a varchar, this will look in the Catalog for an object with a name that
-    /// matches the varchar and return its Object ID value; of no match is found then an error is
-    /// returned.
-    fn lookup_object_id(&mut self, arg: &Literal) -> Result<TableId> {
-        match arg
-            .get_data()
-            .as_ref()
-            .ok_or_else(|| ErrorCode::BindError("No Value".to_string()))?
-        {
-            ScalarImpl::Int16(id) => Ok(TableId::new(*id as u32)),
-            ScalarImpl::Int32(id) => Ok(TableId::new(*id as u32)),
-            ScalarImpl::Int64(id) => Ok(TableId::new(*id as u32)),
-            ScalarImpl::Utf8(name) => {
-                // We use the full parser here because this function needs to accept every legal way
-                // of identifying a table in PG SQL as a valid value for the varchar
-                // literal.  For example: 'foo', 'public.foo', '"my table"', and
-                // '"my schema".foo' must all work as values passed pg_table_size.
-                let mut tokenizer = Tokenizer::new(name);
-                let tokens = tokenizer
-                    .tokenize_with_location()
-                    .map_err(|e| ErrorCode::BindError(e.to_string()))?;
-                let mut parser = Parser::new(tokens);
-                let table = parser
-                    .parse_object_name()
-                    .map_err(|e| ErrorCode::BindError(e.to_string()))?;
-                if parser.next_token().token != Token::EOF {
-                    Err(ErrorCode::BindError("Invalid name syntax".to_string()))?
-                }
-                let (schema_name, table_name) =
-                    Self::resolve_schema_qualified_name(&self.db_name, table)?;
-
-                let table = self.bind_table(schema_name.as_deref(), &table_name, None)?;
-                Ok(table.table_id)
-            }
-            _ => Err(ErrorCode::BindError(
-                "This only supports Object IDs (int) or Object Names (varchar) literals."
-                    .to_string(),
-            ))?,
-        }
-    }
-
     pub fn bind_get_table_size_by_id_select(&mut self, input: &ExprImpl) -> Result<BoundSelect> {
         let arg = input.as_literal().ok_or_else(|| {
             ErrorCode::BindError(
@@ -545,6 +502,49 @@ impl Binder {
                 BoundDistinct::DistinctOn(bound_exprs)
             }
         })
+    }
+
+    /// Uses a literal value to look up the ID of an Object (e.g. a table). If the literal is an
+    /// integer (int16, int32, or int64) this will just return that number as an ObjectID value.
+    /// If the literal is a varchar, this will look in the Catalog for an object with a name that
+    /// matches the varchar and return its Object ID value; of no match is found then an error is
+    /// returned.
+    fn lookup_object_id(&mut self, arg: &Literal) -> Result<TableId> {
+        match arg
+            .get_data()
+            .as_ref()
+            .ok_or_else(|| ErrorCode::BindError("No Value".to_string()))?
+        {
+            ScalarImpl::Int16(id) => Ok(TableId::new(*id as u32)),
+            ScalarImpl::Int32(id) => Ok(TableId::new(*id as u32)),
+            ScalarImpl::Int64(id) => Ok(TableId::new(*id as u32)),
+            ScalarImpl::Utf8(name) => {
+                // We use the full parser here because this function needs to accept every legal way
+                // of identifying a table in PG SQL as a valid value for the varchar
+                // literal.  For example: 'foo', 'public.foo', '"my table"', and
+                // '"my schema".foo' must all work as values passed pg_table_size.
+                let mut tokenizer = Tokenizer::new(name);
+                let tokens = tokenizer
+                    .tokenize_with_location()
+                    .map_err(|e| ErrorCode::BindError(e.to_string()))?;
+                let mut parser = Parser::new(tokens);
+                let table = parser
+                    .parse_object_name()
+                    .map_err(|e| ErrorCode::BindError(e.to_string()))?;
+                if parser.next_token().token != Token::EOF {
+                    Err(ErrorCode::BindError("Invalid name syntax".to_string()))?
+                }
+                let (schema_name, table_name) =
+                    Self::resolve_schema_qualified_name(&self.db_name, table)?;
+
+                let table = self.bind_table(schema_name.as_deref(), &table_name, None)?;
+                Ok(table.table_id)
+            }
+            _ => Err(ErrorCode::BindError(
+                "This only supports Object IDs (int) or Object Names (varchar) literals."
+                    .to_string(),
+            ))?,
+        }
     }
 }
 
