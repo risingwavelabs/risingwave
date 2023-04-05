@@ -42,6 +42,7 @@ pub mod timestamptz;
 pub mod to_char;
 pub mod to_timestamp;
 pub mod translate;
+pub mod trigonometric;
 pub mod trim;
 pub mod tumble;
 pub mod upper;

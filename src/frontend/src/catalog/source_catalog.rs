@@ -15,9 +15,11 @@
 use std::collections::BTreeMap;
 
 use risingwave_common::catalog::ColumnCatalog;
+use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 
 use super::{ColumnId, RelationCatalog, SourceId};
+use crate::catalog::TableId;
 use crate::user::UserId;
 use crate::WithOptions;
 
@@ -35,6 +37,7 @@ pub struct SourceCatalog {
     pub row_id_index: Option<usize>,
     pub properties: BTreeMap<String, String>,
     pub watermark_descs: Vec<WatermarkDesc>,
+    pub associated_table_id: Option<TableId>,
 }
 
 impl From<&PbSource> for SourceCatalog {
@@ -56,6 +59,13 @@ impl From<&PbSource> for SourceCatalog {
         let owner = prost.owner;
         let watermark_descs = prost.get_watermark_descs().clone();
 
+        let associated_table_id = prost
+            .optional_associated_table_id
+            .clone()
+            .map(|id| match id {
+                OptionalAssociatedTableId::AssociatedTableId(id) => id,
+            });
+
         Self {
             id,
             name,
@@ -67,6 +77,7 @@ impl From<&PbSource> for SourceCatalog {
             row_id_index,
             properties: with_options.into_inner(),
             watermark_descs,
+            associated_table_id: associated_table_id.map(|x| x.into()),
         }
     }
 }

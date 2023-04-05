@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::fmt::{Debug, Formatter};
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -1017,12 +1018,10 @@ impl HummockMetaClient for MetaClient {
 
 #[async_trait]
 impl TelemetryInfoFetcher for MetaClient {
-    async fn fetch_telemetry_info(&self) -> anyhow::Result<String> {
+    async fn fetch_telemetry_info(&self) -> anyhow::Result<Option<String>> {
         let resp = self.get_telemetry_info().await?;
-        let tracking_id = resp
-            .get_tracking_id()
-            .map_err(|e| anyhow::format_err!("failed to get tracking_id {:?}", e))?;
-        Ok(tracking_id.to_string())
+        let tracking_id = resp.get_tracking_id().ok();
+        Ok(tracking_id.map(|id| id.to_owned()))
     }
 }
 
@@ -1144,7 +1143,7 @@ impl ElectionMemberManagement {
                             None => {
                                 let endpoint = GrpcMetaClient::addr_to_endpoint(addr.clone())?;
                                 let channel = GrpcMetaClient::connect_to_endpoint(endpoint).await?;
-                                let new_client: MetaMemberServiceClient<Channel> =
+                                let new_client: MetaMemberClient =
                                     MetaMemberServiceClient::new(channel);
                                 *client = Some(new_client.clone());
 
@@ -1301,7 +1300,7 @@ impl GrpcMetaClient {
         let members = match &strategy {
             MetaAddressStrategy::LoadBalance(_) => Either::Left(meta_member_client),
             MetaAddressStrategy::List(addrs) => {
-                let mut members = LruCache::new(20);
+                let mut members = LruCache::new(NonZeroUsize::new(20).unwrap());
                 for addr in addrs {
                     members.put(addr.clone(), None);
                 }

@@ -438,7 +438,7 @@ where
         database_core.ensure_schema_id(view.schema_id)?;
         for dependent_id in &view.dependent_relations {
             // TODO(zehua): refactor when using SourceId.
-            database_core.ensure_table_or_source_id(dependent_id)?;
+            database_core.ensure_table_view_or_source_id(dependent_id)?;
         }
         let key = (view.database_id, view.schema_id, view.name.clone());
         database_core.check_relation_name_duplicated(&key)?;
@@ -519,10 +519,7 @@ where
         user_core.increase_ref(function.owner);
 
         let version = self
-            .notify_frontend_relation_info(
-                Operation::Add,
-                RelationInfo::Function(function.to_owned()),
-            )
+            .notify_frontend(Operation::Add, Info::Function(function.to_owned()))
             .await;
 
         Ok(version)
@@ -552,7 +549,7 @@ where
         }
 
         let version = self
-            .notify_frontend_relation_info(Operation::Delete, RelationInfo::Function(function))
+            .notify_frontend(Operation::Delete, Info::Function(function))
             .await;
 
         Ok(version)
@@ -634,7 +631,7 @@ where
         database_core.ensure_schema_id(table.schema_id)?;
         for dependent_id in &table.dependent_relations {
             // TODO(zehua): refactor when using SourceId.
-            database_core.ensure_table_or_source_id(dependent_id)?;
+            database_core.ensure_table_view_or_source_id(dependent_id)?;
         }
         #[cfg(not(test))]
         user_core.ensure_user_id(table.owner)?;
@@ -1024,8 +1021,6 @@ where
         to_update_tables.iter().for_each(|table| {
             tables.insert(table.id, table.clone());
         });
-        // TODO: there are some inconsistencies in the process of notifying the frontend, we need to
-        // support batch notification.
         to_update_views.iter().for_each(|view| {
             views.insert(view.id, view.clone());
         });
@@ -1708,7 +1703,7 @@ where
         database_core.ensure_schema_id(sink.schema_id)?;
         for dependent_id in &sink.dependent_relations {
             // TODO(zehua): refactor when using SourceId.
-            database_core.ensure_table_or_source_id(dependent_id)?;
+            database_core.ensure_table_view_or_source_id(dependent_id)?;
         }
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
         database_core.check_relation_name_duplicated(&key)?;

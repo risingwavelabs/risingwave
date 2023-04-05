@@ -59,6 +59,7 @@ pub mod aggregation;
 mod barrier_recv;
 mod batch_query;
 mod chain;
+mod dedup;
 mod dispatch;
 pub mod dml;
 mod dynamic_filter;
@@ -84,12 +85,14 @@ pub mod row_id_gen;
 mod sink;
 mod sort;
 mod sort_buffer;
+mod sort_buffer_v0;
 pub mod source;
 mod stream_reader;
 pub mod subtask;
 mod temporal_join;
 mod top_n;
 mod union;
+mod values;
 mod watermark;
 mod watermark_filter;
 mod wrapper;
@@ -105,6 +108,7 @@ pub use backfill::*;
 pub use barrier_recv::BarrierRecvExecutor;
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
+pub use dedup::AppendOnlyDedupExecutor;
 pub use dispatch::{DispatchExecutor, DispatcherImpl};
 pub use dynamic_filter::DynamicFilterExecutor;
 pub use error::{StreamExecutorError, StreamExecutorResult};
@@ -133,6 +137,7 @@ pub use top_n::{
     AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,
 };
 pub use union::UnionExecutor;
+pub use values::ValuesExecutor;
 pub use watermark_filter::WatermarkFilterExecutor;
 pub use wrapper::WrapperExecutor;
 

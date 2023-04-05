@@ -16,11 +16,12 @@ use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::Result;
 use risingwave_pb::user::grant_privilege::{PbAction, PbObject};
 
-use crate::binder::{BoundStatement, Relation};
+use crate::binder::{BoundQuery, BoundStatement, Relation};
 use crate::catalog::RelationCatalog;
 use crate::session::SessionImpl;
 use crate::user::UserId;
 
+#[derive(Debug)]
 pub struct ObjectCheckItem {
     owner: UserId,
     action: PbAction,
@@ -111,14 +112,19 @@ pub(crate) fn resolve_privileges(stmt: &BoundStatement) -> Vec<ObjectCheckItem> 
             };
             objects.push(object);
         }
-        BoundStatement::Query(ref query) => {
-            if let crate::binder::BoundSetExpr::Select(select) = &query.body {
-                if let Some(sub_relation) = &select.from {
-                    resolve_relation_privileges(sub_relation, PbAction::Select, &mut objects);
-                }
-            }
-        }
+        BoundStatement::Query(ref query) => objects.extend(resolve_query_privileges(query)),
     };
+    objects
+}
+
+/// resolve privileges in `query`
+pub(crate) fn resolve_query_privileges(query: &BoundQuery) -> Vec<ObjectCheckItem> {
+    let mut objects = Vec::new();
+    if let crate::binder::BoundSetExpr::Select(select) = &query.body {
+        if let Some(sub_relation) = &select.from {
+            resolve_relation_privileges(sub_relation, PbAction::Select, &mut objects);
+        }
+    }
     objects
 }
 

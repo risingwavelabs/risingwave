@@ -22,6 +22,7 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
+use chrono::{Datelike, Timelike};
 use enum_as_inner::EnumAsInner;
 use risingwave_common::array::{ArrayError, ArrayResult, RowRef, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
@@ -42,6 +43,8 @@ use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink};
 use crate::sink::remote::{RemoteConfig, RemoteSink};
 use crate::ConnectorParams;
+
+pub const DOWNSTREAM_SINK_KEY: &str = "connector";
 pub const SINK_TYPE_OPTION: &str = "type";
 pub const SINK_TYPE_APPEND_ONLY: &str = "append-only";
 pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
@@ -306,19 +309,27 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
             json!(v)
         }
         (DataType::Decimal, ScalarRefImpl::Decimal(v)) => {
-            // fixme
             json!(v.to_text())
         }
-        (
-            dt @ DataType::Date
-            | dt @ DataType::Time
-            | dt @ DataType::Timestamp
-            | dt @ DataType::Timestamptz
-            | dt @ DataType::Interval
-            | dt @ DataType::Bytea,
-            scalar,
-        ) => {
-            json!(scalar.to_text_with_type(&dt))
+        (DataType::Timestamptz, ScalarRefImpl::Timestamp(v)) => {
+            json!(v.0.and_local_timezone(chrono::Utc).unwrap().to_rfc3339())
+        }
+        (DataType::Time, ScalarRefImpl::Time(v)) => {
+            // todo: just ignore the nanos part to avoid leap second complex
+            json!(v.0.num_seconds_from_midnight() as i64 * 1000)
+        }
+        (DataType::Date, ScalarRefImpl::Date(v)) => {
+            json!(v.0.num_days_from_ce())
+        }
+        (DataType::Timestamp, ScalarRefImpl::Timestamp(v)) => {
+            json!(v.0.timestamp_millis())
+        }
+        (DataType::Bytea, ScalarRefImpl::Bytea(v)) => {
+            json!(hex::encode(v))
+        }
+        // P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S
+        (DataType::Interval, ScalarRefImpl::Interval(v)) => {
+            json!(v.as_iso_8601())
         }
         (DataType::List { datatype }, ScalarRefImpl::List(list_ref)) => {
             let mut vec = Vec::with_capacity(list_ref.values_ref().len());
@@ -350,4 +361,113 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
     };
 
     Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+
+    use risingwave_common::types::{Interval, ScalarImpl, Time, Timestamp};
+
+    use super::*;
+    #[test]
+    fn test_to_json_basic_type() {
+        let mock_field = Field {
+            data_type: DataType::Boolean,
+            name: Default::default(),
+            sub_fields: Default::default(),
+            type_name: Default::default(),
+        };
+        let boolean_value = datum_to_json_object(
+            &Field {
+                data_type: DataType::Boolean,
+                ..mock_field.clone()
+            },
+            Some(ScalarImpl::Bool(false).as_scalar_ref_impl()),
+        )
+        .unwrap();
+        assert_eq!(boolean_value, json!(false));
+
+        let int16_value = datum_to_json_object(
+            &Field {
+                data_type: DataType::Int16,
+                ..mock_field.clone()
+            },
+            Some(ScalarImpl::Int16(16).as_scalar_ref_impl()),
+        )
+        .unwrap();
+        assert_eq!(int16_value, json!(16));
+
+        let int64_value = datum_to_json_object(
+            &Field {
+                data_type: DataType::Int64,
+                ..mock_field.clone()
+            },
+            Some(ScalarImpl::Int64(std::i64::MAX).as_scalar_ref_impl()),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_string(&int64_value).unwrap(),
+            std::i64::MAX.to_string()
+        );
+
+        // https://github.com/debezium/debezium/blob/main/debezium-core/src/main/java/io/debezium/time/ZonedTimestamp.java
+        let tstz_str = "2018-01-26T18:30:09.453Z";
+        let tstz_value = datum_to_json_object(
+            &Field {
+                data_type: DataType::Timestamptz,
+                ..mock_field.clone()
+            },
+            Some(
+                ScalarImpl::Timestamp(
+                    chrono::DateTime::parse_from_rfc3339(tstz_str)
+                        .unwrap()
+                        .naive_utc()
+                        .into(),
+                )
+                .as_scalar_ref_impl(),
+            ),
+        )
+        .unwrap();
+        chrono::DateTime::parse_from_rfc3339(tstz_value.as_str().unwrap_or_default()).unwrap();
+
+        let ts_value = datum_to_json_object(
+            &Field {
+                data_type: DataType::Timestamp,
+                ..mock_field.clone()
+            },
+            Some(
+                ScalarImpl::Timestamp(Timestamp::from_timestamp_uncheck(1000, 0))
+                    .as_scalar_ref_impl(),
+            ),
+        )
+        .unwrap();
+        assert_eq!(ts_value, json!(1000 * 1000));
+
+        // Represents the number of microseconds past midnigh, io.debezium.time.Time
+        let time_value = datum_to_json_object(
+            &Field {
+                data_type: DataType::Time,
+                ..mock_field.clone()
+            },
+            Some(
+                ScalarImpl::Time(Time::from_num_seconds_from_midnight_uncheck(1000, 0))
+                    .as_scalar_ref_impl(),
+            ),
+        )
+        .unwrap();
+        assert_eq!(time_value, json!(1000 * 1000));
+
+        let interval_value = datum_to_json_object(
+            &Field {
+                data_type: DataType::Interval,
+                ..mock_field
+            },
+            Some(
+                ScalarImpl::Interval(Interval::from_month_day_usec(13, 2, 1000000))
+                    .as_scalar_ref_impl(),
+            ),
+        )
+        .unwrap();
+        assert_eq!(interval_value, json!("P1Y1M2DT0H0M1S"));
+    }
 }

@@ -87,7 +87,7 @@ impl BoxedExecutorBuilder for TableFunctionExecutorBuilder {
 
         let identity = source.plan_node().get_identity().clone();
 
-        let chunk_size = source.context.get_config().developer.batch_chunk_size;
+        let chunk_size = source.context.get_config().developer.chunk_size;
 
         let table_function = build_from_prost(node.table_function.as_ref().unwrap(), chunk_size)?;
 
