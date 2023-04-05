@@ -44,7 +44,7 @@ impl StreamGroupTopN {
             input.watermark_columns().clone()
         } else {
             let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
-            for idx in logical.group_key {
+            for &idx in &logical.group_key {
                 if input.watermark_columns().contains(idx) {
                     watermark_columns.insert(idx);
                 }

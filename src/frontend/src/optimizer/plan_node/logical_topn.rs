@@ -126,10 +126,11 @@ impl LogicalTopN {
         let input_dist = stream_input.distribution().clone();
 
         let gen_single_plan = |stream_input: PlanRef| -> Result<PlanRef> {
-            Ok(StreamTopN::new(self.clone_with_input(
-                RequiredDist::single().enforce_if_not_satisfies(stream_input, &Order::any())?,
-            ))
-            .into())
+            let input =
+                RequiredDist::single().enforce_if_not_satisfies(stream_input, &Order::any())?;
+            let mut logical = self.core.clone();
+            logical.input = input;
+            Ok(StreamTopN::new(logical).into())
         };
 
         // if it is append only, for now we don't generate 2-phase rules
@@ -185,13 +186,14 @@ impl LogicalTopN {
         let local_top_n = StreamGroupTopN::new(logical_top_n, Some(vnode_col_idx));
         let exchange =
             RequiredDist::single().enforce_if_not_satisfies(local_top_n.into(), &Order::any())?;
-        let global_top_n = StreamTopN::new(LogicalTopN::new(
+        let global_top_n = generic::TopN::without_group(
             exchange,
             self.limit(),
             self.offset(),
             self.with_ties(),
             self.topn_order().clone(),
-        ));
+        );
+        let global_top_n = StreamTopN::new(global_top_n);
 
         // use another projection to remove the column we added before.
         exprs.pop();
