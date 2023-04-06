@@ -855,9 +855,9 @@ impl Session<PgResponseStream, PrepareStatement, Portal> for SessionImpl {
     ) -> std::result::Result<(Vec<DataType>, Vec<PgFieldDescriptor>), BoxedError> {
         Ok(match prepare_statement {
             PrepareStatement::Prepared(prepare_statement) => (
-                prepare_statement.param_types,
+                prepare_statement.bound_result.param_types,
                 infer(
-                    Some(prepare_statement.bound_statement),
+                    Some(prepare_statement.bound_result.bound),
                     prepare_statement.statement,
                 )?,
             ),
@@ -870,7 +870,7 @@ impl Session<PgResponseStream, PrepareStatement, Portal> for SessionImpl {
         portal: Portal,
     ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
         match portal {
-            Portal::Portal(portal) => Ok(infer(Some(portal.bound_statement), portal.statement)?),
+            Portal::Portal(portal) => Ok(infer(Some(portal.bound_result.bound), portal.statement)?),
             Portal::PureStatement(statement) => Ok(infer(None, statement)?),
         }
     }
