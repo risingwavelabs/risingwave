@@ -17,7 +17,7 @@ use risingwave_common::types::DataType;
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
 pub const RW_TABLE_STATS_TABLE_NAME: &str = "rw_table_stats";
-pub const RW_TABLE_ID_INDEX: usize = 0;
+pub const RW_TABLE_STATS_TABLE_ID_INDEX: usize = 0;
 pub const RW_TABLE_STATS_KEY_SIZE_INDEX: usize = 2;
 pub const RW_TABLE_STATS_VALUE_SIZE_INDEX: usize = 3;
 

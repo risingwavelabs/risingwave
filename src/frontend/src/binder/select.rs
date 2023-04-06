@@ -31,7 +31,7 @@ use crate::catalog::system_catalog::pg_catalog::{
     PG_USER_ID_INDEX, PG_USER_NAME_INDEX, PG_USER_TABLE_NAME,
 };
 use crate::catalog::system_catalog::rw_catalog::{
-    RW_TABLE_ID_INDEX, RW_TABLE_STATS_KEY_SIZE_INDEX, RW_TABLE_STATS_TABLE_NAME,
+    RW_TABLE_STATS_KEY_SIZE_INDEX, RW_TABLE_STATS_TABLE_ID_INDEX, RW_TABLE_STATS_TABLE_NAME,
     RW_TABLE_STATS_VALUE_SIZE_INDEX,
 };
 use crate::catalog::{check_valid_column_name, TableId};
@@ -424,7 +424,7 @@ impl Binder {
                 ExprType::Equal,
                 vec![
                     input,
-                    InputRef::new(RW_TABLE_ID_INDEX, DataType::Int32).into(),
+                    InputRef::new(RW_TABLE_STATS_TABLE_ID_INDEX, DataType::Int32).into(),
                 ],
             )?
             .into(),
