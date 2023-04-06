@@ -393,6 +393,9 @@ impl Binder {
             Some(ScalarImpl::Int32(table_object_id.table_id as i32)),
             DataType::Int32,
         )));
+
+        // Add the space used by keys and the space used by values to get the total space used by
+        // the table
         let key_value_size_sum = FunctionCall::new(
             ExprType::Add,
             vec![
@@ -403,14 +406,15 @@ impl Binder {
         .into();
         let select_items = vec![key_value_size_sum];
 
-        // Is this the schema for the input to the query or the output of the query?
-        let schema = Schema {
+        // define the output schema
+        let result_schema = Schema {
             fields: vec![Field::with_name(
                 DataType::Int64,
-                UNNAMED_COLUMN.to_string(),
+                "pg_table_size".to_string(),
             )],
         };
-        // define the output schema
+
+        // Get table stats data
         let from = Some(self.bind_relation_by_name_inner(
             Some(RW_CATALOG_SCHEMA_NAME),
             RW_TABLE_STATS_TABLE_NAME,
@@ -418,7 +422,7 @@ impl Binder {
             false,
         )?);
 
-        // Define the where clause
+        // Filter by the table id to only get the stats for the specified table
         let where_clause = Some(
             FunctionCall::new(
                 ExprType::Equal,
@@ -438,7 +442,7 @@ impl Binder {
             where_clause,
             group_by: vec![],
             having: None,
-            schema,
+            schema: result_schema,
         })
     }
 
@@ -519,32 +523,39 @@ impl Binder {
             ScalarImpl::Int32(id) => Ok(TableId::new(*id as u32)),
             ScalarImpl::Int64(id) => Ok(TableId::new(*id as u32)),
             ScalarImpl::Utf8(name) => {
-                // We use the full parser here because this function needs to accept every legal way
-                // of identifying a table in PG SQL as a valid value for the varchar
-                // literal.  For example: 'foo', 'public.foo', '"my table"', and
-                // '"my schema".foo' must all work as values passed pg_table_size.
-                let mut tokenizer = Tokenizer::new(name);
-                let tokens = tokenizer
-                    .tokenize_with_location()
-                    .map_err(|e| ErrorCode::BindError(e.to_string()))?;
-                let mut parser = Parser::new(tokens);
-                let table = parser
-                    .parse_object_name()
-                    .map_err(|e| ErrorCode::BindError(e.to_string()))?;
-                if parser.next_token().token != Token::EOF {
-                    Err(ErrorCode::BindError("Invalid name syntax".to_string()))?
-                }
+                let object_name = Self::parse_object_name(name)?;
                 let (schema_name, table_name) =
-                    Self::resolve_schema_qualified_name(&self.db_name, table)?;
+                    Self::resolve_schema_qualified_name(&self.db_name, object_name)?;
 
-                let table = self.bind_table(schema_name.as_deref(), &table_name, None)?;
-                Ok(table.table_id)
+                let object = self.bind_table(schema_name.as_deref(), &table_name, None)?;
+                Ok(object.table_id)
             }
             _ => Err(ErrorCode::BindError(
                 "This only supports Object IDs (int) or Object Names (varchar) literals."
                     .to_string(),
             ))?,
         }
+    }
+
+    /// Attempt to parse the value of a varchar Literal into an
+    /// [`ObjectName`](risingwave_sqlparser::ast::ObjectName).
+    fn parse_object_name(name: &str) -> Result<risingwave_sqlparser::ast::ObjectName> {
+        // We use the full parser here because this function needs to accept every legal way
+        // of identifying an object in PG SQL as a valid value for the varchar
+        // literal.  For example: 'foo', 'public.foo', '"my table"', and
+        // '"my schema".foo' must all work as values passed pg_table_size.
+        let mut tokenizer = Tokenizer::new(name);
+        let tokens = tokenizer
+            .tokenize_with_location()
+            .map_err(|e| ErrorCode::BindError(e.to_string()))?;
+        let mut parser = Parser::new(tokens);
+        let object = parser
+            .parse_object_name()
+            .map_err(|e| ErrorCode::BindError(e.to_string()))?;
+        if parser.next_token().token != Token::EOF {
+            Err(ErrorCode::BindError("Invalid name syntax".to_string()))?
+        }
+        Ok(object)
     }
 }
 
