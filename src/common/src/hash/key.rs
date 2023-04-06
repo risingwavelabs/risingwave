@@ -370,11 +370,11 @@ impl<'a> HashKeySerDe<'a> for Int256Ref<'a> {
     type S = [u8; 32];
 
     fn serialize(self) -> Self::S {
-        todo!()
+        unreachable!("HashKeySerDe cannot be implemented for non-primitive types")
     }
 
     fn deserialize<R: Read>(_source: &mut R) -> Self {
-        todo!()
+        unreachable!("HashKeySerDe cannot be implemented for non-primitive types")
     }
 }
 
@@ -382,11 +382,11 @@ impl<'a> HashKeySerDe<'a> for Uint256Ref<'a> {
     type S = [u8; 32];
 
     fn serialize(self) -> Self::S {
-        todo!()
+        unreachable!("HashKeySerDe cannot be implemented for non-primitive types")
     }
 
     fn deserialize<R: Read>(_source: &mut R) -> Self {
-        todo!()
+        unreachable!("HashKeySerDe cannot be implemented for non-primitive types")
     }
 }
 
