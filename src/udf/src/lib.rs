@@ -72,7 +72,20 @@ impl ArrowFlightUdfClient {
     /// Call a function.
     pub async fn call(&self, id: &str, input: RecordBatch) -> Result<RecordBatch> {
         let mut output_stream = self.call_stream(id, stream::once(async { input })).await?;
-        output_stream.next().await.ok_or(Error::NoReturned)?
+        // TODO: support no output
+        let head = output_stream.next().await.ok_or(Error::NoReturned)??;
+        let mut remaining = vec![];
+        while let Some(batch) = output_stream.next().await {
+            remaining.push(batch?);
+        }
+        if remaining.is_empty() {
+            Ok(head)
+        } else {
+            Ok(arrow_select::concat::concat_batches(
+                &head.schema(),
+                std::iter::once(&head).chain(remaining.iter()),
+            )?)
+        }
     }
 
     /// Call a function with streaming input and output.
@@ -157,6 +170,8 @@ pub enum Error {
         expected: String,
         actual: String,
     },
+    #[error("arrow error: {0}")]
+    Arrow(#[from] arrow_schema::ArrowError),
     #[error("UDF service returned no data")]
     NoReturned,
 }
