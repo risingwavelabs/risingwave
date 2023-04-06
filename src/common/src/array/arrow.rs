@@ -198,6 +198,11 @@ macro_rules! converts {
                 array.iter().collect()
             }
         }
+        impl From<&[$ArrowType]> for $ArrayType {
+            fn from(arrays: &[$ArrowType]) -> Self {
+                arrays.iter().flat_map(|a| a.iter()).collect()
+            }
+        }
     };
     // convert values using FromIntoArrow
     ($ArrayType:ty, $ArrowType:ty, @map) => {
@@ -210,6 +215,19 @@ macro_rules! converts {
             fn from(array: &$ArrowType) -> Self {
                 array
                     .iter()
+                    .map(|o| {
+                        o.map(|v| {
+                            <<$ArrayType as Array>::RefItem<'_> as FromIntoArrow>::from_arrow(v)
+                        })
+                    })
+                    .collect()
+            }
+        }
+        impl From<&[$ArrowType]> for $ArrayType {
+            fn from(arrays: &[$ArrowType]) -> Self {
+                arrays
+                    .iter()
+                    .flat_map(|a| a.iter())
                     .map(|o| {
                         o.map(|v| {
                             <<$ArrayType as Array>::RefItem<'_> as FromIntoArrow>::from_arrow(v)
