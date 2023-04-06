@@ -71,7 +71,7 @@ const_assert_eq!(
 );
 
 pub trait NullBitmap: EstimateSize {
-     fn empty() -> Self;
+    fn empty() -> Self;
 
     fn is_empty(&self) -> bool;
 
@@ -117,7 +117,7 @@ impl NullBitmap for StackNullBitmap {
 impl NullBitmap for HeapNullBitmap {
     fn empty() -> Self {
         HeapNullBitmap {
-            inner: FixedBitSet::new()
+            inner: FixedBitSet::new(),
         }
     }
 
