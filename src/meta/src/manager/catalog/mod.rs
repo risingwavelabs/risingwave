@@ -231,6 +231,13 @@ where
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
+
+        if database_core.has_creation_in_database(database_id) {
+            return Err(MetaError::permission_denied(
+                "Some relations are creating in the target database, try again later".into(),
+            ));
+        }
+
         let mut databases = BTreeMapTransaction::new(&mut database_core.databases);
         let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
         let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
@@ -239,6 +246,7 @@ where
         let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
         let mut views = BTreeMapTransaction::new(&mut database_core.views);
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+        let mut functions = BTreeMapTransaction::new(&mut database_core.functions);
 
         /// `drop_by_database_id` provides a wrapper for dropping relations by database id, it will
         /// return the relation ids that dropped.
@@ -267,6 +275,7 @@ where
             let tables_to_drop = drop_by_database_id!(tables, database_id);
             let indexes_to_drop = drop_by_database_id!(indexes, database_id);
             let views_to_drop = drop_by_database_id!(views, database_id);
+            let functions_to_drop = drop_by_database_id!(functions, database_id);
 
             let objects = std::iter::once(Object::DatabaseId(database_id))
                 .chain(
@@ -280,6 +289,11 @@ where
                     sources_to_drop
                         .iter()
                         .map(|source| Object::SourceId(source.id)),
+                )
+                .chain(
+                    functions_to_drop
+                        .iter()
+                        .map(|function| Object::FunctionId(function.id)),
                 )
                 .collect_vec();
             let users_need_update = Self::update_user_privileges(&mut users, &objects);
@@ -298,6 +312,7 @@ where
                 )
                 .chain(indexes_to_drop.iter().map(|index| index.owner))
                 .chain(views_to_drop.iter().map(|view| view.owner))
+                .chain(functions_to_drop.iter().map(|function| function.owner))
                 .for_each(|owner_id| user_core.decrease_ref(owner_id));
 
             // Update relation ref count.
@@ -310,7 +325,7 @@ where
             for view in &views_to_drop {
                 database_core.relation_ref_count.remove(&view.id);
             }
-
+            // FIXME: resolve function refer count.
             for user in users_need_update {
                 self.notify_frontend(Operation::Update, Info::User(user))
                     .await;
@@ -353,12 +368,15 @@ where
         let conn_id = connection.id;
         let conn_name = connection.name.clone();
         let mut connections = BTreeMapTransaction::new(&mut core.connections);
-        connections.insert(conn_id, connection);
+        connections.insert(conn_id, connection.to_owned());
         commit_meta!(self, connections)?;
 
         core.connection_by_name.insert(conn_name, conn_id);
-        // Currently we don't need to notify frontend, so just fill 0 here
-        Ok(0)
+
+        let version = self
+            .notify_frontend(Operation::Add, Info::Connection(connection))
+            .await;
+        Ok(version)
     }
 
     pub async fn drop_connection(&self, conn_name: &str) -> MetaResult<NotificationVersion> {
@@ -370,10 +388,13 @@ where
             .ok_or_else(|| anyhow!("connection {} not found", conn_name))?;
 
         let mut connections = BTreeMapTransaction::new(&mut core.connections);
-        connections.remove(conn_id);
+        let connection = connections.remove(conn_id).unwrap();
         commit_meta!(self, connections)?;
-        // Currently we don't need to notify frontend, so just fill 0 here
-        Ok(0)
+
+        let version = self
+            .notify_frontend(Operation::Delete, Info::Connection(connection))
+            .await;
+        Ok(version)
     }
 
     pub async fn create_schema(&self, schema: &Schema) -> MetaResult<NotificationVersion> {
@@ -405,8 +426,15 @@ where
         if !database_core.schemas.contains_key(&schema_id) {
             return Err(MetaError::catalog_id_not_found("schema", schema_id));
         }
+        if database_core.has_creation_in_schema(schema_id) {
+            return Err(MetaError::permission_denied(
+                "Some relations are creating in the target schema, try again later".into(),
+            ));
+        }
         if !database_core.schema_is_empty(schema_id) {
-            bail!("schema is not empty!");
+            return Err(MetaError::permission_denied(
+                "The schema is not empty, try dropping them first".into(),
+            ));
         }
         let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);

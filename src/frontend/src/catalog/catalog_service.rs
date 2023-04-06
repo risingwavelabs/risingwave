@@ -24,6 +24,7 @@ use risingwave_pb::catalog::{
     PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
 };
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
+use risingwave_pb::ddl_service::create_connection_request;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
@@ -48,7 +49,7 @@ impl CatalogReader {
     }
 }
 
-/// [`CatalogWriter`] initiate DDL operations (create table/schema/database/function).
+/// [`CatalogWriter`] initiate DDL operations (create table/schema/database/function/connection).
 /// It will only send rpc to meta and get the catalog version as response.
 /// Then it will wait for the local catalog to be synced to the version, which is performed by
 /// [observer](`crate::observer::FrontendObserverNode`).
@@ -98,6 +99,12 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn create_function(&self, function: PbFunction) -> Result<()>;
 
+    async fn create_connection(
+        &self,
+        connection_name: String,
+        connection: create_connection_request::Payload,
+    ) -> Result<()>;
+
     async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()>;
 
     async fn drop_materialized_view(&self, table_id: TableId) -> Result<()>;
@@ -115,6 +122,8 @@ pub trait CatalogWriter: Send + Sync {
     async fn drop_index(&self, index_id: IndexId) -> Result<()>;
 
     async fn drop_function(&self, function_id: FunctionId) -> Result<()>;
+
+    async fn drop_connection(&self, connection_name: &str) -> Result<()>;
 
     async fn alter_table_name(&self, table_id: u32, table_name: &str) -> Result<()>;
 
@@ -231,6 +240,18 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
+    async fn create_connection(
+        &self,
+        connection_name: String,
+        connection: create_connection_request::Payload,
+    ) -> Result<()> {
+        let (_, version) = self
+            .meta_client
+            .create_connection(connection_name, connection)
+            .await?;
+        self.wait_version(version).await
+    }
+
     async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()> {
         let version = self.meta_client.drop_table(source_id, table_id).await?;
         self.wait_version(version).await
@@ -273,6 +294,11 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn drop_database(&self, database_id: u32) -> Result<()> {
         let version = self.meta_client.drop_database(database_id).await?;
+        self.wait_version(version).await
+    }
+
+    async fn drop_connection(&self, connection_name: &str) -> Result<()> {
+        let version = self.meta_client.drop_connection(connection_name).await?;
         self.wait_version(version).await
     }
 
