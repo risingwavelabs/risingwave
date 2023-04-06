@@ -20,10 +20,10 @@ use risingwave_common::error::Result;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
 use super::{
-    gen_filter_and_pushdown, BatchGroupTopN, ColPrunable, ColumnPruningContext, ExprRewritable,
-    LogicalProject, LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
-    PredicatePushdownContext, RewriteStreamContext, StreamDedup, StreamGroupTopN, ToBatch,
-    ToStream, ToStreamContext,
+    gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, ColumnPruningContext,
+    ExprRewritable, LogicalProject, LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, StreamDedup,
+    StreamGroupTopN, ToBatch, ToStream, ToStreamContext,
 };
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::utils::Condition;
@@ -33,46 +33,29 @@ use crate::utils::Condition;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalDedup {
     pub base: PlanBase,
-    input: PlanRef,
-
-    /// Column indices of the columns to be deduplicated.
-    dedup_cols: Vec<usize>,
+    core: generic::Dedup<PlanRef>,
 }
 
 impl LogicalDedup {
     pub fn new(input: PlanRef, dedup_cols: Vec<usize>) -> Self {
-        let logical_pk = dedup_cols
-            .iter()
-            .chain(input.logical_pk())
-            .unique()
-            .copied()
-            .collect_vec();
-        LogicalDedup {
-            base: PlanBase::new_logical(
-                input.ctx(),
-                input.schema().clone(),
-                logical_pk,
-                input.functional_dependency().clone(),
-            ),
-            input,
-            dedup_cols,
-        }
-    }
-
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        builder.field("dedup_cols", &self.dedup_cols);
-        builder.finish()
+        let base = PlanBase::new_logical(
+            input.ctx(),
+            input.schema().clone(),
+            dedup_cols.clone(),
+            input.functional_dependency().clone(),
+        );
+        let core = generic::Dedup { input, dedup_cols };
+        LogicalDedup { base, core }
     }
 
     pub fn dedup_cols(&self) -> &[usize] {
-        &self.dedup_cols
+        &self.core.dedup_cols
     }
 }
 
 impl PlanTreeNodeUnary for LogicalDedup {
     fn input(&self) -> PlanRef {
-        self.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
@@ -126,7 +109,8 @@ impl ToStream for LogicalDedup {
             .enforce_if_not_satisfies(input, &Order::any())?;
         if input.append_only() {
             // `LogicalDedup` is transformed to `StreamDedup` only when the input is append-only.
-            let logical_dedup = self.clone_with_input(input);
+            let mut logical_dedup = self.core.clone();
+            logical_dedup.input = input;
             Ok(StreamDedup::new(logical_dedup).into())
         } else {
             // If the input is not append-only, we use a `StreamGroupTopN` with the limit being 1.
@@ -202,6 +186,6 @@ impl ColPrunable for LogicalDedup {
 
 impl fmt::Display for LogicalDedup {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalDedup")
+        self.core.fmt_with_name(f, "LogicalDedup")
     }
 }

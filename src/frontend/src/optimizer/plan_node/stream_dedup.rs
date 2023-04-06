@@ -19,9 +19,9 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::DedupNode;
 
-use super::generic::GenericPlanRef;
+use super::generic::{self, GenericPlanNode, GenericPlanRef};
 use super::utils::TableCatalogBuilder;
-use super::{ExprRewritable, LogicalDedup, PlanBase, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::PlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -30,19 +30,19 @@ use crate::TableCatalog;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamDedup {
     pub base: PlanBase,
-    logical: LogicalDedup,
+    logical: generic::Dedup<PlanRef>,
 }
 
 impl StreamDedup {
-    pub fn new(logical: LogicalDedup) -> Self {
-        let input = logical.input();
+    pub fn new(logical: generic::Dedup<PlanRef>) -> Self {
+        let input = logical.input.clone();
         // A dedup operator must be append-only.
         assert!(input.append_only());
 
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
-            input.logical_pk().to_vec(),
+            logical.dedup_cols.clone(),
             input.functional_dependency().clone(),
             input.distribution().clone(),
             true,
@@ -60,14 +60,14 @@ impl StreamDedup {
             builder.add_column(field);
         });
 
-        self.logical.dedup_cols().iter().for_each(|idx| {
+        self.logical.dedup_cols.iter().for_each(|idx| {
             builder.add_order_column(*idx, OrderType::ascending());
         });
 
         let read_prefix_len_hint = builder.get_current_pk_len();
 
         builder.build(
-            self.logical.distribution().dist_column_indices().to_vec(),
+            self.base.distribution().dist_column_indices().to_vec(),
             read_prefix_len_hint,
         )
     }
@@ -82,11 +82,13 @@ impl fmt::Display for StreamDedup {
 
 impl PlanTreeNodeUnary for StreamDedup {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let mut logical = self.logical.clone();
+        logical.input = input;
+        Self::new(logical)
     }
 }
 
@@ -101,7 +103,7 @@ impl StreamNode for StreamDedup {
             state_table: Some(table_catalog.to_internal_table_prost()),
             dedup_column_indices: self
                 .logical
-                .dedup_cols()
+                .dedup_cols
                 .iter()
                 .map(|idx| *idx as _)
                 .collect_vec(),
