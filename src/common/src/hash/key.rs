@@ -68,10 +68,6 @@ impl NullBitmap {
         self.inner.add_inplace(idx);
     }
 
-    fn len(&self) -> usize {
-        self.inner.len()
-    }
-
     fn contains(&self, x: usize) -> bool {
         self.inner.contains(x)
     }
