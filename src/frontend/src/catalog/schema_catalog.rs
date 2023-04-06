@@ -21,17 +21,14 @@ use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::catalog::{PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView};
 
-use super::source_catalog::SourceCatalog;
-use super::ViewId;
+use super::{SinkId, SourceId, ViewId};
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::catalog::index_catalog::IndexCatalog;
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::catalog::SchemaId;
-
-pub type SourceId = u32;
-pub type SinkId = u32;
 
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {

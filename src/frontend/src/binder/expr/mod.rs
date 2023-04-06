@@ -214,6 +214,7 @@ impl Binder {
         let func_type = match op {
             UnaryOperator::Not => ExprType::Not,
             UnaryOperator::Minus => ExprType::Neg,
+            UnaryOperator::PGAbs => ExprType::Abs,
             UnaryOperator::PGBitwiseNot => ExprType::BitwiseNot,
             UnaryOperator::Plus => {
                 return self.rewrite_positive(expr);

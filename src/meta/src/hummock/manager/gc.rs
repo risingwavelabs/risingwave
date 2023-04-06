@@ -22,7 +22,6 @@ use risingwave_hummock_sdk::HummockSstableObjectId;
 
 use crate::hummock::error::Result;
 use crate::hummock::manager::{commit_multi_var, read_lock, write_lock};
-use crate::hummock::metrics_utils::trigger_stale_ssts_stat;
 use crate::hummock::HummockManager;
 use crate::model::{BTreeMapTransaction, ValTransaction};
 use crate::storage::{MetaStore, Transaction};
@@ -56,9 +55,7 @@ where
             .checkpoint
             .stale_objects
             .retain(|_, stale_objects| !stale_objects.id.is_empty());
-        let remain = versioning_guard.objects_to_delete.len();
         drop(versioning_guard);
-        trigger_stale_ssts_stat(&self.metrics, remain);
         Ok(())
     }
 
@@ -124,9 +121,7 @@ where
             .filter(|object_id| !tracked_object_ids.contains(object_id));
         let mut versioning_guard = write_lock!(self, versioning).await;
         versioning_guard.objects_to_delete.extend(to_delete.clone());
-        let remain = versioning_guard.objects_to_delete.len();
         drop(versioning_guard);
-        trigger_stale_ssts_stat(&self.metrics, remain);
         to_delete.count()
     }
 }

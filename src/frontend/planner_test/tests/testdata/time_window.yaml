@@ -210,3 +210,87 @@
   batch_plan: |
     BatchProject { exprs: [*VALUES*_0.column_0, TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) as $expr1, (TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) + '00:00:10':Interval) as $expr2] }
     └─BatchValues { rows: [['2020-01-01 12:00:00':Timestamp]] }
+- sql: |
+    create table t1 ( c1 varchar, c2 int, c3 timestamp);
+    create table t2 ( d1 int, d2 varchar, d3 timestamp);
+    create index idx_t1 on t1(c2) include (c1, c2, c3);
+    select * from t2 inner join hop(t1,  c3, interval '10 minute',interval '20 minute')  on t2.d1 = t1.c2;
+  logical_plan: |
+    LogicalProject { exprs: [t2.d1, t2.d2, t2.d3, t1.c1, t1.c2, t1.c3, window_start, window_end] }
+    └─LogicalJoin { type: Inner, on: (t2.d1 = t1.c2), output: all }
+      ├─LogicalScan { table: t2, columns: [t2.d1, t2.d2, t2.d3, t2._row_id] }
+      └─LogicalHopWindow { time_col: t1.c3, slide: 00:10:00, size: 00:20:00, output: all }
+        └─LogicalFilter { predicate: IsNotNull(t1.c3) }
+          └─LogicalScan { table: t1, columns: [t1.c1, t1.c2, t1.c3, t1._row_id] }
+  optimized_logical_plan_for_batch: |
+    LogicalHopWindow { time_col: t1.c3, slide: 00:10:00, size: 00:20:00, output: all }
+    └─LogicalFilter { predicate: IsNotNull(t1.c3) }
+      └─LogicalJoin { type: Inner, on: (t2.d1 = t1.c2), output: all }
+        ├─LogicalScan { table: t2, columns: [t2.d1, t2.d2, t2.d3] }
+        └─LogicalScan { table: t1, columns: [t1.c1, t1.c2, t1.c3], predicate: IsNotNull(t1.c3) }
+  batch_plan: |
+    BatchHopWindow { time_col: idx_t1.c3, slide: 00:10:00, size: 00:20:00, output: all }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchFilter { predicate: IsNotNull(idx_t1.c3) }
+        └─BatchLookupJoin { type: Inner, predicate: t2.d1 = idx_t1.c2 AND IsNotNull(idx_t1.c3), output: all }
+          └─BatchExchange { order: [], dist: UpstreamHashShard(t2.d1) }
+            └─BatchScan { table: t2, columns: [t2.d1, t2.d2, t2.d3], distribution: SomeShard }
+- sql: |
+    create table t1 ( c1 varchar, c2 int, c3 timestamp);
+    create table t2 ( d1 int, d2 varchar, d3 timestamp);
+    create index idx_t1 on t1(c2) include (c1, c2, c3);
+    select * from hop(t2,  d3, interval '10 minute',interval '20 minute') inner join hop(t1,  c3, interval '10 minute',interval '20 minute')  on t2.d1 = t1.c2;
+  logical_plan: |
+    LogicalProject { exprs: [t2.d1, t2.d2, t2.d3, window_start, window_end, t1.c1, t1.c2, t1.c3, window_start, window_end] }
+    └─LogicalJoin { type: Inner, on: (t2.d1 = t1.c2), output: all }
+      ├─LogicalHopWindow { time_col: t2.d3, slide: 00:10:00, size: 00:20:00, output: all }
+      | └─LogicalFilter { predicate: IsNotNull(t2.d3) }
+      |   └─LogicalScan { table: t2, columns: [t2.d1, t2.d2, t2.d3, t2._row_id] }
+      └─LogicalHopWindow { time_col: t1.c3, slide: 00:10:00, size: 00:20:00, output: all }
+        └─LogicalFilter { predicate: IsNotNull(t1.c3) }
+          └─LogicalScan { table: t1, columns: [t1.c1, t1.c2, t1.c3, t1._row_id] }
+  optimized_logical_plan_for_batch: |
+    LogicalHopWindow { time_col: t1.c3, slide: 00:10:00, size: 00:20:00, output: [t2.d1, t2.d2, t2.d3, window_start, window_end, t1.c1, t1.c2, t1.c3, window_start, window_end] }
+    └─LogicalFilter { predicate: IsNotNull(t1.c3) }
+      └─LogicalHopWindow { time_col: t2.d3, slide: 00:10:00, size: 00:20:00, output: all }
+        └─LogicalFilter { predicate: IsNotNull(t2.d3) }
+          └─LogicalJoin { type: Inner, on: (t2.d1 = t1.c2), output: all }
+            ├─LogicalScan { table: t2, columns: [t2.d1, t2.d2, t2.d3], predicate: IsNotNull(t2.d3) }
+            └─LogicalScan { table: t1, columns: [t1.c1, t1.c2, t1.c3], predicate: IsNotNull(t1.c3) }
+  batch_plan: |
+    BatchHopWindow { time_col: idx_t1.c3, slide: 00:10:00, size: 00:20:00, output: [t2.d1, t2.d2, t2.d3, window_start, window_end, idx_t1.c1, idx_t1.c2, idx_t1.c3, window_start, window_end] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchFilter { predicate: IsNotNull(idx_t1.c3) }
+        └─BatchHopWindow { time_col: t2.d3, slide: 00:10:00, size: 00:20:00, output: all }
+          └─BatchFilter { predicate: IsNotNull(t2.d3) }
+            └─BatchLookupJoin { type: Inner, predicate: t2.d1 = idx_t1.c2 AND IsNotNull(idx_t1.c3), output: all }
+              └─BatchExchange { order: [], dist: UpstreamHashShard(t2.d1) }
+                └─BatchFilter { predicate: IsNotNull(t2.d3) }
+                  └─BatchScan { table: t2, columns: [t2.d1, t2.d2, t2.d3], distribution: SomeShard }
+- sql: |
+    CREATE TABLE auction (id BIGINT, item_name CHARACTER VARYING, description CHARACTER VARYING, initial_bid BIGINT, reserve BIGINT, date_time TIMESTAMP, expires TIMESTAMP, seller BIGINT, category BIGINT, extra CHARACTER VARYING, PRIMARY KEY (id));
+    CREATE TABLE nation (n_nationkey INT, n_name CHARACTER VARYING, n_regionkey INT, n_comment CHARACTER VARYING, PRIMARY KEY (n_nationkey));
+    CREATE TABLE alltypes2 (c1 BOOLEAN, c2 SMALLINT, c3 INT, c4 BIGINT, c5 REAL, c6 DOUBLE, c7 NUMERIC, c8 DATE, c9 CHARACTER VARYING, c10 TIME, c11 TIMESTAMP, c13 INTERVAL, c14 STRUCT<a INT>, c15 INT[], c16 CHARACTER VARYING[]);
+    SELECT ((CASE WHEN (hop_0.c2 = (32)) THEN TIMESTAMP '2022-07-29 15:06:36' WHEN hop_0.c1 THEN t_2.expires WHEN false THEN (t_2.expires + (INTERVAL '-18')) ELSE t_2.expires END) + (INTERVAL '87')) AS col_0, ((INT '618') % ((311))) AS col_1, (SMALLINT '35') AS col_2, ((coalesce(NULL, NULL, NULL, NULL, NULL, (INT '0'), NULL, NULL, NULL, NULL)) - hop_0.c7) AS col_3 FROM hop(alltypes2, alltypes2.c11, INTERVAL '3600', INTERVAL '144000') AS hop_0, nation AS t_1 JOIN auction AS t_2 ON t_1.n_name = t_2.item_name AND true WHERE (t_2.seller > ((CAST(((SMALLINT '62')) IN (hop_0.c2, hop_0.c2, hop_0.c2, (- hop_0.c2), hop_0.c2, hop_0.c2, hop_0.c2, (SMALLINT '-32768')) AS INT) | t_1.n_nationkey) + hop_0.c7)) GROUP BY t_2.description, hop_0.c7, t_2.category, t_2.item_name, hop_0.c15, hop_0.c2, hop_0.c1, hop_0.c9, t_2.expires, hop_0.c6;
+  logical_plan: |
+    LogicalProject { exprs: [(Case((alltypes2.c2 = 32:Int32), '2022-07-29 15:06:36':Timestamp, alltypes2.c1, auction.expires, false:Boolean, (auction.expires + '-00:00:18':Interval), auction.expires) + '00:01:27':Interval) as $expr1, (618:Int32 % 311:Int32) as $expr2, 35:Int16, (Coalesce(null:Int32, null:Int32, null:Int32, null:Int32, null:Int32, 0:Int32, null:Int32, null:Int32, null:Int32, null:Int32) - alltypes2.c7) as $expr3] }
+    └─LogicalAgg { group_key: [auction.description, alltypes2.c7, auction.category, auction.item_name, alltypes2.c15, alltypes2.c2, alltypes2.c1, alltypes2.c9, auction.expires, alltypes2.c6], aggs: [] }
+      └─LogicalProject { exprs: [auction.description, alltypes2.c7, auction.category, auction.item_name, alltypes2.c15, alltypes2.c2, alltypes2.c1, alltypes2.c9, auction.expires, alltypes2.c6] }
+        └─LogicalFilter { predicate: (auction.seller > (((((((((In(62:Int16, -32768:Int16) OR (62:Int16 = alltypes2.c2)) OR (62:Int16 = alltypes2.c2)) OR (62:Int16 = alltypes2.c2)) OR (62:Int16 = Neg(alltypes2.c2))) OR (62:Int16 = alltypes2.c2)) OR (62:Int16 = alltypes2.c2)) OR (62:Int16 = alltypes2.c2))::Int32 | nation.n_nationkey) + alltypes2.c7)) }
+          └─LogicalJoin { type: Inner, on: true, output: all }
+            ├─LogicalHopWindow { time_col: alltypes2.c11, slide: 01:00:00, size: 40:00:00, output: all }
+            | └─LogicalFilter { predicate: IsNotNull(alltypes2.c11) }
+            |   └─LogicalScan { table: alltypes2, columns: [alltypes2.c1, alltypes2.c2, alltypes2.c3, alltypes2.c4, alltypes2.c5, alltypes2.c6, alltypes2.c7, alltypes2.c8, alltypes2.c9, alltypes2.c10, alltypes2.c11, alltypes2.c13, alltypes2.c14, alltypes2.c15, alltypes2.c16, alltypes2._row_id] }
+            └─LogicalJoin { type: Inner, on: (nation.n_name = auction.item_name), output: all }
+              ├─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment] }
+              └─LogicalScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, auction.extra] }
+  optimized_logical_plan_for_batch: |
+    LogicalProject { exprs: [(Case((alltypes2.c2 = 32:Int32), '2022-07-29 15:06:36':Timestamp, alltypes2.c1, auction.expires, false:Boolean, (auction.expires + '-00:00:18':Interval), auction.expires) + '00:01:27':Interval) as $expr1, (618:Int32 % 311:Int32) as $expr2, 35:Int16, (Coalesce(null:Int32, null:Int32, null:Int32, null:Int32, null:Int32, 0:Int32, null:Int32, null:Int32, null:Int32, null:Int32) - alltypes2.c7) as $expr3] }
+    └─LogicalAgg { group_key: [auction.description, alltypes2.c7, auction.category, auction.item_name, alltypes2.c15, alltypes2.c2, alltypes2.c1, alltypes2.c9, auction.expires, alltypes2.c6], aggs: [] }
+      └─LogicalHopWindow { time_col: alltypes2.c11, slide: 01:00:00, size: 40:00:00, output: [auction.description, alltypes2.c7, auction.category, auction.item_name, alltypes2.c15, alltypes2.c2, alltypes2.c1, alltypes2.c9, auction.expires, alltypes2.c6] }
+        └─LogicalFilter { predicate: IsNotNull(alltypes2.c11) }
+          └─LogicalJoin { type: Inner, on: (auction.seller > (((((((((In(62:Int16, -32768:Int16) OR (62:Int16 = alltypes2.c2)) OR (62:Int16 = alltypes2.c2)) OR (62:Int16 = alltypes2.c2)) OR (62:Int16 = Neg(alltypes2.c2))) OR (62:Int16 = alltypes2.c2)) OR (62:Int16 = alltypes2.c2)) OR (62:Int16 = alltypes2.c2))::Int32 | nation.n_nationkey) + alltypes2.c7)), output: all }
+            ├─LogicalJoin { type: Inner, on: (nation.n_name = auction.item_name), output: [nation.n_nationkey, auction.item_name, auction.description, auction.expires, auction.seller, auction.category] }
+            | ├─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name] }
+            | └─LogicalScan { table: auction, columns: [auction.item_name, auction.description, auction.expires, auction.seller, auction.category] }
+            └─LogicalScan { table: alltypes2, columns: [alltypes2.c1, alltypes2.c2, alltypes2.c6, alltypes2.c7, alltypes2.c9, alltypes2.c11, alltypes2.c15], predicate: IsNotNull(alltypes2.c11) }

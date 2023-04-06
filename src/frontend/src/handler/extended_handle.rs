@@ -18,12 +18,19 @@ use bytes::Bytes;
 use pgwire::types::Format;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Query, Statement};
+use risingwave_sqlparser::ast::{CreateSink, Query, Statement};
 
 use super::{handle, query, HandlerArgs, RwPgResponse};
 use crate::binder::BoundStatement;
 use crate::session::SessionImpl;
 
+/// Except for Query,Insert,Delete,Update statement, we store other statement as `PureStatement`.
+/// We separate them because `PureStatement` don't have query and parameters (except
+/// create-table-as, create-view-as, create-sink-as), so we don't need to do extra work(infer and
+/// bind parameter) for them.
+/// For create-table-as, create-view-as, create-sink-as with query parameters, we can't
+/// support them. If we find that there are parameter in their query, we return a error otherwise we
+/// store them as `PureStatement`.
 #[derive(Clone)]
 pub enum PrepareStatement {
     Prepared(PreparedResult),
@@ -52,17 +59,17 @@ pub struct PortalResult {
 
 pub fn handle_parse(
     session: Arc<SessionImpl>,
-    stmt: Statement,
+    statement: Statement,
     specific_param_types: Vec<DataType>,
 ) -> Result<PrepareStatement> {
     session.clear_cancel_query_flag();
-    let str_sql = stmt.to_string();
-    let handler_args = HandlerArgs::new(session, &stmt, &str_sql)?;
-    match &stmt {
+    let str_sql = statement.to_string();
+    let handler_args = HandlerArgs::new(session, &statement, &str_sql)?;
+    match &statement {
         Statement::Query(_)
         | Statement::Insert { .. }
         | Statement::Delete { .. }
-        | Statement::Update { .. } => query::handle_parse(handler_args, stmt, specific_param_types),
+        | Statement::Update { .. } => query::handle_parse(handler_args, statement, specific_param_types),
         Statement::CreateView {
             query,
             ..
@@ -74,7 +81,7 @@ pub fn handle_parse(
                 )
                 .into());
             }
-            Ok(PrepareStatement::PureStatement(stmt))
+            Ok(PrepareStatement::PureStatement(statement))
         }
         Statement::CreateTable {
             query,
@@ -86,10 +93,20 @@ pub fn handle_parse(
                     None.into(),
                 ).into())
             } else {
-                Ok(PrepareStatement::PureStatement(stmt))
+                Ok(PrepareStatement::PureStatement(statement))
             }
         }
-        _ => Ok(PrepareStatement::PureStatement(stmt)),
+        Statement::CreateSink { stmt } => {
+            if let CreateSink::AsQuery(query) = &stmt.sink_from && have_parameter_in_query(query) {
+                Err(ErrorCode::NotImplemented(
+                    "CREATE SINK AS SELECT with parameters".to_string(),
+                    None.into(),
+                ).into())
+            } else {
+                Ok(PrepareStatement::PureStatement(statement))
+            }
+        }
+        _ => Ok(PrepareStatement::PureStatement(statement)),
     }
 }
 
@@ -113,7 +130,13 @@ pub fn handle_bind(
                 result_formats,
             }))
         }
-        PrepareStatement::PureStatement(stmt) => Ok(Portal::PureStatement(stmt)),
+        PrepareStatement::PureStatement(stmt) => {
+            assert!(
+                params.is_empty() && param_formats.is_empty(),
+                "params and param_formats should be empty for pure statement"
+            );
+            Ok(Portal::PureStatement(stmt))
+        }
     }
 }
 
