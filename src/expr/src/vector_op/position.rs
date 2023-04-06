@@ -14,16 +14,43 @@
 
 use risingwave_expr_macro::function;
 
-use crate::Result;
-
-/// Location of specified substring
+/// Returns the index of the first occurrence of the specified substring in the input string,
+/// or zero if the substring is not present.
 ///
-/// Note: According to pgsql, position will return 0 rather -1 when substr is not in the target str
+/// # Example
+///
+/// ```slt
+/// query I
+/// select position('om' in 'Thomas');
+/// ----
+/// 3
+///
+/// query I
+/// select strpos('hello, world', 'lo');
+/// ----
+/// 4
+///
+/// query I
+/// select strpos('high', 'ig');
+/// ----
+/// 2
+///
+/// query I
+/// select strpos('abc', 'def');
+/// ----
+/// 0
+///
+/// query I
+/// select strpos('床前明月光', '月光');
+/// ----
+/// 4
+/// ```
+#[function("strpos(varchar, varchar) -> int32")] // backward compatibility with old proto
 #[function("position(varchar, varchar) -> int32")]
-pub fn position(str: &str, sub_str: &str) -> Result<i32> {
+pub fn position(str: &str, sub_str: &str) -> i32 {
     match str.find(sub_str) {
-        Some(byte_idx) => Ok((str[..byte_idx].chars().count() + 1) as i32),
-        None => Ok(0),
+        Some(byte_idx) => (str[..byte_idx].chars().count() + 1) as i32,
+        None => 0,
     }
 }
 
@@ -41,7 +68,7 @@ mod tests {
         ];
 
         for (str, sub_str, expected) in cases {
-            assert_eq!(position(str, sub_str).unwrap(), expected)
+            assert_eq!(position(str, sub_str), expected)
         }
     }
 }
