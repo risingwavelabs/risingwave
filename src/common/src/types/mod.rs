@@ -20,7 +20,7 @@ use bytes::{Buf, BufMut, Bytes};
 use num_traits::Float;
 use parse_display::{Display, FromStr};
 use postgres_types::FromSql;
-use risingwave_pb::data::data_type::{PbTypeName};
+use risingwave_pb::data::data_type::PbTypeName;
 use risingwave_pb::data::PbDataType;
 use serde::{Deserialize, Serialize};
 
