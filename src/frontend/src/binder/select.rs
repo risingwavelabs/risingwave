@@ -394,18 +394,6 @@ impl Binder {
             DataType::Int32,
         )));
 
-        // Add the space used by keys and the space used by values to get the total space used by
-        // the table
-        let key_value_size_sum = FunctionCall::new(
-            ExprType::Add,
-            vec![
-                InputRef::new(RW_TABLE_STATS_KEY_SIZE_INDEX, DataType::Int64).into(),
-                InputRef::new(RW_TABLE_STATS_VALUE_SIZE_INDEX, DataType::Int64).into(),
-            ],
-        )?
-        .into();
-        let select_items = vec![key_value_size_sum];
-
         // define the output schema
         let result_schema = Schema {
             fields: vec![Field::with_name(
@@ -433,6 +421,18 @@ impl Binder {
             )?
             .into(),
         );
+
+        // Add the space used by keys and the space used by values to get the total space used by
+        // the table
+        let key_value_size_sum = FunctionCall::new(
+            ExprType::Add,
+            vec![
+                InputRef::new(RW_TABLE_STATS_KEY_SIZE_INDEX, DataType::Int64).into(),
+                InputRef::new(RW_TABLE_STATS_VALUE_SIZE_INDEX, DataType::Int64).into(),
+            ],
+        )?
+        .into();
+        let select_items = vec![key_value_size_sum];
 
         Ok(BoundSelect {
             distinct: BoundDistinct::All,
