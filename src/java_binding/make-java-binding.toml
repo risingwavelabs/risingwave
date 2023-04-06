@@ -21,8 +21,8 @@ script = '''
 #!/usr/bin/env bash
 set -ex
 cd java
-mvn clean install --pl java-binding-integration-test --am -DskipTests=true
-mvn dependency:copy-dependencies --pl java-binding-integration-test
+mvn clean install --no-transfer-progress --pl java-binding-integration-test --am -DskipTests=true
+mvn dependency:copy-dependencies --no-transfer-progress --pl java-binding-integration-test
 '''
 
 [tasks.start-java-binding-demo-cluster]

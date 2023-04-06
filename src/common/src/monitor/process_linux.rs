@@ -133,8 +133,8 @@ impl Collector for ProcessCollector {
     fn collect(&self) -> Vec<proto::MetricFamily> {
         let pid = unsafe { libc::getpid() };
         let clock_tick = unsafe {
-            let mut info = mach::mach_time::mach_timebase_info::default();
-            let errno = mach::mach_time::mach_timebase_info(&mut info as *mut _);
+            let mut info = mach2::mach_time::mach_timebase_info::default();
+            let errno = mach2::mach_time::mach_timebase_info(&mut info as *mut _);
             if errno != 0 {
                 1_f64
             } else {

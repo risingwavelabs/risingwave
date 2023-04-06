@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{bail, Result};
@@ -26,19 +26,28 @@ use futures::future::join_all;
 use futures::{SinkExt, StreamExt};
 use madsim::net::ipvs::*;
 use madsim::runtime::{Handle, NodeHandle};
-use madsim::task::JoinHandle;
 use rand::Rng;
 use sqllogictest::AsyncDB;
 
 use crate::client::RisingWave;
 
-/// Embed the config file and create a temporary file at runtime.
-static CONFIG_PATH: LazyLock<tempfile::TempPath> = LazyLock::new(|| {
-    let mut file = tempfile::NamedTempFile::new().expect("failed to create temp config file");
-    file.write_all(include_bytes!("risingwave.toml"))
-        .expect("failed to write config file");
-    file.into_temp_path()
-});
+/// The path to the configuration file for the cluster.
+#[derive(Clone, Debug)]
+pub enum ConfigPath {
+    /// A regular path pointing to a external configuration file.
+    Regular(String),
+    /// A temporary path pointing to a configuration file created at runtime.
+    Temp(Arc<tempfile::TempPath>),
+}
+
+impl ConfigPath {
+    fn as_str(&self) -> &str {
+        match self {
+            ConfigPath::Regular(s) => s,
+            ConfigPath::Temp(p) => p.as_os_str().to_str().unwrap(),
+        }
+    }
+}
 
 /// RisingWave cluster configuration.
 #[derive(Debug, Clone)]
@@ -46,7 +55,7 @@ pub struct Configuration {
     /// The path to configuration file.
     ///
     /// Empty string means using the default config.
-    pub config_path: String,
+    pub config_path: ConfigPath,
 
     /// The number of frontend nodes.
     pub frontend_nodes: usize,
@@ -75,8 +84,18 @@ pub struct Configuration {
 impl Configuration {
     /// Returns the config for scale test.
     pub fn for_scale() -> Self {
+        // Embed the config file and create a temporary file at runtime. The file will be deleted
+        // automatically when it's dropped.
+        let config_path = {
+            let mut file =
+                tempfile::NamedTempFile::new().expect("failed to create temp config file");
+            file.write_all(include_bytes!("risingwave-scale.toml"))
+                .expect("failed to write config file");
+            file.into_temp_path()
+        };
+
         Configuration {
-            config_path: CONFIG_PATH.as_os_str().to_string_lossy().into(),
+            config_path: ConfigPath::Temp(config_path.into()),
             frontend_nodes: 2,
             compute_nodes: 3,
             meta_nodes: 3,
@@ -201,7 +220,7 @@ impl Cluster {
             let opts = risingwave_meta::MetaNodeOpts::parse_from([
                 "meta-node",
                 "--config-path",
-                &conf.config_path,
+                conf.config_path.as_str(),
                 "--listen-addr",
                 "0.0.0.0:5690",
                 "--advertise-addr",
@@ -229,7 +248,7 @@ impl Cluster {
             let opts = risingwave_frontend::FrontendOpts::parse_from([
                 "frontend-node",
                 "--config-path",
-                &conf.config_path,
+                conf.config_path.as_str(),
                 "--listen-addr",
                 "0.0.0.0:4566",
                 "--advertise-addr",
@@ -248,7 +267,7 @@ impl Cluster {
             let opts = risingwave_compute::ComputeNodeOpts::parse_from([
                 "compute-node",
                 "--config-path",
-                &conf.config_path,
+                conf.config_path.as_str(),
                 "--listen-addr",
                 "0.0.0.0:5688",
                 "--advertise-addr",
@@ -272,7 +291,7 @@ impl Cluster {
             let opts = risingwave_compactor::CompactorOpts::parse_from([
                 "compactor-node",
                 "--config-path",
-                &conf.config_path,
+                conf.config_path.as_str(),
                 "--listen-addr",
                 "0.0.0.0:6660",
                 "--advertise-addr",
