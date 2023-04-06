@@ -119,6 +119,9 @@ pub struct MetaMetrics {
 
     pub level_compact_task_cnt: IntGaugeVec,
     pub object_store_metric: Arc<ObjectStoreMetrics>,
+
+    /// supervisor for which source is still up.
+    pub source_is_up: IntGaugeVec,
 }
 
 impl MetaMetrics {
@@ -383,6 +386,14 @@ impl MetaMetrics {
         .unwrap();
         let object_store_metric = Arc::new(ObjectStoreMetrics::new(registry.clone()));
 
+        let source_is_up = register_int_gauge_vec_with_registry!(
+            "source_status_is_up",
+            "source is up or not",
+            &["source_id", "source_name"],
+            registry
+        )
+        .unwrap();
+
         Self {
             registry,
 
@@ -425,6 +436,7 @@ impl MetaMetrics {
             scale_compactor_core_num,
             level_compact_task_cnt,
             object_store_metric,
+            source_is_up,
         }
     }
 
