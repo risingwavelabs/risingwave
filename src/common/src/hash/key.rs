@@ -85,7 +85,7 @@ impl NullBitmap {
     }
 }
 
-impl From<Vec<bool>> for NullBitmap {
+impl<T: AsRef<[bool]>> From<T> for NullBitmap {
     fn from(value: Vec<bool>) -> Self {
         let mut bitmap = NullBitmap::empty();
         for (idx, is_true) in value.into_iter().enumerate() {
