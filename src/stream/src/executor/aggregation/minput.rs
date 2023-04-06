@@ -18,22 +18,21 @@ use futures::{pin_mut, StreamExt};
 use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::{ArrayImpl, Op};
+use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, RowExt};
-use risingwave_common::types::{Datum, DatumRef, ScalarImpl};
+use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
-use smallvec::SmallVec;
 
+use super::agg_state_cache::{AggStateCache, GenericAggStateCache, StateCacheInputBatch};
 use super::minput_agg_impl::array_agg::ArrayAgg;
 use super::minput_agg_impl::extreme::ExtremeAgg;
 use super::minput_agg_impl::string_agg::StringAgg;
-use super::minput_agg_impl::{AggStateCache, CacheKey, GenericAggStateCache};
 use super::AggCall;
 use crate::common::cache::{OrderedStateCache, TopNStateCache};
 use crate::common::table::state_table::StateTable;
@@ -215,71 +214,6 @@ impl<S: StateStore> MaterializedInputState<S> {
         }
         assert!(self.cache.is_synced());
         Ok(self.cache.get_output())
-    }
-}
-
-// TODO(yuchao): May extract common logic here to `struct [Data/Stream]ChunkRef` if there's other
-// usage in the future. https://github.com/risingwavelabs/risingwave/pull/5908#discussion_r1002896176
-pub struct StateCacheInputBatch<'a> {
-    idx: usize,
-    ops: Ops<'a>,
-    visibility: Option<&'a Bitmap>,
-    columns: &'a [&'a ArrayImpl],
-    cache_key_serializer: &'a OrderedRowSerde,
-    arg_col_indices: &'a [usize],
-    order_col_indices: &'a [usize],
-}
-
-impl<'a> StateCacheInputBatch<'a> {
-    fn new(
-        ops: Ops<'a>,
-        visibility: Option<&'a Bitmap>,
-        columns: &'a [&'a ArrayImpl],
-        cache_key_serializer: &'a OrderedRowSerde,
-        arg_col_indices: &'a [usize],
-        order_col_indices: &'a [usize],
-    ) -> Self {
-        let first_idx = visibility.map_or(0, |v| v.next_set_bit(0).unwrap_or(ops.len()));
-        Self {
-            idx: first_idx,
-            ops,
-            visibility,
-            columns,
-            cache_key_serializer,
-            arg_col_indices,
-            order_col_indices,
-        }
-    }
-}
-
-impl<'a> Iterator for StateCacheInputBatch<'a> {
-    type Item = (Op, CacheKey, SmallVec<[DatumRef<'a>; 2]>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.idx >= self.ops.len() {
-            None
-        } else {
-            let op = self.ops[self.idx];
-            let key = {
-                let mut key = Vec::new();
-                self.cache_key_serializer.serialize_datums(
-                    self.order_col_indices
-                        .iter()
-                        .map(|col_idx| self.columns[*col_idx].value_at(self.idx)),
-                    &mut key,
-                );
-                key
-            };
-            let value = self
-                .arg_col_indices
-                .iter()
-                .map(|col_idx| self.columns[*col_idx].value_at(self.idx))
-                .collect();
-            self.idx = self.visibility.map_or(self.idx + 1, |v| {
-                v.next_set_bit(self.idx + 1).unwrap_or(self.ops.len())
-            });
-            Some((op, key, value))
-        }
     }
 }
 
