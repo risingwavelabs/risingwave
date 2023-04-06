@@ -264,9 +264,9 @@ SELECT SUBSTRING('string' FROM -10 FOR -2147483646) AS "error";
 \pset null ''
 
 -- E021-11 position expression
---@ SELECT POSITION('4' IN '1234567890') = '4' AS "4";
---@ 
---@ SELECT POSITION('5' IN '1234567890') = '5' AS "5";
+SELECT POSITION('4' IN '1234567890') = '4' AS "4";
+
+SELECT POSITION('5' IN '1234567890') = '5' AS "5";
 
 -- T312 character overlay function
 SELECT OVERLAY('abcdef' PLACING '45' FROM 4) AS "abc45f";
@@ -722,8 +722,8 @@ SELECT rpad('hi', 5, '');
 
 SELECT ltrim('zzzytrim', 'xyz');
 
---@ SELECT translate('', '14', 'ax');
---@ SELECT translate('12345', '14', 'ax');
+SELECT translate('', '14', 'ax');
+SELECT translate('12345', '14', 'ax');
 
 SELECT ascii('x');
 SELECT ascii('');

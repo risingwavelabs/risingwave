@@ -41,7 +41,7 @@ hyper = "0.14"
 hyper-tls = "0.5"
 itertools = "0.10"
 maplit = "1.0.2"
-moka = { version = "0.9", features = ["future"] }
+moka = { version = "0.10", features = ["future"] }
 nexmark = { version = "0.2", features = ["serde"] }
 num-traits = "0.2"
 parking_lot = "0.12"

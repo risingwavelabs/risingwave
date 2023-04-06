@@ -135,6 +135,7 @@ message HummockVersionDeltas {
 message HummockVersionCheckpoint {
   message StaleObjects {
     repeated uint64 id = 1;
+    uint64 total_file_size = 2;
   }
   HummockVersion version = 1;
   map<uint64, StaleObjects> stale_objects = 2;

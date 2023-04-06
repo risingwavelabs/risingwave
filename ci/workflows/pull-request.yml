@@ -7,10 +7,12 @@ cargo-cache: &cargo-cache
   backend: s3
   s3:
     bucket: ci-cache-bucket
+    args: '--no-progress'
   paths:
     - ".cargo/registry/index"
     - ".cargo/registry/cache"
     - ".cargo/git/db"
+    - ".cargo/advisory-db"
 
 steps:
   - label: "check ci image rebuild"
@@ -286,7 +288,7 @@ steps:
       #     files: "*-junit.xml"
       #     format: "junit"
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 18
+    timeout_in_minutes: 25
 
   - label: "misc check"
     command: "ci/scripts/misc-check.sh"

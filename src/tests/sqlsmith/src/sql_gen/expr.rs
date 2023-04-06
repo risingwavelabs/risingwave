@@ -550,7 +550,7 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
         E::IsNotTrue => Some(Expr::IsNotTrue(Box::new(exprs[0].clone()))),
         E::IsFalse => Some(Expr::IsFalse(Box::new(exprs[0].clone()))),
         E::IsNotFalse => Some(Expr::IsNotFalse(Box::new(exprs[0].clone()))),
-        E::Position => Some(Expr::Function(make_simple_func("position", &exprs))),
+        E::Position => Some(Expr::Function(make_simple_func("strpos", &exprs))),
         E::RoundDigit => Some(Expr::Function(make_simple_func("round", &exprs))),
         E::Pow => Some(Expr::Function(make_simple_func("pow", &exprs))),
         E::Repeat => Some(Expr::Function(make_simple_func("repeat", &exprs))),

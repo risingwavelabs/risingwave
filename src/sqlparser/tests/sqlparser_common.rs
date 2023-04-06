@@ -92,7 +92,7 @@ fn parse_insert_values() {
 
 #[test]
 fn parse_update() {
-    let sql = "UPDATE t SET a = 1, b = 2, c = 3 WHERE d";
+    let sql = "UPDATE t SET a = 1, b = 2, c = 3, d = DEFAULT WHERE e";
     match verified_stmt(sql) {
         Statement::Update {
             table_name,
@@ -106,19 +106,23 @@ fn parse_update() {
                 vec![
                     Assignment {
                         id: vec!["a".into()],
-                        value: Expr::Value(number("1")),
+                        value: AssignmentValue::Expr(Expr::Value(number("1"))),
                     },
                     Assignment {
                         id: vec!["b".into()],
-                        value: Expr::Value(number("2")),
+                        value: AssignmentValue::Expr(Expr::Value(number("2"))),
                     },
                     Assignment {
                         id: vec!["c".into()],
-                        value: Expr::Value(number("3")),
+                        value: AssignmentValue::Expr(Expr::Value(number("3"))),
                     },
+                    Assignment {
+                        id: vec!["d".into()],
+                        value: AssignmentValue::Default,
+                    }
                 ]
             );
-            assert_eq!(selection.unwrap(), Expr::Identifier("d".into()));
+            assert_eq!(selection.unwrap(), Expr::Identifier("e".into()));
         }
         _ => unreachable!(),
     }

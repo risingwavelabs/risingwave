@@ -121,6 +121,7 @@ impl Binder {
                 substring_from,
                 substring_for,
             } => self.bind_substring(*expr, substring_from, substring_for),
+            Expr::Position { substring, string } => self.bind_position(*substring, *string),
             Expr::Overlay {
                 expr,
                 new_substring,
@@ -218,6 +219,7 @@ impl Binder {
         let func_type = match op {
             UnaryOperator::Not => ExprType::Not,
             UnaryOperator::Minus => ExprType::Neg,
+            UnaryOperator::PGAbs => ExprType::Abs,
             UnaryOperator::PGBitwiseNot => ExprType::BitwiseNot,
             UnaryOperator::Plus => {
                 return self.rewrite_positive(expr);
@@ -281,6 +283,15 @@ impl Binder {
             args.push(self.bind_expr(*expr)?);
         }
         FunctionCall::new(ExprType::Substr, args).map(|f| f.into())
+    }
+
+    fn bind_position(&mut self, substring: Expr, string: Expr) -> Result<ExprImpl> {
+        let args = vec![
+            // Note that we reverse the order of arguments.
+            self.bind_expr(string)?,
+            self.bind_expr(substring)?,
+        ];
+        FunctionCall::new(ExprType::Position, args).map(Into::into)
     }
 
     fn bind_overlay(
