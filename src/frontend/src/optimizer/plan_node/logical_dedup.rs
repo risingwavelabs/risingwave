@@ -45,7 +45,7 @@ impl LogicalDedup {
             .iter()
             .chain(input.logical_pk())
             .unique()
-            .map(|k| *k)
+            .copied()
             .collect_vec();
         LogicalDedup {
             base: PlanBase::new_logical(
@@ -137,8 +137,7 @@ impl ToStream for LogicalDedup {
                 false,
                 Order::default(),
                 self.dedup_cols().to_vec(),
-            )
-            .into();
+            );
             Ok(StreamGroupTopN::new(logical_top_n, None).into())
         }
     }
@@ -154,8 +153,7 @@ impl ToBatch for LogicalDedup {
             false,
             Order::default(),
             self.dedup_cols().to_vec(),
-        )
-        .into();
+        );
         Ok(BatchGroupTopN::new(logical_top_n).into())
     }
 }
@@ -193,13 +191,6 @@ impl ColPrunable for LogicalDedup {
                 .map(|&idx| mapping.map(idx))
                 .collect_vec();
             let src_size = logical_dedup.schema().len();
-            dbg!(
-                &mapping,
-                &input_required_cols,
-                &required_cols,
-                &output_required_cols,
-                logical_dedup.schema()
-            );
             LogicalProject::with_mapping(
                 logical_dedup,
                 ColIndexMapping::with_remaining_columns(&output_required_cols, src_size),
