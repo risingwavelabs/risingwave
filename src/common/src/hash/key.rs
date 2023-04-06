@@ -134,7 +134,7 @@ impl NullBitmap for HeapNullBitmap {
     }
 
     fn set_true(&mut self, idx: usize) {
-        self.inner.grow(self.inner.len() + 1);
+        self.inner.grow(idx + 1);
         self.inner.insert(idx)
     }
 
