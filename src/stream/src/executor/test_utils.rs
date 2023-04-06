@@ -252,7 +252,7 @@ pub mod agg_executor {
     use std::sync::Arc;
 
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-    use risingwave_common::hash::SerializedKey;
+    use risingwave_common::hash::{SerializedKey, StackNullBitmap};
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::expr::AggKind;
@@ -416,7 +416,7 @@ pub mod agg_executor {
         )
         .await;
 
-        HashAggExecutor::<SerializedKey, S>::new(AggExecutorArgs {
+        HashAggExecutor::<SerializedKey<StackNullBitmap>, S>::new(AggExecutorArgs {
             input,
             actor_ctx: ActorContext::create(123),
             pk_indices,

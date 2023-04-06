@@ -537,7 +537,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .map(|&idx| original_schema[idx].clone())
             .collect();
 
-        let null_matched: NullBitmap = null_safe.into();
+        let null_matched = K::Bitmap::from_bool_vec(null_safe);
 
         let need_degree_table_l = need_left_degree(T) && !pk_contained_in_jk_r;
         let need_degree_table_r = need_right_degree(T) && !pk_contained_in_jk_l;

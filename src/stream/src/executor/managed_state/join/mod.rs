@@ -199,7 +199,7 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// Data types of the join key columns
     join_key_data_types: Vec<DataType>,
     /// Null safe bitmap for each join pair
-    null_matched: NullBitmap,
+    null_matched: K::Bitmap,
     /// The memcomparable serializer of primary key.
     pk_serializer: OrderedRowSerde,
     /// State table. Contains the data from upstream.
@@ -247,7 +247,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         degree_all_data_types: Vec<DataType>,
         degree_table: StateTable<S>,
         degree_pk_indices: Vec<usize>,
-        null_matched: NullBitmap,
+        null_matched: K::Bitmap,
         need_degree_table: bool,
         pk_contained_in_jk: bool,
         metrics: Arc<StreamingMetrics>,
@@ -561,7 +561,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.inner.len()
     }
 
-    pub fn null_matched(&self) -> &NullBitmap {
+    pub fn null_matched(&self) -> &K::Bitmap {
         &self.null_matched
     }
 }

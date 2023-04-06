@@ -295,15 +295,17 @@ pub trait GetBitmap {
 
 impl<const N: usize, B: NullBitmap> GetBitmap for FixedSizeKey<N, B> {
     type Bitmap = B;
+
     fn null_bitmap(&self) -> &B {
-        self.null_bitmap()
+        &self.null_bitmap
     }
 }
 
 impl<B: NullBitmap> GetBitmap for SerializedKey<B> {
     type Bitmap = B;
+
     fn null_bitmap(&self) -> &B {
-        self.null_bitmap()
+        &self.null_bitmap
     }
 }
 
