@@ -6524,7 +6524,7 @@ dependencies = [
  "futures",
  "glob",
  "itertools",
- "lru 0.10.0",
+ "lru 0.7.6",
  "madsim",
  "madsim-aws-sdk-s3",
  "madsim-etcd-client",
