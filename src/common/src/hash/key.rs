@@ -65,13 +65,13 @@ pub struct HeapNullBitmap {
 pub struct StackNullBitmap {
     inner: Set64,
 }
-//
-// const_assert_eq!(
-//     std::mem::size_of::<NullBitmap>(),
-//     std::mem::size_of::<u64>()
-// );
 
-pub trait NullBitmap: EstimateSize + Clone + PartialEq + Debug + Send + Sync {
+const_assert_eq!(
+    std::mem::size_of::<StackNullBitmap>(),
+    std::mem::size_of::<u64>()
+);
+
+pub trait NullBitmap: EstimateSize + Clone + PartialEq + Debug + Send + Sync + 'static {
     fn empty() -> Self;
 
     fn is_empty(&self) -> bool;
@@ -80,9 +80,9 @@ pub trait NullBitmap: EstimateSize + Clone + PartialEq + Debug + Send + Sync {
 
     fn len(&self) -> usize;
 
-    fn contains(&self, x: usize);
+    fn contains(&self, x: usize) -> bool;
 
-    fn is_subset(&self, other: &Self);
+    fn is_subset(&self, other: &Self) -> bool;
 
     fn from_bool_vec<T: AsRef<[bool]> + IntoIterator<Item = bool>>(value: T) -> Self;
 }
@@ -139,7 +139,7 @@ impl NullBitmap for HeapNullBitmap {
     }
 
     fn is_subset(&self, other: &Self) -> bool {
-        self.is_subset(other)
+        self.inner.is_subset(&other.inner)
     }
 
     fn from_bool_vec<T: AsRef<[bool]> + IntoIterator<Item = bool>>(value: T) -> Self {
@@ -161,7 +161,7 @@ impl EstimateSize for HeapNullBitmap {
 
 impl<T: AsRef<[bool]> + IntoIterator<Item = bool>> From<T> for StackNullBitmap {
     fn from(value: T) -> Self {
-        let mut bitmap = NullBitmap::empty();
+        let mut bitmap = StackNullBitmap::empty();
         for (idx, is_true) in value.into_iter().enumerate() {
             if is_true {
                 bitmap.set_true(idx);
@@ -295,14 +295,14 @@ pub trait GetBitmap {
 
 impl<const N: usize, B: NullBitmap> GetBitmap for FixedSizeKey<N, B> {
     type Bitmap = B;
-    fn null_bitmap(&self) -> B {
+    fn null_bitmap(&self) -> &B {
         self.null_bitmap()
     }
 }
 
 impl<B: NullBitmap> GetBitmap for SerializedKey<B> {
     type Bitmap = B;
-    fn null_bitmap(&self) -> B {
+    fn null_bitmap(&self) -> &B {
         self.null_bitmap()
     }
 }
@@ -311,7 +311,7 @@ impl<B: NullBitmap> GetBitmap for SerializedKey<B> {
 ///
 /// See [`crate::hash::calc_hash_key_kind`]
 #[derive(Clone, Debug)]
-pub struct FixedSizeKey<'a, const N: usize, B: NullBitmap> {
+pub struct FixedSizeKey<const N: usize, B: NullBitmap> {
     key: [u8; N],
     hash_code: u64,
     null_bitmap: B,
@@ -718,7 +718,7 @@ impl<const N: usize, B: NullBitmap> HashKeySerializer for FixedSizeKeySerializer
     }
 
     fn into_hash_key(self) -> Self::K {
-        FixedSizeKey::<N> {
+        FixedSizeKey::<N, B> {
             hash_code: self.hash_code,
             key: self.buffer,
             null_bitmap: self.null_bitmap,
@@ -850,7 +850,7 @@ impl ArrayBuilderImpl {
     }
 }
 
-impl<'a, const N: usize, B: NullBitmap + 'a> HashKey for FixedSizeKey<'a, N, B> {
+impl<const N: usize, B: NullBitmap> HashKey for FixedSizeKey<N, B> {
     type S = FixedSizeKeySerializer<N, B>;
 
     fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<OwnedRow> {
@@ -874,7 +874,7 @@ impl<'a, const N: usize, B: NullBitmap + 'a> HashKey for FixedSizeKey<'a, N, B> 
         array_builders: &mut [ArrayBuilderImpl],
         _data_types: &[DataType],
     ) -> ArrayResult<()> {
-        let mut deserializer = FixedSizeKeyDeserializer::<N>::from_hash_key(self.clone());
+        let mut deserializer = FixedSizeKeyDeserializer::<N, B>::from_hash_key(self.clone());
         for array_builder in array_builders.iter_mut() {
             array_builder.deserialize_from_hash_key(&mut deserializer)?;
         }
@@ -1065,39 +1065,39 @@ mod tests {
 
     #[test]
     fn test_two_bytes_hash_key() {
-        do_test::<Key16, _>(vec![1], generate_random_data_chunk);
+        do_test::<Key16<StackNullBitmap>, _>(vec![1], generate_random_data_chunk);
     }
 
     #[test]
     fn test_four_bytes_hash_key() {
-        do_test::<Key32, _>(vec![0, 1], generate_random_data_chunk);
-        do_test::<Key32, _>(vec![2], generate_random_data_chunk);
-        do_test::<Key32, _>(vec![4], generate_random_data_chunk);
+        do_test::<Key32<StackNullBitmap>, _>(vec![0, 1], generate_random_data_chunk);
+        do_test::<Key32<StackNullBitmap>, _>(vec![2], generate_random_data_chunk);
+        do_test::<Key32<StackNullBitmap>, _>(vec![4], generate_random_data_chunk);
     }
 
     #[test]
     fn test_eight_bytes_hash_key() {
-        do_test::<Key64, _>(vec![1, 2], generate_random_data_chunk);
-        do_test::<Key64, _>(vec![0, 1, 2], generate_random_data_chunk);
-        do_test::<Key64, _>(vec![3], generate_random_data_chunk);
-        do_test::<Key64, _>(vec![5], generate_random_data_chunk);
+        do_test::<Key64<StackNullBitmap>, _>(vec![1, 2], generate_random_data_chunk);
+        do_test::<Key64<StackNullBitmap>, _>(vec![0, 1, 2], generate_random_data_chunk);
+        do_test::<Key64<StackNullBitmap>, _>(vec![3], generate_random_data_chunk);
+        do_test::<Key64<StackNullBitmap>, _>(vec![5], generate_random_data_chunk);
     }
 
     #[test]
     fn test_128_bits_hash_key() {
-        do_test::<Key128, _>(vec![3, 5], generate_random_data_chunk);
-        do_test::<Key128, _>(vec![6], generate_random_data_chunk);
+        do_test::<Key128<StackNullBitmap>, _>(vec![3, 5], generate_random_data_chunk);
+        do_test::<Key128<StackNullBitmap>, _>(vec![6], generate_random_data_chunk);
     }
 
     #[test]
     fn test_256_bits_hash_key() {
-        do_test::<Key256, _>(vec![3, 5, 6], generate_random_data_chunk);
-        do_test::<Key256, _>(vec![3, 6], generate_random_data_chunk);
+        do_test::<Key256<StackNullBitmap>, _>(vec![3, 5, 6], generate_random_data_chunk);
+        do_test::<Key256<StackNullBitmap>, _>(vec![3, 6], generate_random_data_chunk);
     }
 
     #[test]
     fn test_var_length_hash_key() {
-        do_test::<KeySerialized, _>(vec![0, 7], generate_random_data_chunk);
+        do_test::<KeySerialized<StackNullBitmap>, _>(vec![0, 7], generate_random_data_chunk);
     }
 
     fn generate_decimal_test_data() -> (DataChunk, Vec<DataType>) {
@@ -1116,14 +1116,14 @@ mod tests {
 
     #[test]
     fn test_decimal_hash_key_serialization() {
-        do_test::<Key128, _>(vec![0], generate_decimal_test_data);
+        do_test::<Key128<StackNullBitmap>, _>(vec![0], generate_decimal_test_data);
     }
 
     // Simple test to ensure a row <None, Some(2)> will be serialized and restored
     // losslessly.
     #[test]
     fn test_simple_hash_key_nullable_serde() {
-        let keys = Key64::build(
+        let keys = Key64::<StackNullBitmap>::build(
             &[0, 1],
             &DataChunk::from_pretty(
                 "i i
