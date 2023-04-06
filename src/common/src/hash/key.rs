@@ -30,14 +30,13 @@ use std::io::{Cursor, Read};
 use chrono::{Datelike, Timelike};
 use fixedbitset::FixedBitSet;
 use smallbitset::Set64;
-use static_assertions::{const_assert, const_assert_eq};
+use static_assertions::const_assert_eq;
 
 use crate::array::serial_array::Serial;
 use crate::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayError, ArrayImpl, ArrayResult, DataChunk, JsonbRef,
     ListRef, StructRef,
 };
-use crate::buffer::Bitmap;
 use crate::collection::estimate_size::EstimateSize;
 use crate::row::{OwnedRow, RowDeserializer};
 use crate::types::num256::{Int256Ref, Uint256Ref};
@@ -46,7 +45,7 @@ use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::iter_util::ZipEqFast;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum_into};
 
-/// FIXME(noel): -> ...ON_STACK
+/// FIXME(noel): -> ...`ON_STACK`
 pub static MAX_GROUP_KEYS: usize = 64;
 
 /// Null bitmap on heap.

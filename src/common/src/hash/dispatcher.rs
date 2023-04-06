@@ -14,7 +14,6 @@
 
 use super::HashKey;
 use crate::array::serial_array::Serial;
-use crate::hash;
 use crate::types::DataType;
 
 /// An enum to help to dynamically dispatch [`HashKey`] template.

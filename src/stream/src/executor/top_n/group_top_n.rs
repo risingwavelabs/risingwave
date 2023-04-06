@@ -261,7 +261,7 @@ mod tests {
     use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::hash::SerializedKey;
+    use risingwave_common::hash::{SerializedKey, StackNullBitmap};
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
@@ -368,7 +368,7 @@ mod tests {
             &pk_indices(),
         )
         .await;
-        let a = GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
+        let a = GroupTopNExecutor::<SerializedKey<StackNullBitmap>, MemoryStateStore, false>::new(
             source as Box<dyn Executor>,
             ActorContext::create(0),
             storage_key(),
@@ -465,7 +465,7 @@ mod tests {
         )
         .await;
         let top_n_executor = Box::new(
-            GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
+            GroupTopNExecutor::<SerializedKey<StackNullBitmap>, MemoryStateStore, false>::new(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
                 storage_key(),
@@ -555,7 +555,7 @@ mod tests {
         )
         .await;
         let top_n_executor = Box::new(
-            GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
+            GroupTopNExecutor::<SerializedKey<StackNullBitmap>, MemoryStateStore, false>::new(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
                 storage_key(),
