@@ -60,7 +60,7 @@ pub trait StateCacheFiller {
     /// Get the capacity of the cache.
     fn capacity(&self) -> Option<usize>;
 
-    /// Append an entry to the cache. The key is expected to be larger than all existing keys.
+    /// Insert an entry into the cache without cache validity check.
     fn insert_unchecked(&mut self, key: Self::Key, value: Self::Value);
 
     /// Finish syncing the cache with the state table. This should mark the cache as synced.
@@ -84,7 +84,7 @@ impl<K: Ord, V> TopNStateCache<K, V> {
         }
     }
 
-    pub fn new_with_row_count(capacity: usize, table_row_count: usize) -> Self {
+    pub fn with_table_row_count(capacity: usize, table_row_count: usize) -> Self {
         Self {
             table_row_count: Some(table_row_count),
             cache: TopNCache::new(capacity),
