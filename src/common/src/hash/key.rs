@@ -29,6 +29,7 @@ use std::io::{Cursor, Read};
 
 use chrono::{Datelike, Timelike};
 use smallbitset::Set64;
+use static_assertions::{const_assert, const_assert_eq};
 
 use crate::array::serial_array::Serial;
 use crate::array::{
@@ -53,6 +54,11 @@ pub static MAX_GROUP_KEYS: usize = 64;
 pub struct NullBitmap {
     inner: Set64,
 }
+
+const_assert_eq!(
+    std::mem::size_of::<NullBitmap>(),
+    std::mem::size_of::<u64>()
+);
 
 impl NullBitmap {
     fn empty() -> Self {
