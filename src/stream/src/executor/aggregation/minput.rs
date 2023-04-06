@@ -30,10 +30,10 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 use smallvec::SmallVec;
 
-use super::state_cache::array_agg::ArrayAgg;
-use super::state_cache::extreme::ExtremeAgg;
-use super::state_cache::string_agg::StringAgg;
-use super::state_cache::{AggStateCache, CacheKey, GenericAggStateCache};
+use super::minput_agg_impl::array_agg::ArrayAgg;
+use super::minput_agg_impl::extreme::ExtremeAgg;
+use super::minput_agg_impl::string_agg::StringAgg;
+use super::minput_agg_impl::{AggStateCache, CacheKey, GenericAggStateCache};
 use super::AggCall;
 use crate::common::cache::{OrderedStateCache, TopNStateCache};
 use crate::common::table::state_table::StateTable;
