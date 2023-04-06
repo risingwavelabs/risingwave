@@ -14,6 +14,8 @@
 
 use super::HashKey;
 use crate::array::serial_array::Serial;
+use crate::hash;
+use crate::hash::{HeapNullBitmap, NullBitmap, StackNullBitmap};
 use crate::types::DataType;
 
 /// An enum to help to dynamically dispatch [`HashKey`] template.
@@ -64,17 +66,23 @@ pub trait HashKeyDispatcher: Sized {
     fn data_types(&self) -> &[DataType];
 
     fn dispatch(self) -> Self::Output {
-        // Use macro here to handle all permutations.
-        todo!()
-        // match calc_hash_key_kind(self.data_types()) {
-        //     HashKeyKind::Key8 => self.dispatch_impl::<hash::Key8>(),
-        //     HashKeyKind::Key16 => self.dispatch_impl::<hash::Key16>(),
-        //     HashKeyKind::Key32 => self.dispatch_impl::<hash::Key32>(),
-        //     HashKeyKind::Key64 => self.dispatch_impl::<hash::Key64>(),
-        //     HashKeyKind::Key128 => self.dispatch_impl::<hash::Key128>(),
-        //     HashKeyKind::Key256 => self.dispatch_impl::<hash::Key256>(),
-        //     HashKeyKind::KeySerialized => self.dispatch_impl::<hash::KeySerialized>(),
-        // }
+        if self.data_types().len() > 64 {
+            self.dispatch_by_key_size::<StackNullBitmap>()
+        } else {
+            self.dispatch_by_key_size::<HeapNullBitmap>()
+        }
+    }
+
+    fn dispatch_by_key_size<T: NullBitmap>(self) -> Self::Output {
+        match calc_hash_key_kind(self.data_types()) {
+            HashKeyKind::Key8 => self.dispatch_impl::<hash::Key8<T>>(),
+            HashKeyKind::Key16 => self.dispatch_impl::<hash::Key16<T>>(),
+            HashKeyKind::Key32 => self.dispatch_impl::<hash::Key32<T>>(),
+            HashKeyKind::Key64 => self.dispatch_impl::<hash::Key64<T>>(),
+            HashKeyKind::Key128 => self.dispatch_impl::<hash::Key128<T>>(),
+            HashKeyKind::Key256 => self.dispatch_impl::<hash::Key256<T>>(),
+            HashKeyKind::KeySerialized => self.dispatch_impl::<hash::KeySerialized<T>>(),
+        }
     }
 }
 
