@@ -21,7 +21,7 @@ use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::catalog::{
-    PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
+    PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
 };
 
 use super::function_catalog::FunctionCatalog;
@@ -29,11 +29,12 @@ use super::source_catalog::SourceCatalog;
 use super::system_catalog::get_sys_catalogs_in_schema;
 use super::view_catalog::ViewCatalog;
 use super::{CatalogError, CatalogResult, SinkId, SourceId, ViewId};
+use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
-use crate::catalog::{DatabaseId, IndexCatalog, SchemaId};
+use crate::catalog::{ConnectionId, DatabaseId, IndexCatalog, SchemaId};
 
 #[derive(Copy, Clone)]
 pub enum SchemaPath<'a> {
@@ -94,6 +95,8 @@ pub struct Catalog {
     db_name_by_id: HashMap<DatabaseId, String>,
     /// all table catalogs in the cluster identified by universal unique table id.
     table_by_id: HashMap<TableId, TableCatalog>,
+    connection_by_id: HashMap<ConnectionId, ConnectionCatalog>,
+    connection_id_by_name: HashMap<String, ConnectionId>,
 }
 
 #[expect(clippy::derivable_impls)]
@@ -104,6 +107,8 @@ impl Default for Catalog {
             database_by_name: HashMap::new(),
             db_name_by_id: HashMap::new(),
             table_by_id: HashMap::new(),
+            connection_by_id: HashMap::new(), // TODO: move to schema_catalog
+            connection_id_by_name: HashMap::new(), // TODO: move to schema_catalog
         }
     }
 }
@@ -193,6 +198,19 @@ impl Catalog {
             .get_schema_mut(proto.schema_id)
             .unwrap()
             .create_function(proto);
+    }
+
+    pub fn create_connection(&mut self, proto: &PbConnection) {
+        let name = proto.name.clone();
+        let id = proto.id;
+
+        self.connection_by_id.try_insert(id, proto.into()).unwrap();
+        self.connection_id_by_name.try_insert(name, id).unwrap();
+    }
+
+    pub fn drop_connection(&mut self, connection_name: &str) {
+        let id = self.connection_id_by_name.remove(connection_name).unwrap();
+        let _connection = self.connection_by_id.remove(&id).unwrap();
     }
 
     pub fn drop_database(&mut self, db_id: DatabaseId) {
@@ -526,6 +544,19 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("function", function_name.to_string()))
     }
 
+    pub fn get_connection_by_name(
+        &self,
+        connection_name: &str,
+    ) -> CatalogResult<&ConnectionCatalog> {
+        let connection_id = self
+            .connection_id_by_name
+            .get(connection_name)
+            .ok_or_else(|| CatalogError::NotFound("connection", connection_name.to_string()))?;
+        self.connection_by_id
+            .get(connection_id)
+            .ok_or_else(|| CatalogError::NotFound("connection", connection_name.to_string()))
+    }
+
     /// Check the name if duplicated with existing table, materialized view or source.
     pub fn check_relation_name_duplicated(
         &self,
@@ -609,5 +640,9 @@ impl Catalog {
             })?
             .map(|(id, _)| id)
             .ok_or_else(|| CatalogError::NotFound("class", class_name.to_string()))
+    }
+
+    pub fn get_all_connections(&self) -> Vec<ConnectionCatalog> {
+        self.connection_by_id.values().cloned().collect_vec()
     }
 }

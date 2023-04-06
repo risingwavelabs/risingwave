@@ -496,6 +496,7 @@ impl Parser {
                 Keyword::EXISTS => self.parse_exists_expr(),
                 Keyword::EXTRACT => self.parse_extract_expr(),
                 Keyword::SUBSTRING => self.parse_substring_expr(),
+                Keyword::POSITION => self.parse_position_expr(),
                 Keyword::OVERLAY => self.parse_overlay_expr(),
                 Keyword::TRIM => self.parse_trim_expr(),
                 Keyword::INTERVAL => self.parse_literal_interval(),
@@ -925,6 +926,25 @@ impl Parser {
             expr: Box::new(expr),
             substring_from: from_expr.map(Box::new),
             substring_for: to_expr.map(Box::new),
+        })
+    }
+
+    /// POSITION(<expr> IN <expr>)
+    pub fn parse_position_expr(&mut self) -> Result<Expr, ParserError> {
+        self.expect_token(&Token::LParen)?;
+
+        // Logically `parse_expr`, but limited to those with precedence higher than `BETWEEN`/`IN`,
+        // to avoid conflict with general IN operator, for example `position(a IN (b) IN (c))`.
+        // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/parser/gram.y#L16012
+        let substring = self.parse_subexpr(Precedence::Between)?;
+        self.expect_keyword(Keyword::IN)?;
+        let string = self.parse_subexpr(Precedence::Between)?;
+
+        self.expect_token(&Token::RParen)?;
+
+        Ok(Expr::Position {
+            substring: Box::new(substring),
+            string: Box::new(string),
         })
     }
 
@@ -1725,6 +1745,8 @@ impl Parser {
             self.parse_create_source(or_replace)
         } else if self.parse_keyword(Keyword::SINK) {
             self.parse_create_sink(or_replace)
+        } else if self.parse_keyword(Keyword::CONNECTION) {
+            self.parse_create_connection()
         } else if self.parse_keyword(Keyword::FUNCTION) {
             self.parse_create_function(or_replace, temporary)
         } else if or_replace {
@@ -1818,6 +1840,17 @@ impl Parser {
     pub fn parse_create_sink(&mut self, _or_replace: bool) -> Result<Statement, ParserError> {
         Ok(Statement::CreateSink {
             stmt: CreateSinkStatement::parse_to(self)?,
+        })
+    }
+
+    // CREATE
+    // CONNECTION
+    // [IF NOT EXISTS]?
+    // <connection_name: Ident>
+    // [WITH (properties)]?
+    pub fn parse_create_connection(&mut self) -> Result<Statement, ParserError> {
+        Ok(Statement::CreateConnection {
+            stmt: CreateConnectionStatement::parse_to(self)?,
         })
     }
 
@@ -3573,6 +3606,9 @@ impl Parser {
                     } else {
                         return self.expected("from after columns", self.peek_token());
                     }
+                }
+                Keyword::CONNECTIONS => {
+                    return Ok(Statement::ShowObjects(ShowObject::Connection));
                 }
                 _ => {}
             }

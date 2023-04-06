@@ -235,36 +235,6 @@ pub fn reverse(s: &str, writer: &mut dyn Write) {
     }
 }
 
-/// Returns the index of the first occurrence of the specified substring in the input string,
-/// or zero if the substring is not present.
-///
-/// # Example
-///
-/// ```slt
-/// query T
-/// select strpos('hello, world', 'lo');
-/// ----
-/// 4
-///
-/// query T
-/// select strpos('high', 'ig');
-/// ----
-/// 2
-///
-/// query T
-/// select strpos('abc', 'def');
-/// ----
-/// 0
-/// ```
-#[function("strpos(varchar, varchar) -> int32")]
-pub fn strpos(s: &str, substr: &str) -> i32 {
-    if let Some(pos) = s.find(substr) {
-        pos as i32 + 1
-    } else {
-        0
-    }
-}
-
 /// Converts the input string to ASCII by dropping accents, assuming that the input string
 /// is encoded in one of the supported encodings (Latin1, Latin2, Latin9, or WIN1250).
 ///

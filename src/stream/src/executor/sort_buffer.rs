@@ -18,6 +18,7 @@ use std::ops::Bound;
 use futures::stream;
 use futures_async_stream::try_stream;
 use risingwave_common::array::stream_record::Record;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{self, OwnedRow, Row};
 use risingwave_common::types::ScalarImpl;
@@ -27,19 +28,26 @@ use risingwave_storage::StateStore;
 use super::StreamExecutorError;
 use crate::common::table::state_table::StateTable;
 
-// TODO(rc): Now it assumes first column is the watermark column and has no in-memory cache,
-// later we will support specifying watermark column index and in-memory cache.
+// TODO(rc): Internal cache will be added later.
 /// [`SortBuffer`] is a common component that consume an unordered stream and produce an ordered
 /// stream by watermark. This component maintains a buffer table passed in, whose schema is same as
 /// [`SortBuffer`]'s input and output. Generally, the component acts as a buffer that output the
 /// data it received with a delay, commonly used to implement emit-on-window-close policy.
 pub struct SortBuffer<S: StateStore> {
+    #[allow(dead_code)]
+    sort_column_index: usize,
     _phantom: PhantomData<S>,
 }
 
 impl<S: StateStore> SortBuffer<S> {
-    pub fn new() -> Self {
+    pub fn new(sort_column_index: usize, buffer_table: &StateTable<S>) -> Self {
+        assert_eq!(
+            sort_column_index,
+            buffer_table.pk_indices()[0],
+            "the column to sort on must be the first pk column of the buffer table"
+        );
         Self {
+            sort_column_index,
             _phantom: PhantomData,
         }
     }
@@ -70,6 +78,13 @@ impl<S: StateStore> SortBuffer<S> {
             Record::Insert { new_row } => self.insert(new_row, buffer_table),
             Record::Delete { old_row } => self.delete(old_row, buffer_table),
             Record::Update { old_row, new_row } => self.update(old_row, new_row, buffer_table),
+        }
+    }
+
+    /// Apply a stream chunk to the buffer.
+    pub fn apply_chunk(&mut self, chunk: StreamChunk, buffer_table: &mut StateTable<S>) {
+        for record in chunk.records() {
+            self.apply_change(record, buffer_table);
         }
     }
 
@@ -106,5 +121,9 @@ impl<S: StateStore> SortBuffer<S> {
         // TODO(rc): Need something like `table.range_delete()`. Here we call
         // `update_watermark(watermark, true)` as an alternative to `range_delete((..watermark))`.
         buffer_table.update_watermark(watermark, true);
+    }
+
+    pub fn clear_cache(&mut self) {
+        // nothing to do
     }
 }

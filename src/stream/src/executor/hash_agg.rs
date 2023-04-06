@@ -22,7 +22,7 @@ use futures_async_stream::try_stream;
 use iter_chunks::IterChunks;
 use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::StreamChunk;
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
@@ -128,8 +128,10 @@ impl<K: HashKey, S: StateStore> ExecutorInner<K, S> {
     }
 }
 
-trait Emitter: Default {
+trait Emitter {
     type StateStore: StateStore;
+
+    fn new(result_table: &StateTable<Self::StateStore>) -> Self;
 
     fn emit_from_changes<'a>(
         &'a mut self,
@@ -153,6 +155,12 @@ struct EmitOnUpdates<S: StateStore> {
 
 impl<S: StateStore> Emitter for EmitOnUpdates<S> {
     type StateStore = S;
+
+    fn new(_result_table: &StateTable<Self::StateStore>) -> Self {
+        Self {
+            _phantom: PhantomData,
+        }
+    }
 
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
     async fn emit_from_changes<'a>(
@@ -182,20 +190,18 @@ impl<S: StateStore> Emitter for EmitOnUpdates<S> {
     }
 }
 
-impl<S: StateStore> Default for EmitOnUpdates<S> {
-    fn default() -> Self {
-        Self {
-            _phantom: PhantomData,
-        }
-    }
-}
-
 struct EmitOnWindowClose<S: StateStore> {
     buffer: SortBuffer<S>,
 }
 
 impl<S: StateStore> Emitter for EmitOnWindowClose<S> {
     type StateStore = S;
+
+    fn new(result_table: &StateTable<Self::StateStore>) -> Self {
+        Self {
+            buffer: SortBuffer::new(0, result_table),
+        }
+    }
 
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
     async fn emit_from_changes<'a>(
@@ -222,18 +228,10 @@ impl<S: StateStore> Emitter for EmitOnWindowClose<S> {
             #[for_await]
             for row in self.buffer.consume(watermark.clone(), result_table) {
                 let row = row?;
-                if let Some(chunk) = chunk_builder.append_record(Record::Insert { new_row: row }) {
+                if let Some(chunk) = chunk_builder.append_row(Op::Insert, row) {
                     yield chunk;
                 }
             }
-        }
-    }
-}
-
-impl<S: StateStore> Default for EmitOnWindowClose<S> {
-    fn default() -> Self {
-        Self {
-            buffer: SortBuffer::new(),
         }
     }
 }
@@ -640,7 +638,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             buffered_watermarks: vec![None; this.group_key_indices.len()],
             window_watermark: None,
             chunk_builder: ChunkBuilder::new(this.chunk_size, &this.info.schema.data_types()),
-            chunk_emitter: E::default(),
+            chunk_emitter: E::new(&this.result_table),
         };
 
         // TODO(rc): use something like a `ColumnMapping` type
