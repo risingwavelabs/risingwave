@@ -33,9 +33,7 @@ use crate::hummock::compactor::context::CompactorContext;
 use crate::hummock::compactor::{CompactOutput, Compactor};
 use crate::hummock::event_handler::uploader::UploadTaskPayload;
 use crate::hummock::event_handler::LocalInstanceId;
-use crate::hummock::iterator::{
-    Forward, HummockIterator, OrderedMergeIteratorInner, UnorderedMergeIteratorInner,
-};
+use crate::hummock::iterator::{Forward, HummockIterator, OrderedMergeIteratorInner};
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchInner, SharedBufferVersionedEntry,
 };
@@ -280,19 +278,12 @@ pub async fn merge_imms_in_memory(
     epochs.sort();
 
     // use merge iterator to merge input imms
-    let mut mi = UnorderedMergeIteratorInner::new(imm_iters);
+    let mut mi = OrderedMergeIteratorInner::new(imm_iters);
     mi.rewind().await?;
     let mut items = Vec::with_capacity(kv_count);
     while mi.is_valid() {
-        let full_key = mi.key();
-        let epoch = full_key.epoch;
-        // copy key and value to avoid lifetime issue
-        // because the merge iterator will be dropped after the function returns
-        let item = (
-            Bytes::copy_from_slice(full_key.user_key.table_key.as_ref()),
-            mi.value().to_bytes(),
-        );
-        items.push((item, epoch));
+        let (key, (epoch, value)) = mi.current_item();
+        items.push(((key, value), epoch));
         mi.next().await?;
     }
 
@@ -301,6 +292,7 @@ pub async fn merge_imms_in_memory(
     let mut versions: Vec<(HummockEpoch, HummockValue<Bytes>)> = Vec::new();
 
     for ((key, value), epoch) in items {
+        assert!(key >= pivot, "key should be in ascending order");
         if key == pivot {
             versions.push((epoch, value));
         } else {

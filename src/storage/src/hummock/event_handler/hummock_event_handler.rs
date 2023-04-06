@@ -503,8 +503,6 @@ impl HummockEventHandler {
                             } else {
                                 // start merging task on non-checkpoint epochs sealed
                                 self.uploader.start_merge_imms(epoch);
-                                // merging task memory consumption may exceed the flush threshold
-                                self.uploader.may_flush();
                             }
                         }
                         #[cfg(any(test, feature = "test"))]

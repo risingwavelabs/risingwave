@@ -127,12 +127,6 @@ impl MergingImmTask {
     }
 }
 
-impl Drop for MergingImmTask {
-    fn drop(&mut self) {
-        self.join_handle.abort();
-    }
-}
-
 impl Future for MergingImmTask {
     type Output = HummockResult<ImmutableMemtable>;
 
@@ -388,22 +382,19 @@ impl SealedData {
     }
 
     fn drop_merging_tasks(&mut self) {
-        // scan from oldest merging task to restore
-        // merge candidate imms back
-        for task in self.merging_tasks.iter().rev() {
-            task.input_imms.iter().for_each(|imm| {
-                self.imms_by_table_shard
-                    .entry((imm.table_id, imm.instance_id))
-                    .or_default()
-                    .push_back(imm.clone());
-            });
+        // pop from oldest merging task to restore candidate imms back
+        while let Some(task) = self.merging_tasks.pop_back() {
+            // cancel the task
+            task.join_handle.abort();
+            self.imms_by_table_shard
+                .entry((task.table_id, task.instance_id))
+                .and_modify(|imms| imms.extend(task.input_imms.into_iter()));
         }
-        self.merging_tasks.clear();
     }
 
     // Flush can be triggered by either a sync_epoch or a spill (`may_flush`) request.
     fn flush(&mut self, context: &UploaderContext) {
-        // drop unfinished merging tasks in the task queue
+        // drop unfinished merging tasks
         self.drop_merging_tasks();
 
         // group imms by epoch and order by epoch
@@ -411,10 +402,7 @@ impl SealedData {
         self.imms_by_table_shard.drain().for_each(|(_, imms)| {
             for imm in imms {
                 debug_assert!(imm.max_epoch() == imm.min_epoch());
-                imms_by_epoch
-                    .entry(imm.max_epoch())
-                    .or_default()
-                    .push(imm.clone());
+                imms_by_epoch.entry(imm.max_epoch()).or_default().push(imm);
             }
         });
 
@@ -708,9 +696,8 @@ impl HummockUploader {
 
             // acquire memory before generate merge task
             // if acquire memory failed, the task will not be generated
-            if let Some(tracker) =
-                memory_limiter.try_require_memory((imm_size + kv_count * EPOCH_LEN) as u64)
-            {
+            let memory_sz = (imm_size + kv_count * EPOCH_LEN) as u64;
+            if let Some(tracker) = memory_limiter.try_require_memory(memory_sz) {
                 self.sealed_data
                     .merging_tasks
                     .push_front(MergingImmTask::new(
@@ -720,6 +707,13 @@ impl HummockUploader {
                         Some(tracker),
                         &self.context,
                     ));
+            } else {
+                tracing::warn!(
+                    "fail to acqiure memory {} B, skip merging imms for table {}, shard {}",
+                    memory_sz,
+                    table_id,
+                    shard_id
+                );
             }
         }
     }

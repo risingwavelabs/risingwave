@@ -550,8 +550,9 @@ impl SharedBufferBatch {
 /// If there are multiple versions of a key, the iterator will return all versions
 pub struct SharedBufferBatchIterator<D: HummockIteratorDirection> {
     inner: Arc<SharedBufferBatchInner>,
-    current_value_idx: i32,
-    current_key_idx: usize,
+    current_version_idx: i32,
+    // The index of the current entry in the payload
+    current_idx: usize,
     table_id: TableId,
     _phantom: PhantomData<D>,
 }
@@ -560,67 +561,50 @@ impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
     pub(crate) fn new(inner: Arc<SharedBufferBatchInner>, table_id: TableId) -> Self {
         Self {
             inner,
-            current_key_idx: 0,
-            current_value_idx: 0,
+            current_idx: 0,
+            current_version_idx: 0,
             table_id,
             _phantom: Default::default(),
         }
     }
 
     /// Return all values of the current key
-    pub(crate) fn current_values(&self) -> &Vec<(HummockEpoch, HummockValue<Bytes>)> {
-        debug_assert!(self.current_key_idx < self.inner.len());
-        let key_idx = match D::direction() {
-            DirectionEnum::Forward => self.current_key_idx,
-            DirectionEnum::Backward => self.inner.len() - self.current_key_idx - 1,
+    pub(crate) fn current_versions(&self) -> &Vec<(HummockEpoch, HummockValue<Bytes>)> {
+        debug_assert!(self.current_idx < self.inner.len());
+        let idx = match D::direction() {
+            DirectionEnum::Forward => self.current_idx,
+            DirectionEnum::Backward => self.inner.len() - self.current_idx - 1,
         };
-        &self.inner.get(key_idx).unwrap().1
+        &self.inner.get(idx).unwrap().1
     }
 
-    fn current_values_len(&self) -> i32 {
-        if self.current_key_idx < self.inner.len() {
-            self.current_values().len() as i32
+    fn current_versions_len(&self) -> i32 {
+        if self.current_idx < self.inner.len() {
+            self.current_versions().len() as i32
         } else {
             0
         }
     }
+}
 
-    pub(crate) fn current_item(&self) -> (&Bytes, &(HummockEpoch, HummockValue<Bytes>)) {
-        assert!(self.is_valid());
-        let (key_idx, value_idx) = match D::direction() {
-            DirectionEnum::Forward => (self.current_key_idx, self.current_value_idx),
+/// trait iterface provided to the `MergedIterator` to avoid memory copy
+pub trait SharedBufferBatchIterCurrent {
+    fn current_item(&self) -> (&Bytes, &(HummockEpoch, HummockValue<Bytes>));
+}
+
+impl<D: HummockIteratorDirection> SharedBufferBatchIterCurrent for SharedBufferBatchIterator<D> {
+    fn current_item(&self) -> (&Bytes, &(HummockEpoch, HummockValue<Bytes>)) {
+        assert!(self.is_valid(), "iterator is not valid");
+        let (idx, version_idx) = match D::direction() {
+            DirectionEnum::Forward => (self.current_idx, self.current_version_idx),
             DirectionEnum::Backward => (
-                self.inner.len() - self.current_key_idx - 1,
-                self.current_value_idx,
+                self.inner.len() - self.current_idx - 1,
+                self.current_version_idx,
             ),
         };
-        let cur_entry = self.inner.get(key_idx).unwrap();
-        let value = &cur_entry.1[value_idx as usize];
+        let cur_entry = self.inner.get(idx).unwrap();
+        let value = &cur_entry.1[version_idx as usize];
         (&cur_entry.0, value)
-    }
-
-    // Used in the `build_merged_imm()`
-    pub fn blocking_next(&mut self) {
-        debug_assert!(self.is_valid());
-        match D::direction() {
-            DirectionEnum::Forward => {
-                // If the current key has more versions, we need to advance the version index
-                if self.current_value_idx + 1 < self.current_values_len() {
-                    self.current_value_idx += 1;
-                } else {
-                    self.current_key_idx += 1;
-                    self.current_value_idx = 0;
-                }
-            }
-            DirectionEnum::Backward => {
-                if self.current_value_idx > 0 {
-                    self.current_value_idx -= 1;
-                } else {
-                    self.current_key_idx += 1;
-                    self.current_value_idx = self.current_values_len() - 1;
-                }
-            }
-        }
     }
 }
 
@@ -637,19 +621,19 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
             match D::direction() {
                 DirectionEnum::Forward => {
                     // If the current key has more versions, we need to advance the value index
-                    if self.current_value_idx + 1 < self.current_values_len() {
-                        self.current_value_idx += 1;
+                    if self.current_version_idx + 1 < self.current_versions_len() {
+                        self.current_version_idx += 1;
                     } else {
-                        self.current_key_idx += 1;
-                        self.current_value_idx = 0;
+                        self.current_idx += 1;
+                        self.current_version_idx = 0;
                     }
                 }
                 DirectionEnum::Backward => {
-                    if self.current_value_idx > 0 {
-                        self.current_value_idx -= 1;
+                    if self.current_version_idx > 0 {
+                        self.current_version_idx -= 1;
                     } else {
-                        self.current_key_idx += 1;
-                        self.current_value_idx = self.current_values_len() - 1;
+                        self.current_idx += 1;
+                        self.current_version_idx = self.current_versions_len() - 1;
                     }
                 }
             }
@@ -668,22 +652,23 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
     }
 
     fn is_valid(&self) -> bool {
-        if self.current_key_idx >= self.inner.len() {
+        if self.current_idx >= self.inner.len() {
             return false;
         }
-        self.current_value_idx >= 0 && self.current_value_idx < self.current_values().len() as i32
+        self.current_version_idx >= 0
+            && self.current_version_idx < self.current_versions().len() as i32
     }
 
     fn rewind(&mut self) -> Self::RewindFuture<'_> {
         async move {
-            self.current_key_idx = 0;
+            self.current_idx = 0;
 
             match D::direction() {
                 DirectionEnum::Forward => {
-                    self.current_value_idx = 0;
+                    self.current_version_idx = 0;
                 }
                 DirectionEnum::Backward => {
-                    self.current_value_idx = self.current_values_len() - 1;
+                    self.current_version_idx = self.current_versions_len() - 1;
                 }
             }
             Ok(())
@@ -702,10 +687,10 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
             match D::direction() {
                 DirectionEnum::Forward => match partition_point {
                     Ok(i) => {
-                        self.current_key_idx = i;
+                        self.current_idx = i;
                         // seek to the first version that is <= the seek key epoch
                         let mut idx: i32 = 0;
-                        for (epoch, _) in self.current_values() {
+                        for (epoch, _) in self.current_versions() {
                             if *epoch <= seek_key_epoch {
                                 break;
                             }
@@ -714,24 +699,24 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
 
                         // Move onto the next key for forward iteration if seek key epoch is smaller
                         // than all versions
-                        if idx >= self.current_values().len() as i32 {
-                            self.current_key_idx += 1;
-                            self.current_value_idx = 0;
+                        if idx >= self.current_versions().len() as i32 {
+                            self.current_idx += 1;
+                            self.current_version_idx = 0;
                         } else {
-                            self.current_value_idx = idx;
+                            self.current_version_idx = idx;
                         }
                     }
                     Err(i) => {
-                        self.current_key_idx = i;
-                        self.current_value_idx = 0;
+                        self.current_idx = i;
+                        self.current_version_idx = 0;
                     }
                 },
                 DirectionEnum::Backward => {
                     match partition_point {
                         Ok(i) => {
-                            self.current_key_idx = self.inner.len() - i - 1;
+                            self.current_idx = self.inner.len() - i - 1;
                             // seek from back to the first version that is >= seek_key_epoch
-                            let values = self.current_values();
+                            let values = self.current_versions();
                             let mut idx: i32 = (values.len() - 1) as i32;
                             for (epoch, _) in values.iter().rev() {
                                 if *epoch >= seek_key_epoch {
@@ -741,18 +726,18 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
                             }
 
                             if idx < 0 {
-                                self.current_key_idx += 1;
-                                self.current_value_idx = self.current_values_len() - 1;
+                                self.current_idx += 1;
+                                self.current_version_idx = self.current_versions_len() - 1;
                             } else {
-                                self.current_value_idx = idx;
+                                self.current_version_idx = idx;
                             }
                         }
                         // Seek to one item before the seek partition_point:
                         // If i == 0, the iterator will be invalidated with self.current_idx ==
                         // self.inner.len().
                         Err(i) => {
-                            self.current_key_idx = self.inner.len() - i;
-                            self.current_value_idx = self.current_values_len() - 1;
+                            self.current_idx = self.inner.len() - i;
+                            self.current_version_idx = self.current_versions_len() - 1;
                         }
                     }
                 }
