@@ -46,7 +46,7 @@ pub fn gen_chunk(data_types: &[DataType], size: usize, seed: u64, null_ratio: f6
             }
             DataType::List { datatype: _ } => {
                 todo!()
-            },
+            }
             DataType::Int256 => todo!(),
         }));
     }

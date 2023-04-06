@@ -28,9 +28,8 @@ use serde::{Deserialize, Serialize, Serializer};
 use to_text::ToText;
 
 use crate::array::ArrayResult;
-use crate::error::RwError;
 use crate::types::to_binary::ToBinary;
-use crate::types::{to_text, DataType, Interval, Scalar, ScalarRef};
+use crate::types::{to_text, DataType, Scalar, ScalarRef};
 
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
 pub struct Int256(Box<I256>);
@@ -244,7 +243,7 @@ impl_try_from_int256!(
 
 impl From<Int256Ref<'_>> for Int256 {
     fn from(value: Int256Ref<'_>) -> Self {
-        Self(Box::new(value.0.clone()))
+        Self(Box::new(*value.0))
     }
 }
 
@@ -296,8 +295,8 @@ impl Not for Int256Ref<'_> {
 
 impl<'de> Deserialize<'de> for Int256 {
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de>,
+    where
+        D: serde::Deserializer<'de>,
     {
         I256::deserialize(deserializer).map(Into::into)
     }

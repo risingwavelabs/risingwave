@@ -24,7 +24,7 @@ use risingwave_common::array::{
     JsonbRef, ListArray, ListRef, ListValue, StructArray, StructRef, StructValue, Utf8Array,
 };
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::num256::{Int256, Int256Ref, Uint256, Uint256Ref};
+use risingwave_common::types::num256::Int256;
 use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{
@@ -307,6 +307,14 @@ pub fn to_f32<T: ToPrimitive + Debug>(elem: T) -> Result<F32> {
     elem.to_f32()
         .map(Into::into)
         .ok_or(ExprError::CastOutOfRange("f32"))
+}
+
+#[function("cast(int16) -> int256")]
+#[function("cast(int32) -> int256")]
+#[function("cast(int64) -> int256")]
+pub fn to_int256<T: TryInto<Int256>>(elem: T) -> Result<Int256> {
+    elem.try_into()
+        .map_err(|_| ExprError::CastOutOfRange("int256"))
 }
 
 #[function("cast(decimal) -> float64")]

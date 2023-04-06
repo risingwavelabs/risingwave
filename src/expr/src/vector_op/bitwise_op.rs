@@ -145,6 +145,6 @@ mod tests {
             general_bitxor::<u32, u32, u64>(0b0011u32, 0b0101u32),
             0b0110u64
         );
-        assert_eq!(general_bitnot::<i32>(0b01i32), -2i32);
+        assert_eq!(general_bitnot::<i32, i32>(0b01i32), -2i32);
     }
 }

@@ -37,7 +37,6 @@ impl DataType {
             | DataType::Jsonb
             | DataType::Struct(_)
             | DataType::List { .. } => -1,
-            _ => todo!(),
         }
     }
 

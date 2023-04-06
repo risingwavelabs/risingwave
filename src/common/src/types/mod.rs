@@ -53,7 +53,6 @@ mod ordered_float;
 use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
 pub use chrono_wrapper::{Date, Time, Timestamp, UNIX_EPOCH_DAYS};
 pub use decimal::Decimal;
-use ethnum::I256;
 pub use interval::*;
 use itertools::Itertools;
 pub use ops::{CheckedAdd, IsNegative};
@@ -1272,7 +1271,10 @@ mod tests {
                 DataTypeName::Int16 => (ScalarImpl::Int16(233), DataType::Int16),
                 DataTypeName::Int32 => (ScalarImpl::Int32(233333), DataType::Int32),
                 DataTypeName::Int64 => (ScalarImpl::Int64(233333333333), DataType::Int64),
-                DataTypeName::Int256 => (ScalarImpl::Int256(233333333333.into()), DataType::Int256),
+                DataTypeName::Int256 => (
+                    ScalarImpl::Int256(233333333333_i64.into()),
+                    DataType::Int256,
+                ),
                 DataTypeName::Serial => (ScalarImpl::Serial(233333333333.into()), DataType::Serial),
                 DataTypeName::Float32 => (ScalarImpl::Float32(23.33.into()), DataType::Float32),
                 DataTypeName::Float64 => (
