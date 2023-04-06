@@ -56,6 +56,14 @@ pub struct HeapNullBitmap {
     inner: FixedBitSet,
 }
 
+impl HeapNullBitmap {
+    fn with_capacity(n: usize) -> Self {
+        HeapNullBitmap {
+            inner: FixedBitSet::with_capacity(n),
+        }
+    }
+}
+
 /// Bitmap for null values in key.
 /// This is specialized for key,
 /// since it usually has few group keys.
@@ -126,6 +134,7 @@ impl NullBitmap for HeapNullBitmap {
     }
 
     fn set_true(&mut self, idx: usize) {
+        self.inner.grow(self.len() + 1);
         self.inner.insert(idx)
     }
 
@@ -172,7 +181,7 @@ impl<T: AsRef<[bool]> + IntoIterator<Item = bool>> From<T> for StackNullBitmap {
 
 impl<T: AsRef<[bool]> + IntoIterator<Item = bool>> From<T> for HeapNullBitmap {
     fn from(value: T) -> Self {
-        let mut bitmap = HeapNullBitmap::empty();
+        let mut bitmap = HeapNullBitmap::with_capacity(value.as_ref().len());
         for (idx, is_true) in value.into_iter().enumerate() {
             if is_true {
                 bitmap.set_true(idx);
