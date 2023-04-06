@@ -30,6 +30,8 @@ impl DataType {
             | DataType::Time => 8,
             DataType::Decimal
             | DataType::Varchar
+            // todo
+            | DataType::Int256
             | DataType::Bytea
             | DataType::Interval
             | DataType::Jsonb
@@ -116,7 +118,8 @@ impl DataType {
             DataType::Int16 => 21,
             DataType::Int32 => 23,
             DataType::Int64 => 20,
-            DataType::Int256 => todo!(),
+            // int256 as int64
+            DataType::Int256 => 20,
             DataType::Serial => 20,
             DataType::Float32 => 700,
             DataType::Float64 => 701,

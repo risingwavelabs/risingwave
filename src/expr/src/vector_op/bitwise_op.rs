@@ -17,6 +17,7 @@ use std::fmt::Debug;
 use std::ops::{BitAnd, BitOr, BitXor, Not};
 
 use num_traits::{CheckedShl, CheckedShr};
+use risingwave_common::types::{Scalar, ScalarRef};
 use risingwave_expr_macro::function;
 
 use crate::{ExprError, Result};
@@ -103,7 +104,11 @@ where
 }
 
 #[function("bitwise_not(*int) -> auto")]
-pub fn general_bitnot<T1: Not<Output = T1>>(expr: T1) -> T1 {
+pub fn general_bitnot<'a, T1, T2>(expr: T1) -> T2
+where
+    T1: Not<Output = T2> + ScalarRef<'a, ScalarType = T2>,
+    T2: Scalar<ScalarRefType<'a> = T1>,
+{
     !expr
 }
 

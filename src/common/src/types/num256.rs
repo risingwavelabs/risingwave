@@ -91,6 +91,11 @@ macro_rules! impl_common_for_num256 {
             }
 
             #[inline]
+            pub fn from_le_bytes(bytes: [u8; mem::size_of::<$inner>()]) -> Self {
+                Self(Box::new(<$inner>::from_le_bytes(bytes)))
+            }
+
+            #[inline]
             pub fn from_be_bytes(bytes: [u8; mem::size_of::<$inner>()]) -> Self {
                 Self(Box::new(<$inner>::from_be_bytes(bytes)))
             }

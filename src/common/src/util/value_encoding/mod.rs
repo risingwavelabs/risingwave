@@ -36,6 +36,7 @@ use crate::types::{
 pub mod error;
 use error::ValueEncodingError;
 use serial_array::Serial;
+use crate::types::num256::{Int256, Uint256};
 
 use self::column_aware_row_encoding::ColumnAwareSerde;
 pub mod column_aware_row_encoding;
@@ -363,7 +364,7 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         DataType::Int16 => ScalarImpl::Int16(data.get_i16_le()),
         DataType::Int32 => ScalarImpl::Int32(data.get_i32_le()),
         DataType::Int64 => ScalarImpl::Int64(data.get_i64_le()),
-        DataType::Int256 => todo!(),
+        DataType::Int256 => ScalarImpl::Int256(deserialize_int256(data)),
         DataType::Serial => ScalarImpl::Serial(Serial::from(data.get_i64_le())),
         DataType::Float32 => ScalarImpl::Float32(F32::from(data.get_f32_le())),
         DataType::Float64 => ScalarImpl::Float64(F64::from(data.get_f64_le())),
@@ -420,6 +421,19 @@ fn deserialize_bytea(data: &mut impl Buf) -> Vec<u8> {
     let mut bytes = vec![0; len as usize];
     data.copy_to_slice(&mut bytes);
     bytes
+}
+
+fn deserialize_int256(data: &mut impl Buf) -> Int256 {
+    let mut bytes = [0; Int256::size()];
+    data.copy_to_slice(&mut bytes);
+    Int256::from_le_bytes(bytes)
+}
+
+
+fn deserialize_uint256(data: &mut impl Buf) -> Uint256 {
+    let mut bytes = [0; Uint256::size()];
+    data.copy_to_slice(&mut bytes);
+    Uint256::from_le_bytes(bytes)
 }
 
 fn deserialize_bool(data: &mut impl Buf) -> Result<bool> {
