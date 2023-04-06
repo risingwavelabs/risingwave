@@ -86,7 +86,7 @@ pub trait NullBitmap: EstimateSize {
     fn from_bool_vec<T: AsRef<[bool]> + IntoIterator<Item = bool>>(value: T) -> Self;
 }
 
-impl NullBitmap for NullBitmapStack {
+impl NullBitmap for StackNullBitmap {
     fn empty() -> Self {
         NullBitmap {
             inner: Set64::empty(),
@@ -107,6 +107,38 @@ impl NullBitmap for NullBitmapStack {
 
     fn is_subset(&self, other: &Self) -> bool {
         other.inner.contains_all(self.inner)
+    }
+
+    fn from_bool_vec<T: AsRef<[bool]> + IntoIterator<Item = bool>>(value: T) -> Self {
+        value.into()
+    }
+}
+
+impl NullBitmap for HeapNullBitmap {
+    fn empty() -> Self {
+        HeapNullBitmap {
+            inner: FixedBitSet::new()
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    fn set_true(&mut self, idx: usize) {
+        self.inner.insert(idx)
+    }
+
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn contains(&self, x: usize) -> bool {
+        self.inner.contains(x)
+    }
+
+    fn is_subset(&self, other: &Self) -> bool {
+        self.is_subset(other)
     }
 
     fn from_bool_vec<T: AsRef<[bool]> + IntoIterator<Item = bool>>(value: T) -> Self {
