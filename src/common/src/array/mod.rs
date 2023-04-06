@@ -53,7 +53,6 @@ pub use column_proto_readers::*;
 pub use data_chunk::{DataChunk, DataChunkTestExt};
 pub use data_chunk_iter::RowRef;
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
-use get_size::GetSize;
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
 pub use iterator::ArrayIterator;
 pub use jsonb_array::{JsonbArray, JsonbArrayBuilder, JsonbRef, JsonbVal};
@@ -72,6 +71,7 @@ pub use crate::array::num256_array::{
     Int256Array, Int256ArrayBuilder, Uint256Array, Uint256ArrayBuilder,
 };
 use crate::buffer::Bitmap;
+use crate::collection::estimate_size::EstimateSize;
 use crate::types::*;
 use crate::util::iter_util::ZipEqFast;
 pub type ArrayResult<T> = Result<T, ArrayError>;
@@ -164,7 +164,7 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
 /// and max, we need to store current maximum in the aggregator. In this case, we
 /// could use `A::OwnedItem` in aggregator struct.
 pub trait Array:
-    std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImpl> + GetSize
+    std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImpl> + EstimateSize
 {
     /// A reference to item in array, as well as return type of `value_at`, which is
     /// reciprocal to `Self::OwnedItem`.
@@ -369,7 +369,7 @@ macro_rules! for_all_variants {
 macro_rules! array_impl_enum {
     ( $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
         /// `ArrayImpl` embeds all possible array in `array` module.
-        #[derive(Debug, Clone, GetSize)]
+        #[derive(Debug, Clone)]
         pub enum ArrayImpl {
             $( $variant_name($array) ),*
         }
@@ -678,6 +678,20 @@ macro_rules! impl_array {
 }
 
 for_all_variants! { impl_array }
+
+macro_rules! impl_array_estimate_size {
+    ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        impl EstimateSize for ArrayImpl {
+            fn estimated_heap_size(&self) -> usize {
+                match self {
+                    $( Self::$variant_name(inner) => inner.estimated_heap_size(), )*
+                }
+            }
+        }
+    }
+}
+
+for_all_variants! { impl_array_estimate_size }
 
 impl ArrayImpl {
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = DatumRef<'_>> + ExactSizeIterator {

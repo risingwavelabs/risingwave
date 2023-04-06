@@ -19,13 +19,13 @@ use std::hash::Hash;
 use std::sync::Arc;
 
 use bytes::{Buf, BufMut};
-use get_size::GetSize;
 use itertools::Itertools;
 use risingwave_pb::data::{PbArray, PbArrayType, StructArrayData};
 
 use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayMeta, ArrayResult};
 use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::collection::estimate_size::EstimateSize;
 use crate::types::to_text::ToText;
 use crate::types::{hash_datum, DataType, Datum, DatumRef, Scalar, ScalarRefImpl, ToDatumRef};
 use crate::util::iter_util::ZipEqFast;
@@ -229,8 +229,11 @@ impl StructArray {
         children_names: Arc<[String]>,
         len: usize,
     ) -> Self {
-        let heap_size =
-            bitmap.get_heap_size() + children.iter().map(|c| c.get_heap_size()).sum::<usize>();
+        let heap_size = bitmap.estimated_heap_size()
+            + children
+                .iter()
+                .map(|c| c.estimated_heap_size())
+                .sum::<usize>();
 
         Self {
             bitmap,
@@ -327,8 +330,8 @@ impl StructArray {
     }
 }
 
-impl GetSize for StructArray {
-    fn get_heap_size(&self) -> usize {
+impl EstimateSize for StructArray {
+    fn estimated_heap_size(&self) -> usize {
         self.heap_size
     }
 }

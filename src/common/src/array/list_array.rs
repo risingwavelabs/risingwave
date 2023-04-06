@@ -16,9 +16,9 @@ use core::fmt;
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::hash::Hash;
+use std::mem::size_of;
 
 use bytes::{Buf, BufMut};
-use get_size::GetSize;
 use itertools::EitherOrBoth::{Both, Left, Right};
 use itertools::Itertools;
 use risingwave_pb::data::{ListArrayData, PbArray, PbArrayType};
@@ -26,6 +26,7 @@ use serde::{Deserializer, Serializer};
 
 use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayMeta, ArrayResult, RowRef};
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::collection::estimate_size::EstimateSize;
 use crate::row::Row;
 use crate::types::to_text::ToText;
 use crate::types::{hash_datum, DataType, Datum, DatumRef, Scalar, ScalarRefImpl, ToDatumRef};
@@ -153,13 +154,20 @@ impl ListArrayBuilder {
 ///
 /// For example, `values (array[1]), (array[]::int[]), (null), (array[2, 3]);` stores an inner
 ///  `I32Array` with `[1, 2, 3]`, along with offsets `[0, 1, 1, 1, 3]` and null bitmap `TTFT`.
-#[derive(Debug, Clone, PartialEq, GetSize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ListArray {
     bitmap: Bitmap,
     pub(super) offsets: Vec<u32>,
     pub(super) value: Box<ArrayImpl>,
-    #[get_size(ignore)]
     pub(super) value_type: DataType,
+}
+
+impl EstimateSize for ListArray {
+    fn estimated_heap_size(&self) -> usize {
+        self.bitmap.estimated_heap_size()
+            + self.offsets.capacity() * size_of::<u32>()
+            + self.value.estimated_heap_size()
+    }
 }
 
 impl Array for ListArray {

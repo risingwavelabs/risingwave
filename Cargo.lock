@@ -2627,25 +2627,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "get-size"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "016d98c5465aa9c741e4e520b307375d0c15f6a1670fee78f37b1a2e706deff0"
-dependencies = [
- "get-size-derive",
-]
-
-[[package]]
-name = "get-size-derive"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cef24d44f3b8d0c1e16dc10c2d7272085c1643c907b5e2db43d689f2b4eb08b"
-dependencies = [
- "quote",
- "syn",
-]
-
-[[package]]
 name = "getopts"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5895,7 +5876,6 @@ dependencies = [
  "fixedbitset",
  "futures",
  "futures-async-stream",
- "get-size",
  "hex",
  "humantime",
  "itertools",

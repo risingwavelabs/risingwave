@@ -40,9 +40,10 @@ use std::iter::{self, TrustedLen};
 use std::mem::size_of;
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, Not, RangeInclusive};
 
-use get_size::GetSize;
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::PbBuffer;
+
+use crate::collection::estimate_size::EstimateSize;
 
 #[derive(Default, Debug)]
 pub struct BitmapBuilder {
@@ -187,8 +188,8 @@ pub struct Bitmap {
     bits: Box<[usize]>,
 }
 
-impl GetSize for Bitmap {
-    fn get_heap_size(&self) -> usize {
+impl EstimateSize for Bitmap {
+    fn estimated_heap_size(&self) -> usize {
         self.bits.len() * size_of::<usize>()
     }
 }
@@ -689,8 +690,8 @@ mod tests {
             }
             builder.finish()
         };
-        assert_eq!(8, bitmap1.get_heap_size());
-        assert_eq!(40, bitmap1.get_size());
+        assert_eq!(8, bitmap1.estimated_heap_size());
+        assert_eq!(40, bitmap1.estimated_size());
     }
 
     #[test]

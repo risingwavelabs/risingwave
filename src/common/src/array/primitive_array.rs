@@ -16,7 +16,6 @@ use std::fmt::Debug;
 use std::io::Write;
 use std::mem::size_of;
 
-use get_size::GetSize;
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{ArrayType, PbArray};
@@ -25,6 +24,7 @@ use super::{Array, ArrayBuilder, ArrayResult};
 use crate::array::serial_array::Serial;
 use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayMeta};
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::collection::estimate_size::EstimateSize;
 use crate::for_all_native_types;
 use crate::types::decimal::Decimal;
 use crate::types::interval::Interval;
@@ -274,9 +274,9 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
     }
 }
 
-impl<T: PrimitiveArrayItemType> GetSize for PrimitiveArray<T> {
-    fn get_heap_size(&self) -> usize {
-        self.bitmap.get_heap_size() + self.data.capacity() * size_of::<T>()
+impl<T: PrimitiveArrayItemType> EstimateSize for PrimitiveArray<T> {
+    fn estimated_heap_size(&self) -> usize {
+        self.bitmap.estimated_heap_size() + self.data.capacity() * size_of::<T>()
     }
 }
 
