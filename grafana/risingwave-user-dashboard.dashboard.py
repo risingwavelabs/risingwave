@@ -219,6 +219,28 @@ def section_memory(outer_panels):
                             ),
                     ],
                 ),
+
+                panels.timeseries_percentage(
+                    "Executor Cache Miss Ratio",
+                    "",
+                    [
+                        panels.target(
+                         f"(sum(rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])) by (actor_id) ) / (sum(rate({metric('stream_join_lookup_total_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "join executor cache miss ratio - {{actor_id}} {{side}}",
+                            ),
+
+                        panels.target(
+                         f"(sum(rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])) by (actor_id) ) / (sum(rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "Agg cache miss ratio - {{actor_id}} ",
+                            ),
+
+                        panels.target(
+                         f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "materialize executor cache miss ratio - state table {{table_id}} - actor {{actor_id}}  {{instance}}",
+                            ),
+
+                    ],
+                ),
                 panels.timeseries_ops(
                     "Storage Cache",
                     "Storage cache statistics",
