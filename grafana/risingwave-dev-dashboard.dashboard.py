@@ -70,8 +70,8 @@ def section_recovery_node(panels):
     return [
         panels.row("Recovery"),
         panels.timeseries_ops(
-            "Recovery Rate",
-            "The rate of recovery attempts",
+            "Recovery Successful Rate",
+            "The rate of successful recovery attempts",
             [
                 panels.target(f"sum(rate({metric('recovery_latency_count')}[$__rate_interval])) by (instance)",
                               "{{instance}}")
@@ -89,7 +89,7 @@ def section_recovery_node(panels):
         ),
         panels.timeseries_latency(
             "Recovery latency",
-            "Time spent in recovery",
+            "Time spent in a successful recovery attempt",
             [
                 *quantile(
                     lambda quantile, legend: panels.target(

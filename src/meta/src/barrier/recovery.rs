@@ -120,8 +120,10 @@ where
             .await
             .expect("clean dirty fragments");
         let retry_strategy = Self::get_retry_strategy();
+        
+        // We take retry into consideration because this is the latency user sees for a cluster to get recovered.
+        let recovery_timer = self.metrics.recovery_latency.start_timer();
         let (new_epoch, _responses) = tokio_retry::Retry::spawn(retry_strategy, || async {
-            let recovery_timer = self.metrics.recovery_latency.start_timer();
             let recovery_result: MetaResult<(Epoch, Vec<BarrierCompleteResponse>)> = try {
                 let mut info = self.resolve_actor_info_for_recovery().await;
                 let mut new_epoch = prev_epoch.next();
@@ -206,7 +208,6 @@ where
                 };
                 res?
             };
-            recovery_timer.observe_duration();
             if recovery_result.is_err() {
                 self.metrics.recovery_failure_cnt.inc();
             }
@@ -214,6 +215,7 @@ where
         })
         .await
         .expect("Retry until recovery success.");
+        recovery_timer.observe_duration();
         tracing::info!("recovery success");
 
         new_epoch
