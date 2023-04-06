@@ -24,7 +24,8 @@ use risingwave_pb::common::{ActorInfo, WorkerNode, WorkerType};
 use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
 use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, UpdateActorsRequest,
+    BarrierCompleteResponse, BroadcastActorInfoTableRequest, BuildActorsRequest,
+    ForceStopActorsRequest, UpdateActorsRequest,
 };
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::{debug, error, warn};
@@ -121,7 +122,7 @@ where
         let retry_strategy = Self::get_retry_strategy();
         let (new_epoch, _responses) = tokio_retry::Retry::spawn(retry_strategy, || async {
             let recovery_timer = self.metrics.recovery_latency.start_timer();
-            let recovery_result = {
+            let recovery_result: MetaResult<(Epoch, Vec<BarrierCompleteResponse>)> = try {
                 let mut info = self.resolve_actor_info_for_recovery().await;
                 let mut new_epoch = prev_epoch.next();
 
@@ -189,19 +190,21 @@ where
                     tokio::sync::mpsc::unbounded_channel();
                 self.inject_barrier(command_ctx.clone(), &barrier_complete_tx)
                     .await;
-                match barrier_complete_rx.recv().await.unwrap().result {
+                let res = match barrier_complete_rx.recv().await.unwrap().result {
                     Ok(response) => {
                         if let Err(err) = command_ctx.post_collect().await {
                             error!(err = ?err, "post_collect failed");
-                            return Err(err);
+                            Err(err)
+                        } else {
+                            Ok((new_epoch, response))
                         }
-                        Ok((new_epoch, response))
                     }
                     Err(err) => {
                         error!(err = ?err, "inject_barrier failed");
                         Err(err)
                     }
-                }
+                };
+                res?
             };
             recovery_timer.observe_duration();
             if recovery_result.is_err() {
