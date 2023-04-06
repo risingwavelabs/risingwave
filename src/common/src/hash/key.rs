@@ -64,13 +64,13 @@ pub struct HeapNullBitmap {
 pub struct StackNullBitmap {
     inner: Set64,
 }
+//
+// const_assert_eq!(
+//     std::mem::size_of::<NullBitmap>(),
+//     std::mem::size_of::<u64>()
+// );
 
-const_assert_eq!(
-    std::mem::size_of::<NullBitmap>(),
-    std::mem::size_of::<u64>()
-);
-
-pub trait NullBitmap: EstimateSize {
+pub trait NullBitmap: EstimateSize + Clone + PartialEq + Debug + Send + Sync {
     fn empty() -> Self;
 
     fn is_empty(&self) -> bool;
@@ -88,7 +88,7 @@ pub trait NullBitmap: EstimateSize {
 
 impl NullBitmap for StackNullBitmap {
     fn empty() -> Self {
-        NullBitmap {
+        StackNullBitmap {
             inner: Set64::empty(),
         }
     }
@@ -198,15 +198,15 @@ impl HashCode {
     }
 }
 
-pub trait HashKeySerializer {
-    type K: HashKey;
+pub trait HashKeySerializer<B: NullBitmap> {
+    type K: HashKey<B>;
     fn from_hash_code(hash_code: HashCode, estimated_key_size: usize) -> Self;
     fn append<'a, D: HashKeySerDe<'a>>(&mut self, data: Option<D>);
     fn into_hash_key(self) -> Self::K;
 }
 
-pub trait HashKeyDeserializer {
-    type K: HashKey;
+pub trait HashKeyDeserializer<B: NullBitmap> {
+    type K: HashKey<B>;
     fn from_hash_key(hash_key: Self::K) -> Self;
     fn deserialize<'a, D: HashKeySerDe<'a>>(&'a mut self) -> ArrayResult<Option<D>>;
 }
@@ -235,10 +235,10 @@ pub trait HashKeySerDe<'a>: ScalarRef<'a> {
 /// Current comparison implementation treats `null == null`. This is consistent with postgresql's
 /// group by implementation, but not join. In pg's join implementation, `null != null`, and the join
 /// executor should take care of this.
-pub trait HashKey:
+pub trait HashKey<B: NullBitmap>:
     EstimateSize + Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static
 {
-    type S: HashKeySerializer<K = Self>;
+    type S: HashKeySerializer<B, K = Self>;
 
     fn build(column_idxes: &[usize], data_chunk: &DataChunk) -> ArrayResult<Vec<Self>> {
         let hash_codes = data_chunk.get_hash_values(column_idxes, Crc32FastBuilder);
@@ -286,65 +286,65 @@ pub trait HashKey:
         !self.null_bitmap().is_empty()
     }
 
-    fn null_bitmap(&self) -> &NullBitmap;
+    fn null_bitmap(&self) -> &B;
 }
 
 /// Designed for hash keys with at most `N` serialized bytes.
 ///
 /// See [`crate::hash::calc_hash_key_kind`]
 #[derive(Clone, Debug)]
-pub struct FixedSizeKey<const N: usize> {
+pub struct FixedSizeKey<const N: usize, B: NullBitmap> {
     key: [u8; N],
     hash_code: u64,
-    null_bitmap: NullBitmap,
+    null_bitmap: B,
 }
 
 /// Designed for hash keys which can't be represented by [`FixedSizeKey`].
 ///
 /// See [`crate::hash::calc_hash_key_kind`]
 #[derive(Clone, Debug)]
-pub struct SerializedKey {
+pub struct SerializedKey<B: NullBitmap> {
     // Key encoding.
     key: Vec<u8>,
     hash_code: u64,
-    null_bitmap: NullBitmap,
+    null_bitmap: B,
 }
 
-impl<const N: usize> EstimateSize for FixedSizeKey<N> {
+impl<const N: usize, B: NullBitmap> EstimateSize for FixedSizeKey<N, B> {
     fn estimated_heap_size(&self) -> usize {
         self.null_bitmap.estimated_heap_size()
     }
 }
 
-impl<const N: usize> PartialEq for FixedSizeKey<N> {
+impl<const N: usize, B: NullBitmap> PartialEq for FixedSizeKey<N, B> {
     fn eq(&self, other: &Self) -> bool {
         (self.key == other.key) && (self.null_bitmap == other.null_bitmap)
     }
 }
 
-impl<const N: usize> Eq for FixedSizeKey<N> {}
+impl<const N: usize, B: NullBitmap> Eq for FixedSizeKey<N, B> {}
 
-impl<const N: usize> Hash for FixedSizeKey<N> {
+impl<const N: usize, B: NullBitmap> Hash for FixedSizeKey<N, B> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         state.write_u64(self.hash_code)
     }
 }
 
-impl EstimateSize for SerializedKey {
+impl<B: NullBitmap> EstimateSize for SerializedKey<B> {
     fn estimated_heap_size(&self) -> usize {
         self.key.estimated_heap_size() + self.null_bitmap.estimated_heap_size()
     }
 }
 
-impl PartialEq for SerializedKey {
+impl<B: NullBitmap> PartialEq for SerializedKey<B> {
     fn eq(&self, other: &Self) -> bool {
         self.key == other.key
     }
 }
 
-impl Eq for SerializedKey {}
+impl<B: NullBitmap> Eq for SerializedKey<B> {}
 
-impl Hash for SerializedKey {
+impl<B: NullBitmap> Hash for SerializedKey<B> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         state.write_u64(self.hash_code)
     }
@@ -388,13 +388,13 @@ impl BuildHasher for PrecomputedBuildHasher {
     }
 }
 
-pub type Key8 = FixedSizeKey<1>;
-pub type Key16 = FixedSizeKey<2>;
-pub type Key32 = FixedSizeKey<4>;
-pub type Key64 = FixedSizeKey<8>;
-pub type Key128 = FixedSizeKey<16>;
-pub type Key256 = FixedSizeKey<32>;
-pub type KeySerialized = SerializedKey;
+pub type Key8<B> = FixedSizeKey<1, B>;
+pub type Key16<B> = FixedSizeKey<2, B>;
+pub type Key32<B> = FixedSizeKey<4, B>;
+pub type Key64<B> = FixedSizeKey<8, B>;
+pub type Key128<B> = FixedSizeKey<16, B>;
+pub type Key256<B> = FixedSizeKey<32, B>;
+pub type KeySerialized<B> = SerializedKey<B>;
 
 impl HashKeySerDe<'_> for bool {
     type S = [u8; 1];
@@ -653,22 +653,22 @@ impl<'a> HashKeySerDe<'a> for ListRef<'a> {
     }
 }
 
-pub struct FixedSizeKeySerializer<const N: usize> {
+pub struct FixedSizeKeySerializer<const N: usize, B: NullBitmap> {
     buffer: [u8; N],
-    null_bitmap: NullBitmap,
+    null_bitmap: B,
     null_bitmap_idx: usize,
     data_len: usize,
     hash_code: u64,
 }
 
-impl<const N: usize> FixedSizeKeySerializer<N> {
+impl<const N: usize, B: NullBitmap> FixedSizeKeySerializer<N, B> {
     fn left_size(&self) -> usize {
         N - self.data_len
     }
 }
 
-impl<const N: usize> HashKeySerializer for FixedSizeKeySerializer<N> {
-    type K = FixedSizeKey<N>;
+impl<const N: usize, B: NullBitmap> HashKeySerializer for FixedSizeKeySerializer<N, B> {
+    type K = FixedSizeKey<N, B>;
 
     /// We already know the estimated key size statically, no need
     /// to use runtime parameter: `estimated_key_size`.
@@ -708,14 +708,14 @@ impl<const N: usize> HashKeySerializer for FixedSizeKeySerializer<N> {
     }
 }
 
-pub struct FixedSizeKeyDeserializer<const N: usize> {
+pub struct FixedSizeKeyDeserializer<const N: usize, B: NullBitmap> {
     cursor: Cursor<[u8; N]>,
-    null_bitmap: NullBitmap,
+    null_bitmap: B,
     null_bitmap_idx: usize,
 }
 
-impl<const N: usize> HashKeyDeserializer for FixedSizeKeyDeserializer<N> {
-    type K = FixedSizeKey<N>;
+impl<const N: usize, B: NullBitmap> HashKeyDeserializer for FixedSizeKeyDeserializer<N, B> {
+    type K = FixedSizeKey<N, B>;
 
     fn from_hash_key(hash_key: Self::K) -> Self {
         Self {
@@ -738,15 +738,15 @@ impl<const N: usize> HashKeyDeserializer for FixedSizeKeyDeserializer<N> {
     }
 }
 
-pub struct SerializedKeySerializer {
+pub struct SerializedKeySerializer<B: NullBitmap> {
     buffer: Vec<u8>,
     hash_code: u64,
-    null_bitmap: NullBitmap,
+    null_bitmap: B,
     null_bitmap_idx: usize,
 }
 
-impl HashKeySerializer for SerializedKeySerializer {
-    type K = SerializedKey;
+impl<B: NullBitmap> HashKeySerializer<B> for SerializedKeySerializer<B> {
+    type K = SerializedKey<B>;
 
     fn from_hash_code(hash_code: HashCode, estimated_value_encoding_size: usize) -> Self {
         Self {
@@ -770,7 +770,7 @@ impl HashKeySerializer for SerializedKeySerializer {
         self.null_bitmap_idx += 1;
     }
 
-    fn into_hash_key(self) -> SerializedKey {
+    fn into_hash_key(self) -> SerializedKey<B> {
         SerializedKey {
             key: self.buffer,
             hash_code: self.hash_code,
@@ -783,7 +783,8 @@ fn serialize_array_to_hash_key<'a, A, S>(array: &'a A, serializers: &mut [S])
 where
     A: Array,
     A::RefItem<'a>: HashKeySerDe<'a>,
-    S: HashKeySerializer,
+    B: NullBitmap,
+    S: HashKeySerializer<B>,
 {
     for (item, serializer) in array.iter().zip_eq_fast(serializers.iter_mut()) {
         serializer.append(item);
@@ -796,15 +797,16 @@ fn deserialize_array_element_from_hash_key<'a, A, S>(
 ) -> ArrayResult<()>
 where
     A: ArrayBuilder,
+    B: NullBitmap,
     <<A as ArrayBuilder>::ArrayType as Array>::RefItem<'a>: HashKeySerDe<'a>,
-    S: HashKeyDeserializer,
+    S: HashKeyDeserializer<B>,
 {
     builder.append(deserializer.deserialize()?);
     Ok(())
 }
 
 impl ArrayImpl {
-    fn serialize_to_hash_key<S: HashKeySerializer>(&self, serializers: &mut [S]) {
+    fn serialize_to_hash_key<B: NullBitmap, S: HashKeySerializer<B>>(&self, serializers: &mut [S]) {
         macro_rules! impl_all_serialize_to_hash_key {
             ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
                 match self {
@@ -832,8 +834,8 @@ impl ArrayBuilderImpl {
     }
 }
 
-impl<const N: usize> HashKey for FixedSizeKey<N> {
-    type S = FixedSizeKeySerializer<N>;
+impl<const N: usize, B: NullBitmap> HashKey<B> for FixedSizeKey<N, B> {
+    type S = FixedSizeKeySerializer<N, B>;
 
     fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<OwnedRow> {
         // TODO: directly deserialize to Row
@@ -863,13 +865,14 @@ impl<const N: usize> HashKey for FixedSizeKey<N> {
         Ok(())
     }
 
-    fn null_bitmap(&self) -> &NullBitmap {
+    fn null_bitmap(&self) -> &B {
         &self.null_bitmap
     }
 }
 
-impl HashKey for SerializedKey {
-    type S = SerializedKeySerializer;
+impl<B: NullBitmap> HashKey for SerializedKey<B> {
+    type B = B;
+    type S = SerializedKeySerializer<B>;
 
     fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<OwnedRow> {
         RowDeserializer::new(data_types)
@@ -893,7 +896,7 @@ impl HashKey for SerializedKey {
         Ok(())
     }
 
-    fn null_bitmap(&self) -> &NullBitmap {
+    fn null_bitmap(&self) -> &B {
         &self.null_bitmap
     }
 }
@@ -958,7 +961,7 @@ mod tests {
         (DataChunk::new(columns, capacity), types)
     }
 
-    fn do_test_serialize<K: HashKey, F>(column_indexes: Vec<usize>, data_gen: F)
+    fn do_test_serialize<K: HashKey<StackNullBitmap>, F>(column_indexes: Vec<usize>, data_gen: F)
     where
         F: FnOnce() -> DataChunk,
     {
@@ -1009,7 +1012,7 @@ mod tests {
         assert_eq!(expected_row_id_mapping, actual_row_id_mapping);
     }
 
-    fn do_test_deserialize<K: HashKey, F>(column_indexes: Vec<usize>, data_gen: F)
+    fn do_test_deserialize<K: HashKey<StackNullBitmap>, F>(column_indexes: Vec<usize>, data_gen: F)
     where
         F: FnOnce() -> (DataChunk, Vec<DataType>),
     {
@@ -1042,7 +1045,7 @@ mod tests {
         }
     }
 
-    fn do_test<K: HashKey, F>(column_indexes: Vec<usize>, data_gen: F)
+    fn do_test<K: HashKey<StackNullBitmap>, F>(column_indexes: Vec<usize>, data_gen: F)
     where
         F: FnOnce() -> (DataChunk, Vec<DataType>),
     {

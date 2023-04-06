@@ -65,15 +65,17 @@ pub trait HashKeyDispatcher: Sized {
     fn data_types(&self) -> &[DataType];
 
     fn dispatch(self) -> Self::Output {
-        match calc_hash_key_kind(self.data_types()) {
-            HashKeyKind::Key8 => self.dispatch_impl::<hash::Key8>(),
-            HashKeyKind::Key16 => self.dispatch_impl::<hash::Key16>(),
-            HashKeyKind::Key32 => self.dispatch_impl::<hash::Key32>(),
-            HashKeyKind::Key64 => self.dispatch_impl::<hash::Key64>(),
-            HashKeyKind::Key128 => self.dispatch_impl::<hash::Key128>(),
-            HashKeyKind::Key256 => self.dispatch_impl::<hash::Key256>(),
-            HashKeyKind::KeySerialized => self.dispatch_impl::<hash::KeySerialized>(),
-        }
+        // Use macro here to handle all permutations.
+        todo!()
+        // match calc_hash_key_kind(self.data_types()) {
+        //     HashKeyKind::Key8 => self.dispatch_impl::<hash::Key8>(),
+        //     HashKeyKind::Key16 => self.dispatch_impl::<hash::Key16>(),
+        //     HashKeyKind::Key32 => self.dispatch_impl::<hash::Key32>(),
+        //     HashKeyKind::Key64 => self.dispatch_impl::<hash::Key64>(),
+        //     HashKeyKind::Key128 => self.dispatch_impl::<hash::Key128>(),
+        //     HashKeyKind::Key256 => self.dispatch_impl::<hash::Key256>(),
+        //     HashKeyKind::KeySerialized => self.dispatch_impl::<hash::KeySerialized>(),
+        // }
     }
 }
 
@@ -115,6 +117,7 @@ const MAX_FIXED_SIZE_KEY_ELEMENTS: usize = 8;
 /// 2. Number of columns exceeds [`MAX_FIXED_SIZE_KEY_ELEMENTS`]
 /// 3. Sizes of data types exceed `256` bytes.
 /// 4. Any column's serialized format can't be used for equality check.
+/// 5. Calculate what sort of bitmap to use.
 ///
 /// Otherwise we choose smallest [`crate::hash::FixedSizeKey`] whose size can hold all data types.
 pub fn calc_hash_key_kind(data_types: &[DataType]) -> HashKeyKind {
