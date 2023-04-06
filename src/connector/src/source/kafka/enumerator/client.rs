@@ -57,6 +57,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         let broker_rewrite_map = common_props.broker_rewrite_map.clone();
         let topic = common_props.topic.clone();
         config.set("bootstrap.servers", &broker_address);
+        config.set("isolation.level", "read_committed");
         common_props.set_security_properties(&mut config);
         let mut scan_start_offset = match properties
             .scan_startup_mode

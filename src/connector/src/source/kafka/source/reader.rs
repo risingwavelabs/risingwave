@@ -67,6 +67,7 @@ impl SplitReader for KafkaSplitReader {
         config.set("enable.partition.eof", "false");
         config.set("enable.auto.commit", "false");
         config.set("auto.offset.reset", "smallest");
+        config.set("isolation.level", "read_committed");
         config.set("bootstrap.servers", bootstrap_servers);
 
         properties.common.set_security_properties(&mut config);
