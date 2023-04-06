@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::fmt::{Debug, Formatter};
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -79,6 +80,7 @@ use crate::error::{Result, RpcError};
 use crate::hummock_meta_client::{CompactTaskItem, HummockMetaClient};
 use crate::{meta_rpc_client_method_impl, ExtraInfoSourceRef};
 
+type ConnectionId = u32;
 type DatabaseId = u32;
 type SchemaId = u32;
 
@@ -124,10 +126,17 @@ impl MetaClient {
         .await
     }
 
-    pub async fn create_connection(&self, req: create_connection_request::Payload) -> Result<u32> {
-        let request = CreateConnectionRequest { payload: Some(req) };
+    pub async fn create_connection(
+        &self,
+        connection_name: String,
+        req: create_connection_request::Payload,
+    ) -> Result<(ConnectionId, CatalogVersion)> {
+        let request = CreateConnectionRequest {
+            name: connection_name,
+            payload: Some(req),
+        };
         let resp = self.inner.create_connection(request).await?;
-        Ok(resp.connection_id)
+        Ok((resp.connection_id, resp.version))
     }
 
     pub async fn list_connections(&self, _name: Option<&str>) -> Result<Vec<Connection>> {
@@ -136,12 +145,12 @@ impl MetaClient {
         Ok(resp.connections)
     }
 
-    pub async fn drop_connection(&self, connection_name: &str) -> Result<()> {
+    pub async fn drop_connection(&self, connection_name: &str) -> Result<CatalogVersion> {
         let request = DropConnectionRequest {
             connection_name: connection_name.to_string(),
         };
-        let _ = self.inner.drop_connection(request).await?;
-        Ok(())
+        let resp = self.inner.drop_connection(request).await?;
+        Ok(resp.version)
     }
 
     pub(crate) fn parse_meta_addr(meta_addr: &str) -> Result<MetaAddressStrategy> {
@@ -1142,7 +1151,7 @@ impl ElectionMemberManagement {
                             None => {
                                 let endpoint = GrpcMetaClient::addr_to_endpoint(addr.clone())?;
                                 let channel = GrpcMetaClient::connect_to_endpoint(endpoint).await?;
-                                let new_client: MetaMemberServiceClient<Channel> =
+                                let new_client: MetaMemberClient =
                                     MetaMemberServiceClient::new(channel);
                                 *client = Some(new_client.clone());
 
@@ -1299,7 +1308,7 @@ impl GrpcMetaClient {
         let members = match &strategy {
             MetaAddressStrategy::LoadBalance(_) => Either::Left(meta_member_client),
             MetaAddressStrategy::List(addrs) => {
-                let mut members = LruCache::new(20);
+                let mut members = LruCache::new(NonZeroUsize::new(20).unwrap());
                 for addr in addrs {
                     members.put(addr.clone(), None);
                 }

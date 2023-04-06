@@ -75,8 +75,6 @@ where
         .commit_epoch(epoch, ssts, sst_to_worker)
         .await
         .unwrap();
-    // Current state: {v0: [], v1: [test_tables]}
-
     // Simulate a compaction and increase version by 1.
     let mut temp_compactor = false;
     if hummock_manager
@@ -103,6 +101,14 @@ where
         .await
         .unwrap()
         .unwrap();
+    assert_eq!(
+        compact_task
+            .input_ssts
+            .iter()
+            .map(|i| i.table_infos.len())
+            .sum::<usize>(),
+        3
+    );
     compact_task.target_level = 6;
     hummock_manager
         .assign_compaction_task(&compact_task, compactor.context_id())
@@ -123,8 +129,6 @@ where
             .compactor_manager_ref_for_test()
             .remove_compactor(context_id);
     }
-    // Current state: {v0: [], v1: [test_tables], v2: [test_tables_2, test_tables to_delete]}
-
     // Increase version by 1.
     epoch += 1;
     let test_tables_3 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
@@ -143,8 +147,6 @@ where
         .commit_epoch(epoch, ssts, sst_to_worker)
         .await
         .unwrap();
-    // Current state: {v0: [], v1: [test_tables], v2: [test_tables_2, to_delete:test_tables], v3:
-    // [test_tables_2, test_tables_3]}
     vec![test_tables, test_tables_2, test_tables_3]
 }
 
