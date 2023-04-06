@@ -2030,9 +2030,6 @@ where
         self.env
             .notification_manager()
             .notify_frontend_without_version(Operation::Update, Info::HummockStats(stats.clone()));
-        self.env
-            .notification_manager()
-            .notify_compute_without_version(Operation::Update, Info::HummockStats(stats.clone()));
     }
 
     #[named]
