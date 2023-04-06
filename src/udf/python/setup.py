@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="risingwave",
-    version="0.0.3",
+    version="0.0.4",
     author="RisingWave Labs",
     description="RisingWave Python API",
     long_description=long_description,
@@ -16,6 +16,6 @@ setup(
         "Programming Language :: Python",
         "License :: OSI Approved :: Apache Software License"
     ],
-    python_requires=">=3.10",
+    python_requires=">=3.8",
     install_requires=['pyarrow'],
 )

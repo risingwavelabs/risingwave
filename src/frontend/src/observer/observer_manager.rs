@@ -50,7 +50,11 @@ impl ObserverState for FrontendObserverNode {
         };
 
         match info.to_owned() {
-            Info::Database(_) | Info::Schema(_) | Info::RelationGroup(_) => {
+            Info::Database(_)
+            | Info::Schema(_)
+            | Info::RelationGroup(_)
+            | Info::Function(_)
+            | Info::Connection(_) => {
                 self.handle_catalog_notification(resp);
             }
             Info::Node(node) => {
@@ -102,6 +106,7 @@ impl ObserverState for FrontendObserverNode {
             indexes,
             views,
             functions,
+            connections,
             users,
             parallel_unit_mappings,
             nodes,
@@ -118,26 +123,29 @@ impl ObserverState for FrontendObserverNode {
         for schema in schemas {
             catalog_guard.create_schema(&schema)
         }
-        for table in tables {
-            catalog_guard.create_table(&table)
-        }
         for source in sources {
             catalog_guard.create_source(&source)
         }
-        for user in users {
-            user_guard.create_user(user)
+        for sink in sinks {
+            catalog_guard.create_sink(&sink)
+        }
+        for table in tables {
+            catalog_guard.create_table(&table)
         }
         for index in indexes {
             catalog_guard.create_index(&index)
-        }
-        for sink in sinks {
-            catalog_guard.create_sink(&sink)
         }
         for view in views {
             catalog_guard.create_view(&view)
         }
         for function in functions {
             catalog_guard.create_function(&function)
+        }
+        for connection in connections {
+            catalog_guard.create_connection(&connection)
+        }
+        for user in users {
+            user_guard.create_user(user)
         }
         self.worker_node_manager.refresh(
             nodes,
@@ -221,14 +229,16 @@ impl FrontendObserverNode {
                                 table.id.into(),
                             ),
                             Operation::Update => {
-                                let old_table =
-                                    catalog_guard.get_table_by_id(&table.id.into()).unwrap();
+                                let old_fragment_id = catalog_guard
+                                    .get_table_by_id(&table.id.into())
+                                    .unwrap()
+                                    .fragment_id;
                                 catalog_guard.update_table(table);
-                                if old_table.fragment_id != table.fragment_id {
+                                if old_fragment_id != table.fragment_id {
                                     // FIXME: the frontend node delete its fragment for the update
                                     // operation by itself.
                                     self.worker_node_manager
-                                        .remove_fragment_mapping(&old_table.fragment_id);
+                                        .remove_fragment_mapping(&old_fragment_id);
                                 }
                             }
                             _ => panic!("receive an unsupported notify {:?}", resp),
@@ -269,18 +279,23 @@ impl FrontendObserverNode {
                             Operation::Update => catalog_guard.update_view(view),
                             _ => panic!("receive an unsupported notify {:?}", resp),
                         },
-                        RelationInfo::Function(function) => match resp.operation() {
-                            Operation::Add => catalog_guard.create_function(function),
-                            Operation::Delete => catalog_guard.drop_function(
-                                function.database_id,
-                                function.schema_id,
-                                function.id.into(),
-                            ),
-                            _ => panic!("receive an unsupported notify {:?}", resp),
-                        },
                     }
                 }
             }
+            Info::Function(function) => match resp.operation() {
+                Operation::Add => catalog_guard.create_function(function),
+                Operation::Delete => catalog_guard.drop_function(
+                    function.database_id,
+                    function.schema_id,
+                    function.id.into(),
+                ),
+                _ => panic!("receive an unsupported notify {:?}", resp),
+            },
+            Info::Connection(connection) => match resp.operation() {
+                Operation::Add => catalog_guard.create_connection(connection),
+                Operation::Delete => catalog_guard.drop_connection(connection.get_name().as_str()),
+                _ => panic!("receive an unsupported notify {:?}", resp),
+            },
             _ => unreachable!(),
         }
         assert!(

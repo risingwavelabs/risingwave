@@ -142,6 +142,28 @@ impl LogicalJoin {
         &self.core.on
     }
 
+    /// Collect all input ref in the on condition. And separate them into left and right.
+    pub fn input_idx_on_condition(&self) -> (Vec<usize>, Vec<usize>) {
+        let input_refs = self
+            .core
+            .on
+            .collect_input_refs(self.core.left.schema().len() + self.core.right.schema().len());
+        let index_group = input_refs
+            .ones()
+            .group_by(|i| *i < self.core.left.schema().len());
+        let left_index = index_group
+            .into_iter()
+            .next()
+            .map_or(vec![], |group| group.1.collect_vec());
+        let right_index = index_group.into_iter().next().map_or(vec![], |group| {
+            group
+                .1
+                .map(|i| i - self.core.left.schema().len())
+                .collect_vec()
+        });
+        (left_index, right_index)
+    }
+
     /// Get the join type of the logical join.
     pub fn join_type(&self) -> JoinType {
         self.core.join_type
@@ -915,7 +937,7 @@ impl LogicalJoin {
             );
             let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
             let hash_join = StreamHashJoin::new(logical_join.core, eq_cond).into();
-            let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
+            let logical_filter = generic::Filter::new(predicate.non_eq_cond(), hash_join);
             let plan = StreamFilter::new(logical_filter).into();
             if self.output_indices() != &default_indices {
                 let logical_project = LogicalProject::with_mapping(

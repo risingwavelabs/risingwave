@@ -239,12 +239,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let casts = EXPLICIT_CAST_TABLE.get(ret)?;
         let cast_sig = casts.choose(&mut self.rng).unwrap();
 
-        use CastContext as T;
         match cast_sig.context {
-            T::Explicit => {
-                let expr = self
-                    .gen_expr(&cast_sig.from_type, context.set_inside_explicit_cast())
-                    .into();
+            CastContext::Explicit => {
+                let expr = self.gen_expr(&cast_sig.from_type, context).into();
                 let data_type = data_type_to_ast_data_type(&cast_sig.to_type);
                 Some(Expr::Cast { expr, data_type })
             }
@@ -550,7 +547,7 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
         E::IsNotTrue => Some(Expr::IsNotTrue(Box::new(exprs[0].clone()))),
         E::IsFalse => Some(Expr::IsFalse(Box::new(exprs[0].clone()))),
         E::IsNotFalse => Some(Expr::IsNotFalse(Box::new(exprs[0].clone()))),
-        E::Position => Some(Expr::Function(make_simple_func("position", &exprs))),
+        E::Position => Some(Expr::Function(make_simple_func("strpos", &exprs))),
         E::RoundDigit => Some(Expr::Function(make_simple_func("round", &exprs))),
         E::Pow => Some(Expr::Function(make_simple_func("pow", &exprs))),
         E::Repeat => Some(Expr::Function(make_simple_func("repeat", &exprs))),
@@ -693,6 +690,9 @@ pub(crate) fn sql_null() -> Expr {
     Expr::Value(Value::Null)
 }
 
+// TODO(kwannoel):
+// Add variadic function signatures. Can add these functions
+// to a FUNC_TABLE too.
 pub fn print_function_table() -> String {
     let func_str = func_sigs()
         .map(|sign| {

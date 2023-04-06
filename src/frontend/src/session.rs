@@ -18,6 +18,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use bytes::Bytes;
 use parking_lot::{RwLock, RwLockReadGuard};
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::PgResponse;
@@ -56,19 +57,20 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::info;
 
-use crate::binder::Binder;
+use crate::binder::{Binder, BoundStatement};
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{check_schema_writable, DatabaseId, SchemaId};
+use crate::handler::extended_handle::{
+    handle_bind, handle_execute, handle_parse, Portal, PrepareStatement,
+};
+use crate::handler::handle;
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::util::to_pg_field;
-use crate::handler::{handle, HandlerArgs};
 use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::FrontendMetrics;
 use crate::observer::FrontendObserverNode;
-use crate::optimizer::OptimizerContext;
-use crate::planner::Planner;
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::SchedulerError::QueryCancelError;
@@ -132,7 +134,6 @@ impl FrontendEnv {
         let compute_client_pool = Arc::new(ComputeClientPool::default());
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
-            hummock_snapshot_manager.clone(),
             compute_client_pool,
             catalog_reader.clone(),
             Arc::new(DistributedQueryMetrics::for_test()),
@@ -189,6 +190,7 @@ impl FrontendEnv {
             WorkerType::Frontend,
             &frontend_address,
             0,
+            &config.meta,
         )
         .await?;
 
@@ -221,7 +223,6 @@ impl FrontendEnv {
             Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
-            hummock_snapshot_manager.clone(),
             compute_client_pool,
             catalog_reader.clone(),
             Arc::new(DistributedQueryMetrics::new(registry.clone())),
@@ -569,6 +570,51 @@ impl SessionImpl {
     pub fn cancel_current_creating_job(&self) {
         self.env.creating_streaming_job_tracker.abort_jobs(self.id);
     }
+
+    /// This function only used for test now.
+    /// Maybe we can remove it in the future.
+    pub async fn run_statement(
+        self: Arc<Self>,
+        sql: &str,
+        formats: Vec<Format>,
+    ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
+        // Parse sql.
+        let mut stmts = Parser::parse_sql(sql)
+            .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))?;
+        if stmts.is_empty() {
+            return Ok(PgResponse::empty_result(
+                pgwire::pg_response::StatementType::EMPTY,
+            ));
+        }
+        if stmts.len() > 1 {
+            return Ok(PgResponse::empty_result_with_notice(
+                pgwire::pg_response::StatementType::EMPTY,
+                "cannot insert multiple commands into statement".to_string(),
+            ));
+        }
+        let stmt = stmts.swap_remove(0);
+        let rsp = {
+            let mut handle_fut = Box::pin(handle(self, stmt, sql, formats));
+            if cfg!(debug_assertions) {
+                // Report the SQL in the log periodically if the query is slow.
+                const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
+                loop {
+                    match tokio::time::timeout(SLOW_QUERY_LOG_PERIOD, &mut handle_fut).await {
+                        Ok(result) => break result,
+                        Err(_) => tracing::warn!(
+                            target: "risingwave_frontend_slow_query_log",
+                            sql,
+                            "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
+                        ),
+                    }
+                }
+            } else {
+                handle_fut.await
+            }
+        }
+        .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql, e))?;
+        Ok(rsp)
+    }
 }
 
 pub struct SessionManagerImpl {
@@ -578,7 +624,7 @@ pub struct SessionManagerImpl {
     number: AtomicI32,
 }
 
-impl SessionManager<PgResponseStream> for SessionManagerImpl {
+impl SessionManager<PgResponseStream, PrepareStatement, Portal> for SessionManagerImpl {
     type Session = SessionImpl;
 
     fn connect(
@@ -717,50 +763,7 @@ impl SessionManagerImpl {
 }
 
 #[async_trait::async_trait]
-impl Session<PgResponseStream> for SessionImpl {
-    async fn run_statement(
-        self: Arc<Self>,
-        sql: &str,
-        formats: Vec<Format>,
-    ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
-        // Parse sql.
-        let mut stmts = Parser::parse_sql(sql)
-            .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))?;
-        if stmts.is_empty() {
-            return Ok(PgResponse::empty_result(
-                pgwire::pg_response::StatementType::EMPTY,
-            ));
-        }
-        if stmts.len() > 1 {
-            return Ok(PgResponse::empty_result_with_notice(
-                pgwire::pg_response::StatementType::EMPTY,
-                "cannot insert multiple commands into statement".to_string(),
-            ));
-        }
-        let stmt = stmts.swap_remove(0);
-        let rsp = {
-            let mut handle_fut = Box::pin(handle(self, stmt, sql, formats));
-            if cfg!(debug_assertions) {
-                // Report the SQL in the log periodically if the query is slow.
-                const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
-                loop {
-                    match tokio::time::timeout(SLOW_QUERY_LOG_PERIOD, &mut handle_fut).await {
-                        Ok(result) => break result,
-                        Err(_) => tracing::warn!(
-                            target: "risingwave_frontend_slow_query_log",
-                            sql,
-                            "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
-                        ),
-                    }
-                }
-            } else {
-                handle_fut.await
-            }
-        }
-        .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql, e))?;
-        Ok(rsp)
-    }
-
+impl Session<PgResponseStream, PrepareStatement, Portal> for SessionImpl {
     /// A copy of run_statement but exclude the parser part so each run must be at most one
     /// statement. The str sql use the to_string of AST. Consider Reuse later.
     async fn run_one_query(
@@ -791,121 +794,6 @@ impl Session<PgResponseStream> for SessionImpl {
         Ok(rsp)
     }
 
-    async fn infer_return_type(
-        self: Arc<Self>,
-        sql: &str,
-    ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
-        // Parse sql.
-        let mut stmts = Parser::parse_sql(sql)
-            .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))?;
-        if stmts.is_empty() {
-            return Ok(vec![]);
-        }
-        if stmts.len() > 1 {
-            return Err(Box::new(Error::new(
-                ErrorKind::InvalidInput,
-                "cannot insert multiple commands into statement",
-            )));
-        }
-        let stmt = stmts.swap_remove(0);
-        // This part refers from src/frontend/handler/ so the Vec<PgFieldDescriptor> is same as
-        // result of run_statement().
-        let rsp = match stmt {
-            Statement::Query(_) => infer(self, stmt, sql)
-                .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql, e))?,
-            Statement::ShowObjects(show_object) => match show_object {
-                ShowObject::Columns { table: _ } => {
-                    vec![
-                        PgFieldDescriptor::new(
-                            "Name".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Type".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                    ]
-                }
-                _ => {
-                    vec![PgFieldDescriptor::new(
-                        "Name".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    )]
-                }
-            },
-            Statement::ShowCreateObject { .. } => {
-                vec![
-                    PgFieldDescriptor::new(
-                        "Name".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Create Sql".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                ]
-            }
-            Statement::ShowVariable { variable } => {
-                let name = &variable[0].real_value().to_lowercase();
-                if name.eq_ignore_ascii_case("ALL") {
-                    vec![
-                        PgFieldDescriptor::new(
-                            "Name".to_string(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Setting".to_string(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Description".to_string(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                    ]
-                } else {
-                    vec![PgFieldDescriptor::new(
-                        name.to_ascii_lowercase(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    )]
-                }
-            }
-            Statement::Describe { name: _ } => {
-                vec![
-                    PgFieldDescriptor::new(
-                        "Name".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Type".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                ]
-            }
-            Statement::Explain { .. } => {
-                vec![PgFieldDescriptor::new(
-                    "QUERY PLAN".to_owned(),
-                    DataType::Varchar.to_oid(),
-                    DataType::Varchar.type_len(),
-                )]
-            }
-            _ => {
-                panic!("infer_return_type only support query statement");
-            }
-        };
-        Ok(rsp)
-    }
-
     fn user_authenticator(&self) -> &UserAuthenticator {
         &self.user_authenticator
     }
@@ -913,26 +801,170 @@ impl Session<PgResponseStream> for SessionImpl {
     fn id(&self) -> SessionId {
         self.id
     }
+
+    fn parse(
+        self: Arc<Self>,
+        statement: Statement,
+        params_types: Vec<DataType>,
+    ) -> std::result::Result<PrepareStatement, BoxedError> {
+        Ok(handle_parse(self, statement, params_types)?)
+    }
+
+    fn bind(
+        self: Arc<Self>,
+        prepare_statement: PrepareStatement,
+        params: Vec<Bytes>,
+        param_formats: Vec<Format>,
+        result_formats: Vec<Format>,
+    ) -> std::result::Result<Portal, BoxedError> {
+        Ok(handle_bind(
+            prepare_statement,
+            params,
+            param_formats,
+            result_formats,
+        )?)
+    }
+
+    async fn execute(
+        self: Arc<Self>,
+        portal: Portal,
+    ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
+        let rsp = {
+            let mut handle_fut = Box::pin(handle_execute(self, portal));
+            if cfg!(debug_assertions) {
+                // Report the SQL in the log periodically if the query is slow.
+                const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
+                loop {
+                    match tokio::time::timeout(SLOW_QUERY_LOG_PERIOD, &mut handle_fut).await {
+                        Ok(result) => break result,
+                        Err(_) => tracing::warn!(
+                            "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
+                        ),
+                    }
+                }
+            } else {
+                handle_fut.await
+            }
+        }
+        .inspect_err(|e| tracing::error!("failed to handle execute:\n{}", e))?;
+        Ok(rsp)
+    }
+
+    fn describe_statement(
+        self: Arc<Self>,
+        prepare_statement: PrepareStatement,
+    ) -> std::result::Result<(Vec<DataType>, Vec<PgFieldDescriptor>), BoxedError> {
+        Ok(match prepare_statement {
+            PrepareStatement::Prepared(prepare_statement) => (
+                prepare_statement.param_types,
+                infer(
+                    Some(prepare_statement.bound_statement),
+                    prepare_statement.statement,
+                )?,
+            ),
+            PrepareStatement::PureStatement(statement) => (vec![], infer(None, statement)?),
+        })
+    }
+
+    fn describe_portral(
+        self: Arc<Self>,
+        portal: Portal,
+    ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
+        match portal {
+            Portal::Portal(portal) => Ok(infer(Some(portal.bound_statement), portal.statement)?),
+            Portal::PureStatement(statement) => Ok(infer(None, statement)?),
+        }
+    }
 }
 
 /// Returns row description of the statement
-fn infer(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<Vec<PgFieldDescriptor>> {
-    let context = OptimizerContext::from_handler_args(HandlerArgs::new(session, &stmt, sql)?);
-    let session = context.session_ctx().clone();
-
-    let bound = {
-        let mut binder = Binder::new(&session);
-        binder.bind(stmt)?
-    };
-
-    let root = Planner::new(context.into()).plan(bound)?;
-
-    let pg_descs = root
-        .schema()
-        .fields()
-        .iter()
-        .map(to_pg_field)
-        .collect::<Vec<PgFieldDescriptor>>();
-
-    Ok(pg_descs)
+fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDescriptor>> {
+    match stmt {
+        Statement::Query(_)
+        | Statement::Insert { .. }
+        | Statement::Delete { .. }
+        | Statement::Update { .. } => Ok(bound
+            .unwrap()
+            .output_fields()
+            .iter()
+            .map(to_pg_field)
+            .collect()),
+        Statement::ShowObjects(show_object) => match show_object {
+            ShowObject::Columns { table: _ } => Ok(vec![
+                PgFieldDescriptor::new(
+                    "Name".to_owned(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
+                PgFieldDescriptor::new(
+                    "Type".to_owned(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
+            ]),
+            _ => Ok(vec![PgFieldDescriptor::new(
+                "Name".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            )]),
+        },
+        Statement::ShowCreateObject { .. } => Ok(vec![
+            PgFieldDescriptor::new(
+                "Name".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Create Sql".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+        ]),
+        Statement::ShowVariable { variable } => {
+            let name = &variable[0].real_value().to_lowercase();
+            if name.eq_ignore_ascii_case("ALL") {
+                Ok(vec![
+                    PgFieldDescriptor::new(
+                        "Name".to_string(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
+                    ),
+                    PgFieldDescriptor::new(
+                        "Setting".to_string(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
+                    ),
+                    PgFieldDescriptor::new(
+                        "Description".to_string(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
+                    ),
+                ])
+            } else {
+                Ok(vec![PgFieldDescriptor::new(
+                    name.to_ascii_lowercase(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                )])
+            }
+        }
+        Statement::Describe { name: _ } => Ok(vec![
+            PgFieldDescriptor::new(
+                "Name".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Type".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+        ]),
+        Statement::Explain { .. } => Ok(vec![PgFieldDescriptor::new(
+            "QUERY PLAN".to_owned(),
+            DataType::Varchar.to_oid(),
+            DataType::Varchar.type_len(),
+        )]),
+        _ => Ok(vec![]),
+    }
 }

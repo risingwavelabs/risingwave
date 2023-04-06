@@ -226,6 +226,8 @@ fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
         ScalarRefImpl::Int16(v) => buf.put_i16_le(v),
         ScalarRefImpl::Int32(v) => buf.put_i32_le(v),
         ScalarRefImpl::Int64(v) => buf.put_i64_le(v),
+        ScalarRefImpl::Int256(v) => buf.put_slice(&v.to_le_bytes()),
+        ScalarRefImpl::Uint256(v) => buf.put_slice(&v.to_le_bytes()),
         ScalarRefImpl::Serial(v) => buf.put_i64_le(v.into_inner()),
         ScalarRefImpl::Float32(v) => buf.put_f32_le(v.into_inner()),
         ScalarRefImpl::Float64(v) => buf.put_f64_le(v.into_inner()),
@@ -252,6 +254,8 @@ fn estimate_serialize_scalar_size(value: ScalarRefImpl<'_>) -> usize {
         ScalarRefImpl::Int16(_) => 2,
         ScalarRefImpl::Int32(_) => 4,
         ScalarRefImpl::Int64(_) => 8,
+        ScalarRefImpl::Int256(_) => 32,
+        ScalarRefImpl::Uint256(_) => 32,
         ScalarRefImpl::Serial(_) => 8,
         ScalarRefImpl::Float32(_) => 4,
         ScalarRefImpl::Float64(_) => 8,
@@ -307,9 +311,9 @@ fn estimate_serialize_str_size(bytes: &[u8]) -> usize {
 }
 
 fn serialize_interval(interval: &Interval, buf: &mut impl BufMut) {
-    buf.put_i32_le(interval.get_months());
-    buf.put_i32_le(interval.get_days());
-    buf.put_i64_le(interval.get_usecs());
+    buf.put_i32_le(interval.months());
+    buf.put_i32_le(interval.days());
+    buf.put_i64_le(interval.usecs());
 }
 
 fn estimate_serialize_interval_size() -> usize {

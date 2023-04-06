@@ -17,14 +17,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use await_tree::InstrumentAwait;
-use fixedbitset::FixedBitSet;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use multimap::MultiMap;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
-use risingwave_common::hash::HashKey;
+use risingwave_common::hash::{HashKey, NullBitmap};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
@@ -538,13 +537,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .map(|&idx| original_schema[idx].clone())
             .collect();
 
-        let null_matched: FixedBitSet = {
-            let mut null_matched = FixedBitSet::with_capacity(null_safe.len());
-            for (idx, col_null_matched) in null_safe.into_iter().enumerate() {
-                null_matched.set(idx, col_null_matched);
-            }
-            null_matched
-        };
+        let null_matched: NullBitmap = null_safe.into();
 
         let need_degree_table_l = need_left_degree(T) && !pk_contained_in_jk_r;
         let need_degree_table_r = need_right_degree(T) && !pk_contained_in_jk_l;
@@ -1107,18 +1100,22 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                 side_match.ht.delete_row(key, matched_row.row);
                             }
                         }
-                    } else if let Some(chunk) =
-                        hashjoin_chunk_builder.forward_if_not_matched(Op::Insert, row)
-                    {
-                        yield chunk;
-                    }
 
-                    if append_only_optimize && let Some(row) = append_only_matched_row {
-                        side_match.ht.delete(key, row);
-                    } else if side_update.need_degree_table {
-                        side_update.ht.insert(key, JoinRow::new(row, degree)).await?;
+                        if append_only_optimize && let Some(row) = append_only_matched_row {
+                            side_match.ht.delete(key, row);
+                        } else if side_update.need_degree_table {
+                            side_update.ht.insert(key, JoinRow::new(row, degree)).await?;
+                        } else {
+                            side_update.ht.insert_row(key, row).await?;
+                        }
                     } else {
-                        side_update.ht.insert_row(key, row).await?;
+                        // Row which violates null-safe bitmap will never be matched so we need not
+                        // store.
+                        if let Some(chunk) =
+                            hashjoin_chunk_builder.forward_if_not_matched(Op::Insert, row)
+                        {
+                            yield chunk;
+                        }
                     }
                 }
                 Op::Delete | Op::UpdateDelete => {
@@ -1200,18 +1197,22 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                 side_match.ht.delete_row(key, matched_row.row);
                             }
                         }
-                    } else if let Some(chunk) =
-                        hashjoin_chunk_builder.forward_if_not_matched(Op::Delete, row)
-                    {
-                        yield chunk;
-                    }
-                    if append_only_optimize {
-                        unreachable!();
-                    } else if side_update.need_degree_table {
-                        side_update.ht.delete(key, JoinRow::new(row, degree));
+
+                        if append_only_optimize {
+                            unreachable!();
+                        } else if side_update.need_degree_table {
+                            side_update.ht.delete(key, JoinRow::new(row, degree));
+                        } else {
+                            side_update.ht.delete_row(key, row);
+                        };
                     } else {
-                        side_update.ht.delete_row(key, row);
-                    };
+                        // We do not store row which violates null-safe bitmap.
+                        if let Some(chunk) =
+                            hashjoin_chunk_builder.forward_if_not_matched(Op::Delete, row)
+                        {
+                            yield chunk;
+                        }
+                    }
                 }
             }
         }
