@@ -126,6 +126,9 @@ pub struct MetaMetrics {
     /// ********************************** Object Store ************************************
     // Object store related metrics (for backup/restore and version checkpoint)
     pub object_store_metric: Arc<ObjectStoreMetrics>,
+
+    /// supervisor for which source is still up.
+    pub source_is_up: IntGaugeVec,
 }
 
 impl MetaMetrics {
@@ -403,6 +406,14 @@ impl MetaMetrics {
         );
         let recovery_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
+        let source_is_up = register_int_gauge_vec_with_registry!(
+            "source_status_is_up",
+            "source is up or not",
+            &["source_id", "source_name"],
+            registry
+        )
+        .unwrap();
+
         Self {
             registry,
             grpc_latency,
@@ -446,6 +457,7 @@ impl MetaMetrics {
             scale_compactor_core_num,
             level_compact_task_cnt,
             object_store_metric,
+            source_is_up,
         }
     }
 

@@ -615,6 +615,16 @@ def section_streaming(panels):
                 )
             ]
         ),
+        panels.timeseries_count(
+            "Source Upstream Status",
+            "Monitor each source upstream, 0 means the upstream is not normal, 1 means the source is ready.",
+            [
+                panels.target(
+                    f"{metric('source_status_is_up')}",
+                    "source_id={{source_id}}, source_name={{source_name}} @ {{instance}}"
+                )
+            ]
+        ),
         panels.timeseries_rowsps(
             "Backfill Snapshot Read Throughput(rows)",
             "Total number of rows that have been read from the backfill snapshot",
