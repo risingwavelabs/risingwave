@@ -651,7 +651,6 @@ impl HashKeySerializer for SerializedKeySerializer {
     }
 
     fn append<'a, D: HashKeySerDe<'a>>(&mut self, data: Option<D>) {
-        let _len_bitmap = self.null_bitmap.len();
         match data {
             Some(v) => {
                 serialize_datum_into(&Some(v.to_owned_scalar().into()), &mut self.buffer);
