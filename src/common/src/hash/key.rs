@@ -37,6 +37,7 @@ use crate::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayError, ArrayImpl, ArrayResult, DataChunk, JsonbRef,
     ListRef, StructRef,
 };
+use crate::buffer::Bitmap;
 use crate::collection::estimate_size::EstimateSize;
 use crate::row::{OwnedRow, RowDeserializer};
 use crate::types::num256::{Int256Ref, Uint256Ref};
@@ -198,15 +199,15 @@ impl HashCode {
     }
 }
 
-pub trait HashKeySerializer<B: NullBitmap> {
-    type K: HashKey<B>;
+pub trait HashKeySerializer {
+    type K: HashKey;
     fn from_hash_code(hash_code: HashCode, estimated_key_size: usize) -> Self;
     fn append<'a, D: HashKeySerDe<'a>>(&mut self, data: Option<D>);
     fn into_hash_key(self) -> Self::K;
 }
 
-pub trait HashKeyDeserializer<B: NullBitmap> {
-    type K: HashKey<B>;
+pub trait HashKeyDeserializer {
+    type K: HashKey;
     fn from_hash_key(hash_key: Self::K) -> Self;
     fn deserialize<'a, D: HashKeySerDe<'a>>(&'a mut self) -> ArrayResult<Option<D>>;
 }
@@ -235,10 +236,10 @@ pub trait HashKeySerDe<'a>: ScalarRef<'a> {
 /// Current comparison implementation treats `null == null`. This is consistent with postgresql's
 /// group by implementation, but not join. In pg's join implementation, `null != null`, and the join
 /// executor should take care of this.
-pub trait HashKey<B: NullBitmap>:
-    EstimateSize + Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static
+pub trait HashKey:
+    EstimateSize + Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static + GetBitmap
 {
-    type S: HashKeySerializer<B, K = Self>;
+    type S: HashKeySerializer<K = Self>;
 
     fn build(column_idxes: &[usize], data_chunk: &DataChunk) -> ArrayResult<Vec<Self>> {
         let hash_codes = data_chunk.get_hash_values(column_idxes, Crc32FastBuilder);
@@ -285,15 +286,32 @@ pub trait HashKey<B: NullBitmap>:
     fn has_null(&self) -> bool {
         !self.null_bitmap().is_empty()
     }
+}
 
-    fn null_bitmap(&self) -> &B;
+pub trait GetBitmap {
+    type Bitmap: NullBitmap;
+    fn null_bitmap(&self) -> &Self::Bitmap;
+}
+
+impl<const N: usize, B: NullBitmap> GetBitmap for FixedSizeKey<N, B> {
+    type Bitmap = B;
+    fn null_bitmap(&self) -> B {
+        self.null_bitmap()
+    }
+}
+
+impl<B: NullBitmap> GetBitmap for SerializedKey<B> {
+    type Bitmap = B;
+    fn null_bitmap(&self) -> B {
+        self.null_bitmap()
+    }
 }
 
 /// Designed for hash keys with at most `N` serialized bytes.
 ///
 /// See [`crate::hash::calc_hash_key_kind`]
 #[derive(Clone, Debug)]
-pub struct FixedSizeKey<const N: usize, B: NullBitmap> {
+pub struct FixedSizeKey<'a, const N: usize, B: NullBitmap> {
     key: [u8; N],
     hash_code: u64,
     null_bitmap: B,
@@ -745,7 +763,7 @@ pub struct SerializedKeySerializer<B: NullBitmap> {
     null_bitmap_idx: usize,
 }
 
-impl<B: NullBitmap> HashKeySerializer<B> for SerializedKeySerializer<B> {
+impl<B: NullBitmap> HashKeySerializer for SerializedKeySerializer<B> {
     type K = SerializedKey<B>;
 
     fn from_hash_code(hash_code: HashCode, estimated_value_encoding_size: usize) -> Self {
@@ -783,8 +801,7 @@ fn serialize_array_to_hash_key<'a, A, S>(array: &'a A, serializers: &mut [S])
 where
     A: Array,
     A::RefItem<'a>: HashKeySerDe<'a>,
-    B: NullBitmap,
-    S: HashKeySerializer<B>,
+    S: HashKeySerializer,
 {
     for (item, serializer) in array.iter().zip_eq_fast(serializers.iter_mut()) {
         serializer.append(item);
@@ -797,16 +814,15 @@ fn deserialize_array_element_from_hash_key<'a, A, S>(
 ) -> ArrayResult<()>
 where
     A: ArrayBuilder,
-    B: NullBitmap,
     <<A as ArrayBuilder>::ArrayType as Array>::RefItem<'a>: HashKeySerDe<'a>,
-    S: HashKeyDeserializer<B>,
+    S: HashKeyDeserializer,
 {
     builder.append(deserializer.deserialize()?);
     Ok(())
 }
 
 impl ArrayImpl {
-    fn serialize_to_hash_key<B: NullBitmap, S: HashKeySerializer<B>>(&self, serializers: &mut [S]) {
+    fn serialize_to_hash_key<S: HashKeySerializer>(&self, serializers: &mut [S]) {
         macro_rules! impl_all_serialize_to_hash_key {
             ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
                 match self {
@@ -834,7 +850,7 @@ impl ArrayBuilderImpl {
     }
 }
 
-impl<const N: usize, B: NullBitmap> HashKey<B> for FixedSizeKey<N, B> {
+impl<'a, const N: usize, B: NullBitmap + 'a> HashKey for FixedSizeKey<'a, N, B> {
     type S = FixedSizeKeySerializer<N, B>;
 
     fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<OwnedRow> {
@@ -864,14 +880,9 @@ impl<const N: usize, B: NullBitmap> HashKey<B> for FixedSizeKey<N, B> {
         }
         Ok(())
     }
-
-    fn null_bitmap(&self) -> &B {
-        &self.null_bitmap
-    }
 }
 
 impl<B: NullBitmap> HashKey for SerializedKey<B> {
-    type B = B;
     type S = SerializedKeySerializer<B>;
 
     fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<OwnedRow> {
@@ -894,10 +905,6 @@ impl<B: NullBitmap> HashKey for SerializedKey<B> {
             array_builder.append_datum(&datum_result.map_err(ArrayError::internal)?);
         }
         Ok(())
-    }
-
-    fn null_bitmap(&self) -> &B {
-        &self.null_bitmap
     }
 }
 
@@ -961,7 +968,7 @@ mod tests {
         (DataChunk::new(columns, capacity), types)
     }
 
-    fn do_test_serialize<K: HashKey<StackNullBitmap>, F>(column_indexes: Vec<usize>, data_gen: F)
+    fn do_test_serialize<K: HashKey, F>(column_indexes: Vec<usize>, data_gen: F)
     where
         F: FnOnce() -> DataChunk,
     {
@@ -1012,7 +1019,7 @@ mod tests {
         assert_eq!(expected_row_id_mapping, actual_row_id_mapping);
     }
 
-    fn do_test_deserialize<K: HashKey<StackNullBitmap>, F>(column_indexes: Vec<usize>, data_gen: F)
+    fn do_test_deserialize<K: HashKey, F>(column_indexes: Vec<usize>, data_gen: F)
     where
         F: FnOnce() -> (DataChunk, Vec<DataType>),
     {
@@ -1045,7 +1052,7 @@ mod tests {
         }
     }
 
-    fn do_test<K: HashKey<StackNullBitmap>, F>(column_indexes: Vec<usize>, data_gen: F)
+    fn do_test<K: HashKey, F>(column_indexes: Vec<usize>, data_gen: F)
     where
         F: FnOnce() -> (DataChunk, Vec<DataType>),
     {
