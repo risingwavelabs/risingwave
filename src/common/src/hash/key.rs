@@ -254,6 +254,9 @@ pub type Key32 = FixedSizeKey<4>;
 pub type Key64 = FixedSizeKey<8>;
 pub type Key128 = FixedSizeKey<16>;
 pub type Key256 = FixedSizeKey<32>;
+pub type Key512 = FixedSizeKey<64>;
+pub type Key1024 = FixedSizeKey<128>;
+pub type Key2048 = FixedSizeKey<256>;
 pub type KeySerialized = SerializedKey;
 
 impl HashKeySerDe<'_> for bool {

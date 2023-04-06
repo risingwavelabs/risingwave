@@ -26,11 +26,14 @@ pub enum HashKeyKind {
     Key64,
     Key128,
     Key256,
+    Key512,
+    Key1024,
+    Key2048,
     KeySerialized,
 }
 
 impl HashKeyKind {
-    fn order_by_key_size() -> impl IntoIterator<Item = (HashKeyKind, usize)> {
+    fn order_by_key_size_in_bytes() -> impl IntoIterator<Item = (HashKeyKind, usize)> {
         use HashKeyKind::*;
         [
             (Key8, 1),
@@ -39,6 +42,9 @@ impl HashKeyKind {
             (Key64, 8),
             (Key128, 16),
             (Key256, 32),
+            (Key512, 64),
+            (Key1024, 128),
+            (Key2048, 256),
         ]
     }
 }
@@ -72,6 +78,9 @@ pub trait HashKeyDispatcher: Sized {
             HashKeyKind::Key64 => self.dispatch_impl::<hash::Key64>(),
             HashKeyKind::Key128 => self.dispatch_impl::<hash::Key128>(),
             HashKeyKind::Key256 => self.dispatch_impl::<hash::Key256>(),
+            HashKeyKind::Key512 => self.dispatch_impl::<hash::Key512>(),
+            HashKeyKind::Key1024 => self.dispatch_impl::<hash::Key1024>(),
+            HashKeyKind::Key2048 => self.dispatch_impl::<hash::Key2048>(),
             HashKeyKind::KeySerialized => self.dispatch_impl::<hash::KeySerialized>(),
         }
     }
@@ -106,14 +115,17 @@ fn hash_key_size(data_type: &DataType) -> HashKeySize {
     }
 }
 
-const MAX_FIXED_SIZE_KEY_ELEMENTS: usize = 8;
+/// Max size of fixed size element: u64.
+/// Our max key size: Key2048.
+/// Number of u64 we can fit = 32
+const MAX_FIXED_SIZE_KEY_ELEMENTS: usize = 32;
 
 /// Calculate what kind of hash key should be used given the key data types.
 ///
 /// When any of following conditions is met, we choose [`crate::hash::SerializedKey`]:
 /// 1. Has variable size column.
 /// 2. Number of columns exceeds [`MAX_FIXED_SIZE_KEY_ELEMENTS`]
-/// 3. Sizes of data types exceed `256` bytes.
+/// 3. Sizes of data types exceed our max key size, since we serialize all keys into this key.
 /// 4. Any column's serialized format can't be used for equality check.
 ///
 /// Otherwise we choose smallest [`crate::hash::FixedSizeKey`] whose size can hold all data types.
