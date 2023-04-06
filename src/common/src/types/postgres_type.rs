@@ -140,7 +140,7 @@ impl DataType {
                 DataType::Int16 => 1005,
                 DataType::Int32 => 1007,
                 DataType::Int64 => 1016,
-                DataType::Int256 => todo!(),
+                DataType::Int256 => 1016,
                 DataType::Serial => 1016,
                 DataType::Float32 => 1021,
                 DataType::Float64 => 1022,

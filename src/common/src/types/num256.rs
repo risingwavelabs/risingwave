@@ -24,7 +24,7 @@ use ethnum::I256;
 use num_traits::{FromPrimitive, ToPrimitive, Zero};
 use postgres_types::{ToSql, Type};
 use risingwave_pb::data::ArrayType;
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Serialize, Serializer};
 use to_text::ToText;
 
 use crate::array::ArrayResult;
@@ -285,5 +285,20 @@ impl Not for Int256Ref<'_> {
 
     fn not(self) -> Self::Output {
         todo!()
+    }
+}
+
+// impl Int256 {
+//     fn xx() {
+//         I256::deserialize()
+//     }
+// }
+
+impl<'de> Deserialize<'de> for Int256 {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+    {
+        I256::deserialize(deserializer).map(Into::into)
     }
 }

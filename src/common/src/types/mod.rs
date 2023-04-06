@@ -53,6 +53,7 @@ mod ordered_float;
 use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
 pub use chrono_wrapper::{Date, Time, Timestamp, UNIX_EPOCH_DAYS};
 pub use decimal::Decimal;
+use ethnum::I256;
 pub use interval::*;
 use itertools::Itertools;
 pub use ops::{CheckedAdd, IsNegative};
@@ -405,7 +406,7 @@ impl DataType {
             DataType::Int16 => ScalarImpl::Int16(i16::MIN),
             DataType::Int32 => ScalarImpl::Int32(i32::MIN),
             DataType::Int64 => ScalarImpl::Int64(i64::MIN),
-            DataType::Int256 => todo!(),
+            DataType::Int256 => ScalarImpl::Int256(Int256::default()),
             DataType::Serial => ScalarImpl::Serial(Serial::from(i64::MIN)),
             DataType::Float32 => ScalarImpl::Float32(F32::neg_infinity()),
             DataType::Float64 => ScalarImpl::Float64(F64::neg_infinity()),
@@ -784,6 +785,7 @@ impl ScalarImpl {
                 i64::from_sql(&Type::INT8, bytes)
                     .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?,
             ),
+
             DataType::Serial => Self::Serial(Serial::from(
                 i64::from_sql(&Type::INT8, bytes)
                     .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?,
@@ -871,7 +873,9 @@ impl ScalarImpl {
             DataType::Int64 => Self::Int64(i64::from_str(str).map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
             })?),
-            DataType::Int256 => todo!(),
+            DataType::Int256 => Self::Int256(Int256::from_str(str).map_err(|_| {
+                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
+            })?),
             DataType::Serial => Self::Serial(Serial::from(i64::from_str(str).map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
             })?)),
@@ -1089,7 +1093,7 @@ impl ScalarImpl {
             Ty::Int16 => Self::Int16(i16::deserialize(de)?),
             Ty::Int32 => Self::Int32(i32::deserialize(de)?),
             Ty::Int64 => Self::Int64(i64::deserialize(de)?),
-            Ty::Int256 => todo!(),
+            Ty::Int256 => Self::Int256(Int256::deserialize(de)?),
             Ty::Serial => Self::Serial(Serial::from(i64::deserialize(de)?)),
             Ty::Float32 => Self::Float32(f32::deserialize(de)?.into()),
             Ty::Float64 => Self::Float64(f64::deserialize(de)?.into()),
@@ -1268,7 +1272,7 @@ mod tests {
                 DataTypeName::Int16 => (ScalarImpl::Int16(233), DataType::Int16),
                 DataTypeName::Int32 => (ScalarImpl::Int32(233333), DataType::Int32),
                 DataTypeName::Int64 => (ScalarImpl::Int64(233333333333), DataType::Int64),
-                DataTypeName::Int256 => todo!(),
+                DataTypeName::Int256 => (ScalarImpl::Int256(233333333333.into()), DataType::Int256),
                 DataTypeName::Serial => (ScalarImpl::Serial(233333333333.into()), DataType::Serial),
                 DataTypeName::Float32 => (ScalarImpl::Float32(23.33.into()), DataType::Float32),
                 DataTypeName::Float64 => (
@@ -1354,6 +1358,9 @@ mod tests {
         assert_eq!(DataType::from_str("bigint").unwrap(), DataType::Int64);
         assert_eq!(DataType::from_str("INT8").unwrap(), DataType::Int64);
         assert_eq!(DataType::from_str("BIGINT").unwrap(), DataType::Int64);
+
+        assert_eq!(DataType::from_str("int256").unwrap(), DataType::Int256);
+        assert_eq!(DataType::from_str("INT256").unwrap(), DataType::Int256);
 
         assert_eq!(DataType::from_str("float4").unwrap(), DataType::Float32);
         assert_eq!(DataType::from_str("real").unwrap(), DataType::Float32);

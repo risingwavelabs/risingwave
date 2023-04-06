@@ -61,10 +61,10 @@ pub static CAST_MAP: LazyLock<CastMap> = LazyLock::new(|| {
             T::Int16,
             T::Int32,
             T::Int64,
-            T::Int256,
             T::Decimal,
             T::Float32,
             T::Float64,
+            T::Int256,
         ],
     );
     insert_cast_seq(&mut m, &[T::Date, T::Timestamp, T::Timestamptz]);
