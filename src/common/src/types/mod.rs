@@ -47,7 +47,7 @@ pub mod struct_type;
 pub mod to_binary;
 pub mod to_text;
 
-mod num256;
+pub mod num256;
 mod ordered_float;
 
 use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
