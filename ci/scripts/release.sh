@@ -38,7 +38,9 @@ curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip
 unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
 
 echo "--- Update risingwave release version"
-toml set --toml-path Cargo.toml workspace.package.version ${BUILDKITE_TAG#*v}
+if [[ -n "${BUILDKITE_TAG+x}" ]]; then
+  toml set --toml-path Cargo.toml workspace.package.version ${BUILDKITE_TAG#*v}
+fi
 
 echo "--- Build risingwave release binary"
 cargo build -p risingwave_cmd_all --features "static-link static-log-level" --profile release

@@ -213,6 +213,11 @@ impl Binder {
         Self::resolve_single_name(name.0, "user name")
     }
 
+    /// return the `connection_name`
+    pub fn resolve_connection_name(name: ObjectName) -> Result<String> {
+        Self::resolve_single_name(name.0, "connection name")
+    }
+
     /// Fill the [`BindContext`](super::BindContext) for table.
     pub(super) fn bind_table_to_context(
         &mut self,

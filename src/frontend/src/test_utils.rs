@@ -34,7 +34,7 @@ use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
 };
-use risingwave_pb::ddl_service::DdlProgress;
+use risingwave_pb::ddl_service::{create_connection_request, DdlProgress};
 use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{CreatingJobInfo, SystemParams};
@@ -298,6 +298,14 @@ impl CatalogWriter for MockCatalogWriter {
         unreachable!()
     }
 
+    async fn create_connection(
+        &self,
+        _connection_name: String,
+        _connection: create_connection_request::Payload,
+    ) -> Result<()> {
+        unreachable!()
+    }
+
     async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()> {
         if let Some(source_id) = source_id {
             self.drop_table_or_source_id(source_id);
@@ -384,6 +392,10 @@ impl CatalogWriter for MockCatalogWriter {
     }
 
     async fn drop_function(&self, _function_id: FunctionId) -> Result<()> {
+        unreachable!()
+    }
+
+    async fn drop_connection(&self, _connection_name: &str) -> Result<()> {
         unreachable!()
     }
 

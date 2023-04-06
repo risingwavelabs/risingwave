@@ -40,5 +40,5 @@ tracing = "0.1"
 url = "2.3.1"
 
 [target.'cfg(not(madsim))'.dependencies]
-moka = { version = "0.9", features = ["future"] }
+moka = { version = "0.10", features = ["future"] }
 workspace-hack = { path = "../workspace-hack" }

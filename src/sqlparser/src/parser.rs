@@ -1725,6 +1725,8 @@ impl Parser {
             self.parse_create_source(or_replace)
         } else if self.parse_keyword(Keyword::SINK) {
             self.parse_create_sink(or_replace)
+        } else if self.parse_keyword(Keyword::CONNECTION) {
+            self.parse_create_connection()
         } else if self.parse_keyword(Keyword::FUNCTION) {
             self.parse_create_function(or_replace, temporary)
         } else if or_replace {
@@ -1818,6 +1820,17 @@ impl Parser {
     pub fn parse_create_sink(&mut self, _or_replace: bool) -> Result<Statement, ParserError> {
         Ok(Statement::CreateSink {
             stmt: CreateSinkStatement::parse_to(self)?,
+        })
+    }
+
+    // CREATE
+    // CONNECTION
+    // [IF NOT EXISTS]?
+    // <connection_name: Ident>
+    // [WITH (properties)]?
+    pub fn parse_create_connection(&mut self) -> Result<Statement, ParserError> {
+        Ok(Statement::CreateConnection {
+            stmt: CreateConnectionStatement::parse_to(self)?,
         })
     }
 
@@ -3574,6 +3587,9 @@ impl Parser {
                         return self.expected("from after columns", self.peek_token());
                     }
                 }
+                Keyword::CONNECTIONS => {
+                    return Ok(Statement::ShowObjects(ShowObject::Connection));
+                }
                 _ => {}
             }
         }
@@ -4035,7 +4051,13 @@ impl Parser {
     pub fn parse_assignment(&mut self) -> Result<Assignment, ParserError> {
         let id = self.parse_identifiers_non_keywords()?;
         self.expect_token(&Token::Eq)?;
-        let value = self.parse_expr()?;
+
+        let value = if self.parse_keyword(Keyword::DEFAULT) {
+            AssignmentValue::Default
+        } else {
+            AssignmentValue::Expr(self.parse_expr()?)
+        };
+
         Ok(Assignment { id, value })
     }
 

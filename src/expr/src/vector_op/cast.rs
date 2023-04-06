@@ -384,7 +384,7 @@ pub fn timestamp_to_time(elem: Timestamp) -> Time {
 /// In `PostgreSQL`, casting from interval to time discards the days part.
 #[function("cast(interval) -> time")]
 pub fn interval_to_time(elem: Interval) -> Time {
-    let usecs = elem.get_usecs_of_day();
+    let usecs = elem.usecs_of_day();
     let secs = (usecs / 1_000_000) as u32;
     let nano = (usecs % 1_000_000 * 1000) as u32;
     Time::from_num_seconds_from_midnight_uncheck(secs, nano)
