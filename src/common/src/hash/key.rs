@@ -50,6 +50,9 @@ pub static MAX_GROUP_KEYS: usize = 64;
 
 /// Null bitmap on heap.
 /// For group key sizes larger than 64, we use this.
+/// This is because group key null bits cannot fit into a u64
+/// if they exceed 64 bits.
+/// NOTE(kwannoel): This is not really optimized as it is an edge case.
 #[repr(transparent)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct HeapNullBitmap {
@@ -64,9 +67,8 @@ impl HeapNullBitmap {
     }
 }
 
-/// Bitmap for null values in key.
-/// This is specialized for key,
-/// since it usually has few group keys.
+/// Null Bitmap on stack.
+/// This is specialized for few group keys (<= 64).
 #[repr(transparent)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct StackNullBitmap {
@@ -84,8 +86,6 @@ pub trait NullBitmap: EstimateSize + Clone + PartialEq + Debug + Send + Sync + '
     fn is_empty(&self) -> bool;
 
     fn set_true(&mut self, idx: usize);
-
-    fn len(&self) -> usize;
 
     fn contains(&self, x: usize) -> bool;
 
@@ -134,12 +134,8 @@ impl NullBitmap for HeapNullBitmap {
     }
 
     fn set_true(&mut self, idx: usize) {
-        self.inner.grow(self.len() + 1);
+        self.inner.grow(self.inner.len() + 1);
         self.inner.insert(idx)
-    }
-
-    fn len(&self) -> usize {
-        self.inner.len()
     }
 
     fn contains(&self, x: usize) -> bool {
