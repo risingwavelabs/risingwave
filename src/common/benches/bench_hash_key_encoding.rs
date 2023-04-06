@@ -233,7 +233,7 @@ fn case_builders() -> Vec<HashKeyBenchCaseBuilder> {
             describe: "large mixed".to_string(),
         },
         // These benchmark cases will test unaligned key sizes.
-        // For instance key size 5 of Int64 cannot fit within Key256,
+        // For instance five keys of Int64 cannot fit within Key256 (5 * 64 = 320 > 256),
         // so it has to go to next largest keysize, Key512.
         // This means 24 bytes of wasted memory.
         HashKeyBenchCaseBuilder {
