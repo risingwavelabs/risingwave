@@ -31,8 +31,8 @@ use crate::expr::{
 use crate::optimizer::plan_node::generic::{Project, ProjectBuilder};
 pub use crate::optimizer::plan_node::LogicalFilter;
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalApply, LogicalOverAgg, LogicalProject, LogicalProjectSet, LogicalTopN,
-    LogicalValues, PlanAggCall, PlanRef,
+    LogicalAgg, LogicalApply, LogicalDedup, LogicalOverAgg, LogicalProject, LogicalProjectSet,
+    LogicalTopN, LogicalValues, PlanAggCall, PlanRef,
 };
 use crate::optimizer::property::Order;
 use crate::planner::Planner;
@@ -156,15 +156,21 @@ impl Planner {
         }
 
         if matches!(&distinct, BoundDistinct::DistinctOn(_)) {
-            root = LogicalTopN::with_group(
-                root,
-                1,
-                0,
-                false,
-                Order::new(order.to_vec()),
-                distinct_list_index_to_select_items_index,
-            )
-            .into();
+            root = if order.is_empty() {
+                // We only support deduplicating `DISTINCT ON` columns when there is no `ORDER BY`
+                // clause now.
+                LogicalDedup::new(root, distinct_list_index_to_select_items_index).into()
+            } else {
+                LogicalTopN::with_group(
+                    root,
+                    1,
+                    0,
+                    false,
+                    Order::new(order.to_vec()),
+                    distinct_list_index_to_select_items_index,
+                )
+                .into()
+            };
         }
 
         if need_restore_select_items {

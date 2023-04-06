@@ -626,6 +626,7 @@ mod batch_update;
 mod batch_values;
 mod logical_agg;
 mod logical_apply;
+mod logical_dedup;
 mod logical_delete;
 mod logical_expand;
 mod logical_filter;
@@ -646,6 +647,7 @@ mod logical_topn;
 mod logical_union;
 mod logical_update;
 mod logical_values;
+mod stream_dedup;
 mod stream_delta_join;
 mod stream_dml;
 mod stream_dynamic_filter;
@@ -702,6 +704,7 @@ pub use batch_update::BatchUpdate;
 pub use batch_values::BatchValues;
 pub use logical_agg::LogicalAgg;
 pub use logical_apply::LogicalApply;
+pub use logical_dedup::LogicalDedup;
 pub use logical_delete::LogicalDelete;
 pub use logical_expand::LogicalExpand;
 pub use logical_filter::LogicalFilter;
@@ -722,6 +725,7 @@ pub use logical_topn::LogicalTopN;
 pub use logical_union::LogicalUnion;
 pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
+pub use stream_dedup::StreamDedup;
 pub use stream_delta_join::StreamDeltaJoin;
 pub use stream_dml::StreamDml;
 pub use stream_dynamic_filter::StreamDynamicFilter;
@@ -793,6 +797,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, OverAgg }
             , { Logical, Share }
             , { Logical, Now }
+            , { Logical, Dedup }
             // , { Logical, Sort } we don't need a LogicalSort, just require the Order
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
@@ -844,6 +849,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, WatermarkFilter }
             , { Stream, TemporalJoin }
             , { Stream, Values }
+            , { Stream, Dedup }
         }
     };
 }
@@ -875,6 +881,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, OverAgg }
             , { Logical, Share }
             , { Logical, Now }
+            , { Logical, Dedup }
             // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we don't support that, we don't need LogicalSort, just require the Order at the top of query
         }
@@ -945,6 +952,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, WatermarkFilter }
             , { Stream, TemporalJoin }
             , { Stream, Values }
+            , { Stream, Dedup }
         }
     };
 }
