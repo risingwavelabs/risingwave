@@ -170,7 +170,7 @@
   batch_plan: |
     BatchValues { rows: [[4:Int32]] }
 - sql: |
-    select position(replace('1','1','2'),'123') where '12' like '%1';
+    select position('123' in replace('1','1','2')) where '12' like '%1';
   batch_plan: |
     BatchValues { rows: [] }
 - name: case searched form with else
