@@ -6795,6 +6795,7 @@ dependencies = [
  "arrow-array",
  "arrow-flight",
  "arrow-schema",
+ "arrow-select",
  "futures-util",
  "madsim-tokio",
  "madsim-tonic",
