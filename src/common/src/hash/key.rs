@@ -28,6 +28,7 @@ use std::hash::{BuildHasher, Hash, Hasher};
 use std::io::{Cursor, Read};
 
 use chrono::{Datelike, Timelike};
+use fixedbitset::FixedBitSet;
 use smallbitset::Set64;
 use static_assertions::{const_assert, const_assert_eq};
 
@@ -44,14 +45,23 @@ use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::iter_util::ZipEqFast;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum_into};
 
+/// FIXME(noel): -> ...ON_STACK
 pub static MAX_GROUP_KEYS: usize = 64;
+
+/// Null bitmap on heap.
+/// For group key sizes larger than 64, we use this.
+#[repr(transparent)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct HeapNullBitmap {
+    inner: FixedBitSet,
+}
 
 /// Bitmap for null values in key.
 /// This is specialized for key,
 /// since it usually has few group keys.
 #[repr(transparent)]
 #[derive(Clone, Debug, PartialEq)]
-pub struct NullBitmap {
+pub struct StackNullBitmap {
     inner: Set64,
 }
 
@@ -60,7 +70,23 @@ const_assert_eq!(
     std::mem::size_of::<u64>()
 );
 
-impl NullBitmap {
+pub trait NullBitmap: EstimateSize {
+     fn empty() -> Self;
+
+    fn is_empty(&self) -> bool;
+
+    fn set_true(&mut self, idx: usize);
+
+    fn len(&self) -> usize;
+
+    fn contains(&self, x: usize);
+
+    fn is_subset(&self, other: &Self);
+
+    fn from_bool_vec<T: AsRef<[bool]> + IntoIterator<Item = bool>>(value: T) -> Self;
+}
+
+impl NullBitmap for NullBitmapStack {
     fn empty() -> Self {
         NullBitmap {
             inner: Set64::empty(),
@@ -79,20 +105,42 @@ impl NullBitmap {
         self.inner.contains(x)
     }
 
-    pub fn is_subset(&self, other: &NullBitmap) -> bool {
+    fn is_subset(&self, other: &Self) -> bool {
         other.inner.contains_all(self.inner)
+    }
+
+    fn from_bool_vec<T: AsRef<[bool]> + IntoIterator<Item = bool>>(value: T) -> Self {
+        value.into()
     }
 }
 
-impl EstimateSize for NullBitmap {
+impl EstimateSize for StackNullBitmap {
     fn estimated_heap_size(&self) -> usize {
         0
     }
 }
 
-impl<T: AsRef<[bool]> + IntoIterator<Item = bool>> From<T> for NullBitmap {
+impl EstimateSize for HeapNullBitmap {
+    fn estimated_heap_size(&self) -> usize {
+        self.inner.estimated_heap_size()
+    }
+}
+
+impl<T: AsRef<[bool]> + IntoIterator<Item = bool>> From<T> for StackNullBitmap {
     fn from(value: T) -> Self {
         let mut bitmap = NullBitmap::empty();
+        for (idx, is_true) in value.into_iter().enumerate() {
+            if is_true {
+                bitmap.set_true(idx);
+            }
+        }
+        bitmap
+    }
+}
+
+impl<T: AsRef<[bool]> + IntoIterator<Item = bool>> From<T> for HeapNullBitmap {
+    fn from(value: T) -> Self {
+        let mut bitmap = HeapNullBitmap::empty();
         for (idx, is_true) in value.into_iter().enumerate() {
             if is_true {
                 bitmap.set_true(idx);
