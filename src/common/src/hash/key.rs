@@ -87,8 +87,8 @@ impl EstimateSize for NullBitmap {
     }
 }
 
-impl<T: AsRef<[bool]>> From<T> for NullBitmap {
-    fn from(value: Vec<bool>) -> Self {
+impl<T: AsRef<[bool]> + IntoIterator<Item = bool>> From<T> for NullBitmap {
+    fn from(value: T) -> Self {
         let mut bitmap = NullBitmap::empty();
         for (idx, is_true) in value.into_iter().enumerate() {
             if is_true {
