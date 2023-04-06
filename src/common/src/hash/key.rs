@@ -68,10 +68,6 @@ impl NullBitmap {
         self.inner.add_inplace(idx);
     }
 
-    fn estimated_heap_size(&self) -> usize {
-        self.inner.capacity()
-    }
-
     fn len(&self) -> usize {
         self.inner.len()
     }
@@ -82,6 +78,12 @@ impl NullBitmap {
 
     pub fn is_subset(&self, other: &NullBitmap) -> bool {
         other.inner.contains_all(self.inner)
+    }
+}
+
+impl EstimateSize for NullBitmap {
+    fn estimated_heap_size(&self) -> usize {
+        0
     }
 }
 
@@ -207,7 +209,6 @@ pub trait HashKey:
 /// Designed for hash keys with at most `N` serialized bytes.
 ///
 /// See [`crate::hash::calc_hash_key_kind`]
-/// TODO(kwannoel): add benchmark and test, this should also use small bitset.
 #[derive(Clone, Debug)]
 pub struct FixedSizeKey<const N: usize> {
     key: [u8; N],
