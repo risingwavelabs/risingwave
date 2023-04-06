@@ -65,6 +65,7 @@ serde = { version = "1", features = ["derive"] }
 serde_default = "0.1"
 serde_json = "1"
 serde_with = "2"
+smallbitset = "0.6.1"
 static_assertions = "1"
 strum = "0.24"
 strum_macros = "0.24"
