@@ -587,7 +587,7 @@ impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
     }
 }
 
-/// trait iterface provided to the `MergedIterator` to avoid memory copy
+/// trait provided to the `MergedIterator` to avoid memory copy
 pub trait SharedBufferBatchIterCurrent {
     fn current_item(&self) -> (&Bytes, &(HummockEpoch, HummockValue<Bytes>));
 }

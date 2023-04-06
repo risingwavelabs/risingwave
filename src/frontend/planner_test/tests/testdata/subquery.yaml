@@ -217,38 +217,41 @@
           └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr1] }
             └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   optimized_logical_plan_for_batch: |
-    LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(auction.date_time, auction.date_time), output: all }
-    ├─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
-    | └─LogicalScan { table: auction, columns: [auction.date_time], predicate: IsNotNull(auction.date_time) }
-    └─LogicalProject { exprs: [auction.date_time] }
-      └─LogicalProject { exprs: [auction.date_time, auction.date_time] }
-        └─LogicalAgg { group_key: [auction.date_time], aggs: [] }
-          └─LogicalJoin { type: Inner, on: true, output: all }
-            ├─LogicalAgg { group_key: [auction.date_time], aggs: [] }
-            | └─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
-            |   └─LogicalScan { table: auction, columns: [auction.date_time], predicate: IsNotNull(auction.date_time) }
-            └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
+    └─LogicalFilter { predicate: IsNotNull(auction.date_time) }
+      └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(auction.date_time, auction.date_time), output: all }
+        ├─LogicalScan { table: auction, columns: [auction.date_time], predicate: IsNotNull(auction.date_time) }
+        └─LogicalProject { exprs: [auction.date_time] }
+          └─LogicalProject { exprs: [auction.date_time, auction.date_time] }
+            └─LogicalAgg { group_key: [auction.date_time], aggs: [] }
+              └─LogicalJoin { type: Inner, on: true, output: all }
+                ├─LogicalAgg { group_key: [auction.date_time], aggs: [] }
+                | └─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
+                |   └─LogicalScan { table: auction, columns: [auction.date_time], predicate: IsNotNull(auction.date_time) }
+                └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
-    BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: LeftSemi, predicate: auction.date_time IS NOT DISTINCT FROM auction.date_time, output: all }
-      ├─BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
-      | └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
-      |   └─BatchFilter { predicate: IsNotNull(auction.date_time) }
-      |     └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
-      └─BatchProject { exprs: [auction.date_time] }
-        └─BatchHashAgg { group_key: [auction.date_time], aggs: [] }
-          └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
-            └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
-              ├─BatchExchange { order: [], dist: Single }
-              | └─BatchHashAgg { group_key: [auction.date_time], aggs: [] }
-              |   └─BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
-              |     └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
-              |       └─BatchFilter { predicate: IsNotNull(auction.date_time) }
-              |         └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
-              └─BatchValues { rows: [[]] }
+    BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchFilter { predicate: IsNotNull(auction.date_time) }
+        └─BatchHashJoin { type: LeftSemi, predicate: auction.date_time IS NOT DISTINCT FROM auction.date_time, output: all }
+          ├─BatchExchange { order: [], dist: HashShard(auction.date_time) }
+          | └─BatchFilter { predicate: IsNotNull(auction.date_time) }
+          |   └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
+          └─BatchProject { exprs: [auction.date_time] }
+            └─BatchHashAgg { group_key: [auction.date_time], aggs: [] }
+              └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
+                └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+                  ├─BatchExchange { order: [], dist: Single }
+                  | └─BatchHashAgg { group_key: [auction.date_time], aggs: [] }
+                  |   └─BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
+                  |     └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
+                  |       └─BatchFilter { predicate: IsNotNull(auction.date_time) }
+                  |         └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
+                  └─BatchValues { rows: [[]] }
   stream_error: |-
-    Feature is not yet implemented: Stream values executor is unimplemented!
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+    Not supported: streaming nested-loop join
+    HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
+    See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md
 - sql: |
     CREATE TABLE t (v int);
     SELECT 1 FROM t AS t_inner WHERE EXISTS ( SELECT 1 HAVING t_inner.v > 1);

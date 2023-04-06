@@ -23,9 +23,10 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
 use super::privilege::resolve_relation_privileges;
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
+use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::Explain;
-use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
 use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
@@ -86,14 +87,14 @@ pub fn gen_create_mv_plan(
 
     let definition = context.normalized_sql().to_owned();
 
-    let bound = {
+    let (dependent_relations, bound) = {
         let mut binder = Binder::new_for_stream(session);
         let bound = binder.bind_query(query)?;
-        // FIXME: We should record the views into mv's dependent relations to to refine the drop
-        // check and recursive rename of the views.
-        let _views = binder.shared_views().keys().cloned().collect_vec();
-        bound
+        (binder.included_relations(), bound)
     };
+
+    let check_items = resolve_query_privileges(&bound);
+    session.check_privileges(&check_items)?;
 
     let col_names = get_column_names(&bound, session, columns)?;
 
@@ -110,7 +111,16 @@ pub fn gen_create_mv_plan(
         );
     }
     let plan: PlanRef = materialize.into();
+    let dependent_relations =
+        RelationCollectorVisitor::collect_with(dependent_relations, plan.clone());
+
     table.owner = session.user_id();
+
+    // record dependent relations.
+    table.dependent_relations = dependent_relations
+        .into_iter()
+        .map(|t| t.table_id)
+        .collect_vec();
 
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();

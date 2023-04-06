@@ -26,7 +26,7 @@ use super::{
 
 #[async_trait::async_trait]
 pub trait TelemetryInfoFetcher {
-    async fn fetch_telemetry_info(&self) -> Result<String>;
+    async fn fetch_telemetry_info(&self) -> Result<Option<String>>;
 }
 
 pub trait TelemetryReportCreator {
@@ -63,7 +63,11 @@ where
         // There is only one case tracking_id updated at the runtime ---- etcd data has been
         // cleaned. There is no way that etcd has been cleaned but nodes are still running
         let tracking_id = match info_fetcher.fetch_telemetry_info().await {
-            Ok(resp) => resp,
+            Ok(Some(id)) => id,
+            Ok(None) => {
+                tracing::info!("Telemetry is disabled");
+                return;
+            }
             Err(err) => {
                 tracing::error!("Telemetry failed to get tracking_id, err {}", err);
                 return;

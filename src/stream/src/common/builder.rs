@@ -19,6 +19,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 
 type IndexMappings = Vec<(usize, usize)>;
 
+// FIXME(rc): I think this type is over-designed for executors with two side inputs.
 /// Build a array and it's corresponding operations.
 pub struct StreamChunkBuilder {
     /// operations in the data chunk to build
@@ -69,10 +70,10 @@ impl StreamChunkBuilder {
         let reduced_capacity = capacity - 1;
         assert!(reduced_capacity > 0);
 
-        let ops = Vec::with_capacity(reduced_capacity);
+        let ops = Vec::with_capacity(capacity);
         let column_builders = data_types
             .iter()
-            .map(|datatype| datatype.create_array_builder(reduced_capacity))
+            .map(|datatype| datatype.create_array_builder(capacity))
             .collect();
         Self {
             ops,

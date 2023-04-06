@@ -37,9 +37,31 @@ pub struct Join<PlanRef> {
     pub output_indices: Vec<usize>,
 }
 
+pub(crate) fn has_repeated_element(slice: &[usize]) -> bool {
+    (1..slice.len()).any(|i| slice[i..].contains(&slice[i - 1]))
+}
+
 impl<PlanRef> Join<PlanRef> {
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.on = self.on.clone().rewrite_expr(r);
+    }
+
+    pub fn new(
+        left: PlanRef,
+        right: PlanRef,
+        on: Condition,
+        join_type: JoinType,
+        output_indices: Vec<usize>,
+    ) -> Self {
+        // We cannot deal with repeated output indices in join
+        debug_assert!(!has_repeated_element(&output_indices));
+        Self {
+            left,
+            right,
+            on,
+            join_type,
+            output_indices,
+        }
     }
 }
 
@@ -310,6 +332,18 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
     /// Get the Mapping of columnIndex from right column index to internal column index.
     pub fn r2i_col_mapping(&self) -> ColIndexMapping {
         self.i2r_col_mapping().inverse()
+    }
+
+    /// Get the Mapping of columnIndex from internal column index to output column index
+    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
+        ColIndexMapping::with_remaining_columns(&self.output_indices, self.internal_column_num())
+    }
+
+    /// Get the Mapping of columnIndex from output column index to internal column index
+    pub fn o2i_col_mapping(&self) -> ColIndexMapping {
+        // If output_indices = [0, 0, 1], we should use it as `o2i_col_mapping` directly.
+        // If we use `self.i2o_col_mapping().inverse()`, we will lose the first 0.
+        ColIndexMapping::new(self.output_indices.iter().map(|x| Some(*x)).collect())
     }
 
     pub fn add_which_join_key_to_pk(&self) -> EitherOrBoth<(), ()> {

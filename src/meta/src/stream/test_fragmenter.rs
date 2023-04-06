@@ -411,7 +411,7 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
         fragments: HashMap::from_iter(fragments.into_iter().map(|f| (f.fragment_id, f))),
         edges: make_fragment_edges(),
         env: Some(StreamEnvironment::default()),
-        dependent_relation_ids: vec![],
+        dependent_table_ids: vec![],
         table_ids_cnt: 3,
         parallelism: None,
     }

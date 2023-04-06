@@ -102,7 +102,7 @@ impl TableDmlHandle {
             risingwave_common::util::schema_check::schema_check(
                 self.column_descs
                     .iter()
-                    .filter_map(|c| (!c.is_generated_column()).then_some(&c.data_type)),
+                    .filter_map(|c| (!c.is_generated()).then_some(&c.data_type)),
                 chunk.columns(),
             )
             .expect("table source write chunk schema check failed");

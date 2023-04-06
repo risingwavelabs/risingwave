@@ -15,7 +15,6 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::FieldDisplay;
 use risingwave_common::error::Result;
 
 use super::{
@@ -64,17 +63,8 @@ impl LogicalExpand {
         &self.core.column_subsets
     }
 
-    pub fn column_subsets_display(&self) -> Vec<Vec<FieldDisplay<'_>>> {
-        self.core.column_subsets_display()
-    }
-
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(
-            f,
-            "{} {{ column_subsets: {:?} }}",
-            name,
-            self.column_subsets_display()
-        )
+        self.core.fmt_with_name(f, name)
     }
 }
 
@@ -153,7 +143,8 @@ impl PredicatePushdown for LogicalExpand {
 impl ToBatch for LogicalExpand {
     fn to_batch(&self) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
-        let new_logical = self.clone_with_input(new_input);
+        let mut new_logical = self.core.clone();
+        new_logical.input = new_input;
         Ok(BatchExpand::new(new_logical).into())
     }
 }
@@ -170,7 +161,8 @@ impl ToStream for LogicalExpand {
 
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         let new_input = self.input().to_stream(ctx)?;
-        let new_logical = self.clone_with_input(new_input);
+        let mut new_logical = self.core.clone();
+        new_logical.input = new_input;
         Ok(StreamExpand::new(new_logical).into())
     }
 }

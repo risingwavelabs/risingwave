@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt;
+
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
@@ -106,9 +108,18 @@ impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
                 subset
                     .iter()
                     .map(|&i| FieldDisplay(self.input.schema().fields.get(i).unwrap()))
-                    .collect_vec()
+                    .collect()
             })
-            .collect_vec()
+            .collect()
+    }
+
+    pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+        write!(
+            f,
+            "{} {{ column_subsets: {:?} }}",
+            name,
+            self.column_subsets_display()
+        )
     }
 
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {

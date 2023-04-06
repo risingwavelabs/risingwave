@@ -1362,20 +1362,20 @@ where
         new_hummock_version.id = new_version_delta.id;
         let mut incorrect_ssts = vec![];
         let mut new_sst_id_number = 0;
-        sstables.retain_mut(|local_sst_info| {
-            let ExtendedSstableInfo {
-                compaction_group_id,
-                sst_info: sst,
-                ..
-            } = local_sst_info;
-            let mut is_sst_belong_to_group_declared =
-                match old_version.levels.get(compaction_group_id) {
-                    Some(compaction_group) => sst
-                        .table_ids
-                        .iter()
-                        .all(|t| compaction_group.member_table_ids.contains(t)),
-                    None => false,
-                };
+        for ExtendedSstableInfo {
+            compaction_group_id,
+            sst_info: sst,
+            ..
+        } in &mut sstables
+        {
+            let is_sst_belong_to_group_declared = match old_version.levels.get(compaction_group_id)
+            {
+                Some(compaction_group) => sst
+                    .table_ids
+                    .iter()
+                    .all(|t| compaction_group.member_table_ids.contains(t)),
+                None => false,
+            };
             if !is_sst_belong_to_group_declared {
                 let mut group_table_ids: BTreeMap<_, Vec<u32>> = BTreeMap::new();
                 for table_id in sst.get_table_ids() {
@@ -1403,38 +1403,46 @@ where
                         == sst.get_table_ids().len();
                 if is_trivial_adjust {
                     *compaction_group_id = *group_table_ids.first_key_value().unwrap().0;
-                    is_sst_belong_to_group_declared = true;
+                    // is_sst_belong_to_group_declared = true;
                 } else {
                     new_sst_id_number += group_table_ids.len();
                     incorrect_ssts.push((std::mem::take(sst), group_table_ids));
+                    *compaction_group_id =
+                        StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId;
                 }
             }
-            is_sst_belong_to_group_declared
-        });
+        }
         let mut new_sst_id = self
             .env
             .id_gen_manager()
             .generate_interval::<{ IdCategory::HummockSstableId }>(new_sst_id_number as u64)
             .await?;
         let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
-        let mut branch_sstables = Vec::with_capacity(new_sst_id_number);
-        for (sst, group_table_ids) in incorrect_ssts {
-            let mut branch_groups = HashMap::new();
-            for (group_id, _match_ids) in group_table_ids {
-                let mut branch_sst = sst.clone();
-                branch_sst.sst_id = new_sst_id;
-                branch_sstables.push(ExtendedSstableInfo::with_compaction_group(
-                    group_id, branch_sst,
-                ));
-                branch_groups.insert(group_id, new_sst_id);
-                new_sst_id += 1;
-            }
-            if !branch_groups.is_empty() {
-                branched_ssts.insert(sst.get_object_id(), branch_groups);
+        let original_sstables = std::mem::take(&mut sstables);
+        sstables.reserve_exact(original_sstables.len() - incorrect_ssts.len() + new_sst_id_number);
+        let mut incorrect_ssts = incorrect_ssts.into_iter();
+        for original_sstable in original_sstables {
+            if original_sstable.compaction_group_id
+                == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId
+            {
+                let (sst, group_table_ids) = incorrect_ssts.next().unwrap();
+                let mut branch_groups = HashMap::new();
+                for (group_id, _match_ids) in group_table_ids {
+                    let mut branch_sst = sst.clone();
+                    branch_sst.sst_id = new_sst_id;
+                    sstables.push(ExtendedSstableInfo::with_compaction_group(
+                        group_id, branch_sst,
+                    ));
+                    branch_groups.insert(group_id, new_sst_id);
+                    new_sst_id += 1;
+                }
+                if !branch_groups.is_empty() {
+                    branched_ssts.insert(sst.get_object_id(), branch_groups);
+                }
+            } else {
+                sstables.push(original_sstable);
             }
         }
-
-        sstables.append(&mut branch_sstables);
 
         let mut modified_compaction_groups = vec![];
         // Append SSTs to a new version.

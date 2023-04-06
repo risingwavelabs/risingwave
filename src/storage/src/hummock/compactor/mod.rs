@@ -130,7 +130,7 @@ impl Compactor {
         context
             .compactor_metrics
             .compact_read_current_level
-            .with_label_values(&[group_label.as_str(), cur_level_label.as_str()])
+            .with_label_values(&[&group_label, &cur_level_label])
             .inc_by(
                 select_table_infos
                     .iter()
@@ -140,7 +140,7 @@ impl Compactor {
         context
             .compactor_metrics
             .compact_read_sstn_current_level
-            .with_label_values(&[group_label.as_str(), cur_level_label.as_str()])
+            .with_label_values(&[&group_label, &cur_level_label])
             .inc_by(select_table_infos.len() as u64);
 
         let sec_level_read_bytes = target_table_infos.iter().map(|t| t.file_size).sum::<u64>();
@@ -148,18 +148,21 @@ impl Compactor {
         context
             .compactor_metrics
             .compact_read_next_level
-            .with_label_values(&[group_label.as_str(), next_level_label.as_str()])
+            .with_label_values(&[&group_label, next_level_label.as_str()])
             .inc_by(sec_level_read_bytes);
         context
             .compactor_metrics
             .compact_read_sstn_next_level
-            .with_label_values(&[group_label.as_str(), next_level_label.as_str()])
+            .with_label_values(&[&group_label, next_level_label.as_str()])
             .inc_by(target_table_infos.len() as u64);
 
         let timer = context
             .compactor_metrics
             .compact_task_duration
-            .with_label_values(&[compact_task.input_ssts[0].level_idx.to_string().as_str()])
+            .with_label_values(&[
+                &group_label,
+                &compact_task.input_ssts[0].level_idx.to_string(),
+            ])
             .start_timer();
 
         let (need_quota, file_counts) = estimate_state_for_compaction(&compact_task);
@@ -313,12 +316,12 @@ impl Compactor {
         context
             .compactor_metrics
             .compact_write_bytes
-            .with_label_values(&[group_label.as_str(), level_label.as_str()])
+            .with_label_values(&[&group_label, level_label.as_str()])
             .inc_by(compaction_write_bytes);
         context
             .compactor_metrics
             .compact_write_sstn
-            .with_label_values(&[group_label.as_str(), level_label.as_str()])
+            .with_label_values(&[&group_label, level_label.as_str()])
             .inc_by(compact_task.sorted_output_ssts.len() as u64);
 
         if let Err(e) = context

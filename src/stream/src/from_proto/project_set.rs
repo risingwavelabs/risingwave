@@ -35,13 +35,10 @@ impl ExecutorBuilder for ProjectSetExecutorBuilder {
             .get_select_list()
             .iter()
             .map(|proto| {
-                ProjectSetSelectItem::from_prost(
-                    proto,
-                    params.env.config().developer.stream_chunk_size,
-                )
+                ProjectSetSelectItem::from_prost(proto, params.env.config().developer.chunk_size)
             })
             .try_collect()?;
-        let chunk_size = params.env.config().developer.stream_chunk_size;
+        let chunk_size = params.env.config().developer.chunk_size;
         Ok(ProjectSetExecutor::new(
             input,
             params.pk_indices,

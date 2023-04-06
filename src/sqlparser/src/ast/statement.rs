@@ -492,6 +492,48 @@ impl fmt::Display for CreateSinkStatement {
     }
 }
 
+// sql_grammar!(CreateConnectionStatement {
+//     if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS],
+//     connection_name: Ident,
+//     with_properties: AstOption<WithProperties>,
+// });
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CreateConnectionStatement {
+    pub if_not_exists: bool,
+    pub connection_name: ObjectName,
+    pub with_properties: WithProperties,
+}
+
+impl ParseTo for CreateConnectionStatement {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
+        impl_parse_to!(connection_name: ObjectName, p);
+        impl_parse_to!(with_properties: WithProperties, p);
+        if with_properties.0.is_empty() {
+            return Err(ParserError::ParserError(
+                "connection properties not provided".to_string(),
+            ));
+        }
+
+        Ok(Self {
+            if_not_exists,
+            connection_name,
+            with_properties,
+        })
+    }
+}
+
+impl fmt::Display for CreateConnectionStatement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut v: Vec<String> = vec![];
+        impl_fmt_display!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], v, self);
+        impl_fmt_display!(connection_name, v, self);
+        impl_fmt_display!(with_properties, v, self);
+        v.iter().join(" ").fmt(f)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct AstVec<T>(pub Vec<T>);
