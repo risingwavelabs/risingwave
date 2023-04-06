@@ -476,7 +476,7 @@ impl StreamingMetrics {
         let materialize_cache_hit_count = register_int_counter_vec_with_registry!(
             "stream_materialize_cache_hit_count",
             "Materialize executor cache hit count",
-            &["actor_id"],
+            &["table_id", "actor_id"],
             registry
         )
         .unwrap();
@@ -484,7 +484,7 @@ impl StreamingMetrics {
         let materialize_cache_total_count = register_int_counter_vec_with_registry!(
             "stream_materialize_cache_total_count",
             "Materialize executor cache total operation",
-            &["actor_id"],
+            &["table_id", "actor_id"],
             registry
         )
         .unwrap();

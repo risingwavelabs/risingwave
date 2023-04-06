@@ -93,6 +93,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         let state_table =
             StateTableInner::from_table_catalog_inconsistent_op(table_catalog, store, vnodes).await;
         let actor_id = actor_context.id;
+        let table_id = table_catalog.id;
         Self {
             input,
             state_table,
@@ -103,7 +104,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 pk_indices: arrange_columns,
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
-            materialize_cache: MaterializeCache::new(watermark_epoch, metrics, actor_id),
+            materialize_cache: MaterializeCache::new(watermark_epoch, metrics, actor_id, table_id),
             conflict_behavior,
         }
     }
@@ -230,6 +231,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             materialize_cache: MaterializeCache::new(
                 watermark_epoch,
                 Arc::new(StreamingMetrics::unused()),
+                0,
                 0,
             ),
             conflict_behavior,
@@ -430,6 +432,7 @@ pub struct MaterializeCache<SD> {
     _serde: PhantomData<SD>,
     metrics: Arc<StreamingMetrics>,
     actor_id: String,
+    table_id: String,
 }
 
 #[derive(EnumAsInner)]
@@ -445,14 +448,15 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         watermark_epoch: AtomicU64Ref,
         metrics: Arc<StreamingMetrics>,
         actor_id: u32,
+        table_id: u32,
     ) -> Self {
         let cache = ExecutorCache::new(new_unbounded(watermark_epoch));
-        let actor_id = actor_id.to_string();
         Self {
             data: cache,
             _serde: PhantomData,
             metrics,
-            actor_id,
+            actor_id: actor_id.to_string(),
+            table_id: table_id.to_string(),
         }
     }
 
@@ -595,12 +599,12 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         for key in keys {
             self.metrics
                 .materialize_cache_total_count
-                .with_label_values(&[&self.actor_id])
+                .with_label_values(&[&self.table_id, &self.actor_id])
                 .inc();
             if self.data.contains(key) {
                 self.metrics
                     .materialize_cache_hit_count
-                    .with_label_values(&[&self.actor_id])
+                    .with_label_values(&[&self.table_id, &self.actor_id])
                     .inc();
                 continue;
             }

@@ -1415,13 +1415,13 @@ def section_streaming_actors(outer_panels):
                     "",
                     [
                         panels.target(
-                         f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (actor_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (actor_id))",
-                            "cache miss rate -actor {{actor_id}}  {{instance}}",
+                         f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "cache miss rate - state table {{table_id}} - actor {{actor_id}}  {{instance}}",
                             ),
 
                         panels.target(
-                         f"(sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (actor_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (actor_id))",
-                            "cache hit rate -actor {{actor_id}}  {{instance}}",
+                         f"(sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "cache hit rate - state table {{table_id}} - actor {{actor_id}}   {{instance}}",
                             ),
                     ],
                 ),
