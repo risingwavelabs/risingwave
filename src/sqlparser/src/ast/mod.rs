@@ -746,6 +746,7 @@ pub enum ShowObject {
     Source { schema: Option<Ident> },
     Sink { schema: Option<Ident> },
     Columns { table: ObjectName },
+    Connection,
 }
 
 impl fmt::Display for ShowObject {
@@ -776,6 +777,9 @@ impl fmt::Display for ShowObject {
             ShowObject::Source { schema } => write!(f, "SOURCES{}", fmt_schema(schema)),
             ShowObject::Sink { schema } => write!(f, "SINKS{}", fmt_schema(schema)),
             ShowObject::Columns { table } => write!(f, "COLUMNS FROM {}", table),
+            ShowObject::Connection => f.write_str("CONNECTIONS"), /* TODO: format schema after
+                                                                   * adding database_id and
+                                                                   * schema_id */
         }
     }
 }
@@ -976,6 +980,8 @@ pub enum Statement {
     CreateSource { stmt: CreateSourceStatement },
     /// CREATE SINK
     CreateSink { stmt: CreateSinkStatement },
+    /// CREATE CONNECTION
+    CreateConnection { stmt: CreateConnectionStatement },
     /// CREATE FUNCTION
     ///
     /// Postgres: https://www.postgresql.org/docs/15/sql-createfunction.html
@@ -1411,6 +1417,7 @@ impl fmt::Display for Statement {
                 stmt,
             ),
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
+            Statement::CreateConnection { stmt } => write!(f, "CREATE CONNECTION {}", stmt,),
             Statement::AlterTable { name, operation } => {
                 write!(f, "ALTER TABLE {} {}", name, operation)
             }
@@ -1969,6 +1976,7 @@ pub enum ObjectType {
     Sink,
     Database,
     User,
+    Connection,
 }
 
 impl fmt::Display for ObjectType {
@@ -1983,6 +1991,7 @@ impl fmt::Display for ObjectType {
             ObjectType::Sink => "SINK",
             ObjectType::Database => "DATABASE",
             ObjectType::User => "USER",
+            ObjectType::Connection => "CONNECTION",
         })
     }
 }
@@ -2007,9 +2016,11 @@ impl ParseTo for ObjectType {
             ObjectType::Database
         } else if parser.parse_keyword(Keyword::USER) {
             ObjectType::User
+        } else if parser.parse_keyword(Keyword::CONNECTION) {
+            ObjectType::Connection
         } else {
             return parser.expected(
-                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SCHEMA, DATABASE or USER after DROP",
+                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SCHEMA, DATABASE, USER or CONNECTION after DROP",
                 parser.peek_token(),
             );
         };
