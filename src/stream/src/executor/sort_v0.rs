@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+#![cfg_attr(not(test), expect(dead_code))]
 
 use std::collections::BTreeMap;
 use std::ops::Bound;
@@ -79,7 +80,6 @@ pub struct SortExecutor<S: StateStore> {
 }
 
 impl<S: StateStore> SortExecutor<S> {
-    #[expect(dead_code)]
     pub fn new(
         context: ActorContextRef,
         input: BoxedExecutor,
