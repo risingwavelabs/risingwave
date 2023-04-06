@@ -232,6 +232,22 @@ fn case_builders() -> Vec<HashKeyBenchCaseBuilder> {
             },
             describe: "large mixed".to_string(),
         },
+        // These benchmark cases will test unaligned key sizes.
+        // For instance key size 9 of Int64 cannot fit within Key512,
+        // so it has to go to next largest keysize, 1024.
+        // This means 56 bytes of unused memory.
+        HashKeyBenchCaseBuilder {
+            data_types: vec![DataType::Int64; 5],
+            describe: "unaligned small fixed".to_string(),
+        },
+        HashKeyBenchCaseBuilder {
+            data_types: vec![DataType::Int64; 9],
+            describe: "unaligned medium fixed".to_string(),
+        },
+        HashKeyBenchCaseBuilder {
+            data_types: vec![DataType::Int64; 17],
+            describe: "unaligned large fixed".to_string(),
+        },
     ]
 }
 
