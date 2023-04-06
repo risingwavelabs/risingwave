@@ -89,7 +89,9 @@ where
             .take(end_row_id - start_row_id)
             .filter(|scalar_ref| {
                 self.exists.insert(
-                    scalar_ref.map(|scalar_ref| scalar_ref.to_owned_scalar().to_scalar_value()),
+                    scalar_ref
+                        .clone()
+                        .map(|scalar_ref| scalar_ref.to_owned_scalar().to_scalar_value()),
                 )
             });
         let mut cur = self.result.as_ref().map(|x| x.as_scalar_ref());

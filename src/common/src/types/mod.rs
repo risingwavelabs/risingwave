@@ -467,7 +467,7 @@ pub fn option_as_scalar_ref<S: Scalar>(scalar: &Option<S>) -> Option<S::ScalarRe
 /// `ScalarRef` is reciprocal to `Scalar`. Use `to_owned_scalar` to get an
 /// owned scalar.
 pub trait ScalarRef<'a>:
-    Copy
+    Clone
     + std::fmt::Debug
     + Send
     + Sync

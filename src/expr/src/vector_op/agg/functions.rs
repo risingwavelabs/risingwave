@@ -77,7 +77,7 @@ pub fn min<'a, T>(result: Option<T>, input: Option<T>) -> Result<Option<T>>
 where
     T: ScalarRef<'a> + PartialOrd,
 {
-    let res = match (result, input) {
+    let res = match (result.clone(), input.clone()) {
         (None, _) => input,
         (_, None) => result,
         (Some(r), Some(i)) => Some(if r < i { r } else { i }),
@@ -104,7 +104,7 @@ pub fn max<'a, T>(result: Option<T>, input: Option<T>) -> Result<Option<T>>
 where
     T: ScalarRef<'a> + PartialOrd,
 {
-    let res = match (result, input) {
+    let res = match (result.clone(), input.clone()) {
         (None, _) => input,
         (_, None) => result,
         (Some(r), Some(i)) => Some(if r > i { r } else { i }),

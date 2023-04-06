@@ -754,7 +754,7 @@ mod tests {
     where
         T1: PrimitiveArrayItemType + AsPrimitive<T3>,
         T2: PrimitiveArrayItemType + AsPrimitive<T3>,
-        T3: PrimitiveArrayItemType + CheckedAdd,
+        T3: PrimitiveArrayItemType + CheckedAdd + Copy,
     {
         let mut builder = PrimitiveArrayBuilder::<T3>::new(a.len());
         for (a, b) in a.iter().zip_eq_fast(b.iter()) {

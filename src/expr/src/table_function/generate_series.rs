@@ -85,7 +85,9 @@ where
             cur < stop
         } {
             builder.append(Some(cur.as_scalar_ref()));
-            cur = cur.checked_add(step).ok_or(ExprError::NumericOutOfRange)?;
+            cur = cur
+                .checked_add(step.clone())
+                .ok_or(ExprError::NumericOutOfRange)?;
         }
 
         Ok(Arc::new(builder.finish().into()))
