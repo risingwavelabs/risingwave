@@ -16,8 +16,8 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 arc-swap = "1"
-arrow-array = "34"
-arrow-schema = "34"
+arrow-array = "36"
+arrow-schema = "36"
 async-trait = "0.1"
 auto_enums = "0.8"
 bitflags = "2"
@@ -35,6 +35,7 @@ derivative = "2"
 easy-ext = "1"
 either = "1"
 enum-as-inner = "0.5"
+ethnum = { version = "1", features = ["serde"] }
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"

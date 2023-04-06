@@ -255,6 +255,12 @@ lazy_static! {
         vec![AlwaysFalseFilterRule::create()],
         ApplyOrder::TopDown,
     );
+
+    static ref PULL_UP_HOP: OptimizationStage = OptimizationStage::new(
+        "Pull up hop",
+        vec![PullUpHopRule::create()],
+        ApplyOrder::BottomUp,
+    );
 }
 
 impl LogicalOptimizer {
@@ -480,6 +486,8 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&JOIN_COMMUTE);
 
         plan = plan.optimize_by_rules(&PROJECT_REMOVE);
+
+        plan = plan.optimize_by_rules(&PULL_UP_HOP);
 
         plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
 

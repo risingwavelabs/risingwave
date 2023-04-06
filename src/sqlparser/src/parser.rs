@@ -4051,7 +4051,13 @@ impl Parser {
     pub fn parse_assignment(&mut self) -> Result<Assignment, ParserError> {
         let id = self.parse_identifiers_non_keywords()?;
         self.expect_token(&Token::Eq)?;
-        let value = self.parse_expr()?;
+
+        let value = if self.parse_keyword(Keyword::DEFAULT) {
+            AssignmentValue::Default
+        } else {
+            AssignmentValue::Expr(self.parse_expr()?)
+        };
+
         Ok(Assignment { id, value })
     }
 
