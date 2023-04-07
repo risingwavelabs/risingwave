@@ -17,14 +17,17 @@ use std::hash::Hasher;
 use std::io::Read;
 use std::mem;
 use std::num::ParseIntError;
-use std::ops::{Add, BitAnd, BitOr, BitXor, Not};
+use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 use std::str::FromStr;
 
 use bytes::Bytes;
-use num_traits::{FromPrimitive, ToPrimitive, Zero};
-use ethnum::{i256, I256, U256};
-use num_traits::{CheckedAdd};
 
+use ethnum::{i256, I256, U256};
+
+use num_traits::{
+    CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, FromPrimitive,
+    ToPrimitive, Zero,
+};
 use postgres_types::{ToSql, Type};
 use risingwave_pb::data::ArrayType;
 use serde::{Deserialize, Serialize, Serializer};
@@ -177,6 +180,8 @@ macro_rules! impl_common_for_num256 {
     };
 }
 
+
+// only for int256
 impl_common_for_num256!(Int256, Int256Ref<'a>, I256, Int256);
 
 impl FromPrimitive for Int256 {
@@ -227,48 +232,58 @@ impl From<Int256Ref<'_>> for Int256 {
     }
 }
 
-impl Add<Int256> for Int256 {
-    type Output = Self;
+macro_rules! impl_checked_op {
+    ($trait:ty, $func:ident, $op:tt, $proxied_trait:tt, $proxied_func:ident, $scalar:ident, $scalar_ref:ident < $gen:tt >) => {
+        impl $proxied_trait<Self> for $scalar {
+            type Output = Self;
 
-    fn add(self, rhs: Self) -> Self::Output {
-        Int256::from(self.0.as_ref() + rhs.0.as_ref())
+            fn $proxied_func(self, rhs: Self) -> Self::Output {
+                $scalar::from(self.0.as_ref() $op rhs.0.as_ref())
+            }
+        }
+
+        impl<$gen> $proxied_trait<Self> for $scalar_ref<$gen> {
+            type Output = $scalar;
+
+            fn $proxied_func(self, rhs: Self) -> Self::Output {
+                Int256::from(self.0 $op rhs.0)
+            }
+        }
+
+        impl $trait for $scalar {
+            fn $func(&self, other: &Self) -> Option<Self> {
+                self.0.$func(*other.0).map(Into::into)
+            }
+        }
+    };
+}
+
+impl_checked_op!(CheckedAdd, checked_add, +, Add, add, Int256, Int256Ref<'a>);
+impl_checked_op!(CheckedSub, checked_sub, -, Sub, sub, Int256, Int256Ref<'a>);
+impl_checked_op!(CheckedMul, checked_mul, *, Mul, mul, Int256, Int256Ref<'a>);
+impl_checked_op!(CheckedDiv, checked_div, /, Div, div, Int256, Int256Ref<'a>);
+impl_checked_op!(CheckedRem, checked_rem, %, Rem, rem, Int256, Int256Ref<'a>);
+
+impl Neg for Int256 {
+    type Output = Int256;
+
+    fn neg(self) -> Self::Output {
+        Int256::from(self.0.neg())
     }
 }
 
-impl CheckedAdd for Int256 {
-    fn checked_add(&self, other: &Self) -> Option<Self> {
-        self.0.checked_add(*other.0).map(Into::into)
+impl CheckedNeg for Int256 {
+    fn checked_neg(&self) -> Option<Self> {
+        self.0.checked_neg().map(Into::into)
     }
 }
 
-impl BitAnd for Int256 {
-    type Output = Self;
-
-    fn bitand(self, rhs: Self) -> Self::Output {
-        Self(Box::new(self.0.as_ref() & rhs.0.as_ref()))
+impl Zero for Int256 {
+    fn zero() -> Self {
+        Int256::from(i256::new(0))
     }
-}
 
-impl BitOr for Int256 {
-    type Output = Self;
-
-    fn bitor(self, rhs: Self) -> Self::Output {
-        Self(Box::new(self.0.as_ref() | rhs.0.as_ref()))
-    }
-}
-
-impl BitXor for Int256 {
-    type Output = Self;
-
-    fn bitxor(self, rhs: Self) -> Self::Output {
-        Self(Box::new(self.0.as_ref() ^ rhs.0.as_ref()))
-    }
-}
-
-impl Not for Int256 {
-    type Output = Self;
-
-    fn not(self) -> Self::Output {
-        Self(Box::new(self.0.as_ref().not()))
+    fn is_zero(&self) -> bool {
+        !self.0.is_negative() && !self.0.is_positive()
     }
 }

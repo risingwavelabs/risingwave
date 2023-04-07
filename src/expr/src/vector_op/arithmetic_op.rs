@@ -25,6 +25,7 @@ use crate::{ExprError, Result};
 
 #[function("add(*number, *number) -> auto")]
 #[function("add(interval, interval) -> interval")]
+#[function("add(int256, int256) -> int256")]
 pub fn general_add<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -38,6 +39,7 @@ where
 
 #[function("subtract(*number, *number) -> auto")]
 #[function("subtract(interval, interval) -> interval")]
+#[function("subtract(int256, int256) -> int256")]
 pub fn general_sub<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -50,6 +52,7 @@ where
 }
 
 #[function("multiply(*number, *number) -> auto")]
+#[function("multiply(int256, int256) -> int256")]
 pub fn general_mul<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -62,6 +65,7 @@ where
 }
 
 #[function("divide(*number, *number) -> auto")]
+#[function("divide(int256, int256) -> int256")]
 pub fn general_div<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -80,6 +84,7 @@ where
 }
 
 #[function("modulus(*number, *number) -> auto")]
+#[function("modulus(int256, int256) -> int256")]
 pub fn general_mod<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -99,6 +104,17 @@ where
 #[function("neg(decimal) -> decimal")]
 pub fn general_neg<T1: CheckedNeg>(expr: T1) -> Result<T1> {
     expr.checked_neg().ok_or(ExprError::NumericOutOfRange)
+}
+
+#[function("neg(int256) -> int256")]
+pub fn int256_neg<TRef, T>(expr: TRef) -> Result<T>
+where
+    TRef: Into<T> + Debug,
+    T: CheckedNeg,
+{
+    expr.into()
+        .checked_neg()
+        .ok_or(ExprError::NumericOutOfRange)
 }
 
 #[function("abs(int16) -> int16")]

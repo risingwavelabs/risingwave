@@ -38,7 +38,7 @@ use error::ValueEncodingError;
 use serial_array::Serial;
 
 use self::column_aware_row_encoding::ColumnAwareSerde;
-use crate::types::num256::{Int256, Uint256};
+use crate::types::num256::Int256;
 pub mod column_aware_row_encoding;
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
@@ -427,12 +427,6 @@ fn deserialize_int256(data: &mut impl Buf) -> Int256 {
     let mut bytes = [0; Int256::size()];
     data.copy_to_slice(&mut bytes);
     Int256::from_le_bytes(bytes)
-}
-
-fn _deserialize_uint256(data: &mut impl Buf) -> Uint256 {
-    let mut bytes = [0; Uint256::size()];
-    data.copy_to_slice(&mut bytes);
-    Uint256::from_le_bytes(bytes)
 }
 
 fn deserialize_bool(data: &mut impl Buf) -> Result<bool> {
