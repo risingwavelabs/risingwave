@@ -13,7 +13,6 @@
 // limitations under the License.
 
 pub mod catalog;
-pub mod console;
 pub mod kafka;
 pub mod redis;
 pub mod remote;
@@ -38,7 +37,6 @@ use thiserror::Error;
 pub use tracing;
 
 use self::catalog::{SinkCatalog, SinkType};
-use crate::sink::console::{ConsoleConfig, ConsoleSink, CONSOLE_SINK};
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink};
 use crate::sink::remote::{RemoteConfig, RemoteSink};
@@ -72,7 +70,6 @@ pub enum SinkConfig {
     Redis(RedisConfig),
     Kafka(Box<KafkaConfig>),
     Remote(RemoteConfig),
-    Console(ConsoleConfig),
     BlackHole,
 }
 
@@ -80,7 +77,6 @@ pub enum SinkConfig {
 pub enum SinkState {
     Kafka,
     Redis,
-    Console,
     Remote,
     Blackhole,
 }
@@ -97,9 +93,6 @@ impl SinkConfig {
             KAFKA_SINK => Ok(SinkConfig::Kafka(Box::new(KafkaConfig::from_hashmap(
                 properties,
             )?))),
-            CONSOLE_SINK => Ok(SinkConfig::Console(ConsoleConfig::from_hashmap(
-                properties,
-            )?)),
             BLACKHOLE_SINK => Ok(SinkConfig::BlackHole),
             _ => Ok(SinkConfig::Remote(RemoteConfig::from_hashmap(properties)?)),
         }
@@ -110,7 +103,6 @@ impl SinkConfig {
             SinkConfig::Kafka(_) => "kafka",
             SinkConfig::Redis(_) => "redis",
             SinkConfig::Remote(_) => "remote",
-            SinkConfig::Console(_) => "console",
             SinkConfig::BlackHole => "blackhole",
         }
     }
@@ -123,7 +115,6 @@ pub enum SinkImpl {
     UpsertKafka(Box<KafkaSink<false>>),
     Remote(Box<RemoteSink<true>>),
     UpsertRemote(Box<RemoteSink<false>>),
-    Console(Box<ConsoleSink>),
     Blackhole,
 }
 
@@ -150,7 +141,6 @@ impl SinkImpl {
                     ))
                 }
             }
-            SinkConfig::Console(cfg) => SinkImpl::Console(Box::new(ConsoleSink::new(cfg, schema)?)),
             SinkConfig::Remote(cfg) => {
                 if sink_type.is_append_only() {
                     // Append-only remote sink
@@ -189,7 +179,6 @@ impl SinkImpl {
                     RemoteSink::<false>::validate(cfg, sink_catalog, connector_rpc_endpoint).await
                 }
             }
-            SinkConfig::Console(_) => Ok(()),
             SinkConfig::BlackHole => Ok(()),
         }
     }
@@ -235,8 +224,7 @@ impl_sink! {
     Kafka,
     UpsertKafka,
     Remote,
-    UpsertRemote,
-    Console
+    UpsertRemote
 }
 
 pub type Result<T> = std::result::Result<T, SinkError>;

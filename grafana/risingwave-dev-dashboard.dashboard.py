@@ -14,6 +14,7 @@ datasource = {"type": "prometheus", "uid": f"{source_uid}"}
 panels = Panels(datasource)
 logging.basicConfig(level=logging.WARN)
 
+
 def section_cluster_node(panels):
     return [
         panels.row("Cluster Node"),
@@ -62,6 +63,49 @@ def section_cluster_node(panels):
             ],
             ["last"],
         ),
+    ]
+
+
+def section_recovery_node(panels):
+    return [
+        panels.row("Recovery"),
+        panels.timeseries_ops(
+            "Recovery Successful Rate",
+            "The rate of successful recovery attempts",
+            [
+                panels.target(f"sum(rate({metric('recovery_latency_count')}[$__rate_interval])) by (instance)",
+                              "{{instance}}")
+            ],
+            ["last"],
+        ),
+        panels.timeseries_count(
+            "Failed recovery attempts",
+            "Total number of failed reocovery attempts",
+            [
+                panels.target(f"sum({metric('recovery_failure_cnt')}) by (instance)",
+                              "{{instance}}")
+            ],
+            ["last"],
+        ),
+        panels.timeseries_latency(
+            "Recovery latency",
+            "Time spent in a successful recovery attempt",
+            [
+                *quantile(
+                    lambda quantile, legend: panels.target(
+                        f"histogram_quantile({quantile}, sum(rate({metric('recovery_latency_bucket')}[$__rate_interval])) by (le, instance))",
+                        f"recovery latency p{legend}" +
+                        " - {{instance}}",
+                    ),
+                    [50, 90, 99, "max"],
+                ),
+                panels.target(
+                    f"sum by (le) (rate({metric('recovery_latency_sum')}[$__rate_interval])) / sum by (le) (rate({metric('recovery_latency_count')}[$__rate_interval]))",
+                    "recovery latency avg",
+                ),
+            ],
+            ["last"],
+        )
     ]
 
 
@@ -330,7 +374,7 @@ def section_compaction(outer_panels):
                     ],
                 ),
 
-                 panels.timeseries_count(
+                panels.timeseries_count(
                     "Hummock Sstable Stat",
                     "Avg count gotten from sstable_distinct_epoch_count, for observing sstable_distinct_epoch_count",
                     [
@@ -344,7 +388,7 @@ def section_compaction(outer_panels):
                 panels.timeseries_latency(
                     "Hummock Remote Read Duration",
                     "Total time of operations which read from remote storage when enable prefetch",
-                    [                       
+                    [
                         *quantile(
                             lambda quantile, legend: panels.target(
                                 f"histogram_quantile({quantile}, sum(rate({metric('state_store_remote_read_time_per_task_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
@@ -501,7 +545,7 @@ def section_object_storage(outer_panels):
                     "Estimated S3 Cost (Monthly)",
                     "This metric uses the total size of data in S3 at this second to derive the cost of storing data "
                     "for a whole month. The price is 0.023 USD per GB. Please checkout AWS's pricing model for more "
-                    "accurate calculation.", 
+                    "accurate calculation.",
                     [
                         panels.target(
                             f"sum({metric('storage_level_total_file_size')}) by (instance) * 0.023 / 1000 / 1000",
@@ -568,6 +612,16 @@ def section_streaming(panels):
                 panels.target(
                     f"rate({metric('stream_source_rows_per_barrier_counts')}[$__rate_interval])",
                     "actor={{actor_id}} source={{source_id}} @ {{instance}}"
+                )
+            ]
+        ),
+        panels.timeseries_count(
+            "Source Upstream Status",
+            "Monitor each source upstream, 0 means the upstream is not normal, 1 means the source is ready.",
+            [
+                panels.target(
+                    f"{metric('source_status_is_up')}",
+                    "source_id={{source_id}}, source_name={{source_name}} @ {{instance}}"
                 )
             ]
         ),
@@ -1153,6 +1207,7 @@ def section_batch_exchange(outer_panels):
         ),
     ]
 
+
 def section_frontend(outer_panels):
     panels = outer_panels.sub_panel()
     return [
@@ -1184,7 +1239,7 @@ def section_frontend(outer_panels):
                     "",
                     [
                         panels.target(f"{metric('distributed_running_query_num')}",
-                            "The number of running query in distributed execution mode"),
+                                      "The number of running query in distributed execution mode"),
                     ],
                     ["last"],
                 ),
@@ -1193,7 +1248,7 @@ def section_frontend(outer_panels):
                     "",
                     [
                         panels.target(f"{metric('distributed_rejected_query_counter')}",
-                            "The number of rejected query in distributed execution mode"),
+                                      "The number of rejected query in distributed execution mode"),
                     ],
                     ["last"],
                 ),
@@ -1202,7 +1257,7 @@ def section_frontend(outer_panels):
                     "",
                     [
                         panels.target(f"{metric('distributed_completed_query_counter')}",
-                            "The number of completed query in distributed execution mode"),
+                                      "The number of completed query in distributed execution mode"),
                     ],
                     ["last"],
                 ),
@@ -1745,6 +1800,7 @@ def section_hummock_tiered_cache(outer_panels):
         )
     ]
 
+
 def section_hummock_manager(outer_panels):
     panels = outer_panels.sub_panel()
     total_key_size_filter = "metric='total_key_size'"
@@ -1891,6 +1947,7 @@ Objects are classified into 3 groups:
         )
     ]
 
+
 def section_backup_manager(outer_panels):
     panels = outer_panels.sub_panel()
     return [
@@ -1916,7 +1973,7 @@ def section_backup_manager(outer_panels):
                                 f"histogram_quantile({quantile}, sum(rate({metric('backup_job_latency_bucket')}[$__rate_interval])) by (le, state))",
                                 f"Job Process Time p{legend}" +
                                 " - {{state}}",
-                                ),
+                            ),
                             [50, 99, 999, "max"],
                         ),
                     ],
@@ -1924,6 +1981,7 @@ def section_backup_manager(outer_panels):
             ],
         )
     ]
+
 
 def grpc_metrics_target(panels, name, filter):
     return panels.timeseries_latency_small(
@@ -2166,6 +2224,7 @@ def section_grpc_hummock_meta_client(outer_panels):
         ),
     ]
 
+
 def section_memory_manager(outer_panels):
     panels = outer_panels.sub_panel()
     return [
@@ -2236,6 +2295,7 @@ def section_memory_manager(outer_panels):
         ),
     ]
 
+
 def section_connector_node(outer_panels):
     panels = outer_panels.sub_panel()
     return [
@@ -2255,6 +2315,7 @@ def section_connector_node(outer_panels):
             ],
         )
     ]
+
 
 templating = Templating()
 if namespace_filter_enabled:
@@ -2295,6 +2356,7 @@ dashboard = Dashboard(
     version=dashboard_version,
     panels=[
         *section_cluster_node(panels),
+        *section_recovery_node(panels),
         *section_streaming(panels),
         *section_streaming_actors(panels),
         *section_streaming_exchange(panels),
