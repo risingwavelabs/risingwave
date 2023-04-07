@@ -21,6 +21,7 @@
 #![feature(exclusive_range_pattern)]
 #![feature(lazy_cell)]
 #![feature(try_blocks)]
+#![feature(lint_reasons)]
 
 mod error;
 pub mod expr;
