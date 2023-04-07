@@ -21,9 +21,9 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
 use super::{
     gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, ColumnPruningContext,
-    ExprRewritable, LogicalProject, LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, StreamDedup,
-    StreamGroupTopN, ToBatch, ToStream, ToStreamContext,
+    ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
+    PredicatePushdownContext, RewriteStreamContext, StreamDedup, StreamGroupTopN, ToBatch,
+    ToStream, ToStreamContext,
 };
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::utils::Condition;
@@ -114,14 +114,14 @@ impl ToStream for LogicalDedup {
             Ok(StreamDedup::new(logical_dedup).into())
         } else {
             // If the input is not append-only, we use a `StreamGroupTopN` with the limit being 1.
-            let logical_top_n = LogicalTopN::with_group(
+            let logical_top_n = generic::TopN {
                 input,
-                1,
-                0,
-                false,
-                Order::default(),
-                self.dedup_cols().to_vec(),
-            );
+                limit: 1,
+                offset: 0,
+                with_ties: false,
+                order: Order::default(),
+                group_key: self.dedup_cols().to_vec(),
+            };
             Ok(StreamGroupTopN::new(logical_top_n, None).into())
         }
     }
@@ -130,14 +130,14 @@ impl ToStream for LogicalDedup {
 impl ToBatch for LogicalDedup {
     fn to_batch(&self) -> Result<PlanRef> {
         let input = self.input().to_batch()?;
-        let logical_top_n = LogicalTopN::with_group(
+        let logical_top_n = generic::TopN {
             input,
-            1,
-            0,
-            false,
-            Order::default(),
-            self.dedup_cols().to_vec(),
-        );
+            limit: 1,
+            offset: 0,
+            with_ties: false,
+            order: Order::default(),
+            group_key: self.dedup_cols().to_vec(),
+        };
         Ok(BatchGroupTopN::new(logical_top_n).into())
     }
 }
