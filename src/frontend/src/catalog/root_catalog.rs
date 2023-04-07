@@ -406,6 +406,17 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("table id", table_id.to_string()))
     }
 
+    pub fn get_schema_by_table_id(
+        &self,
+        db_name: &str,
+        table_id: &TableId,
+    ) -> CatalogResult<&SchemaCatalog> {
+        self.database_by_name
+            .get(db_name)
+            .and_then(|db| db.find_schema_with_table_id(table_id))
+            .ok_or_else(|| CatalogError::NotFound("schema with table", table_id.to_string()))
+    }
+
     // Used by test_utils only.
     pub fn alter_table_name_by_id(&mut self, table_id: &TableId, table_name: &str) {
         let (mut database_id, mut schema_id) = (0, 0);

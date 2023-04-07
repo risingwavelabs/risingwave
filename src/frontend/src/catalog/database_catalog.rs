@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_pb::catalog::{PbDatabase, PbSchema};
 
+use super::TableId;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{DatabaseId, SchemaId};
 
@@ -80,6 +81,16 @@ impl DatabaseCatalog {
     pub fn get_schema_mut(&mut self, schema_id: SchemaId) -> Option<&mut SchemaCatalog> {
         let name = self.schema_name_by_id.get(&schema_id).unwrap();
         self.schema_by_name.get_mut(name)
+    }
+
+    pub fn find_schema_with_table_id(&self, table_id: &TableId) -> Option<&SchemaCatalog> {
+        for (_, schema) in &self.schema_by_name {
+            if let Some(_) = schema.get_table_by_id(table_id) {
+                return Some(schema);
+            }
+        }
+
+        None
     }
 
     pub fn is_empty(&self) -> bool {
