@@ -70,9 +70,9 @@ pub(crate) struct TombstoneEnterExitEvent {
 type CompactionDeleteRangeEvent = (
     // event key
     UserKey<Vec<u8>>,
-    // tombstones which exits at the event key
+    // Old tombstones which exits at the event key
     Vec<TombstoneEnterExitEvent>,
-    // tombstones which enters at the event key
+    // New tombstones which enters at the event key
     Vec<TombstoneEnterExitEvent>,
 );
 pub(crate) fn apply_event(epochs: &mut BTreeSet<HummockEpoch>, event: &CompactionDeleteRangeEvent) {
