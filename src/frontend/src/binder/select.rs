@@ -618,7 +618,9 @@ impl Binder {
             .as_ref()
             .ok_or_else(|| ErrorCode::BindError("No Value".to_string()))?
         {
+            ScalarImpl::Int16(id) => self.get_table_by_id(&TableId::new(*id as u32))?,
             ScalarImpl::Int32(id) => self.get_table_by_id(&TableId::new(*id as u32))?,
+            ScalarImpl::Int64(id) => self.get_table_by_id(&TableId::new(*id as u32))?,
             ScalarImpl::Utf8(name) => self.get_object_by_name(name)?,
             _ => {
                 return Err(ErrorCode::BindError(
