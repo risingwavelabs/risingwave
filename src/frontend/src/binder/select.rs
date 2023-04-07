@@ -467,7 +467,7 @@ impl Binder {
                 "{output_name} only supports varchar or int literals as arguments"
             ))
         })?;
-        let table_id = self.bind_object_id(arg)?;
+        let table_id = self.bind_table_by_id(arg)?;
 
         let table_id_expr = ExprImpl::Literal(Box::new(Literal::new(
             Some(ScalarImpl::Int32(table_id.table_id as i32)),
@@ -590,7 +590,7 @@ impl Binder {
     /// If the literal is a varchar, this will look in the Catalog for an object with a name that
     /// matches the varchar and return its Object ID value; of no match is found then an error is
     /// returned.
-    fn bind_object_id(&mut self, arg: &Literal) -> Result<TableId> {
+    fn bind_table_by_id(&mut self, arg: &Literal) -> Result<TableId> {
         match arg
             .get_data()
             .as_ref()
@@ -600,7 +600,7 @@ impl Binder {
             ScalarImpl::Int32(id) => Ok(TableId::new(*id as u32)),
             ScalarImpl::Int64(id) => Ok(TableId::new(*id as u32)),
             ScalarImpl::Utf8(name) => {
-                let object = self.get_object_by_name(name)?;
+                let object = self.get_table_by_qualified_name(name)?;
                 Ok(object.table_id)
             }
             _ => Err(ErrorCode::BindError(
@@ -621,7 +621,7 @@ impl Binder {
             ScalarImpl::Int16(id) => self.get_table_by_id(&TableId::new(*id as u32))?,
             ScalarImpl::Int32(id) => self.get_table_by_id(&TableId::new(*id as u32))?,
             ScalarImpl::Int64(id) => self.get_table_by_id(&TableId::new(*id as u32))?,
-            ScalarImpl::Utf8(name) => self.get_object_by_name(name)?,
+            ScalarImpl::Utf8(name) => self.get_table_by_qualified_name(name)?,
             _ => {
                 return Err(ErrorCode::BindError(
                     "This only supports Object Names (varchar) literals.".to_string(),
@@ -635,7 +635,7 @@ impl Binder {
     }
 
     /// Attempt to get the reference to a Database object by it's name.
-    fn get_object_by_name(&mut self, name: &str) -> Result<BoundBaseTable> {
+    fn get_table_by_qualified_name(&mut self, name: &str) -> Result<BoundBaseTable> {
         let object_name = Self::parse_object_name(name)?;
         let (schema_name, table_name) =
             Self::resolve_schema_qualified_name(&self.db_name, object_name)?;
