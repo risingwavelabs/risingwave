@@ -28,18 +28,6 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 
 use crate::expr::{BoxedExpression, Expression, ValueImpl, ValueRef};
 
-trait ArrayConversion
-where
-    Self: Array,
-{
-}
-
-impl<A> ArrayConversion for A where
-    A: Array /* for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
-              * for<'a> ValueRef<'a, A>: std::convert::From<&'a ValueImpl>, */
-{
-}
-
 macro_rules! gen_eval {
     { ($macro:ident, $macro_row:ident), $ty_name:ident, $OA:ty, $($arg:ident,)* } => {
         fn eval_new<'a, 'b, 'async_trait>(&'a self, data_chunk: &'b DataChunk)

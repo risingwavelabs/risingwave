@@ -13,16 +13,15 @@
 // limitations under the License.
 
 use std::convert::TryFrom;
-use std::sync::Arc;
 
-use risingwave_common::array::{ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk};
-use risingwave_common::for_all_variants;
+use risingwave_common::array::DataChunk;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{literal_type_match, DataType, Datum, Scalar, ScalarImpl};
+use risingwave_common::types::{literal_type_match, DataType, Datum};
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
+use super::ValueImpl;
 use crate::expr::Expression;
 use crate::{bail, ensure, ExprError, Result};
 
@@ -39,33 +38,11 @@ impl Expression for LiteralExpression {
         self.return_type.clone()
     }
 
-    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let mut array_builder = self.return_type.create_array_builder(input.capacity());
-        let capacity = input.capacity();
-        let builder = &mut array_builder;
-        let literal = &self.literal;
-
-        macro_rules! array_impl_literal_append {
-            ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-                match (builder, literal) {
-                    $(
-                        (ArrayBuilderImpl::$variant_name(inner), Some(ScalarImpl::$variant_name(v))) => {
-                            inner.append_n(capacity, Some(v.as_scalar_ref()));
-                        }
-                        (ArrayBuilderImpl::$variant_name(inner), None) => {
-                            inner.append_n(capacity, None);
-                        }
-                    )*
-                    (_, _) => $crate::bail!(
-                        "Do not support values in insert values executor".to_string()
-                    ),
-                }
-            };
-        }
-
-        for_all_variants! { array_impl_literal_append }
-
-        Ok(Arc::new(array_builder.finish()))
+    async fn eval_new(&self, input: &DataChunk) -> Result<ValueImpl> {
+        Ok(ValueImpl::Scalar {
+            value: self.literal.clone(),
+            capacity: input.capacity(),
+        })
     }
 
     async fn eval_row(&self, _input: &OwnedRow) -> Result<Datum> {
@@ -126,7 +103,7 @@ mod tests {
     use risingwave_common::array::{I32Array, StructValue};
     use risingwave_common::array_nonnull;
     use risingwave_common::types::test_utils::IntervalTestExt;
-    use risingwave_common::types::{Decimal, Interval, IntoOrdered};
+    use risingwave_common::types::{Decimal, Interval, IntoOrdered, Scalar, ScalarImpl};
     use risingwave_common::util::value_encoding::serialize_datum;
     use risingwave_pb::data::data_type::{IntervalType, TypeName};
     use risingwave_pb::data::{PbDataType, PbDatum};
