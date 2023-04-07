@@ -268,10 +268,6 @@ impl StageExecution {
         }
     }
 
-    pub fn get_task_status_unchecked(&self, task_id: TaskId) -> Arc<TaskStatus> {
-        self.tasks[&task_id].get_status()
-    }
-
     /// Returns all exchange sources for `output_id`. Each `ExchangeSource` is identified by
     /// producer's `TaskId` and `output_id` (consumer's `TaskId`), since each task may produce
     /// output to several channels.
@@ -961,11 +957,5 @@ impl StageRunner {
 
     fn is_root_stage(&self) -> bool {
         self.stage.id == 0
-    }
-}
-
-impl TaskStatus {
-    pub fn task_host_unchecked(&self) -> HostAddress {
-        self.location.clone().unwrap()
     }
 }

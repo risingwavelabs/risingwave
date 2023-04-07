@@ -14,7 +14,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-And don't forget to include the generated `risingwave-dashboard.json` in the commit.
+And don't forget to include the generated `risingwave-<xxx>-dashboard.json` in the commit.
 
 ## Generate Dashboard
 

@@ -16,5 +16,6 @@ pub use builder::*;
 pub use column_mapping::*;
 
 mod builder;
+pub mod cache;
 mod column_mapping;
 pub mod table;
