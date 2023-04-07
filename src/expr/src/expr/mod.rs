@@ -67,9 +67,12 @@ pub mod test_utils;
 
 use std::sync::Arc;
 
-use risingwave_common::array::{ArrayRef, DataChunk};
+use either::Either;
+use futures_util::TryFutureExt;
+use risingwave_common::array::{Array, ArrayRef, DataChunk};
+use risingwave_common::for_all_variants;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{DataType, Datum};
+use risingwave_common::types::{DataType, Datum, Scalar};
 use static_assertions::const_assert;
 
 pub use self::agg::AggKind;
@@ -77,6 +80,100 @@ pub use self::build::*;
 pub use self::expr_input_ref::InputRefExpression;
 pub use self::expr_literal::LiteralExpression;
 use super::{ExprError, Result};
+
+// #[derive(Debug, Clone)]
+// pub enum Value<A: Array> {
+//     Array(A),
+//     Scalar {
+//         value: Option<<A as Array>::OwnedItem>,
+//         capacity: usize,
+//     },
+// }
+
+// impl<A: Array> Value<A> {
+//     pub fn iter(&self) -> impl Iterator<Item = Option<A::RefItem<'_>>> + '_ {
+//         match self {
+//             Value::Array(array) => Either::Left(array.iter()),
+//             Value::Scalar { value, capacity } => Either::Right(
+//                 std::iter::repeat(value.as_ref().map(|v| v.as_scalar_ref())).take(*capacity),
+//             ),
+//         }
+//     }
+// }
+
+#[derive(Debug, Clone)]
+pub enum ValueImpl {
+    Array(ArrayRef),
+    Scalar { value: Datum, capacity: usize },
+}
+
+// /// Define `ArrayImpl` with macro.
+// macro_rules! value_impl_enum {
+//     ( $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+//         use risingwave_common::array::*;
+
+//         /// `ArrayImpl` embeds all possible array in `array` module.
+//         #[derive(Debug, Clone)]
+//         pub enum ValueImpl {
+//             $( $variant_name(Value<$array>) ),*
+//         }
+//     };
+// }
+
+#[derive(Debug, Clone, Copy)]
+pub enum ValueRef<'a, A: Array> {
+    Array(&'a A),
+    Scalar {
+        value: Option<<A as Array>::RefItem<'a>>,
+        capacity: usize,
+    },
+}
+
+impl<'a, A: Array> ValueRef<'a, A> {
+    pub fn iter(self) -> impl Iterator<Item = Option<A::RefItem<'a>>> + 'a {
+        match self {
+            Self::Array(array) => Either::Left(array.iter()),
+            Self::Scalar { value, capacity } => {
+                Either::Right(std::iter::repeat(value).take(capacity))
+            }
+        }
+    }
+}
+
+// for_all_variants! { value_impl_enum }
+
+use risingwave_common::array::*;
+
+/// `impl_convert` implements several conversions for `Array` and `ArrayBuilder`.
+/// * `ArrayImpl -> &Array` with `impl.as_int16()`.
+/// * `ArrayImpl -> Array` with `impl.into_int16()`.
+/// * `&ArrayImpl -> &Array` with `From` trait.
+/// * `ArrayImpl -> Array` with `From` trait.
+/// * `ArrayBuilder -> ArrayBuilderImpl` with `From` trait.
+macro_rules! impl_convert {
+    ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        $(
+            paste::paste! {
+                impl<'a> From<&'a ValueImpl> for ValueRef<'a, $array> {
+                    fn from(value: &'a ValueImpl) -> Self {
+                        match value {
+                            ValueImpl::Array(array) => {
+                                let array = array.[<as_ $suffix_name>]();
+                                ValueRef::Array(array)
+                            },
+                            ValueImpl::Scalar { value, capacity } => {
+                                let value = value.as_ref().map(|v| v.[<as_ $suffix_name>]().as_scalar_ref());
+                                ValueRef::Scalar { value, capacity: *capacity }
+                            },
+                        }
+                    }
+                }
+            }
+        )*
+    };
+}
+
+for_all_variants! { impl_convert }
 
 /// Instance of an expression
 #[async_trait::async_trait]
@@ -99,7 +196,21 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     /// # Arguments
     ///
     /// * `input` - input data of the Project Executor
-    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef>;
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let value = self.eval_new(input).await?;
+        Ok(match value {
+            ValueImpl::Array(array) => array,
+            ValueImpl::Scalar { value, capacity } => {
+                let mut builder = self.return_type().create_array_builder(capacity);
+                builder.append_datum_n(capacity, value);
+                builder.finish().into()
+            }
+        })
+    }
+
+    async fn eval_new(&self, input: &DataChunk) -> Result<ValueImpl> {
+        self.eval(input).map_ok(ValueImpl::Array).await
+    }
 
     /// Evaluate the expression in row-based execution.
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum>;
