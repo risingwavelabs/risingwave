@@ -394,6 +394,7 @@ impl Binder {
         })?;
         // Get list of indexes
         let indexes = self.get_indexes_on_table(arg)?;
+        println!("Index: {indexes:?}");
 
         // Get the size of each index
         // define the output schema
@@ -412,29 +413,29 @@ impl Binder {
             false,
         )?);
 
-        let idx_id_list = indexes
+        let mut idx_id_list: Vec<_> = indexes
             .into_iter()
-            .map(|id| Some(ScalarImpl::Int32(id.index_id as i32)));
-        let list_val = ListValue::new(idx_id_list.collect());
-        let list_literal = Literal::new(
-            Some(ScalarImpl::List(list_val)),
-            DataType::List {
-                datatype: Box::new(DataType::Int32),
-            },
-        );
-        let input = ExprImpl::Literal(Box::new(list_literal));
+            .map(|id| {
+                ExprImpl::Literal(Box::new(Literal::new(
+                    Some(ScalarImpl::Int32(id.index_id as i32)),
+                    DataType::Int32,
+                )))
+            })
+            .collect();
+        // let list_val = ListValue::new(idx_id_list.collect());
+        // let list_literal = Literal::new(
+        // Some(ScalarImpl::List(list_val)),
+        // DataType::List {
+        // datatype: Box::new(DataType::Int32),
+        // },
+        // );
+        // let input = ExprImpl::Literal(Box::new(list_literal));
+        let mut input: Vec<ExprImpl> =
+            vec![InputRef::new(RW_TABLE_STATS_TABLE_ID_INDEX, DataType::Int32).into()];
+        input.append(&mut idx_id_list);
 
         // Filter to only the Indexes on this table
-        let where_clause: Option<ExprImpl> = Some(
-            FunctionCall::new(
-                ExprType::In,
-                vec![
-                    input,
-                    InputRef::new(RW_TABLE_STATS_TABLE_ID_INDEX, DataType::Int32).into(),
-                ],
-            )?
-            .into(),
-        );
+        let where_clause: Option<ExprImpl> = Some(FunctionCall::new(ExprType::In, input)?.into());
 
         // Get the sum of all the sizes of all the indexes on this table
         let sum = FunctionCall::new(
