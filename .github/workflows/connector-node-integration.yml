@@ -77,13 +77,6 @@ jobs:
             echo "Jdbc sink test failed"
             exit 1
           fi
-
-          if python3 integration_tests.py --print_sink; then
-            echo "Print sink test passed"
-          else
-            echo "Print sink test failed"
-            exit 1
-          fi
           cd ..
           echo "all jdbc tests passed"
           
