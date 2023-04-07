@@ -203,7 +203,7 @@ def section_memory(outer_panels):
                         ),
                         panels.target(
                             f"rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])",
-                            "Agg - cache miss - table {{table_id}} actor{{actor_id}}",
+                            "Agg - cache miss - table {{table_id}} actor {{actor_id}}",
                         ),
                         panels.target(
                             f"rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])",
