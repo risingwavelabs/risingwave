@@ -385,6 +385,7 @@ impl Binder {
         })
     }
 
+    /// This returns the size of all the indexes that are on the specified table.
     pub fn bind_get_indexes_size_select(&mut self, table: &ExprImpl) -> Result<BoundSelect> {
         let arg = table.as_literal().ok_or_else(|| {
             ErrorCode::BindError(format!(
@@ -426,7 +427,7 @@ impl Binder {
         let where_clause: Option<ExprImpl> =
             Some(FunctionCall::new(ExprType::In, indices_on_table)?.into());
 
-        // Get the sum of all the sizes of all the indexes on this table
+        // Get the sum of the total sizes of all the indexes on this table
         let sum = FunctionCall::new(
             ExprType::Add,
             vec![
