@@ -184,7 +184,7 @@ drop view src;
 
 # 4.6 sink 
 statement ok
-CREATE SINK sink FROM mv WITH (connector='blackhole', prefix='DEBUG', suffix='');
+CREATE SINK sink FROM mv WITH (connector='blackhole');
 
 # FIXME: improve the error message
 statement error not found
