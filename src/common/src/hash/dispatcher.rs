@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use num256::Int256;
+
 use super::HashKey;
 use crate::array::serial_array::Serial;
 use crate::hash;
