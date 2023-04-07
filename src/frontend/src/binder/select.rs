@@ -15,10 +15,14 @@
 use std::fmt::Debug;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME};
+use risingwave_common::array::ListValue;
+use risingwave_common::catalog::{
+    Field, IndexId, Schema, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME,
+};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::expr::AggKind;
 use risingwave_sqlparser::ast::{DataType as AstDataType, Distinct, Expr, Select, SelectItem};
 use risingwave_sqlparser::parser::Parser;
 use risingwave_sqlparser::tokenizer::{Token, Tokenizer};
@@ -36,9 +40,10 @@ use crate::catalog::system_catalog::rw_catalog::{
 };
 use crate::catalog::{check_valid_column_name, TableId};
 use crate::expr::{
-    CorrelatedId, CorrelatedInputRef, Depth, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef,
-    Literal,
+    AggCall, CorrelatedId, CorrelatedInputRef, Depth, Expr as _, ExprImpl, ExprType, FunctionCall,
+    InputRef, Literal, OrderBy,
 };
+use crate::utils::Condition;
 
 #[derive(Debug, Clone)]
 pub struct BoundSelect {
@@ -381,6 +386,86 @@ impl Binder {
         })
     }
 
+    pub fn bind_get_indexes_size_select(&mut self, input: &ExprImpl) -> Result<BoundSelect> {
+        let arg = input.as_literal().ok_or_else(|| {
+            ErrorCode::BindError(format!(
+                "pg_indexes_size only supports varchar or int literals as arguments"
+            ))
+        })?;
+        // Get list of indexes
+        let indexes = self.get_indexes_on_table(arg)?;
+
+        // Get the size of each index
+        // define the output schema
+        let result_schema = Schema {
+            fields: vec![Field::with_name(
+                DataType::Int64,
+                "pg_indexes_size".to_string(),
+            )],
+        };
+
+        // Get table stats data
+        let from = Some(self.bind_relation_by_name_inner(
+            Some(RW_CATALOG_SCHEMA_NAME),
+            RW_TABLE_STATS_TABLE_NAME,
+            None,
+            false,
+        )?);
+
+        let idx_id_list = indexes
+            .into_iter()
+            .map(|id| Some(ScalarImpl::Int32(id.index_id as i32)));
+        let list_val = ListValue::new(idx_id_list.collect());
+        let list_literal = Literal::new(
+            Some(ScalarImpl::List(list_val)),
+            DataType::List {
+                datatype: Box::new(DataType::Int32),
+            },
+        );
+        let input = ExprImpl::Literal(Box::new(list_literal));
+
+        // Filter to only the Indexes on this table
+        let where_clause: Option<ExprImpl> = Some(
+            FunctionCall::new(
+                ExprType::In,
+                vec![
+                    input,
+                    InputRef::new(RW_TABLE_STATS_TABLE_ID_INDEX, DataType::Int32).into(),
+                ],
+            )?
+            .into(),
+        );
+
+        // Get the sum of all the sizes of all the indexes on this table
+        let sum = FunctionCall::new(
+            ExprType::Add,
+            vec![
+                InputRef::new(RW_TABLE_STATS_KEY_SIZE_INDEX, DataType::Int64).into(),
+                InputRef::new(RW_TABLE_STATS_VALUE_SIZE_INDEX, DataType::Int64).into(),
+            ],
+        )?
+        .into();
+        let select_items = vec![AggCall::new(
+            AggKind::Sum0,
+            vec![sum],
+            false,
+            OrderBy::any(),
+            Condition::true_cond(),
+        )?
+        .into()];
+
+        Ok(BoundSelect {
+            distinct: BoundDistinct::All,
+            select_items,
+            aliases: vec![None],
+            from,
+            where_clause,
+            group_by: vec![],
+            having: None,
+            schema: result_schema,
+        })
+    }
+
     pub fn bind_get_object_size_select(
         &mut self,
         output_name: &str,
@@ -532,6 +617,31 @@ impl Binder {
                     .to_string(),
             ))?,
         }
+    }
+
+    fn get_indexes_on_table(&mut self, arg: &Literal) -> Result<Vec<IndexId>> {
+        // arg is integer look up table by ID
+        // arg is varchar look up table by name
+        let table = match arg
+            .get_data()
+            .as_ref()
+            .ok_or_else(|| ErrorCode::BindError("No Value".to_string()))?
+        {
+            ScalarImpl::Utf8(name) => {
+                let object = self.get_object_by_name(name)?;
+                object
+            }
+            _ => {
+                return Err(ErrorCode::BindError(
+                    "This only supports Object IDs (int) or Object Names (varchar) literals."
+                        .to_string(),
+                )
+                .into())
+            }
+        };
+        // get the list of index IDs and return
+        let indexes = table.table_indexes.iter().map(|idx| idx.id).collect();
+        Ok(indexes)
     }
 
     /// Attempt to get the reference to a Database object by it's name.
