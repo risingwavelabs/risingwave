@@ -413,7 +413,7 @@ impl Catalog {
     ) -> CatalogResult<&SchemaCatalog> {
         self.database_by_name
             .get(db_name)
-            .and_then(|db| db.find_schema_with_table_id(table_id))
+            .and_then(|db| db.find_schema_containing_table_id(table_id))
             .ok_or_else(|| CatalogError::NotFound("schema with table", table_id.to_string()))
     }
 

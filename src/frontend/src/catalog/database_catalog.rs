@@ -83,7 +83,7 @@ impl DatabaseCatalog {
         self.schema_by_name.get_mut(name)
     }
 
-    pub fn find_schema_with_table_id(&self, table_id: &TableId) -> Option<&SchemaCatalog> {
+    pub fn find_schema_containing_table_id(&self, table_id: &TableId) -> Option<&SchemaCatalog> {
         for (_, schema) in &self.schema_by_name {
             if let Some(_) = schema.get_table_by_id(table_id) {
                 return Some(schema);
