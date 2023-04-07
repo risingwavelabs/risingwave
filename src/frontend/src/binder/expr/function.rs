@@ -536,7 +536,10 @@ impl Binder {
                         ))))
                     }
                 ))),
-                ("pg_relation_size", guard_by_len(1, raw(|binder, inputs|{
+                ("pg_relation_size",raw(|binder, inputs|{
+                        if inputs.len() >= 1 && inputs.len() <= 2{
+                            return Err("pg_relation_size takes 1 or 2 arguments".into());
+                        }
                         let input = &inputs[0];
 
                         // This function, on Postgres, offers the ability to get the size of forks of a 
@@ -557,7 +560,7 @@ impl Binder {
                             SubqueryKind::Scalar,
                         ))))
                     }
-                ))),
+                )),
                 ("pg_indexes_size", guard_by_len(1, raw(|binder, inputs|{
                         let input = &inputs[0];
                         let bound_query = binder.bind_get_indexes_size_select(input)?;
