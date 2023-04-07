@@ -19,7 +19,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use itertools::multizip;
+use itertools::{multizip, Itertools};
 use paste::paste;
 use risingwave_common::array::{Array, ArrayBuilder, ArrayImpl, DataChunk, Utf8Array};
 use risingwave_common::row::OwnedRow;
@@ -43,19 +43,28 @@ macro_rules! gen_eval {
                 )*
 
                 Ok(match ($([<val_ $arg:lower>], )*) {
-                    ($(ValueRef::Scalar { value: [<scalar_ref_ $arg:lower>], capacity: _ }, )*) => {
+                    // If all arguments are scalar, we can directly compute the result.
+                    ($(ValueRef::Scalar { value: [<scalar_ref_ $arg:lower>], capacity: [<cap_ $arg:lower>] }, )*) => {
                         let output_scalar = $macro_row!(self, $([<scalar_ref_ $arg:lower>],)*);
                         let output_datum = output_scalar.map(|s| s.to_scalar_value());
                         let capacity = data_chunk.capacity();
 
+                        if cfg!(debug_assertions) {
+                            let all_capacities = [capacity, $([<cap_ $arg:lower>], )*];
+                            assert!(all_capacities.into_iter().all_equal(), "capacities mismatched: {:?}", all_capacities);
+                        }
+
                         ValueImpl::Scalar { value: output_datum, capacity }
                     }
 
+                    // Otherwise, fallback to array computation.
+                    // TODO: match all possible combinations to further get rid of the overhead of `Either` iterators.
                     ($([<val_ $arg:lower>], )*) => {
                         let bitmap = data_chunk.visibility();
                         let mut output_array = <$OA as Array>::Builder::with_meta(data_chunk.capacity(), (&self.return_type).into());
                         let array = match bitmap {
                             Some(bitmap) => {
+                                // TODO: use `izip` here.
                                 for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<val_ $arg:lower>].iter(), )*)).zip_eq_debug(bitmap.iter()) {
                                     if !visible {
                                         output_array.append_null();
@@ -66,6 +75,7 @@ macro_rules! gen_eval {
                                 output_array.finish().into()
                             }
                             None => {
+                                // TODO: use `izip` here.
                                 for ($([<v_ $arg:lower>], )*) in multizip(($([<val_ $arg:lower>].iter(), )*)) {
                                     $macro!(self, output_array, $([<v_ $arg:lower>],)*)
                                 }
@@ -155,11 +165,7 @@ macro_rules! gen_expr_normal {
                 F: Fn($($arg::RefItem<'_>, )*) -> $crate::Result<OA::OwnedItem> + Sync + Send,
             > Expression for $ty_name<$($arg, )* OA, F>
             where
-                $(
-                    for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,
-                    for<'a> ValueRef<'a, $arg>: std::convert::From<&'a ValueImpl>,
-                )*
-                for<'a> &'a OA: std::convert::From<&'a ArrayImpl>,
+                $(for<'a> ValueRef<'a, $arg>: std::convert::From<&'a ValueImpl>,)*
                 for<'a> ValueRef<'a, OA>: std::convert::From<&'a ValueImpl>,
             {
                 fn return_type(&self) -> DataType {
@@ -324,11 +330,7 @@ macro_rules! gen_expr_nullable {
                 F: Fn($(Option<$arg::RefItem<'_>>, )*) -> $crate::Result<Option<OA::OwnedItem>> + Sync + Send,
             > Expression for $ty_name<$($arg, )* OA, F>
             where
-                $(
-                    for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,
-                    for<'a> ValueRef<'a, $arg>: std::convert::From<&'a ValueImpl>,
-                )*
-                for<'a> &'a OA: std::convert::From<&'a ArrayImpl>,
+                $(for<'a> ValueRef<'a, $arg>: std::convert::From<&'a ValueImpl>,)*
                 for<'a> ValueRef<'a, OA>: std::convert::From<&'a ValueImpl>,
             {
                 fn return_type(&self) -> DataType {

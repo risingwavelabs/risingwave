@@ -64,79 +64,28 @@ pub(crate) mod data_types;
 pub(crate) mod template;
 pub(crate) mod template_fast;
 pub mod test_utils;
+mod value;
 
 use std::sync::Arc;
 
-use either::Either;
 use futures_util::TryFutureExt;
-use risingwave_common::array::{Array, ArrayRef, DataChunk};
-use risingwave_common::for_all_variants;
+use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{DataType, Datum, Scalar};
+use risingwave_common::types::{DataType, Datum};
 use static_assertions::const_assert;
 
 pub use self::agg::AggKind;
 pub use self::build::*;
 pub use self::expr_input_ref::InputRefExpression;
 pub use self::expr_literal::LiteralExpression;
+pub use self::value::{ValueImpl, ValueRef};
 use super::{ExprError, Result};
 
-#[derive(Debug, Clone)]
-pub enum ValueImpl {
-    Array(ArrayRef),
-    Scalar { value: Datum, capacity: usize },
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum ValueRef<'a, A: Array> {
-    Array(&'a A),
-    Scalar {
-        value: Option<<A as Array>::RefItem<'a>>,
-        capacity: usize,
-    },
-}
-
-impl<'a, A: Array> ValueRef<'a, A> {
-    pub fn iter(self) -> impl Iterator<Item = Option<A::RefItem<'a>>> + 'a {
-        match self {
-            Self::Array(array) => Either::Left(array.iter()),
-            Self::Scalar { value, capacity } => {
-                Either::Right(std::iter::repeat(value).take(capacity))
-            }
-        }
-    }
-}
-
-// for_all_variants! { value_impl_enum }
-
-use risingwave_common::array::*;
-
-macro_rules! impl_convert {
-    ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        $(
-            paste::paste! {
-                impl<'a> From<&'a ValueImpl> for ValueRef<'a, $array> {
-                    fn from(value: &'a ValueImpl) -> Self {
-                        match value {
-                            ValueImpl::Array(array) => {
-                                let array = array.[<as_ $suffix_name>]();
-                                ValueRef::Array(array)
-                            },
-                            ValueImpl::Scalar { value, capacity } => {
-                                let value = value.as_ref().map(|v| v.[<as_ $suffix_name>]().as_scalar_ref());
-                                ValueRef::Scalar { value, capacity: *capacity }
-                            },
-                        }
-                    }
-                }
-            }
-        )*
-    };
-}
-
-for_all_variants! { impl_convert }
-
-/// Instance of an expression
+/// Interface of an expression.
+///
+/// There're two functions to evaluate an expression: `eval` and `eval_new`, exactly one of them
+/// should be implemented. Prefer calling and implementing `eval_new` instead of `eval` if possible,
+/// to gain the performance benefit of scalar expression.
 #[async_trait::async_trait]
 pub trait Expression: std::fmt::Debug + Sync + Send {
     /// Get the return data type.
@@ -152,11 +101,9 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
         Ok(res)
     }
 
-    /// Evaluate the expression
+    /// Evaluate the expression in vectorized execution. Returns an array.
     ///
-    /// # Arguments
-    ///
-    /// * `input` - input data of the Project Executor
+    /// The default implementation calls `eval_new` and always converts the result to an array.
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let value = self.eval_new(input).await?;
         Ok(match value {
@@ -169,11 +116,15 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
         })
     }
 
+    /// Evaluate the expression in vectorized execution. Returns a value that can be either an
+    /// array, or a scalar if all values in the array are the same.
+    ///
+    /// The default implementation calls `eval` and puts the result into the `Array` variant.
     async fn eval_new(&self, input: &DataChunk) -> Result<ValueImpl> {
         self.eval(input).map_ok(ValueImpl::Array).await
     }
 
-    /// Evaluate the expression in row-based execution.
+    /// Evaluate the expression in row-based execution. Returns a nullable scalar.
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum>;
 
     /// Evaluate if the expression is constant.
