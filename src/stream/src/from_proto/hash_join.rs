@@ -48,29 +48,9 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
 
         let table_l = node.get_left_table()?;
         let degree_table_l = node.get_left_degree_table()?;
-        stream.streaming_metrics.actor_info_collector.add_table(
-            table_l.id.into(),
-            params.actor_context.id,
-            &table_l.name,
-        );
-        stream.streaming_metrics.actor_info_collector.add_table(
-            degree_table_l.id.into(),
-            params.actor_context.id,
-            &degree_table_l.name,
-        );
 
         let table_r = node.get_right_table()?;
         let degree_table_r = node.get_right_degree_table()?;
-        stream.streaming_metrics.actor_info_collector.add_table(
-            table_r.id.into(),
-            params.actor_context.id,
-            &table_r.name,
-        );
-        stream.streaming_metrics.actor_info_collector.add_table(
-            degree_table_r.id.into(),
-            params.actor_context.id,
-            &degree_table_r.name,
-        );
 
         let params_l = JoinParams::new(
             node.get_left_key()

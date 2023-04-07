@@ -85,21 +85,12 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             vnodes.clone(),
         )
         .await;
-        let table_catalog = node.get_result_table().unwrap();
-        let result_table =
-            StateTable::from_table_catalog(table_catalog, store.clone(), vnodes.clone()).await;
-        stream.streaming_metrics.actor_info_collector.add_table(
-            table_catalog.id.into(),
-            params.actor_context.id,
-            &table_catalog.name,
-        );
-        for table in node.get_distinct_dedup_tables().values() {
-            stream.streaming_metrics.actor_info_collector.add_table(
-                table.id.into(),
-                params.actor_context.id,
-                &table.name,
-            );
-        }
+        let result_table = StateTable::from_table_catalog(
+            node.get_result_table().unwrap(),
+            store.clone(),
+            vnodes.clone(),
+        )
+        .await;
         let distinct_dedup_tables =
             build_distinct_dedup_table_from_proto(node.get_distinct_dedup_tables(), store, vnodes)
                 .await;

@@ -15,15 +15,15 @@ panels = Panels(datasource)
 logging.basicConfig(level=logging.WARN)
 
 def section_actor_info(panels):
-    excluded_cols = ['Time', 'Value', '__name__', 'job']
+    excluded_cols = ['Time', 'Value', '__name__', 'job', 'instance']
     return [
         panels.row("Actor/Table Id Info"),
         panels.table_info("Actor Id Info",
                           "Mapping from actor id to fragment id",
-                          [panels.table_target(f"last_over_time({metric('actor_id_info')}[10y])")], excluded_cols),
+                          [panels.table_target(f"{metric('actor_info')}")], excluded_cols),
         panels.table_info("Table Id Info",
                           "Mapping from table id to actor id and table name",
-                          [panels.table_target(f"last_over_time({metric('state_table_id_info')}[10y])")], excluded_cols)
+                          [panels.table_target(f"{metric('table_info')}")], excluded_cols),
 
     ]
 
@@ -613,6 +613,7 @@ dashboard = Dashboard(
     templating=templating,
     version=dashboard_version,
     panels=[
+        *section_actor_info(panels),
         *section_overview(panels),
         *section_cpu(panels),
         *section_memory(panels),

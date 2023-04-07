@@ -33,7 +33,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
+        _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [source_l, source_r]: [_; 2] = params.input.try_into().unwrap();
         let key_l = node.get_left_key() as usize;
@@ -57,24 +57,16 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
         }
 
         // TODO: use consistent operation for dynamic filter <https://github.com/risingwavelabs/risingwave/issues/3893>
-        let table_l = node.get_left_table()?;
-        let state_table_l =
-            StateTable::from_table_catalog_inconsistent_op(table_l, store.clone(), Some(vnodes))
-                .await;
-        stream.streaming_metrics.actor_info_collector.add_table(
-            table_l.id.into(),
-            params.actor_context.id,
-            &table_l.name,
-        );
+        let state_table_l = StateTable::from_table_catalog_inconsistent_op(
+            node.get_left_table()?,
+            store.clone(),
+            Some(vnodes),
+        )
+        .await;
 
-        let table_r = node.get_right_table()?;
         let state_table_r =
-            StateTable::from_table_catalog_inconsistent_op(table_r, store, None).await;
-        stream.streaming_metrics.actor_info_collector.add_table(
-            table_r.id.into(),
-            params.actor_context.id,
-            &table_r.name,
-        );
+            StateTable::from_table_catalog_inconsistent_op(node.get_right_table()?, store, None)
+                .await;
 
         Ok(Box::new(DynamicFilterExecutor::new(
             params.actor_context,

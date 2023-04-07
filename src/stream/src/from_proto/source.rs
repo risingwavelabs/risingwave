@@ -81,14 +81,11 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 .collect();
             let schema = Schema::new(fields);
 
-            let table = source.state_table.as_ref().unwrap();
-            let state_table_handler =
-                SourceStateTableHandler::from_table_catalog(table, store.clone()).await;
-            stream.streaming_metrics.actor_info_collector.add_table(
-                table.id.into(),
-                params.actor_context.id,
-                &table.name,
-            );
+            let state_table_handler = SourceStateTableHandler::from_table_catalog(
+                source.state_table.as_ref().unwrap(),
+                store.clone(),
+            )
+            .await;
             let stream_source_core = StreamSourceCore::new(
                 source_id,
                 source_name,

@@ -12,6 +12,5 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod actor_info_collector;
 pub mod streaming_stats;
 pub use streaming_stats::*;

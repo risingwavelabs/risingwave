@@ -1,4 +1,4 @@
-from grafanalib.core import Dashboard, TimeSeries, Target, GridPos, RowPanel, Time, Templating
+from grafanalib.core import Dashboard, TimeSeries, Target, GridPos, RowPanel, Time, Templating, Table
 import logging
 import os
 
@@ -49,7 +49,6 @@ if namespace_filter_enabled:
             }
         ]
     )
-
 
 class Layout:
 
@@ -115,6 +114,13 @@ class Panels:
                       legendFormat=legendFormat,
                       datasource=self.datasource,
                       hide=hide)
+
+    def table_target(self, expr, hide=False):
+        return Target(expr=expr,
+                      datasource=self.datasource,
+                      hide=hide,
+                      instant=True,
+                      format='table')
 
     def timeseries(self, title, description, targets):
         gridPos = self.layout.next_half_width_graph()
@@ -402,10 +408,10 @@ class Panels:
         )
 
     def timeseries_bytesps(self,
-                           title,
-                           description,
-                           targets,
-                           legendCols=["mean"]):
+                          title,
+                          description,
+                          targets,
+                          legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,

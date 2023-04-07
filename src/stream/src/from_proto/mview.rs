@@ -44,11 +44,6 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             .collect();
 
         let table = node.get_table()?;
-        stream.streaming_metrics.actor_info_collector.add_table(
-            table.id.into(),
-            params.actor_context.id,
-            &table.name,
-        );
         let versioned = table.version.is_some();
 
         let conflict_behavior =
@@ -105,11 +100,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             .collect();
 
         let table = node.get_table()?;
-        stream.streaming_metrics.actor_info_collector.add_table(
-            table.id.into(),
-            params.actor_context.id,
-            &table.name,
-        );
+
         // FIXME: Lookup is now implemented without cell-based table API and relies on all vnodes
         // being `DEFAULT_VNODE`, so we need to make the Arrange a singleton.
         let vnodes = params.vnode_bitmap.map(Arc::new);
