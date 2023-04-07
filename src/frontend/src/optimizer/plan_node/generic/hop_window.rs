@@ -127,6 +127,16 @@ impl<PlanRef: BatchPlanRef> HopWindow<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
+    pub fn output_window_start_col_idx(&self) -> Option<usize> {
+        self.internal2output_col_mapping()
+            .try_map(self.internal_window_start_col_idx())
+    }
+
+    pub fn output_window_end_col_idx(&self) -> Option<usize> {
+        self.internal2output_col_mapping()
+            .try_map(self.internal_window_end_col_idx())
+    }
+
     pub fn into_parts(self) -> (PlanRef, InputRef, Interval, Interval, Interval, Vec<usize>) {
         (
             self.input,

@@ -118,13 +118,11 @@ impl LogicalHopWindow {
     }
 
     pub fn output_window_start_col_idx(&self) -> Option<usize> {
-        self.internal2output_col_mapping()
-            .try_map(self.core.internal_window_start_col_idx())
+        self.core.output_window_start_col_idx()
     }
 
     pub fn output_window_end_col_idx(&self) -> Option<usize> {
-        self.internal2output_col_mapping()
-            .try_map(self.core.internal_window_end_col_idx())
+        self.core.output_window_end_col_idx()
     }
 
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
@@ -133,10 +131,6 @@ impl LogicalHopWindow {
 
     pub fn output2internal_col_mapping(&self) -> ColIndexMapping {
         self.core.output2internal_col_mapping()
-    }
-
-    pub fn internal2output_col_mapping(&self) -> ColIndexMapping {
-        self.core.internal2output_col_mapping()
     }
 
     pub fn clone_with_output_indices(&self, output_indices: Vec<usize>) -> Self {
