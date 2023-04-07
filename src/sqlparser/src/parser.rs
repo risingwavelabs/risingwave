@@ -975,28 +975,41 @@ impl Parser {
         })
     }
 
-    /// TRIM (WHERE 'text' FROM 'text')\
-    /// TRIM ('text')
+    /// TRIM ([WHERE] ['text'] FROM 'text')\
+    /// TRIM ([WHERE] [FROM] 'text' [, 'text'])
     pub fn parse_trim_expr(&mut self) -> Result<Expr, ParserError> {
         self.expect_token(&Token::LParen)?;
-        let mut where_expr = None;
+        let mut trim_where = None;
         if let Token::Word(word) = self.peek_token().token {
             if [Keyword::BOTH, Keyword::LEADING, Keyword::TRAILING]
                 .iter()
                 .any(|d| word.keyword == *d)
             {
-                let trim_where = self.parse_trim_where()?;
-                let sub_expr = self.parse_expr()?;
-                self.expect_keyword(Keyword::FROM)?;
-                where_expr = Some((trim_where, Box::new(sub_expr)));
+                trim_where = Some(self.parse_trim_where()?);
             }
         }
-        let expr = self.parse_expr()?;
+
+        let (mut trim_what, expr) = if self.parse_keyword(Keyword::FROM) {
+            (None, self.parse_expr()?)
+        } else {
+            let mut expr = self.parse_expr()?;
+            if self.parse_keyword(Keyword::FROM) {
+                let trim_what = std::mem::replace(&mut expr, self.parse_expr()?);
+                (Some(Box::new(trim_what)), expr)
+            } else {
+                (None, expr)
+            }
+        };
+
+        if trim_what.is_none() && self.consume_token(&Token::Comma) {
+            trim_what = Some(Box::new(self.parse_expr()?));
+        }
         self.expect_token(&Token::RParen)?;
 
         Ok(Expr::Trim {
             expr: Box::new(expr),
-            trim_where: where_expr,
+            trim_where,
+            trim_what,
         })
     }
 

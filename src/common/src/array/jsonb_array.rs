@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::mem::size_of;
+
 use postgres_types::{FromSql as _, ToSql as _, Type};
 use serde_json::Value;
 
 use super::{Array, ArrayBuilder};
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::collection::estimate_size::EstimateSize;
 use crate::types::{Scalar, ScalarRef};
 use crate::util::iter_util::ZipEqFast;
 
@@ -468,5 +471,12 @@ impl serde_json::ser::Formatter for ToTextFormatter {
         W: ?Sized + std::io::Write,
     {
         writer.write_all(b": ")
+    }
+}
+
+// TODO: We need to fix this later.
+impl EstimateSize for JsonbArray {
+    fn estimated_heap_size(&self) -> usize {
+        self.bitmap.estimated_heap_size() + self.data.capacity() * size_of::<Value>()
     }
 }
