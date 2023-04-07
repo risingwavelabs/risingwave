@@ -81,44 +81,11 @@ pub use self::expr_input_ref::InputRefExpression;
 pub use self::expr_literal::LiteralExpression;
 use super::{ExprError, Result};
 
-// #[derive(Debug, Clone)]
-// pub enum Value<A: Array> {
-//     Array(A),
-//     Scalar {
-//         value: Option<<A as Array>::OwnedItem>,
-//         capacity: usize,
-//     },
-// }
-
-// impl<A: Array> Value<A> {
-//     pub fn iter(&self) -> impl Iterator<Item = Option<A::RefItem<'_>>> + '_ {
-//         match self {
-//             Value::Array(array) => Either::Left(array.iter()),
-//             Value::Scalar { value, capacity } => Either::Right(
-//                 std::iter::repeat(value.as_ref().map(|v| v.as_scalar_ref())).take(*capacity),
-//             ),
-//         }
-//     }
-// }
-
 #[derive(Debug, Clone)]
 pub enum ValueImpl {
     Array(ArrayRef),
     Scalar { value: Datum, capacity: usize },
 }
-
-// /// Define `ArrayImpl` with macro.
-// macro_rules! value_impl_enum {
-//     ( $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-//         use risingwave_common::array::*;
-
-//         /// `ArrayImpl` embeds all possible array in `array` module.
-//         #[derive(Debug, Clone)]
-//         pub enum ValueImpl {
-//             $( $variant_name(Value<$array>) ),*
-//         }
-//     };
-// }
 
 #[derive(Debug, Clone, Copy)]
 pub enum ValueRef<'a, A: Array> {
@@ -144,12 +111,6 @@ impl<'a, A: Array> ValueRef<'a, A> {
 
 use risingwave_common::array::*;
 
-/// `impl_convert` implements several conversions for `Array` and `ArrayBuilder`.
-/// * `ArrayImpl -> &Array` with `impl.as_int16()`.
-/// * `ArrayImpl -> Array` with `impl.into_int16()`.
-/// * `&ArrayImpl -> &Array` with `From` trait.
-/// * `ArrayImpl -> Array` with `From` trait.
-/// * `ArrayBuilder -> ArrayBuilderImpl` with `From` trait.
 macro_rules! impl_convert {
     ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
         $(

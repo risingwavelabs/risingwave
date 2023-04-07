@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use itertools::multizip;
 use paste::paste;
-use risingwave_common::array::{Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, Utf8Array};
+use risingwave_common::array::{Array, ArrayBuilder, ArrayImpl, DataChunk, Utf8Array};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{option_as_scalar_ref, DataType, Datum, Scalar};
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -42,41 +42,6 @@ impl<A> ArrayConversion for A where
 
 macro_rules! gen_eval {
     { ($macro:ident, $macro_row:ident), $ty_name:ident, $OA:ty, $($arg:ident,)* } => {
-        // fn eval<'a, 'b, 'async_trait>(&'a self, data_chunk: &'b DataChunk)
-        //     -> Pin<Box<dyn Future<Output = $crate::Result<ArrayRef>> + Send + 'async_trait>>
-        // where
-        //     'a: 'async_trait,
-        //     'b: 'async_trait,
-        // {
-        //     Box::pin(async move { paste! {
-        //         $(
-        //             let [<ret_ $arg:lower>] = self.[<expr_ $arg:lower>].eval_checked(data_chunk).await?;
-        //             let [<arr_ $arg:lower>]: &$arg = [<ret_ $arg:lower>].as_ref().into();
-        //         )*
-
-        //         let bitmap = data_chunk.visibility();
-        //         let mut output_array = <$OA as Array>::Builder::with_meta(data_chunk.capacity(), (&self.return_type).into());
-        //         Ok(Arc::new(match bitmap {
-        //             Some(bitmap) => {
-        //                 for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<arr_ $arg:lower>].iter(), )*)).zip_eq_debug(bitmap.iter()) {
-        //                     if !visible {
-        //                         output_array.append_null();
-        //                         continue;
-        //                     }
-        //                     $macro!(self, output_array, $([<v_ $arg:lower>],)*)
-        //                 }
-        //                 output_array.finish().into()
-        //             }
-        //             None => {
-        //                 for ($([<v_ $arg:lower>], )*) in multizip(($([<arr_ $arg:lower>].iter(), )*)) {
-        //                     $macro!(self, output_array, $([<v_ $arg:lower>],)*)
-        //                 }
-        //                 output_array.finish().into()
-        //             }
-        //         }))
-        //     }})
-        // }
-
         fn eval_new<'a, 'b, 'async_trait>(&'a self, data_chunk: &'b DataChunk)
             -> Pin<Box<dyn Future<Output = $crate::Result<ValueImpl>> + Send + 'async_trait>>
         where
