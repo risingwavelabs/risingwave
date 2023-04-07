@@ -279,7 +279,7 @@ impl StreamingMetrics {
         let join_lookup_miss_count = register_int_counter_vec_with_registry!(
             "stream_join_lookup_miss_count",
             "Join executor lookup miss duration",
-            &["table_id", "actor_id", "side"],
+            &["side", "join_table_id", "degree_table_id", "actor_id"],
             registry
         )
         .unwrap();
@@ -287,7 +287,7 @@ impl StreamingMetrics {
         let join_total_lookup_count = register_int_counter_vec_with_registry!(
             "stream_join_lookup_total_count",
             "Join executor lookup total operation",
-            &["table_id", "actor_id", "side"],
+            &["side", "join_table_id", "degree_table_id", "actor_id"],
             registry
         )
         .unwrap();
@@ -295,7 +295,7 @@ impl StreamingMetrics {
         let join_insert_cache_miss_count = register_int_counter_vec_with_registry!(
             "stream_join_insert_cache_miss_count",
             "Join executor cache miss when insert operation",
-            &["table_id", "actor_id", "side"],
+            &["side", "join_table_id", "degree_table_id", "actor_id"],
             registry
         )
         .unwrap();
