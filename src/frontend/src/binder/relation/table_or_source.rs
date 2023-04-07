@@ -333,6 +333,8 @@ impl Binder {
         let table_id = table_catalog.id();
         let table_indexes = self.resolve_table_indexes(schema_name, table_id)?;
 
+        // TODO: This type name implies that the table is bound to the query context, should this
+        // return a different type?
         Ok(BoundBaseTable {
             table_id,
             table_catalog,
@@ -351,6 +353,9 @@ impl Binder {
         let table_catalog = self.catalog.get_table_by_id(table_id)?;
 
         // Create a BoundBaseTable
+
+        // TODO: This type name implies that the table is bound to the query context, should this
+        // return a different type?
         Ok(BoundBaseTable {
             table_id: *table_id,
             table_catalog,
