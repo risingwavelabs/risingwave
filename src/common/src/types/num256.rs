@@ -23,8 +23,8 @@ use std::str::FromStr;
 use bytes::{BufMut, Bytes};
 use ethnum::i256;
 use num_traits::{
-    CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, FromPrimitive,
-    ToPrimitive, Zero,
+    CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, FromPrimitive, One,
+    Signed, ToPrimitive, Zero,
 };
 use risingwave_pb::data::ArrayType;
 use serde::de::{Error, Visitor};
@@ -340,6 +340,20 @@ impl Signed for Int256 {
 
     fn is_negative(&self) -> bool {
         self.0.is_negative()
+    }
+}
+
+impl<'a> Into<arrow_buffer::i256> for Int256Ref<'a> {
+    fn into(self) -> arrow_buffer::i256 {
+        let buffer = self.to_be_bytes();
+        arrow_buffer::i256::from_be_bytes(buffer)
+    }
+}
+
+impl From<arrow_buffer::i256> for Int256 {
+    fn from(value: arrow_buffer::i256) -> Self {
+        let buffer = value.to_be_bytes();
+        Int256::from_be_bytes(buffer)
     }
 }
 

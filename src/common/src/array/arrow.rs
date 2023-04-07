@@ -15,6 +15,7 @@
 //! Converts between arrays and Apache Arrow arrays.
 use arrow_schema::Field;
 use chrono::{NaiveDateTime, NaiveTime};
+use crate::types::num256::Int256;
 
 use super::column::Column;
 use super::*;
@@ -352,6 +353,18 @@ impl FromIntoArrow for Interval {
             // TODO: this may overflow and we need `try_into`
             self.usecs() * 1000,
         )
+    }
+}
+
+impl FromIntoArrow for Int256 {
+    type ArrowType = arrow_buffer::i256;
+
+    fn from_arrow(value: Self::ArrowType) -> Self {
+        Self::from(value)
+    }
+
+    fn into_arrow(self) -> Self::ArrowType {
+        self.as_scalar_ref().into()
     }
 }
 
