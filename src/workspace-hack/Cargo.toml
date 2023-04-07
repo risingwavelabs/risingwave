@@ -84,7 +84,7 @@ regex = { version = "1" }
 regex-syntax = { version = "0.6" }
 reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls"] }
 ring = { version = "0.16", features = ["std"] }
-rust_decimal = { version = "1", features = ["db-postgres", "db-tokio-postgres"] }
+rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1", features = ["alloc"] }
@@ -180,7 +180,7 @@ regex = { version = "1" }
 regex-syntax = { version = "0.6" }
 reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls"] }
 ring = { version = "0.16", features = ["std"] }
-rust_decimal = { version = "1", features = ["db-postgres", "db-tokio-postgres"] }
+rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1", features = ["alloc"] }
