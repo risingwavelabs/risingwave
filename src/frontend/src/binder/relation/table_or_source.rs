@@ -315,6 +315,32 @@ impl Binder {
         })
     }
 
+    pub(crate) fn get_table_by_name(
+        &mut self,
+        schema_name: Option<&str>,
+        table_name: &str,
+    ) -> Result<BoundBaseTable> {
+        let db_name = &self.db_name;
+        let schema_path = match schema_name {
+            Some(schema_name) => SchemaPath::Name(schema_name),
+            None => SchemaPath::Path(&self.search_path, &self.auth_context.user_name),
+        };
+        let (table_catalog, schema_name) =
+            self.catalog
+                .get_table_by_name(db_name, schema_path, table_name)?;
+        let table_catalog = table_catalog.deref().clone();
+
+        let table_id = table_catalog.id();
+        let table_indexes = self.resolve_table_indexes(schema_name, table_id)?;
+
+        Ok(BoundBaseTable {
+            table_id,
+            table_catalog,
+            table_indexes,
+            for_system_time_as_of_now: false,
+        })
+    }
+
     pub(crate) fn get_table_by_id(&mut self, table_id: &TableId) -> Result<BoundBaseTable> {
         let db = &self.db_name;
         // Find the schema catalog that contains this TableId
@@ -323,16 +349,6 @@ impl Binder {
         let table_indexes = schema.get_indexes_by_table_id(table_id);
         // Get the table catalog for this table
         let table_catalog = self.catalog.get_table_by_id(table_id)?;
-        // Get the columns for this table
-        // let columns = table_catalog.columns.clone();
-
-        // self.bind_table_to_context(
-        // columns
-        // .iter()
-        // .map(|c| (c.is_hidden, (&c.column_desc).into())),
-        // table_catalog.name().to_string(),
-        // None,
-        // )?;
 
         // Create a BoundBaseTable
         Ok(BoundBaseTable {

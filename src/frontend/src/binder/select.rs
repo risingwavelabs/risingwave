@@ -640,7 +640,7 @@ impl Binder {
         let (schema_name, table_name) =
             Self::resolve_schema_qualified_name(&self.db_name, object_name)?;
 
-        self.bind_table(schema_name.as_deref(), &table_name, None)
+        self.get_table_by_name(schema_name.as_deref(), &table_name)
     }
 
     /// Attempt to parse the value of a varchar Literal into an
