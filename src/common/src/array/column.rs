@@ -19,6 +19,7 @@ use risingwave_pb::data::PbColumn;
 
 use super::{Array, ArrayError, ArrayResult, I64Array};
 use crate::array::{ArrayImpl, ArrayRef};
+use crate::collection::estimate_size::EstimateSize;
 
 /// A [`Column`] consists of its logical data type
 /// and its corresponding physical array implementation,
@@ -116,6 +117,12 @@ impl<A: Array> From<A> for Column {
 impl From<ArrayImpl> for Column {
     fn from(a: ArrayImpl) -> Self {
         Self::new(Arc::new(a))
+    }
+}
+
+impl EstimateSize for Column {
+    fn estimated_heap_size(&self) -> usize {
+        self.array.estimated_heap_size()
     }
 }
 
