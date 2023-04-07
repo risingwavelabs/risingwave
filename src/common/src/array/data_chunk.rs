@@ -16,7 +16,7 @@ use std::hash::BuildHasher;
 use std::sync::Arc;
 use std::{fmt, usize};
 
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_pb::data::PbDataChunk;
 
@@ -439,7 +439,7 @@ impl DataChunk {
         let buffers = match &self.vis2 {
             Vis::Bitmap(vis) => {
                 let rows_num = vis.len();
-                let mut buffers = vec![BytesMut::new(); rows_num];
+                let mut buffers: Vec<Vec<u8>> = vec![Vec::new(); rows_num];
                 let mut col_variable: Vec<&Column> = vec![];
                 col_variable.reserve(self.columns().len());
                 let mut row_len_fixed: usize = 0;
@@ -483,7 +483,7 @@ impl DataChunk {
                 buffers
             }
             Vis::Compact(rows_num) => {
-                let mut buffers = vec![BytesMut::new(); *rows_num];
+                let mut buffers: Vec<Vec<u8>> = vec![Vec::new(); *rows_num];
                 let mut col_variable: Vec<&Column> = vec![];
                 col_variable.reserve(self.columns().len());
                 let mut row_len_fixed: usize = 0;
@@ -524,7 +524,7 @@ impl DataChunk {
             }
         };
 
-        buffers.into_iter().map(BytesMut::freeze).collect_vec()
+        buffers.into_iter().map(|item| item.into()).collect_vec()
     }
 
     /// Serialize each row into bytes with given serializer.
