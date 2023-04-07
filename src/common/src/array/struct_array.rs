@@ -222,7 +222,7 @@ impl Array for StructArray {
 }
 
 impl StructArray {
-    pub fn new(
+    fn new(
         bitmap: Bitmap,
         children: Vec<ArrayRef>,
         children_type: Arc<[DataType]>,
