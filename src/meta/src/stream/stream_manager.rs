@@ -646,9 +646,7 @@ mod tests {
             &self,
             _request: Request<BarrierCompleteRequest>,
         ) -> std::result::Result<Response<BarrierCompleteResponse>, Status> {
-            Ok(Response::new(BarrierCompleteResponse {
-                ..Default::default()
-            }))
+            Ok(Response::new(BarrierCompleteResponse::default()))
         }
 
         async fn wait_epoch_commit(

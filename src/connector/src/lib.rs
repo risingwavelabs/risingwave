@@ -21,7 +21,7 @@
 #![feature(trait_alias)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(lint_reasons)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![feature(result_option_inspect)]
 #![feature(let_chains)]
 #![feature(box_into_inner)]
