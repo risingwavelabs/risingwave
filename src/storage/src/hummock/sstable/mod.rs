@@ -126,6 +126,12 @@ impl DeleteRangeTombstone {
     }
 }
 
+#[derive(Clone)]
+pub struct MonotonicDeleteEvent {
+    event_key: UserKey<Vec<u8>>,
+    new_epoch: HummockEpoch,
+}
+
 /// [`Sstable`] is a handle for accessing SST.
 #[derive(Clone)]
 pub struct Sstable {
@@ -137,7 +143,7 @@ pub struct Sstable {
     /// can be transformed into events below:
     /// `{ <0, +epoch1> <wmk1, -epoch1> <wmk1, +epoch2> <wmk2, -epoch2> <wmk2, +epoch3> <wmk3,
     /// -epoch3> }`
-    pub monotonic_tombstone_events: Vec<(UserKey<Vec<u8>>, HummockEpoch)>,
+    pub monotonic_tombstone_events: Vec<MonotonicDeleteEvent>,
 }
 
 impl Debug for Sstable {
@@ -159,12 +165,13 @@ impl Sstable {
         let mut monotonic_tombstone_events = Vec::with_capacity(events.len());
         for event in events {
             apply_event(&mut epochs, &event);
-            monotonic_tombstone_events.push((
-                event.0,
-                epochs.first().map_or(HummockEpoch::MAX, |epoch| *epoch),
-            ));
+            monotonic_tombstone_events.push(MonotonicDeleteEvent {
+                event_key: event.0,
+                new_epoch: epochs.first().map_or(HummockEpoch::MAX, |epoch| *epoch),
+            });
         }
-        monotonic_tombstone_events.dedup_by_key(|(_, epoch)| *epoch);
+        monotonic_tombstone_events
+            .dedup_by_key(|MonotonicDeleteEvent { new_epoch, .. }| *new_epoch);
 
         Self {
             id,

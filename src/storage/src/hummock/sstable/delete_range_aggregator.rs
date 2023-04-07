@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::key::UserKey;
 use risingwave_hummock_sdk::HummockEpoch;
 
-use super::DeleteRangeTombstone;
+use super::{DeleteRangeTombstone, MonotonicDeleteEvent};
 use crate::hummock::iterator::DeleteRangeIterator;
 use crate::hummock::sstable_store::TableHolder;
 use crate::hummock::Sstable;
@@ -361,13 +361,13 @@ impl SstableDeleteRangeIterator {
 impl DeleteRangeIterator for SstableDeleteRangeIterator {
     fn next_user_key(&self) -> UserKey<&[u8]> {
         self.table.value().monotonic_tombstone_events[self.next_idx]
-            .0
+            .event_key
             .as_ref()
     }
 
     fn current_epoch(&self) -> HummockEpoch {
         if self.next_idx > 0 {
-            self.table.value().monotonic_tombstone_events[self.next_idx - 1].1
+            self.table.value().monotonic_tombstone_events[self.next_idx - 1].new_epoch
         } else {
             HummockEpoch::MAX
         }
@@ -386,7 +386,9 @@ impl DeleteRangeIterator for SstableDeleteRangeIterator {
             .table
             .value()
             .monotonic_tombstone_events
-            .partition_point(|(user_key, _)| user_key.as_ref().le(&target_user_key));
+            .partition_point(|MonotonicDeleteEvent { event_key, .. }| {
+                event_key.as_ref().le(&target_user_key)
+            });
     }
 
     fn is_valid(&self) -> bool {
@@ -398,13 +400,13 @@ pub fn get_min_delete_range_epoch_from_sstable(
     table: &Sstable,
     query_user_key: &UserKey<&[u8]>,
 ) -> HummockEpoch {
-    let idx = table
-        .monotonic_tombstone_events
-        .partition_point(|(user_key, _)| user_key.as_ref().le(query_user_key));
+    let idx = table.monotonic_tombstone_events.partition_point(
+        |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(query_user_key),
+    );
     if idx == 0 {
         HummockEpoch::MAX
     } else {
-        table.monotonic_tombstone_events[idx - 1].1
+        table.monotonic_tombstone_events[idx - 1].new_epoch
     }
 }
 
