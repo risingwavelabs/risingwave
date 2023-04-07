@@ -15,10 +15,9 @@
 use std::cmp::Ordering;
 use std::ops::Range;
 
-use bytes::{Buf, BytesMut};
+use bytes::BytesMut;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::HummockEpoch;
 
 use super::{KeyPrefix, LenType, RestartPoint};
 use crate::hummock::BlockHolder;
@@ -33,8 +32,6 @@ pub struct BlockIterator {
     offset: usize,
     /// Current key.
     key: BytesMut,
-    /// Current earliest delete epoch,
-    earliest_delete_epoch: HummockEpoch,
     /// Current value.
     value_range: Range<usize>,
     /// Current entry len.
@@ -51,7 +48,6 @@ impl BlockIterator {
             offset: usize::MAX,
             restart_point_index: usize::MAX,
             key: BytesMut::default(),
-            earliest_delete_epoch: HummockEpoch::MAX,
             value_range: 0..0,
             entry_len: 0,
             last_key_len_type: LenType::u8,
@@ -87,12 +83,6 @@ impl BlockIterator {
         assert!(self.is_valid());
 
         FullKey::from_slice_without_table_id(self.table_id(), &self.key[..])
-    }
-
-    #[inline(always)]
-    pub fn earliest_delete_epoch(&self) -> u64 {
-        debug_assert!(self.is_valid());
-        self.earliest_delete_epoch
     }
 
     pub fn value(&self) -> &[u8] {
@@ -136,7 +126,6 @@ impl BlockIterator {
         self.offset = self.block.len();
         self.restart_point_index = self.block.restart_point_len();
         self.key.clear();
-        self.earliest_delete_epoch = HummockEpoch::MAX;
         self.value_range = 0..0;
         self.entry_len = 0;
     }
@@ -176,12 +165,8 @@ impl BlockIterator {
         let prefix =
             self.decode_prefix_at(offset, self.last_key_len_type, self.last_value_len_type);
         self.key.truncate(prefix.overlap_len());
-        let diff_key_range = prefix.diff_key_range();
-        let earliest_delete_epoch_pos = diff_key_range.end;
         self.key
-            .extend_from_slice(&self.block.data()[diff_key_range]);
-
-        self.earliest_delete_epoch = (&self.block.data()[earliest_delete_epoch_pos..]).get_u64();
+            .extend_from_slice(&self.block.data()[prefix.diff_key_range()]);
 
         self.value_range = prefix.value_range();
         self.offset = offset;
@@ -295,10 +280,7 @@ impl BlockIterator {
             restart_point.value_len_type,
         );
 
-        let diff_key_range = prefix.diff_key_range();
-        let earliest_delete_epoch_pos = diff_key_range.end;
-        self.key = BytesMut::from(&self.block.data()[diff_key_range]);
-        self.earliest_delete_epoch = (&self.block.data()[earliest_delete_epoch_pos..]).get_u64();
+        self.key = BytesMut::from(&self.block.data()[prefix.diff_key_range()]);
         self.value_range = prefix.value_range();
         self.offset = offset;
         self.entry_len = prefix.entry_len();

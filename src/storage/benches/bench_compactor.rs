@@ -21,7 +21,6 @@ use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
 use risingwave_pb::hummock::{compact_task, SstableInfo};
@@ -217,7 +216,6 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
         .block_on(async { build_table(sstable_store.clone(), 4, 0..test_key_size, 2).await });
     let level2 = vec![info1, info2];
     let read_options = Arc::new(SstableIteratorReadOptions {
-        read_epoch_to_fast_delete: HummockEpoch::MIN,
         cache_policy: CachePolicy::Fill(CachePriority::High),
         must_iterated_end_user_key: None,
     });

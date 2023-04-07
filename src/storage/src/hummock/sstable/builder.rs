@@ -192,15 +192,13 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
     ) -> HummockResult<()> {
-        self.add(full_key, HummockEpoch::MAX, value, is_new_user_key)
-            .await
+        self.add(full_key, value, is_new_user_key).await
     }
 
     /// Add kv pair to sstable.
     pub async fn add(
         &mut self,
         full_key: FullKey<&[u8]>,
-        earliest_delete_epoch: HummockEpoch,
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
     ) -> HummockResult<()> {
@@ -265,8 +263,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             })
         }
 
-        self.block_builder
-            .add(full_key, earliest_delete_epoch, self.raw_value.as_ref());
+        self.block_builder.add(full_key, self.raw_value.as_ref());
         self.last_table_stats.total_key_size += full_key.encoded_len() as i64;
         self.last_table_stats.total_value_size += value.encoded_len() as i64;
 

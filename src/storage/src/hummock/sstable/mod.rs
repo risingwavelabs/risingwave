@@ -422,18 +422,13 @@ impl SstableMeta {
 
 #[derive(Default)]
 pub struct SstableIteratorReadOptions {
-    pub read_epoch_to_fast_delete: HummockEpoch,
     pub cache_policy: CachePolicy,
     pub must_iterated_end_user_key: Option<Bound<UserKey<KeyPayloadType>>>,
 }
 
 impl SstableIteratorReadOptions {
-    pub fn from_read_options(
-        read_options: &ReadOptions,
-        read_epoch_to_fast_delete: HummockEpoch,
-    ) -> Self {
+    pub fn from_read_options(read_options: &ReadOptions) -> Self {
         Self {
-            read_epoch_to_fast_delete,
             cache_policy: read_options.cache_policy,
             must_iterated_end_user_key: None,
         }

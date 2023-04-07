@@ -912,10 +912,7 @@ mod tests {
         )
         .await;
         let cache = create_small_table_cache();
-        let read_options = SstableIteratorReadOptions {
-            read_epoch_to_fast_delete: 150,
-            ..Default::default()
-        };
+        let read_options = SstableIteratorReadOptions::default();
         let table_id = table.id;
         let iters = vec![SstableIterator::create(
             cache.insert(table.id, table.id, 1, Box::new(table), CachePriority::High),
@@ -948,10 +945,7 @@ mod tests {
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
-        let read_options = SstableIteratorReadOptions {
-            read_epoch_to_fast_delete: 300,
-            ..Default::default()
-        };
+        let read_options = SstableIteratorReadOptions::default();
         let iters = vec![SstableIterator::create(
             cache.lookup(table_id, &table_id).unwrap(),
             sstable_store,
