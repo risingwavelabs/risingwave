@@ -350,13 +350,14 @@ pub enum Expr {
         start: Box<Expr>,
         count: Option<Box<Expr>>,
     },
-    /// TRIM([BOTH | LEADING | TRAILING] <expr> [FROM <expr>])\
+    /// TRIM([BOTH | LEADING | TRAILING] [<expr>] FROM <expr>)\
     /// Or\
-    /// TRIM(<expr>)
+    /// TRIM([BOTH | LEADING | TRAILING] [FROM] <expr> [, <expr>])
     Trim {
         expr: Box<Expr>,
         // ([BOTH | LEADING | TRAILING], <expr>)
-        trim_where: Option<(TrimWhereField, Box<Expr>)>,
+        trim_where: Option<TrimWhereField>,
+        trim_what: Option<Box<Expr>>,
     },
     /// `expr COLLATE collation`
     Collate {
@@ -576,15 +577,19 @@ impl fmt::Display for Expr {
             }
             Expr::IsDistinctFrom(a, b) => write!(f, "{} IS DISTINCT FROM {}", a, b),
             Expr::IsNotDistinctFrom(a, b) => write!(f, "{} IS NOT DISTINCT FROM {}", a, b),
-            Expr::Trim { expr, trim_where } => {
+            Expr::Trim {
+                expr,
+                trim_where,
+                trim_what,
+            } => {
                 write!(f, "TRIM(")?;
-                if let Some((ident, trim_char)) = trim_where {
-                    write!(f, "{} {} FROM {}", ident, trim_char, expr)?;
-                } else {
-                    write!(f, "{}", expr)?;
+                if let Some(ident) = trim_where {
+                    write!(f, "{} ", ident)?;
                 }
-
-                write!(f, ")")
+                if let Some(trim_char) = trim_what {
+                    write!(f, "{} ", trim_char)?;
+                }
+                write!(f, "FROM {})", expr)
             }
             Expr::Row(exprs) => write!(
                 f,

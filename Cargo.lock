@@ -5903,6 +5903,7 @@ dependencies = [
  "serde_default",
  "serde_json",
  "serde_with 2.3.1",
+ "smallbitset",
  "static_assertions",
  "strum",
  "strum_macros",
@@ -6524,7 +6525,7 @@ dependencies = [
  "futures",
  "glob",
  "itertools",
- "lru 0.10.0",
+ "lru 0.7.6",
  "madsim",
  "madsim-aws-sdk-s3",
  "madsim-etcd-client",
@@ -6794,6 +6795,7 @@ dependencies = [
  "arrow-array",
  "arrow-flight",
  "arrow-schema",
+ "arrow-select",
  "futures-util",
  "madsim-tokio",
  "madsim-tonic",
@@ -7445,6 +7447,16 @@ dependencies = [
  "async-channel",
  "futures-core",
  "futures-io",
+]
+
+[[package]]
+name = "smallbitset"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d93fb6dc506bf9247d497b1cd9748015f444b9b16da6da79484f54b20df49a7c"
+dependencies = [
+ "num",
+ "paste",
 ]
 
 [[package]]
@@ -8908,6 +8920,7 @@ dependencies = [
  "memchr",
  "miniz_oxide",
  "multimap",
+ "num",
  "num-bigint",
  "num-integer",
  "num-traits",
