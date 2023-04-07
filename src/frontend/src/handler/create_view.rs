@@ -49,7 +49,7 @@ pub async fn handle_create_view(
             schema,
             dependent_relations,
             ..
-        } = super::query::gen_batch_query_plan(
+        } = super::query::gen_batch_plan_by_statement(
             &session,
             context.into(),
             Statement::Query(Box::new(query.clone())),
