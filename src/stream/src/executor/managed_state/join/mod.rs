@@ -189,7 +189,7 @@ impl JoinHashMapMetrics {
         self.metrics
             .join_lookup_miss_count
             .with_label_values(&[
-                &self.side,
+                (self.side),
                 &self.join_table_id,
                 &self.degree_table_id,
                 &self.actor_id,
@@ -198,7 +198,7 @@ impl JoinHashMapMetrics {
         self.metrics
             .join_total_lookup_count
             .with_label_values(&[
-                &self.side,
+                (self.side),
                 &self.join_table_id,
                 &self.degree_table_id,
                 &self.actor_id,
@@ -207,7 +207,7 @@ impl JoinHashMapMetrics {
         self.metrics
             .join_insert_cache_miss_count
             .with_label_values(&[
-                &self.side,
+                (self.side),
                 &self.join_table_id,
                 &self.degree_table_id,
                 &self.actor_id,
