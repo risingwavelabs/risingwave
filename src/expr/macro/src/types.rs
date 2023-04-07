@@ -40,7 +40,6 @@ pub fn expand_type_wildcard(ty: &str) -> Vec<&str> {
         ],
         "*int" => vec!["int16", "int32", "int64"],
         "*number" => vec!["int16", "int32", "int64", "float32", "float64", "decimal"],
-        "*big_number" => vec!["int256"],
         _ => vec![ty],
     }
 }
@@ -107,9 +106,6 @@ pub fn min_compatible_type(types: &[impl AsRef<str>]) -> &str {
         ("int256", "int16") => "int256",
         ("int256", "int32") => "int256",
         ("int256", "int64") => "int256",
-        ("int256", "float32") => "float64",
-        ("int256", "float64") => "float64",
-        ("int256", "decimal") => "decimal",
 
         ("float32", "int16") => "float64",
         ("float32", "int32") => "float64",
