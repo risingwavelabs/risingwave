@@ -60,7 +60,7 @@ lexical-write-integer = { version = "0.8", default-features = false, features = 
 libc = { version = "0.2", features = ["extra_traits"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["kv_unstable", "std"] }
-madsim-tokio = { git = "https://github.com/madsim-rs/madsim.git", rev = "5edee1f", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
+madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2" }
 miniz_oxide = { version = "0.6", default-features = false, features = ["with-alloc"] }
 multimap = { version = "0.8" }
@@ -155,7 +155,7 @@ lexical-write-integer = { version = "0.8", default-features = false, features = 
 libc = { version = "0.2", features = ["extra_traits"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["kv_unstable", "std"] }
-madsim-tokio = { git = "https://github.com/madsim-rs/madsim.git", rev = "5edee1f", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
+madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2" }
 miniz_oxide = { version = "0.6", default-features = false, features = ["with-alloc"] }
 multimap = { version = "0.8" }

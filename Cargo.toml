@@ -125,6 +125,4 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0c25710"
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }
 postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }
-madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "5edee1f" }
-madsim = { git = "https://github.com/madsim-rs/madsim.git", rev = "5edee1f" }
-madsim-tokio = { git = "https://github.com/madsim-rs/madsim.git", rev = "5edee1f" }
+madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "52adb98" }

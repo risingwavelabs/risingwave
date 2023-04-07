@@ -3589,8 +3589,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.18"
-source = "git+https://github.com/madsim-rs/madsim.git?rev=5edee1f#5edee1f7c62c77fdb3a8fc19714e81dbd9d6e1ef"
+version = "0.2.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "baac280a8f0a7760cfbf788dc523f8784a26550582b07e05ea92b62093c9a72b"
 dependencies = [
  "ahash 0.7.6",
  "async-channel",
@@ -3655,7 +3656,8 @@ dependencies = [
 [[package]]
 name = "madsim-macros"
 version = "0.2.12"
-source = "git+https://github.com/madsim-rs/madsim.git?rev=5edee1f#5edee1f7c62c77fdb3a8fc19714e81dbd9d6e1ef"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3d248e97b1a48826a12c3828d921e8548e714394bf17274dd0a93910dc946e1"
 dependencies = [
  "darling 0.14.4",
  "proc-macro2",
@@ -3666,7 +3668,7 @@ dependencies = [
 [[package]]
 name = "madsim-rdkafka"
 version = "0.2.14-alpha"
-source = "git+https://github.com/madsim-rs/madsim.git?rev=5edee1f#5edee1f7c62c77fdb3a8fc19714e81dbd9d6e1ef"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=52adb98#52adb98d33939dc841dd6d0c616238edc4fb6db3"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -3688,11 +3690,12 @@ dependencies = [
 
 [[package]]
 name = "madsim-tokio"
-version = "0.2.15"
-source = "git+https://github.com/madsim-rs/madsim.git?rev=5edee1f#5edee1f7c62c77fdb3a8fc19714e81dbd9d6e1ef"
+version = "0.2.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c1b74bc405410c47019265f21edee52c7bf08c90d6e984387e26db7ff8ce23e"
 dependencies = [
  "madsim",
- "spin 0.9.6",
+ "spin 0.9.8",
  "tokio",
 ]
 
