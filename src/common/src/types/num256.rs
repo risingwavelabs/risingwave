@@ -14,14 +14,17 @@
 
 use std::fmt::Write;
 use std::hash::Hasher;
+use std::io::Read;
 use std::mem;
 use std::num::ParseIntError;
-use std::ops::{BitAnd, BitOr, BitXor, Not};
+use std::ops::{Add, BitAnd, BitOr, BitXor, Not};
 use std::str::FromStr;
 
 use bytes::Bytes;
-use ethnum::I256;
 use num_traits::{FromPrimitive, ToPrimitive, Zero};
+use ethnum::{i256, I256, U256};
+use num_traits::{CheckedAdd};
+
 use postgres_types::{ToSql, Type};
 use risingwave_pb::data::ArrayType;
 use serde::{Deserialize, Serialize, Serializer};
@@ -68,6 +71,23 @@ macro_rules! impl_common_for_num256 {
             }
         }
 
+        impl<'de> Deserialize<'de> for $scalar {
+            fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                <$inner>::deserialize(deserializer).map(Into::into)
+            }
+        }
+
+        impl FromStr for $scalar {
+            type Err = ParseIntError;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                <$inner>::from_str(s).map(Into::into)
+            }
+        }
+
         impl $scalar {
             #[inline]
             pub fn into_inner(self) -> $inner {
@@ -97,6 +117,18 @@ macro_rules! impl_common_for_num256 {
             #[inline]
             pub fn from_be_bytes(bytes: [u8; mem::size_of::<$inner>()]) -> Self {
                 Self(Box::new(<$inner>::from_be_bytes(bytes)))
+            }
+
+            pub fn from_protobuf(input: &mut impl Read) -> ArrayResult<Self> {
+                let mut buf = [0u8; mem::size_of::<$inner>()];
+                input.read_exact(&mut buf)?;
+                Ok(Self::from_be_bytes(buf))
+            }
+        }
+
+        impl From<$inner> for $scalar {
+            fn from(value: $inner) -> Self {
+                Self(Box::new(value))
             }
         }
 
@@ -147,26 +179,6 @@ macro_rules! impl_common_for_num256 {
 
 impl_common_for_num256!(Int256, Int256Ref<'a>, I256, Int256);
 
-impl ToPrimitive for Int256 {
-    fn to_i64(&self) -> Option<i64> {
-        Some(self.0.as_i64())
-    }
-
-    fn to_u64(&self) -> Option<u64> {
-        Some(self.0.as_u64())
-    }
-}
-
-impl ToPrimitive for Int256Ref<'_> {
-    fn to_i64(&self) -> Option<i64> {
-        Some(self.0.as_i64())
-    }
-
-    fn to_u64(&self) -> Option<u64> {
-        Some(self.0.as_u64())
-    }
-}
-
 impl FromPrimitive for Int256 {
     fn from_i64(n: i64) -> Option<Self> {
         Some(I256::from(n).into())
@@ -177,73 +189,55 @@ impl FromPrimitive for Int256 {
     }
 }
 
-impl From<I256> for Int256 {
-    fn from(value: I256) -> Self {
-        Self(Box::new(value))
+impl ToPrimitive for Int256 {
+    fn to_i64(&self) -> Option<i64> {
+        (*self.0 <= i256::from(i64::MAX)).then_some(self.0.as_i64())
+    }
+
+    fn to_u64(&self) -> Option<u64> {
+        (*self.0 <= i256::from(u64::MAX)).then_some(self.0.as_u64())
     }
 }
 
-impl FromStr for Int256 {
-    type Err = ParseIntError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        I256::from_str(s).map(Into::into)
-    }
-}
-
-// todo , dup code
-macro_rules! impl_from {
-    ($T:ty, $from_ty:path) => {
-        impl core::convert::From<$T> for Int256 {
+macro_rules! impl_from_type {
+    ($source:ty, $call:path, $target:ty) => {
+        impl core::convert::From<$source> for $target {
             #[inline]
-            fn from(t: $T) -> Self {
-                $from_ty(t).unwrap()
+            fn from(t: $source) -> Self {
+                $call(t).unwrap()
             }
         }
     };
 }
 
-macro_rules! impl_try_from_int256 {
-    ($from_ty:ty, $to_ty:ty, $convert:path, $err:expr) => {
-        impl core::convert::TryFrom<$from_ty> for $to_ty {
-            type Error = anyhow::Error;
-
-            fn try_from(value: $from_ty) -> Result<Self, Self::Error> {
-                // todo
-                Ok($convert(&value).unwrap())
-                //$convert(&value).ok_or_else(|| Self::Error::from($err))
-            }
-        }
-    };
-}
-
-impl_from!(isize, FromPrimitive::from_isize);
-impl_from!(i8, FromPrimitive::from_i8);
-impl_from!(i16, FromPrimitive::from_i16);
-impl_from!(i32, FromPrimitive::from_i32);
-impl_from!(i64, FromPrimitive::from_i64);
-impl_from!(usize, FromPrimitive::from_usize);
-impl_from!(u8, FromPrimitive::from_u8);
-impl_from!(u16, FromPrimitive::from_u16);
-impl_from!(u32, FromPrimitive::from_u32);
-impl_from!(u64, FromPrimitive::from_u64);
-
-impl_try_from_int256!(
-    Int256Ref<'_>,
-    i32,
-    Int256Ref::to_i32,
-    "Failed to convert to i32"
-);
-
-// impl<'a> From<Int256> for Int256Ref<'a> {
-//     fn from(value: Int256) -> Self {
-//         value.as_scalar_ref()
-//     }
-// }
+impl_from_type!(isize, FromPrimitive::from_isize, Int256);
+impl_from_type!(i8, FromPrimitive::from_i8, Int256);
+impl_from_type!(i16, FromPrimitive::from_i16, Int256);
+impl_from_type!(i32, FromPrimitive::from_i32, Int256);
+impl_from_type!(i64, FromPrimitive::from_i64, Int256);
+impl_from_type!(usize, FromPrimitive::from_usize, Int256);
+impl_from_type!(u8, FromPrimitive::from_u8, Int256);
+impl_from_type!(u16, FromPrimitive::from_u16, Int256);
+impl_from_type!(u32, FromPrimitive::from_u32, Int256);
+impl_from_type!(u64, FromPrimitive::from_u64, Int256);
 
 impl From<Int256Ref<'_>> for Int256 {
     fn from(value: Int256Ref<'_>) -> Self {
         Self(Box::new(*value.0))
+    }
+}
+
+impl Add<Int256> for Int256 {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Int256::from(self.0.as_ref() + rhs.0.as_ref())
+    }
+}
+
+impl CheckedAdd for Int256 {
+    fn checked_add(&self, other: &Self) -> Option<Self> {
+        self.0.checked_add(*other.0).map(Into::into)
     }
 }
 
@@ -276,28 +270,5 @@ impl Not for Int256 {
 
     fn not(self) -> Self::Output {
         Self(Box::new(self.0.as_ref().not()))
-    }
-}
-
-impl Not for Int256Ref<'_> {
-    type Output = Self;
-
-    fn not(self) -> Self::Output {
-        todo!()
-    }
-}
-
-// impl Int256 {
-//     fn xx() {
-//         I256::deserialize()
-//     }
-// }
-
-impl<'de> Deserialize<'de> for Int256 {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        I256::deserialize(deserializer).map(Into::into)
     }
 }

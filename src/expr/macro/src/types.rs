@@ -40,6 +40,7 @@ pub fn expand_type_wildcard(ty: &str) -> Vec<&str> {
         ],
         "*int" => vec!["int16", "int32", "int64"],
         "*number" => vec!["int16", "int32", "int64", "float32", "float64", "decimal"],
+        "*big_number" => vec!["int256"],
         _ => vec![ty],
     }
 }
