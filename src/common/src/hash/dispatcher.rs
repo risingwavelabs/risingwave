@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use num256::Int256;
 use super::HashKey;
 use crate::array::serial_array::Serial;
 use crate::hash;
+
 use crate::hash::{HeapNullBitmap, NullBitmap, StackNullBitmap, MAX_GROUP_KEYS_ON_STACK};
-use crate::types::DataType;
+use crate::types::{num256, DataType};
+
 
 /// An enum to help to dynamically dispatch [`HashKey`] template.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -104,6 +107,10 @@ fn hash_key_size(data_type: &DataType) -> HashKeySize {
         DataType::Int16 => HashKeySize::Fixed(size_of::<i16>()),
         DataType::Int32 => HashKeySize::Fixed(size_of::<i32>()),
         DataType::Int64 => HashKeySize::Fixed(size_of::<i64>()),
+<<<<<<< HEAD
+=======
+        DataType::Int256 => HashKeySize::Fixed(Int256::size()),
+>>>>>>> 4370bc2f2 (Add import for num256::Int256 and use for hash key size.)
         DataType::Serial => HashKeySize::Fixed(size_of::<Serial>()),
         DataType::Float32 => HashKeySize::Fixed(size_of::<F32>()),
         DataType::Float64 => HashKeySize::Fixed(size_of::<F64>()),
