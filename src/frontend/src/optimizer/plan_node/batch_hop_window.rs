@@ -19,7 +19,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HopWindowNode;
 
 use super::{
-    ExprRewritable, LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb,
+    generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb,
     ToDistributedBatch,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
@@ -32,24 +32,25 @@ use crate::utils::ColIndexMappingRewriteExt;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchHopWindow {
     pub base: PlanBase,
-    logical: LogicalHopWindow,
+    logical: generic::HopWindow<PlanRef>,
     window_start_exprs: Vec<ExprImpl>,
     window_end_exprs: Vec<ExprImpl>,
 }
 
 impl BatchHopWindow {
     pub fn new(
-        logical: LogicalHopWindow,
+        logical: generic::HopWindow<PlanRef>,
         window_start_exprs: Vec<ExprImpl>,
         window_end_exprs: Vec<ExprImpl>,
     ) -> Self {
-        let ctx = logical.base.ctx.clone();
+        let base = PlanBase::new_logical_with_core(&logical);
+        let ctx = base.ctx;
         let distribution = logical
             .i2o_col_mapping()
-            .rewrite_provided_distribution(logical.input().distribution());
+            .rewrite_provided_distribution(logical.input.distribution());
         let base = PlanBase::new_batch(
             ctx,
-            logical.schema().clone(),
+            base.schema,
             distribution,
             logical.get_out_column_index_order(),
         );
@@ -70,12 +71,14 @@ impl fmt::Display for BatchHopWindow {
 
 impl PlanTreeNodeUnary for BatchHopWindow {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
+        let mut logical = self.logical.clone();
+        logical.input = input;
         Self::new(
-            self.logical.clone_with_input(input),
+            logical,
             self.window_start_exprs.clone(),
             self.window_end_exprs.clone(),
         )
@@ -105,7 +108,8 @@ impl ToDistributedBatch for BatchHopWindow {
         let new_input = self
             .input()
             .to_distributed_with_required(required_order, &input_required)?;
-        let new_logical = self.logical.clone_with_input(new_input);
+        let mut new_logical = self.logical.clone();
+        new_logical.input = new_input;
         let batch_plan = BatchHopWindow::new(
             new_logical,
             self.window_start_exprs.clone(),
@@ -119,12 +123,11 @@ impl ToDistributedBatch for BatchHopWindow {
 impl ToBatchPb for BatchHopWindow {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::HopWindow(HopWindowNode {
-            time_col: self.logical.core.time_col.index() as _,
-            window_slide: Some(self.logical.core.window_slide.into()),
-            window_size: Some(self.logical.core.window_size.into()),
+            time_col: self.logical.time_col.index() as _,
+            window_slide: Some(self.logical.window_slide.into()),
+            window_size: Some(self.logical.window_size.into()),
             output_indices: self
                 .logical
-                .core
                 .output_indices
                 .iter()
                 .map(|&x| x as u32)

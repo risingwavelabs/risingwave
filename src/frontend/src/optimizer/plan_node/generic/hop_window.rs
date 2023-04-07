@@ -26,7 +26,8 @@ use super::super::utils::IndicesDisplay;
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::plan_node::batch::BatchPlanRef;
+use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::utils::ColIndexMappingRewriteExt;
 
 /// [`HopWindow`] implements Hop Table Function.
@@ -115,6 +116,13 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for HopWindow<PlanRef> {
             fd_set.add_functional_dependency_by_column_indices(&[end_idx], &[start_idx]);
         }
         fd_set
+    }
+}
+
+impl<PlanRef: BatchPlanRef> HopWindow<PlanRef> {
+    pub fn get_out_column_index_order(&self) -> Order {
+        self.i2o_col_mapping()
+            .rewrite_provided_order(self.input.order())
     }
 }
 
