@@ -385,13 +385,13 @@ impl Binder {
         })
     }
 
-    pub fn bind_get_indexes_size_select(&mut self, input: &ExprImpl) -> Result<BoundSelect> {
-        let arg = input.as_literal().ok_or_else(|| {
+    pub fn bind_get_indexes_size_select(&mut self, table: &ExprImpl) -> Result<BoundSelect> {
+        let arg = table.as_literal().ok_or_else(|| {
             ErrorCode::BindError(format!(
                 "pg_indexes_size only supports literals as arguments"
             ))
         })?;
-        // Get list of indexes
+        // Get list of indexes on this table
         let indexes = self.get_indexes_on_table(arg)?;
 
         // Get the size of each index
@@ -411,9 +411,11 @@ impl Binder {
             false,
         )?);
 
-        let mut input: Vec<ExprImpl> =
+        // Construct operand for ExprType::In operator: this will return only stats for
+        // indexes that are in the list Indexes on the target table.
+        let mut indices_on_table: Vec<ExprImpl> =
             vec![InputRef::new(RW_TABLE_STATS_TABLE_ID_INDEX, DataType::Int32).into()];
-        input.extend(indexes.into_iter().map(|id| {
+        indices_on_table.extend(indexes.into_iter().map(|id| {
             ExprImpl::Literal(Box::new(Literal::new(
                 Some(ScalarImpl::Int32(id.index_id as i32)),
                 DataType::Int32,
@@ -421,7 +423,8 @@ impl Binder {
         }));
 
         // Filter to only the Indexes on this table
-        let where_clause: Option<ExprImpl> = Some(FunctionCall::new(ExprType::In, input)?.into());
+        let where_clause: Option<ExprImpl> =
+            Some(FunctionCall::new(ExprType::In, indices_on_table)?.into());
 
         // Get the sum of all the sizes of all the indexes on this table
         let sum = FunctionCall::new(
@@ -457,17 +460,17 @@ impl Binder {
     pub fn bind_get_object_size_select(
         &mut self,
         output_name: &str,
-        input: &ExprImpl,
+        table: &ExprImpl,
     ) -> Result<BoundSelect> {
-        let arg = input.as_literal().ok_or_else(|| {
+        let arg = table.as_literal().ok_or_else(|| {
             ErrorCode::BindError(format!(
                 "{output_name} only supports varchar or int literals as arguments"
             ))
         })?;
-        let table_object_id = self.bind_object_id(arg)?;
+        let table_id = self.bind_object_id(arg)?;
 
-        let input = ExprImpl::Literal(Box::new(Literal::new(
-            Some(ScalarImpl::Int32(table_object_id.table_id as i32)),
+        let table_id_expr = ExprImpl::Literal(Box::new(Literal::new(
+            Some(ScalarImpl::Int32(table_id.table_id as i32)),
             DataType::Int32,
         )));
 
@@ -489,7 +492,7 @@ impl Binder {
             FunctionCall::new(
                 ExprType::Equal,
                 vec![
-                    input,
+                    table_id_expr,
                     InputRef::new(RW_TABLE_STATS_TABLE_ID_INDEX, DataType::Int32).into(),
                 ],
             )?
