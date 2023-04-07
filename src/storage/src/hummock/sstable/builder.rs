@@ -31,7 +31,7 @@ use super::{
     BlockBuilder, BlockBuilderOptions, BlockMeta, SstableMeta, SstableWriter, DEFAULT_BLOCK_SIZE,
     DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
 };
-use crate::hummock::sstable::{FilterBuilder, XorFilterBuilder};
+use crate::hummock::sstable::{create_monotonic_events, FilterBuilder, XorFilterBuilder};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{DeleteRangeTombstone, HummockResult};
 use crate::opts::StorageOpts;
@@ -344,6 +344,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             .map(|block_meta| block_meta.uncompressed_size as u64)
             .sum::<u64>();
 
+        let monotonic_tombstone_events = create_monotonic_events(&self.range_tombstones);
+
         let mut meta = SstableMeta {
             block_metas: self.block_metas,
             bloom_filter,
@@ -354,6 +356,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             version: VERSION,
             meta_offset,
             range_tombstone_list: self.range_tombstones,
+            monotonic_tombstone_events,
         };
         meta.estimated_size = meta.encoded_size() as u32 + meta_offset as u32;
 
