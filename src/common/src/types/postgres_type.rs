@@ -30,7 +30,6 @@ impl DataType {
             | DataType::Time => 8,
             DataType::Decimal
             | DataType::Varchar
-            // todo
             | DataType::Int256
             | DataType::Bytea
             | DataType::Interval
