@@ -19,6 +19,7 @@ use std::ops::Bound::*;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::HummockEpoch;
 
 use super::super::{HummockResult, HummockValue};
 use super::Sstable;
@@ -155,6 +156,8 @@ pub struct SstableIterator {
     sstable_store: SstableStoreRef,
     stats: StoreLocalStatistic,
     options: Arc<SstableIteratorReadOptions>,
+
+    epoch: HummockEpoch,
 }
 
 impl SstableIterator {
@@ -163,6 +166,7 @@ impl SstableIterator {
         sstable_store: SstableStoreRef,
         options: Arc<SstableIteratorReadOptions>,
     ) -> Self {
+        let epoch = options.read_epoch_to_fast_delete;
         Self {
             block_iter: None,
             cur_idx: 0,
@@ -173,6 +177,7 @@ impl SstableIterator {
             sstable_store,
             stats: StoreLocalStatistic::default(),
             options,
+            epoch,
         }
     }
 
@@ -290,13 +295,25 @@ impl HummockIterator for SstableIterator {
     }
 
     fn key(&self) -> FullKey<&[u8]> {
-        self.block_iter.as_ref().expect("no block iter").key()
+        let block_iter = self.block_iter.as_ref().expect("no block iter");
+        if block_iter.earliest_delete_epoch() > self.epoch {
+            block_iter.key()
+        } else {
+            let mut full_key = block_iter.key();
+            full_key.epoch = block_iter.earliest_delete_epoch();
+            full_key
+        }
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
-        let raw_value = self.block_iter.as_ref().expect("no block iter").value();
+        let block_iter = self.block_iter.as_ref().expect("no block iter");
+        if block_iter.earliest_delete_epoch() > self.epoch {
+            let raw_value = block_iter.value();
 
-        HummockValue::from_slice(raw_value).expect("decode error")
+            HummockValue::from_slice(raw_value).expect("decode error")
+        } else {
+            HummockValue::Delete
+        }
     }
 
     fn is_valid(&self) -> bool {
@@ -358,6 +375,7 @@ mod tests {
     use rand::prelude::*;
     use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::HummockEpoch;
 
     use super::*;
     use crate::assert_bytes_eq;
@@ -510,6 +528,7 @@ mod tests {
                 .unwrap(),
             sstable_store,
             Arc::new(SstableIteratorReadOptions {
+                read_epoch_to_fast_delete: HummockEpoch::MIN,
                 cache_policy: CachePolicy::Fill(CachePriority::High),
                 must_iterated_end_user_key: None,
             }),

@@ -378,7 +378,10 @@ pub async fn get_from_sstable_info(
     let mut iter = SstableIterator::create(
         sstable,
         sstable_store_ref.clone(),
-        Arc::new(SstableIteratorReadOptions::from_read_options(read_options)),
+        Arc::new(SstableIteratorReadOptions::from_read_options(
+            read_options,
+            full_key.epoch,
+        )),
     );
     iter.seek(full_key).await?;
     // Iterator has sought passed the borders.

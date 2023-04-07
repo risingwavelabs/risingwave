@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::LocalSstableInfo;
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use tokio::task::JoinHandle;
 
 use super::CompactionDeleteRanges;
@@ -138,7 +138,8 @@ where
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
     ) -> HummockResult<()> {
-        self.add_full_key(full_key, value, is_new_user_key).await
+        self.add_full_key(full_key, HummockEpoch::MAX, value, is_new_user_key)
+            .await
     }
 
     /// Adds a key-value pair to the underlying builders.
@@ -151,6 +152,7 @@ where
     pub async fn add_full_key(
         &mut self,
         full_key: FullKey<&[u8]>,
+        earliest_delete_epoch: HummockEpoch,
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
     ) -> HummockResult<()> {
@@ -175,7 +177,9 @@ where
         }
 
         let builder = self.current_builder.as_mut().unwrap();
-        builder.add(full_key, value, is_new_user_key).await
+        builder
+            .add(full_key, earliest_delete_epoch, value, is_new_user_key)
+            .await
     }
 
     /// Marks the current builder as sealed. Next call of `add` will always create a new table.

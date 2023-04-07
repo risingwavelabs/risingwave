@@ -217,18 +217,7 @@ pub async fn gen_test_sstable_inner<B: AsRef<[u8]> + Clone + Default + Eq>(
         .clone()
         .create_sst_writer(object_id, writer_opts);
     let mut b = SstableBuilder::for_test(object_id, writer, opts);
-
-    let mut last_key = FullKey::<B>::default();
-    let mut user_key_last_delete = HummockEpoch::MAX;
-    for (mut key, value) in kv_iter {
-        let mut is_new_user_key =
-            last_key.is_empty() || key.user_key.as_ref() != last_key.user_key.as_ref();
-        let epoch = key.epoch;
-        if is_new_user_key {
-            last_key = key.clone();
-            user_key_last_delete = HummockEpoch::MAX;
-        }
-
+    for (key, value) in kv_iter {
         let mut earliest_delete_epoch = HummockEpoch::MAX;
         for range_tombstone in &range_tombstones {
             if range_tombstone
@@ -245,21 +234,7 @@ pub async fn gen_test_sstable_inner<B: AsRef<[u8]> + Clone + Default + Eq>(
                 earliest_delete_epoch = range_tombstone.sequence;
             }
         }
-
-        if value.is_delete() {
-            user_key_last_delete = epoch;
-        } else if earliest_delete_epoch < user_key_last_delete {
-            user_key_last_delete = earliest_delete_epoch;
-
-            key.epoch = earliest_delete_epoch;
-            b.add(key.to_ref(), HummockValue::Delete, is_new_user_key)
-                .await
-                .unwrap();
-            key.epoch = epoch;
-            is_new_user_key = false;
-        }
-
-        b.add(key.to_ref(), value.as_slice(), is_new_user_key)
+        b.add(key.to_ref(), earliest_delete_epoch, value.as_slice(), true)
             .await
             .unwrap();
     }

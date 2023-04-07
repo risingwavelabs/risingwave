@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::ValidationTask;
 
 use crate::hummock::iterator::HummockIterator;
@@ -59,6 +60,7 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
             holder,
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions {
+                read_epoch_to_fast_delete: HummockEpoch::MIN,
                 cache_policy: CachePolicy::NotFill,
                 must_iterated_end_user_key: None,
             }),
