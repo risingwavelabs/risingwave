@@ -392,7 +392,7 @@ impl Binder {
             ))
         })?;
         // Get list of indexes on this table
-        let indexes = self.get_indexes_on_table(arg)?;
+        let indexes = self.get_indexes_on_table_by_literal(arg)?;
 
         // Get the size of each index
         // define the output schema
@@ -467,7 +467,7 @@ impl Binder {
                 "{output_name} only supports varchar or int literals as arguments"
             ))
         })?;
-        let table_id = self.bind_table_by_id(arg)?;
+        let table_id = self.get_table_by_literal(arg)?.table_id;
 
         let table_id_expr = ExprImpl::Literal(Box::new(Literal::new(
             Some(ScalarImpl::Int32(table_id.table_id as i32)),
@@ -585,62 +585,39 @@ impl Binder {
         })
     }
 
+    fn get_indexes_on_table_by_literal(&mut self, arg: &Literal) -> Result<Vec<IndexId>> {
+        self.get_table_by_literal(arg)
+            .map(|table| table.table_indexes.iter().map(|idx| idx.id).collect())
+    }
+
     /// Uses a literal value to look up the ID of an Object (e.g. a table). If the literal is an
     /// integer (int16, int32, or int64) this will just return that number as an ObjectID value.
     /// If the literal is a varchar, this will look in the Catalog for an object with a name that
     /// matches the varchar and return its Object ID value; of no match is found then an error is
     /// returned.
-    fn bind_table_by_id(&mut self, arg: &Literal) -> Result<TableId> {
+    fn get_table_by_literal(&mut self, arg: &Literal) -> Result<BoundBaseTable> {
         match arg
             .get_data()
             .as_ref()
             .ok_or_else(|| ErrorCode::BindError("No Value".to_string()))?
         {
-            ScalarImpl::Int16(id) => Ok(TableId::new(*id as u32)),
-            ScalarImpl::Int32(id) => Ok(TableId::new(*id as u32)),
-            ScalarImpl::Int64(id) => Ok(TableId::new(*id as u32)),
+            ScalarImpl::Int16(id) => self.get_table_by_id(&TableId::new(*id as u32)),
+            ScalarImpl::Int32(id) => self.get_table_by_id(&TableId::new(*id as u32)),
+            ScalarImpl::Int64(id) => self.get_table_by_id(&TableId::new(*id as u32)),
             ScalarImpl::Utf8(name) => {
-                let object = self.get_table_by_varchar_literal(name)?;
-                Ok(object.table_id)
-            }
-            _ => Err(ErrorCode::BindError(
-                "This only supports Object IDs (int) or Object Names (varchar) literals."
-                    .to_string(),
-            ))?,
-        }
-    }
+                let object_name = Self::parse_object_name(&name)?;
+                let (schema_name, table_name) =
+                    Self::resolve_schema_qualified_name(&self.db_name, object_name)?;
 
-    fn get_indexes_on_table(&mut self, arg: &Literal) -> Result<Vec<IndexId>> {
-        // arg is integer look up table by ID
-        // arg is varchar look up table by name
-        let table = match arg
-            .get_data()
-            .as_ref()
-            .ok_or_else(|| ErrorCode::BindError("No Value".to_string()))?
-        {
-            ScalarImpl::Int16(id) => self.get_table_by_id(&TableId::new(*id as u32))?,
-            ScalarImpl::Int32(id) => self.get_table_by_id(&TableId::new(*id as u32))?,
-            ScalarImpl::Int64(id) => self.get_table_by_id(&TableId::new(*id as u32))?,
-            ScalarImpl::Utf8(name) => self.get_table_by_varchar_literal(name)?,
+                self.get_table_by_name(schema_name.as_deref(), &table_name)
+            }
             _ => {
                 return Err(ErrorCode::BindError(
                     "This only supports Object Names (varchar) literals.".to_string(),
                 )
                 .into())
             }
-        };
-        // get the list of index IDs and return
-        let indexes = table.table_indexes.iter().map(|idx| idx.id).collect();
-        Ok(indexes)
-    }
-
-    /// Attempt to get the reference to a Database object by it's name.
-    fn get_table_by_varchar_literal(&mut self, name: &str) -> Result<BoundBaseTable> {
-        let object_name = Self::parse_object_name(name)?;
-        let (schema_name, table_name) =
-            Self::resolve_schema_qualified_name(&self.db_name, object_name)?;
-
-        self.get_table_by_name(schema_name.as_deref(), &table_name)
+        }
     }
 
     /// Attempt to parse the value of a varchar Literal into an
