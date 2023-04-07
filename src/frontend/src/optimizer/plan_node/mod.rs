@@ -601,10 +601,10 @@ pub use predicate_pushdown::*;
 mod merge_eq_nodes;
 pub use merge_eq_nodes::*;
 
+pub mod batch;
 pub mod generic;
 pub mod stream;
 pub mod stream_derive;
-pub mod batch;
 
 pub use generic::{PlanAggCall, PlanAggCallDisplay};
 
