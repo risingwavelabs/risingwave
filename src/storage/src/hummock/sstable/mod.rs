@@ -132,6 +132,24 @@ pub struct MonotonicDeleteEvent {
     new_epoch: HummockEpoch,
 }
 
+fn create_monotonic_events(
+    delete_range_tombstones: &Vec<DeleteRangeTombstone>,
+) -> Vec<MonotonicDeleteEvent> {
+    let (events, _) = DeleteRangeAggregatorBuilder::build_events(delete_range_tombstones);
+    let mut epochs = BTreeSet::new();
+    let mut monotonic_tombstone_events = Vec::with_capacity(events.len());
+    for event in events {
+        apply_event(&mut epochs, &event);
+        monotonic_tombstone_events.push(MonotonicDeleteEvent {
+            event_key: event.0,
+            new_epoch: epochs.first().map_or(HummockEpoch::MAX, |epoch| *epoch),
+        });
+    }
+    monotonic_tombstone_events.dedup_by_key(|MonotonicDeleteEvent { new_epoch, .. }| *new_epoch);
+
+    monotonic_tombstone_events
+}
+
 /// [`Sstable`] is a handle for accessing SST.
 #[derive(Clone)]
 pub struct Sstable {
@@ -160,18 +178,7 @@ impl Sstable {
         let filter_data = std::mem::take(&mut meta.bloom_filter);
         let filter_reader = XorFilterReader::new(filter_data);
 
-        let (events, _) = DeleteRangeAggregatorBuilder::build_events(&meta.range_tombstone_list);
-        let mut epochs = BTreeSet::new();
-        let mut monotonic_tombstone_events = Vec::with_capacity(events.len());
-        for event in events {
-            apply_event(&mut epochs, &event);
-            monotonic_tombstone_events.push(MonotonicDeleteEvent {
-                event_key: event.0,
-                new_epoch: epochs.first().map_or(HummockEpoch::MAX, |epoch| *epoch),
-            });
-        }
-        monotonic_tombstone_events
-            .dedup_by_key(|MonotonicDeleteEvent { new_epoch, .. }| *new_epoch);
+        let monotonic_tombstone_events = create_monotonic_events(&meta.range_tombstone_list);
 
         Self {
             id,
