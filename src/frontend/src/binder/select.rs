@@ -600,7 +600,7 @@ impl Binder {
             ScalarImpl::Int32(id) => Ok(TableId::new(*id as u32)),
             ScalarImpl::Int64(id) => Ok(TableId::new(*id as u32)),
             ScalarImpl::Utf8(name) => {
-                let object = self.get_table_by_qualified_name(name)?;
+                let object = self.get_table_by_varchar_literal(name)?;
                 Ok(object.table_id)
             }
             _ => Err(ErrorCode::BindError(
@@ -621,7 +621,7 @@ impl Binder {
             ScalarImpl::Int16(id) => self.get_table_by_id(&TableId::new(*id as u32))?,
             ScalarImpl::Int32(id) => self.get_table_by_id(&TableId::new(*id as u32))?,
             ScalarImpl::Int64(id) => self.get_table_by_id(&TableId::new(*id as u32))?,
-            ScalarImpl::Utf8(name) => self.get_table_by_qualified_name(name)?,
+            ScalarImpl::Utf8(name) => self.get_table_by_varchar_literal(name)?,
             _ => {
                 return Err(ErrorCode::BindError(
                     "This only supports Object Names (varchar) literals.".to_string(),
@@ -635,7 +635,7 @@ impl Binder {
     }
 
     /// Attempt to get the reference to a Database object by it's name.
-    fn get_table_by_qualified_name(&mut self, name: &str) -> Result<BoundBaseTable> {
+    fn get_table_by_varchar_literal(&mut self, name: &str) -> Result<BoundBaseTable> {
         let object_name = Self::parse_object_name(name)?;
         let (schema_name, table_name) =
             Self::resolve_schema_qualified_name(&self.db_name, object_name)?;
