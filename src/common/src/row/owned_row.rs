@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::{self, Deref};
-
 use super::Row;
 use crate::collection::estimate_size::EstimateSize;
 use crate::types::{
@@ -28,7 +26,7 @@ use crate::util::value_encoding::deserialize_datum;
 pub struct OwnedRow(Vec<Datum>);
 
 /// Do not implement `IndexMut` to make it immutable.
-impl ops::Index<usize> for OwnedRow {
+impl std::ops::Index<usize> for OwnedRow {
     type Output = Datum;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -226,53 +224,6 @@ impl<D: AsRef<[DataType]>> RowDeserializer<D> {
 
     pub fn data_types(&self) -> &[DataType] {
         self.data_types.as_ref()
-    }
-}
-
-/// A simple wrapper for [`OwnedRow`], which assumes that all fields are defined as `ASC` order.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub struct AscentOwnedRow(OwnedRow);
-
-impl AscentOwnedRow {
-    pub fn into_inner(self) -> OwnedRow {
-        self.0
-    }
-}
-
-impl Deref for AscentOwnedRow {
-    type Target = OwnedRow;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Row for AscentOwnedRow {
-    type Iter<'a> = <OwnedRow as Row>::Iter<'a>;
-
-    deref_forward_row! {}
-
-    fn into_owned_row(self) -> OwnedRow {
-        self.into_inner()
-    }
-}
-
-impl PartialOrd for AscentOwnedRow {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.0.as_inner().partial_cmp(other.0.as_inner())
-    }
-}
-
-impl Ord for AscentOwnedRow {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other)
-            .unwrap_or_else(|| panic!("cannot compare rows with different types"))
-    }
-}
-
-impl From<OwnedRow> for AscentOwnedRow {
-    fn from(row: OwnedRow) -> Self {
-        Self(row)
     }
 }
 

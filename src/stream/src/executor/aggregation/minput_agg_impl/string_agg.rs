@@ -15,7 +15,7 @@
 use risingwave_common::types::{Datum, DatumRef, ScalarRefImpl};
 use smallvec::SmallVec;
 
-use super::StateCacheAggregator;
+use super::MInputAggregator;
 
 pub struct StringAggData {
     delim: String,
@@ -24,7 +24,7 @@ pub struct StringAggData {
 
 pub struct StringAgg;
 
-impl StateCacheAggregator for StringAgg {
+impl MInputAggregator for StringAgg {
     type Value = StringAggData;
 
     fn convert_cache_value(&self, value: SmallVec<[DatumRef<'_>; 2]>) -> Self::Value {
@@ -56,14 +56,14 @@ impl StateCacheAggregator for StringAgg {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::executor::aggregation::state_cache::cache::OrderedCache;
+    use crate::common::cache::TopNCache;
 
     #[test]
     fn test_string_agg_aggregate() {
         let agg = StringAgg;
 
-        let mut cache = OrderedCache::new(10);
-        assert_eq!(agg.aggregate(cache.iter_values()), None);
+        let mut cache = TopNCache::new(10);
+        assert_eq!(agg.aggregate(cache.values()), None);
 
         cache.insert(
             vec![1, 2, 3],
@@ -80,7 +80,7 @@ mod tests {
             },
         );
         assert_eq!(
-            agg.aggregate(cache.iter_values()),
+            agg.aggregate(cache.values()),
             Some("hello,world".to_string().into())
         );
 
@@ -92,7 +92,7 @@ mod tests {
             },
         );
         assert_eq!(
-            agg.aggregate(cache.iter_values()),
+            agg.aggregate(cache.values()),
             Some("emmm_hello,world".to_string().into())
         );
     }
