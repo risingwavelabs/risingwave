@@ -15,7 +15,6 @@
 use std::fmt::Debug;
 
 use itertools::Itertools;
-use risingwave_common::array::ListValue;
 use risingwave_common::catalog::{
     Field, IndexId, Schema, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME,
 };
@@ -389,12 +388,11 @@ impl Binder {
     pub fn bind_get_indexes_size_select(&mut self, input: &ExprImpl) -> Result<BoundSelect> {
         let arg = input.as_literal().ok_or_else(|| {
             ErrorCode::BindError(format!(
-                "pg_indexes_size only supports varchar or int literals as arguments"
+                "pg_indexes_size only supports literals as arguments"
             ))
         })?;
         // Get list of indexes
         let indexes = self.get_indexes_on_table(arg)?;
-        println!("Index: {indexes:?}");
 
         // Get the size of each index
         // define the output schema
@@ -413,26 +411,14 @@ impl Binder {
             false,
         )?);
 
-        let mut idx_id_list: Vec<_> = indexes
-            .into_iter()
-            .map(|id| {
-                ExprImpl::Literal(Box::new(Literal::new(
-                    Some(ScalarImpl::Int32(id.index_id as i32)),
-                    DataType::Int32,
-                )))
-            })
-            .collect();
-        // let list_val = ListValue::new(idx_id_list.collect());
-        // let list_literal = Literal::new(
-        // Some(ScalarImpl::List(list_val)),
-        // DataType::List {
-        // datatype: Box::new(DataType::Int32),
-        // },
-        // );
-        // let input = ExprImpl::Literal(Box::new(list_literal));
         let mut input: Vec<ExprImpl> =
             vec![InputRef::new(RW_TABLE_STATS_TABLE_ID_INDEX, DataType::Int32).into()];
-        input.append(&mut idx_id_list);
+        input.extend(indexes.into_iter().map(|id| {
+            ExprImpl::Literal(Box::new(Literal::new(
+                Some(ScalarImpl::Int32(id.index_id as i32)),
+                DataType::Int32,
+            )))
+        }));
 
         // Filter to only the Indexes on this table
         let where_clause: Option<ExprImpl> = Some(FunctionCall::new(ExprType::In, input)?.into());
@@ -446,6 +432,7 @@ impl Binder {
             ],
         )?
         .into();
+
         let select_items = vec![AggCall::new(
             AggKind::Sum0,
             vec![sum],
@@ -634,8 +621,7 @@ impl Binder {
             }
             _ => {
                 return Err(ErrorCode::BindError(
-                    "This only supports Object IDs (int) or Object Names (varchar) literals."
-                        .to_string(),
+                    "This only supports Object Names (varchar) literals.".to_string(),
                 )
                 .into())
             }
