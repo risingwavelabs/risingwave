@@ -102,11 +102,11 @@ impl Rule for IndexSelectionRule {
             self.estimate_full_table_scan_cost(logical_scan, primary_table_row_size),
         );
 
+        let mut final_plan: PlanRef = logical_scan.clone().into();
         #[expect(
             clippy::redundant_clone,
             reason = "false positive https://github.com/rust-lang/rust-clippy/issues/10545"
         )]
-        let mut final_plan: PlanRef = logical_scan.clone().into();
         let mut min_cost = primary_cost.clone();
 
         for index in indexes {
