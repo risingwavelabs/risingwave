@@ -202,67 +202,6 @@ mod test {
     use super::*;
     use crate::executor::test_utils::*;
 
-    #[ignore]
-    #[tokio::test]
-    async fn test_mysqlsink() {
-        use risingwave_common::array::stream_chunk::StreamChunk;
-        use risingwave_common::array::StreamChunkTestExt;
-        use risingwave_common::catalog::Field;
-        use risingwave_common::types::DataType;
-
-        use crate::executor::Barrier;
-
-        let properties = maplit::hashmap! {
-        "connector".into() => "mysql".into(),
-        "endpoint".into() => "127.0.0.1:3306".into(),
-        "database".into() => "db".into(),
-        "table".into() => "t".into(),
-        "user".into() => "root".into()
-        };
-        let schema = Schema::new(vec![
-            Field::with_name(DataType::Int32, "v1"),
-            Field::with_name(DataType::Int32, "v2"),
-            Field::with_name(DataType::Int32, "v3"),
-        ]);
-        let pk = vec![];
-
-        // Mock `child`
-        let mock = MockSource::with_messages(
-            schema.clone(),
-            pk.clone(),
-            vec![
-                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                    " I I I
-            +  3 2 1",
-                ))),
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                    " I I I
-            +  6 5 4",
-                ))),
-            ],
-        );
-
-        let config = SinkConfig::from_hashmap(properties).unwrap();
-        let sink_executor = SinkExecutor::new(
-            Box::new(mock),
-            Arc::new(StreamingMetrics::unused()),
-            config,
-            0,
-            Default::default(),
-            schema.clone(),
-            pk.clone(),
-            SinkType::AppendOnly,
-        );
-
-        let mut executor = SinkExecutor::execute(Box::new(sink_executor));
-
-        executor.next().await.unwrap().unwrap();
-        executor.next().await.unwrap().unwrap();
-        executor.next().await.unwrap().unwrap();
-        executor.next().await.unwrap().unwrap();
-    }
-
     #[tokio::test]
     async fn test_force_append_only_sink() {
         use risingwave_common::array::stream_chunk::StreamChunk;
@@ -274,7 +213,7 @@ mod test {
 
         let properties = maplit::hashmap! {
             "connector".into() => "blackhole".into(),
-            "format".into() => "append_only".into(),
+            "type".into() => "append-only".into(),
             "force_append_only".into() => "true".into()
         };
         let schema = Schema::new(vec![

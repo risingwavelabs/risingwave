@@ -194,7 +194,6 @@ tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev =
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0c25710", features = ["fs", "net"] }
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 tonic = { version = "0.8", features = ["gzip", "tls-webpki-roots"] }
-tonic-build = { version = "0.8" }
 tower = { version = "0.4", features = ["balance", "buffer", "filter", "limit", "load-shed", "retry", "timeout", "util"] }
 tracing = { version = "0.1", features = ["log", "release_max_level_trace"] }
 tracing-core = { version = "0.1" }

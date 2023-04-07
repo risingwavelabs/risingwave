@@ -181,10 +181,7 @@ def test_upsert_iceberg_sink(input_file):
 def test_deltalake_sink(input_file):
     test_sink("deltalake",
               {"location":"minio://minioadmin:minioadmin@127.0.0.1:9000/bucket/delta",
-               "location.type":"minio",
-               "storage_options.s3a_endpoint":"http://127.0.0.1:9000",
-               "storage_options.s3a_access_key":"minioadmin",
-               "storage_options.s3a_secret_key":"minioadmin"},
+               "location.type":"minio"},
               input_file)
 
 if __name__ == "__main__":

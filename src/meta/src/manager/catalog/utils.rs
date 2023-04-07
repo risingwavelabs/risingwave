@@ -251,6 +251,11 @@ impl QueryRewriter<'_> {
             | Expr::Nested(expr)
             | Expr::ArrayIndex { obj: expr, .. } => self.visit_expr(expr),
 
+            Expr::Position { substring, string } => {
+                self.visit_expr(substring);
+                self.visit_expr(string);
+            }
+
             Expr::InSubquery { expr, subquery, .. } => {
                 self.visit_expr(expr);
                 self.visit_query(subquery);

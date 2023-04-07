@@ -154,6 +154,20 @@ impl StreamSink {
             }
         }
 
+        if properties.contains_key(SINK_USER_FORCE_APPEND_ONLY_OPTION)
+            && !properties.value_eq_ignore_case(SINK_USER_FORCE_APPEND_ONLY_OPTION, "true")
+            && !properties.value_eq_ignore_case(SINK_USER_FORCE_APPEND_ONLY_OPTION, "false")
+        {
+            return Err(ErrorCode::SinkError(Box::new(Error::new(
+                ErrorKind::InvalidInput,
+                format!(
+                    "`{}` must be true or false",
+                    SINK_USER_FORCE_APPEND_ONLY_OPTION
+                ),
+            )))
+            .into());
+        }
+
         let frontend_derived_append_only = input_append_only;
         let user_defined_append_only =
             properties.value_eq_ignore_case(SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY);

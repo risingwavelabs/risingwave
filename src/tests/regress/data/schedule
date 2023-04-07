@@ -8,6 +8,6 @@
 # test: tablespace
 
 test: boolean varchar text int2 int4 int8 float4 float8 comments
-test: date time timestamp interval
+test: strings date time timestamp interval
 test: case arrays
 test: jsonb

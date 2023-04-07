@@ -30,6 +30,7 @@ use crate::common::KafkaCommon;
 pub const KAFKA_CONNECTOR: &str = "kafka";
 pub const KAFKA_PROPS_BROKER_KEY: &str = "properties.bootstrap.server";
 pub const KAFKA_PROPS_BROKER_KEY_ALIAS: &str = "kafka.brokers";
+pub const PRIVATELINK_CONNECTION: &str = "privatelink";
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct KafkaProperties {

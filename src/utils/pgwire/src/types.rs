@@ -16,7 +16,6 @@ use std::iter::TrustedLen;
 use std::ops::Index;
 use std::slice::Iter;
 
-use anyhow::anyhow;
 use bytes::Bytes;
 
 use crate::error::{PsqlError, PsqlResult};
@@ -67,10 +66,9 @@ impl Format {
         match format_code {
             0 => Ok(Format::Text),
             1 => Ok(Format::Binary),
-            _ => Err(PsqlError::Internal(anyhow!(
-                "Unknown format code: {}",
-                format_code
-            ))),
+            _ => Err(PsqlError::Internal(
+                format!("Unknown format code: {}", format_code).into(),
+            )),
         }
     }
 }
