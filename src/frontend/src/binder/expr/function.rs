@@ -522,7 +522,7 @@ impl Binder {
                 ))),
                 ("pg_table_size", guard_by_len(1, raw(|binder, inputs|{
                         let input = &inputs[0];
-                        let bound_query = binder.bind_get_table_size_by_id_select(input)?;
+                        let bound_query = binder.bind_get_object_size_select("pg_table_size", input)?;
                         Ok(ExprImpl::Subquery(Box::new(Subquery::new(
                             BoundQuery {
                                 body: BoundSetExpr::Select(Box::new(bound_query)),

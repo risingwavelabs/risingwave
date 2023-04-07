@@ -25,7 +25,7 @@ use risingwave_sqlparser::tokenizer::{Token, Tokenizer};
 
 use super::bind_context::{Clause, ColumnBinding};
 use super::statement::RewriteExprsRecursive;
-use super::UNNAMED_COLUMN;
+use super::{BoundBaseTable, UNNAMED_COLUMN};
 use crate::binder::{Binder, Relation};
 use crate::catalog::system_catalog::pg_catalog::{
     PG_USER_ID_INDEX, PG_USER_NAME_INDEX, PG_USER_TABLE_NAME,
@@ -381,13 +381,17 @@ impl Binder {
         })
     }
 
-    pub fn bind_get_table_size_by_id_select(&mut self, input: &ExprImpl) -> Result<BoundSelect> {
+    pub fn bind_get_object_size_select(
+        &mut self,
+        output_name: &str,
+        input: &ExprImpl,
+    ) -> Result<BoundSelect> {
         let arg = input.as_literal().ok_or_else(|| {
-            ErrorCode::BindError(
-                "pg_table_size only supports varchar or int literals as arguments".to_string(),
-            )
+            ErrorCode::BindError(format!(
+                "{output_name} only supports varchar or int literals as arguments"
+            ))
         })?;
-        let table_object_id = self.lookup_object_id(arg)?;
+        let table_object_id = self.bind_object_id(arg)?;
 
         let input = ExprImpl::Literal(Box::new(Literal::new(
             Some(ScalarImpl::Int32(table_object_id.table_id as i32)),
@@ -396,10 +400,7 @@ impl Binder {
 
         // define the output schema
         let result_schema = Schema {
-            fields: vec![Field::with_name(
-                DataType::Int64,
-                "pg_table_size".to_string(),
-            )],
+            fields: vec![Field::with_name(DataType::Int64, output_name.to_string())],
         };
 
         // Get table stats data
@@ -513,7 +514,7 @@ impl Binder {
     /// If the literal is a varchar, this will look in the Catalog for an object with a name that
     /// matches the varchar and return its Object ID value; of no match is found then an error is
     /// returned.
-    fn lookup_object_id(&mut self, arg: &Literal) -> Result<TableId> {
+    fn bind_object_id(&mut self, arg: &Literal) -> Result<TableId> {
         match arg
             .get_data()
             .as_ref()
@@ -523,11 +524,7 @@ impl Binder {
             ScalarImpl::Int32(id) => Ok(TableId::new(*id as u32)),
             ScalarImpl::Int64(id) => Ok(TableId::new(*id as u32)),
             ScalarImpl::Utf8(name) => {
-                let object_name = Self::parse_object_name(name)?;
-                let (schema_name, table_name) =
-                    Self::resolve_schema_qualified_name(&self.db_name, object_name)?;
-
-                let object = self.bind_table(schema_name.as_deref(), &table_name, None)?;
+                let object = self.get_object_by_name(name)?;
                 Ok(object.table_id)
             }
             _ => Err(ErrorCode::BindError(
@@ -535,6 +532,15 @@ impl Binder {
                     .to_string(),
             ))?,
         }
+    }
+
+    /// Attempt to get the reference to a Database object by it's name.
+    fn get_object_by_name(&mut self, name: &str) -> Result<BoundBaseTable> {
+        let object_name = Self::parse_object_name(name)?;
+        let (schema_name, table_name) =
+            Self::resolve_schema_qualified_name(&self.db_name, object_name)?;
+
+        self.bind_table(schema_name.as_deref(), &table_name, None)
     }
 
     /// Attempt to parse the value of a varchar Literal into an
