@@ -16,11 +16,11 @@ use risingwave_common::array::ListValue;
 use risingwave_common::types::{Datum, DatumRef, ScalarRefImpl};
 use smallvec::SmallVec;
 
-use super::StateCacheAggregator;
+use super::MInputAggregator;
 
 pub struct ArrayAgg;
 
-impl StateCacheAggregator for ArrayAgg {
+impl MInputAggregator for ArrayAgg {
     type Value = Datum;
 
     fn convert_cache_value(&self, value: SmallVec<[DatumRef<'_>; 2]>) -> Self::Value {
@@ -39,19 +39,19 @@ impl StateCacheAggregator for ArrayAgg {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::executor::aggregation::state_cache::cache::OrderedCache;
+    use crate::common::cache::TopNCache;
 
     #[test]
     fn test_array_agg_aggregate() {
         let agg = ArrayAgg;
 
-        let mut cache = OrderedCache::new(10);
-        assert_eq!(agg.aggregate(cache.iter_values()), None);
+        let mut cache = TopNCache::new(10);
+        assert_eq!(agg.aggregate(cache.values()), None);
 
         cache.insert(vec![1, 2, 3], Some("hello".to_string().into()));
         cache.insert(vec![1, 2, 4], Some("world".to_string().into()));
         assert_eq!(
-            agg.aggregate(cache.iter_values()),
+            agg.aggregate(cache.values()),
             Some(
                 ListValue::new(vec![
                     Some("hello".to_string().into()),
@@ -63,7 +63,7 @@ mod tests {
 
         cache.insert(vec![0, 1, 2], Some("emmm".to_string().into()));
         assert_eq!(
-            agg.aggregate(cache.iter_values()),
+            agg.aggregate(cache.values()),
             Some(
                 ListValue::new(vec![
                     Some("emmm".to_string().into()),
@@ -76,7 +76,7 @@ mod tests {
 
         cache.insert(vec![6, 6, 6], None);
         assert_eq!(
-            agg.aggregate(cache.iter_values()),
+            agg.aggregate(cache.values()),
             Some(
                 ListValue::new(vec![
                     Some("emmm".to_string().into()),

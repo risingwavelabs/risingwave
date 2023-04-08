@@ -112,6 +112,10 @@ impl LevelHandler {
             .map(|task| task.task_id)
             .collect_vec()
     }
+
+    pub fn get_pending_tasks(&self) -> Vec<RunningCompactTask> {
+        self.pending_tasks.clone()
+    }
 }
 
 impl From<&LevelHandler> for risingwave_pb::hummock::LevelHandler {

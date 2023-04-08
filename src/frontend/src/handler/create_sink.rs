@@ -81,7 +81,7 @@ pub fn gen_sink_plan(
     let definition = context.normalized_sql().to_owned();
 
     let (dependent_relations, bound) = {
-        let mut binder = Binder::new(session);
+        let mut binder = Binder::new(session, vec![]);
         let bound = binder.bind_query(*query)?;
         (binder.included_relations(), bound)
     };

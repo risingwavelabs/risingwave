@@ -18,7 +18,7 @@ anyhow = { version = "1", features = ["backtrace"] }
 chrono = { version = "0.4", features = ['serde'] }
 clap = { version = "4", features = ["derive"] }
 pg_interval = "0.4"
-rust_decimal ={ version = "1.25", features = ["db-postgres","db-tokio-postgres"] }
+rust_decimal ={ version = "1.25", features = ["db-postgres"] }
 tokio = { version = "1", features = ["rt", "macros","rt-multi-thread"] }
 tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"] }
 tracing = "0.1"
