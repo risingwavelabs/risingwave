@@ -54,7 +54,7 @@ pub trait LogWriter {
     where
         Self: 'a;
 
-    /// Initialized the log writer with an initialize
+    /// Initialize the log writer with an epoch
     fn init(&mut self, epoch: u64) -> Self::InitFuture<'_>;
 
     /// Write a stream chunk to the log writer
@@ -312,5 +312,81 @@ impl LogWriter for BoundedInMemLogStoreWriter {
 
     fn update_vnode_bitmap(&mut self, _new_vnodes: Arc<Bitmap>) {
         // Since this is in memory, we don't need to handle the vnode bitmap
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::{Op, StreamChunk};
+    use risingwave_common::row::OwnedRow;
+    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+
+    use crate::common::log_store::{BoundedInMemLogStoreFactory, LogReader, LogStoreFactory, LogStoreReadItem, LogWriter};
+
+    #[tokio::test]
+    async fn test_in_memory_log_store() {
+        let factory = BoundedInMemLogStoreFactory::new(4);
+        let (mut reader, mut writer) = factory.build().await;
+
+        let init_epoch = 233;
+        let epoch1 = init_epoch + 1;
+        let epoch2 = init_epoch + 2;
+
+
+
+        let ops = vec![Op::Insert, Op::Delete, Op::UpdateInsert, Op::UpdateDelete];
+        let mut builder = DataChunkBuilder::new(vec![DataType::Int64, DataType::Varchar], 10000);
+        for i in 0..ops.len() {
+            assert!(builder
+                .append_one_row(OwnedRow::new(vec![
+                    Some(ScalarImpl::Int64(i as i64)),
+                    Some(ScalarImpl::Utf8(format!("name_{}", i).into_boxed_str()))
+                ]))
+                .is_none());
+        }
+        let data_chunk = builder.consume_all().unwrap();
+        let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
+        let stream_chunk_clone = stream_chunk.clone();
+
+        tokio::spawn(async move {
+            writer.init(init_epoch).await.unwrap();
+            writer.write_chunk(stream_chunk_clone.clone()).await.unwrap();
+            writer.flush_current_epoch(epoch1, false).await.unwrap();
+            writer.write_chunk(stream_chunk_clone).await.unwrap();
+            writer.flush_current_epoch(epoch2, true).await.unwrap();
+        });
+
+
+        assert_eq!(init_epoch, reader.init().await.unwrap());
+        match reader.next_item().await.unwrap() {
+            LogStoreReadItem::StreamChunk(chunk) => {
+                assert_eq!(&chunk, &stream_chunk);
+            }
+            LogStoreReadItem::Barrier { .. } => unreachable!()
+        }
+
+        match reader.next_item().await.unwrap() {
+            LogStoreReadItem::StreamChunk(_) => unreachable!(),
+            LogStoreReadItem::Barrier { is_checkpoint, next_epoch } => {
+                assert!(!is_checkpoint);
+                assert_eq!(next_epoch, epoch1);
+            }
+        }
+
+        match reader.next_item().await.unwrap() {
+            LogStoreReadItem::StreamChunk(chunk) => {
+                assert_eq!(&chunk, &stream_chunk);
+            }
+            LogStoreReadItem::Barrier { .. } => unreachable!()
+        }
+
+        match reader.next_item().await.unwrap() {
+            LogStoreReadItem::StreamChunk(_) => unreachable!(),
+            LogStoreReadItem::Barrier { is_checkpoint, next_epoch } => {
+                assert!(is_checkpoint);
+                assert_eq!(next_epoch, epoch2);
+            }
+        }
     }
 }
