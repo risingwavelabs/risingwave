@@ -863,11 +863,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             (&mut self.side_r, &mut self.side_l)
         };
 
-        // State cleaning
-        if side_update.join_key_indices[0] == watermark.col_idx {
-            side_match.ht.update_watermark(watermark.val.clone());
-        }
-
         // Select watermarks to yield.
         let wm_in_jk = side_update
             .join_key_indices
@@ -894,6 +889,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     );
                 for output_idx in output_indices {
                     watermarks_to_emit.push(selected_watermark.clone().with_idx(*output_idx));
+                }
+                // State cleaning
+                if idx == 0 {
+                    side_update
+                        .ht
+                        .update_watermark(selected_watermark.val.clone());
+                    side_match
+                        .ht
+                        .update_watermark(selected_watermark.val.clone());
                 }
             };
         }
