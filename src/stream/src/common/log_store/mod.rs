@@ -397,6 +397,7 @@ mod tests {
             }
         }
 
+        reader.truncate().await.unwrap();
         join_handle.await.unwrap();
     }
 }
