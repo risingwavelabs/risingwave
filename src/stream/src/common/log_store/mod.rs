@@ -322,7 +322,9 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 
-    use crate::common::log_store::{BoundedInMemLogStoreFactory, LogReader, LogStoreFactory, LogStoreReadItem, LogWriter};
+    use crate::common::log_store::{
+        BoundedInMemLogStoreFactory, LogReader, LogStoreFactory, LogStoreReadItem, LogWriter,
+    };
 
     #[tokio::test]
     async fn test_in_memory_log_store() {
@@ -332,8 +334,6 @@ mod tests {
         let init_epoch = 233;
         let epoch1 = init_epoch + 1;
         let epoch2 = init_epoch + 2;
-
-
 
         let ops = vec![Op::Insert, Op::Delete, Op::UpdateInsert, Op::UpdateDelete];
         let mut builder = DataChunkBuilder::new(vec![DataType::Int64, DataType::Varchar], 10000);
@@ -351,24 +351,29 @@ mod tests {
 
         tokio::spawn(async move {
             writer.init(init_epoch).await.unwrap();
-            writer.write_chunk(stream_chunk_clone.clone()).await.unwrap();
+            writer
+                .write_chunk(stream_chunk_clone.clone())
+                .await
+                .unwrap();
             writer.flush_current_epoch(epoch1, false).await.unwrap();
             writer.write_chunk(stream_chunk_clone).await.unwrap();
             writer.flush_current_epoch(epoch2, true).await.unwrap();
         });
-
 
         assert_eq!(init_epoch, reader.init().await.unwrap());
         match reader.next_item().await.unwrap() {
             LogStoreReadItem::StreamChunk(chunk) => {
                 assert_eq!(&chunk, &stream_chunk);
             }
-            LogStoreReadItem::Barrier { .. } => unreachable!()
+            LogStoreReadItem::Barrier { .. } => unreachable!(),
         }
 
         match reader.next_item().await.unwrap() {
             LogStoreReadItem::StreamChunk(_) => unreachable!(),
-            LogStoreReadItem::Barrier { is_checkpoint, next_epoch } => {
+            LogStoreReadItem::Barrier {
+                is_checkpoint,
+                next_epoch,
+            } => {
                 assert!(!is_checkpoint);
                 assert_eq!(next_epoch, epoch1);
             }
@@ -378,12 +383,15 @@ mod tests {
             LogStoreReadItem::StreamChunk(chunk) => {
                 assert_eq!(&chunk, &stream_chunk);
             }
-            LogStoreReadItem::Barrier { .. } => unreachable!()
+            LogStoreReadItem::Barrier { .. } => unreachable!(),
         }
 
         match reader.next_item().await.unwrap() {
             LogStoreReadItem::StreamChunk(_) => unreachable!(),
-            LogStoreReadItem::Barrier { is_checkpoint, next_epoch } => {
+            LogStoreReadItem::Barrier {
+                is_checkpoint,
+                next_epoch,
+            } => {
                 assert!(is_checkpoint);
                 assert_eq!(next_epoch, epoch2);
             }
