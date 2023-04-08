@@ -190,6 +190,7 @@ pub(crate) fn gen_create_index_plan(
     }
 
     index_table_prost.owner = session.user_id();
+    index_table_prost.dependent_relations = vec![table.id.table_id];
 
     let index_prost = PbIndex {
         id: IndexId::placeholder().index_id,

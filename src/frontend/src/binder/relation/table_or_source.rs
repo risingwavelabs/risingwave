@@ -86,17 +86,6 @@ impl Binder {
             )
         };
 
-        let resolve_source_relation = |source_catalog: &SourceCatalog| {
-            (
-                Relation::Source(Box::new(source_catalog.into())),
-                source_catalog
-                    .columns
-                    .iter()
-                    .map(|c| (c.is_hidden, Field::from(&c.column_desc)))
-                    .collect_vec(),
-            )
-        };
-
         // start to bind
         let (ret, columns) = {
             match schema_name {
@@ -129,7 +118,7 @@ impl Binder {
                             .get_table_by_name(&self.db_name, schema_path, table_name)
                     {
                         self.resolve_table_relation(
-                            table_catalog,
+                            &table_catalog.clone(),
                             schema_name,
                             for_system_time_as_of_now,
                         )?
@@ -137,7 +126,7 @@ impl Binder {
                         self.catalog
                             .get_source_by_name(&self.db_name, schema_path, table_name)
                     {
-                        resolve_source_relation(source_catalog)
+                        self.resolve_source_relation(&source_catalog.clone())
                     } else if let Ok((view_catalog, _)) =
                         self.catalog
                             .get_view_by_name(&self.db_name, schema_path, table_name)
@@ -174,14 +163,16 @@ impl Binder {
                             {
                                 if let Some(table_catalog) = schema.get_table_by_name(table_name) {
                                     return self.resolve_table_relation(
-                                        table_catalog,
-                                        schema_name,
+                                        &table_catalog.clone(),
+                                        &schema_name.clone(),
                                         for_system_time_as_of_now,
                                     );
                                 } else if let Some(source_catalog) =
                                     schema.get_source_by_name(table_name)
                                 {
-                                    return Ok(resolve_source_relation(source_catalog));
+                                    return Ok(
+                                        self.resolve_source_relation(&source_catalog.clone())
+                                    );
                                 } else if let Some(view_catalog) =
                                     schema.get_view_by_name(table_name)
                                 {
@@ -201,7 +192,7 @@ impl Binder {
     }
 
     fn resolve_table_relation(
-        &self,
+        &mut self,
         table_catalog: &TableCatalog,
         schema_name: &str,
         for_system_time_as_of_now: bool,
@@ -213,6 +204,7 @@ impl Binder {
             .iter()
             .map(|c| (c.is_hidden, Field::from(&c.column_desc)))
             .collect_vec();
+        self.included_relations.insert(table_id);
         let table_indexes = self.resolve_table_indexes(schema_name, table_id)?;
 
         let table = BoundBaseTable {
@@ -223,6 +215,21 @@ impl Binder {
         };
 
         Ok::<_, RwError>((Relation::BaseTable(Box::new(table)), columns))
+    }
+
+    fn resolve_source_relation(
+        &mut self,
+        source_catalog: &SourceCatalog,
+    ) -> (Relation, Vec<(bool, Field)>) {
+        self.included_relations.insert(source_catalog.id.into());
+        (
+            Relation::Source(Box::new(source_catalog.into())),
+            source_catalog
+                .columns
+                .iter()
+                .map(|c| (c.is_hidden, Field::from(&c.column_desc)))
+                .collect_vec(),
+        )
     }
 
     fn resolve_view_relation(
@@ -249,6 +256,7 @@ impl Binder {
             None => {
                 let share_id = self.next_share_id();
                 self.shared_views.insert(view_catalog.id, share_id);
+                self.included_relations.insert(view_catalog.id.into());
                 share_id
             }
         };

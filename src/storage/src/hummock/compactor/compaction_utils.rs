@@ -127,8 +127,9 @@ pub struct TaskConfig {
     pub split_by_table: bool,
 }
 
-pub fn estimate_memory_use_for_compaction(task: &CompactTask) -> u64 {
+pub fn estimate_state_for_compaction(task: &CompactTask) -> (u64, usize) {
     let mut total_memory_size = 0;
+    let mut total_file_count = 0;
     for level in &task.input_ssts {
         if level.level_type == LevelType::Nonoverlapping as i32 {
             if let Some(table) = level.table_infos.first() {
@@ -139,8 +140,11 @@ pub fn estimate_memory_use_for_compaction(task: &CompactTask) -> u64 {
                 total_memory_size += table.file_size;
             }
         }
+
+        total_file_count += level.table_infos.len();
     }
-    total_memory_size
+
+    (total_memory_size, total_file_count)
 }
 
 pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionFilter {

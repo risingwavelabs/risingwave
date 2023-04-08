@@ -26,12 +26,12 @@ use super::agg_common::{
 };
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::agg_common::{AggExecutorArgs, AggExecutorArgsExtra};
+use crate::executor::agg_common::{AggExecutorArgs, GroupAggExecutorExtraArgs};
 use crate::executor::aggregation::AggCall;
 use crate::executor::HashAggExecutor;
 
 pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
-    args: AggExecutorArgs<S>,
+    args: AggExecutorArgs<S, GroupAggExecutorExtraArgs>,
     group_key_types: Vec<DataType>,
 }
 
@@ -102,7 +102,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
                 pk_indices: params.pk_indices,
                 executor_id: params.executor_id,
 
-                extreme_cache_size: stream.config.developer.unsafe_stream_extreme_cache_size,
+                extreme_cache_size: stream.config.developer.unsafe_extreme_cache_size,
 
                 agg_calls,
                 row_count_index: node.get_row_count_index() as usize,
@@ -111,12 +111,12 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
                 distinct_dedup_tables,
                 watermark_epoch: stream.get_watermark_epoch(),
 
-                extra: Some(AggExecutorArgsExtra {
+                extra: GroupAggExecutorExtraArgs {
                     group_key_indices,
-
+                    chunk_size: params.env.config().developer.chunk_size,
+                    emit_on_window_close: false,
                     metrics: params.executor_stats,
-                    chunk_size: params.env.config().developer.stream_chunk_size,
-                }),
+                },
             },
             group_key_types,
         }

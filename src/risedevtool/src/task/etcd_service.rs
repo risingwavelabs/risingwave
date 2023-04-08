@@ -57,8 +57,6 @@ impl EtcdService {
             .arg(&advertise_peer_urls)
             .arg("--listen-metrics-urls")
             .arg(&exporter_urls)
-            .arg("--name")
-            .arg("risedev-meta")
             .arg("--max-txn-ops")
             .arg("999999")
             .arg("--max-request-bytes")
@@ -111,7 +109,7 @@ impl Task for EtcdService {
         Self::apply_command_args(&mut cmd, &self.config)?;
 
         let path = Path::new(&env::var("PREFIX_DATA")?).join(self.id());
-        std::fs::create_dir_all(&path)?;
+        fs_err::create_dir_all(&path)?;
         cmd.arg("--data-dir").arg(&path);
 
         ctx.run_command(ctx.tmux_run(cmd)?)?;

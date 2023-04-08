@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Schema, TableVersionId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_sqlparser::ast::{Assignment, Expr, ObjectName, SelectItem};
+use risingwave_sqlparser::ast::{Assignment, AssignmentValue, Expr, ObjectName, SelectItem};
 
 use super::statement::RewriteExprsRecursive;
 use super::{Binder, Relation};
@@ -27,7 +27,7 @@ use crate::catalog::TableId;
 use crate::expr::{Expr as _, ExprImpl};
 use crate::user::UserId;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundUpdate {
     /// Id of the table to perform updating.
     pub table_id: TableId,
@@ -114,7 +114,7 @@ impl Binder {
                 }
 
                 // (col1, col2) = (subquery)
-                (_ids, Expr::Subquery(_)) => {
+                (_ids, AssignmentValue::Expr(Expr::Subquery(_))) => {
                     return Err(ErrorCode::NotImplemented(
                         "subquery on the right side of multi-assignment".to_owned(),
                         None.into(),
@@ -122,9 +122,11 @@ impl Binder {
                     .into())
                 }
                 // (col1, col2) = (expr1, expr2)
-                (ids, Expr::Row(values)) if ids.len() == values.len() => {
-                    id.into_iter().zip_eq_fast(values.into_iter()).collect()
-                }
+                // TODO: support `DEFAULT` in multiple assignments
+                (ids, AssignmentValue::Expr(Expr::Row(values))) if ids.len() == values.len() => id
+                    .into_iter()
+                    .zip_eq_fast(values.into_iter().map(AssignmentValue::Expr))
+                    .collect(),
                 // (col1, col2) = <other expr>
                 _ => {
                     return Err(ErrorCode::BindError(
@@ -148,7 +150,13 @@ impl Binder {
                     }
                 }
 
-                let value_expr = self.bind_expr(value)?.cast_assign(id_expr.return_type())?;
+                let value_expr = match value {
+                    AssignmentValue::Expr(expr) => {
+                        self.bind_expr(expr)?.cast_assign(id_expr.return_type())?
+                    }
+                    // TODO: specify default expression after we support non-`NULL` default values.
+                    AssignmentValue::Default => ExprImpl::literal_null(id_expr.return_type()),
+                };
 
                 match assignment_exprs.entry(id_expr) {
                     Entry::Occupied(_) => {

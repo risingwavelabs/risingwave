@@ -154,6 +154,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     progress,
                     schema,
                     params.pk_indices,
+                    stream.streaming_metrics.clone(),
                 )
                 .boxed()
             }

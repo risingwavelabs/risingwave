@@ -403,17 +403,9 @@ impl LocalQueryExecution {
                             .inner_side_table_desc
                             .as_ref()
                             .expect("no side table desc");
-                        let table = self
-                            .front_env
-                            .catalog_reader()
-                            .read_guard()
-                            .get_table_by_id(&side_table_desc.table_id.into())
-                            .context("side table not found")?;
                         let mapping = self
-                            .front_env
-                            .worker_node_manager()
-                            .get_fragment_mapping(&table.fragment_id)
-                            .context("fragment mapping not found")?;
+                            .get_vnode_mapping(&side_table_desc.table_id.into())
+                            .context("side table not found")?;
 
                         // TODO: should we use `pb::ParallelUnitMapping` here?
                         node.inner_side_vnode_mapping = mapping.to_expanded();
@@ -454,9 +446,8 @@ impl LocalQueryExecution {
 
     #[inline(always)]
     fn get_vnode_mapping(&self, table_id: &TableId) -> Option<ParallelUnitMapping> {
-        self.front_env
-            .catalog_reader()
-            .read_guard()
+        let reader = self.front_env.catalog_reader().read_guard();
+        reader
             .get_table_by_id(table_id)
             .map(|table| {
                 self.front_env

@@ -244,7 +244,6 @@ create source s18 with (
 ) row format avro 
 row schema location 'file:///risingwave/avro-complex-schema.avsc'
 
-
 # we cannot use confluent schema registry when connector is not kafka
 statement error
 create table s19 
@@ -255,6 +254,38 @@ with (
 )
 row format avro
 row schema location confluent schema registry 'http://127.0.0.1:8081'
+
+# we cannot create debezium source with generated column
+statement error
+create table s20 (
+  id integer primary key,
+  first_name varchar,
+  last_name varchar,
+  email varchar,
+  gen_id integer as id+1
+) with (
+  connector = 'kafka',
+  topic = 'debezium_log',
+  properties.bootstrap.server = '127.0.0.1:29092'
+) row format debezium_json
+
+# create kafka source table with generated column
+statement ok
+create table s21 (v1 int as v2-1, v2 int, v3 int as v2+1) with (
+  connector = 'kafka',
+  topic = 'kafka_4_partition_topic_generated_columns',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  scan.startup.mode = 'earliest'
+) row format json
+
+# create kafka source with generated column
+statement ok
+create source s22 (v1 int as v2-1, v2 int, v3 int as v2+1) with (
+  connector = 'kafka',
+  topic = 'kafka_4_partition_topic_generated_columns',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  scan.startup.mode = 'earliest'
+) row format json
 
 statement ok
 flush;
@@ -384,7 +415,7 @@ select id, first_name, last_name, email from s8;
 query IITFFBTT
 select id, sequence_id, name, score, avg_score, is_lasted, entrance_date, birthday, passed from s9;
 ----
-32 64 str_value 32 64 t 1970-01-01 1970-01-01 00:00:00 1 mon 1 day 00:00:01
+32 64 str_value 32 64 t 1970-01-01 1970-01-01 00:00:00+00:00 1 mon 1 day 00:00:01
 
 query ITITT
 select id, code, timestamp, xfas, contacts, sex from s10;
@@ -421,6 +452,20 @@ query I
 select count(*) from s16
 ----
 0
+
+query III rowsort
+select * from s21;
+----
+19 20 21
+20 21 22
+NULL NULL NULL
+
+query III rowsort
+select * from s22;
+----
+19 20 21
+20 21 22
+NULL NULL NULL
 
 statement ok
 drop materialized view source_mv1
@@ -463,3 +508,9 @@ drop source s17
 
 statement ok
 drop source s18
+
+statement ok
+drop table s21
+
+statement ok
+drop source s22

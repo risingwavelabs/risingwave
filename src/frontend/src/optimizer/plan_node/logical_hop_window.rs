@@ -17,7 +17,7 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::Result;
-use risingwave_common::types::IntervalUnit;
+use risingwave_common::types::Interval;
 
 use super::generic::GenericPlanNode;
 use super::{
@@ -39,14 +39,18 @@ pub struct LogicalHopWindow {
 }
 
 impl LogicalHopWindow {
+    /// Hop windows will add `windows_start` and `windows_end` columns at the end.
+    /// Take care to modify the code referring it if above rule changes.
+    pub const ADDITION_COLUMN_LEN: usize = 2;
+
     /// just used in optimizer and the function will not check if the `time_col`'s value is NULL
     /// compared with `LogicalHopWindow::create`
     fn new(
         input: PlanRef,
         time_col: InputRef,
-        window_slide: IntervalUnit,
-        window_size: IntervalUnit,
-        window_offset: IntervalUnit,
+        window_slide: Interval,
+        window_size: Interval,
+        window_offset: Interval,
         output_indices: Option<Vec<usize>>,
     ) -> Self {
         // if output_indices is not specified, use default output_indices
@@ -84,16 +88,7 @@ impl LogicalHopWindow {
         LogicalHopWindow { base, core }
     }
 
-    pub fn into_parts(
-        self,
-    ) -> (
-        PlanRef,
-        InputRef,
-        IntervalUnit,
-        IntervalUnit,
-        IntervalUnit,
-        Vec<usize>,
-    ) {
+    pub fn into_parts(self) -> (PlanRef, InputRef, Interval, Interval, Interval, Vec<usize>) {
         self.core.into_parts()
     }
 
@@ -102,9 +97,9 @@ impl LogicalHopWindow {
     pub fn create(
         input: PlanRef,
         time_col: InputRef,
-        window_slide: IntervalUnit,
-        window_size: IntervalUnit,
-        window_offset: IntervalUnit,
+        window_slide: Interval,
+        window_size: Interval,
+        window_offset: Interval,
     ) -> PlanRef {
         let input = LogicalFilter::create_with_expr(
             input,
@@ -131,6 +126,16 @@ impl LogicalHopWindow {
         self.core.internal_window_end_col_idx()
     }
 
+    pub fn output_window_start_col_idx(&self) -> Option<usize> {
+        self.internal2output_col_mapping()
+            .try_map(self.internal_window_start_col_idx())
+    }
+
+    pub fn output_window_end_col_idx(&self) -> Option<usize> {
+        self.internal2output_col_mapping()
+            .try_map(self.internal_window_end_col_idx())
+    }
+
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
         self.core.o2i_col_mapping()
     }
@@ -143,11 +148,15 @@ impl LogicalHopWindow {
         self.core.internal_column_num()
     }
 
-    fn output2internal_col_mapping(&self) -> ColIndexMapping {
+    pub fn output2internal_col_mapping(&self) -> ColIndexMapping {
         self.core.output2internal_col_mapping()
     }
 
-    fn clone_with_output_indices(&self, output_indices: Vec<usize>) -> Self {
+    pub fn internal2output_col_mapping(&self) -> ColIndexMapping {
+        self.core.internal2output_col_mapping()
+    }
+
+    pub fn clone_with_output_indices(&self, output_indices: Vec<usize>) -> Self {
         Self::new(
             self.input(),
             self.core.time_col.clone(),
@@ -434,9 +443,9 @@ mod test {
         let hop_window: PlanRef = LogicalHopWindow::new(
             values.into(),
             InputRef::new(0, DataType::Date),
-            IntervalUnit::from_month_day_usec(0, 1, 0),
-            IntervalUnit::from_month_day_usec(0, 3, 0),
-            IntervalUnit::from_month_day_usec(0, 0, 0),
+            Interval::from_month_day_usec(0, 1, 0),
+            Interval::from_month_day_usec(0, 3, 0),
+            Interval::from_month_day_usec(0, 0, 0),
             None,
         )
         .into();
@@ -490,9 +499,9 @@ mod test {
         let hop_window: PlanRef = LogicalHopWindow::new(
             values.into(),
             InputRef::new(0, DataType::Date),
-            IntervalUnit::from_month_day_usec(0, 1, 0),
-            IntervalUnit::from_month_day_usec(0, 3, 0),
-            IntervalUnit::from_month_day_usec(0, 0, 0),
+            Interval::from_month_day_usec(0, 1, 0),
+            Interval::from_month_day_usec(0, 3, 0),
+            Interval::from_month_day_usec(0, 0, 0),
             None,
         )
         .into();

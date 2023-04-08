@@ -47,7 +47,18 @@ public class Utils {
                             row.getString(6),
                             ((Short) rowIndex).toString().repeat((rowIndex % 10) + 1)));
         }
-        if (row.isNull(7) != (rowIndex % 5 == 0)) {
+
+        if (row.getTimestamp(7).getTime() != rowIndex * 1000) {
+            throw new RuntimeException(
+                    String.format("invalid Timestamp value: %s %s", row.getTimestamp(7), rowIndex));
+        }
+
+        if (row.getDecimal(8).intValue() != rowIndex) {
+            throw new RuntimeException(
+                    String.format("invalid decimal value: %s %s", row.getDecimal(8), rowIndex));
+        }
+
+        if (row.isNull(9) != (rowIndex % 5 == 0)) {
             throw new RuntimeException(
                     String.format(
                             "invalid isNull value: %s %s", row.isNull(7), (rowIndex % 5 == 0)));

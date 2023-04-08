@@ -13,12 +13,15 @@
 // limitations under the License.
 
 use std::borrow::Cow;
+use std::fmt::Display;
 use std::hash::{BuildHasher, Hasher};
 
 use bytes::{BufMut, Bytes, BytesMut};
+use itertools::Itertools;
 
 use self::empty::EMPTY;
 use crate::hash::HashCode;
+use crate::types::to_text::ToText;
 use crate::types::{hash_datum, DatumRef, ToDatumRef, ToOwnedDatum};
 use crate::util::ordered::OrderedRowSerde;
 use crate::util::value_encoding;
@@ -75,7 +78,11 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
     /// Serializes the row with value encoding and returns the bytes.
     #[inline]
     fn value_serialize(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(self.len()); // each datum is at least 1 byte
+        let estimate_size = self
+            .iter()
+            .map(value_encoding::estimate_serialize_datum_size)
+            .sum();
+        let mut buf = Vec::with_capacity(estimate_size);
         self.value_serialize_into(&mut buf);
         buf
     }
@@ -83,7 +90,11 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
     /// Serializes the row with value encoding and returns the bytes.
     #[inline]
     fn value_serialize_bytes(&self) -> Bytes {
-        let mut buf = BytesMut::with_capacity(self.len()); // each datum is at least 1 byte
+        let estimate_size = self
+            .iter()
+            .map(value_encoding::estimate_serialize_datum_size)
+            .sum();
+        let mut buf = BytesMut::with_capacity(estimate_size);
         self.value_serialize_into(&mut buf);
         buf.freeze()
     }
@@ -144,6 +155,25 @@ pub trait RowExt: Row {
         Self: Sized,
     {
         assert_row(Project::new(self, indices))
+    }
+
+    fn display(&self) -> impl Display + '_ {
+        struct D<'a, T: Row>(&'a T);
+        impl<'a, T: Row> Display for D<'a, T> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(
+                    f,
+                    "{}",
+                    self.0.iter().format_with(" | ", |datum, f| {
+                        match datum {
+                            None => f(&"NULL"),
+                            Some(scalar) => f(&format_args!("{}", scalar.to_text())),
+                        }
+                    })
+                )
+            }
+        }
+        D(self)
     }
 }
 

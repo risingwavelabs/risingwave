@@ -14,29 +14,38 @@
 
 use std::collections::HashMap;
 
+use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::join;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DatumRef, ScalarRefImpl};
+use serde::Deserialize;
 
+use super::SinkError;
 use crate::sink::{Result, Sink};
 
 pub const CONSOLE_SINK: &str = "console";
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConsoleConfig {
+    #[serde(skip_serializing)]
+    pub connector: String,
+
+    #[serde(default)]
     pub prefix: Option<String>,
+
+    #[serde(default)]
     pub suffix: Option<String>,
 }
 
 impl ConsoleConfig {
     pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
-        Ok(ConsoleConfig {
-            prefix: values.get("prefix").cloned(),
-            suffix: values.get("suffix").cloned(),
-        })
+        let config = serde_json::from_value::<ConsoleConfig>(serde_json::to_value(values).unwrap())
+            .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        Ok(config)
     }
 }
 
@@ -106,8 +115,8 @@ fn parse_datum(datum: DatumRef<'_>) -> String {
         Some(ScalarRefImpl::Decimal(v)) => format!("Decimal({})", v),
         Some(ScalarRefImpl::Utf8(v)) => format!("Utf8(\"{}\")", v),
         Some(ScalarRefImpl::Bool(v)) => format!("Bool({})", v),
-        Some(ScalarRefImpl::NaiveDate(v)) => format!("Date({})", v),
-        Some(ScalarRefImpl::NaiveTime(v)) => format!("Time({})", v),
+        Some(ScalarRefImpl::Date(v)) => format!("Date({})", v),
+        Some(ScalarRefImpl::Time(v)) => format!("Time({})", v),
         Some(ScalarRefImpl::Interval(v)) => format!("Interval({})", v),
         Some(ScalarRefImpl::Struct(v)) => {
             format!(
@@ -178,6 +187,7 @@ mod test {
 
             let mut console_sink = ConsoleSink::new(
                 ConsoleConfig {
+                    connector: "console".to_string(),
                     prefix: Option::from("[CONSOLE] ".to_string()),
                     suffix: Option::from(";".to_string()),
                 },

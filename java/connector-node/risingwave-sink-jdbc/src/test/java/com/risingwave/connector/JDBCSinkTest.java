@@ -30,7 +30,7 @@ public class JDBCSinkTest {
     @Test
     public void testJDBCSync() throws SQLException {
         Connection conn = DriverManager.getConnection(connectionURL);
-        JDBCSink sink = new JDBCSink(conn, TableSchema.getMockTableSchema(), "test");
+        JDBCSink sink = new JDBCSink(conn, TableSchema.getMockTableSchema(), "test", "upsert");
         createMockTable(conn, sink.getTableName());
 
         sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 1, "Alice")));
@@ -66,7 +66,7 @@ public class JDBCSinkTest {
         }
 
         try {
-            stmt.execute("create table " + tableName + " (id int, name varchar(255))");
+            stmt.execute("create table " + tableName + " (id int primary key, name varchar(255))");
             conn.commit();
         } catch (SQLException e) {
             throw io.grpc.Status.INTERNAL.withCause(e).asRuntimeException();
@@ -78,7 +78,7 @@ public class JDBCSinkTest {
     @Test
     public void testJDBCWrite() throws SQLException {
         Connection conn = DriverManager.getConnection(connectionURL);
-        JDBCSink sink = new JDBCSink(conn, TableSchema.getMockTableSchema(), "test");
+        JDBCSink sink = new JDBCSink(conn, TableSchema.getMockTableSchema(), "test", "upsert");
         createMockTable(conn, sink.getTableName());
 
         sink.write(
@@ -106,7 +106,7 @@ public class JDBCSinkTest {
     @Test
     public void testJDBCDrop() throws SQLException {
         Connection conn = DriverManager.getConnection(connectionURL);
-        JDBCSink sink = new JDBCSink(conn, TableSchema.getMockTableSchema(), "test");
+        JDBCSink sink = new JDBCSink(conn, TableSchema.getMockTableSchema(), "test", "upsert");
         sink.drop();
         try {
             assertTrue(conn.isClosed());
