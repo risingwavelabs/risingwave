@@ -56,9 +56,84 @@ pub fn atan2_f64(input_x: F64, input_y: F64) -> F64 {
     input_x.0.atan2(input_y.0).into()
 }
 
+// Radians per degree, a.k.a. PI / 180
+static RADIANS_PER_DEGREE: f64 = 0.0174532925199432957692;
+
+// returns the cosine of an angle that lies between 0 and 60 degrees.  This will return exactly 1
+// when xis 0, and exactly 0.5 when x is 60 degrees.
+fn cosd_0_to_60(x: f64) -> f64 {
+    // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c
+    let one_minus_cos_x: f64 = 1.0 - f64::cos(x * RADIANS_PER_DEGREE);
+    // TODO: one_minus_cos_60 as a constant?
+    let one_minus_cos_60 = 1.0 - f64::cos(60.0 * RADIANS_PER_DEGREE);
+    return 1.0 - (one_minus_cos_x / one_minus_cos_60) / 2.0;
+}
+
+// returns the sine of an angle that lies between 0 and 30 degrees.  This will return exactly 0 when
+// x is 0, and exactly 0.5 when x is 30 degrees.
+fn sind_0_to_30(x: f64) -> f64 {
+    // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c
+
+    let sin_x = f64::sin(x * RADIANS_PER_DEGREE);
+    // TODO: sin_30 as a constant?
+    let sin_30 = f64::sin(30.0 * RADIANS_PER_DEGREE);
+
+    return (sin_x / sin_30) / 2.0;
+}
+
+// Returns the sine of an angle in the first quadrant (0 to 90 degrees).
+fn sind_q1(input: f64) -> f64 {
+    // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c
+
+    //  Stitch together the sine and cosine functions for the ranges [0, 30]
+    //  and (30, 90].  These guarantee to return exact answers at their
+    //  endpoints, so the overall result is a continuous monotonic function
+    //  that gives exact results when x = 0, 30 and 90 degrees.
+
+    if input <= 30.0 {
+        sind_0_to_30(input)
+    } else {
+        cosd_0_to_60(90.0 - input)
+    }
+}
+
 #[function("sind(float64) -> float64")]
 pub fn sind_f64(input: F64) -> F64 {
-    f64::sin(f64::to_radians(input.0)).into()
+    // PSQL implementation: https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c#L2444
+
+    // Per the POSIX spec, return NaN if the input is NaN and throw an error if the input is
+    // infinite.
+
+    // TODO: implement this
+
+    // TODO: write test for this
+
+    // TODO: do not use mut
+    let mut arg1 = input.0 % 360.0;
+    let mut sign = 1.0;
+
+    if arg1 < 0.0 {
+        // sind(-x) = -sind(x)
+        arg1 = -arg1;
+        sign = -sign;
+    }
+
+    if arg1 > 180.0 {
+        //  sind(360-x) = -sind(x)
+        arg1 = 360.0 - arg1;
+        sign = -sign;
+    }
+
+    if arg1 > 90.0 {
+        //  sind(180-x) = sind(x)
+        arg1 = 180.0 - arg1;
+    }
+
+    let result = sign * sind_q1(arg1);
+
+    // TODO: Check for inf
+
+    result.into()
 }
 
 #[function("cosd(float64) -> float64")]
