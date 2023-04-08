@@ -169,91 +169,66 @@ SELECT abs(abs(sind(-1)) - 0.01745240643728351) < 0.000000000000001
 t
 
 query R
-SELECT abs(cosd(1) - 0.9998476951563913) < 0.000000000000001
+SELECT abs(abs(sind(0)) - 0) < 0.000000000000001
 ----
 t
 
 query R
-SELECT cosd(0)
-----
-1
-
-query R
-SELECT abs(cosd(-1) - 0.9998476951563913) < 0.000000000000001
+SELECT abs(abs(sind(30)) - 0.5) < 0.000000000000001
 ----
 t
 
 query R
-SELECT abs(tand(1) - 0.017455064928217585) < 0.000000000000001
+SELECT abs(abs(sind(45)) - 0.707106781186548) < 0.000000000000001
 ----
 t
 
 query R
-SELECT tand(0)
-----
-0
-
-query R
-SELECT abs(abs(tand(-1)) -0.017455064928217585) < 0.000000000000001
+SELECT abs(abs(sind(60)) - 0.866025403784439) < 0.000000000000001
 ----
 t
 
 query R
-SELECT abs(asind(1) - 0.01745417873758517) < 0.000000000000001
+SELECT abs(abs(sind(90)) - 1) < 0.000000000000001
 ----
 t
 
 query R
-SELECT asind(0);
-----
-0
-
-query R
-SELECT abs(abs(asind(-1)) -0.01745417873758517) < 0.000000000000001
+SELECT abs(abs(sind(120)) - 0.8660254037844386) < 0.000000000000001
 ----
 t
 
 query R
-SELECT abs(acosd(1) - 1.5533421480573113) < 0.000000000000001
+SELECT abs(abs(sind(135)) - 0.7071067811865475) < 0.000000000000001
 ----
 t
 
 query R
-SELECT abs(acosd(0) - 1.5707963267948966) < 0.000000000000001
+SELECT abs(abs(sind(150)) - 0.5) < 0.000000000000001
 ----
 t
 
 query R
-SELECT abs(acosd(-1) - 1.5882505055324818) < 0.000000000000001
+SELECT abs(abs(sind(180)) - 0) < 0.000000000000001
 ----
 t
 
 query R
-SELECT abs(atand(1) - 0.017451520651465824) < 0.000000000000001
+SELECT abs(abs(sind(360)) - 0) < 0.000000000000001
 ----
 t
 
 query R
-SELECT atand(0);
+SELECT sind(INF)
 ----
-0
+NaN
 
 query R
-SELECT abs(atand(-1) + 0.017451520651465824) < 0.000000000000001
+SELECT sind(-INF)
 ----
-t
+NaN
 
 query R
-SELECT abs(atan2d(1, 0) - 1.5707963267948966) < 0.000000000000001
+SELECT sind(NaN)
 ----
-t
-
-query R
-SELECT atan2d(0, 0);
-----
-0 
-
-query R
-SELECT abs(atan2d(-1, 0) + 1.5707963267948966) < 0.000000000000001
-----
-t
+NaN

@@ -101,77 +101,35 @@ fn sind_q1(input: f64) -> f64 {
 pub fn sind_f64(input: F64) -> F64 {
     // PSQL implementation: https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c#L2444
 
-    // Per the POSIX spec, return NaN if the input is NaN and throw an error if the input is
-    // infinite.
+    // Returns NaN if input is NaN or infinite. Different from PSQL implementation.
+    if input.0.is_nan() || input.0.is_infinite() {
+        return f64::NAN.into();
+    }
 
-    // TODO: implement this
+    let arg1 = input.0 % 360.0;
+    let sign = 1.0;
 
-    // TODO: write test for this
-
-    // TODO: do not use mut
-    let mut arg1 = input.0 % 360.0;
-    let mut sign = 1.0;
-
-    if arg1 < 0.0 {
+    let (arg1, sign) = if arg1 < 0.0 {
         // sind(-x) = -sind(x)
-        arg1 = -arg1;
-        sign = -sign;
-    }
-
-    if arg1 > 180.0 {
+        (-arg1, -sign)
+    } else if arg1 > 180.0 {
         //  sind(360-x) = -sind(x)
-        arg1 = 360.0 - arg1;
-        sign = -sign;
-    }
-
-    if arg1 > 90.0 {
+        (360.0 - arg1, -sign)
+    } else if arg1 > 90.0 {
         //  sind(180-x) = sind(x)
-        arg1 = 180.0 - arg1;
-    }
+        (180.0 - arg1, sign)
+    } else {
+        (arg1, sign)
+    };
 
     let result = sign * sind_q1(arg1);
 
-    // TODO: Check for inf
-
-    result.into()
-}
-
-#[function("cosd(float64) -> float64")]
-pub fn cosd_f64(input: F64) -> F64 {
-    f64::cos(f64::to_radians(input.0)).into()
-}
-
-#[function("tand(float64) -> float64")]
-pub fn tand_f64(input: F64) -> F64 {
-    f64::tan(f64::to_radians(input.0)).into()
-}
-
-#[function("cotd(float64) -> float64")]
-pub fn cotd_f64(input: F64) -> F64 {
-    let res = 1.0 / f64::tan(f64::to_radians(input.0));
-    res.into()
-}
-
-#[function("asind(float64) -> float64")]
-pub fn asind_f64(input: F64) -> F64 {
-    f64::asin(f64::to_radians(input.0)).into()
-}
-
-#[function("acosd(float64) -> float64")]
-pub fn acosd_f64(input: F64) -> F64 {
-    f64::acos(f64::to_radians(input.0)).into()
-}
-
-#[function("atand(float64) -> float64")]
-pub fn atand_f64(input: F64) -> F64 {
-    f64::atan(f64::to_radians(input.0)).into()
-}
-
-#[function("atan2d(float64, float64) -> float64")]
-pub fn atan2d_f64(input_x: F64, input_y: F64) -> F64 {
-    f64::to_radians(input_x.0)
-        .atan2(f64::to_radians(input_y.0))
-        .into()
+    if result.is_infinite() {
+        // Different from PSQL implementation.
+        f64::NAN.into()
+    } else {
+        result.into()
+    }
 }
 
 #[cfg(test)]
@@ -179,7 +137,6 @@ mod tests {
 
     use std::f64::consts::PI;
 
-    use num_traits::ToPrimitive;
     use risingwave_common::types::F64;
 
     use crate::vector_op::trigonometric::*;
@@ -193,17 +150,20 @@ mod tests {
     #[test]
     fn test_degrees() {
         let d = F64::from(180);
-        let d2 = F64::from(90);
         let pi = F64::from(PI);
-        let pi2 = F64::from(PI / 2.to_f64().unwrap());
-        assert_eq!(sin_f64(pi), sind_f64(d));
-        assert_eq!(cos_f64(pi), cosd_f64(d));
-        assert_eq!(tan_f64(pi), tand_f64(d));
-        assert_eq!(cot_f64(pi), cotd_f64(d));
-        assert_eq!(asin_f64(pi), asind_f64(d));
-        assert_eq!(acos_f64(pi), acosd_f64(d));
-        assert_eq!(atan_f64(pi), atand_f64(d));
-        assert_eq!(atan2_f64(pi, pi2), atan2d_f64(d, d2));
+        assert_similar(
+            sin_f64(F64::from(50).to_radians().into()),
+            sind_f64(F64::from(50)),
+        );
+        assert_similar(
+            sin_f64(F64::from(100).to_radians().into()),
+            sind_f64(F64::from(100)),
+        );
+        assert_similar(
+            sin_f64(F64::from(250).to_radians().into()),
+            sind_f64(F64::from(250)),
+        );
+        assert_similar(sin_f64(pi), sind_f64(d));
     }
 
     #[test]
