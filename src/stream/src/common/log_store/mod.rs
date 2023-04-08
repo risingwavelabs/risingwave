@@ -349,7 +349,7 @@ mod tests {
         let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
         let stream_chunk_clone = stream_chunk.clone();
 
-        tokio::spawn(async move {
+        let join_handle = tokio::spawn(async move {
             writer.init(init_epoch).await.unwrap();
             writer
                 .write_chunk(stream_chunk_clone.clone())
@@ -396,5 +396,7 @@ mod tests {
                 assert_eq!(next_epoch, epoch2);
             }
         }
+
+        join_handle.await.unwrap();
     }
 }
