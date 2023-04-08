@@ -131,6 +131,12 @@ macro_rules! impl_common_for_num256 {
             }
         }
 
+        impl From<$scalar> for $inner {
+            fn from(value: $scalar) -> Self {
+                *value.0
+            }
+        }
+
         impl $scalar_ref<'_> {
             #[inline]
             pub fn to_le_bytes(self) -> [u8; mem::size_of::<$inner>()] {
@@ -343,17 +349,17 @@ impl Signed for Int256 {
     }
 }
 
-impl<'a> Into<arrow_buffer::i256> for Int256Ref<'a> {
-    fn into(self) -> arrow_buffer::i256 {
-        let buffer = self.to_be_bytes();
-        arrow_buffer::i256::from_be_bytes(buffer)
-    }
-}
-
 impl From<arrow_buffer::i256> for Int256 {
     fn from(value: arrow_buffer::i256) -> Self {
         let buffer = value.to_be_bytes();
         Int256::from_be_bytes(buffer)
+    }
+}
+
+impl<'a> From<Int256Ref<'a>> for arrow_buffer::i256 {
+    fn from(val: Int256Ref<'a>) -> Self {
+        let buffer = val.to_be_bytes();
+        arrow_buffer::i256::from_be_bytes(buffer)
     }
 }
 

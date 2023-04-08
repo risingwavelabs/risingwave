@@ -32,7 +32,7 @@ pub struct Int256ArrayBuilder {
     data: Vec<I256>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Int256Array {
     bitmap: Bitmap,
     data: Vec<I256>,
@@ -147,8 +147,44 @@ macro_rules! impl_array_for_num256 {
             }
         }
 
+        impl<$gen> FromIterator<Option<$scalar_ref<$gen>>> for $array {
+            fn from_iter<T: IntoIterator<Item = Option<$scalar_ref<$gen>>>>(iter: T) -> Self {
+                let iter = iter.into_iter();
+                let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
+                for i in iter {
+                    builder.append(i);
+                }
+                builder.finish()
+            }
+        }
+
+        impl FromIterator<Option<$scalar>> for $array {
+            fn from_iter<T: IntoIterator<Item = Option<$scalar>>>(iter: T) -> Self {
+                let iter = iter.into_iter();
+                let mut bitmap_builder = BitmapBuilder::with_capacity(iter.size_hint().0);
+                let mut data = Vec::with_capacity(iter.size_hint().0);
+
+                for v in iter {
+                    match v {
+                        Some(x) => {
+                            bitmap_builder.append(true);
+                            data.push(x.into());
+                        }
+                        None => {
+                            bitmap_builder.append(false);
+                            data.push(Default::default());
+                        }
+                    }
+                }
+
+                let bitmap = bitmap_builder.finish();
+
+                Self { bitmap, data }
+            }
+        }
+
         impl $array {
-            pub fn from_protobuf(array: &PbArray, cardinality:usize) -> ArrayResult<ArrayImpl> {
+            pub fn from_protobuf(array: &PbArray, cardinality: usize) -> ArrayResult<ArrayImpl> {
                 ensure!(
                     array.get_values().len() == 1,
                     "Must have only 1 buffer in array"
@@ -175,7 +211,6 @@ macro_rules! impl_array_for_num256 {
                 Ok(arr.into())
             }
         }
-
     };
 }
 

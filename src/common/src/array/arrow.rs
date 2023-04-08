@@ -13,12 +13,13 @@
 // limitations under the License.
 
 //! Converts between arrays and Apache Arrow arrays.
-use arrow_schema::Field;
+
+use arrow_schema::{Field, DECIMAL256_MAX_PRECISION};
 use chrono::{NaiveDateTime, NaiveTime};
-use crate::types::num256::Int256;
 
 use super::column::Column;
 use super::*;
+use crate::types::num256::Int256;
 use crate::types::struct_type::StructType;
 use crate::util::iter_util::ZipEqFast;
 
@@ -90,6 +91,7 @@ converts_generic! {
     { arrow_array::StringArray, Utf8, ArrayImpl::Utf8 },
     { arrow_array::BooleanArray, Boolean, ArrayImpl::Bool },
     { arrow_array::Decimal128Array, Decimal128(_, _), ArrayImpl::Decimal },
+    { arrow_array::Decimal256Array, Decimal256(_, _), ArrayImpl::Int256 },
     { arrow_array::IntervalMonthDayNanoArray, Interval(MonthDayNano), ArrayImpl::Interval },
     { arrow_array::Date32Array, Date32, ArrayImpl::Date },
     { arrow_array::TimestampNanosecondArray, Timestamp(Nanosecond, _), ArrayImpl::Timestamp },
@@ -124,6 +126,7 @@ impl From<&arrow_schema::DataType> for DataType {
                 datatype: Box::new(field.data_type().into()),
             },
             Decimal128(_, _) => Self::Decimal,
+            Decimal256(_, _) => Self::Int256,
             _ => todo!("Unsupported arrow data type: {value:?}"),
         }
     }
@@ -142,6 +145,7 @@ impl From<&DataType> for arrow_schema::DataType {
             DataType::Int16 => Self::Int16,
             DataType::Int32 => Self::Int32,
             DataType::Int64 => Self::Int64,
+            DataType::Int256 => Self::Decimal256(DECIMAL256_MAX_PRECISION, 0),
             DataType::Float32 => Self::Float32,
             DataType::Float64 => Self::Float64,
             DataType::Date => Self::Date32,
@@ -356,18 +360,6 @@ impl FromIntoArrow for Interval {
     }
 }
 
-impl FromIntoArrow for Int256 {
-    type ArrowType = arrow_buffer::i256;
-
-    fn from_arrow(value: Self::ArrowType) -> Self {
-        Self::from(value)
-    }
-
-    fn into_arrow(self) -> Self::ArrowType {
-        self.as_scalar_ref().into()
-    }
-}
-
 // RisingWave Decimal type is self-contained, but Arrow is not.
 // In Arrow DecimalArray, the scale is stored in data type as metadata, and the mantissa is stored
 // as i128 in the array.
@@ -415,6 +407,21 @@ impl From<&arrow_array::Decimal128Array> for DecimalArray {
             }
         };
         array.iter().map(|o| o.map(from_arrow)).collect()
+    }
+}
+
+impl From<&Int256Array> for arrow_array::Decimal256Array {
+    fn from(array: &Int256Array) -> Self {
+        array
+            .iter()
+            .map(|o| o.map(arrow_buffer::i256::from))
+            .collect()
+    }
+}
+
+impl From<&arrow_array::Decimal256Array> for Int256Array {
+    fn from(array: &arrow_array::Decimal256Array) -> Self {
+        array.iter().map(|o| o.map(Int256::from)).collect()
     }
 }
 
@@ -468,7 +475,14 @@ impl From<&ListArray> for arrow_array::ListArray {
                 StringBuilder::with_capacity(a.len(), a.data().len()),
                 |b, v| b.append_option(v),
             ),
-            ArrayImpl::Int256(_a) => todo!(),
+            ArrayImpl::Int256(a) => build(
+                array,
+                a,
+                Decimal256Builder::with_capacity(a.len()).with_data_type(
+                    arrow_schema::DataType::Decimal256(DECIMAL256_MAX_PRECISION, 0),
+                ),
+                |b, v| b.append_option(v.map(|d| d.into_arrow())),
+            ),
             ArrayImpl::Bool(a) => {
                 build(array, a, BooleanBuilder::with_capacity(a.len()), |b, v| {
                     b.append_option(v)
@@ -665,6 +679,26 @@ mod tests {
         let arrow = arrow_array::Decimal128Array::from(&array);
         assert_eq!(DecimalArray::from(&arrow), array);
     }
+
+    #[test]
+    fn int256() {
+        let array = Int256Array::from_iter([
+            None,
+            Some(Int256::from(1)),
+            Some(Int256::from(i64::MAX)),
+            Some(Int256::from(i64::MAX) * Int256::from(i64::MAX)),
+            Some(Int256::from(i64::MAX) * Int256::from(i64::MAX) * Int256::from(i64::MAX)),
+            Some(
+                Int256::from(i64::MAX)
+                    * Int256::from(i64::MAX)
+                    * Int256::from(i64::MAX)
+                    * Int256::from(i64::MAX),
+            ),
+        ]);
+        let arrow = arrow_array::Decimal256Array::from(&array);
+        assert_eq!(Int256Array::from(&arrow), array);
+    }
+
     #[test]
     fn struct_array() {
         use arrow_array::Array as _;
