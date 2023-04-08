@@ -61,8 +61,8 @@ static RADIANS_PER_DEGREE: f64 = 0.017_453_292_519_943_295;
 
 // Constants we use to get more accurate results.
 // See PSQL: https://github.com/postgres/postgres/blob/78ec02d612a9b69039ec2610740f738968fe144d/src/backend/utils/adt/float.c#L2024
-static SIN_30: f64 = 0.49999999999999994;
-static ONE_MINUS_COS_60: f64 = 0.49999999999999989;
+static SIN_30: f64 = 0.499_999_999_999_999_94;
+static ONE_MINUS_COS_60: f64 = 0.499_999_999_999_999_9;
 
 // returns the cosine of an angle that lies between 0 and 60 degrees. This will return exactly 1
 // when xis 0, and exactly 0.5 when x is 60 degrees.
@@ -163,6 +163,12 @@ mod tests {
             sind_f64(F64::from(250)),
         );
         assert_similar(sin_f64(pi), sind_f64(d));
+
+        // exact matches
+        assert_eq!(sind_f64(F64::from(30)).0, 0.5);
+        assert_eq!(sind_f64(F64::from(90)).0, 1.0);
+        assert_eq!(sind_f64(F64::from(180)).0, 0.0);
+        assert_eq!(sind_f64(F64::from(270)).0, -1.0);
     }
 
     #[test]
