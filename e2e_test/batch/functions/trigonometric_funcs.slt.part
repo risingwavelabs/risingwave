@@ -219,16 +219,21 @@ SELECT abs(abs(sind(360)) - 0) < 0.000000000000001
 t
 
 query R
-SELECT sind(INF)
+SELECT sind(('Inf'))
 ----
 NaN
 
 query R
-SELECT sind(-INF)
+SELECT sind(('-Inf'))
 ----
 NaN
 
 query R
-SELECT sind(NaN)
+SELECT sind('NaN')
+----
+NaN
+
+query R
+SELECT sind('-NaN')
 ----
 NaN
