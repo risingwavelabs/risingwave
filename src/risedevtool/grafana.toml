@@ -13,7 +13,7 @@ dependencies = ["prepare"]
 condition = { env_set = [ "ENABLE_PROMETHEUS_GRAFANA" ] }
 description = "Download and extract Grafana"
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 if [ -d "${PREFIX_BIN}/grafana" ]; then
     if [ -f "${PREFIX_BIN}/grafana/RISEDEV-VERSION-${GRAFANA_VERSION}" ]; then

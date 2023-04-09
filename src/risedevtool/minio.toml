@@ -11,7 +11,7 @@ dependencies = ["prepare"]
 condition = { env_set = [ "ENABLE_MINIO" ] }
 description = "Download and extract MinIO"
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 if [ -f "${PREFIX_BIN}/minio" ]; then
     exit 0
@@ -30,7 +30,7 @@ dependencies = ["prepare"]
 condition = { env_set = [ "ENABLE_MINIO" ] }
 description = "Download and extract MinIO Client"
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 if [ -f "${PREFIX_BIN}/mcli" ]; then
     exit 0

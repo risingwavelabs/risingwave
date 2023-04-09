@@ -1,8 +1,9 @@
 # macOS
-.DS_Store
+**/*.DS_Store
 
 # Visual Studio Code
-.vscode/
+.vscode/*
+!.vscode/*.example
 .devcontainer/
 
 # JetBrains
@@ -21,6 +22,9 @@ cmake-build-debug/
 *.exe
 *.app
 build/
+
+# Python
+*.pyc
 
 # Golang
 go/bin/
@@ -45,19 +49,22 @@ src/log/
 
 log/
 
+*.log
+
 .risingwave/
 .bin/
 
 # generated files
 risedev-components.user.env
-riselab-components.user.env
 risedev-compose.yml
+risedev-profiles.user.yml
 ft.txt
 # generated output from regress tests
 src/tests/regress/output/*
 src/tests/sync_point/slt/e2e_test
 # generated e2e tests
-e2e_test/generated
+e2e_test/generated/*
+!e2e_test/generated/README.md
 # generated scale tests by `cargo nextest`
 scale-test.tar.zst
 

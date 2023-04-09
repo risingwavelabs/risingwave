@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -81,6 +81,9 @@ pub struct ComposeConfig {
     /// The directory to output all configs. If disabled, all config files will be embedded into
     /// the docker-compose file.
     pub config_directory: String,
+
+    /// The path of `risingwave.toml`
+    pub rw_config_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -151,20 +154,16 @@ fn health_check_port(port: u16) -> HealthCheck {
 impl Compose for ComputeNodeConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("compute-node");
-        ComputeNodeService::apply_command_args(
-            &mut command,
-            self,
-            HummockInMemoryStrategy::Disallowed,
-        )?;
-        command.arg("--config-path").arg("/risingwave.toml");
+        ComputeNodeService::apply_command_args(&mut command, self)?;
         if self.enable_tiered_cache {
             command.arg("--file-cache-dir").arg("/filecache");
         }
 
-        std::fs::copy(
-            Path::new("src").join("config").join("risingwave.toml"),
-            Path::new(&config.config_directory).join("risingwave.toml"),
-        )?;
+        if let Some(c) = &config.rw_config_path {
+            let target = Path::new(&config.config_directory).join("risingwave.toml");
+            fs_err::copy(c, target)?;
+            command.arg("--config-path").arg("/risingwave.toml");
+        }
 
         let command = get_cmd_args(&command, true)?;
 
@@ -198,15 +197,19 @@ impl Compose for ComputeNodeConfig {
 impl Compose for MetaNodeConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("meta-node");
-        MetaNodeService::apply_command_args(&mut command, self)?;
-        command.arg("--config-path").arg("/risingwave.toml");
-        let command = get_cmd_args(&command, true)?;
-
-        std::fs::copy(
-            Path::new("src").join("config").join("risingwave.toml"),
-            Path::new(&config.config_directory).join("risingwave.toml"),
+        MetaNodeService::apply_command_args(
+            &mut command,
+            self,
+            HummockInMemoryStrategy::Disallowed,
         )?;
 
+        if let Some(c) = &config.rw_config_path {
+            let target = Path::new(&config.config_directory).join("risingwave.toml");
+            fs_err::copy(c, target)?;
+            command.arg("--config-path").arg("/risingwave.toml");
+        }
+
+        let command = get_cmd_args(&command, true)?;
         Ok(ComposeService {
             image: config.image.risingwave.clone(),
             environment: [("RUST_BACKTRACE".to_string(), "1".to_string())]
@@ -231,10 +234,15 @@ impl Compose for FrontendConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("frontend-node");
         FrontendService::apply_command_args(&mut command, self)?;
-        command.arg("--config-path").arg("/risingwave.toml");
-        let command = get_cmd_args(&command, true)?;
         let provide_meta_node = self.provide_meta_node.as_ref().unwrap();
 
+        if let Some(c) = &config.rw_config_path {
+            let target = Path::new(&config.config_directory).join("risingwave.toml");
+            fs_err::copy(c, target)?;
+            command.arg("--config-path").arg("/risingwave.toml");
+        }
+
+        let command = get_cmd_args(&command, true)?;
         Ok(ComposeService {
             image: config.image.risingwave.clone(),
             environment: [("RUST_BACKTRACE".to_string(), "1".to_string())]
@@ -257,17 +265,17 @@ impl Compose for CompactorConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("compactor-node");
         CompactorService::apply_command_args(&mut command, self)?;
-        command.arg("--config-path").arg("/risingwave.toml");
-        let command = get_cmd_args(&command, true)?;
 
-        std::fs::copy(
-            Path::new("src").join("config").join("risingwave.toml"),
-            Path::new(&config.config_directory).join("risingwave.toml"),
-        )?;
+        if let Some(c) = &config.rw_config_path {
+            let target = Path::new(&config.config_directory).join("risingwave.toml");
+            fs_err::copy(c, target)?;
+            command.arg("--config-path").arg("/risingwave.toml");
+        }
 
         let provide_meta_node = self.provide_meta_node.as_ref().unwrap();
         let provide_minio = self.provide_minio.as_ref().unwrap();
 
+        let command = get_cmd_args(&command, true)?;
         Ok(ComposeService {
             image: config.image.risingwave.clone(),
             environment: [("RUST_BACKTRACE".to_string(), "1".to_string())]
@@ -396,7 +404,7 @@ impl Compose for PrometheusConfig {
             ..Default::default()
         };
 
-        std::fs::write(
+        fs_err::write(
             Path::new(&config.config_directory).join("prometheus.yaml"),
             prometheus_config,
         )?;
@@ -411,19 +419,19 @@ impl Compose for PrometheusConfig {
 impl Compose for GrafanaConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let config_root = Path::new(&config.config_directory);
-        std::fs::write(
+        fs_err::write(
             config_root.join("grafana.ini"),
-            &GrafanaGen.gen_custom_ini(self),
+            GrafanaGen.gen_custom_ini(self),
         )?;
 
-        std::fs::write(
+        fs_err::write(
             config_root.join("grafana-risedev-datasource.yml"),
-            &GrafanaGen.gen_datasource_yml(self)?,
+            GrafanaGen.gen_datasource_yml(self)?,
         )?;
 
-        std::fs::write(
+        fs_err::write(
             config_root.join("grafana-risedev-dashboard.yml"),
-            &GrafanaGen.gen_dashboard_yml(self, config_root, "/")?,
+            GrafanaGen.gen_dashboard_yml(self, config_root, "/")?,
         )?;
 
         let service = ComposeService {

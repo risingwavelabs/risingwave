@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -37,10 +37,6 @@ macro_rules! impl_all_native_scalar {
                 fn as_scalar_ref(&self) -> Self {
                     *self
                 }
-
-                fn to_scalar_value(self) -> ScalarImpl {
-                    ScalarImpl::$variant_name(self)
-                }
             }
 
             impl<'scalar> ScalarRef<'scalar> for $scalar_type {
@@ -68,10 +64,6 @@ impl Scalar for Box<str> {
     fn as_scalar_ref(&self) -> &str {
         self.as_ref()
     }
-
-    fn to_scalar_value(self) -> ScalarImpl {
-        ScalarImpl::Utf8(self)
-    }
 }
 
 /// Implement `Scalar` for `Bytes`.
@@ -80,10 +72,6 @@ impl Scalar for Box<[u8]> {
 
     fn as_scalar_ref(&self) -> &[u8] {
         self
-    }
-
-    fn to_scalar_value(self) -> ScalarImpl {
-        ScalarImpl::Bytea(self)
     }
 }
 
@@ -94,10 +82,6 @@ impl Scalar for StructValue {
     fn as_scalar_ref(&self) -> StructRef<'_> {
         StructRef::ValueRef { val: self }
     }
-
-    fn to_scalar_value(self) -> ScalarImpl {
-        ScalarImpl::Struct(self)
-    }
 }
 
 /// Implement `Scalar` for `ListValue`.
@@ -106,10 +90,6 @@ impl Scalar for ListValue {
 
     fn as_scalar_ref(&self) -> ListRef<'_> {
         ListRef::ValueRef { val: self }
-    }
-
-    fn to_scalar_value(self) -> ScalarImpl {
-        ScalarImpl::List(self)
     }
 }
 
@@ -164,10 +144,6 @@ impl Scalar for bool {
     fn as_scalar_ref(&self) -> bool {
         *self
     }
-
-    fn to_scalar_value(self) -> ScalarImpl {
-        ScalarImpl::Bool(self)
-    }
 }
 
 /// Implement `ScalarRef` for `bool`.
@@ -190,10 +166,6 @@ impl Scalar for Decimal {
     fn as_scalar_ref(&self) -> Decimal {
         *self
     }
-
-    fn to_scalar_value(self) -> ScalarImpl {
-        ScalarImpl::Decimal(self)
-    }
 }
 
 /// Implement `ScalarRef` for `Decimal`.
@@ -209,24 +181,20 @@ impl<'a> ScalarRef<'a> for Decimal {
     }
 }
 
-/// Implement `Scalar` for `IntervalUnit`.
-impl Scalar for IntervalUnit {
-    type ScalarRefType<'a> = IntervalUnit;
+/// Implement `Scalar` for `Interval`.
+impl Scalar for Interval {
+    type ScalarRefType<'a> = Interval;
 
-    fn as_scalar_ref(&self) -> IntervalUnit {
+    fn as_scalar_ref(&self) -> Interval {
         *self
-    }
-
-    fn to_scalar_value(self) -> ScalarImpl {
-        ScalarImpl::Interval(self)
     }
 }
 
-/// Implement `ScalarRef` for `IntervalUnit`.
-impl<'a> ScalarRef<'a> for IntervalUnit {
-    type ScalarType = IntervalUnit;
+/// Implement `ScalarRef` for `Interval`.
+impl<'a> ScalarRef<'a> for Interval {
+    type ScalarType = Interval;
 
-    fn to_owned_scalar(&self) -> IntervalUnit {
+    fn to_owned_scalar(&self) -> Interval {
         *self
     }
 
@@ -235,24 +203,20 @@ impl<'a> ScalarRef<'a> for IntervalUnit {
     }
 }
 
-/// Implement `Scalar` for `NaiveDateWrapper`.
-impl Scalar for NaiveDateWrapper {
-    type ScalarRefType<'a> = NaiveDateWrapper;
+/// Implement `Scalar` for `Date`.
+impl Scalar for Date {
+    type ScalarRefType<'a> = Date;
 
-    fn as_scalar_ref(&self) -> NaiveDateWrapper {
+    fn as_scalar_ref(&self) -> Date {
         *self
-    }
-
-    fn to_scalar_value(self) -> ScalarImpl {
-        ScalarImpl::NaiveDate(self)
     }
 }
 
-/// Implement `ScalarRef` for `NaiveDateWrapper`.
-impl<'a> ScalarRef<'a> for NaiveDateWrapper {
-    type ScalarType = NaiveDateWrapper;
+/// Implement `ScalarRef` for `Date`.
+impl<'a> ScalarRef<'a> for Date {
+    type ScalarType = Date;
 
-    fn to_owned_scalar(&self) -> NaiveDateWrapper {
+    fn to_owned_scalar(&self) -> Date {
         *self
     }
 
@@ -261,24 +225,20 @@ impl<'a> ScalarRef<'a> for NaiveDateWrapper {
     }
 }
 
-/// Implement `Scalar` for `NaiveDateTimeWrapper`.
-impl Scalar for NaiveDateTimeWrapper {
-    type ScalarRefType<'a> = NaiveDateTimeWrapper;
+/// Implement `Scalar` for `Timestamp`.
+impl Scalar for Timestamp {
+    type ScalarRefType<'a> = Timestamp;
 
-    fn as_scalar_ref(&self) -> NaiveDateTimeWrapper {
+    fn as_scalar_ref(&self) -> Timestamp {
         *self
-    }
-
-    fn to_scalar_value(self) -> ScalarImpl {
-        ScalarImpl::NaiveDateTime(self)
     }
 }
 
-/// Implement `ScalarRef` for `NaiveDateTimeWrapper`.
-impl<'a> ScalarRef<'a> for NaiveDateTimeWrapper {
-    type ScalarType = NaiveDateTimeWrapper;
+/// Implement `ScalarRef` for `Timestamp`.
+impl<'a> ScalarRef<'a> for Timestamp {
+    type ScalarType = Timestamp;
 
-    fn to_owned_scalar(&self) -> NaiveDateTimeWrapper {
+    fn to_owned_scalar(&self) -> Timestamp {
         *self
     }
 
@@ -287,24 +247,20 @@ impl<'a> ScalarRef<'a> for NaiveDateTimeWrapper {
     }
 }
 
-/// Implement `Scalar` for `NaiveTimeWrapper`.
-impl Scalar for NaiveTimeWrapper {
-    type ScalarRefType<'a> = NaiveTimeWrapper;
+/// Implement `Scalar` for `Time`.
+impl Scalar for Time {
+    type ScalarRefType<'a> = Time;
 
-    fn as_scalar_ref(&self) -> NaiveTimeWrapper {
+    fn as_scalar_ref(&self) -> Time {
         *self
-    }
-
-    fn to_scalar_value(self) -> ScalarImpl {
-        ScalarImpl::NaiveTime(self)
     }
 }
 
-/// Implement `ScalarRef` for `NaiveTimeWrapper`.
-impl<'a> ScalarRef<'a> for NaiveTimeWrapper {
-    type ScalarType = NaiveTimeWrapper;
+/// Implement `ScalarRef` for `Time`.
+impl<'a> ScalarRef<'a> for Time {
+    type ScalarType = Time;
 
-    fn to_owned_scalar(&self) -> NaiveTimeWrapper {
+    fn to_owned_scalar(&self) -> Time {
         *self
     }
 

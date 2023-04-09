@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,17 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::{zip_eq, Itertools};
+use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::zip_eq_fast;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, DataType as AstDataType, Expr, Function, ObjectName, Query, StructField,
+    Array, BinaryOperator, DataType as AstDataType, Expr, Function, ObjectName, Query, StructField,
     TrimWhereField, UnaryOperator,
 };
 
 use crate::binder::Binder;
-use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, SubqueryKind};
+use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, Parameter, SubqueryKind};
 
 mod binary_op;
 mod column;
@@ -32,18 +33,19 @@ mod subquery;
 mod value;
 
 impl Binder {
-    pub(super) fn bind_expr(&mut self, expr: Expr) -> Result<ExprImpl> {
+    pub fn bind_expr(&mut self, expr: Expr) -> Result<ExprImpl> {
         match expr {
             // literal
             Expr::Value(v) => Ok(ExprImpl::Literal(Box::new(self.bind_value(v)?))),
             Expr::TypedString { data_type, value } => {
                 let s: ExprImpl = self.bind_string(value)?.into();
                 s.cast_explicit(bind_data_type(&data_type)?)
+                    .map_err(Into::into)
             }
             Expr::Row(exprs) => self.bind_row(exprs),
             // input ref
             Expr::Identifier(ident) => {
-                if ["session_user", "current_schema"]
+                if ["session_user", "current_schema", "current_timestamp"]
                     .iter()
                     .any(|e| ident.real_value().as_str() == *e)
                 {
@@ -64,7 +66,7 @@ impl Binder {
             Expr::UnaryOp { op, expr } => self.bind_unary_expr(op, *expr),
             Expr::BinaryOp { left, op, right } => self.bind_binary_op(*left, op, *right),
             Expr::Nested(expr) => self.bind_expr(*expr),
-            Expr::Array(exprs) => self.bind_array(exprs),
+            Expr::Array(Array { elem: exprs, .. }) => self.bind_array(exprs),
             Expr::ArrayIndex { obj, index } => self.bind_array_index(*obj, *index),
             Expr::Function(f) => self.bind_function(f),
             // subquery
@@ -109,18 +111,24 @@ impl Binder {
                 time_zone,
             } => self.bind_at_time_zone(*timestamp, time_zone),
             // special syntaxt for string
-            Expr::Trim { expr, trim_where } => self.bind_trim(*expr, trim_where),
+            Expr::Trim {
+                expr,
+                trim_where,
+                trim_what,
+            } => self.bind_trim(*expr, trim_where, trim_what),
             Expr::Substring {
                 expr,
                 substring_from,
                 substring_for,
             } => self.bind_substring(*expr, substring_from, substring_for),
+            Expr::Position { substring, string } => self.bind_position(*substring, *string),
             Expr::Overlay {
                 expr,
                 new_substring,
                 start,
                 count,
             } => self.bind_overlay(*expr, *new_substring, *start, count),
+            Expr::Parameter { index } => self.bind_parameter(index),
             _ => Err(ErrorCode::NotImplemented(
                 format!("unsupported expression {:?}", expr),
                 112.into(),
@@ -211,6 +219,7 @@ impl Binder {
         let func_type = match op {
             UnaryOperator::Not => ExprType::Not,
             UnaryOperator::Minus => ExprType::Neg,
+            UnaryOperator::PGAbs => ExprType::Abs,
             UnaryOperator::PGBitwiseNot => ExprType::BitwiseNot,
             UnaryOperator::Plus => {
                 return self.rewrite_positive(expr);
@@ -240,21 +249,20 @@ impl Binder {
     pub(super) fn bind_trim(
         &mut self,
         expr: Expr,
-        // ([BOTH | LEADING | TRAILING], <expr>)
-        trim_where: Option<(TrimWhereField, Box<Expr>)>,
+        // BOTH | LEADING | TRAILING
+        trim_where: Option<TrimWhereField>,
+        trim_what: Option<Box<Expr>>,
     ) -> Result<ExprImpl> {
         let mut inputs = vec![self.bind_expr(expr)?];
         let func_type = match trim_where {
-            Some(t) => {
-                inputs.push(self.bind_expr(*t.1)?);
-                match t.0 {
-                    TrimWhereField::Both => ExprType::Trim,
-                    TrimWhereField::Leading => ExprType::Ltrim,
-                    TrimWhereField::Trailing => ExprType::Rtrim,
-                }
-            }
+            Some(TrimWhereField::Both) => ExprType::Trim,
+            Some(TrimWhereField::Leading) => ExprType::Ltrim,
+            Some(TrimWhereField::Trailing) => ExprType::Rtrim,
             None => ExprType::Trim,
         };
+        if let Some(t) = trim_what {
+            inputs.push(self.bind_expr(*t)?);
+        }
         Ok(FunctionCall::new(func_type, inputs)?.into())
     }
 
@@ -277,6 +285,15 @@ impl Binder {
         FunctionCall::new(ExprType::Substr, args).map(|f| f.into())
     }
 
+    fn bind_position(&mut self, substring: Expr, string: Expr) -> Result<ExprImpl> {
+        let args = vec![
+            // Note that we reverse the order of arguments.
+            self.bind_expr(string)?,
+            self.bind_expr(substring)?,
+        ];
+        FunctionCall::new(ExprType::Position, args).map(Into::into)
+    }
+
     fn bind_overlay(
         &mut self,
         expr: Expr,
@@ -293,6 +310,10 @@ impl Binder {
             args.push(self.bind_expr(*count)?);
         }
         FunctionCall::new(ExprType::Overlay, args).map(|f| f.into())
+    }
+
+    fn bind_parameter(&mut self, index: u64) -> Result<ExprImpl> {
+        Ok(Parameter::new(index, self.param_types.clone()).into())
     }
 
     /// Bind `expr (not) between low and high`
@@ -347,7 +368,7 @@ impl Binder {
             .collect::<Result<_>>()?;
         let else_result_expr = else_result.map(|expr| self.bind_expr(*expr)).transpose()?;
 
-        for (condition, result) in zip_eq(conditions, results_expr) {
+        for (condition, result) in zip_eq_fast(conditions, results_expr) {
             let condition = match operand {
                 Some(ref t) => Expr::BinaryOp {
                     left: t.clone(),
@@ -356,7 +377,10 @@ impl Binder {
                 },
                 None => condition,
             };
-            inputs.push(self.bind_expr(condition)?);
+            inputs.push(
+                self.bind_expr(condition)
+                    .and_then(|expr| expr.enforce_bool_clause("CASE WHEN"))?,
+            );
             inputs.push(result);
         }
         if let Some(expr) = else_result_expr {
@@ -385,15 +409,48 @@ impl Binder {
     }
 
     pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<ExprImpl> {
-        self.bind_cast_inner(expr, bind_data_type(&data_type)?)
+        match &data_type {
+            // Casting to Regclass type means getting the oid of expr.
+            // See https://www.postgresql.org/docs/current/datatype-oid.html.
+            // Currently only string liter expr is supported since we cannot handle subquery in join
+            // on condition: https://github.com/risingwavelabs/risingwave/issues/6852
+            // TODO: Add generic expr support when needed
+            AstDataType::Regclass => {
+                let input = self.bind_expr(expr)?;
+                let class_name = match &input {
+                    ExprImpl::Literal(literal)
+                        if literal.return_type() == DataType::Varchar
+                            && let Some(scalar) = literal.get_data() =>
+                    {
+                        match scalar {
+                            risingwave_common::types::ScalarImpl::Utf8(s) => s,
+                            _ => {
+                                return Err(ErrorCode::BindError(
+                                    "Unsupported input type".to_string(),
+                                )
+                                .into())
+                            }
+                        }
+                    }
+                    _ => {
+                        return Err(
+                            ErrorCode::BindError("Unsupported input type".to_string()).into()
+                        )
+                    }
+                };
+                self.resolve_regclass(class_name)
+                    .map(|id| ExprImpl::literal_int(id as i32))
+            }
+            _ => self.bind_cast_inner(expr, bind_data_type(&data_type)?),
+        }
     }
 
     pub fn bind_cast_inner(&mut self, expr: Expr, data_type: DataType) -> Result<ExprImpl> {
-        if let Expr::Array(ref expr) = expr && matches!(&data_type, DataType::List{ .. } ) {
+        if let Expr::Array(Array {elem: ref expr, ..}) = expr && matches!(&data_type, DataType::List{ .. } ) {
             return self.bind_array_cast(expr.clone(), data_type);
         }
         let lhs = self.bind_expr(expr)?;
-        lhs.cast_explicit(data_type)
+        lhs.cast_explicit(data_type).map_err(Into::into)
     }
 }
 
@@ -409,6 +466,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
                     name: f.name.real_value(),
                     field_descs: vec![],
                     type_name: "".to_string(),
+                    generated_column: None,
                 })
             })
             .collect::<Result<Vec<_>>>()?
@@ -421,6 +479,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
         name: column_def.name.real_value(),
         field_descs,
         type_name: "".to_string(),
+        generated_column: None,
     })
 }
 
@@ -433,17 +492,18 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
     };
     let data_type = match data_type {
         AstDataType::Boolean => DataType::Boolean,
-        AstDataType::SmallInt(None) => DataType::Int16,
-        AstDataType::Int(None) => DataType::Int32,
-        AstDataType::BigInt(None) => DataType::Int64,
+        AstDataType::SmallInt => DataType::Int16,
+        AstDataType::Int => DataType::Int32,
+        AstDataType::BigInt => DataType::Int64,
         AstDataType::Real | AstDataType::Float(Some(1..=24)) => DataType::Float32,
         AstDataType::Double | AstDataType::Float(Some(25..=53) | None) => DataType::Float64,
+        AstDataType::Float(Some(0 | 54..)) => unreachable!(),
         AstDataType::Decimal(None, None) => DataType::Decimal,
-        AstDataType::Varchar | AstDataType::String | AstDataType::Text => DataType::Varchar,
+        AstDataType::Varchar | AstDataType::Text => DataType::Varchar,
         AstDataType::Date => DataType::Date,
         AstDataType::Time(false) => DataType::Time,
         AstDataType::Timestamp(false) => DataType::Timestamp,
-        AstDataType::Timestamp(true) => DataType::Timestampz,
+        AstDataType::Timestamp(true) => DataType::Timestamptz,
         AstDataType::Interval => DataType::Interval,
         AstDataType::Array(datatype) => DataType::List {
             datatype: Box::new(bind_data_type(datatype)?),
@@ -471,12 +531,24 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 "int8" => DataType::Int64,
                 "float4" => DataType::Float32,
                 "float8" => DataType::Float64,
-                "timestamptz" => DataType::Timestampz,
+                "timestamptz" => DataType::Timestamptz,
+                "jsonb" => DataType::Jsonb,
+                "serial" => {
+                    return Err(ErrorCode::NotSupported(
+                        "Column type SERIAL is not supported".into(),
+                        "Please remove the SERIAL column".into(),
+                    )
+                    .into())
+                }
                 _ => return Err(new_err().into()),
             }
         }
         AstDataType::Bytea => DataType::Bytea,
-        _ => return Err(new_err().into()),
+        AstDataType::Regclass
+        | AstDataType::Uuid
+        | AstDataType::Custom(_)
+        | AstDataType::Decimal(_, _)
+        | AstDataType::Time(true) => return Err(new_err().into()),
     };
     Ok(data_type)
 }

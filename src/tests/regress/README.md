@@ -11,14 +11,19 @@ in rust.
   expected output. For example, for a test case named `boolean`, here is its [input file](data/sql/boolean.sql)
   and [expected out](data/expected/boolean.out).
 
-# How to add a new test
+# How to enable a new test file
 
 Just add another line in your schedule file with your test cast name.
 ```
 test: boolean
 ```
 
+# How to edit a test file
+
 If you want to ignore a certain test query from an input sql file, comment it out with `--@ `. Note the extra `@` after `--`.
+
+Except for the `--@ ` syntax above, all other edits to the input sql file must be applied to the expected output file as well, including extra normal comments `-- `.
+In general, these files are not meant to be modified a lot. The test runner has some assumptions over the format and would misbehave otherwise.
 
 # How to run
 
@@ -26,8 +31,9 @@ If you want to ignore a certain test query from an input sql file, comment it ou
 * `cd` to the root directory of risingwave.
 * Start risingwave cluster.
 * Run tests against RisingWave.
+
 ```shell
-RUST_BACKTRACE=1 target/debug/risingwave_regress_test -h 127.0.0.1 \
+RUST_BACKTRACE=1 target/debug/risingwave_regress_test --host 127.0.0.1 \
   -p 4566 \
   -u root \
   --input `pwd`/src/tests/regress/data \
@@ -37,8 +43,9 @@ RUST_BACKTRACE=1 target/debug/risingwave_regress_test -h 127.0.0.1 \
 ```
 
 * Run tests against PostgreSQL. Make sure PostgreSQL is running.
+
 ```shell
-RUST_BACKTRACE=1 target/debug/risingwave_regress_test -h 127.0.0.1 \
+RUST_BACKTRACE=1 target/debug/risingwave_regress_test --host 127.0.0.1 \
   -p 5432 \
   -u `user name` \
   --database `database name` \
@@ -46,9 +53,10 @@ RUST_BACKTRACE=1 target/debug/risingwave_regress_test -h 127.0.0.1 \
   --output `pwd`/src/tests/regress/output \
   --schedule `pwd`/src/tests/regress/data/schedule \
   --mode postgres
-
 ```
+
 Please remove the `output` directory before running the test again.
+
 ```shell
 rm -rf `pwd`/src/tests/regress/output
 ```

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,16 +15,19 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeCompactor};
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManagerRef,
 };
 use risingwave_pb::catalog::Table;
+use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 
 pub struct CompactorObserverNode {
     filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+    system_params_manager: LocalSystemParamsManagerRef,
     version: u64,
 }
 
@@ -37,21 +40,29 @@ impl ObserverState for CompactorObserverNode {
         };
 
         match info.to_owned() {
-            Info::Table(table_catalog) => {
-                assert!(
-                    resp.version > self.version,
-                    "resp version={:?}, current version={:?}",
-                    resp.version,
-                    self.version
-                );
+            Info::RelationGroup(relation_group) => {
+                for relation in relation_group.relations {
+                    match relation.relation_info.unwrap() {
+                        RelationInfo::Table(table_catalog) => {
+                            assert!(
+                                resp.version > self.version,
+                                "resp version={:?}, current version={:?}",
+                                resp.version,
+                                self.version
+                            );
 
-                self.handle_catalog_notification(resp.operation(), table_catalog);
+                            self.handle_catalog_notification(resp.operation(), table_catalog);
 
-                self.version = resp.version;
+                            self.version = resp.version;
+                        }
+                        _ => panic!("error type notification"),
+                    };
+                }
             }
-
             Info::HummockVersionDeltas(_) => {}
-
+            Info::SystemParams(p) => {
+                self.system_params_manager.try_set_params(p);
+            }
             _ => {
                 panic!("error type notification");
             }
@@ -69,9 +80,13 @@ impl ObserverState for CompactorObserverNode {
 }
 
 impl CompactorObserverNode {
-    pub fn new(filter_key_extractor_manager: FilterKeyExtractorManagerRef) -> Self {
+    pub fn new(
+        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+        system_params_manager: LocalSystemParamsManagerRef,
+    ) -> Self {
         Self {
             filter_key_extractor_manager,
+            system_params_manager,
             version: 0,
         }
     }

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,33 +14,31 @@
 
 use std::ops::{Bound, RangeBounds};
 
-use itertools::Itertools;
 use paste::paste;
-use risingwave_pb::batch_plan::scan_range::Bound as BoundProst;
-use risingwave_pb::batch_plan::ScanRange as ScanRangeProst;
+use risingwave_pb::batch_plan::scan_range::Bound as BoundPb;
+use risingwave_pb::batch_plan::ScanRange as ScanRangePb;
 
-use super::value_encoding::serialize_datum_to_bytes;
+use super::value_encoding::serialize_datum;
+use crate::catalog::get_dist_key_in_pk_indices;
 use crate::hash::VirtualNode;
-use crate::row::{Row2, RowExt};
 use crate::types::{Datum, ScalarImpl};
-use crate::util::hash_util::Crc32FastBuilder;
-use crate::util::value_encoding::serialize_datum;
+use crate::util::value_encoding::serialize_datum_into;
 
-/// See also [`ScanRangeProst`]
-#[derive(Debug, Clone)]
+/// See also [`ScanRangePb`]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ScanRange {
     pub eq_conds: Vec<Datum>,
     pub range: (Bound<ScalarImpl>, Bound<ScalarImpl>),
 }
 
-fn bound_to_proto(bound: &Bound<ScalarImpl>) -> Option<BoundProst> {
+fn bound_to_proto(bound: &Bound<ScalarImpl>) -> Option<BoundPb> {
     match bound {
-        Bound::Included(literal) => Some(BoundProst {
-            value: serialize_datum_to_bytes(Some(literal)),
+        Bound::Included(literal) => Some(BoundPb {
+            value: serialize_datum(Some(literal)),
             inclusive: true,
         }),
-        Bound::Excluded(literal) => Some(BoundProst {
-            value: serialize_datum_to_bytes(Some(literal)),
+        Bound::Excluded(literal) => Some(BoundPb {
+            value: serialize_datum(Some(literal)),
             inclusive: false,
         }),
         Bound::Unbounded => None,
@@ -48,14 +46,14 @@ fn bound_to_proto(bound: &Bound<ScalarImpl>) -> Option<BoundProst> {
 }
 
 impl ScanRange {
-    pub fn to_protobuf(&self) -> ScanRangeProst {
-        ScanRangeProst {
+    pub fn to_protobuf(&self) -> ScanRangePb {
+        ScanRangePb {
             eq_conds: self
                 .eq_conds
                 .iter()
                 .map(|datum| {
                     let mut encoded = vec![];
-                    serialize_datum(datum, &mut encoded);
+                    serialize_datum_into(datum, &mut encoded);
                     encoded
                 })
                 .collect(),
@@ -66,6 +64,16 @@ impl ScanRange {
 
     pub fn is_full_table_scan(&self) -> bool {
         self.eq_conds.is_empty() && self.range == full_range()
+    }
+
+    pub fn has_eq_conds(&self) -> bool {
+        !self.eq_conds.is_empty()
+    }
+
+    pub fn two_side_bound(&self) -> bool {
+        let bounds = &self.range;
+        !matches!(bounds.start_bound(), Bound::Unbounded)
+            && !matches!(bounds.end_bound(), Bound::Unbounded)
     }
 
     pub const fn full_table_scan() -> Self {
@@ -81,33 +89,24 @@ impl ScanRange {
         pk_indices: &[usize],
     ) -> Option<VirtualNode> {
         if dist_key_indices.is_empty() {
-            return None;
+            return Some(VirtualNode::ZERO);
         }
 
-        let dist_key_in_pk_indices = dist_key_indices
-            .iter()
-            .map(|&di| {
-                pk_indices
-                    .iter()
-                    .position(|&pi| di == pi)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "distribution keys {:?} must be a subset of primary keys {:?}",
-                            dist_key_indices, pk_indices
-                        )
-                    })
-            })
-            .collect_vec();
+        let dist_key_in_pk_indices = get_dist_key_in_pk_indices(dist_key_indices, pk_indices);
+        self.try_compute_vnode_with_dist_key_in_pk_indices(&dist_key_in_pk_indices)
+    }
+
+    pub fn try_compute_vnode_with_dist_key_in_pk_indices(
+        &self,
+        dist_key_in_pk_indices: &[usize],
+    ) -> Option<VirtualNode> {
         let pk_prefix_len = self.eq_conds.len();
         if dist_key_in_pk_indices.iter().any(|&i| i >= pk_prefix_len) {
             return None;
         }
 
-        let pk_prefix_value = &self.eq_conds;
-        let vnode = pk_prefix_value
-            .project(&dist_key_in_pk_indices)
-            .hash(Crc32FastBuilder)
-            .to_vnode();
+        let pk_prefix_value: &[_] = &self.eq_conds;
+        let vnode = VirtualNode::compute_row(pk_prefix_value, dist_key_in_pk_indices);
         Some(vnode)
     }
 }
@@ -174,7 +173,7 @@ for_all_scalar_int_variants! { impl_split_small_range }
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::row::Row;
+    use crate::row::OwnedRow;
 
     // dist_key is prefix of pk
     #[test]
@@ -189,13 +188,13 @@ mod tests {
         assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
 
         scan_range.eq_conds.push(Some(ScalarImpl::from(514)));
-        let vnode = Row::new(vec![
+        let row = OwnedRow::new(vec![
             Some(ScalarImpl::from(114)),
             Some(ScalarImpl::from(514)),
-        ])
-        .project(&[0, 1])
-        .hash(Crc32FastBuilder)
-        .to_vnode();
+        ]);
+
+        let vnode = VirtualNode::compute_row(&row, &[0, 1]);
+
         assert_eq!(scan_range.try_compute_vnode(&dist_key, &pk), Some(vnode));
     }
 
@@ -215,14 +214,14 @@ mod tests {
         assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
 
         scan_range.eq_conds.push(Some(ScalarImpl::from(114514)));
-        let vnode = Row::new(vec![
+        let row = OwnedRow::new(vec![
             Some(ScalarImpl::from(114)),
             Some(ScalarImpl::from(514)),
             Some(ScalarImpl::from(114514)),
-        ])
-        .project(&[2, 1])
-        .hash(Crc32FastBuilder)
-        .to_vnode();
+        ]);
+
+        let vnode = VirtualNode::compute_row(&row, &[2, 1]);
+
         assert_eq!(scan_range.try_compute_vnode(&dist_key, &pk), Some(vnode));
     }
 }

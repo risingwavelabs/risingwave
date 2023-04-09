@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,25 +14,25 @@
 
 use bytes::BufMut;
 
-use super::Row2;
+use super::Row;
 use crate::types::DatumRef;
 
 /// Row for the [`chain`](super::RowExt::chain) method.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Chain<R1, R2> {
     r1: R1,
     r2: R2,
 }
 
-impl<R1: Row2, R2: Row2> PartialEq for Chain<R1, R2> {
+impl<R1: Row, R2: Row> PartialEq for Chain<R1, R2> {
     fn eq(&self, other: &Self) -> bool {
         self.iter().eq(other.iter())
     }
 }
-impl<R1: Row2, R2: Row2> Eq for Chain<R1, R2> {}
+impl<R1: Row, R2: Row> Eq for Chain<R1, R2> {}
 
-impl<R1: Row2, R2: Row2> Row2 for Chain<R1, R2> {
-    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
+impl<R1: Row, R2: Row> Row for Chain<R1, R2> {
+    type Iter<'a> = std::iter::Chain<R1::Iter<'a>, R2::Iter<'a>>
     where
         R1: 'a,
         R2: 'a;
@@ -74,8 +74,8 @@ impl<R1: Row2, R2: Row2> Row2 for Chain<R1, R2> {
     // Manually implemented in case `R1` or `R2` has a more efficient implementation.
     #[inline]
     fn value_serialize_into(&self, mut buf: impl BufMut) {
-        buf.put_slice(&self.r1.value_serialize());
-        buf.put_slice(&self.r2.value_serialize());
+        self.r1.value_serialize_into(&mut buf);
+        self.r2.value_serialize_into(buf);
     }
 }
 
@@ -88,16 +88,16 @@ impl<R1, R2> Chain<R1, R2> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::row::Row;
+    use crate::row::OwnedRow;
     use crate::types::{ScalarImpl, ScalarRefImpl};
 
     #[test]
     fn test_chain_row() {
-        let r1 = || Row::new((1..=3).map(|i| Some(ScalarImpl::Int64(i))).collect());
-        let r2 = || Row::new((4..=6).map(|i| Some(ScalarImpl::Int64(i))).collect());
-        let r3 = || Row::new((7..=9).map(|i| Some(ScalarImpl::Int64(i))).collect());
+        let r1 = || OwnedRow::new((1..=3).map(|i| Some(ScalarImpl::Int64(i))).collect());
+        let r2 = || OwnedRow::new((4..=6).map(|i| Some(ScalarImpl::Int64(i))).collect());
+        let r3 = || OwnedRow::new((7..=9).map(|i| Some(ScalarImpl::Int64(i))).collect());
 
-        let r_expected = Row::new((1..=9).map(|i| Some(ScalarImpl::Int64(i))).collect());
+        let r_expected = OwnedRow::new((1..=9).map(|i| Some(ScalarImpl::Int64(i))).collect());
 
         macro_rules! test {
             ($r:expr) => {

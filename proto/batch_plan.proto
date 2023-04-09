@@ -8,6 +8,7 @@ import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message RowSeqScanNode {
@@ -21,6 +22,14 @@ message RowSeqScanNode {
   //
   // Will be filled by the scheduler.
   common.Buffer vnode_bitmap = 4;
+  // Whether the order on output columns should be preserved.
+  bool ordered = 5;
+
+  message ChunkSize {
+    uint32 chunk_size = 1;
+  }
+  // If along with `batch_limit`, `chunk_size` will be set.
+  ChunkSize chunk_size = 6;
 }
 
 message SysRowSeqScanNode {
@@ -54,7 +63,7 @@ message SourceNode {
   repeated plan_common.ColumnCatalog columns = 2;
   map<string, string> properties = 3;
   bytes split = 4;
-  catalog.SourceInfo info = 5;
+  catalog.StreamSourceInfo info = 5;
 }
 
 message ProjectNode {
@@ -66,23 +75,33 @@ message FilterNode {
 }
 
 message InsertNode {
-  uint32 table_source_id = 1;
-  repeated uint32 column_idxs = 2;
-  // Id of the materialized view which is used to determine which compute node to execute the dml fragment.
-  uint32 associated_mview_id = 3;
+  // Id of the table to perform inserting.
+  uint32 table_id = 1;
+  // Version of the table.
+  uint64 table_version_id = 5;
+  repeated uint32 column_indices = 2;
+  // An optional field and will be `None` for tables without user-defined pk.
+  // The `BatchInsertExecutor` should add a column with NULL value which will
+  // be filled in streaming.
+  optional uint32 row_id_index = 3;
+  bool returning = 4;
 }
 
 message DeleteNode {
-  uint32 table_source_id = 1;
-  // Id of the materialized view which is used to determine which compute node to execute the dml fragment.
-  uint32 associated_mview_id = 2;
+  // Id of the table to perform deleting.
+  uint32 table_id = 1;
+  // Version of the table.
+  uint64 table_version_id = 3;
+  bool returning = 2;
 }
 
 message UpdateNode {
-  uint32 table_source_id = 1;
+  // Id of the table to perform updating.
+  uint32 table_id = 1;
+  // Version of the table.
+  uint64 table_version_id = 4;
   repeated expr.ExprNode exprs = 2;
-  // Id of the materialized view which is used to determine which compute node to execute the dml fragment.
-  uint32 associated_mview_id = 3;
+  bool returning = 3;
 }
 
 message ValuesNode {
@@ -94,18 +113,18 @@ message ValuesNode {
 }
 
 message SortNode {
-  repeated plan_common.ColumnOrder column_orders = 1;
+  repeated common.ColumnOrder column_orders = 1;
 }
 
 message TopNNode {
-  repeated plan_common.ColumnOrder column_orders = 1;
+  repeated common.ColumnOrder column_orders = 1;
   uint64 limit = 2;
   uint64 offset = 3;
   bool with_ties = 4;
 }
 
 message GroupTopNNode {
-  repeated plan_common.ColumnOrder column_orders = 1;
+  repeated common.ColumnOrder column_orders = 1;
   uint64 limit = 2;
   uint64 offset = 3;
   repeated uint32 group_key = 4;
@@ -159,15 +178,17 @@ message SortMergeJoinNode {
   plan_common.JoinType join_type = 1;
   repeated int32 left_key = 2;
   repeated int32 right_key = 3;
-  plan_common.OrderType direction = 4;
+  common.Direction direction = 4;
   repeated uint32 output_indices = 5;
 }
 
 message HopWindowNode {
-  expr.InputRefExpr time_col = 1;
-  data.IntervalUnit window_slide = 2;
-  data.IntervalUnit window_size = 3;
+  uint32 time_col = 1;
+  data.Interval window_slide = 2;
+  data.Interval window_size = 3;
   repeated uint32 output_indices = 4;
+  repeated expr.ExprNode window_start_exprs = 5;
+  repeated expr.ExprNode window_end_exprs = 6;
 }
 
 message TableFunctionNode {
@@ -191,7 +212,7 @@ message TaskOutputId {
 
 message LocalExecutePlan {
   batch_plan.PlanFragment plan = 1;
-  uint64 epoch = 2;
+  common.BatchQueryEpoch epoch = 2;
 }
 
 // ExchangeSource describes where to read results from children operators
@@ -210,7 +231,7 @@ message ExchangeNode {
 
 message MergeSortExchangeNode {
   ExchangeNode exchange = 1;
-  repeated plan_common.ColumnOrder column_orders = 2;
+  repeated common.ColumnOrder column_orders = 2;
 }
 
 message LocalLookupJoinNode {
@@ -249,6 +270,8 @@ message UnionNode {}
 
 message PlanNode {
   repeated PlanNode children = 1;
+  reserved 22;
+  reserved "sort_merge_join";
   oneof node_body {
     InsertNode insert = 2;
     DeleteNode delete = 3;
@@ -266,7 +289,6 @@ message PlanNode {
     ValuesNode values = 18;
     HashJoinNode hash_join = 19;
     MergeSortExchangeNode merge_sort_exchange = 21;
-    SortMergeJoinNode sort_merge_join = 22;
     HopWindowNode hop_window = 25;
     TableFunctionNode table_function = 26;
     SysRowSeqScanNode sys_row_seq_scan = 27;

@@ -74,20 +74,20 @@ SELECT INTERVAL '3 mins' * 1.5;
 00:04:30
 
 # https://github.com/risingwavelabs/risingwave/issues/3873
-query TTTTT
+query T
 select distinct * from (values (interval '1' month), (interval '30' day)) as t;
 ----
-30 days
+1 mon
 
-query TTTTT
+query T
 select distinct * from (values (interval '30' day), (interval '1' month)) as t;
 ----
-30 days
+1 mon
 
-query TTTTT
+query T
 select distinct * from (values (interval '720' hour), (interval '1' month)) as t;
 ----
-30 days
+1 mon
 
 query TTTTTT
 select interval '1 year 1 month 1 day 1';
@@ -108,3 +108,60 @@ query TTTTTT
 select interval '1 year 1 month 1 day 1:1:1.009';
 ----
 1 year 1 mon 1 day 01:01:01.009
+
+# issue #7059
+query T
+select '1 mons 1 days 00:00:00.000001'::INTERVAL;
+----
+1 mon 1 day 00:00:00.000001
+
+query T
+select '1 mons 1 days 00:00:00.0000001'::INTERVAL;
+----
+1 mon 1 day
+
+# parsing large values
+
+query T
+select '2562047788:00:54.775807'::interval;
+----
+2562047788:00:54.775807
+
+statement error
+select '2562047788:00:54.775808'::interval;
+
+query T
+select '4 years 2147483599 mon'::interval;
+----
+178956970 years 7 mons
+
+statement error
+select '4 years 2147483600 mon'::interval;
+
+query T
+select '-2562047788:00:54.775807'::interval;
+----
+-2562047788:00:54.775807
+
+query T
+select '-2562047788:00:54.775808'::interval;
+----
+-2562047788:00:54.775808
+
+statement error
+select '-2562047788:00:54.775809'::interval;
+
+query T
+select interval '3 mons -3 days' / 2;
+----
+1 mon 14 days -12:00:00
+
+# The following is an overflow bug present in PostgreSQL 15.2
+# Their `days` overflows to a negative value, leading to the latter smaller
+# than the former. We report an error in this case.
+
+statement ok
+select interval '2147483647 mons 2147483647 days' * 0.999999991;
+
+statement error out of range
+select interval '2147483647 mons 2147483647 days' * 0.999999992;

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,12 +13,13 @@
 // limitations under the License.
 
 use super::HashKey;
+use crate::array::serial_array::Serial;
 use crate::hash;
 use crate::types::DataType;
 
 /// An enum to help to dynamically dispatch [`HashKey`] template.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum HashKeyKind {
+pub enum HashKeyKind {
     Key8,
     Key16,
     Key32,
@@ -79,10 +80,7 @@ pub trait HashKeyDispatcher: Sized {
 fn hash_key_size(data_type: &DataType) -> HashKeySize {
     use std::mem::size_of;
 
-    use crate::types::{
-        Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
-        OrderedF32, OrderedF64,
-    };
+    use crate::types::{Date, Decimal, Interval, Time, Timestamp, F32, F64};
 
     match data_type {
         // for `Boolean` in `HashKey` use 1 FixedBytes , but in `Array` use 1 FixedBits
@@ -90,17 +88,19 @@ fn hash_key_size(data_type: &DataType) -> HashKeySize {
         DataType::Int16 => HashKeySize::Fixed(size_of::<i16>()),
         DataType::Int32 => HashKeySize::Fixed(size_of::<i32>()),
         DataType::Int64 => HashKeySize::Fixed(size_of::<i64>()),
-        DataType::Float32 => HashKeySize::Fixed(size_of::<OrderedF32>()),
-        DataType::Float64 => HashKeySize::Fixed(size_of::<OrderedF64>()),
+        DataType::Serial => HashKeySize::Fixed(size_of::<Serial>()),
+        DataType::Float32 => HashKeySize::Fixed(size_of::<F32>()),
+        DataType::Float64 => HashKeySize::Fixed(size_of::<F64>()),
         DataType::Decimal => HashKeySize::Fixed(size_of::<Decimal>()),
-        DataType::Date => HashKeySize::Fixed(size_of::<NaiveDateWrapper>()),
-        DataType::Time => HashKeySize::Fixed(size_of::<NaiveTimeWrapper>()),
-        DataType::Timestamp => HashKeySize::Fixed(size_of::<NaiveDateTimeWrapper>()),
-        DataType::Timestampz => HashKeySize::Fixed(size_of::<i64>()),
-        DataType::Interval => HashKeySize::Fixed(size_of::<IntervalUnit>()),
+        DataType::Date => HashKeySize::Fixed(size_of::<Date>()),
+        DataType::Time => HashKeySize::Fixed(size_of::<Time>()),
+        DataType::Timestamp => HashKeySize::Fixed(size_of::<Timestamp>()),
+        DataType::Timestamptz => HashKeySize::Fixed(size_of::<i64>()),
+        DataType::Interval => HashKeySize::Fixed(size_of::<Interval>()),
 
         DataType::Varchar => HashKeySize::Variable,
         DataType::Bytea => HashKeySize::Variable,
+        DataType::Jsonb => HashKeySize::Variable,
         DataType::Struct { .. } => HashKeySize::Variable,
         DataType::List { .. } => HashKeySize::Variable,
     }
@@ -117,7 +117,7 @@ const MAX_FIXED_SIZE_KEY_ELEMENTS: usize = 8;
 /// 4. Any column's serialized format can't be used for equality check.
 ///
 /// Otherwise we choose smallest [`crate::hash::FixedSizeKey`] whose size can hold all data types.
-fn calc_hash_key_kind(data_types: &[DataType]) -> HashKeyKind {
+pub fn calc_hash_key_kind(data_types: &[DataType]) -> HashKeyKind {
     if data_types.len() > MAX_FIXED_SIZE_KEY_ELEMENTS {
         return HashKeyKind::KeySerialized;
     }

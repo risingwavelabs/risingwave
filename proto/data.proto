@@ -4,12 +4,13 @@ package data;
 
 import "common.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
-message IntervalUnit {
+message Interval {
   int32 months = 1;
   int32 days = 2;
-  int64 ms = 3;
+  int64 usecs = 3;
 }
 
 message DataType {
@@ -44,10 +45,12 @@ message DataType {
     INTERVAL = 11;
     DATE = 12;
     // Timestamp type with timezone
-    TIMESTAMPZ = 13;
+    TIMESTAMPTZ = 13;
     STRUCT = 15;
     LIST = 16;
     BYTEA = 17;
+    JSONB = 18;
+    SERIAL = 19;
   }
   TypeName type_name = 1;
   // Data length for char.
@@ -94,6 +97,10 @@ enum ArrayType {
   STRUCT = 13;
   LIST = 14;
   BYTEA = 15;
+  JSONB = 16;
+  SERIAL = 17;
+  INT256 = 18;
+  UINT256 = 19;
 }
 
 message Array {

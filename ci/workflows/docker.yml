@@ -1,10 +1,3 @@
-auto-retry: &auto-retry
-  automatic:
-    - exit_status: -1  # Agent was lost
-      limit: 2
-    - exit_status: 255 # Forced agent shutdown
-      limit: 2
-
 steps:
   - label: "docker-build-push: amd64"
     command: "ci/scripts/docker.sh"
@@ -15,7 +8,7 @@ steps:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
             DOCKER_TOKEN: docker-token
-    retry: *auto-retry
+            GITHUB_TOKEN: github-token
 
   - label: "docker-build-push: aarch64"
     command: "ci/scripts/docker.sh"
@@ -26,7 +19,7 @@ steps:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
             DOCKER_TOKEN: docker-token
-    retry: *auto-retry
+            GITHUB_TOKEN: github-token
     agents:
       queue: "linux-arm64"
 
@@ -41,12 +34,17 @@ steps:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
             DOCKER_TOKEN: docker-token
-    retry: *auto-retry
 
   - label: "pre build binary"
     command: "ci/scripts/release.sh"
     plugins:
-      - docker-compose#v3.9.0:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GITHUB_TOKEN: github-token
+      - docker-compose#v4.9.0:
           run: release-env
           config: ci/docker-compose.yml
-    retry: *auto-retry
+          environment:
+            - BINARY_NAME
+            - BUILDKITE_SOURCE
+            - GITHUB_TOKEN

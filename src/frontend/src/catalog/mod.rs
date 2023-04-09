@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,18 +18,18 @@
 //! structs. It is accessed via [`catalog_service::CatalogReader`] and
 //! [`catalog_service::CatalogWriter`], which is held by [`crate::session::FrontendEnv`].
 
-use risingwave_common::catalog::{ColumnDesc, PG_CATALOG_SCHEMA_NAME};
+use risingwave_common::catalog::{is_row_id_column_name, PG_CATALOG_SCHEMA_NAME, ROWID_PREFIX};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::DataType;
+use risingwave_connector::sink::catalog::SinkCatalog;
 use thiserror::Error;
 pub(crate) mod catalog_service;
 
-pub(crate) mod column_catalog;
+pub(crate) mod connection_catalog;
 pub(crate) mod database_catalog;
+pub(crate) mod function_catalog;
 pub(crate) mod index_catalog;
 pub(crate) mod root_catalog;
 pub(crate) mod schema_catalog;
-pub(crate) mod sink_catalog;
 pub(crate) mod source_catalog;
 pub(crate) mod system_catalog;
 pub(crate) mod table_catalog;
@@ -38,6 +38,9 @@ pub(crate) mod view_catalog;
 pub use index_catalog::IndexCatalog;
 pub use table_catalog::TableCatalog;
 
+use crate::user::UserId;
+
+pub(crate) type ConnectionId = u32;
 pub(crate) type SourceId = u32;
 pub(crate) type SinkId = u32;
 pub(crate) type ViewId = u32;
@@ -72,28 +75,6 @@ pub fn check_schema_writable(schema: &str) -> Result<()> {
     }
 }
 
-const ROWID_PREFIX: &str = "_row_id";
-
-pub fn row_id_column_name() -> String {
-    ROWID_PREFIX.to_string()
-}
-
-pub fn is_row_id_column_name(name: &str) -> bool {
-    name.starts_with(ROWID_PREFIX)
-}
-
-/// Creates a row ID column (for implicit primary key).
-pub fn row_id_column_desc(column_id: ColumnId) -> ColumnDesc {
-    ColumnDesc {
-        data_type: DataType::Int64,
-        // We should not assume the first column (i.e., column_id == 0) is `_row_id`.
-        column_id,
-        name: row_id_column_name(),
-        field_descs: vec![],
-        type_name: "".to_string(),
-    }
-}
-
 pub type CatalogResult<T> = std::result::Result<T, CatalogError>;
 
 #[derive(Error, Debug)]
@@ -109,5 +90,19 @@ pub enum CatalogError {
 impl From<CatalogError> for RwError {
     fn from(e: CatalogError) -> Self {
         ErrorCode::CatalogError(Box::new(e)).into()
+    }
+}
+
+/// A trait for the catalog of relations (table, index, sink, etc.).
+///
+/// This trait can be used to reduce code duplication and can be extended if needed in the future.
+pub trait RelationCatalog {
+    /// Returns the owner of the relation.
+    fn owner(&self) -> UserId;
+}
+
+impl RelationCatalog for SinkCatalog {
+    fn owner(&self) -> UserId {
+        self.owner.user_id
     }
 }

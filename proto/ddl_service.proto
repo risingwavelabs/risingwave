@@ -6,6 +6,7 @@ import "catalog.proto";
 import "common.proto";
 import "stream_plan.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message CreateDatabaseRequest {
@@ -124,25 +125,63 @@ message DropViewResponse {
   uint64 version = 2;
 }
 
-message CreateMaterializedSourceRequest {
+message CreateTableRequest {
+  // An optional field and will be `Some` for tables with an external connector. If so, the table
+  // will subscribe to the changes of the external connector and materialize the data.
   catalog.Source source = 1;
   catalog.Table materialized_view = 2;
   stream_plan.StreamFragmentGraph fragment_graph = 3;
 }
 
-message CreateMaterializedSourceResponse {
+message CreateTableResponse {
   common.Status status = 1;
-  uint32 source_id = 2;
-  uint32 table_id = 3;
-  uint64 version = 4;
+  uint32 table_id = 2;
+  uint64 version = 3;
 }
 
-message DropMaterializedSourceRequest {
-  uint32 source_id = 1;
+message AlterRelationNameRequest {
+  oneof relation {
+    uint32 table_id = 1;
+    uint32 view_id = 2;
+    uint32 index_id = 3;
+    uint32 sink_id = 4;
+    uint32 source_id = 5;
+  }
+  string new_name = 20;
+}
+
+message AlterRelationNameResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
+message CreateFunctionRequest {
+  catalog.Function function = 1;
+}
+
+message CreateFunctionResponse {
+  common.Status status = 1;
+  uint32 function_id = 2;
+  uint64 version = 3;
+}
+
+message DropFunctionRequest {
+  uint32 function_id = 1;
+}
+
+message DropFunctionResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
+message DropTableRequest {
+  oneof source_id {
+    uint32 id = 1;
+  }
   uint32 table_id = 2;
 }
 
-message DropMaterializedSourceResponse {
+message DropTableResponse {
   common.Status status = 1;
   uint64 version = 2;
 }
@@ -176,6 +215,77 @@ message DropIndexResponse {
   uint64 version = 2;
 }
 
+message ReplaceTablePlanRequest {
+  // The new table catalog, with the correct table ID and a new version.
+  // If the new version does not match the subsequent version in the meta service's
+  // catalog, this request will be rejected.
+  catalog.Table table = 1;
+  // The new materialization plan, where all schema are updated.
+  stream_plan.StreamFragmentGraph fragment_graph = 2;
+  // The mapping from the old columns to the new columns of the table.
+  catalog.ColIndexMapping table_col_index_mapping = 3;
+}
+
+message ReplaceTablePlanResponse {
+  common.Status status = 1;
+  // The new global catalog version.
+  uint64 version = 2;
+}
+
+message GetTableRequest {
+  string database_name = 1;
+  string table_name = 2;
+}
+
+message GetTableResponse {
+  catalog.Table table = 1;
+}
+
+message GetDdlProgressRequest {}
+
+message DdlProgress {
+  uint64 id = 1;
+  string statement = 2;
+  string progress = 3;
+}
+
+message GetDdlProgressResponse {
+  repeated DdlProgress ddl_progress = 1;
+}
+
+message CreateConnectionRequest {
+  message PrivateLink {
+    string provider = 1;
+    string service_name = 2;
+    repeated string availability_zones = 3;
+  }
+  string name = 1;
+  oneof payload {
+    PrivateLink private_link = 2;
+  }
+}
+
+message CreateConnectionResponse {
+  uint32 connection_id = 1;
+  // global catalog version
+  uint64 version = 2;
+}
+
+message ListConnectionsRequest {}
+
+message ListConnectionsResponse {
+  repeated catalog.Connection connections = 1;
+}
+
+message DropConnectionRequest {
+  string connection_name = 1;
+}
+
+message DropConnectionResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -187,11 +297,20 @@ service DdlService {
   rpc DropSink(DropSinkRequest) returns (DropSinkResponse);
   rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
-  rpc CreateMaterializedSource(CreateMaterializedSourceRequest) returns (CreateMaterializedSourceResponse);
-  rpc DropMaterializedSource(DropMaterializedSourceRequest) returns (DropMaterializedSourceResponse);
+  rpc CreateTable(CreateTableRequest) returns (CreateTableResponse);
+  rpc AlterRelationName(AlterRelationNameRequest) returns (AlterRelationNameResponse);
+  rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
   rpc CreateView(CreateViewRequest) returns (CreateViewResponse);
   rpc DropView(DropViewRequest) returns (DropViewResponse);
   rpc CreateIndex(CreateIndexRequest) returns (CreateIndexResponse);
   rpc DropIndex(DropIndexRequest) returns (DropIndexResponse);
+  rpc CreateFunction(CreateFunctionRequest) returns (CreateFunctionResponse);
+  rpc DropFunction(DropFunctionRequest) returns (DropFunctionResponse);
+  rpc ReplaceTablePlan(ReplaceTablePlanRequest) returns (ReplaceTablePlanResponse);
+  rpc GetTable(GetTableRequest) returns (GetTableResponse);
+  rpc GetDdlProgress(GetDdlProgressRequest) returns (GetDdlProgressResponse);
+  rpc CreateConnection(CreateConnectionRequest) returns (CreateConnectionResponse);
+  rpc ListConnections(ListConnectionsRequest) returns (ListConnectionsResponse);
+  rpc DropConnection(DropConnectionRequest) returns (DropConnectionResponse);
 }

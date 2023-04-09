@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -27,19 +27,30 @@ impl Planner {
         if !insert.cast_exprs.is_empty() {
             input = LogicalProject::create(input, insert.cast_exprs);
         }
-        let plan: PlanRef = LogicalInsert::create(
+        let returning = !insert.returning_list.is_empty();
+        let mut plan: PlanRef = LogicalInsert::create(
             input,
-            insert.table_source.name,
-            insert.table_source.source_id,
-            insert.table_source.associated_mview_id,
-            insert.column_idxs,
+            insert.table_name.clone(),
+            insert.table_id,
+            insert.table_version_id,
+            insert.column_indices,
+            insert.row_id_index,
+            returning,
         )?
         .into();
+        // If containing RETURNING, add one logicalproject node
+        if returning {
+            plan = LogicalProject::create(plan, insert.returning_list);
+        }
         // For insert, frontend will only schedule one task so do not need this to be single.
         let dist = RequiredDist::Any;
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..);
-        let out_names = plan.schema().names();
+        let out_names = if returning {
+            insert.returning_schema.expect("If returning list is not empty, should provide returning schema in BoundInsert.").names()
+        } else {
+            plan.schema().names()
+        };
         let root = PlanRoot::new(plan, dist, Order::any(), out_fields, out_names);
         Ok(root)
     }

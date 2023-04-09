@@ -2,7 +2,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -34,7 +34,7 @@ where
     F: Fn(&mut Parser) -> T,
 {
     let mut tokenizer = Tokenizer::new(sql);
-    let tokens = tokenizer.tokenize().unwrap();
+    let tokens = tokenizer.tokenize_with_location().unwrap();
     f(&mut Parser::new(tokens))
 }
 
@@ -130,14 +130,15 @@ pub fn number(n: &'static str) -> Value {
 
 pub fn table_alias(name: impl Into<String>) -> Option<TableAlias> {
     Some(TableAlias {
-        name: Ident::new(name),
+        name: Ident::new_unchecked(name),
         columns: vec![],
     })
 }
 
 pub fn table(name: impl Into<String>) -> TableFactor {
     TableFactor::Table {
-        name: ObjectName(vec![Ident::new(name.into())]),
+        name: ObjectName(vec![Ident::new_unchecked(name.into())]),
+        for_system_time_as_of_now: false,
         alias: None,
     }
 }

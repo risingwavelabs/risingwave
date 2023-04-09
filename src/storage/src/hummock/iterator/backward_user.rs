@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,17 +14,14 @@
 
 use std::ops::Bound::*;
 
+use bytes::Bytes;
 use risingwave_hummock_sdk::key::{FullKey, UserKey, UserKeyRange};
 use risingwave_hummock_sdk::HummockEpoch;
 
-use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
-use crate::hummock::iterator::{
-    Backward, BackwardUserIteratorType, DirectedUserIterator, DirectedUserIteratorBuilder,
-    ForwardMergeRangeIterator, HummockIterator, UserIteratorPayloadType,
-};
+use crate::hummock::iterator::{Backward, HummockIterator};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{BackwardSstableIterator, DeleteRangeAggregator, HummockResult};
+use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
 
 /// [`BackwardUserIterator`] can be used by user directly.
@@ -36,10 +33,10 @@ pub struct BackwardUserIterator<I: HummockIterator<Direction = Backward>> {
     just_met_new_key: bool,
 
     /// Last user key
-    last_key: FullKey<Vec<u8>>,
+    last_key: FullKey<Bytes>,
 
     /// Last user value
-    last_val: Vec<u8>,
+    last_val: Bytes,
 
     /// Last user key value is deleted
     last_delete: bool,
@@ -65,6 +62,7 @@ pub struct BackwardUserIterator<I: HummockIterator<Direction = Backward>> {
 
 impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
     /// Creates [`BackwardUserIterator`] with given `read_epoch`.
+    #[cfg(test)]
     pub(crate) fn with_epoch(
         iterator: I,
         key_range: UserKeyRange,
@@ -78,7 +76,7 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
             key_range,
             just_met_new_key: false,
             last_key: FullKey::default(),
-            last_val: Vec::new(),
+            last_val: Bytes::new(),
             last_delete: true,
             read_epoch,
             min_epoch,
@@ -87,10 +85,10 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
         }
     }
 
-    fn out_of_range(&self, key: &UserKey<Vec<u8>>) -> bool {
+    fn out_of_range(&self, key: UserKey<&[u8]>) -> bool {
         match &self.key_range.0 {
-            Included(begin_key) => key < begin_key,
-            Excluded(begin_key) => key <= begin_key,
+            Included(begin_key) => key < begin_key.as_ref(),
+            Excluded(begin_key) => key <= begin_key.as_ref(),
             Unbounded => false,
         }
     }
@@ -143,10 +141,10 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
 
             if epoch > self.min_epoch && epoch <= self.read_epoch {
                 if self.just_met_new_key {
-                    self.last_key.set(full_key);
+                    self.last_key = full_key.copy_into();
                     self.just_met_new_key = false;
                     // If we encounter an out-of-range key, stop early.
-                    if self.out_of_range(&self.last_key.user_key) {
+                    if self.out_of_range(self.last_key.user_key.as_ref()) {
                         self.out_of_range = true;
                         break;
                     }
@@ -159,9 +157,9 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
                         return Ok(());
                     } else {
                         // 2(b)
-                        self.last_key.set(full_key);
+                        self.last_key = full_key.copy_into();
                         // If we encounter an out-of-range key, stop early.
-                        if self.out_of_range(&self.last_key.user_key) {
+                        if self.out_of_range(self.last_key.user_key.as_ref()) {
                             self.out_of_range = true;
                             break;
                         }
@@ -177,9 +175,8 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
                 match self.iterator.value() {
                     HummockValue::Put(val) => {
                         // TODO: unconditionally set the last key may lead to redundant copies
-                        self.last_key.set(full_key);
-                        self.last_val.clear();
-                        self.last_val.extend_from_slice(val);
+                        self.last_key = full_key.copy_into();
+                        self.last_val = Bytes::copy_from_slice(val);
                         self.last_delete = false;
                     }
                     HummockValue::Delete => {
@@ -199,7 +196,7 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
     /// `rewind` or `seek` methods are called.
     ///
     /// Note: before call the function you need to ensure that the iterator is valid.
-    pub fn key(&self) -> &FullKey<Vec<u8>> {
+    pub fn key(&self) -> &FullKey<Bytes> {
         assert!(self.is_valid());
         &self.last_key
     }
@@ -207,9 +204,9 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
     /// The returned value is in the form of user value.
     ///
     /// Note: before calling the function you need to ensure that the iterator is valid.
-    pub fn value(&self) -> &[u8] {
+    pub fn value(&self) -> &Bytes {
         assert!(self.is_valid());
-        self.last_val.as_slice()
+        &self.last_val
     }
 
     /// Resets the iterating position to the beginning.
@@ -274,46 +271,19 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
 }
 
 #[cfg(test)]
-impl BackwardUserIterator<BackwardUserIteratorType> {
+impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
     /// Creates [`BackwardUserIterator`] with maximum epoch.
-    pub(crate) fn for_test(
-        iterator: UnorderedMergeIteratorInner<
-            UserIteratorPayloadType<Backward, BackwardSstableIterator>,
-        >,
-        key_range: UserKeyRange,
-    ) -> Self {
+    pub(crate) fn for_test(iterator: I, key_range: UserKeyRange) -> Self {
         Self::with_epoch(iterator, key_range, HummockEpoch::MAX, 0, None)
     }
 
     /// Creates [`BackwardUserIterator`] with maximum epoch.
     pub(crate) fn with_min_epoch(
-        iterator: UnorderedMergeIteratorInner<
-            UserIteratorPayloadType<Backward, BackwardSstableIterator>,
-        >,
+        iterator: I,
         key_range: UserKeyRange,
         min_epoch: HummockEpoch,
     ) -> Self {
         Self::with_epoch(iterator, key_range, HummockEpoch::MAX, min_epoch, None)
-    }
-}
-
-impl DirectedUserIteratorBuilder for BackwardUserIterator<BackwardUserIteratorType> {
-    type Direction = Backward;
-    type SstableIteratorType = BackwardSstableIterator;
-
-    fn create(
-        iterator_iter: Vec<UserIteratorPayloadType<Backward, BackwardSstableIterator>>,
-        key_range: UserKeyRange,
-        read_epoch: u64,
-        min_epoch: u64,
-        version: Option<PinnedVersion>,
-        // TODO: support backward delete range filter.
-        _delete_range_iter: DeleteRangeAggregator<ForwardMergeRangeIterator>,
-    ) -> DirectedUserIterator {
-        let iterator = UnorderedMergeIteratorInner::new(iterator_iter.into_iter());
-        DirectedUserIterator::Backward(BackwardUserIterator::with_epoch(
-            iterator, key_range, read_epoch, min_epoch, version,
-        ))
     }
 }
 
@@ -326,6 +296,7 @@ mod tests {
 
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
+    use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::key::prev_key;
 
@@ -333,10 +304,11 @@ mod tests {
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable_base,
         gen_iterator_test_sstable_from_kv_pair, gen_iterator_test_sstable_with_incr_epoch,
-        iterator_test_key_of, iterator_test_key_of_epoch, iterator_test_user_key_of,
-        iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
+        iterator_test_bytes_key_of, iterator_test_bytes_key_of_epoch,
+        iterator_test_bytes_user_key_of, iterator_test_user_key_of, iterator_test_value_of,
+        mock_sstable_store, TEST_KEYS_COUNT,
     };
-    use crate::hummock::iterator::HummockIteratorUnion;
+    use crate::hummock::iterator::UnorderedMergeIteratorInner;
     use crate::hummock::sstable::Sstable;
     use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable};
     use crate::hummock::value::HummockValue;
@@ -370,20 +342,32 @@ mod tests {
         )
         .await;
         let cache = create_small_table_cache();
-        let handle0 = cache.insert(table0.id, table0.id, 1, Box::new(table0));
-        let handle1 = cache.insert(table1.id, table1.id, 1, Box::new(table1));
-        let handle2 = cache.insert(table2.id, table2.id, 1, Box::new(table2));
+        let handle0 = cache.insert(
+            table0.id,
+            table0.id,
+            1,
+            Box::new(table0),
+            CachePriority::High,
+        );
+        let handle1 = cache.insert(
+            table1.id,
+            table1.id,
+            1,
+            Box::new(table1),
+            CachePriority::High,
+        );
+        let handle2 = cache.insert(
+            table2.id,
+            table2.id,
+            1,
+            Box::new(table2),
+            CachePriority::High,
+        );
 
         let backward_iters = vec![
-            HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-                handle1,
-                sstable_store.clone(),
-            )),
-            HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-                handle2,
-                sstable_store.clone(),
-            )),
-            HummockIteratorUnion::Fourth(BackwardSstableIterator::new(handle0, sstable_store)),
+            BackwardSstableIterator::new(handle1, sstable_store.clone()),
+            BackwardSstableIterator::new(handle2, sstable_store.clone()),
+            BackwardSstableIterator::new(handle0, sstable_store),
         ];
 
         let mi = UnorderedMergeIteratorInner::new(backward_iters);
@@ -393,7 +377,7 @@ mod tests {
         while ui.is_valid() {
             let key = ui.key();
             let val = ui.value();
-            assert_eq!(key, &iterator_test_key_of(i));
+            assert_eq!(key, &iterator_test_bytes_key_of(i));
             assert_eq!(val, iterator_test_value_of(i).as_slice());
             i -= 1;
             ui.next().await.unwrap();
@@ -432,19 +416,31 @@ mod tests {
         )
         .await;
         let cache = create_small_table_cache();
-        let handle0 = cache.insert(table0.id, table0.id, 1, Box::new(table0));
-        let handle1 = cache.insert(table1.id, table1.id, 1, Box::new(table1));
-        let handle2 = cache.insert(table2.id, table2.id, 1, Box::new(table2));
+        let handle0 = cache.insert(
+            table0.id,
+            table0.id,
+            1,
+            Box::new(table0),
+            CachePriority::High,
+        );
+        let handle1 = cache.insert(
+            table1.id,
+            table1.id,
+            1,
+            Box::new(table1),
+            CachePriority::High,
+        );
+        let handle2 = cache.insert(
+            table2.id,
+            table2.id,
+            1,
+            Box::new(table2),
+            CachePriority::High,
+        );
         let backward_iters = vec![
-            HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-                handle0,
-                sstable_store.clone(),
-            )),
-            HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-                handle1,
-                sstable_store.clone(),
-            )),
-            HummockIteratorUnion::Fourth(BackwardSstableIterator::new(handle2, sstable_store)),
+            BackwardSstableIterator::new(handle0, sstable_store.clone()),
+            BackwardSstableIterator::new(handle1, sstable_store.clone()),
+            BackwardSstableIterator::new(handle2, sstable_store),
         ];
 
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
@@ -463,7 +459,7 @@ mod tests {
         let k = bui.key();
         let v = bui.value();
         assert_eq!(v, iterator_test_value_of(TEST_KEYS_COUNT + 4).as_slice());
-        assert_eq!(k, &iterator_test_key_of(TEST_KEYS_COUNT + 4));
+        assert_eq!(k, &iterator_test_bytes_key_of(TEST_KEYS_COUNT + 4));
         bui.seek(iterator_test_user_key_of(2 * TEST_KEYS_COUNT + 5).as_ref())
             .await
             .unwrap();
@@ -473,7 +469,7 @@ mod tests {
             v,
             iterator_test_value_of(2 * TEST_KEYS_COUNT + 5).as_slice()
         );
-        assert_eq!(k, &iterator_test_key_of(2 * TEST_KEYS_COUNT + 5));
+        assert_eq!(k, &iterator_test_bytes_key_of(2 * TEST_KEYS_COUNT + 5));
 
         // left edge case
         bui.seek(iterator_test_user_key_of(3 * TEST_KEYS_COUNT).as_ref())
@@ -482,7 +478,7 @@ mod tests {
         let k = bui.key();
         let v = bui.value();
         assert_eq!(v, iterator_test_value_of(3 * TEST_KEYS_COUNT).as_slice());
-        assert_eq!(k, &iterator_test_key_of(3 * TEST_KEYS_COUNT));
+        assert_eq!(k, &iterator_test_bytes_key_of(3 * TEST_KEYS_COUNT));
     }
 
     #[tokio::test]
@@ -504,14 +500,26 @@ mod tests {
             gen_iterator_test_sstable_from_kv_pair(1, kv_pairs, sstable_store.clone()).await;
         let cache = create_small_table_cache();
         let backward_iters = vec![
-            HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-                cache.insert(table0.id, table0.id, 1, Box::new(table0)),
+            BackwardSstableIterator::new(
+                cache.insert(
+                    table0.id,
+                    table0.id,
+                    1,
+                    Box::new(table0),
+                    CachePriority::High,
+                ),
                 sstable_store.clone(),
-            )),
-            HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-                cache.insert(table1.id, table1.id, 1, Box::new(table1)),
+            ),
+            BackwardSstableIterator::new(
+                cache.insert(
+                    table1.id,
+                    table1.id,
+                    1,
+                    Box::new(table1),
+                    CachePriority::High,
+                ),
                 sstable_store,
-            )),
+            ),
         ];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
         let mut bui = BackwardUserIterator::for_test(bmi, (Unbounded, Unbounded));
@@ -522,8 +530,8 @@ mod tests {
         let k = bui.key();
         let v = bui.value();
 
-        assert_eq!(k, &iterator_test_key_of_epoch(1, 400));
-        assert_eq!(v, iterator_test_value_of(1));
+        assert_eq!(k, &iterator_test_bytes_key_of_epoch(1, 400));
+        assert_eq!(v, &Bytes::from(iterator_test_value_of(1)));
 
         // only one valid kv pair
         bui.next().await.unwrap();
@@ -556,25 +564,28 @@ mod tests {
         let sstable =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let cache = create_small_table_cache();
-        let handle = cache.insert(sstable.id, sstable.id, 1, Box::new(sstable));
-        let backward_iters = vec![HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-            handle,
-            sstable_store,
-        ))];
+        let handle = cache.insert(
+            sstable.id,
+            sstable.id,
+            1,
+            Box::new(sstable),
+            CachePriority::High,
+        );
+        let backward_iters = vec![BackwardSstableIterator::new(handle, sstable_store)];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
 
-        let begin_key = Included(iterator_test_user_key_of(2));
-        let end_key = Included(iterator_test_user_key_of(7));
+        let begin_key = Included(iterator_test_bytes_user_key_of(2));
+        let end_key = Included(iterator_test_bytes_user_key_of(7));
 
         let mut bui = BackwardUserIterator::for_test(bmi, (begin_key, end_key));
 
         // ----- basic iterate -----
         bui.rewind().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(7, 300));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(7, 300));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -582,11 +593,11 @@ mod tests {
         bui.seek(iterator_test_user_key_of(8).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(7, 300));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(7, 300));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -594,11 +605,11 @@ mod tests {
         bui.seek(iterator_test_user_key_of(7).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(7, 300));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(7, 300));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -638,25 +649,28 @@ mod tests {
         let sstable =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let cache = create_small_table_cache();
-        let handle = cache.insert(sstable.id, sstable.id, 1, Box::new(sstable));
-        let backward_iters = vec![HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-            handle,
-            sstable_store,
-        ))];
+        let handle = cache.insert(
+            sstable.id,
+            sstable.id,
+            1,
+            Box::new(sstable),
+            CachePriority::High,
+        );
+        let backward_iters = vec![BackwardSstableIterator::new(handle, sstable_store)];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
 
-        let begin_key = Excluded(iterator_test_user_key_of(2));
-        let end_key = Included(iterator_test_user_key_of(7));
+        let begin_key = Excluded(iterator_test_bytes_user_key_of(2));
+        let end_key = Included(iterator_test_bytes_user_key_of(7));
 
         let mut bui = BackwardUserIterator::for_test(bmi, (begin_key, end_key));
 
         // ----- basic iterate -----
         bui.rewind().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(7, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(7, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -664,11 +678,11 @@ mod tests {
         bui.seek(iterator_test_user_key_of(8).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(7, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(7, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -676,11 +690,11 @@ mod tests {
         bui.seek(iterator_test_user_key_of(7).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(7, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(7, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -721,24 +735,30 @@ mod tests {
         let sstable =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let cache = create_small_table_cache();
-        let backward_iters = vec![HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-            cache.insert(sstable.id, sstable.id, 1, Box::new(sstable)),
+        let backward_iters = vec![BackwardSstableIterator::new(
+            cache.insert(
+                sstable.id,
+                sstable.id,
+                1,
+                Box::new(sstable),
+                CachePriority::High,
+            ),
             sstable_store,
-        ))];
+        )];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
-        let end_key = Included(iterator_test_user_key_of(7));
+        let end_key = Included(iterator_test_bytes_user_key_of(7));
 
         let mut bui = BackwardUserIterator::for_test(bmi, (Unbounded, end_key));
 
         // ----- basic iterate -----
         bui.rewind().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(2, 300));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(2, 300));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(1, 200));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(1, 200));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -746,13 +766,13 @@ mod tests {
         bui.seek(iterator_test_user_key_of(7).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(2, 300));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(2, 300));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(1, 200));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(1, 200));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -760,13 +780,13 @@ mod tests {
         bui.seek(iterator_test_user_key_of(6).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(2, 300));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(2, 300));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(1, 200));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(1, 200));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -801,26 +821,29 @@ mod tests {
         let sstable =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let cache = create_small_table_cache();
-        let handle = cache.insert(sstable.id, sstable.id, 1, Box::new(sstable));
+        let handle = cache.insert(
+            sstable.id,
+            sstable.id,
+            1,
+            Box::new(sstable),
+            CachePriority::High,
+        );
 
-        let backward_iters = vec![HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-            handle,
-            sstable_store,
-        ))];
+        let backward_iters = vec![BackwardSstableIterator::new(handle, sstable_store)];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
-        let begin_key = Included(iterator_test_user_key_of(2));
+        let begin_key = Included(iterator_test_bytes_user_key_of(2));
 
         let mut bui = BackwardUserIterator::for_test(bmi, (begin_key, Unbounded));
 
         // ----- basic iterate -----
         bui.rewind().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(8, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(8, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(2, 300));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(2, 300));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -828,7 +851,7 @@ mod tests {
         bui.seek(iterator_test_user_key_of(2).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(2, 300));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(2, 300));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -836,9 +859,9 @@ mod tests {
         bui.seek(iterator_test_user_key_of(5).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(2, 300));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(2, 300));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -846,13 +869,13 @@ mod tests {
         bui.seek(iterator_test_user_key_of(8).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(8, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(8, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(2, 300));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(2, 300));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -860,13 +883,13 @@ mod tests {
         bui.seek(iterator_test_user_key_of(9).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(8, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(8, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of_epoch(2, 300));
+        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(2, 300));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
     }
@@ -881,29 +904,35 @@ mod tests {
         )
     }
 
+    #[allow(clippy::mutable_key_type)]
     async fn chaos_test_case(
         sstable: Sstable,
-        start_bound: Bound<UserKey<Vec<u8>>>,
-        end_bound: Bound<UserKey<Vec<u8>>>,
+        start_bound: Bound<UserKey<Bytes>>,
+        end_bound: Bound<UserKey<Bytes>>,
         truth: &ChaosTestTruth,
         sstable_store: SstableStoreRef,
     ) {
         let start_key = match &start_bound {
-            Bound::Included(b) => UserKey::for_test(b.table_id, prev_key(&b.table_key.clone())),
+            Bound::Included(b) => {
+                UserKey::for_test(b.table_id, Bytes::from(prev_key(&b.table_key.clone())))
+            }
             Bound::Excluded(b) => b.clone(),
-            Unbounded => key_from_num(0),
+            Unbounded => key_from_num(0).into_bytes(),
         };
         let end_key = match &end_bound {
             Bound::Included(b) => b.clone(),
-            Unbounded => key_from_num(999999999999),
+            Unbounded => key_from_num(999999999999).into_bytes(),
             _ => unimplemented!(),
         };
         let cache = create_small_table_cache();
-        let handle = cache.insert(sstable.id, sstable.id, 1, Box::new(sstable));
-        let backward_iters = vec![HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-            handle,
-            sstable_store,
-        ))];
+        let handle = cache.insert(
+            sstable.id,
+            sstable.id,
+            1,
+            Box::new(sstable),
+            CachePriority::High,
+        );
+        let backward_iters = vec![BackwardSstableIterator::new(handle, sstable_store)];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
         let mut bui = BackwardUserIterator::for_test(bmi, (start_bound, end_bound));
         let num_puts: usize = truth
@@ -942,18 +971,19 @@ mod tests {
     }
 
     type ChaosTestTruth =
-        BTreeMap<UserKey<Vec<u8>>, BTreeMap<Reverse<HummockEpoch>, HummockValue<Vec<u8>>>>;
+        BTreeMap<UserKey<Bytes>, BTreeMap<Reverse<HummockEpoch>, HummockValue<Bytes>>>;
 
     async fn generate_chaos_test_data() -> (usize, Sstable, ChaosTestTruth, SstableStoreRef) {
         // We first generate the key value pairs.
         let mut rng = thread_rng();
+        #[allow(clippy::mutable_key_type)]
         let mut truth: ChaosTestTruth = BTreeMap::new();
         let mut prev_key_number: usize = 1;
         let number_of_keys = 5000;
         for _ in 0..number_of_keys {
             let key: usize = rng.gen_range(prev_key_number..=(prev_key_number + 10));
             prev_key_number = key + 1;
-            let key_bytes = key_from_num(key);
+            let key_bytes = key_from_num(key).into_bytes();
             let mut prev_time = 500;
             let num_updates = rng.gen_range(1..10usize);
             for _ in 0..num_updates {
@@ -976,7 +1006,7 @@ mod tests {
                         truth
                             .entry(key_bytes.clone())
                             .or_default()
-                            .insert(Reverse(time), HummockValue::put(value.into_bytes()));
+                            .insert(Reverse(time), HummockValue::put(Bytes::from(value)));
                     }
                 }
                 prev_time = time + 1;
@@ -1013,7 +1043,7 @@ mod tests {
             let begin_key: usize = rng.gen_range(1..=end_key);
             let begin_key_bytes = key_from_num(begin_key);
             chaos_test_case(
-                clone_sst(&sst),
+                sst.clone(),
                 Unbounded,
                 Unbounded,
                 &truth,
@@ -1030,11 +1060,11 @@ mod tests {
         for _ in 0..repeat {
             let mut rng = thread_rng();
             let end_key: usize = rng.gen_range(2..=prev_key_number);
-            let end_key_bytes = key_from_num(end_key);
+            let end_key_bytes = key_from_num(end_key).into_bytes();
             let begin_key: usize = rng.gen_range(1..=end_key);
             let begin_key_bytes = key_from_num(begin_key);
             chaos_test_case(
-                clone_sst(&sst),
+                sst.clone(),
                 Unbounded,
                 Included(end_key_bytes.clone()),
                 &truth,
@@ -1053,9 +1083,9 @@ mod tests {
             let end_key: usize = rng.gen_range(2..=prev_key_number);
             let end_key_bytes = key_from_num(end_key);
             let begin_key: usize = rng.gen_range(1..=end_key);
-            let begin_key_bytes = key_from_num(begin_key);
+            let begin_key_bytes = key_from_num(begin_key).into_bytes();
             chaos_test_case(
-                clone_sst(&sst),
+                sst.clone(),
                 Included(begin_key_bytes.clone()),
                 Unbounded,
                 &truth,
@@ -1074,9 +1104,9 @@ mod tests {
             let end_key: usize = rng.gen_range(2..=prev_key_number);
             let end_key_bytes = key_from_num(end_key);
             let begin_key: usize = rng.gen_range(1..=end_key);
-            let begin_key_bytes = key_from_num(begin_key);
+            let begin_key_bytes = key_from_num(begin_key).into_bytes();
             chaos_test_case(
-                clone_sst(&sst),
+                sst.clone(),
                 Excluded(begin_key_bytes.clone()),
                 Unbounded,
                 &truth,
@@ -1093,11 +1123,11 @@ mod tests {
         for _ in 0..repeat {
             let mut rng = thread_rng();
             let end_key: usize = rng.gen_range(2..=prev_key_number);
-            let end_key_bytes = key_from_num(end_key);
+            let end_key_bytes = key_from_num(end_key).into_bytes();
             let begin_key: usize = rng.gen_range(1..=end_key);
-            let begin_key_bytes = key_from_num(begin_key);
+            let begin_key_bytes = key_from_num(begin_key).into_bytes();
             chaos_test_case(
-                clone_sst(&sst),
+                sst.clone(),
                 Included(begin_key_bytes.clone()),
                 Included(end_key_bytes.clone()),
                 &truth,
@@ -1114,24 +1144,17 @@ mod tests {
         for _ in 0..repeat {
             let mut rng = thread_rng();
             let end_key: usize = rng.gen_range(2..=prev_key_number);
-            let end_key_bytes = key_from_num(end_key);
+            let end_key_bytes = key_from_num(end_key).into_bytes();
             let begin_key: usize = rng.gen_range(1..=end_key);
-            let begin_key_bytes = key_from_num(begin_key);
+            let begin_key_bytes = key_from_num(begin_key).into_bytes();
             chaos_test_case(
-                clone_sst(&sst),
+                sst.clone(),
                 Excluded(begin_key_bytes),
                 Included(end_key_bytes),
                 &truth,
                 sstable_store.clone(),
             )
             .await;
-        }
-    }
-
-    fn clone_sst(sst: &Sstable) -> Sstable {
-        Sstable {
-            id: sst.id,
-            meta: sst.meta.clone(),
         }
     }
 
@@ -1149,12 +1172,15 @@ mod tests {
         .await;
 
         let cache = create_small_table_cache();
-        let handle0 = cache.insert(table0.id, table0.id, 1, Box::new(table0));
+        let handle0 = cache.insert(
+            table0.id,
+            table0.id,
+            1,
+            Box::new(table0),
+            CachePriority::High,
+        );
 
-        let backward_iters = vec![HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-            handle0,
-            sstable_store,
-        ))];
+        let backward_iters = vec![BackwardSstableIterator::new(handle0, sstable_store)];
 
         let min_epoch = (TEST_KEYS_COUNT / 5) as u64;
         let mi = UnorderedMergeIteratorInner::new(backward_iters);

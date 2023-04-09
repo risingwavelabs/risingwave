@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
 
@@ -20,24 +20,28 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::ColumnOrder;
 
-use super::generic::GenericPlanNode;
+use super::generic::GenericPlanRef;
 use super::{
-    generic, BatchFilter, BatchProject, ColPrunable, PlanBase, PlanRef, PredicatePushdown,
-    StreamTableScan, ToBatch, ToStream,
+    generic, BatchFilter, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    PredicatePushdown, StreamTableScan, ToBatch, ToStream,
 };
 use crate::catalog::{ColumnId, IndexCatalog};
-use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
-use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject, LogicalValues};
-use crate::optimizer::property::Direction::Asc;
-use crate::optimizer::property::{FieldOrder, FunctionalDependencySet, Order};
+use crate::expr::{
+    CollectInputRef, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
+};
+use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::{
+    BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
+    PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+};
+use crate::optimizer::property::Order;
 use crate::optimizer::rule::IndexSelectionRule;
-use crate::session::OptimizerContextRef;
-use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay};
 
 /// `LogicalScan` returns contents of a table or other equivalent object
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalScan {
     pub base: PlanBase,
     core: generic::Scan,
@@ -45,6 +49,7 @@ pub struct LogicalScan {
 
 impl LogicalScan {
     /// Create a `LogicalScan` node. Used internally by optimizer.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         table_name: String, // explain-only
         is_sys_table: bool,
@@ -53,6 +58,7 @@ impl LogicalScan {
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
+        for_system_time_as_of_now: bool,
     ) -> Self {
         // here we have 3 concepts
         // 1. column_id: ColumnId, stored in catalog and a ID to access data from storage.
@@ -81,21 +87,12 @@ impl LogicalScan {
             table_desc,
             indexes,
             predicate,
-        };
-
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
-
-        let functional_dependency = match &pk_indices {
-            Some(pk_indices) => FunctionalDependencySet::with_key(schema.len(), pk_indices),
-            None => FunctionalDependencySet::new(schema.len()),
-        };
-        let base = PlanBase::new_logical(
+            chunk_size: None,
+            for_system_time_as_of_now,
             ctx,
-            schema,
-            pk_indices.unwrap_or_default(),
-            functional_dependency,
-        );
+        };
+
+        let base = PlanBase::new_logical_with_core(&core);
 
         Self { base, core }
     }
@@ -107,15 +104,17 @@ impl LogicalScan {
         table_desc: Rc<TableDesc>,
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
+        for_system_time_as_of_now: bool,
     ) -> Self {
         Self::new(
             table_name,
             is_sys_table,
-            (0..table_desc.columns.len()).into_iter().collect(),
+            (0..table_desc.columns.len()).collect(),
             table_desc,
             indexes,
             ctx,
             Condition::true_cond(),
+            for_system_time_as_of_now,
         )
     }
 
@@ -169,6 +168,10 @@ impl LogicalScan {
         self.core.is_sys_table
     }
 
+    pub fn for_system_time_as_of_now(&self) -> bool {
+        self.core.for_system_time_as_of_now
+    }
+
     /// Get a reference to the logical scan's table desc.
     pub fn table_desc(&self) -> &TableDesc {
         self.core.table_desc.as_ref()
@@ -187,8 +190,16 @@ impl LogicalScan {
             .collect()
     }
 
-    pub fn output_column_indices(&self) -> &[usize] {
-        &self.core.output_col_idx
+    /// Get the ids of the output columns and primary key columns.
+    pub fn output_and_pk_column_ids(&self) -> Vec<ColumnId> {
+        let mut ids = self.output_column_ids();
+        for column_order in self.primary_key() {
+            let id = self.table_desc().columns[column_order.column_index].column_id;
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+        ids
     }
 
     /// Get all indexes on this table
@@ -219,12 +230,9 @@ impl LogicalScan {
                 .iter()
                 .map(|order| {
                     let idx = id_to_tb_idx
-                        .get(&self.table_desc().columns[order.column_idx].column_id)
+                        .get(&self.table_desc().columns[order.column_index].column_id)
                         .unwrap();
-                    match order.order_type {
-                        OrderType::Ascending => FieldOrder::ascending(*idx),
-                        OrderType::Descending => FieldOrder::descending(*idx),
-                    }
+                    ColumnOrder::new(*idx, order.order_type)
                 })
                 .collect(),
         );
@@ -251,11 +259,75 @@ impl LogicalScan {
             .collect()
     }
 
+    pub fn watermark_columns(&self) -> FixedBitSet {
+        let watermark_columns = &self.table_desc().watermark_columns;
+        self.i2o_col_mapping().rewrite_bitset(watermark_columns)
+    }
+
+    /// Return indexes can satisfy the required order.
+    pub fn indexes_satisfy_order(&self, required_order: &Order) -> Vec<&Rc<IndexCatalog>> {
+        let output_col_map = self
+            .output_col_idx()
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(id, col)| (col, id))
+            .collect::<BTreeMap<_, _>>();
+        let unmatched_idx = output_col_map.len();
+        self.indexes()
+            .iter()
+            .filter(|idx| {
+                let s2p_mapping = idx.secondary_to_primary_mapping();
+                Order {
+                    column_orders: idx
+                        .index_table
+                        .pk()
+                        .iter()
+                        .map(|idx_item| {
+                            ColumnOrder::new(
+                                *output_col_map
+                                    .get(
+                                        s2p_mapping
+                                            .get(&idx_item.column_index)
+                                            .expect("should be in s2p mapping"),
+                                    )
+                                    .unwrap_or(&unmatched_idx),
+                                idx_item.order_type,
+                            )
+                        })
+                        .collect(),
+                }
+                .satisfies(required_order)
+            })
+            .collect()
+    }
+
+    /// If the index can cover the scan, transform it to the index scan.
+    pub fn to_index_scan_if_index_covered(&self, index: &Rc<IndexCatalog>) -> Option<LogicalScan> {
+        let p2s_mapping = index.primary_to_secondary_mapping();
+        if self
+            .required_col_idx()
+            .iter()
+            .all(|x| p2s_mapping.contains_key(x))
+        {
+            let index_scan = self.to_index_scan(
+                &index.name,
+                index.index_table.table_desc().into(),
+                p2s_mapping,
+            );
+            Some(index_scan)
+        } else {
+            None
+        }
+    }
+
+    /// Prerequisite: the caller should guarantee that `primary_to_secondary_mapping` must cover the
+    /// scan.
     pub fn to_index_scan(
         &self,
         index_name: &str,
         index_table_desc: Rc<TableDesc>,
-        primary_to_secondary_mapping: &HashMap<usize, usize>,
+        primary_to_secondary_mapping: &BTreeMap<usize, usize>,
     ) -> LogicalScan {
         let new_output_col_idx = self
             .output_col_idx()
@@ -264,7 +336,7 @@ impl LogicalScan {
             .collect_vec();
 
         struct Rewriter<'a> {
-            primary_to_secondary_mapping: &'a HashMap<usize, usize>,
+            primary_to_secondary_mapping: &'a BTreeMap<usize, usize>,
         }
         impl ExprRewriter for Rewriter<'_> {
             fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
@@ -292,7 +364,22 @@ impl LogicalScan {
             vec![],
             self.ctx(),
             new_predicate,
+            self.for_system_time_as_of_now(),
         )
+    }
+
+    /// used by optimizer (currently `top_n_on_index_rule`) to help reduce useless `chunk_size` at
+    /// executor
+    pub fn set_chunk_size(&mut self, chunk_size: u32) {
+        self.core.chunk_size = Some(chunk_size);
+    }
+
+    pub fn chunk_size(&self) -> Option<u32> {
+        self.core.chunk_size
+    }
+
+    pub fn primary_key(&self) -> Vec<ColumnOrder> {
+        self.core.table_desc.pk.clone()
     }
 
     /// a vec of `InputRef` corresponding to `output_col_idx`, which can represent a pulled project.
@@ -328,6 +415,7 @@ impl LogicalScan {
             self.indexes().to_vec(),
             self.ctx(),
             Condition::true_cond(),
+            self.for_system_time_as_of_now(),
         );
         let project_expr = if self.required_col_idx() != self.output_col_idx() {
             Some(self.output_idx_to_input_ref())
@@ -346,6 +434,7 @@ impl LogicalScan {
             self.indexes().to_vec(),
             self.base.ctx.clone(),
             predicate,
+            self.for_system_time_as_of_now(),
         )
     }
 
@@ -358,6 +447,7 @@ impl LogicalScan {
             self.indexes().to_vec(),
             self.base.ctx.clone(),
             self.predicate().clone(),
+            self.for_system_time_as_of_now(),
         )
     }
 
@@ -375,42 +465,56 @@ impl_plan_tree_node_for_leaf! {LogicalScan}
 impl fmt::Display for LogicalScan {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
+        let output_col_names = if verbose {
+            self.column_names_with_table_prefix()
+        } else {
+            self.column_names()
+        }
+        .join(", ");
+
         if self.predicate().always_true() {
             write!(
                 f,
                 "LogicalScan {{ table: {}, columns: [{}] }}",
                 self.table_name(),
-                if verbose {
-                    self.column_names_with_table_prefix()
-                } else {
-                    self.column_names()
-                }
-                .join(", "),
+                output_col_names,
             )
         } else {
-            let required_col_names = self
-                .required_col_idx()
-                .iter()
-                .map(|i| self.table_desc().columns[*i].name.to_string())
-                .collect_vec();
+            write!(f, "LogicalScan {{ table: {}", self.table_name())?;
+            if self.output_col_idx() == self.required_col_idx() {
+                write!(f, ", columns: [{}]", output_col_names)?;
+            } else {
+                write!(
+                    f,
+                    ", output_columns: [{}], required_columns: [{}]",
+                    output_col_names,
+                    self.required_col_idx().iter().format_with(", ", |i, f| {
+                        if verbose {
+                            f(&format_args!(
+                                "{}.{}",
+                                self.table_name(),
+                                self.table_desc().columns[*i].name
+                            ))
+                        } else {
+                            f(&format_args!("{}", self.table_desc().columns[*i].name))
+                        }
+                    })
+                )?;
+            }
 
+            let fields = self
+                .table_desc()
+                .columns
+                .iter()
+                .map(|col| Field::from_with_table_name_prefix(col, self.table_name()))
+                .collect_vec();
+            let input_schema = Schema { fields };
             write!(
                 f,
-                "LogicalScan {{ table: {}, output_columns: [{}], required_columns: [{}], predicate: {} }}",
-                self.table_name(),
-                if verbose {
-                    self.column_names_with_table_prefix()
-                } else {
-                    self.column_names()
-                }.join(", "),
-                required_col_names.join(", "),
-                {
-                    let fields = self.table_desc().columns.iter().map(|col| Field::from_with_table_name_prefix(col, self.table_name())).collect_vec();
-                    let input_schema = Schema{fields};
-                    format!("{}", ConditionDisplay {
-                        condition: self.predicate(),
-                        input_schema: &input_schema,
-                    })
+                ", predicate: {} }}",
+                ConditionDisplay {
+                    condition: self.predicate(),
+                    input_schema: &input_schema,
                 }
             )
         }
@@ -418,7 +522,7 @@ impl fmt::Display for LogicalScan {
 }
 
 impl ColPrunable for LogicalScan {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         let output_col_idx: Vec<usize> = required_cols
             .iter()
             .map(|i| self.required_col_idx()[*i])
@@ -431,14 +535,59 @@ impl ColPrunable for LogicalScan {
     }
 }
 
+impl ExprRewritable for LogicalScan {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self {
+            base: self.base.clone_with_new_plan_id(),
+            core,
+        }
+        .into()
+    }
+}
+
 impl PredicatePushdown for LogicalScan {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        mut predicate: Condition,
+        _ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
+        // If the predicate contains `CorrelatedInputRef` or `now()`. We don't push down.
+        // This case could come from the predicate push down before the subquery unnesting.
+        struct HasCorrelated {}
+        impl ExprVisitor<bool> for HasCorrelated {
+            fn merge(a: bool, b: bool) -> bool {
+                a | b
+            }
+
+            fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) -> bool {
+                true
+            }
+        }
+        let non_pushable_predicate: Vec<_> = predicate
+            .conjunctions
+            .drain_filter(|expr| expr.count_nows() > 0 || HasCorrelated {}.visit_expr(expr))
+            .collect();
         let predicate = predicate.rewrite_expr(&mut ColIndexMapping::new(
             self.output_col_idx().iter().map(|i| Some(*i)).collect(),
         ));
-
-        self.clone_with_predicate(predicate.and(self.predicate().clone()))
-            .into()
+        if non_pushable_predicate.is_empty() {
+            self.clone_with_predicate(predicate.and(self.predicate().clone()))
+                .into()
+        } else {
+            return LogicalFilter::create(
+                self.clone_with_predicate(predicate.and(self.predicate().clone()))
+                    .into(),
+                Condition {
+                    conjunctions: non_pushable_predicate,
+                },
+            );
+        }
     }
 }
 
@@ -451,8 +600,7 @@ impl LogicalScan {
                 self.core.table_desc.clone(),
                 self.base
                     .ctx
-                    .inner()
-                    .session_ctx
+                    .session_ctx()
                     .config()
                     .get_max_split_range_gap(),
             )?;
@@ -461,11 +609,15 @@ impl LogicalScan {
             let (scan, predicate, project_expr) = scan.predicate_pull_up();
 
             if predicate.always_false() {
-                return LogicalValues::create(vec![], scan.schema().clone(), scan.ctx()).to_batch();
+                let plan =
+                    LogicalValues::create(vec![], scan.schema().clone(), scan.ctx()).to_batch()?;
+                assert_eq!(plan.schema(), self.schema());
+                return required_order.enforce_if_not_satisfies(plan);
             }
+
             let mut plan: PlanRef = BatchSeqScan::new(scan, scan_ranges).into();
             if !predicate.always_true() {
-                plan = BatchFilter::new(LogicalFilter::new(plan, predicate)).into();
+                plan = BatchFilter::new(generic::Filter::new(predicate, plan)).into();
             }
             if let Some(exprs) = project_expr {
                 plan = BatchProject::new(LogicalProject::new(plan, exprs)).into()
@@ -481,39 +633,18 @@ impl LogicalScan {
         &self,
         required_order: &Order,
     ) -> Option<Result<PlanRef>> {
-        if required_order.field_order.is_empty() {
+        if required_order.column_orders.is_empty() {
             return None;
         }
 
-        let index = self.indexes().iter().find(|idx| {
-            Order {
-                field_order: idx
-                    .index_item
-                    .iter()
-                    .map(|idx_item| FieldOrder {
-                        index: idx_item.index,
-                        direct: Asc,
-                    })
-                    .collect(),
+        let order_satisfied_index = self.indexes_satisfy_order(required_order);
+        for index in order_satisfied_index {
+            if let Some(index_scan) = self.to_index_scan_if_index_covered(index) {
+                return Some(index_scan.to_batch());
             }
-            .satisfies(required_order)
-        })?;
-
-        let p2s_mapping = index.primary_to_secondary_mapping();
-        if self
-            .required_col_idx()
-            .iter()
-            .all(|x| p2s_mapping.contains_key(x))
-        {
-            let index_scan = self.to_index_scan(
-                &index.name,
-                index.index_table.table_desc().into(),
-                p2s_mapping,
-            );
-            Some(index_scan.to_batch())
-        } else {
-            None
         }
+
+        None
     }
 }
 
@@ -523,33 +654,34 @@ impl ToBatch for LogicalScan {
     }
 
     fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
-        if !self.indexes().is_empty() {
+        let new = self.clone_with_predicate(self.predicate().clone());
+
+        if !new.indexes().is_empty() {
             let index_selection_rule = IndexSelectionRule::create();
-            if let Some(applied) = index_selection_rule.apply(self.clone().into()) {
+            if let Some(applied) = index_selection_rule.apply(new.clone().into()) {
                 if let Some(scan) = applied.as_logical_scan() {
                     // covering index
-                    return required_order.enforce_if_not_satisfies(scan.to_batch().unwrap());
+                    return required_order.enforce_if_not_satisfies(scan.to_batch()?);
                 } else if let Some(join) = applied.as_logical_join() {
                     // index lookup join
-                    return required_order.enforce_if_not_satisfies(
-                        join.index_lookup_join_to_batch_lookup_join().unwrap(),
-                    );
+                    return required_order
+                        .enforce_if_not_satisfies(join.index_lookup_join_to_batch_lookup_join()?);
                 } else {
                     unreachable!();
                 }
             } else {
                 // Try to make use of index if it satisfies the required order
-                if let Some(plan_ref) = self.use_index_scan_if_order_is_satisfied(required_order) {
+                if let Some(plan_ref) = new.use_index_scan_if_order_is_satisfied(required_order) {
                     return plan_ref;
                 }
             }
         }
-        self.to_batch_inner_with_required(required_order)
+        new.to_batch_inner_with_required(required_order)
     }
 }
 
 impl ToStream for LogicalScan {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         if self.is_sys_table() {
             return Err(RwError::from(ErrorCode::NotImplemented(
                 "streaming on system table is not allowed".to_string(),
@@ -564,11 +696,14 @@ impl ToStream for LogicalScan {
             if let Some(exprs) = project_expr {
                 plan = LogicalProject::create(plan, exprs)
             }
-            plan.to_stream()
+            plan.to_stream(ctx)
         }
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+    fn logical_rewrite_for_stream(
+        &self,
+        _ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         if self.is_sys_table() {
             return Err(RwError::from(ErrorCode::NotImplemented(
                 "streaming on system table is not allowed".to_string(),
@@ -587,8 +722,8 @@ impl ToStream for LogicalScan {
                     .pk
                     .iter()
                     .filter_map(|c| {
-                        if !col_ids.contains(&self.table_desc().columns[c.column_idx].column_id) {
-                            Some(c.column_idx)
+                        if !col_ids.contains(&self.table_desc().columns[c.column_index].column_id) {
+                            Some(c.column_index)
                         } else {
                             None
                         }

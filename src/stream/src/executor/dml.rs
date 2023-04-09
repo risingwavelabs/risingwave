@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,18 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::future::Either;
-use futures::stream::select;
+use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::{ColumnDesc, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, Schema, TableId, TableVersionId};
 use risingwave_source::dml_manager::DmlManagerRef;
 
 use super::error::StreamExecutorError;
+use super::stream_reader::StreamReaderWithPause;
 use super::{
-    expect_first_barrier, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices,
-    PkIndicesRef,
+    expect_first_barrier, BoxedExecutor, BoxedMessageStream, Executor, Message, Mutation,
+    PkIndices, PkIndicesRef,
 };
 
 /// [`DmlExecutor`] accepts both stream data and batch data for data manipulation on a specific
@@ -43,11 +42,15 @@ pub struct DmlExecutor {
     // Id of the table on which DML performs.
     table_id: TableId,
 
+    // Version of the table on which DML performs.
+    table_version_id: TableVersionId,
+
     // Column descriptions of the table.
     column_descs: Vec<ColumnDesc>,
 }
 
 impl DmlExecutor {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         upstream: BoxedExecutor,
         schema: Schema,
@@ -55,6 +58,7 @@ impl DmlExecutor {
         executor_id: u64,
         dml_manager: DmlManagerRef,
         table_id: TableId,
+        table_version_id: TableVersionId,
         column_descs: Vec<ColumnDesc>,
     ) -> Self {
         Self {
@@ -64,6 +68,7 @@ impl DmlExecutor {
             identity: format!("DmlExecutor {:X}", executor_id),
             dml_manager,
             table_id,
+            table_version_id,
             column_descs,
         }
     }
@@ -72,37 +77,55 @@ impl DmlExecutor {
     async fn execute_inner(self: Box<Self>) {
         let mut upstream = self.upstream.execute();
 
-        // Construct the reader of batch data (DML from users).
-        let batch_reader = self
-            .dml_manager
-            .register_reader(&self.table_id, &self.column_descs);
-        let batch_reader = batch_reader
-            .stream_reader_v2()
-            .into_stream_v2()
-            .map(Either::Right);
-
         // The first barrier message should be propagated.
         let barrier = expect_first_barrier(&mut upstream).await?;
+
+        // Construct the reader of batch data (DML from users). We must create a variable to hold
+        // this `Arc<TableDmlHandle>` here, or it will be dropped due to the `Weak` reference in
+        // `DmlManager`.
+        //
+        // Note(bugen): Only register after the first barrier message is received, which means the
+        // current executor is activated. This avoids the new reader overwriting the old one during
+        // the preparation of schema change.
+        let batch_reader = self
+            .dml_manager
+            .register_reader(self.table_id, self.table_version_id, &self.column_descs)
+            .map_err(StreamExecutorError::connector_error)?;
+        let batch_reader = batch_reader.stream_reader().into_stream();
+
+        // Merge the two streams using `StreamReaderWithPause` because when we receive a pause
+        // barrier, we should stop receiving the data from DML. We poll data from the two streams in
+        // a round robin way.
+        let mut stream = StreamReaderWithPause::<false>::new(upstream, batch_reader);
+
+        // If the first barrier is configuration change, then the DML executor must be newly
+        // created, and we should start with the paused state.
+        if barrier.is_update() {
+            stream.pause_stream();
+        }
+
         yield Message::Barrier(barrier);
 
-        // Stream data from the upstream executor.
-        let upstream = upstream.map(Either::Left);
-
-        // Merge the two streams.
-        let stream = select(upstream, batch_reader);
-
-        #[for_await]
-        for input_msg in stream {
-            match input_msg {
+        while let Some(input_msg) = stream.next().await {
+            match input_msg? {
                 Either::Left(msg) => {
-                    // Stream data.
-                    let msg: Message = msg?;
+                    // Stream messages.
+                    if let Message::Barrier(barrier) = &msg {
+                        // We should handle barrier messages here to pause or resume the data from
+                        // DML.
+                        if let Some(mutation) = barrier.mutation.as_deref() {
+                            match mutation {
+                                Mutation::Pause => stream.pause_stream(),
+                                Mutation::Resume => stream.resume_stream(),
+                                _ => {}
+                            }
+                        }
+                    }
                     yield msg;
                 }
                 Either::Right(chunk) => {
                     // Batch data.
-                    let chunk: StreamChunk = chunk.map_err(StreamExecutorError::connector_error)?;
-                    yield Message::Chunk(chunk);
+                    yield Message::Chunk(chunk.chunk);
                 }
             }
         }
@@ -131,7 +154,8 @@ impl Executor for DmlExecutor {
 mod tests {
     use std::sync::Arc;
 
-    use risingwave_common::catalog::{ColumnId, Field};
+    use risingwave_common::array::StreamChunk;
+    use risingwave_common::catalog::{ColumnId, Field, INITIAL_TABLE_VERSION_ID};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_source::dml_manager::DmlManager;
@@ -161,6 +185,7 @@ mod tests {
             1,
             dml_manager.clone(),
             table_id,
+            INITIAL_TABLE_VERSION_ID,
             column_descs,
         ));
         let mut dml_executor = dml_executor.execute();
@@ -198,7 +223,10 @@ mod tests {
         tx.push_chunk(stream_chunk3);
 
         // Message from batch
-        let _ = dml_manager.write_chunk(&table_id, batch_chunk).unwrap();
+        dml_manager
+            .write_chunk(table_id, INITIAL_TABLE_VERSION_ID, batch_chunk)
+            .await
+            .unwrap();
 
         // Consume the 1st message from upstream executor
         let msg = dml_executor.next().await.unwrap().unwrap();

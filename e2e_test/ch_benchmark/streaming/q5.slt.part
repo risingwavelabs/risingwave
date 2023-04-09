@@ -1,0 +1,18 @@
+query II
+select * from ch_benchmark_q5
+order by revenue desc;
+----
+ITALY           281346
+UNITED KINGDOM  187124
+GREECE          120320
+UKRAINE         106360
+PORTUGAL        106034
+ROMANIA         100531
+BELGIUM          90277
+NETHERLANDS      82625
+RUSSIA           76785
+POLAND           74822
+SPAIN            62534
+FRANCE           46961
+FINLAND          31240
+GERMANY          28440

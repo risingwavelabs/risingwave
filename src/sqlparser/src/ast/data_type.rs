@@ -2,7 +2,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -30,26 +30,16 @@ pub enum DataType {
     Varchar,
     /// Uuid type
     Uuid,
-    /// Large character object e.g. CLOB(1000)
-    Clob(u64),
-    /// Fixed-length binary type e.g. BINARY(10)
-    Binary(u64),
-    /// Variable-length binary type e.g. VARBINARY(10)
-    Varbinary(u64),
-    /// Large binary object e.g. BLOB(1000)
-    Blob(u64),
     /// Decimal type with optional precision and scale e.g. DECIMAL(10,2)
     Decimal(Option<u64>, Option<u64>),
     /// Floating point with optional precision e.g. FLOAT(8)
     Float(Option<u64>),
-    /// Tiny integer with optional display width e.g. TINYINT or TINYINT(3)
-    TinyInt(Option<u64>),
-    /// Small integer with optional display width e.g. SMALLINT or SMALLINT(5)
-    SmallInt(Option<u64>),
-    /// Integer with optional display width e.g. INT or INT(11)
-    Int(Option<u64>),
-    /// Big integer with optional display width e.g. BIGINT or BIGINT(20)
-    BigInt(Option<u64>),
+    /// SMALLINT (int2)
+    SmallInt,
+    /// INTEGER (int4)
+    Int,
+    /// BIGINT (int8)
+    BigInt,
     /// Floating point e.g. REAL
     Real,
     /// Double e.g. DOUBLE PRECISION
@@ -68,8 +58,6 @@ pub enum DataType {
     Regclass,
     /// Text
     Text,
-    /// String
-    String,
     /// Bytea
     Bytea,
     /// Custom type such as enums
@@ -86,10 +74,6 @@ impl fmt::Display for DataType {
             DataType::Char(size) => format_type_with_optional_length(f, "CHAR", size),
             DataType::Varchar => write!(f, "CHARACTER VARYING"),
             DataType::Uuid => write!(f, "UUID"),
-            DataType::Clob(size) => write!(f, "CLOB({})", size),
-            DataType::Binary(size) => write!(f, "BINARY({})", size),
-            DataType::Varbinary(size) => write!(f, "VARBINARY({})", size),
-            DataType::Blob(size) => write!(f, "BLOB({})", size),
             DataType::Decimal(precision, scale) => {
                 if let Some(scale) = scale {
                     write!(f, "NUMERIC({},{})", precision.unwrap(), scale)
@@ -98,12 +82,11 @@ impl fmt::Display for DataType {
                 }
             }
             DataType::Float(size) => format_type_with_optional_length(f, "FLOAT", size),
-            DataType::TinyInt(zerofill) => format_type_with_optional_length(f, "TINYINT", zerofill),
-            DataType::SmallInt(zerofill) => {
-                format_type_with_optional_length(f, "SMALLINT", zerofill)
+            DataType::SmallInt => {
+                write!(f, "SMALLINT")
             }
-            DataType::Int(zerofill) => format_type_with_optional_length(f, "INT", zerofill),
-            DataType::BigInt(zerofill) => format_type_with_optional_length(f, "BIGINT", zerofill),
+            DataType::Int => write!(f, "INT"),
+            DataType::BigInt => write!(f, "BIGINT"),
             DataType::Real => write!(f, "REAL"),
             DataType::Double => write!(f, "DOUBLE"),
             DataType::Boolean => write!(f, "BOOLEAN"),
@@ -115,7 +98,6 @@ impl fmt::Display for DataType {
             DataType::Interval => write!(f, "INTERVAL"),
             DataType::Regclass => write!(f, "REGCLASS"),
             DataType::Text => write!(f, "TEXT"),
-            DataType::String => write!(f, "STRING"),
             DataType::Bytea => write!(f, "BYTEA"),
             DataType::Array(ty) => write!(f, "{}[]", ty),
             DataType::Custom(ty) => write!(f, "{}", ty),

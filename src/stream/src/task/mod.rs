@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,13 +16,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use parking_lot::{Mutex, MutexGuard, RwLock};
+use parking_lot::{MappedMutexGuard, Mutex, MutexGuard, RwLock};
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::ActorInfo;
 use risingwave_rpc_client::ComputeClientPool;
 
-use crate::cache::{LruManager, LruManagerRef};
 use crate::error::StreamResult;
 use crate::executor::exchange::permit::{self, Receiver, Sender};
 
@@ -80,7 +79,7 @@ pub struct SharedContext {
 
     pub(crate) barrier_manager: Arc<Mutex<LocalBarrierManager>>,
 
-    pub(crate) lru_manager: Option<LruManagerRef>,
+    pub(crate) config: StreamingConfig,
 }
 
 impl std::fmt::Debug for SharedContext {
@@ -92,28 +91,14 @@ impl std::fmt::Debug for SharedContext {
 }
 
 impl SharedContext {
-    pub fn new(
-        addr: HostAddr,
-        state_store: StateStoreImpl,
-        config: &StreamingConfig,
-        enable_managed_cache: bool,
-    ) -> Self {
-        let create_lru_manager = || {
-            let mgr = LruManager::new(
-                config.total_memory_available_bytes,
-                config.barrier_interval_ms,
-            );
-            // Run a background memory monitor
-            tokio::spawn(mgr.clone().run());
-            mgr
-        };
+    pub fn new(addr: HostAddr, state_store: StateStoreImpl, config: &StreamingConfig) -> Self {
         Self {
             channel_map: Default::default(),
             actor_infos: Default::default(),
             addr,
             compute_client_pool: ComputeClientPool::default(),
-            lru_manager: enable_managed_cache.then(create_lru_manager),
             barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new(state_store))),
+            config: config.clone(),
         }
     }
 
@@ -127,61 +112,56 @@ impl SharedContext {
             barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new(
                 StateStoreImpl::for_test(),
             ))),
-            lru_manager: None,
+            config: StreamingConfig::default(),
         }
-    }
-
-    #[inline]
-    fn lock_channel_map(&self) -> MutexGuard<'_, HashMap<UpDownActorIds, ConsumableChannelPair>> {
-        self.channel_map.lock()
     }
 
     pub fn lock_barrier_manager(&self) -> MutexGuard<'_, LocalBarrierManager> {
         self.barrier_manager.lock()
     }
 
-    #[inline]
+    /// Get the channel pair for the given actor ids. If the channel pair does not exist, create one
+    /// with the configured permits.
+    fn get_or_insert_channels(
+        &self,
+        ids: UpDownActorIds,
+    ) -> MappedMutexGuard<'_, ConsumableChannelPair> {
+        MutexGuard::map(self.channel_map.lock(), |map| {
+            map.entry(ids).or_insert_with(|| {
+                let (tx, rx) = permit::channel(
+                    self.config.developer.exchange_initial_permits,
+                    self.config.developer.exchange_batched_permits,
+                );
+                (Some(tx), Some(rx))
+            })
+        })
+    }
+
     pub fn take_sender(&self, ids: &UpDownActorIds) -> StreamResult<Sender> {
-        self.lock_channel_map()
-            .get_mut(ids)
-            .ok_or_else(|| anyhow!("channel between {} and {} does not exist", ids.0, ids.1))?
+        self.get_or_insert_channels(*ids)
             .0
             .take()
-            .ok_or_else(|| anyhow!("sender from {} to {} does no exist", ids.0, ids.1).into())
+            .ok_or_else(|| anyhow!("sender for {ids:?} has already been taken").into())
     }
 
-    #[inline]
     pub fn take_receiver(&self, ids: &UpDownActorIds) -> StreamResult<Receiver> {
-        self.lock_channel_map()
-            .get_mut(ids)
-            .ok_or_else(|| anyhow!("channel between {} and {} does not exist", ids.0, ids.1))?
+        self.get_or_insert_channels(*ids)
             .1
             .take()
-            .ok_or_else(|| anyhow!("receiver from {} to {} does not exist", ids.0, ids.1).into())
-    }
-
-    #[inline]
-    pub fn add_channel_pairs(&self, ids: UpDownActorIds) {
-        let (tx, rx) = permit::channel();
-        assert!(
-            self.lock_channel_map()
-                .insert(ids, (Some(tx), Some(rx)))
-                .is_none(),
-            "channel already exists: {:?}",
-            ids
-        );
+            .ok_or_else(|| anyhow!("receiver for {ids:?} has already been taken").into())
     }
 
     pub fn retain_channel<F>(&self, mut f: F)
     where
         F: FnMut(&(u32, u32)) -> bool,
     {
-        self.lock_channel_map()
+        self.channel_map
+            .lock()
             .retain(|up_down_ids, _| f(up_down_ids));
     }
 
     pub fn clear_channels(&self) {
-        self.lock_channel_map().clear();
+        self.channel_map.lock().clear()
     }
 
     pub fn get_actor_info(&self, actor_id: &ActorId) -> StreamResult<ActorInfo> {

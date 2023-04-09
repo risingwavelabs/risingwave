@@ -817,7 +817,3 @@ query T
 select array_cat(array[array[2.1]], array[array[1]]);
 ----
 {{2.1},{1}}
-
-
-
-

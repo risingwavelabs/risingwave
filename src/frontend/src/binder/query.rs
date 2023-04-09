@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,22 +13,25 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_sqlparser::ast::{Cte, Expr, Fetch, OrderByExpr, Query, Value, With};
 
+use super::statement::RewriteExprsRecursive;
+use super::BoundValues;
 use crate::binder::{Binder, BoundSetExpr};
-use crate::expr::{CorrelatedId, Depth, ExprImpl};
-use crate::optimizer::property::{Direction, FieldOrder};
+use crate::expr::{CorrelatedId, Depth, ExprImpl, ExprRewriter};
 
 /// A validated sql query, including order and union.
 /// An example of its relationship with `BoundSetExpr` and `BoundSelect` can be found here: <https://bit.ly/3GQwgPz>
 #[derive(Debug, Clone)]
 pub struct BoundQuery {
     pub body: BoundSetExpr,
-    pub order: Vec<FieldOrder>,
+    pub order: Vec<ColumnOrder>,
     pub limit: Option<u64>,
     pub offset: Option<u64>,
     pub with_ties: bool,
@@ -92,6 +95,30 @@ impl BoundQuery {
         // TODO: collect `correlated_input_ref` in `extra_order_exprs`.
         self.body
             .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+    }
+
+    /// Simple `VALUES` without other clauses.
+    pub fn with_values(values: BoundValues) -> Self {
+        BoundQuery {
+            body: BoundSetExpr::Values(values.into()),
+            order: vec![],
+            limit: None,
+            offset: None,
+            with_ties: false,
+            extra_order_exprs: vec![],
+        }
+    }
+}
+
+impl RewriteExprsRecursive for BoundQuery {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl ExprRewriter) {
+        let new_extra_order_exprs = std::mem::take(&mut self.extra_order_exprs)
+            .into_iter()
+            .map(|expr| rewriter.rewrite_expr(expr))
+            .collect::<Vec<_>>();
+        self.extra_order_exprs = new_extra_order_exprs;
+
+        self.body.rewrite_exprs_recursive(rewriter);
     }
 }
 
@@ -206,19 +233,9 @@ impl Binder {
         name_to_index: &HashMap<String, usize>,
         extra_order_exprs: &mut Vec<ExprImpl>,
         visible_output_num: usize,
-    ) -> Result<FieldOrder> {
-        if nulls_first.is_some() {
-            return Err(ErrorCode::NotImplemented(
-                "NULLS FIRST or NULLS LAST".to_string(),
-                4743.into(),
-            )
-            .into());
-        }
-        let direct = match asc {
-            None | Some(true) => Direction::Asc,
-            Some(false) => Direction::Desc,
-        };
-        let index = match expr {
+    ) -> Result<ColumnOrder> {
+        let order_type = OrderType::from_bools(asc, nulls_first);
+        let column_index = match expr {
             Expr::Identifier(name) if let Some(index) = name_to_index.get(&name.real_value()) => match *index != usize::MAX {
                 true => *index,
                 false => return Err(ErrorCode::BindError(format!("ORDER BY \"{}\" is ambiguous", name.real_value())).into()),
@@ -238,7 +255,7 @@ impl Binder {
                 visible_output_num + extra_order_exprs.len() - 1
             }
         };
-        Ok(FieldOrder { index, direct })
+        Ok(ColumnOrder::new(column_index, order_type))
     }
 
     fn bind_with(&mut self, with: With) -> Result<()> {
@@ -249,8 +266,10 @@ impl Binder {
                 let Cte { alias, query, .. } = cte_table;
                 let table_name = alias.name.real_value();
                 let bound_query = self.bind_query(query)?;
-                self.cte_to_relation
-                    .insert(table_name, (bound_query, alias));
+                let share_id = self.next_share_id();
+                self.context
+                    .cte_to_relation
+                    .insert(table_name, Rc::new((share_id, bound_query, alias)));
             }
             Ok(())
         }

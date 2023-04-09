@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Exits as soon as any line fails.
 set -e
@@ -15,8 +15,30 @@ cd "$SCRIPT_PATH/.." || exit 1
 
 KAFKA_BIN="$SCRIPT_PATH/../../.risingwave/bin/kafka/bin"
 
+echo "$SCRIPT_PATH"
+
+if [ "$1" == "compress" ]; then
+  echo "Compress test_data/ into test_data.zip"
+  cd ./source
+  zip_file=test_data.zip
+  if [ -f "$zip_file" ]; then
+    rm "$zip_file"
+  fi
+  zip -r "$zip_file" ./test_data/ch_benchmark/*
+  exit 0
+fi
+
+echo "--- Extract data for Kafka"
+cd ./source/
+mkdir -p ./test_data/ch_benchmark/
+unzip -o test_data.zip -d .
+cd ..
+
+echo "path:${SCRIPT_PATH}/test_data/**/*"
+
 echo "Create topics"
-for filename in "$SCRIPT_PATH"/test_data/*; do
+kafka_data_files=$(find "$SCRIPT_PATH"/test_data -type f)
+for filename in $kafka_data_files; do
     ([ -e "$filename" ]
     base=$(basename "$filename")
     topic="${base%%.*}"
@@ -32,7 +54,7 @@ done
 wait
 
 echo "Fulfill kafka topics"
-for filename in "$SCRIPT_PATH"/test_data/*; do
+for filename in $kafka_data_files; do
     ([ -e "$filename" ]
     base=$(basename "$filename")
     topic="${base%%.*}"

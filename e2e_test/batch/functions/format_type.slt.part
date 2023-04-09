@@ -1,0 +1,19 @@
+query T
+SELECT format_type(16, 0);
+----
+boolean
+
+query T
+SELECT pg_catalog.format_type(9527, 1);
+----
+???
+
+query T
+SELECT format_type(1000, NULL);
+----
+boolean[]
+
+query T
+SELECT format_type(NULL, 0);
+----
+NULL

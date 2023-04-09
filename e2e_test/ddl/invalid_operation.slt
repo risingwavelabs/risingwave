@@ -18,9 +18,6 @@ drop sink not_exists;
 statement error view not found
 drop view not_exists;
 
-statement error Use `DROP SOURCE`
-drop materialized source not_exists;
-
 # 2. drop relation in non-existent schema
 
 statement error schema not found
@@ -65,7 +62,7 @@ drop view not_exists.not_exists.not_exists;
 
 # 4.1. table
 statement ok
-create table t (v int);
+create table t (v int primary key);
 
 statement error Use `DROP TABLE`
 drop materialized view t;
@@ -94,8 +91,7 @@ drop table mv;
 statement error Use `DROP MATERIALIZED VIEW`
 drop index mv;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP MATERIALIZED VIEW`
 drop source mv;
 
 # FIXME: improve the error message
@@ -116,8 +112,7 @@ drop table idx;
 statement error Use `DROP INDEX`
 drop materialized view idx;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP INDEX`
 drop source idx;
 
 # FIXME: improve the error message
@@ -128,9 +123,9 @@ drop sink idx;
 statement error not found
 drop view idx;
 
-# 4.4 materialized source
+# 4.4 table with connector
 statement ok
-create materialized source msrc (v int) with (
+create table msrc (v int) with (
     connector = 'datagen',
     fields.v.kind = 'sequence',
     fields.v.start = '1',
@@ -139,14 +134,14 @@ create materialized source msrc (v int) with (
     datagen.split.num = '1'
 ) row format json;
 
-statement error Use `DROP SOURCE`
-drop table msrc;
-
-statement error Use `DROP SOURCE`
+statement error Use `DROP TABLE`
 drop materialized view msrc;
 
-statement error Use `DROP SOURCE`
+statement error Use `DROP TABLE`
 drop index msrc;
+
+statement error Use `DROP TABLE`
+drop source msrc;
 
 # FIXME: improve the error message
 statement error not found
@@ -156,7 +151,7 @@ drop sink msrc;
 statement error not found
 drop view msrc;
 
-# 4.5 non-materialized source
+# 4.5 source
 statement ok
 create source src (v int) with (
     connector = 'datagen',
@@ -189,11 +184,14 @@ drop view src;
 
 # 4.6 sink 
 statement ok
-CREATE SINK sink FROM mv WITH (connector='console', prefix='DEBUG', suffix='');
+CREATE SINK sink FROM mv WITH (connector='blackhole');
 
 # FIXME: improve the error message
 statement error not found
 drop table sink;
+
+statement error sink properties not provided
+CREATE SINK sink FROM mv;
 
 # FIXME: improve the error message
 statement error not found
@@ -252,10 +250,6 @@ query I
 SELECT * from msrc limit 0;
 ----
 
-query error no batch source operator
-SELECT * from src limit 0;
-----
-
 # FIXME: improve the error message
 query error not found
 SELECT * from sink limit 0;
@@ -270,7 +264,7 @@ SELECT * from v limit 0;
 statement ok
 insert into t values (1);
 
-statement ok
+statement error QueryError: Bind error: update modifying the PK column is banned
 update t set v = 2;
 
 statement ok
@@ -296,20 +290,17 @@ update idx set v = 2;
 statement error cannot change index
 delete from idx;
 
-# 6.4 materialized source
-# FIXME: what's this?
-statement error Get source table id not exists
+# 6.4 table with connector
+statement ok
 insert into msrc values (1);
 
-# FIXME: what's this?
-statement error Get source table id not exists
+statement ok
 update msrc set v = 2;
 
-# FIXME: what's this?
-statement error Get source table id not exists
+statement ok
 delete from msrc;
 
-# 6.5 non-materialized source
+# 6.5 source
 # FIXME: improve the error message
 statement error not found
 insert into src values (1);
@@ -358,7 +349,7 @@ create table mv(v int);
 statement error index.*exists
 create table idx(v int);
 
-statement error source.*exists
+statement error table.*exists
 create table msrc(v int);
 
 statement error source.*exists
@@ -370,6 +361,17 @@ create table sink(v int);
 statement error view.*exists
 create table v(v int);
 
+# 8. create with unsupport format
+statement error connector datagen does not support row format DebeziumJson
+create table err_t1 (v int) with (
+    connector = 'datagen',
+    fields.v.kind = 'sequence',
+    fields.v.start = '1',
+    fields.v.end  = '10',
+    datagen.rows.per.second='15',
+    datagen.split.num = '1'
+) row format debezium_json;
+
 # cleanup
 
 statement ok
@@ -379,7 +381,7 @@ statement ok
 drop sink sink;
 
 statement ok
-drop source msrc;
+drop table msrc;
 
 statement ok
 drop source src;

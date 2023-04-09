@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,18 +17,15 @@ use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criteri
 use itertools::Itertools;
 use risingwave_batch::executor::{BoxedExecutor, HashAggExecutor};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::hash;
 use risingwave_common::types::DataType;
+use risingwave_common::{enable_jemalloc_on_unix, hash};
 use risingwave_expr::expr::AggKind;
 use risingwave_expr::vector_op::agg::AggStateFactory;
-use risingwave_pb::expr::agg_call::Arg;
-use risingwave_pb::expr::{AggCall, InputRefExpr};
-use tikv_jemallocator::Jemalloc;
+use risingwave_pb::expr::{AggCall, InputRef};
 use tokio::runtime::Runtime;
 use utils::{create_input, execute_executor};
 
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
+enable_jemalloc_on_unix!();
 
 fn create_agg_call(
     input_schema: &Schema,
@@ -40,16 +37,14 @@ fn create_agg_call(
         r#type: agg_kind.to_prost() as i32,
         args: args
             .into_iter()
-            .map(|col_idx| Arg {
-                input: Some(InputRefExpr {
-                    column_idx: col_idx as i32,
-                }),
+            .map(|col_idx| InputRef {
+                index: col_idx as _,
                 r#type: Some(input_schema.fields()[col_idx].data_type().to_protobuf()),
             })
             .collect(),
         return_type: Some(return_type.to_protobuf()),
         distinct: false,
-        order_by_fields: vec![],
+        order_by: vec![],
         filter: None,
     }
 }

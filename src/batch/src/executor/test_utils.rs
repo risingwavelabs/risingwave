@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,10 +23,11 @@ use risingwave_common::array::{DataChunk, DataChunkTestExt};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::field_generator::FieldGeneratorImpl;
-use risingwave_common::row::Row2;
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, ToOwnedDatum};
+use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_expr::expr::BoxedExpression;
-use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
+use risingwave_pb::batch_plan::PbExchangeSource;
 
 use crate::exchange_source::{ExchangeSource, ExchangeSourceImpl};
 use crate::executor::{
@@ -65,6 +66,7 @@ pub fn gen_sorted_data(
     batch_num: usize,
     start: String,
     step: u64,
+    offset: u64,
 ) -> Vec<DataChunk> {
     let mut data_gen = FieldGeneratorImpl::with_number_sequence(
         DataType::Int64,
@@ -72,6 +74,7 @@ pub fn gen_sorted_data(
         Some(i64::MAX.to_string()),
         0,
         step,
+        offset,
     )
     .unwrap();
     let mut ret = Vec::<DataChunk>::with_capacity(batch_num);
@@ -112,7 +115,7 @@ pub fn gen_projected_data(
 
         let chunk = DataChunk::new(vec![array_builder.finish().into()], batch_size);
 
-        let array = expr.eval(&chunk).unwrap();
+        let array = futures::executor::block_on(expr.eval(&chunk)).unwrap();
         let chunk = DataChunk::new(vec![Column::new(array)], batch_size);
         ret.push(chunk);
     }
@@ -219,7 +222,7 @@ pub async fn diff_executor_output(actual: BoxedExecutor, expect: BoxedExecutor) 
     expect
         .columns()
         .iter()
-        .zip_eq(actual.columns().iter())
+        .zip_eq_fast(actual.columns().iter())
         .for_each(|(c1, c2)| assert_eq!(c1.array().to_protobuf(), c2.array().to_protobuf()));
 
     is_data_chunk_eq(&expect, &actual)
@@ -236,7 +239,7 @@ fn is_data_chunk_eq(left: &DataChunk, right: &DataChunk) {
     );
 
     left.rows()
-        .zip_eq(right.rows())
+        .zip_eq_debug(right.rows())
         .for_each(|(row1, row2)| assert_eq!(row1, row2));
 }
 
@@ -287,7 +290,7 @@ impl CreateSource for FakeCreateSource {
     async fn create_source(
         &self,
         _: impl BatchTaskContext,
-        _: &ProstExchangeSource,
+        _: &PbExchangeSource,
     ) -> Result<ExchangeSourceImpl> {
         Ok(ExchangeSourceImpl::Fake(self.fake_exchange_source.clone()))
     }
@@ -326,10 +329,9 @@ impl LookupExecutorBuilder for FakeInnerSideExecutorBuilder {
         for idx in 0..base_data_chunk.capacity() {
             let probe_row = base_data_chunk.row_at_unchecked_vis(idx);
             for datum in &self.datums {
-                if datum[0] == probe_row.value_at(0).to_owned_datum() {
-                    let owned_row = probe_row.into_owned_row();
+                if datum[0] == probe_row.datum_at(0).to_owned_datum() {
                     let chunk =
-                        DataChunk::from_rows(&[owned_row], &[DataType::Int32, DataType::Float32]);
+                        DataChunk::from_rows(&[probe_row], &[DataType::Int32, DataType::Float32]);
                     mock_executor.add(chunk);
                     break;
                 }

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -53,8 +53,8 @@ pub struct NexmarkPropertiesInner {
     #[serde(rename = "nexmark.event.num", default = "default_event_num")]
     pub event_num: u64,
 
-    #[serde(rename = "nexmark.table.type", default = "default_event_type")]
-    pub table_type: EventType,
+    #[serde(rename = "nexmark.table.type", default = "none")]
+    pub table_type: Option<EventType>,
 
     #[serde_as(as = "DisplayFromStr")]
     #[serde(rename = "nexmark.max.chunk.size", default = "identity_u64::<1024>")]
@@ -221,10 +221,6 @@ fn default_event_num() -> u64 {
     u64::MAX
 }
 
-fn default_event_type() -> EventType {
-    EventType::Person
-}
-
 impl Default for NexmarkPropertiesInner {
     fn default() -> Self {
         let v = serde_json::to_value(HashMap::<String, String>::new()).unwrap();
@@ -237,10 +233,16 @@ impl From<&NexmarkPropertiesInner> for NexmarkConfig {
         // 2015-07-15 00:00:00
         pub const BASE_TIME: u64 = 1_436_918_400_000;
 
-        let mut cfg = NexmarkConfig {
-            base_time: BASE_TIME,
-            ..Default::default()
+        let mut cfg = match value.table_type {
+            // This is the old way
+            Some(_) => NexmarkConfig {
+                base_time: BASE_TIME,
+                ..Default::default()
+            },
+            // By using default, it will choose the default proportion of three different events.
+            None => NexmarkConfig::default(),
         };
+
         macro_rules! set {
             ($name:ident) => {
                 set!($name, $name);
@@ -271,9 +273,6 @@ impl From<&NexmarkPropertiesInner> for NexmarkConfig {
         set!(base_time);
         set!(num_categories);
         set!(auction_id_lead);
-        set!(hot_seller_ratio_2);
-        set!(hot_auction_ratio_2);
-        set!(hot_bidder_ratio_2);
         set!(person_proportion);
         set!(auction_proportion);
         set!(bid_proportion);

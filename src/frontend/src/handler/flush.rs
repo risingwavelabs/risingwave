@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,17 +16,20 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 
 use super::RwPgResponse;
-use crate::session::OptimizerContext;
+use crate::handler::HandlerArgs;
+use crate::session::SessionImpl;
 
-pub(super) async fn handle_flush(context: OptimizerContext) -> Result<RwPgResponse> {
-    let client = context.session_ctx.env().meta_client();
-    // The returned epoch >= epoch for flush, but it is okay.
+pub(super) async fn handle_flush(handler_args: HandlerArgs) -> Result<RwPgResponse> {
+    do_flush(&handler_args.session).await?;
+    Ok(PgResponse::empty_result(StatementType::FLUSH))
+}
+
+pub(crate) async fn do_flush(session: &SessionImpl) -> Result<()> {
+    let client = session.env().meta_client();
     let snapshot = client.flush(true).await?;
-    // Update max epoch to ensure read-after-write correctness.
-    context
-        .session_ctx
+    session
         .env()
         .hummock_snapshot_manager()
         .update_epoch(snapshot);
-    Ok(PgResponse::empty_result(StatementType::FLUSH))
+    Ok(())
 }

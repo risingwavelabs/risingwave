@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 
 use itertools::Itertools;
@@ -20,13 +22,20 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
 use super::{
-    ColPrunable, LogicalFilter, LogicalJoin, LogicalProject, PlanBase, PlanNodeType, PlanRef,
-    PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    ColPrunable, ExprRewritable, LogicalFilter, LogicalJoin, LogicalProject, PlanBase,
+    PlanNodeType, PlanRef, PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
+    ToStream,
 };
-use crate::expr::{ExprImpl, ExprRewriter};
-use crate::optimizer::plan_node::PlanTreeNode;
+use crate::expr::{ExprImpl, ExprRewriter, ExprType, FunctionCall};
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, PlanTreeNode, PredicatePushdownContext, RewriteStreamContext,
+    ToStreamContext,
+};
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::utils::{ColIndexMapping, Condition, ConditionDisplay, ConnectedComponentLabeller};
+use crate::utils::{
+    ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay,
+    ConnectedComponentLabeller,
+};
 
 /// `LogicalMultiJoin` combines two or more relations according to some condition.
 ///
@@ -34,7 +43,7 @@ use crate::utils::{ColIndexMapping, Condition, ConditionDisplay, ConnectedCompon
 /// of the cartesian product of all the inputs; The `LogicalMultiInnerJoin` is only supported
 /// for inner joins as it implicitly assumes commutativity. Non-inner joins should be
 /// expressed as 2-way `LogicalJoin`s.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalMultiJoin {
     pub base: PlanBase,
     inputs: Vec<PlanRef>,
@@ -45,7 +54,6 @@ pub struct LogicalMultiJoin {
     // pk_derive soon.
     /// the mapping output_col_idx -> (input_idx, input_col_idx), **"output_col_idx" is internal,
     /// not consider output_indices**
-    #[expect(dead_code)]
     inner_o2i_mapping: Vec<(usize, usize)>,
     inner_i2o_mappings: Vec<ColIndexMapping>,
 }
@@ -70,7 +78,7 @@ impl fmt::Display for LogicalMultiJoin {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalMultiJoinBuilder {
     output_indices: Vec<usize>,
     /// the predicates in the on condition, we do not use Condition here to emit unnecessary
@@ -357,7 +365,6 @@ impl LogicalMultiJoin {
                 .cloned()
                 .flat_map(|input_idx| {
                     (0..self.inputs[input_idx].schema().len())
-                        .into_iter()
                         .map(move |col_idx| self.inner_i2o_mappings[input_idx].map(col_idx))
                 })
                 .enumerate()
@@ -478,20 +485,344 @@ impl LogicalMultiJoin {
         Ok(join_ordering)
     }
 
+    /// transform multijoin into bushy tree join.
+    ///
+    /// 1. First, use equivalent condition derivation to get derive join relation.
+    /// 2. Second, for every isolated node will create connection to every other nodes.
+    /// 3. Third, select and merge one node for a iteration, and use a bfs policy for which node the
+    ///    selected node merged with.
+    ///   i. The select node mentioned above is the node with least numer of relations and the
+    ///      lowerst join tree.
+    ///   ii. nodes with a join tree higher than the temporal optimal join tree will be pruned.
+    pub fn as_bushy_tree_join(&self) -> Result<PlanRef> {
+        let (nodes, condition) = self.get_join_graph()?;
+
+        if nodes.is_empty() {
+            return Err(RwError::from(ErrorCode::InternalError(
+                "empty multi-join graph".into(),
+            )));
+        }
+
+        let mut optimized_bushy_tree: Option<GraphNode> = None;
+        let mut que = VecDeque::from([nodes]);
+        let mut isolated = BTreeSet::new();
+
+        while let Some(mut nodes) = que.pop_front() {
+            if nodes.len() == 1 {
+                let node = nodes.into_values().next().unwrap();
+
+                if let Some(old) = &optimized_bushy_tree {
+                    if node.join_tree.height < old.join_tree.height {
+                        optimized_bushy_tree = Some(node);
+                    }
+                } else {
+                    optimized_bushy_tree = Some(node);
+                }
+                continue;
+            }
+
+            let (idx, _) = nodes
+                .iter()
+                .min_by(
+                    |(_, x), (_, y)| match x.relations.len().cmp(&y.relations.len()) {
+                        Ordering::Less => Ordering::Less,
+                        Ordering::Greater => Ordering::Greater,
+                        Ordering::Equal => x.join_tree.height.cmp(&y.join_tree.height),
+                    },
+                )
+                .unwrap();
+            let n_id = *idx;
+
+            let n = nodes.get(&n_id).unwrap();
+            if n.relations.is_empty() {
+                isolated.insert(n.id);
+                nodes.remove(&n_id).unwrap();
+                que.push_back(nodes);
+                continue;
+            }
+
+            let mut relations = nodes.get_mut(&n_id).unwrap().relations.clone();
+            relations.sort_by(|a, b| {
+                let a = nodes.get(a).unwrap();
+                let b = nodes.get(b).unwrap();
+                match a.join_tree.height.cmp(&b.join_tree.height) {
+                    Ordering::Equal => a.id.cmp(&b.id),
+                    other => other,
+                }
+            });
+            relations.dedup();
+            nodes.get_mut(&n_id).unwrap().relations = relations;
+
+            for merge_node_id in &nodes.get(&n_id).unwrap().relations {
+                let mut nodes = nodes.clone();
+                let n = nodes.remove(&n_id).unwrap();
+
+                for adj_node_id in &n.relations {
+                    if adj_node_id != merge_node_id {
+                        let n_id = nodes
+                            .get(adj_node_id)
+                            .unwrap()
+                            .relations
+                            .iter()
+                            .position(|adj_rel| *adj_rel == n_id)
+                            .unwrap();
+
+                        let adj_node = nodes.get_mut(adj_node_id).unwrap();
+                        adj_node.relations.swap_remove(n_id);
+                        adj_node.relations.push(*merge_node_id);
+                        let merge_node = nodes.get_mut(merge_node_id).unwrap();
+                        merge_node.relations.push(*adj_node_id);
+                    }
+                }
+
+                let idx = nodes
+                    .get(merge_node_id)
+                    .unwrap()
+                    .relations
+                    .iter()
+                    .position(|merge_rel| *merge_rel == n_id)
+                    .unwrap();
+
+                let merge_node = nodes.get_mut(merge_node_id).unwrap();
+                merge_node.relations.swap_remove(idx);
+                let l_tree = n.join_tree.clone();
+                let r_tree = std::mem::take(&mut merge_node.join_tree);
+                let new_height = usize::max(l_tree.height, r_tree.height) + 1;
+
+                if let Some(min_height) = optimized_bushy_tree.as_ref().map(|t| t.join_tree.height) && min_height < new_height {
+                    continue;
+                }
+
+                merge_node.join_tree = JoinTreeNode {
+                    idx: None,
+                    left: Some(Box::new(l_tree)),
+                    right: Some(Box::new(r_tree)),
+                    height: new_height,
+                };
+
+                que.push_back(nodes);
+            }
+        }
+
+        let isolated = isolated.into_iter().collect_vec();
+
+        // maintain join order to mapping columns.
+        let mut join_ordering = vec![];
+        let mut output = if let Some(optimized_bushy_tree) = optimized_bushy_tree {
+            let mut output =
+                self.create_logical_join(optimized_bushy_tree.join_tree, &mut join_ordering)?;
+
+            output = isolated.into_iter().fold(output, |chain, n| {
+                join_ordering.push(n);
+                LogicalJoin::new(
+                    chain,
+                    self.inputs[n].clone(),
+                    JoinType::Inner,
+                    Condition::true_cond(),
+                )
+                .into()
+            });
+            output
+        } else if !isolated.is_empty() {
+            let base = isolated[0];
+            join_ordering.push(isolated[0]);
+            isolated[1..]
+                .iter()
+                .fold(self.inputs[base].clone(), |chain, n| {
+                    join_ordering.push(*n);
+                    LogicalJoin::new(
+                        chain,
+                        self.inputs[*n].clone(),
+                        JoinType::Inner,
+                        Condition::true_cond(),
+                    )
+                    .into()
+                })
+        } else {
+            return Err(RwError::from(ErrorCode::InternalError(
+                "no plan remain".into(),
+            )));
+        };
+
+        let total_col_num = self.inner2output.source_size();
+        let reorder_mapping = {
+            let mut reorder_mapping = vec![None; total_col_num];
+
+            join_ordering
+                .iter()
+                .cloned()
+                .flat_map(|input_idx| {
+                    (0..self.inputs[input_idx].schema().len())
+                        .map(move |col_idx| self.inner_i2o_mappings[input_idx].map(col_idx))
+                })
+                .enumerate()
+                .for_each(|(tar, src)| reorder_mapping[src] = Some(tar));
+            reorder_mapping
+        };
+        output =
+            LogicalProject::with_out_col_idx(output, reorder_mapping.iter().map(|i| i.unwrap()))
+                .into();
+
+        output = LogicalFilter::create(output, condition);
+        output =
+            LogicalProject::with_out_col_idx(output, self.output_indices.iter().cloned()).into();
+        Ok(output)
+    }
+
     pub(crate) fn input_col_nums(&self) -> Vec<usize> {
         self.inputs.iter().map(|i| i.schema().len()).collect()
     }
+
+    /// get join graph from `self.on`, return the join graph and the new join condition.
+    fn get_join_graph(&self) -> Result<(BTreeMap<usize, GraphNode>, Condition)> {
+        let mut nodes: BTreeMap<_, _> = (0..self.inputs.len())
+            .map(|idx| GraphNode {
+                id: idx,
+                relations: vec![],
+                join_tree: JoinTreeNode {
+                    idx: Some(idx),
+                    left: None,
+                    right: None,
+                    height: 0,
+                },
+            })
+            .enumerate()
+            .collect();
+
+        let condition = self.on.clone();
+        let condition = self.eq_condition_derivation(condition)?;
+        let (eq_join_conditions, _) = condition
+            .clone()
+            .split_by_input_col_nums(&self.input_col_nums(), true);
+
+        for ((src, dst), _) in eq_join_conditions {
+            nodes.get_mut(&src).unwrap().relations.push(dst);
+            nodes.get_mut(&dst).unwrap().relations.push(src);
+        }
+
+        Ok((nodes, condition))
+    }
+
+    ///  equivalent condition derivation by `a = b && a = c` ==> `b = c`
+    fn eq_condition_derivation(&self, mut condition: Condition) -> Result<Condition> {
+        let (eq_join_conditions, _) = condition
+            .clone()
+            .split_by_input_col_nums(&self.input_col_nums(), true);
+
+        let mut new_conj: BTreeMap<usize, BTreeSet<usize>> = BTreeMap::new();
+        let mut input_ref_map = BTreeMap::new();
+
+        for con in eq_join_conditions.values() {
+            for conj in &con.conjunctions {
+                let (l, r) = conj.as_eq_cond().unwrap();
+                new_conj.entry(l.index).or_default().insert(r.index);
+                new_conj.entry(r.index).or_default().insert(l.index);
+                input_ref_map.insert(l.index, Some(l));
+                input_ref_map.insert(r.index, Some(r));
+            }
+        }
+
+        let mut new_pairs = BTreeSet::new();
+
+        for conjs in new_conj.values() {
+            if conjs.len() < 2 {
+                continue;
+            }
+
+            let conjs = conjs.iter().copied().collect_vec();
+            for i in 0..conjs.len() {
+                for j in i + 1..conjs.len() {
+                    if !new_conj.get(&conjs[i]).unwrap().contains(&conjs[j]) {
+                        if conjs[i] < conjs[j] {
+                            new_pairs.insert((conjs[i], conjs[j]));
+                        } else {
+                            new_pairs.insert((conjs[j], conjs[i]));
+                        }
+                    }
+                }
+            }
+        }
+        for (i, j) in new_pairs {
+            condition
+                .conjunctions
+                .push(ExprImpl::FunctionCall(Box::new(FunctionCall::new(
+                    ExprType::Equal,
+                    vec![
+                        ExprImpl::InputRef(Box::new(
+                            input_ref_map.get(&i).unwrap().as_ref().unwrap().clone(),
+                        )),
+                        ExprImpl::InputRef(Box::new(
+                            input_ref_map.get(&j).unwrap().as_ref().unwrap().clone(),
+                        )),
+                    ],
+                )?)));
+        }
+        Ok(condition)
+    }
+
+    /// create logical plan by recursively travase `JoinTreeNode`
+    fn create_logical_join(
+        &self,
+        mut join_tree: JoinTreeNode,
+        join_ordering: &mut Vec<usize>,
+    ) -> Result<PlanRef> {
+        Ok(match (join_tree.left.take(), join_tree.right.take()) {
+            (Some(l), Some(r)) => LogicalJoin::new(
+                self.create_logical_join(*l, join_ordering)?,
+                self.create_logical_join(*r, join_ordering)?,
+                JoinType::Inner,
+                Condition::true_cond(),
+            )
+            .into(),
+            (None, None) => {
+                if let Some(idx) = join_tree.idx {
+                    join_ordering.push(idx);
+                    self.inputs[idx].clone()
+                } else {
+                    return Err(RwError::from(ErrorCode::InternalError(
+                        "id of the leaf node not found in the join tree".into(),
+                    )));
+                }
+            }
+            (_, _) => {
+                return Err(RwError::from(ErrorCode::InternalError(
+                    "only leaf node can have None subtree".into(),
+                )))
+            }
+        })
+    }
+}
+
+// Join tree internal representation
+#[derive(Clone, Default, Debug)]
+struct JoinTreeNode {
+    idx: Option<usize>,
+    left: Option<Box<JoinTreeNode>>,
+    right: Option<Box<JoinTreeNode>>,
+    height: usize,
+}
+
+// join graph internal representation
+#[derive(Clone, Debug)]
+struct GraphNode {
+    id: usize,
+    join_tree: JoinTreeNode,
+    // use BTreeSet for deterministic
+    relations: Vec<usize>,
 }
 
 impl ToStream for LogicalMultiJoin {
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+    fn logical_rewrite_for_stream(
+        &self,
+        _ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         panic!(
             "Method not available for `LogicalMultiJoin` which is a placeholder node with \
              a temporary lifetime. It only facilitates join reordering during logical planning."
         )
     }
 
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         panic!(
             "Method not available for `LogicalMultiJoin` which is a placeholder node with \
              a temporary lifetime. It only facilitates join reordering during logical planning."
@@ -509,7 +840,16 @@ impl ToBatch for LogicalMultiJoin {
 }
 
 impl ColPrunable for LogicalMultiJoin {
-    fn prune_col(&self, _required_cols: &[usize]) -> PlanRef {
+    fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
+        panic!(
+            "Method not available for `LogicalMultiJoin` which is a placeholder node with \
+             a temporary lifetime. It only facilitates join reordering during logical planning."
+        )
+    }
+}
+
+impl ExprRewritable for LogicalMultiJoin {
+    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
         panic!(
             "Method not available for `LogicalMultiJoin` which is a placeholder node with \
              a temporary lifetime. It only facilitates join reordering during logical planning."
@@ -518,7 +858,11 @@ impl ColPrunable for LogicalMultiJoin {
 }
 
 impl PredicatePushdown for LogicalMultiJoin {
-    fn predicate_pushdown(&self, _predicate: Condition) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        _predicate: Condition,
+        _ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         panic!(
             "Method not available for `LogicalMultiJoin` which is a placeholder node with \
              a temporary lifetime. It only facilitates join reordering during logical planning."
@@ -536,9 +880,9 @@ mod test {
 
     use super::*;
     use crate::expr::{FunctionCall, InputRef};
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;
-    use crate::session::OptimizerContext;
     #[tokio::test]
     async fn fd_derivation_multi_join() {
         // t1: [v0, v1], t2: [v2, v3, v4], t3: [v5, v6]

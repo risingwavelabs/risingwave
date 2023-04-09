@@ -1,0 +1,34 @@
+[package]
+name = "risingwave_backup_cmd"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+risingwave_backup = { path = "../../backup" }
+risingwave_meta = { path = "../../../meta" }
+risingwave_rt = { path = "../../../utils/runtime" }
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+    "fs",
+    "tracing",
+] }
+
+[[bin]]
+name = "backup-restore"
+path = "src/bin/backup_restore.rs"

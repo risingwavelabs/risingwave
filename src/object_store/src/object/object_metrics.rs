@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,39 +18,14 @@ use prometheus::{
     register_int_counter_vec_with_registry, register_int_counter_with_registry, HistogramVec,
     Registry,
 };
-use risingwave_common::monitor::Print;
 
-macro_rules! for_all_metrics {
-    ($macro:ident) => {
-        $macro! {
-            write_bytes: GenericCounter<AtomicU64>,
-            read_bytes: GenericCounter<AtomicU64>,
-            operation_latency: HistogramVec,
-            operation_size: HistogramVec,
-            failure_count: GenericCounterVec<AtomicU64>,
-        }
-    };
+pub struct ObjectStoreMetrics {
+    pub write_bytes: GenericCounter<AtomicU64>,
+    pub read_bytes: GenericCounter<AtomicU64>,
+    pub operation_latency: HistogramVec,
+    pub operation_size: HistogramVec,
+    pub failure_count: GenericCounterVec<AtomicU64>,
 }
-
-macro_rules! define_object_store_metrics {
-    ($( $name:ident: $type:ty ),* ,) => {
-        /// [`ObjectStoreMetrics`] stores the performance and IO metrics of `ObjectStore` such as
-        /// `S3` and `MinIO`.
-        #[derive(Debug)]
-        pub struct ObjectStoreMetrics {
-            $( pub $name: $type, )*
-        }
-
-        impl Print for ObjectStoreMetrics {
-            fn print(&self) {
-                $( self.$name.print(); )*
-            }
-        }
-    }
-
-}
-
-for_all_metrics! { define_object_store_metrics }
 
 impl ObjectStoreMetrics {
     pub fn new(registry: Registry) -> Self {
@@ -115,7 +90,7 @@ impl ObjectStoreMetrics {
         }
     }
 
-    /// Creates a new `StateStoreMetrics` instance used in tests or other places.
+    /// Creates a new `HummockStateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
         Self::new(Registry::new())
     }

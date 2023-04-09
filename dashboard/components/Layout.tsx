@@ -1,11 +1,11 @@
 /*
- * Copyright 2022 Singularity Data
+ * Copyright 2023 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,10 +15,18 @@
  *
  */
 
-import { Box, Button, HStack, Image, Text, VStack } from "@chakra-ui/react"
+import {
+  Box,
+  Button,
+  Flex,
+  HStack,
+  Image,
+  Text,
+  VStack,
+} from "@chakra-ui/react"
 import Link from "next/link"
 import { useRouter } from "next/router"
-import React, { Fragment } from "react"
+import React, { useEffect, useState } from "react"
 import { UrlObject } from "url"
 import {
   IconArrowRightCircle,
@@ -40,7 +48,13 @@ function NavButton({
   leftIconActive?: React.ReactElement
 }) {
   const router = useRouter()
-  const match = router.asPath.startsWith(href.toString())
+  const [match, setMatch] = useState(false)
+
+  useEffect(() => {
+    setMatch(router.asPath.startsWith(href.toString()))
+    return () => {}
+  }, [href, router.asPath])
+
   return (
     <Link href={href}>
       <Button
@@ -71,43 +85,46 @@ function NavTitle({ children }: { children: React.ReactNode }) {
 
 function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <Fragment>
+    <Flex>
       <Box
-        position="fixed"
-        top={0}
-        bottom={0}
-        left={0}
+        height="100vh"
+        overflowY="scroll"
         width={NAVBAR_WIDTH}
+        minWidth={NAVBAR_WIDTH}
         bg="gray.50"
         py={3}
         px={3}
       >
-        <Box height="50px" width="full" mb={3}>
-          <HStack spacing={0}>
-            <Link href="/" passHref>
-              <a>
-                <Image
-                  boxSize="50px"
-                  src="/risingwave.svg"
-                  alt="RisingWave Logo"
-                />
-              </a>
-            </Link>
-            <Text fontSize="xl">
-              <b>RisingWave</b> Dashboard
-            </Text>
-          </HStack>
-        </Box>
         <VStack>
+          <Box height="50px" width="full">
+            <HStack spacing={0}>
+              <Link href="/" passHref>
+                <a>
+                  <Image
+                    boxSize="50px"
+                    src="/risingwave.svg"
+                    alt="RisingWave Logo"
+                  />
+                </a>
+              </Link>
+              <Text fontSize="xl">
+                <b>RisingWave</b> Dashboard
+              </Text>
+            </HStack>
+          </Box>
           <NavButton href="/cluster/" leftIcon={<IconServer />}>
             Cluster Overview
           </NavButton>
           <VStack width="full" alignItems="flex-start" px={3}>
             <NavTitle>Catalog</NavTitle>
             <NavButton href="/data_sources/">Data Sources</NavButton>
+            <NavButton href="/tables/">Tables</NavButton>
             <NavButton href="/materialized_views/">
               Materialized Views
             </NavButton>
+            <NavButton href="/indexes/">Indexes</NavButton>
+            <NavButton href="/internal_tables/">Internal Tables</NavButton>
+            <NavButton href="/sinks/">Sinks</NavButton>
           </VStack>
           <VStack width="full" alignItems="flex-start" px={3}>
             <NavTitle>Streaming</NavTitle>
@@ -122,18 +139,18 @@ function Layout({ children }: { children: React.ReactNode }) {
             <NavTitle>Explain</NavTitle>
             <NavButton href="/explain_distsql/">Distributed Plan</NavButton>
           </VStack>
+          <VStack width="full" alignItems="flex-start" px={3}>
+            <NavTitle>Debug</NavTitle>
+            <NavButton href="/await_tree/">Await Tree Dump</NavButton>
+          </VStack>
           <VStack mb={3}></VStack>
           <NavButton href="/settings/">Settings</NavButton>
         </VStack>
       </Box>
-      <Box
-        ml={NAVBAR_WIDTH}
-        width={`calc(100vw - ${NAVBAR_WIDTH})`}
-        height="full"
-      >
+      <Box flex={1} overflowY="scroll">
         {children}
       </Box>
-    </Fragment>
+    </Flex>
   )
 }
 

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,7 +14,6 @@
 
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use risingwave_common::array::data_chunk_iter::RowRef;
 use risingwave_common::array::{Array, DataChunk};
 use risingwave_common::buffer::BitmapBuilder;
@@ -23,6 +22,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::row::{repeat_n, RowExt};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::{
     build_from_prost as expr_build_from_prost, BoxedExpression, Expression,
 };
@@ -121,7 +121,7 @@ impl NestedLoopJoinExecutor {
 impl NestedLoopJoinExecutor {
     /// Create a chunk by concatenating a row with a chunk and set its visibility according to the
     /// evaluation result of the expression.
-    fn concatenate_and_eval(
+    async fn concatenate_and_eval(
         expr: &dyn Expression,
         left_row_types: &[DataType],
         left_row: RowRef<'_>,
@@ -129,7 +129,7 @@ impl NestedLoopJoinExecutor {
     ) -> Result<DataChunk> {
         let left_chunk = convert_row_to_chunk(&left_row, right_chunk.capacity(), left_row_types)?;
         let mut chunk = concatenate(&left_chunk, right_chunk)?;
-        chunk.set_visibility(expr.eval(&chunk)?.as_bool().iter().collect());
+        chunk.set_visibility(expr.eval(&chunk).await?.as_bool().iter().collect());
         Ok(chunk)
     }
 }
@@ -163,7 +163,7 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
             left_child,
             right_child,
             source.plan_node().get_identity().clone(),
-            source.context.get_config().developer.batch_chunk_size,
+            source.context.get_config().developer.chunk_size,
         )))
     }
 }
@@ -232,11 +232,11 @@ impl NestedLoopJoinExecutor {
                     &left_data_types,
                     left_row,
                     &right_chunk,
-                )?;
+                )
+                .await?;
                 // 4. Yield the concatenated chunk.
                 if chunk.cardinality() > 0 {
-                    #[for_await]
-                    for spilled in chunk_builder.trunc_data_chunk(chunk) {
+                    for spilled in chunk_builder.append_chunk(chunk) {
                         yield spilled
                     }
                 }
@@ -265,11 +265,11 @@ impl NestedLoopJoinExecutor {
                     &left_data_types,
                     left_row,
                     &right_chunk,
-                )?;
+                )
+                .await?;
                 if chunk.cardinality() > 0 {
                     matched.set(left_row_idx, true);
-                    #[for_await]
-                    for spilled in chunk_builder.trunc_data_chunk(chunk) {
+                    for spilled in chunk_builder.append_chunk(chunk) {
                         yield spilled
                     }
                 }
@@ -279,7 +279,7 @@ impl NestedLoopJoinExecutor {
         for (left_row, _) in left
             .iter()
             .flat_map(|chunk| chunk.rows())
-            .zip_eq(matched.finish().iter())
+            .zip_eq_debug(matched.finish().iter())
             .filter(|(_, matched)| !*matched)
         {
             let row = left_row.chain(repeat_n(Datum::None, right_data_types.len()));
@@ -310,7 +310,8 @@ impl NestedLoopJoinExecutor {
                     &left_data_types,
                     left_row,
                     &right_chunk,
-                )?;
+                )
+                .await?;
                 if chunk.cardinality() > 0 {
                     matched.set(left_row_idx, true)
                 }
@@ -319,7 +320,7 @@ impl NestedLoopJoinExecutor {
         for (left_row, _) in left
             .iter()
             .flat_map(|chunk| chunk.rows())
-            .zip_eq(matched.finish().iter())
+            .zip_eq_debug(matched.finish().iter())
             .filter(|(_, matched)| if ANTI_JOIN { !*matched } else { *matched })
         {
             if let Some(chunk) = chunk_builder.append_one_row(left_row) {
@@ -347,19 +348,19 @@ impl NestedLoopJoinExecutor {
                     &left_data_types,
                     left_row,
                     &right_chunk,
-                )?;
+                )
+                .await?;
                 if chunk.cardinality() > 0 {
                     // chunk.visibility() must be Some(_)
                     matched = &matched | chunk.visibility().unwrap();
-                    #[for_await]
-                    for spilled in chunk_builder.trunc_data_chunk(chunk) {
+                    for spilled in chunk_builder.append_chunk(chunk) {
                         yield spilled
                     }
                 }
             }
             for (right_row, _) in right_chunk
                 .rows()
-                .zip_eq(matched.iter())
+                .zip_eq_debug(matched.iter())
                 .filter(|(_, matched)| !*matched)
             {
                 let row = repeat_n(Datum::None, left_data_types.len()).chain(right_row);
@@ -388,7 +389,8 @@ impl NestedLoopJoinExecutor {
                     &left_data_types,
                     left_row,
                     &right_chunk,
-                )?;
+                )
+                .await?;
                 if chunk.cardinality() > 0 {
                     // chunk.visibility() must be Some(_)
                     matched = &matched | chunk.visibility().unwrap();
@@ -399,8 +401,7 @@ impl NestedLoopJoinExecutor {
             }
             right_chunk.set_visibility(matched);
             if right_chunk.cardinality() > 0 {
-                #[for_await]
-                for spilled in chunk_builder.trunc_data_chunk(right_chunk) {
+                for spilled in chunk_builder.append_chunk(right_chunk) {
                     yield spilled
                 }
             }
@@ -428,12 +429,12 @@ impl NestedLoopJoinExecutor {
                     &left_data_types,
                     left_row,
                     &right_chunk,
-                )?;
+                )
+                .await?;
                 if chunk.cardinality() > 0 {
                     left_matched.set(left_row_idx, true);
                     right_matched = &right_matched | chunk.visibility().unwrap();
-                    #[for_await]
-                    for spilled in chunk_builder.trunc_data_chunk(chunk) {
+                    for spilled in chunk_builder.append_chunk(chunk) {
                         yield spilled
                     }
                 }
@@ -441,7 +442,7 @@ impl NestedLoopJoinExecutor {
             // Yield unmatched rows in the right table
             for (right_row, _) in right_chunk
                 .rows()
-                .zip_eq(right_matched.iter())
+                .zip_eq_debug(right_matched.iter())
                 .filter(|(_, matched)| !*matched)
             {
                 let row = repeat_n(Datum::None, left_data_types.len()).chain(right_row);
@@ -454,7 +455,7 @@ impl NestedLoopJoinExecutor {
         for (left_row, _) in left
             .iter()
             .flat_map(|chunk| chunk.rows())
-            .zip_eq(left_matched.finish().iter())
+            .zip_eq_debug(left_matched.finish().iter())
             .filter(|(_, matched)| !*matched)
         {
             let row = left_row.chain(repeat_n(Datum::None, right_data_types.len()));
@@ -469,9 +470,7 @@ mod tests {
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-    use risingwave_expr::expr::InputRefExpression;
-    use risingwave_pb::expr::expr_node::Type;
+    use risingwave_expr::expr::build_from_pretty;
 
     use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;
     use crate::executor::join::JoinType;
@@ -587,13 +586,7 @@ mod tests {
             };
 
             Box::new(NestedLoopJoinExecutor::new(
-                new_binary_expr(
-                    Type::Equal,
-                    DataType::Boolean,
-                    Box::new(InputRefExpression::new(DataType::Int32, 0)),
-                    Box::new(InputRefExpression::new(DataType::Int32, 2)),
-                )
-                .unwrap(),
+                build_from_pretty("(equal:boolean $0:int4 $2:int4)"),
                 join_type,
                 output_indices,
                 left_child,

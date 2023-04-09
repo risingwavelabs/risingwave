@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,12 +18,13 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::TableFunctionNode;
 
-use super::{PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch};
+use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchPb, ToDistributedBatch};
+use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::logical_table_function::LogicalTableFunction;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchTableFunction {
     pub base: PlanBase,
     logical: LogicalTableFunction,
@@ -65,7 +66,7 @@ impl ToDistributedBatch for BatchTableFunction {
     }
 }
 
-impl ToBatchProst for BatchTableFunction {
+impl ToBatchPb for BatchTableFunction {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::TableFunction(TableFunctionNode {
             table_function: Some(self.logical.table_function.to_protobuf()),
@@ -76,5 +77,22 @@ impl ToBatchProst for BatchTableFunction {
 impl ToLocalBatch for BatchTableFunction {
     fn to_local(&self) -> Result<PlanRef> {
         Ok(Self::with_dist(self.logical().clone(), Distribution::Single).into())
+    }
+}
+
+impl ExprRewritable for BatchTableFunction {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_table_function()
+                .unwrap()
+                .clone(),
+        )
+        .into()
     }
 }

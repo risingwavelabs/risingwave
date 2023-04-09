@@ -1,0 +1,29 @@
+statement ok
+create table t (v1 int, v2 int);
+
+statement ok
+create sink s1 from t with (connector = 'blackhole');
+
+statement ok
+create sink s2 as select avg(v1), v2 from t group by v2 with (connector = 'blackhole');
+
+statement error The sink cannot be append-only
+create sink s3 from t with (connector = 'blackhole', type = 'append-only');
+
+statement ok
+create sink s3 from t with (connector = 'blackhole', type = 'append-only', force_append_only = 'true');
+
+statement error Cannot force the sink to be append-only
+create sink s4 from t with (connector = 'blackhole', type = 'upsert', force_append_only = 'true');
+
+statement ok
+drop sink s1
+
+statement ok
+drop sink s2
+
+statement ok
+drop sink s3
+
+statement ok
+drop table t

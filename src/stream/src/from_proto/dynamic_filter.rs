@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,7 +14,9 @@
 use std::sync::Arc;
 
 use risingwave_common::bail;
-use risingwave_pb::expr::expr_node::Type::*;
+use risingwave_pb::expr::expr_node::Type::{
+    GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual,
+};
 use risingwave_pb::stream_plan::DynamicFilterNode;
 
 use super::*;
@@ -54,15 +56,17 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             );
         }
 
-        let state_table_l = StateTable::from_table_catalog(
+        // TODO: use consistent operation for dynamic filter <https://github.com/risingwavelabs/risingwave/issues/3893>
+        let state_table_l = StateTable::from_table_catalog_inconsistent_op(
             node.get_left_table()?,
             store.clone(),
-            Some(vnodes.clone()),
+            Some(vnodes),
         )
         .await;
 
         let state_table_r =
-            StateTable::from_table_catalog(node.get_right_table()?, store, None).await;
+            StateTable::from_table_catalog_inconsistent_op(node.get_right_table()?, store, None)
+                .await;
 
         Ok(Box::new(DynamicFilterExecutor::new(
             params.actor_context,
@@ -75,8 +79,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             state_table_l,
             state_table_r,
             params.executor_stats,
-            params.env.config().developer.stream_chunk_size,
-            vnodes,
+            params.env.config().developer.chunk_size,
         )))
     }
 }

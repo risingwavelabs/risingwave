@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,14 +14,15 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object as ProstObject};
-use risingwave_pb::user::GrantPrivilege as ProstPrivilege;
+use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, PbObject};
+use risingwave_pb::user::PbGrantPrivilege;
 use risingwave_sqlparser::ast::{GrantObjects, Privileges, Statement};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
-use crate::session::{OptimizerContext, SessionImpl};
+use crate::handler::HandlerArgs;
+use crate::session::SessionImpl;
 use crate::user::user_privilege::{
     available_privilege_actions, check_privilege_type, get_prost_action,
 };
@@ -30,7 +31,7 @@ fn make_prost_privilege(
     session: &SessionImpl,
     privileges: Privileges,
     objects: GrantObjects,
-) -> Result<Vec<ProstPrivilege>> {
+) -> Result<Vec<PbGrantPrivilege>> {
     check_privilege_type(&privileges, &objects)?;
 
     let catalog_reader = session.env().catalog_reader();
@@ -45,14 +46,14 @@ fn make_prost_privilege(
             for db in databases {
                 let database_name = Binder::resolve_database_name(db)?;
                 let database = reader.get_database_by_name(&database_name)?;
-                grant_objs.push(ProstObject::DatabaseId(database.id()));
+                grant_objs.push(PbObject::DatabaseId(database.id()));
             }
         }
         GrantObjects::Schemas(schemas) => {
             for schema in schemas {
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(session.database(), &schema_name)?;
-                grant_objs.push(ProstObject::SchemaId(schema.id()));
+                grant_objs.push(PbObject::SchemaId(schema.id()));
             }
         }
         GrantObjects::Mviews(tables) => {
@@ -66,7 +67,7 @@ fn make_prost_privilege(
                 let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
                 let (table, _) = reader.get_table_by_name(db_name, schema_path, &table_name)?;
-                grant_objs.push(ProstObject::TableId(table.id().table_id));
+                grant_objs.push(PbObject::TableId(table.id().table_id));
             }
         }
         GrantObjects::Sources(sources) => {
@@ -80,27 +81,28 @@ fn make_prost_privilege(
                 let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
                 let (source, _) = reader.get_source_by_name(db_name, schema_path, &source_name)?;
-                grant_objs.push(ProstObject::SourceId(source.id));
+                grant_objs.push(PbObject::SourceId(source.id));
             }
         }
         GrantObjects::AllSourcesInSchema { schemas } => {
             for schema in schemas {
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(session.database(), &schema_name)?;
-                grant_objs.push(ProstObject::AllSourcesSchemaId(schema.id()));
+                grant_objs.push(PbObject::AllSourcesSchemaId(schema.id()));
             }
         }
         GrantObjects::AllMviewsInSchema { schemas } => {
             for schema in schemas {
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(session.database(), &schema_name)?;
-                grant_objs.push(ProstObject::AllTablesSchemaId(schema.id()));
+                grant_objs.push(PbObject::AllTablesSchemaId(schema.id()));
             }
         }
-        _ => {
-            return Err(ErrorCode::BindError(
-                "GRANT statement does not support this object type".to_string(),
-            )
+        o => {
+            return Err(ErrorCode::BindError(format!(
+                "GRANT statement does not support object type: {:?}",
+                o
+            ))
             .into());
         }
     };
@@ -118,7 +120,7 @@ fn make_prost_privilege(
 
     let mut prost_privileges = vec![];
     for objs in grant_objs {
-        prost_privileges.push(ProstPrivilege {
+        prost_privileges.push(PbGrantPrivilege {
             action_with_opts: action_with_opts.clone(),
             object: Some(objs),
         });
@@ -127,10 +129,10 @@ fn make_prost_privilege(
 }
 
 pub async fn handle_grant_privilege(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     stmt: Statement,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx;
+    let session = handler_args.session;
     let Statement::Grant {
         privileges,
         objects,
@@ -166,10 +168,10 @@ pub async fn handle_grant_privilege(
 }
 
 pub async fn handle_revoke_privilege(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     stmt: Statement,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx;
+    let session = handler_args.session;
     let Statement::Revoke {
         privileges,
         objects,
@@ -240,10 +242,16 @@ mod tests {
             .await
             .unwrap();
 
-        let database_id = {
+        let (session_database_id, database_id) = {
             let catalog_reader = session.env().catalog_reader();
             let reader = catalog_reader.read_guard();
-            reader.get_database_by_name("db1").unwrap().id()
+            (
+                reader
+                    .get_database_by_name(session.database())
+                    .unwrap()
+                    .id(),
+                reader.get_database_by_name("db1").unwrap().id(),
+            )
         };
 
         {
@@ -252,21 +260,31 @@ mod tests {
             let user_info = reader.get_user_by_name("user1").unwrap();
             assert_eq!(
                 user_info.grant_privileges,
-                vec![ProstPrivilege {
-                    action_with_opts: vec![
-                        ActionWithGrantOption {
+                vec![
+                    PbGrantPrivilege {
+                        action_with_opts: vec![ActionWithGrantOption {
                             action: Action::Connect as i32,
                             with_grant_option: true,
-                            granted_by: DEFAULT_SUPER_USER_ID,
-                        },
-                        ActionWithGrantOption {
-                            action: Action::Create as i32,
-                            with_grant_option: true,
-                            granted_by: DEFAULT_SUPER_USER_ID,
-                        }
-                    ],
-                    object: Some(ProstObject::DatabaseId(database_id)),
-                }]
+                            granted_by: session.user_id(),
+                        }],
+                        object: Some(PbObject::DatabaseId(session_database_id)),
+                    },
+                    PbGrantPrivilege {
+                        action_with_opts: vec![
+                            ActionWithGrantOption {
+                                action: Action::Connect as i32,
+                                with_grant_option: true,
+                                granted_by: DEFAULT_SUPER_USER_ID,
+                            },
+                            ActionWithGrantOption {
+                                action: Action::Create as i32,
+                                with_grant_option: true,
+                                granted_by: DEFAULT_SUPER_USER_ID,
+                            }
+                        ],
+                        object: Some(PbObject::DatabaseId(database_id)),
+                    }
+                ]
             );
         }
 
@@ -281,6 +299,7 @@ mod tests {
             assert!(user_info
                 .grant_privileges
                 .iter()
+                .filter(|gp| gp.object == Some(PbObject::DatabaseId(database_id)))
                 .all(|p| p.action_with_opts.iter().all(|ao| !ao.with_grant_option)));
         }
 
@@ -292,7 +311,18 @@ mod tests {
             let user_reader = session.env().user_info_reader();
             let reader = user_reader.read_guard();
             let user_info = reader.get_user_by_name("user1").unwrap();
-            assert!(user_info.grant_privileges.is_empty());
+            assert_eq!(
+                user_info.grant_privileges,
+                vec![PbGrantPrivilege {
+                    action_with_opts: vec![ActionWithGrantOption {
+                        action: Action::Connect as i32,
+                        with_grant_option: true,
+                        granted_by: session.user_id(),
+                    }],
+                    object: Some(PbObject::DatabaseId(session_database_id)),
+                }]
+            );
         }
+        frontend.run_sql("DROP USER user1").await.unwrap();
     }
 }

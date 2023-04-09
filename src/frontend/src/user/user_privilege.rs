@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,10 +15,8 @@
 use itertools::Itertools;
 use risingwave_common::catalog::DEFAULT_SUPER_USER_ID;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::user::grant_privilege::{
-    Action as ProstAction, ActionWithGrantOption, Object as ProstObject,
-};
-use risingwave_pb::user::GrantPrivilege as ProstPrivilege;
+use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, PbAction, PbObject};
+use risingwave_pb::user::PbGrantPrivilege;
 use risingwave_sqlparser::ast::{Action, GrantObjects, Privileges};
 
 // TODO: add user_privilege mod under user manager and move check and expand logic there, and bitmap
@@ -34,6 +32,7 @@ static AVAILABLE_ACTION_ON_SOURCE: &[Action] = &[
 static AVAILABLE_ACTION_ON_MVIEW: &[Action] = &[Action::Select { columns: None }];
 static AVAILABLE_ACTION_ON_VIEW: &[Action] = AVAILABLE_ACTION_ON_MVIEW;
 static AVAILABLE_ACTION_ON_SINK: &[Action] = &[];
+static AVAILABLE_ACTION_ON_FUNCTION: &[Action] = &[];
 
 pub fn check_privilege_type(privilege: &Privileges, objects: &GrantObjects) -> Result<()> {
     match privilege {
@@ -89,30 +88,31 @@ pub fn available_privilege_actions(objects: &GrantObjects) -> Result<Vec<Action>
 }
 
 #[inline(always)]
-pub fn get_prost_action(action: &Action) -> ProstAction {
+pub fn get_prost_action(action: &Action) -> PbAction {
     match action {
-        Action::Select { .. } => ProstAction::Select,
-        Action::Insert { .. } => ProstAction::Insert,
-        Action::Update { .. } => ProstAction::Update,
-        Action::Delete { .. } => ProstAction::Delete,
-        Action::Connect => ProstAction::Connect,
-        Action::Create => ProstAction::Create,
+        Action::Select { .. } => PbAction::Select,
+        Action::Insert { .. } => PbAction::Insert,
+        Action::Update { .. } => PbAction::Update,
+        Action::Delete { .. } => PbAction::Delete,
+        Action::Connect => PbAction::Connect,
+        Action::Create => PbAction::Create,
         _ => unreachable!(),
     }
 }
 
-pub fn available_prost_privilege(object: ProstObject) -> ProstPrivilege {
+pub fn available_prost_privilege(object: PbObject) -> PbGrantPrivilege {
     let actions = match object {
-        ProstObject::DatabaseId(_) => AVAILABLE_ACTION_ON_DATABASE.to_vec(),
-        ProstObject::SchemaId(_) => AVAILABLE_ACTION_ON_SCHEMA.to_vec(),
-        ProstObject::SourceId(_) | ProstObject::AllSourcesSchemaId { .. } => {
+        PbObject::DatabaseId(_) => AVAILABLE_ACTION_ON_DATABASE.to_vec(),
+        PbObject::SchemaId(_) => AVAILABLE_ACTION_ON_SCHEMA.to_vec(),
+        PbObject::SourceId(_) | PbObject::AllSourcesSchemaId { .. } => {
             AVAILABLE_ACTION_ON_SOURCE.to_vec()
         }
-        ProstObject::TableId(_) | ProstObject::AllTablesSchemaId { .. } => {
+        PbObject::TableId(_) | PbObject::AllTablesSchemaId { .. } => {
             AVAILABLE_ACTION_ON_MVIEW.to_vec()
         }
-        ProstObject::ViewId(_) => AVAILABLE_ACTION_ON_VIEW.to_vec(),
-        ProstObject::SinkId(_) => AVAILABLE_ACTION_ON_SINK.to_vec(),
+        PbObject::ViewId(_) => AVAILABLE_ACTION_ON_VIEW.to_vec(),
+        PbObject::SinkId(_) => AVAILABLE_ACTION_ON_SINK.to_vec(),
+        PbObject::FunctionId(_) => AVAILABLE_ACTION_ON_FUNCTION.to_vec(),
     };
     let actions = actions
         .iter()
@@ -122,7 +122,7 @@ pub fn available_prost_privilege(object: ProstObject) -> ProstPrivilege {
             granted_by: DEFAULT_SUPER_USER_ID,
         })
         .collect_vec();
-    ProstPrivilege {
+    PbGrantPrivilege {
         action_with_opts: actions,
         object: Some(object),
     }

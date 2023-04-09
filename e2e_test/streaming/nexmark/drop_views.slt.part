@@ -51,3 +51,21 @@ drop materialized view nexmark_q21;
 
 statement ok
 drop materialized view nexmark_q22;
+
+statement ok
+drop materialized view nexmark_q101;
+
+statement ok
+drop materialized view nexmark_q102;
+
+statement ok
+drop materialized view nexmark_q103;
+
+statement ok
+drop materialized view nexmark_q104;
+
+statement ok
+drop materialized view nexmark_q105;
+
+statement ok
+drop materialized view nexmark_q106;

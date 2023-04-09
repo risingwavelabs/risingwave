@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,13 +17,14 @@ use std::sync::{Arc, Mutex};
 use anyhow::Context;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use multimap::MultiMap;
 use risingwave_common::array::*;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::*;
 use risingwave_expr::expr::*;
 use risingwave_storage::memory::MemoryStateStore;
 
-use super::exchange::permit::channel;
+use super::exchange::permit::channel_for_test;
 use super::*;
 use crate::executor::actor::ActorContext;
 use crate::executor::aggregation::{AggArgs, AggCall};
@@ -57,24 +58,26 @@ async fn test_merger_sum_aggr() {
                     kind: AggKind::Count,
                     args: AggArgs::None,
                     return_type: DataType::Int64,
-                    order_pairs: vec![],
+                    column_orders: vec![],
                     append_only,
                     filter: None,
+                    distinct: false,
                 },
                 AggCall {
                     kind: AggKind::Sum,
                     args: AggArgs::Unary(DataType::Int64, 0),
                     return_type: DataType::Int64,
-                    order_pairs: vec![],
+                    column_orders: vec![],
                     append_only,
                     filter: None,
+                    distinct: false,
                 },
             ],
             vec![],
             1,
         )
         .unwrap();
-        let (tx, rx) = channel();
+        let (tx, rx) = channel_for_test();
         let consumer = SenderConsumer {
             input: aggregator.boxed(),
             channel: Box::new(LocalOutput::new(233, tx)),
@@ -102,7 +105,7 @@ async fn test_merger_sum_aggr() {
 
     // create 17 local aggregation actors
     for _ in 0..17 {
-        let (tx, rx) = channel();
+        let (tx, rx) = channel_for_test();
         let (actor, channel) = make_actor(rx);
         outputs.push(channel);
         handles.push(tokio::spawn(actor.run()));
@@ -110,15 +113,20 @@ async fn test_merger_sum_aggr() {
     }
 
     // create a round robin dispatcher, which dispatches messages to the actors
-    let (input, rx) = channel();
-    let _schema = Schema {
-        fields: vec![Field::unnamed(DataType::Int64)],
+    let (input, rx) = channel_for_test();
+    let schema = Schema {
+        fields: vec![
+            Field::unnamed(DataType::Int64),
+            Field::unnamed(DataType::Int64),
+        ],
     };
     let receiver_op = Box::new(ReceiverExecutor::for_test(rx));
     let dispatcher = DispatchExecutor::new(
         receiver_op,
         vec![DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(
-            inputs, 0,
+            inputs,
+            vec![0],
+            0,
         ))],
         0,
         ctx,
@@ -135,7 +143,7 @@ async fn test_merger_sum_aggr() {
     handles.push(tokio::spawn(actor.run()));
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
-    let merger = MergeExecutor::for_test(outputs);
+    let merger = MergeExecutor::for_test(outputs, schema);
 
     // for global aggregator, we need to sum data and sum row count
     let append_only = false;
@@ -145,22 +153,34 @@ async fn test_merger_sum_aggr() {
         merger.boxed(),
         vec![
             AggCall {
-                kind: AggKind::Sum,
+                kind: AggKind::Sum0,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
+            },
+            AggCall {
+                kind: AggKind::Count, // as row count, index: 2
+                args: AggArgs::None,
+                return_type: DataType::Int64,
+                column_orders: vec![],
+                append_only,
+                filter: None,
+                distinct: false,
             },
         ],
+        2, // row_count_index
         vec![],
         2,
     )
@@ -175,6 +195,8 @@ async fn test_merger_sum_aggr() {
             Box::new(InputRefExpression::new(DataType::Int64, 1)),
         ],
         3,
+        MultiMap::new(),
+        0.0,
     );
 
     let items = Arc::new(Mutex::new(vec![]));
@@ -203,7 +225,7 @@ async fn test_merger_sum_aggr() {
         for i in 0..10 {
             let chunk = StreamChunk::new(
                 vec![op; i],
-                vec![I64Array::from_slice(vec![Some(1); i].as_slice()).into()],
+                vec![I64Array::from_iter(vec![1; i]).into()],
                 None,
             );
             input.send(Message::Chunk(chunk)).await.unwrap();

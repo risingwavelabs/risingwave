@@ -1,0 +1,42 @@
+// Copy this file to .vscode/settings.json and edit it to your needs
+{
+    "protoc": {
+        "options": [
+            "--proto_path=proto"
+        ]
+    },
+    "yaml.schemas": {
+        "src/risedevtool/schemas/risedev.json": "risedev.yml",
+        "src/risedevtool/schemas/risedev-profiles.user.json": "risedev-profiles.user.yml"
+    },
+    // // ============================================================================
+    // // BEGIN SECTION: configurations for the development of deterministic testing
+    // // ============================================================================
+    // "rust-analyzer.cargo.extraEnv": {
+    //     "RUSTFLAGS": "--cfg tokio_unstable --cfg madsim"
+    // },
+    // "rust-analyzer.runnableEnv": {
+    //     "RUSTFLAGS": "--cfg tokio_unstable --cfg madsim"
+    // },
+    // "rust-analyzer.checkOnSave.overrideCommand": [
+    //     "cargo",
+    //     "check",
+    //     "-p",
+    //     "risingwave_simulation_scale", // Replace with your crate
+    //     "--tests",
+    //     "--message-format=json",
+    // ],
+    // "rust-analyzer.runnables.extraArgs": [
+    //     "--profile",
+    //     "ci-release" // Replace with your target profile
+    // ],
+    // "rust-analyzer.server.extraEnv": {
+    //     "CARGO_TARGET_DIR": "target/analyzer"
+    // },
+    // "terminal.integrated.env.linux": {
+    //     "RUSTFLAGS": "--cfg tokio_unstable --cfg madsim"
+    // },
+    // // ===========================================================================
+    // // END SECTION
+    // // ===========================================================================
+}

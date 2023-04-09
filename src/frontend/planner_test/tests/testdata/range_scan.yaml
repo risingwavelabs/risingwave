@@ -42,12 +42,12 @@
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id = 'a'
-  batch_error: 'Expr error: Can''t cast str to i64'
+  batch_error: 'Expr error: Parse error: i64'
 - before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id > 'a'
-  batch_error: 'Expr error: Can''t cast str to i64'
+  batch_error: 'Expr error: Parse error: i64'
 - before:
   - create_table_and_mv
   sql: |
@@ -87,7 +87,7 @@
     SELECT * FROM orders_count_by_user WHERE user_id > 42 AND date = 1111 AND 2>1
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (2:Int32 > 1:Int32) AND (orders_count_by_user.date = 1111:Int32) }
+    └─BatchFilter { predicate: (orders_count_by_user.date = 1111:Int32) }
       └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id > Int64(42)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
 - before:
   - create_table_and_mv
@@ -95,7 +95,7 @@
     SELECT * FROM orders_count_by_user WHERE date > 1111 AND user_id = 42 AND 5<6 AND date <= 6666
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (5:Int32 < 6:Int32) }
+    └─BatchFilter { predicate: true }
       └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id = Int64(42) AND orders_count_by_user.date > Int32(1111) AND orders_count_by_user.date <= Int32(6666)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
 - before:
   - create_table_and_mv
@@ -131,7 +131,7 @@
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id in ('42', '43.0')
-  batch_error: 'Expr error: Can''t cast str to i64'
+  batch_error: 'Expr error: Parse error: i64'
 - before:
   - create_table_and_mv
   sql: |
@@ -233,28 +233,109 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchScan { table: orders_count_by_user_ordered, columns: [orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date, orders_count_by_user_ordered.orders_count], scan_ranges: [orders_count_by_user_ordered.orders_count = Int64(10)], distribution: UpstreamHashShard(orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date) }
+- name: Cannot push down for Mutiple upper bound 1.
+  before:
+  - create_table_and_mv_ordered
+  sql: |
+    SELECT * FROM orders_count_by_user_ordered WHERE user_id < 10 and user_id < 30
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (orders_count_by_user_ordered.user_id < 10:Int32) AND (orders_count_by_user_ordered.user_id < 30:Int32) }
+      └─BatchScan { table: orders_count_by_user_ordered, columns: [orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date, orders_count_by_user_ordered.orders_count], distribution: UpstreamHashShard(orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date) }
+- name: Cannot push down for Mutiple upper bound 2.
+  before:
+  - create_table_and_mv_ordered
+  sql: |
+    SELECT * FROM orders_count_by_user_ordered WHERE user_id < 10 and user_id <= 10
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (orders_count_by_user_ordered.user_id < 10:Int32) AND (orders_count_by_user_ordered.user_id <= 10:Int32) }
+      └─BatchScan { table: orders_count_by_user_ordered, columns: [orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date, orders_count_by_user_ordered.orders_count], distribution: UpstreamHashShard(orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date) }
+- name: Cannot push down for Mutiple lower bound 1.
+  before:
+  - create_table_and_mv_ordered
+  sql: |
+    SELECT * FROM orders_count_by_user_ordered WHERE user_id > 10 and user_id > 30
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (orders_count_by_user_ordered.user_id > 10:Int32) AND (orders_count_by_user_ordered.user_id > 30:Int32) }
+      └─BatchScan { table: orders_count_by_user_ordered, columns: [orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date, orders_count_by_user_ordered.orders_count], distribution: UpstreamHashShard(orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date) }
+- name: Cannot push down for Mutiple lower bound 2.
+  before:
+  - create_table_and_mv_ordered
+  sql: |
+    SELECT * FROM orders_count_by_user_ordered WHERE user_id > 10 and user_id >= 10
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (orders_count_by_user_ordered.user_id > 10:Int32) AND (orders_count_by_user_ordered.user_id >= 10:Int32) }
+      └─BatchScan { table: orders_count_by_user_ordered, columns: [orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date, orders_count_by_user_ordered.orders_count], distribution: UpstreamHashShard(orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date) }
+- name: Cannot push down for Mix cmp and eq.
+  before:
+  - create_table_and_mv_ordered
+  sql: |
+    SELECT * FROM orders_count_by_user_ordered WHERE user_id = 10 and user_id <30
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (orders_count_by_user_ordered.user_id = 10:Int32) AND (orders_count_by_user_ordered.user_id < 30:Int32) }
+      └─BatchScan { table: orders_count_by_user_ordered, columns: [orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date, orders_count_by_user_ordered.orders_count], distribution: UpstreamHashShard(orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date) }
 - id: create_small
   sql: |
     CREATE TABLE t(x smallint);
     CREATE MATERIALIZED VIEW mv AS
       SELECT x from t group by x;
-- name: When the constant has a larger type and cannot be casted to the column's type, we can't convert it to scan range yet.
+- name: When the constant with larger type is out of the range of the column's type, we can convert it as false condition.
   before:
   - create_small
   sql: |
     SELECT * FROM mv WHERE x = 60000;
   batch_plan: |
-    BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (mv.x = 60000:Int32) }
-      └─BatchScan { table: mv, columns: [mv.x], distribution: UpstreamHashShard(mv.x) }
-- name: When the constant has a larger type and cannot be casted to the column's type, we can't convert it to scan range yet.
+    BatchValues { rows: [] }
+- name: When the constant with larger type is out of the upper bound of the column's type, we can convert < as true condition.
   before:
   - create_small
   sql: |
     SELECT * FROM mv WHERE x < 60000;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (mv.x < 60000:Int32) }
+    └─BatchScan { table: mv, columns: [mv.x], distribution: UpstreamHashShard(mv.x) }
+- name: When the constant with larger type is out of the upper bound of the column's type, we can convert > as false condition.
+  before:
+  - create_small
+  sql: |
+    SELECT * FROM mv WHERE x > 60000;
+  batch_plan: |
+    BatchValues { rows: [] }
+- name: When the constant with larger type is out of the lower bound of the column's type, we can convert < as false condition.
+  before:
+  - create_small
+  sql: |
+    SELECT * FROM mv WHERE x < -60000;
+  batch_plan: |
+    BatchValues { rows: [] }
+- name: When the constant with larger type is out of the lower bound of the column's type, we can convert > as true condition.
+  before:
+  - create_small
+  sql: |
+    SELECT * FROM mv WHERE x > -60000;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: mv, columns: [mv.x], distribution: UpstreamHashShard(mv.x) }
+- name: When the constant with larger type is in range of the column's type, we can convert it.
+  before:
+  - create_small
+  sql: |
+    SELECT * FROM mv WHERE x < 3::bigint and x > 1::bigint;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: mv, columns: [mv.x], scan_ranges: [mv.x > Int16(1) AND mv.x < Int16(3)], distribution: UpstreamHashShard(mv.x) }
+- name: Can't push down the in-compatitble numeric type
+  before:
+  - create_small
+  sql: |
+    SELECT * FROM mv WHERE x = 3.4;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (mv.x = 3.4:Decimal) }
       └─BatchScan { table: mv, columns: [mv.x], distribution: UpstreamHashShard(mv.x) }
 - before:
   - create_table_and_mv

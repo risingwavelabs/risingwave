@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,16 +19,19 @@ use humantime::parse_duration;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use serde_json::{json, Value};
+use tracing::debug;
 
 use super::DEFAULT_MAX_PAST;
-use crate::types::{Datum, NaiveDateTimeWrapper, Scalar};
+use crate::types::{Datum, Scalar, Timestamp};
 
+#[derive(Debug)]
 enum LocalNow {
     Relative,
     Absolute(NaiveDateTime),
 }
 
 pub struct TimestampField {
+    base: Option<DateTime<FixedOffset>>,
     max_past: Duration,
     local_now: LocalNow,
     seed: u64,
@@ -36,6 +39,7 @@ pub struct TimestampField {
 
 impl TimestampField {
     pub fn new(
+        base: Option<DateTime<FixedOffset>>,
         max_past_option: Option<String>,
         max_past_mode: Option<String>,
         seed: u64,
@@ -57,7 +61,9 @@ impl TimestampField {
             // default max_past = 1 day
             DEFAULT_MAX_PAST
         };
+        debug!(?local_now, ?max_past, "parse timestamp field option");
         Ok(Self {
+            base,
             // convert to chrono::Duration
             max_past: chrono::Duration::from_std(max_past)?,
             local_now,
@@ -69,12 +75,15 @@ impl TimestampField {
         let milliseconds = self.max_past.num_milliseconds();
         let mut rng = StdRng::seed_from_u64(offset ^ self.seed);
         let max_milliseconds = rng.gen_range(0..=milliseconds);
-        let now = match self.local_now {
-            LocalNow::Relative => Local::now()
-                .naive_local()
-                .duration_round(Duration::microseconds(1))
-                .unwrap(),
-            LocalNow::Absolute(now) => now,
+        let now = match self.base {
+            Some(base) => base.naive_local(),
+            None => match self.local_now {
+                LocalNow::Relative => Local::now()
+                    .naive_local()
+                    .duration_round(Duration::microseconds(1))
+                    .unwrap(),
+                LocalNow::Absolute(now) => now,
+            },
         };
         now - Duration::milliseconds(max_milliseconds)
     }
@@ -84,6 +93,6 @@ impl TimestampField {
     }
 
     pub fn generate_datum(&mut self, offset: u64) -> Datum {
-        Some(NaiveDateTimeWrapper::new(self.generate_data(offset)).to_scalar_value())
+        Some(Timestamp::new(self.generate_data(offset)).to_scalar_value())
     }
 }

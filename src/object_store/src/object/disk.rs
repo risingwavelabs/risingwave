@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::future::try_join_all;
-use risingwave_common::cache::{CacheableEntry, LruCache};
+use risingwave_common::cache::{CachePriority, CacheableEntry, LruCache};
 use tokio::io::{AsyncRead, AsyncWriteExt};
 
 use super::{
@@ -123,6 +123,7 @@ impl DiskObjectStore {
             opened_read_file_cache: Arc::new(LruCache::new(
                 OPENED_FILE_CACHE_DEFAULT_NUM_SHARD_BITS,
                 OPENED_FILE_CACHE_DEFAULT_CAPACITY,
+                0,
             )),
         }
     }
@@ -151,6 +152,7 @@ impl DiskObjectStore {
             .lookup_with_request_dedup::<_, ObjectError, _>(
                 hash,
                 path.clone(),
+                CachePriority::High,
                 move || async move {
                     let file = utils::open_file(&path, true, false, false)
                         .await?

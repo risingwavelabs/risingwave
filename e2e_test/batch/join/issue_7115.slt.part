@@ -1,0 +1,23 @@
+# https://github.com/risingwavelabs/risingwave/issues/7115
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE t (id int);
+
+statement ok
+CREATE MATERIALIZED VIEW v as SELECT COUNT(*) cnt FROM t;
+
+statement ok
+INSERT INTO t VALUES(1), (4), (6), (0), (5);
+
+query II
+SELECT * FROM v CROSS JOIN (SELECT COUNT(*) FROM t) T;
+----
+5 5
+
+statement ok
+DROP MATERIALIZED VIEW v;
+
+statement ok
+DROP TABLE t;

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,23 +17,23 @@ use std::io::{Cursor, Read};
 use anyhow::anyhow;
 use byteorder::{BigEndian, ReadBytesExt};
 use paste::paste;
-use risingwave_pb::data::Array as ProstArray;
+use risingwave_pb::data::PbArray;
 
 use crate::array::value_reader::{PrimitiveValueReader, VarSizedValueReader};
 use crate::array::{
-    Array, ArrayBuilder, ArrayImpl, ArrayMeta, ArrayResult, BoolArray, IntervalArrayBuilder,
-    NaiveDateArrayBuilder, NaiveDateTimeArrayBuilder, NaiveTimeArrayBuilder, PrimitiveArrayBuilder,
-    PrimitiveArrayItemType,
+    Array, ArrayBuilder, ArrayImpl, ArrayMeta, ArrayResult, BoolArray, DateArrayBuilder,
+    IntervalArrayBuilder, PrimitiveArrayBuilder, PrimitiveArrayItemType, TimeArrayBuilder,
+    TimestampArrayBuilder,
 };
 use crate::buffer::Bitmap;
-use crate::types::interval::IntervalUnit;
-use crate::types::{NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
+use crate::types::interval::Interval;
+use crate::types::{Date, Time, Timestamp};
 
 // TODO: Use techniques like apache arrow flight RPC to eliminate deserialization.
 // https://arrow.apache.org/docs/format/Flight.html
 
 pub fn read_numeric_array<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>>(
-    array: &ProstArray,
+    array: &PbArray,
     cardinality: usize,
 ) -> ArrayResult<ArrayImpl> {
     ensure!(
@@ -55,10 +55,12 @@ pub fn read_numeric_array<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>>
         }
     }
     let arr = builder.finish();
+    ensure_eq!(arr.len(), cardinality);
+
     Ok(arr.into())
 }
 
-pub fn read_bool_array(array: &ProstArray, cardinality: usize) -> ArrayResult<ArrayImpl> {
+pub fn read_bool_array(array: &PbArray, cardinality: usize) -> ArrayResult<ArrayImpl> {
     ensure!(
         array.get_values().len() == 1,
         "Must have only 1 buffer in a bool array"
@@ -67,45 +69,46 @@ pub fn read_bool_array(array: &ProstArray, cardinality: usize) -> ArrayResult<Ar
     let data = (&array.get_values()[0]).into();
     let bitmap: Bitmap = array.get_null_bitmap()?.into();
 
-    let arr = BoolArray::new(bitmap, data);
-    assert_eq!(arr.len(), cardinality);
+    let arr = BoolArray::new(data, bitmap);
+    ensure_eq!(arr.len(), cardinality);
 
     Ok(arr.into())
 }
 
-fn read_naive_date(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveDateWrapper> {
+fn read_date(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Date> {
     match cursor.read_i32::<BigEndian>() {
-        Ok(days) => NaiveDateWrapper::from_protobuf(days),
-        Err(e) => bail!("Failed to read i32 from NaiveDate buffer: {}", e),
+        Ok(days) => Date::with_days(days).map_err(|e| anyhow!(e).into()),
+        Err(e) => bail!("Failed to read i32 from Date buffer: {}", e),
     }
 }
 
-fn read_naive_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveTimeWrapper> {
+fn read_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Time> {
     match cursor.read_u64::<BigEndian>() {
-        Ok(t) => NaiveTimeWrapper::from_protobuf(t),
+        Ok(t) => Time::with_nano(t).map_err(|e| anyhow!(e).into()),
         Err(e) => bail!("Failed to read i64 from NaiveTime buffer: {}", e),
     }
 }
 
-fn read_naive_date_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveDateTimeWrapper> {
-    match cursor.read_i64::<BigEndian>() {
-        Ok(t) => NaiveDateTimeWrapper::from_protobuf(t),
-        Err(e) => bail!("Failed to read i64 from NaiveDateTime buffer: {}", e),
-    }
+fn read_timestamp(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Timestamp> {
+    cursor
+        .read_i64::<BigEndian>()
+        .map_err(|e| anyhow!("Failed to read i64 from Timestamp buffer: {}", e))
+        .and_then(|t| Timestamp::with_macros(t).map_err(|e| anyhow!("{}", e)))
+        .map_err(Into::into)
 }
 
-pub fn read_interval_unit(cursor: &mut Cursor<&[u8]>) -> ArrayResult<IntervalUnit> {
+pub fn read_interval(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Interval> {
     let mut read = || {
         let months = cursor.read_i32::<BigEndian>()?;
         let days = cursor.read_i32::<BigEndian>()?;
-        let ms = cursor.read_i64::<BigEndian>()?;
+        let usecs = cursor.read_i64::<BigEndian>()?;
 
-        Ok::<_, std::io::Error>(IntervalUnit::new(months, days, ms))
+        Ok::<_, std::io::Error>(Interval::from_month_day_usec(months, days, usecs))
     };
 
     match read() {
         Ok(iu) => Ok(iu),
-        Err(e) => bail!("Failed to read IntervalUnit from buffer: {}", e),
+        Err(e) => bail!("Failed to read Interval from buffer: {}", e),
     }
 }
 
@@ -113,7 +116,7 @@ macro_rules! read_one_value_array {
     ($({ $type:ident, $builder:ty }),*) => {
         paste! {
             $(
-            pub fn [<read_ $type:snake _array>](array: &ProstArray, cardinality: usize) -> ArrayResult<ArrayImpl> {
+            pub fn [<read_ $type:snake _array>](array: &PbArray, cardinality: usize) -> ArrayResult<ArrayImpl> {
                 ensure!(
                     array.get_values().len() == 1,
                     "Must have only 1 buffer in a {} array", stringify!($type)
@@ -132,6 +135,8 @@ macro_rules! read_one_value_array {
                     }
                 }
                 let arr = builder.finish();
+                ensure_eq!(arr.len(), cardinality);
+
                 Ok(arr.into())
             }
             )*
@@ -140,10 +145,10 @@ macro_rules! read_one_value_array {
 }
 
 read_one_value_array! {
-    { IntervalUnit, IntervalArrayBuilder },
-    { NaiveDate, NaiveDateArrayBuilder },
-    { NaiveTime, NaiveTimeArrayBuilder },
-    { NaiveDateTime, NaiveDateTimeArrayBuilder }
+    { Interval, IntervalArrayBuilder },
+    { Date, DateArrayBuilder },
+    { Time, TimeArrayBuilder },
+    { Timestamp, TimestampArrayBuilder }
 }
 
 fn read_offset(offset_cursor: &mut Cursor<&[u8]>) -> ArrayResult<i64> {
@@ -154,7 +159,7 @@ fn read_offset(offset_cursor: &mut Cursor<&[u8]>) -> ArrayResult<i64> {
 }
 
 pub fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
-    array: &ProstArray,
+    array: &PbArray,
     cardinality: usize,
 ) -> ArrayResult<ArrayImpl> {
     ensure!(
@@ -188,12 +193,13 @@ pub fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
                     offset
                 )
             })?;
-            let v = R::read(buf.as_slice())?;
-            builder.append(Some(v));
+            R::read(buf.as_slice(), &mut builder)?;
         } else {
             builder.append(None);
         }
     }
     let arr = builder.finish();
+    ensure_eq!(arr.len(), cardinality);
+
     Ok(arr.into())
 }

@@ -8,38 +8,48 @@ license = { workspace = true }
 repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
 [dependencies]
 aho-corasick = "0.7"
 anyhow = "1"
-async-stream = "0.3"
+arrow-array = "36"
+arrow-schema = "36"
 async-trait = "0.1"
-byteorder = "1"
-bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 chrono-tz = { version = "0.7", features = ["case-insensitive"] }
-crc32fast = "1"
+ctor = "0.1"
 dyn-clone = "1"
 either = "1"
-hex = "0.4.3"
+futures-util = "0.3"
 itertools = "0.10"
 md5 = "0.7.0"
 num-traits = "0.2"
+ouroboros = "0.15"
 parse-display = "0.6"
 paste = "1"
-postgres-types = { version = "0.2.4", features = ["derive","with-chrono-0_4"] }
-prost = "0.11"
 regex = "1"
 risingwave_common = { path = "../common" }
+risingwave_expr_macro = { path = "macro" }
 risingwave_pb = { path = "../prost" }
-rust_decimal = "1"
-serde = { version = "1", features = ["derive"] }
-smallvec = "1"
+risingwave_udf = { path = "../udf" }
 speedate = "0.7.0"
+static_assertions = "1"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
-tokio-stream = "0.1"
-toml = "0.5"
-tonic = { version = "0.2", package = "madsim-tonic" }
+tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
+
+[dev-dependencies]
+criterion = "0.4"
+serde_json = "1"
+
+[[bench]]
+name = "expr"
+harness = false

@@ -2,10 +2,10 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-create table t1 (v1 int, v2 int) with (appendonly = true);
+create table t1 (v1 int, v2 int) append only;
 
 statement ok
-create table t2 (v1 int, v3 int) with (appendonly = true);
+create table t2 (v1 int, v3 int) append only;
 
 statement ok
 insert into t1 values (1,2), (2,3);
@@ -18,7 +18,7 @@ insert into t2 values (1,5), (2,6), (3, 7);
 statement ok
 create materialized view mv1 as select t1.v1 as id, v2, v3 from t1 join t2 on t1.v1=t2.v1;
 
-query I rowsort
+query III rowsort
 select * from mv1;
 ----
 1 2 5
@@ -27,7 +27,7 @@ select * from mv1;
 statement ok
 insert into t1 values (3,4), (7,7);
 
-query II rowsort
+query III rowsort
 select * from mv1;
 ----
 1 2 5
@@ -37,7 +37,7 @@ select * from mv1;
 
 ## HashAgg
 statement ok
-create table t4 (v1 real, v2 int, v3 real) with (appendonly = true);
+create table t4 (v1 real, v2 int, v3 real) append only;
 
 statement ok
 insert into t4 values (1,1,4), (5,1,4), (1,9,1), (9,8,1), (0,2,3);
@@ -45,7 +45,7 @@ insert into t4 values (1,1,4), (5,1,4), (1,9,1), (9,8,1), (0,2,3);
 statement ok
 create materialized view mv3 as select v3, sum(v1) as sum_v1, min(v1) as min_v1, max(v1) as max_v1 from t4 group by v3;
 
-query III
+query IIII
 select sum_v1, min_v1, max_v1, v3 from mv3 order by sum_v1;
 ----
 0  0 0 3
@@ -58,24 +58,37 @@ statement ok
 create materialized view mv4 as select v1, v3 from t4 order by v1 limit 3 offset 3;
 
 ## scan MV with ORDER BY isn't guaranteed to be ordered
-query IV rowsort
+query II rowsort
 select * from mv4;
 ----
 5 4
 9 1
 
+## Group TopN
+statement ok
+create materialized view mv4_1 as 
+select v1, v3 from (
+    select *, ROW_NUMBER() OVER (PARTITION BY v3 ORDER BY v1) as rank from t4
+)
+where rank <= 2 AND rank > 1;
+
+query II rowsort
+select * from mv4_1;
+----
+5 4
+9 1
 
 ## SimpleAgg
 statement ok
 create materialized view mv5 as select sum(v1) as sum_v1, max(v2) as max_v2, min(v3) as min_v3 from t4;
 
-query V
+query III
 select * from mv5;
 ----
 16 9 1
 
 statement ok
-create table t5 (v1 int, v2 int) with (appendonly = true);
+create table t5 (v1 int, v2 int) append only;
 
 statement ok
 insert into t5 values (1,0), (1,1), (1,2), (1,3);
@@ -84,7 +97,7 @@ insert into t5 values (1,0), (1,1), (1,2), (1,3);
 statement ok
 create materialized view mv6 as select v1, v2 from t5 order by v1 fetch first 3 rows with ties;
 
-query IV rowsort
+query II rowsort
 select * from mv6;
 ----
 1 0
@@ -95,7 +108,7 @@ select * from mv6;
 statement ok
 insert into t5 values (0,1), (0,2);
 
-query IV rowsort
+query II rowsort
 select * from mv6;
 ----
 0 1
@@ -108,7 +121,7 @@ select * from mv6;
 statement ok
 insert into t5 values (0,3);
 
-query IV rowsort
+query II rowsort
 select * from mv6;
 ----
 0 1
@@ -120,6 +133,9 @@ drop materialized view mv6
 
 statement ok
 drop materialized view mv5
+
+statement ok
+drop materialized view mv4_1
 
 statement ok
 drop materialized view mv4

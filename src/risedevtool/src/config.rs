@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,84 +13,131 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::path::Path;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use itertools::Itertools;
-use yaml_rust::{yaml, Yaml, YamlEmitter, YamlLoader};
+use yaml_rust::{Yaml, YamlEmitter, YamlLoader};
 
-use self::dollar_expander::DollarExpander;
-use self::id_expander::IdExpander;
-use self::use_expander::UseExpander;
 use crate::ServiceConfig;
 
 mod dollar_expander;
 mod id_expander;
 mod provide_expander;
 mod use_expander;
-pub use provide_expander::*;
+use dollar_expander::DollarExpander;
+use id_expander::IdExpander;
+use provide_expander::ProvideExpander;
+use use_expander::UseExpander;
+
+/// The main configuration file name.
+pub const RISEDEV_CONFIG_FILE: &str = "risedev.yml";
+/// The extra user profiles file name.
+pub const RISEDEV_USER_PROFILES_FILE: &str = "risedev-profiles.user.yml";
 
 pub struct ConfigExpander;
 
 impl ConfigExpander {
-    pub fn expand(config: &str, section: &str) -> Result<Yaml> {
-        Self::expand_with_extra_info(config, section, HashMap::new())
+    /// Load a single document YAML file.
+    fn load_yaml(path: impl AsRef<Path>) -> Result<Yaml> {
+        let path = path.as_ref();
+        let content = fs_err::read_to_string(path)?;
+        let [config]: [_; 1] = YamlLoader::load_from_str(&content)?
+            .try_into()
+            .map_err(|_| anyhow!("expect `{}` to have only one section", path.display()))?;
+        Ok(config)
     }
 
-    pub fn expand_with_extra_info(
-        config: &str,
-        section: &str,
-        extra_info: HashMap<String, String>,
-    ) -> Result<Yaml> {
-        let [config]: [_; 1] = YamlLoader::load_from_str(config)?
-            .try_into()
-            .map_err(|_| anyhow!("expect yaml config to have only one section"))?;
+    /// Transforms `risedev.yml` and `risedev-profiles.user.yml` to a fully expanded yaml file.
+    ///
+    /// # Arguments
+    ///
+    /// * `root` is the root directory of these YAML files.
+    /// * `profile` is the selected config profile called by `risedev dev <profile>`. It is one of
+    ///   the keys in the `profile` section.
+    ///
+    /// # Returns
+    ///
+    /// A pair of `config_path` and expanded steps (items in `{profile}.steps` section in YAML)
+    pub fn expand(root: impl AsRef<Path>, profile: &str) -> Result<(Option<String>, Yaml)> {
+        Self::expand_with_extra_info(root, profile, HashMap::new())
+    }
 
-        let global_config = config
+    /// See [`ConfigExpander::expand`] for other information.
+    ///
+    /// # Arguments
+    ///
+    /// - `extra_info` is additional variables for variable expansion by [`DollarExpander`].
+    pub fn expand_with_extra_info(
+        root: impl AsRef<Path>,
+        profile: &str,
+        extra_info: HashMap<String, String>,
+    ) -> Result<(Option<String>, Yaml)> {
+        let global_path = root.as_ref().join(RISEDEV_CONFIG_FILE);
+        let global_yaml = Self::load_yaml(global_path)?;
+        let global_config = global_yaml
             .as_hash()
             .ok_or_else(|| anyhow!("expect config to be a hashmap"))?;
-        let risedev_section = global_config
-            .get(&Yaml::String("risedev".to_string()))
-            .ok_or_else(|| anyhow!("expect `risedev` section"))?;
-        let risedev_section = risedev_section
-            .as_hash()
-            .ok_or_else(|| anyhow!("expect `risedev` section to be a hashmap"))?;
+
+        let all_profile_section = {
+            let mut all = global_config
+                .get(&Yaml::String("profile".to_string()))
+                .ok_or_else(|| anyhow!("expect `profile` section"))?
+                .as_hash()
+                .ok_or_else(|| anyhow!("expect `profile` section to be a hashmap"))?
+                .to_owned();
+
+            // Add user profiles if exists.
+            let user_profiles_path = root.as_ref().join(RISEDEV_USER_PROFILES_FILE);
+            if user_profiles_path.is_file() {
+                let yaml = Self::load_yaml(user_profiles_path)?;
+                let map = yaml.as_hash().ok_or_else(|| {
+                    anyhow!("expect `{RISEDEV_USER_PROFILES_FILE}` to be a hashmap")
+                })?;
+                for (k, v) in map {
+                    if all.insert(k.clone(), v.clone()).is_some() {
+                        bail!(
+                            "find duplicated config key `{k:?}` in `{RISEDEV_USER_PROFILES_FILE}`"
+                        );
+                    }
+                }
+            }
+
+            all
+        };
+
         let template_section = global_config
             .get(&Yaml::String("template".to_string()))
-            .ok_or_else(|| anyhow!("expect `risedev` section"))?;
-        let risedev_section: Vec<(Yaml, Yaml)> = risedev_section
-            .iter()
-            .filter(|(k, _)| k == &&Yaml::String(section.to_string()))
-            .map(|(k, v)| {
-                let k = k
-                    .as_str()
-                    .ok_or_else(|| anyhow!("expect `risedev` section to use string key"))?;
-                let mut use_expander = UseExpander::new(template_section)?;
-                let v = use_expander.visit(v.clone())?;
-                let mut dollar_expander = DollarExpander::new(extra_info.clone());
-                let v = dollar_expander.visit(v)?;
-                let mut id_expander = IdExpander::new(&v)?;
-                let v = id_expander.visit(v)?;
-                let mut provide_expander = ProvideExpander::new(&v)?;
-                let v = provide_expander.visit(v)?;
-                Ok::<_, anyhow::Error>((Yaml::String(k.to_string()), v))
-            })
-            .try_collect()?;
-        let risedev_section = yaml::Hash::from_iter(risedev_section.into_iter());
+            .ok_or_else(|| anyhow!("expect `profile` section"))?;
 
-        Ok(Yaml::Hash(risedev_section))
+        let profile_section = all_profile_section
+            .get(&Yaml::String(profile.to_string()))
+            .ok_or_else(|| anyhow!("profile '{}' not found", profile))?
+            .as_hash()
+            .ok_or_else(|| anyhow!("expect `profile` section to be a hashmap"))?;
+
+        let config_path = profile_section
+            .get(&Yaml::String("config-path".to_string()))
+            .and_then(|s| s.as_str())
+            .map(|s| s.to_string());
+
+        let steps = profile_section
+            .get(&Yaml::String("steps".to_string()))
+            .ok_or_else(|| anyhow!("expect `steps` section"))?
+            .clone();
+
+        let steps = UseExpander::new(template_section)?.visit(steps)?;
+        let steps = DollarExpander::new(extra_info).visit(steps)?;
+        let steps = IdExpander::new(&steps)?.visit(steps)?;
+        let steps = ProvideExpander::new(&steps)?.visit(steps)?;
+
+        Ok((config_path, steps))
     }
 
-    pub fn select(
-        risedev_section: &Yaml,
-        name: &str,
-    ) -> Result<(Vec<String>, HashMap<String, ServiceConfig>)> {
-        let risedev_section = risedev_section
-            .as_hash()
-            .ok_or_else(|| anyhow!("expect risedev section to be a hashmap"))?;
-        let scene = risedev_section
-            .get(&Yaml::String(name.to_string()))
-            .ok_or_else(|| anyhow!("{} not found", name))?;
-        let steps = scene
+    /// Parses the expanded yaml into [`ServiceConfig`]s.
+    /// The order is the same as the original array's order.
+    pub fn deserialize(expanded_config: &Yaml) -> Result<Vec<ServiceConfig>> {
+        let steps = expanded_config
             .as_vec()
             .ok_or_else(|| anyhow!("expect steps to be an array"))?;
         let config: Vec<ServiceConfig> = steps
@@ -119,6 +166,7 @@ impl ConfigExpander {
                     "prometheus" => ServiceConfig::Prometheus(serde_yaml::from_str(&out_str)?),
                     "grafana" => ServiceConfig::Grafana(serde_yaml::from_str(&out_str)?),
                     "jaeger" => ServiceConfig::Jaeger(serde_yaml::from_str(&out_str)?),
+                    "opendal" => ServiceConfig::OpenDal(serde_yaml::from_str(&out_str)?),
                     "aws-s3" => ServiceConfig::AwsS3(serde_yaml::from_str(&out_str)?),
                     "kafka" => ServiceConfig::Kafka(serde_yaml::from_str(&out_str)?),
                     "pubsub" => ServiceConfig::Pubsub(serde_yaml::from_str(&out_str)?),
@@ -134,12 +182,13 @@ impl ConfigExpander {
             })
             .try_collect()?;
 
-        Ok((
-            config.iter().map(|x| x.id().to_string()).collect_vec(),
-            config
-                .into_iter()
-                .map(|x| (x.id().to_string(), x))
-                .collect(),
-        ))
+        let mut services = HashMap::new();
+        for x in &config {
+            let id = x.id().to_string();
+            if services.insert(id.clone(), x).is_some() {
+                return Err(anyhow!("duplicate id: {}", id));
+            }
+        }
+        Ok(config)
     }
 }

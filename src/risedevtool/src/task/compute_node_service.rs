@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,7 +20,7 @@ use anyhow::{anyhow, Result};
 
 use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_meta_node, add_storage_backend, ComputeNodeConfig, HummockInMemoryStrategy};
+use crate::{add_meta_node, ComputeNodeConfig};
 
 pub struct ComputeNodeService {
     config: ComputeNodeConfig,
@@ -42,26 +42,30 @@ impl ComputeNodeService {
     }
 
     /// Apply command args according to config
-    pub fn apply_command_args(
-        cmd: &mut Command,
-        config: &ComputeNodeConfig,
-        hummock_in_memory_strategy: HummockInMemoryStrategy,
-    ) -> Result<()> {
-        cmd.arg("--host")
+    pub fn apply_command_args(cmd: &mut Command, config: &ComputeNodeConfig) -> Result<()> {
+        cmd.arg("--listen-addr")
             .arg(format!("{}:{}", config.listen_address, config.port))
             .arg("--prometheus-listener-addr")
             .arg(format!(
                 "{}:{}",
                 config.listen_address, config.exporter_port
             ))
-            .arg("--client-address")
+            .arg("--advertise-addr")
             .arg(format!("{}:{}", config.address, config.port))
             .arg("--metrics-level")
             .arg("1")
             .arg("--async-stack-trace")
             .arg(&config.async_stack_trace)
             .arg("--connector-rpc-endpoint")
-            .arg(&config.connector_rpc_endpoint);
+            .arg(&config.connector_rpc_endpoint)
+            .arg("--parallelism")
+            .arg(&config.parallelism.to_string())
+            .arg("--total-memory-bytes")
+            .arg(&config.total_memory_bytes.to_string())
+            .arg("--memory-control-policy")
+            .arg(&config.memory_control_policy)
+            .arg("--streaming-memory-proportion")
+            .arg(&config.streaming_memory_proportion.to_string());
 
         let provide_jaeger = config.provide_jaeger.as_ref().unwrap();
         match provide_jaeger.len() {
@@ -77,54 +81,8 @@ impl ComputeNodeService {
             }
         }
 
-        let provide_minio = config.provide_minio.as_ref().unwrap();
-        let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
-        let provide_compute_node = config.provide_compute_node.as_ref().unwrap();
-
-        let is_shared_backend = match (
-            config.enable_in_memory_kv_state_backend,
-            provide_minio.as_slice(),
-            provide_aws_s3.as_slice(),
-        ) {
-            (true, [], []) => {
-                cmd.arg("--state-store").arg("in-memory");
-                false
-            }
-            (true, _, _) => {
-                return Err(anyhow!(
-                    "When `enable_in_memory_kv_state_backend` is enabled, no minio and aws-s3 should be provided.",
-                ));
-            }
-            (false, provide_minio, provide_aws_s3) => add_storage_backend(
-                &config.id,
-                provide_minio,
-                provide_aws_s3,
-                hummock_in_memory_strategy,
-                cmd,
-            )?,
-        };
-
-        if provide_compute_node.len() > 1 && !is_shared_backend {
-            if config.enable_in_memory_kv_state_backend {
-                // Using a non-shared backend with multiple compute nodes will be problematic for
-                // state sharing like scaling. However, for distributed end-to-end tests with
-                // in-memory state store, this is acceptable.
-            } else {
-                return Err(anyhow!(
-                    "Hummock storage may behave incorrectly with in-memory backend for multiple compute-node configuration. Should use a shared backend (e.g. MinIO) instead. Consider adding `use: minio` in risedev config."
-                ));
-            }
-        }
-
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         add_meta_node(provide_meta_node, cmd)?;
-
-        let provide_compactor = config.provide_compactor.as_ref().unwrap();
-        if is_shared_backend && provide_compactor.is_empty() {
-            return Err(anyhow!(
-                "When using a shared backend (minio, aws-s3, or shared in-memory with `risedev playground`), at least one compactor is required. Consider adding `use: compactor` in risedev config."
-            ));
-        }
 
         Ok(())
     }
@@ -154,13 +112,13 @@ impl Task for ComputeNodeService {
             // See https://linux.die.net/man/3/jemalloc for the descriptions of profiling options
             cmd.env(
                 "_RJEM_MALLOC_CONF",
-                "prof:true,lg_prof_interval:34,lg_prof_sample:19,prof_prefix:compute-node",
+                "prof:true,lg_prof_interval:40,lg_prof_sample:19,prof_prefix:compute-node",
             );
         }
 
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"));
-        Self::apply_command_args(&mut cmd, &self.config, HummockInMemoryStrategy::Isolated)?;
+        Self::apply_command_args(&mut cmd, &self.config)?;
         if self.config.enable_tiered_cache {
             let prefix_data = env::var("PREFIX_DATA")?;
             cmd.arg("--file-cache-dir").arg(

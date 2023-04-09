@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -29,20 +29,33 @@
 //!   in the `new()` function.
 
 use std::fmt::{Debug, Display};
+use std::hash::Hash;
+use std::ops::Deref;
 use std::rc::Rc;
 
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::{self, DynClone};
+use fixedbitset::FixedBitSet;
+use itertools::Itertools;
+pub use logical_source::KAFKA_TIMESTAMP_COLUMN_NAME;
 use paste::paste;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::batch_plan::PlanNode as BatchPlanProst;
-use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
+use risingwave_pb::batch_plan::PlanNode as BatchPlanPb;
+use risingwave_pb::stream_plan::StreamNode as StreamPlanPb;
 use serde::Serialize;
+use smallvec::SmallVec;
 
+use self::batch::BatchPlanRef;
 use self::generic::GenericPlanRef;
 use self::stream::StreamPlanRef;
 use super::property::{Distribution, FunctionalDependencySet, Order};
+
+pub trait PlanNodeMeta {
+    fn node_type(&self) -> PlanNodeType;
+    fn plan_base(&self) -> &PlanBase;
+    fn convention(&self) -> Convention;
+}
 
 /// The common trait over all plan nodes. Used by optimizer framework which will treat all node as
 /// `dyn PlanNode`
@@ -51,33 +64,316 @@ use super::property::{Distribution, FunctionalDependencySet, Order};
 pub trait PlanNode:
     PlanTreeNode
     + DynClone
+    + DynEq
+    + DynHash
     + Debug
     + Display
     + Downcast
     + ColPrunable
+    + ExprRewritable
     + ToBatch
     + ToStream
     + ToDistributedBatch
-    + ToProst
+    + ToPb
     + ToLocalBatch
     + PredicatePushdown
+    + PlanNodeMeta
 {
-    fn node_type(&self) -> PlanNodeType;
-    fn plan_base(&self) -> &PlanBase;
-    fn convention(&self) -> Convention;
 }
 
-impl_downcast!(PlanNode);
-pub type PlanRef = Rc<dyn PlanNode>;
+impl Hash for dyn PlanNode {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.dyn_hash(state);
+    }
+}
 
-#[derive(Clone, Debug, Copy, Serialize)]
+impl PartialEq for dyn PlanNode {
+    fn eq(&self, other: &Self) -> bool {
+        self.dyn_eq(other.as_dyn_eq())
+    }
+}
+
+impl Eq for dyn PlanNode {}
+
+impl_downcast!(PlanNode);
+
+// Using a new type wrapper allows direct function implementation on `PlanRef`,
+// and we currently need a manual implementation of `PartialEq` for `PlanRef`.
+#[allow(clippy::derived_hash_with_manual_eq)]
+#[derive(Clone, Debug, Eq, Hash)]
+pub struct PlanRef(Rc<dyn PlanNode>);
+
+// Cannot use the derived implementation for now.
+// See https://github.com/rust-lang/rust/issues/31740
+#[allow(clippy::op_ref)]
+impl PartialEq for PlanRef {
+    fn eq(&self, other: &Self) -> bool {
+        &self.0 == &other.0
+    }
+}
+
+impl Deref for PlanRef {
+    type Target = dyn PlanNode;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.deref()
+    }
+}
+
+impl<T: PlanNode> From<T> for PlanRef {
+    fn from(value: T) -> Self {
+        PlanRef(Rc::new(value))
+    }
+}
+
+impl Display for PlanRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.0, f)
+    }
+}
+
+impl Layer for PlanRef {
+    type Sub = Self;
+
+    fn map<F>(self, f: F) -> Self
+    where
+        F: FnMut(Self::Sub) -> Self::Sub,
+    {
+        self.clone_with_inputs(&self.inputs().into_iter().map(f).collect_vec())
+    }
+
+    fn descent<F>(&self, f: F)
+    where
+        F: FnMut(&Self::Sub),
+    {
+        self.inputs().iter().for_each(f);
+    }
+}
+
+#[derive(Clone, Debug, Copy, Serialize, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct PlanNodeId(pub i32);
+
+/// A more sophisticated `Endo` taking into account of the DAG structure of `PlanRef`.
+/// In addition to `Endo`, one have to specify the `cached` function
+/// to persist transformed `LogicalShare` and their results,
+/// and the `dag_apply` function will take care to only transform every `LogicalShare` nodes once.
+///
+/// Note: Due to the way super trait is designed in rust,
+/// one need to have separate implementation blocks of `Endo<PlanRef>` and `EndoPlan`.
+/// And conventionally the real transformation `apply` is under `Endo<PlanRef>`,
+/// although one can refer to `dag_apply` in the implementation of `apply`.
+pub trait EndoPlan: Endo<PlanRef> {
+    // Return the cached result of `plan` if present,
+    // otherwise store and return the value provided by `f`.
+    // Notice that to allow mutable access of `self` in `f`,
+    // we let `f` to take `&mut Self` as its first argument.
+    fn cached<F>(&mut self, plan: PlanRef, f: F) -> PlanRef
+    where
+        F: FnMut(&mut Self) -> PlanRef;
+
+    fn dag_apply(&mut self, plan: PlanRef) -> PlanRef {
+        match plan.as_logical_share() {
+            Some(_) => self.cached(plan.clone(), |this| this.tree_apply(plan.clone())),
+            None => self.tree_apply(plan),
+        }
+    }
+}
+
+/// A more sophisticated `Visit` taking into account of the DAG structure of `PlanRef`.
+/// In addition to `Visit`, one have to specify `visited`
+/// to store and report visited `LogicalShare` nodes,
+/// and the `dag_visit` function will take care to only visit every `LogicalShare` nodes once.
+/// See also `EndoPlan`.
+pub trait VisitPlan: Visit<PlanRef> {
+    // Skip visiting `plan` if visited, otherwise run the traversal provided by `f`.
+    // Notice that to allow mutable access of `self` in `f`,
+    // we let `f` to take `&mut Self` as its first argument.
+    fn visited<F>(&mut self, plan: &PlanRef, f: F)
+    where
+        F: FnMut(&mut Self);
+
+    fn dag_visit(&mut self, plan: &PlanRef) {
+        match plan.as_logical_share() {
+            Some(_) => self.visited(plan, |this| this.tree_visit(plan)),
+            None => self.tree_visit(plan),
+        }
+    }
+}
 
 #[derive(Debug, PartialEq)]
 pub enum Convention {
     Logical,
     Batch,
     Stream,
+}
+
+pub(crate) trait RewriteExprsRecursive {
+    fn rewrite_exprs_recursive(&self, r: &mut impl ExprRewriter) -> PlanRef;
+}
+
+impl RewriteExprsRecursive for PlanRef {
+    fn rewrite_exprs_recursive(&self, r: &mut impl ExprRewriter) -> PlanRef {
+        let new = self.rewrite_exprs(r);
+        let inputs: Vec<PlanRef> = new
+            .inputs()
+            .iter()
+            .map(|plan_ref| plan_ref.rewrite_exprs_recursive(r))
+            .collect();
+        new.clone_with_inputs(&inputs[..])
+    }
+}
+
+impl ColPrunable for PlanRef {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+        if let Some(logical_share) = self.as_logical_share() {
+            // Check the share cache first. If cache exists, it means this is the second round of
+            // column pruning.
+            if let Some((new_share, merge_required_cols)) = ctx.get_share_cache(self.id()) {
+                // Piggyback share remove if its has only one parent.
+                if ctx.get_parent_num(logical_share) == 1 {
+                    let input: PlanRef = logical_share.input();
+                    return input.prune_col(required_cols, ctx);
+                }
+
+                // If it is the first visit, recursively call `prune_col` for its input and
+                // replace it.
+                if ctx.visit_share_at_second_round(self.id()) {
+                    let new_logical_share: &LogicalShare = new_share
+                        .as_logical_share()
+                        .expect("must be share operator");
+                    let new_share_input = new_logical_share.input().prune_col(
+                        &(0..new_logical_share.base.schema().len()).collect_vec(),
+                        ctx,
+                    );
+                    new_logical_share.replace_input(new_share_input);
+                }
+
+                // Calculate the new required columns based on the new share.
+                let new_required_cols: Vec<usize> = required_cols
+                    .iter()
+                    .map(|col| merge_required_cols.iter().position(|x| x == col).unwrap())
+                    .collect_vec();
+                let mapping = ColIndexMapping::with_remaining_columns(
+                    &new_required_cols,
+                    new_share.schema().len(),
+                );
+                return LogicalProject::with_mapping(new_share, mapping).into();
+            }
+
+            // `LogicalShare` can't clone, so we implement column pruning for `LogicalShare`
+            // here.
+            // Basically, we need to wait for all parents of `LogicalShare` to prune columns before
+            // we merge the required columns and prune.
+            let parent_has_pushed = ctx.add_required_cols(self.id(), required_cols.into());
+            if parent_has_pushed == ctx.get_parent_num(logical_share) {
+                let merge_require_cols = ctx
+                    .take_required_cols(self.id())
+                    .expect("must have required columns")
+                    .into_iter()
+                    .flat_map(|x| x.into_iter())
+                    .sorted()
+                    .dedup()
+                    .collect_vec();
+                let input: PlanRef = logical_share.input();
+                let input = input.prune_col(&merge_require_cols, ctx);
+
+                // Cache the new share operator for the second round.
+                let new_logical_share = LogicalShare::create(input.clone());
+                ctx.add_share_cache(self.id(), new_logical_share, merge_require_cols.clone());
+
+                let exprs = logical_share
+                    .base
+                    .schema()
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .map(|(i, field)| {
+                        if let Some(pos) = merge_require_cols.iter().position(|x| *x == i) {
+                            ExprImpl::InputRef(Box::new(InputRef::new(
+                                pos,
+                                field.data_type.clone(),
+                            )))
+                        } else {
+                            ExprImpl::Literal(Box::new(Literal::new(None, field.data_type.clone())))
+                        }
+                    })
+                    .collect_vec();
+                let project = LogicalProject::create(input, exprs);
+                logical_share.replace_input(project);
+            }
+            let mapping =
+                ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
+            LogicalProject::with_mapping(self.clone(), mapping).into()
+        } else {
+            // Dispatch to dyn PlanNode instead of PlanRef.
+            let dyn_t = self.deref();
+            dyn_t.prune_col(required_cols, ctx)
+        }
+    }
+}
+
+impl PredicatePushdown for PlanRef {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
+        if let Some(logical_share) = self.as_logical_share() {
+            // Piggyback share remove if its has only one parent.
+            if ctx.get_parent_num(logical_share) == 1 {
+                let input: PlanRef = logical_share.input();
+                return input.predicate_pushdown(predicate, ctx);
+            }
+
+            // `LogicalShare` can't clone, so we implement predicate pushdown for `LogicalShare`
+            // here.
+            // Basically, we need to wait for all parents of `LogicalShare` to push down the
+            // predicate before we merge the predicates and pushdown.
+            let parent_has_pushed = ctx.add_predicate(self.id(), predicate.clone());
+            if parent_has_pushed == ctx.get_parent_num(logical_share) {
+                let merge_predicate = ctx
+                    .take_predicate(self.id())
+                    .expect("must have predicate")
+                    .into_iter()
+                    .reduce(|a, b| a.or(b))
+                    .unwrap();
+                let input: PlanRef = logical_share.input();
+                let input = input.predicate_pushdown(merge_predicate, ctx);
+                logical_share.replace_input(input);
+            }
+            LogicalFilter::create(self.clone(), predicate)
+        } else {
+            // Dispatch to dyn PlanNode instead of PlanRef.
+            let dyn_t = self.deref();
+            dyn_t.predicate_pushdown(predicate, ctx)
+        }
+    }
+}
+
+impl PlanTreeNode for PlanRef {
+    fn inputs(&self) -> SmallVec<[PlanRef; 2]> {
+        // Dispatch to dyn PlanNode instead of PlanRef.
+        let dyn_t = self.deref();
+        dyn_t.inputs()
+    }
+
+    fn clone_with_inputs(&self, inputs: &[PlanRef]) -> PlanRef {
+        if let Some(logical_share) = self.clone().as_logical_share() {
+            assert_eq!(inputs.len(), 1);
+            // We can't clone `LogicalShare`, but only can replace input instead.
+            logical_share.replace_input(inputs[0].clone());
+            self.clone()
+        } else if let Some(stream_share) = self.clone().as_stream_share() {
+            assert_eq!(inputs.len(), 1);
+            // We can't clone `StreamShare`, but only can replace input instead.
+            stream_share.replace_input(inputs[0].clone());
+            self.clone()
+        } else {
+            // Dispatch to dyn PlanNode instead of PlanRef.
+            let dyn_t = self.deref();
+            dyn_t.clone_with_inputs(inputs)
+        }
+    }
 }
 
 impl StreamPlanRef for PlanRef {
@@ -87,6 +383,12 @@ impl StreamPlanRef for PlanRef {
 
     fn append_only(&self) -> bool {
         self.plan_base().append_only
+    }
+}
+
+impl BatchPlanRef for PlanRef {
+    fn order(&self) -> &Order {
+        &self.plan_base().order
     }
 }
 
@@ -102,11 +404,42 @@ impl GenericPlanRef for PlanRef {
     fn ctx(&self) -> OptimizerContextRef {
         self.plan_base().ctx()
     }
+
+    fn functional_dependency(&self) -> &FunctionalDependencySet {
+        self.plan_base().functional_dependency()
+    }
 }
 
-impl dyn PlanNode {
+/// In order to let expression display id started from 1 for explaining, hidden column names and
+/// other places. We will reset expression display id to 0 and clone the whole plan to reset the
+/// schema.
+pub fn reorganize_elements_id(plan: PlanRef) -> PlanRef {
+    let old_expr_display_id = plan.ctx().get_expr_display_id();
+    let old_plan_node_id = plan.ctx().get_plan_node_id();
+    plan.ctx().set_expr_display_id(0);
+    plan.ctx().set_plan_node_id(0);
+    let plan = PlanCloner::clone_whole_plan(plan);
+    plan.ctx().set_expr_display_id(old_expr_display_id);
+    plan.ctx().set_plan_node_id(old_plan_node_id);
+    plan
+}
+
+pub trait Explain {
     /// Write explain the whole plan tree.
-    pub fn explain(
+    fn explain(
+        &self,
+        is_last: &mut Vec<bool>,
+        level: usize,
+        f: &mut impl std::fmt::Write,
+    ) -> std::fmt::Result;
+
+    /// Explain the plan node and return a string.
+    fn explain_to_string(&self) -> Result<String>;
+}
+
+impl Explain for PlanRef {
+    /// Write explain the whole plan tree.
+    fn explain(
         &self,
         is_last: &mut Vec<bool>,
         level: usize,
@@ -143,13 +476,17 @@ impl dyn PlanNode {
     }
 
     /// Explain the plan node and return a string.
-    pub fn explain_to_string(&self) -> Result<String> {
+    fn explain_to_string(&self) -> Result<String> {
+        let plan = reorganize_elements_id(self.clone());
+
         let mut output = String::new();
-        self.explain(&mut vec![], 0, &mut output)
+        plan.explain(&mut vec![], 0, &mut output)
             .map_err(|e| ErrorCode::InternalError(format!("failed to explain: {}", e)))?;
         Ok(output)
     }
+}
 
+impl dyn PlanNode {
     pub fn id(&self) -> PlanNodeId {
         self.plan_base().id
     }
@@ -182,16 +519,20 @@ impl dyn PlanNode {
         &self.plan_base().functional_dependency
     }
 
+    pub fn watermark_columns(&self) -> &FixedBitSet {
+        &self.plan_base().watermark_columns
+    }
+
     /// Serialize the plan node and its children to a stream plan proto.
     ///
     /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
     /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
-    pub fn to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> StreamPlanProst {
+    pub fn to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> StreamPlanPb {
         if let Some(stream_table_scan) = self.as_stream_table_scan() {
             return stream_table_scan.adhoc_to_stream_prost();
         }
-        if let Some(stream_index_scan) = self.as_stream_index_scan() {
-            return stream_index_scan.adhoc_to_stream_prost();
+        if let Some(stream_share) = self.as_stream_share() {
+            return stream_share.adhoc_to_stream_prost(state);
         }
 
         let node = Some(self.to_stream_prost_body(state));
@@ -201,7 +542,7 @@ impl dyn PlanNode {
             .map(|plan| plan.to_stream_prost(state))
             .collect();
         // TODO: support pk_indices and operator_id
-        StreamPlanProst {
+        StreamPlanPb {
             input,
             identity: format!("{}", self),
             node_body: node,
@@ -213,20 +554,20 @@ impl dyn PlanNode {
     }
 
     /// Serialize the plan node and its children to a batch plan proto.
-    pub fn to_batch_prost(&self) -> BatchPlanProst {
+    pub fn to_batch_prost(&self) -> BatchPlanPb {
         self.to_batch_prost_identity(true)
     }
 
     /// Serialize the plan node and its children to a batch plan proto without the identity field
     /// (for testing).
-    pub fn to_batch_prost_identity(&self, identity: bool) -> BatchPlanProst {
+    pub fn to_batch_prost_identity(&self, identity: bool) -> BatchPlanPb {
         let node_body = Some(self.to_batch_prost_body());
         let children = self
             .inputs()
             .into_iter()
             .map(|plan| plan.to_batch_prost_identity(identity))
             .collect();
-        BatchPlanProst {
+        BatchPlanPb {
             children,
             identity: if identity {
                 format!("{:?}", self)
@@ -247,6 +588,8 @@ mod plan_tree_node;
 pub use plan_tree_node::*;
 mod col_pruning;
 pub use col_pruning::*;
+mod expr_rewritable;
+pub use expr_rewritable::*;
 mod convert;
 pub use convert::*;
 mod eq_join_predicate;
@@ -255,7 +598,10 @@ mod to_prost;
 pub use to_prost::*;
 mod predicate_pushdown;
 pub use predicate_pushdown::*;
+mod merge_eq_nodes;
+pub use merge_eq_nodes::*;
 
+pub mod batch;
 pub mod generic;
 pub mod stream;
 pub mod stream_derive;
@@ -296,10 +642,12 @@ mod logical_insert;
 mod logical_join;
 mod logical_limit;
 mod logical_multi_join;
+mod logical_now;
 mod logical_over_agg;
 mod logical_project;
 mod logical_project_set;
 mod logical_scan;
+mod logical_share;
 mod logical_source;
 mod logical_table_function;
 mod logical_topn;
@@ -317,9 +665,9 @@ mod stream_group_topn;
 mod stream_hash_agg;
 mod stream_hash_join;
 mod stream_hop_window;
-mod stream_index_scan;
 mod stream_local_simple_agg;
 mod stream_materialize;
+mod stream_now;
 mod stream_project;
 mod stream_project_set;
 mod stream_row_id_gen;
@@ -327,7 +675,12 @@ mod stream_sink;
 mod stream_source;
 mod stream_table_scan;
 mod stream_topn;
+mod stream_values;
+mod stream_watermark_filter;
 
+mod derive;
+mod stream_share;
+mod stream_temporal_join;
 mod stream_union;
 pub mod utils;
 
@@ -365,10 +718,12 @@ pub use logical_insert::LogicalInsert;
 pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
+pub use logical_now::LogicalNow;
 pub use logical_over_agg::{LogicalOverAgg, PlanWindowFunction};
 pub use logical_project::LogicalProject;
 pub use logical_project_set::LogicalProjectSet;
 pub use logical_scan::LogicalScan;
+pub use logical_share::LogicalShare;
 pub use logical_source::LogicalSource;
 pub use logical_table_function::LogicalTableFunction;
 pub use logical_topn::LogicalTopN;
@@ -386,20 +741,27 @@ pub use stream_group_topn::StreamGroupTopN;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
 pub use stream_hop_window::StreamHopWindow;
-pub use stream_index_scan::StreamIndexScan;
 pub use stream_local_simple_agg::StreamLocalSimpleAgg;
 pub use stream_materialize::StreamMaterialize;
+pub use stream_now::StreamNow;
 pub use stream_project::StreamProject;
 pub use stream_project_set::StreamProjectSet;
 pub use stream_row_id_gen::StreamRowIdGen;
+pub use stream_share::StreamShare;
 pub use stream_sink::StreamSink;
 pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
+pub use stream_temporal_join::StreamTemporalJoin;
 pub use stream_topn::StreamTopN;
 pub use stream_union::StreamUnion;
+pub use stream_values::StreamValues;
+pub use stream_watermark_filter::StreamWatermarkFilter;
 
-use crate::session::OptimizerContextRef;
+use crate::expr::{ExprImpl, ExprRewriter, InputRef, Literal};
+use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_rewriter::PlanCloner;
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::utils::{ColIndexMapping, Condition, DynEq, DynHash, Endo, Layer, Visit};
 
 /// `for_all_plan_nodes` includes all plan nodes. If you added a new plan node
 /// inside the project, be sure to add here and in its conventions like `for_logical_plan_nodes`
@@ -437,6 +799,8 @@ macro_rules! for_all_plan_nodes {
             , { Logical, ProjectSet }
             , { Logical, Union }
             , { Logical, OverAgg }
+            , { Logical, Share }
+            , { Logical, Now }
             // , { Logical, Sort } we don't need a LogicalSort, just require the Order
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
@@ -476,7 +840,6 @@ macro_rules! for_all_plan_nodes {
             , { Stream, TopN }
             , { Stream, HopWindow }
             , { Stream, DeltaJoin }
-            , { Stream, IndexScan }
             , { Stream, Expand }
             , { Stream, DynamicFilter }
             , { Stream, ProjectSet }
@@ -484,6 +847,11 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Union }
             , { Stream, RowIdGen }
             , { Stream, Dml }
+            , { Stream, Now }
+            , { Stream, Share }
+            , { Stream, WatermarkFilter }
+            , { Stream, TemporalJoin }
+            , { Stream, Values }
         }
     };
 }
@@ -513,6 +881,8 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, ProjectSet }
             , { Logical, Union }
             , { Logical, OverAgg }
+            , { Logical, Share }
+            , { Logical, Now }
             // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we don't support that, we don't need LogicalSort, just require the Order at the top of query
         }
@@ -571,7 +941,6 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, TopN }
             , { Stream, HopWindow }
             , { Stream, DeltaJoin }
-            , { Stream, IndexScan }
             , { Stream, Expand }
             , { Stream, DynamicFilter }
             , { Stream, ProjectSet }
@@ -579,12 +948,17 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Union }
             , { Stream, RowIdGen }
             , { Stream, Dml }
+            , { Stream, Now }
+            , { Stream, Share }
+            , { Stream, WatermarkFilter }
+            , { Stream, TemporalJoin }
+            , { Stream, Values }
         }
     };
 }
 
 /// impl [`PlanNodeType`] fn for each node.
-macro_rules! enum_plan_node_type {
+macro_rules! impl_plan_node_meta {
     ($( { $convention:ident, $name:ident }),*) => {
         paste!{
             /// each enum value represent a PlanNode struct type, help us to dispatch and downcast
@@ -593,7 +967,7 @@ macro_rules! enum_plan_node_type {
                 $( [<$convention $name>] ),*
             }
 
-            $(impl PlanNode for [<$convention $name>] {
+            $(impl PlanNodeMeta for [<$convention $name>] {
                 fn node_type(&self) -> PlanNodeType{
                     PlanNodeType::[<$convention $name>]
                 }
@@ -608,22 +982,17 @@ macro_rules! enum_plan_node_type {
     }
 }
 
-for_all_plan_nodes! { enum_plan_node_type }
+for_all_plan_nodes! { impl_plan_node_meta }
 
-/// impl fn `plan_ref` for each node.
-macro_rules! impl_plan_ref {
-    ($( { $convention:ident, $name:ident }),*) => {
+macro_rules! impl_plan_node {
+    ($({ $convention:ident, $name:ident }),*) => {
         paste!{
-            $(impl From<[<$convention $name>]> for PlanRef {
-                fn from(plan: [<$convention $name>]) -> Self {
-                    std::rc::Rc::new(plan)
-                }
-            })*
+            $(impl PlanNode for [<$convention $name>] { })*
         }
     }
 }
 
-for_all_plan_nodes! { impl_plan_ref }
+for_all_plan_nodes! { impl_plan_node }
 
 /// impl plan node downcast fn for each node.
 macro_rules! impl_down_cast_fn {

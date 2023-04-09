@@ -1,22 +1,26 @@
 statement ok
-create table t3 (v1 int, v2 int, v3 int);
+create table if not exists t3 (v1 int, v2 int, v3 int) append only;
 
 statement ok
 create materialized view mv3 as select sum(v1) as sum_v1 from t3;
 
+statement ok
+create view v3 as select sum(v2) as sum_v2 from t3;
+
 query TT
 describe t3;
 ----
-v1 Int32
-v2 Int32
-v3 Int32
+v1 integer
+v2 integer
+v3 integer
+primary key _row_id
 
 query TT
 show columns from t3;
 ----
-v1 Int32
-v2 Int32
-v3 Int32
+v1 integer
+v2 integer
+v3 integer
 
 statement ok
 create index idx1 on t3 (v1,v2);;
@@ -24,10 +28,11 @@ create index idx1 on t3 (v1,v2);;
 query TT
 describe t3;
 ----
-v1 Int32
-v2 Int32
-v3 Int32
-idx1 index(v1, v2) distributed by(v1, v2)
+v1 integer
+v2 integer
+v3 integer
+primary key _row_id
+idx1 index(v1 ASC, v2 ASC) include(v3) distributed by(v1, v2)
 
 statement ok
 drop index idx1;
@@ -41,8 +46,9 @@ query T rowsort
 show schemas;
 ----
 information_schema
-public
 pg_catalog
+public
+rw_catalog
 
 query T
 show tables;
@@ -55,6 +61,16 @@ show tables from public;
 t3
 
 query T
+show views;
+----
+v3
+
+query T
+show views from public;
+----
+v3
+
+query T
 show materialized views from public;
 ----
 mv3
@@ -65,15 +81,38 @@ show materialized views;
 mv3
 
 query T
-show materialized sources;
-----
-
-query T
 show sources;
 ----
 
+# Show create objects.
+
+# The `WITH` options should be preserved, and the `IF NOT EXISTS` clause should be omitted.
+query TT
+show create table t3;
+----
+public.t3 CREATE TABLE t3 (v1 INT, v2 INT, v3 INT) APPEND ONLY
+
+query TT
+show create materialized view mv3;
+----
+public.mv3 CREATE MATERIALIZED VIEW mv3 AS SELECT sum(v1) AS sum_v1 FROM t3
+
+statement ok
+create view v1 as select * from t3;
+
+query TT
+show create view v1;
+----
+public.v1 CREATE VIEW v1 AS SELECT * FROM t3
+
 statement ok
 drop materialized view mv3;
+
+statement ok
+drop view v3;
+
+statement ok
+drop view v1;
 
 statement ok
 drop table t3;
@@ -81,19 +120,22 @@ drop table t3;
 query TT
 describe pg_matviews;
 ----
-schemaname Varchar
-matviewname Varchar
-matviewowner Int32
-definition Varchar
-matviewid Int32
-matviewgraph Varchar
+schemaname varchar
+matviewname varchar
+matviewowner integer
+definition varchar
+matviewid integer
+matviewtimezone varchar
+matviewgraph varchar
+primary key schemaname
 
 query TT
 show columns from pg_catalog.pg_matviews;
 ----
-schemaname Varchar
-matviewname Varchar
-matviewowner Int32
-definition Varchar
-matviewid Int32
-matviewgraph Varchar
+schemaname varchar
+matviewname varchar
+matviewowner integer
+definition varchar
+matviewid integer
+matviewtimezone varchar
+matviewgraph varchar

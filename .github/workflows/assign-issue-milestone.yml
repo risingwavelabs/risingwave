@@ -9,11 +9,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Add issue to the latest milestone
-      uses: cgetc/automatically-set-milestone-to-issue@v0.1.2
+      uses: fuyufjh/automatically-set-milestone-to-issue@main
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         version-prefix: 'release-'
         version-separator: '.'
+        overwrite: false
     - name: Add issue to project
       uses: actions/add-to-project@v0.3.0
       with:

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,11 +14,11 @@
 
 //! This module implements `StreamingRowCountAgg`.
 
-use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::StreamingAggImpl;
 use crate::executor::error::StreamExecutorResult;
@@ -79,7 +79,7 @@ impl StreamingAggImpl for StreamingRowCountAgg {
                 }
             }
             Some(visibility) => {
-                for (op, visible) in ops.iter().zip_eq(visibility.iter()) {
+                for (op, visible) in ops.iter().zip_eq_fast(visibility.iter()) {
                     if visible {
                         match op {
                             Op::Insert | Op::UpdateInsert => self.row_cnt += 1,

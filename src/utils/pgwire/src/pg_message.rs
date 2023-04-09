@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -28,6 +28,7 @@ use crate::pg_server::BoxedError;
 use crate::types::Row;
 
 /// Messages that can be sent from pg client to server. Implement `read`.
+#[derive(Debug)]
 pub enum FeMessage {
     Ssl,
     Startup(FeStartupMessage),
@@ -44,6 +45,7 @@ pub enum FeMessage {
     Flush,
 }
 
+#[derive(Debug)]
 pub struct FeStartupMessage {
     pub config: HashMap<String, String>,
 }
@@ -73,21 +75,15 @@ impl FeStartupMessage {
 }
 
 /// Query message contains the string sql.
+#[derive(Debug)]
 pub struct FeQueryMessage {
     pub sql_bytes: Bytes,
 }
 
 #[derive(Debug)]
 pub struct FeBindMessage {
-    // param_format_code:
-    //  false: text
-    //  true: binary
-    pub param_format_code: bool,
-
-    // result_format_code:
-    //  false: text
-    //  true: binary
-    pub result_format_code: bool,
+    pub param_format_codes: Vec<i16>,
+    pub result_format_codes: Vec<i16>,
 
     pub params: Vec<Bytes>,
     pub portal_name: Bytes,
@@ -125,6 +121,7 @@ pub struct FeCloseMessage {
     pub name: Bytes,
 }
 
+#[derive(Debug)]
 pub struct FeCancelMessage {
     pub target_process_id: i32,
     pub target_secret_key: i32,
@@ -171,22 +168,10 @@ impl FeBindMessage {
     pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
         let portal_name = read_null_terminated(&mut buf)?;
         let statement_name = read_null_terminated(&mut buf)?;
-        // Read FormatCode
-        let len = buf.get_i16();
 
-        let param_format_code = if len == 0 || len == 1 {
-            if len == 0 {
-                false
-            } else {
-                buf.get_i16() == 1
-            }
-        } else {
-            let first_value = buf.get_i16();
-            for _ in 1..len {
-                assert!(buf.get_i16() == first_value,"Only support uniform param format (TEXT or BINARY), can't support mix format now.");
-            }
-            first_value == 1
-        };
+        let len = buf.get_i16();
+        let param_format_codes = (0..len).map(|_| buf.get_i16()).collect();
+
         // Read Params
         let len = buf.get_i16();
         let params = (0..len)
@@ -195,21 +180,13 @@ impl FeBindMessage {
                 buf.copy_to_bytes(val_len as usize)
             })
             .collect();
-        // Read ResultFormatCode
+
         let len = buf.get_i16();
-
-        assert!(len==0||len==1,"Only support default result format(len==0) or uniform result format(len==1), can't support mix format now.");
-
-        let result_format_code = if len == 0 {
-            // default format:text
-            false
-        } else {
-            buf.get_i16() == 1
-        };
+        let result_format_codes = (0..len).map(|_| buf.get_i16()).collect();
 
         Ok(FeMessage::Bind(FeBindMessage {
-            param_format_code,
-            result_format_code,
+            param_format_codes,
+            result_format_codes,
             params,
             portal_name,
             statement_name,
@@ -314,8 +291,14 @@ impl FeStartupMessage {
     pub async fn read(stream: &mut (impl AsyncRead + Unpin)) -> Result<FeMessage> {
         let len = stream.read_i32().await?;
         let protocol_num = stream.read_i32().await?;
-        let payload_len = len - 8;
-        let mut payload = vec![0; payload_len as usize];
+        let payload_len = (len - 8) as usize;
+        if payload_len >= isize::MAX as usize {
+            return Err(std::io::Error::new(
+                ErrorKind::InvalidInput,
+                format!("Payload length has exceed usize::MAX {:?}", payload_len),
+            ));
+        }
+        let mut payload = vec![0; payload_len];
         if payload_len > 0 {
             stream.read_exact(&mut payload).await?;
         }
@@ -488,8 +471,14 @@ impl<'a> BeMessage<'a> {
             // +-----+-----------+-----------------+
             BeMessage::CommandComplete(cmd) => {
                 let rows_cnt = cmd.rows_cnt;
-                let stmt_type = cmd.stmt_type;
+                let mut stmt_type = cmd.stmt_type;
                 let mut tag = "".to_owned();
+                stmt_type = match stmt_type {
+                    StatementType::INSERT_RETURNING => StatementType::INSERT,
+                    StatementType::DELETE_RETURNING => StatementType::DELETE,
+                    StatementType::UPDATE_RETURNING => StatementType::UPDATE,
+                    s => s,
+                };
                 tag.push_str(&stmt_type.to_string());
                 if stmt_type == StatementType::INSERT {
                     tag.push_str(" 0");

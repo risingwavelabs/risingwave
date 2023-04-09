@@ -48,8 +48,6 @@ Common functionalities shared inside RisingWave.
 
 The crates under `src/utils` are several independent util crates which helps to simplify development. We plan to publish them to [crates.io](https://crates.io/) in future when they are more mature.
 
-- [async_stack_trace](async_stack_trace/index.html)
-- [global_stats_alloc](global_stats_alloc/index.html)
 - [local_stats_alloc](local_stats_alloc/index.html)
 - [memcomparable](memcomparable/index.html)
 - [pgwire](pgwire/index.html)

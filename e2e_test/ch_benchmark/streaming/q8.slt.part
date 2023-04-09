@@ -1,0 +1,5 @@
+query II rowsort
+select * from ch_benchmark_q8
+order by l_year;
+----
+2022 0.02

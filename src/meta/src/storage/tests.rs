@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -28,7 +28,7 @@ trait MetaStoreTestExt: MetaStore {
     async fn put(&self, key: Key, value: Value) -> MetaStoreResult<()>;
     async fn get(&self, key: &[u8]) -> MetaStoreResult<Value>;
     async fn delete(&self, key: &[u8]) -> MetaStoreResult<()>;
-    async fn list(&self) -> MetaStoreResult<Vec<Vec<u8>>>;
+    async fn list(&self) -> MetaStoreResult<Vec<(Vec<u8>, Vec<u8>)>>;
 }
 
 #[async_trait]
@@ -45,7 +45,7 @@ impl<S: MetaStore> MetaStoreTestExt for S {
         self.delete_cf(TEST_DEFAULT_CF, key).await
     }
 
-    async fn list(&self) -> MetaStoreResult<Vec<Vec<u8>>> {
+    async fn list(&self) -> MetaStoreResult<Vec<(Vec<u8>, Vec<u8>)>> {
         self.list_cf(TEST_DEFAULT_CF).await
     }
 }
@@ -103,7 +103,13 @@ async fn test_meta_store_basic<S: MetaStore>(store: &S) -> MetaStoreResult<()> {
         .put(b"key_3".to_vec(), b"value_3_new".to_vec())
         .await
         .is_ok());
-    let mut values = store.list().await.unwrap();
+    let mut values = store
+        .list()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|(_, v)| v)
+        .collect_vec();
     values.sort();
     let expected: Vec<Vec<u8>> = vec![
         b"value_1".to_vec(),
@@ -138,7 +144,13 @@ async fn test_meta_store_transaction<S: MetaStore>(meta_store: &S) -> MetaStoreR
     let mut trx = Transaction::default();
     trx.add_operations(ops);
     meta_store.txn(trx).await.unwrap();
-    let result = meta_store.list_cf(cf).await.unwrap();
+    let result = meta_store
+        .list_cf(cf)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|(_, v)| v)
+        .collect_vec();
     let expected = kvs
         .iter()
         .take(2)

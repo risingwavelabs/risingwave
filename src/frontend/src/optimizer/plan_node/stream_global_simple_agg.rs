@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,44 +14,63 @@
 
 use std::fmt;
 
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use fixedbitset::FixedBitSet;
+use itertools::Itertools;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::generic::PlanAggCall;
-use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::generic::{self, PlanAggCall};
+use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::expr::ExprRewriter;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamGlobalSimpleAgg {
     pub base: PlanBase,
-    logical: LogicalAgg,
+    logical: generic::Agg<PlanRef>,
+
+    /// The index of `count(*)` in `agg_calls`.
+    row_count_idx: usize,
 }
 
 impl StreamGlobalSimpleAgg {
-    pub fn new(logical: LogicalAgg) -> Self {
-        let ctx = logical.base.ctx.clone();
-        let pk_indices = logical.base.logical_pk.to_vec();
-        let input = logical.input();
+    pub fn new(logical: generic::Agg<PlanRef>, row_count_idx: usize) -> Self {
+        assert_eq!(logical.agg_calls[row_count_idx], PlanAggCall::count_star());
+
+        let base = PlanBase::new_logical_with_core(&logical);
+        let ctx = base.ctx;
+        let pk_indices = base.logical_pk;
+        let schema = base.schema;
+        let input = logical.input.clone();
         let input_dist = input.distribution();
         let dist = match input_dist {
             Distribution::Single => Distribution::Single,
             _ => panic!(),
         };
 
+        // Empty because watermark column(s) must be in group key and global simple agg have no
+        // group key.
+        let watermark_columns = FixedBitSet::with_capacity(schema.len());
+
         // Simple agg executor might change the append-only behavior of the stream.
         let base = PlanBase::new_stream(
             ctx,
-            logical.schema().clone(),
+            schema,
             pk_indices,
-            logical.functional_dependency().clone(),
+            base.functional_dependency,
             dist,
             false,
+            watermark_columns,
         );
-        StreamGlobalSimpleAgg { base, logical }
+        StreamGlobalSimpleAgg {
+            base,
+            logical,
+            row_count_idx,
+        }
     }
 
     pub fn agg_calls(&self) -> &[PlanAggCall] {
-        self.logical.agg_calls()
+        &self.logical.agg_calls
     }
 }
 
@@ -70,22 +89,26 @@ impl fmt::Display for StreamGlobalSimpleAgg {
 
 impl PlanTreeNodeUnary for StreamGlobalSimpleAgg {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let logical = generic::Agg {
+            input,
+            ..self.logical.clone()
+        };
+        Self::new(logical, self.row_count_idx)
     }
 }
 impl_plan_tree_node_for_unary! { StreamGlobalSimpleAgg }
 
 impl StreamNode for StreamGlobalSimpleAgg {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
-        let result_table = self.logical.infer_result_table(None);
-        let agg_states = self.logical.infer_stream_agg_state(None);
+        let (result_table, agg_states, distinct_dedup_tables) =
+            self.logical.infer_tables(&self.base, None);
 
-        ProstStreamNode::GlobalSimpleAgg(SimpleAggNode {
+        PbNodeBody::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: self
                 .agg_calls()
                 .iter()
@@ -108,6 +131,31 @@ impl StreamNode for StreamGlobalSimpleAgg {
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
+            distinct_dedup_tables: distinct_dedup_tables
+                .into_iter()
+                .sorted_by_key(|(i, _)| *i)
+                .map(|(key_idx, table)| {
+                    (
+                        key_idx as u32,
+                        table
+                            .with_id(state.gen_table_id_wrapped())
+                            .to_internal_table_prost(),
+                    )
+                })
+                .collect(),
+            row_count_index: self.row_count_idx as u32,
         })
+    }
+}
+
+impl ExprRewritable for StreamGlobalSimpleAgg {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut logical = self.logical.clone();
+        logical.rewrite_exprs(r);
+        Self::new(logical, self.row_count_idx).into()
     }
 }

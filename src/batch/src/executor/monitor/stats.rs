@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +17,7 @@ use std::sync::Arc;
 use prometheus::core::{AtomicF64, AtomicU64, Collector, Desc, GenericCounterVec, GenericGaugeVec};
 use prometheus::{
     exponential_buckets, opts, proto, GaugeVec, HistogramOpts, HistogramVec, IntCounterVec,
-    Registry,
+    IntGauge, Registry,
 };
 
 use crate::task::TaskId;
@@ -205,5 +205,24 @@ impl BatchTaskMetricsWithTaskLabels {
 
     pub fn task_labels(&self) -> Vec<&str> {
         self.task_labels.iter().map(AsRef::as_ref).collect()
+    }
+}
+
+#[derive(Clone)]
+pub struct BatchManagerMetrics {
+    pub task_num: IntGauge,
+}
+
+impl BatchManagerMetrics {
+    pub fn new(registry: Registry) -> Self {
+        let task_num = IntGauge::new("batch_task_num", "Number of batch task in memory").unwrap();
+
+        registry.register(Box::new(task_num.clone())).unwrap();
+        Self { task_num }
+    }
+
+    #[cfg(test)]
+    pub fn for_test() -> Self {
+        Self::new(Registry::new())
     }
 }

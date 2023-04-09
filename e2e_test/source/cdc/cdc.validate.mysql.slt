@@ -1,0 +1,132 @@
+# CDC MySQL source validate test
+
+# invalid username
+statement error
+create table products ( id INT,
+ name STRING,
+ description STRING,
+ PRIMARY KEY (id)
+) with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'rot',
+ password = '123456',
+ database.name = 'mydb',
+ table.name = 'products',
+ server.id = '5085'
+);
+
+# invalid password
+statement error
+create table products ( id INT,
+ name STRING,
+ description STRING,
+ PRIMARY KEY (id)
+) with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '1456',
+ database.name = 'mydb',
+ table.name = 'products',
+ server.id = '5085'
+);
+
+# invalid database name
+statement error
+create table products ( id INT,
+ name STRING,
+ description STRING,
+ PRIMARY KEY (id)
+) with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'mdb',
+ table.name = 'products',
+ server.id = '5085'
+);
+
+# invalid table name
+statement error
+create table products ( id INT,
+ name STRING,
+ description STRING,
+ PRIMARY KEY (id)
+) with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'mydb',
+ table.name = 'prdcts',
+ server.id = '5085'
+);
+
+# invalid primary key
+statement error
+create table orders (
+   order_id int,
+   order_date timestamp,
+   customer_name string,
+   price decimal,
+   product_id int,
+   order_status smallint,
+   PRIMARY KEY (product_id)
+) with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'mydb',
+ table.name = 'orders',
+ server.id = '5086'
+);
+
+# column data type mismatch
+statement error
+create table orders (
+   order_id int,
+   order_date timestamp,
+   customer_name string,
+   price double,
+   product_id int,
+   order_status smallint,
+   PRIMARY KEY (order_id)
+) with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'mydb',
+ table.name = 'orders',
+ server.id = '5086'
+);
+
+# column name mismatch
+statement error
+create table orders (
+   order_id int,
+   order_date timestamp,
+   cust_name string,
+   price decimal,
+   product_id int,
+   order_status smallint,
+   PRIMARY KEY (order_id)
+) with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'mydb',
+ table.name = 'orders',
+ server.id = '5086'
+);

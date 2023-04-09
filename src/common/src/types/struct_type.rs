@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,6 +18,7 @@ use itertools::Itertools;
 
 use super::DataType;
 use crate::array::ArrayMeta;
+use crate::util::iter_util::ZipEqFast;
 
 /// Details about a struct type. There are 2 cases for a struct:
 /// 1. `field_names.len() == fields.len()`: it represents a struct with named fields, e.g.
@@ -47,6 +48,7 @@ impl StructType {
     pub fn to_array_meta(&self) -> ArrayMeta {
         ArrayMeta::Struct {
             children: self.fields.clone().into(),
+            children_names: self.field_names.clone().into(),
         }
     }
 }
@@ -60,7 +62,7 @@ impl Display for StructType {
                 f,
                 "struct<{}>",
                 (self.fields.iter())
-                    .zip_eq(self.field_names.iter())
+                    .zip_eq_fast(self.field_names.iter())
                     .map(|(d, s)| format!("{} {}", s, d))
                     .join(",")
             )

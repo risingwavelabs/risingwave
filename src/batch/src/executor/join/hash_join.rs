@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,7 +18,6 @@ use std::iter::empty;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use fixedbitset::FixedBitSet;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Array, DataChunk, RowRef};
@@ -29,6 +28,7 @@ use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher
 use risingwave_common::row::{repeat_n, RowExt};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression, Expression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -231,13 +231,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
             JoinHashMap::with_capacity_and_hasher(build_row_count, PrecomputedBuildHasher);
         let mut next_build_row_with_same_key =
             ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
-        let null_matched = {
-            let mut null_matched = FixedBitSet::with_capacity(self.null_matched.len());
-            for (idx, col_null_matched) in self.null_matched.into_iter().enumerate() {
-                null_matched.set(idx, col_null_matched);
-            }
-            null_matched
-        };
+
+        let null_matched = self.null_matched.into();
 
         // Build hash map
         for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {
@@ -290,9 +285,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
             #[for_await]
             for chunk in stream {
-                #[for_await]
-                for output_chunk in output_chunk_builder
-                    .trunc_data_chunk(chunk?.reorder_columns(&self.output_indices))
+                for output_chunk in
+                    output_chunk_builder.append_chunk(chunk?.reorder_columns(&self.output_indices))
                 {
                     yield output_chunk
                 }
@@ -366,7 +360,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for chunk in Self::do_inner_join(params) {
             let mut chunk = chunk?;
-            chunk.set_visibility(cond.eval(&chunk)?.as_bool().iter().collect());
+            chunk.set_visibility(cond.eval(&chunk).await?.as_bool().iter().collect());
             yield chunk
         }
     }
@@ -473,7 +467,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                                 spilled,
                                 cond.as_ref(),
                                 &mut non_equi_state,
-                            )?
+                            )
+                            .await?
                         }
                     }
                 } else {
@@ -494,7 +489,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 spilled,
                 cond.as_ref(),
                 &mut non_equi_state,
-            )?
+            )
+            .await?
         }
     }
 
@@ -539,6 +535,15 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }
     }
 
+    /// High-level idea:
+    /// 1. For each probe_row, append candidate rows to buffer.
+    ///    Candidate rows: Those satisfying equi_predicate (==).
+    /// 2. If buffer becomes full, process it.
+    ///    Apply non_equi_join predicates e.g. `>=`, `<=` to filter rows.
+    ///    Track if probe_row is matched to avoid duplicates.
+    /// 3. If we matched probe_row in spilled chunk,
+    ///    stop appending its candidate rows,
+    ///    to avoid matching it again in next spilled chunk.
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     pub async fn do_left_semi_join_with_non_equi_condition<'a>(
         EquiJoinParams {
@@ -569,6 +574,9 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     for build_row_id in
                         next_build_row_with_same_key.row_id_iter(Some(*first_matched_build_row_id))
                     {
+                        if non_equi_state.found_matched {
+                            break;
+                        }
                         let build_chunk = &build_side[build_row_id.chunk_id()];
                         if let Some(spilled) = Self::append_one_row(
                             &mut chunk_builder,
@@ -581,18 +589,22 @@ impl<K: HashKey> HashJoinExecutor<K> {
                                 spilled,
                                 cond.as_ref(),
                                 &mut non_equi_state,
-                            )?
+                            )
+                            .await?
                         }
                     }
                 }
             }
         }
+
+        // Process remaining rows in buffer
         if let Some(spilled) = chunk_builder.consume_all() {
             yield Self::process_left_semi_anti_join_non_equi_condition::<false>(
                 spilled,
                 cond.as_ref(),
                 &mut non_equi_state,
-            )?
+            )
+            .await?
         }
     }
 
@@ -643,7 +655,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                                 spilled,
                                 cond.as_ref(),
                                 &mut non_equi_state,
-                            )?
+                            )
+                            .await?
                         }
                     }
                 } else if let Some(spilled) = Self::append_one_probe_row(
@@ -661,7 +674,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 spilled,
                 cond.as_ref(),
                 &mut non_equi_state,
-            )?
+            )
+            .await?
         }
         if let Some(spilled) = remaining_chunk_builder.consume_all() {
             yield spilled
@@ -763,7 +777,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                             spilled,
                             cond.as_ref(),
                             &mut non_equi_state,
-                        )?
+                        )
+                        .await?
                     }
                 }
             }
@@ -773,7 +788,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 spilled,
                 cond.as_ref(),
                 &mut non_equi_state,
-            )?
+            )
+            .await?
         }
         #[for_await]
         for spilled in Self::handle_remaining_build_rows_for_right_outer_join(
@@ -870,7 +886,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                             spilled,
                             cond.as_ref(),
                             &mut non_equi_state,
-                        )?
+                        )
+                        .await?
                     }
                 }
             }
@@ -880,7 +897,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 spilled,
                 cond.as_ref(),
                 &mut non_equi_state,
-            )?
+            )
+            .await?
         }
         #[for_await]
         for spilled in Self::handle_remaining_build_rows_for_right_semi_anti_join::<ANTI_JOIN>(
@@ -1014,7 +1032,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                                 cond.as_ref(),
                                 &mut left_non_equi_state,
                                 &mut right_non_equi_state,
-                            )?
+                            )
+                            .await?
                         }
                     }
                 } else {
@@ -1036,7 +1055,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 cond.as_ref(),
                 &mut left_non_equi_state,
                 &mut right_non_equi_state,
-            )?
+            )
+            .await?
         }
         #[for_await]
         for spilled in Self::handle_remaining_build_rows_for_right_outer_join(
@@ -1185,7 +1205,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
     ///
     /// For more information about how `process_*_join_non_equi_condition` work, see their unit
     /// tests.
-    fn process_left_outer_join_non_equi_condition(
+    async fn process_left_outer_join_non_equi_condition(
         chunk: DataChunk,
         cond: &dyn Expression,
         LeftNonEquiJoinState {
@@ -1195,7 +1215,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             found_matched,
         }: &mut LeftNonEquiJoinState,
     ) -> Result<DataChunk> {
-        let filter = cond.eval(&chunk)?.as_bool().iter().collect();
+        let filter = cond.eval(&chunk).await?.as_bool().iter().collect();
         Ok(DataChunkMutator(chunk)
             .nullify_build_side_for_non_equi_condition(&filter, *probe_column_count)
             .remove_duplicate_rows_for_left_outer_join(
@@ -1207,7 +1227,9 @@ impl<K: HashKey> HashJoinExecutor<K> {
             .take())
     }
 
-    fn process_left_semi_anti_join_non_equi_condition<const ANTI_JOIN: bool>(
+    /// Filters for candidate rows which satisfy `non_equi` predicate.
+    /// Removes duplicate rows.
+    async fn process_left_semi_anti_join_non_equi_condition<const ANTI_JOIN: bool>(
         chunk: DataChunk,
         cond: &dyn Expression,
         LeftNonEquiJoinState {
@@ -1217,7 +1239,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             ..
         }: &mut LeftNonEquiJoinState,
     ) -> Result<DataChunk> {
-        let filter = cond.eval(&chunk)?.as_bool().iter().collect();
+        let filter = cond.eval(&chunk).await?.as_bool().iter().collect();
         Ok(DataChunkMutator(chunk)
             .remove_duplicate_rows_for_left_semi_anti_join::<ANTI_JOIN>(
                 &filter,
@@ -1228,7 +1250,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             .take())
     }
 
-    fn process_right_outer_join_non_equi_condition(
+    async fn process_right_outer_join_non_equi_condition(
         chunk: DataChunk,
         cond: &dyn Expression,
         RightNonEquiJoinState {
@@ -1236,13 +1258,13 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_row_matched,
         }: &mut RightNonEquiJoinState,
     ) -> Result<DataChunk> {
-        let filter = cond.eval(&chunk)?.as_bool().iter().collect();
+        let filter = cond.eval(&chunk).await?.as_bool().iter().collect();
         Ok(DataChunkMutator(chunk)
             .remove_duplicate_rows_for_right_outer_join(&filter, build_row_ids, build_row_matched)
             .take())
     }
 
-    fn process_right_semi_anti_join_non_equi_condition(
+    async fn process_right_semi_anti_join_non_equi_condition(
         chunk: DataChunk,
         cond: &dyn Expression,
         RightNonEquiJoinState {
@@ -1250,7 +1272,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_row_matched,
         }: &mut RightNonEquiJoinState,
     ) -> Result<()> {
-        let filter = cond.eval(&chunk)?.as_bool().iter().collect();
+        let filter = cond.eval(&chunk).await?.as_bool().iter().collect();
         DataChunkMutator(chunk).remove_duplicate_rows_for_right_semi_anti_join(
             &filter,
             build_row_ids,
@@ -1259,13 +1281,13 @@ impl<K: HashKey> HashJoinExecutor<K> {
         Ok(())
     }
 
-    fn process_full_outer_join_non_equi_condition(
+    async fn process_full_outer_join_non_equi_condition(
         chunk: DataChunk,
         cond: &dyn Expression,
         left_non_equi_state: &mut LeftNonEquiJoinState,
         right_non_equi_state: &mut RightNonEquiJoinState,
     ) -> Result<DataChunk> {
-        let filter = cond.eval(&chunk)?.as_bool().iter().collect();
+        let filter = cond.eval(&chunk).await?.as_bool().iter().collect();
         Ok(DataChunkMutator(chunk)
             .nullify_build_side_for_non_equi_condition(
                 &filter,
@@ -1454,6 +1476,9 @@ impl DataChunkMutator {
         self
     }
 
+    /// Removes duplicate rows using `filter`
+    /// and only returns the first match for each window.
+    /// Windows are indicated by `first_output_row_ids`.
     fn remove_duplicate_rows_for_left_semi_anti_join<const ANTI_JOIN: bool>(
         mut self,
         filter: &Bitmap,
@@ -1511,7 +1536,7 @@ impl DataChunkMutator {
     ) -> Self {
         let mut new_visibility = BitmapBuilder::zeroed(self.0.capacity());
         for (output_row_id, (output_row_non_null, &build_row_id)) in
-            filter.iter().zip_eq(build_row_ids.iter()).enumerate()
+            filter.iter().zip_eq_fast(build_row_ids.iter()).enumerate()
         {
             if output_row_non_null {
                 build_row_matched[build_row_id] = true;
@@ -1531,7 +1556,8 @@ impl DataChunkMutator {
         build_row_ids: &mut Vec<RowId>,
         build_row_matched: &mut ChunkedData<bool>,
     ) {
-        for (output_row_non_null, &build_row_id) in filter.iter().zip_eq(build_row_ids.iter()) {
+        for (output_row_non_null, &build_row_id) in filter.iter().zip_eq_fast(build_row_ids.iter())
+        {
             if output_row_non_null {
                 build_row_matched[build_row_id] = true;
             }
@@ -1587,7 +1613,7 @@ impl DataChunkMutator {
         first_output_row_id.clear();
 
         for (output_row_id, (output_row_non_null, &build_row_id)) in
-            filter.iter().zip_eq(build_row_ids.iter()).enumerate()
+            filter.iter().zip_eq_fast(build_row_ids.iter()).enumerate()
         {
             if output_row_non_null {
                 build_row_matched[build_row_id] = true;
@@ -1662,7 +1688,7 @@ impl BoxedExecutorBuilder for HashJoinExecutor<()> {
             cond,
             identity: context.plan_node().get_identity().clone(),
             right_key_types,
-            chunk_size: context.context.get_config().developer.batch_chunk_size,
+            chunk_size: context.context.get_config().developer.chunk_size,
         }
         .dispatch())
     }
@@ -1760,16 +1786,14 @@ impl<K> HashJoinExecutor<K> {
 mod tests {
 
     use futures::StreamExt;
-    use itertools::Itertools;
     use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::error::Result;
     use risingwave_common::hash::Key32;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-    use risingwave_expr::expr::{BoxedExpression, InputRefExpression};
-    use risingwave_pb::expr::expr_node::Type;
+    use risingwave_common::util::iter_util::ZipEqDebug;
+    use risingwave_expr::expr::{build_from_pretty, BoxedExpression};
 
     use super::{
         ChunkedData, HashJoinExecutor, JoinType, LeftNonEquiJoinState, RightNonEquiJoinState, RowId,
@@ -1829,7 +1853,7 @@ mod tests {
         }
 
         left.rows()
-            .zip_eq(right.rows())
+            .zip_eq_debug(right.rows())
             .all(|(row1, row2)| row1 == row2)
     }
 
@@ -1954,22 +1978,18 @@ mod tests {
         }
 
         fn create_cond() -> BoxedExpression {
-            let left_expr = InputRefExpression::new(DataType::Float32, 1);
-            let right_expr = InputRefExpression::new(DataType::Float64, 3);
-            new_binary_expr(
-                Type::LessThan,
-                DataType::Boolean,
-                Box::new(left_expr),
-                Box::new(right_expr),
-            )
-            .unwrap()
+            build_from_pretty("(less_than:boolean $1:float4 $3:float8)")
         }
 
-        fn create_join_executor(&self, has_non_equi_cond: bool, null_safe: bool) -> BoxedExecutor {
+        fn create_join_executor_with_chunk_size_and_executors(
+            &self,
+            has_non_equi_cond: bool,
+            null_safe: bool,
+            chunk_size: usize,
+            left_child: BoxedExecutor,
+            right_child: BoxedExecutor,
+        ) -> BoxedExecutor {
             let join_type = self.join_type;
-
-            let left_child = self.create_left_executor();
-            let right_child = self.create_right_executor();
 
             let output_indices = (0..match join_type {
                 JoinType::LeftSemi | JoinType::LeftAnti => left_child.schema().fields().len(),
@@ -1994,12 +2014,40 @@ mod tests {
                 vec![null_safe],
                 cond,
                 "HashJoinExecutor".to_string(),
-                CHUNK_SIZE,
+                chunk_size,
             ))
         }
 
         async fn do_test(&self, expected: DataChunk, has_non_equi_cond: bool, null_safe: bool) {
-            let join_executor = self.create_join_executor(has_non_equi_cond, null_safe);
+            let left_executor = self.create_left_executor();
+            let right_executor = self.create_right_executor();
+            self.do_test_with_chunk_size_and_executors(
+                expected,
+                has_non_equi_cond,
+                null_safe,
+                self::CHUNK_SIZE,
+                left_executor,
+                right_executor,
+            )
+            .await
+        }
+
+        async fn do_test_with_chunk_size_and_executors(
+            &self,
+            expected: DataChunk,
+            has_non_equi_cond: bool,
+            null_safe: bool,
+            chunk_size: usize,
+            left_executor: BoxedExecutor,
+            right_executor: BoxedExecutor,
+        ) {
+            let join_executor = self.create_join_executor_with_chunk_size_and_executors(
+                has_non_equi_cond,
+                null_safe,
+                chunk_size,
+                left_executor,
+                right_executor,
+            );
 
             let mut data_chunk_merger = DataChunkMerger::new(self.output_data_types()).unwrap();
 
@@ -2025,6 +2073,8 @@ mod tests {
             }
 
             let result_chunk = data_chunk_merger.finish().unwrap();
+            println!("expected: {:?}", expected);
+            println!("result: {:?}", result_chunk);
 
             // TODO: Replace this with unsorted comparison
             // assert_eq!(expected, result_chunk);
@@ -2379,6 +2429,69 @@ mod tests {
         test_fixture.do_test(expected_chunk, true, false).await;
     }
 
+    /// Tests handling of edge case:
+    /// Match is found for a probe_row,
+    /// but there are still candidate rows in the iterator for that probe_row.
+    /// These should not be buffered or we will have duplicate rows in output.
+    #[tokio::test]
+    async fn test_left_semi_join_with_non_equi_condition_duplicates() {
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Float32),
+            ],
+        };
+
+        // Build side
+        let mut left_executor = MockExecutor::new(schema);
+        left_executor.add(DataChunk::from_pretty(
+            "i f
+                 1 1.0
+                 1 1.0
+                 1 1.0
+                 1 1.0
+                 2 1.0",
+        ));
+
+        // Probe side
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Float64),
+            ],
+        };
+        let mut right_executor = MockExecutor::new(schema);
+        right_executor.add(DataChunk::from_pretty(
+            "i F
+                 1 2.0
+                 1 2.0
+                 1 2.0
+                 1 2.0
+                 2 2.0",
+        ));
+
+        let test_fixture = TestFixture::with_join_type(JoinType::LeftSemi);
+        let expected_chunk = DataChunk::from_pretty(
+            "i f
+            1 1.0
+            1 1.0
+            1 1.0
+            1 1.0
+            2 1.0",
+        );
+
+        test_fixture
+            .do_test_with_chunk_size_and_executors(
+                expected_chunk,
+                true,
+                false,
+                3,
+                Box::new(left_executor),
+                Box::new(right_executor),
+            )
+            .await;
+    }
+
     #[tokio::test]
     async fn test_right_anti_join() {
         let test_fixture = TestFixture::with_join_type(JoinType::RightAnti);
@@ -2493,6 +2606,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2522,6 +2636,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2551,6 +2666,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2590,6 +2706,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2616,6 +2733,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2642,6 +2760,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2683,6 +2802,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2711,6 +2831,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2739,6 +2860,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2802,6 +2924,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2842,6 +2965,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2894,6 +3018,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .is_ok()
         );
         assert_eq!(state.build_row_ids, Vec::new());
@@ -2928,6 +3053,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .is_ok()
         );
         assert_eq!(state.build_row_ids, Vec::new());
@@ -2989,6 +3115,7 @@ mod tests {
                 &mut left_state,
                 &mut right_state,
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -3036,6 +3163,7 @@ mod tests {
                 &mut left_state,
                 &mut right_state,
             )
+            .await
             .unwrap()
             .compact(),
             &expect

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,24 +13,20 @@
 // limitations under the License.
 
 #![allow(rustdoc::private_intra_doc_links)]
-#![feature(trait_alias)]
 #![feature(let_chains)]
-#![feature(binary_heap_drain_sorted)]
-#![feature(binary_heap_into_iter_sorted)]
-#![feature(is_sorted)]
 #![feature(fn_traits)]
 #![feature(assert_matches)]
 #![feature(lint_reasons)]
-#![feature(type_alias_impl_trait)]
-#![feature(generators)]
 #![feature(iterator_try_collect)]
 #![feature(exclusive_range_pattern)]
+#![feature(once_cell)]
+#![feature(try_blocks)]
 
-pub mod error;
+mod error;
 pub mod expr;
+pub mod sig;
 pub mod table_function;
 pub mod vector_op;
 
-pub use error::ExprError;
-pub use risingwave_common::{bail, ensure};
-pub type Result<T> = std::result::Result<T, ExprError>;
+pub use error::{ExprError, Result};
+use risingwave_common::{bail, ensure};

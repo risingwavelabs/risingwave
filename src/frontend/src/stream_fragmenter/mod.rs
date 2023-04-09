@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,18 +17,20 @@ use graph::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 mod rewrite;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use derivative::Derivative;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, DispatcherType, ExchangeNode, FragmentType,
+    DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag,
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
 use self::rewrite::build_delta_join_without_arrange;
+use crate::optimizer::plan_node::reorganize_elements_id;
 use crate::optimizer::PlanRef;
 
 /// The mutable state when building fragment graph.
@@ -48,8 +50,13 @@ pub struct BuildFragmentGraphState {
     #[derivative(Default(value = "u32::MAX - 1"))]
     next_operator_id: u32,
 
-    /// dependent table ids
+    /// dependent streaming job ids.
     dependent_table_ids: HashSet<TableId>,
+
+    /// operator id to `LocalFragmentId` mapping used by share operator.
+    share_mapping: HashMap<u32, LocalFragmentId>,
+    /// operator id to `StreamNode` mapping used by share operator.
+    share_stream_node_mapping: HashMap<u32, StreamNode>,
 }
 
 impl BuildFragmentGraphState {
@@ -77,9 +84,20 @@ impl BuildFragmentGraphState {
     pub fn gen_table_id_wrapped(&mut self) -> TableId {
         TableId::new(self.gen_table_id())
     }
+
+    pub fn add_share_stream_node(&mut self, operator_id: u32, stream_node: StreamNode) {
+        self.share_stream_node_mapping
+            .insert(operator_id, stream_node);
+    }
+
+    pub fn get_share_stream_node(&mut self, operator_id: u32) -> Option<&StreamNode> {
+        self.share_stream_node_mapping.get(&operator_id)
+    }
 }
 
 pub fn build_graph(plan_node: PlanRef) -> StreamFragmentGraphProto {
+    let plan_node = reorganize_elements_id(plan_node);
+
     let mut state = BuildFragmentGraphState::default();
     let stream_node = plan_node.to_stream_prost(&mut state);
     generate_fragment_graph(&mut state, stream_node).unwrap();
@@ -124,7 +142,8 @@ fn rewrite_stream_node(
 
                 let strategy = DispatchStrategy {
                     r#type: DispatcherType::NoShuffle.into(),
-                    column_indices: vec![], // TODO: use distribution key
+                    dist_key_indices: vec![], // TODO: use distribution key
+                    output_indices: (0..(child_node.fields.len() as u32)).collect(),
                 };
                 Ok(StreamNode {
                     stream_key: child_node.stream_key.clone(),
@@ -178,21 +197,33 @@ fn generate_fragment_graph(
 pub(self) fn build_and_add_fragment(
     state: &mut BuildFragmentGraphState,
     stream_node: StreamNode,
-) -> Result<StreamFragment> {
-    let mut fragment = state.new_stream_fragment();
-    let node = build_fragment(state, &mut fragment, stream_node)?;
+) -> Result<Rc<StreamFragment>> {
+    let operator_id = stream_node.operator_id as u32;
+    match state.share_mapping.get(&operator_id) {
+        None => {
+            let mut fragment = state.new_stream_fragment();
+            let node = build_fragment(state, &mut fragment, stream_node)?;
 
-    assert!(fragment.node.is_none());
-    fragment.node = Some(Box::new(node));
+            assert!(fragment.node.is_none());
+            fragment.node = Some(Box::new(node));
+            let fragment_ref = Rc::new(fragment);
 
-    state.fragment_graph.add_fragment(fragment.clone());
-    Ok(fragment)
+            state.fragment_graph.add_fragment(fragment_ref.clone());
+            state
+                .share_mapping
+                .insert(operator_id, fragment_ref.fragment_id);
+            Ok(fragment_ref)
+        }
+        Some(fragment_id) => Ok(state
+            .fragment_graph
+            .get_fragment(fragment_id)
+            .unwrap()
+            .clone()),
+    }
 }
 
 /// Build new fragment and link dependencies by visiting children recursively, update
-/// `is_singleton` and `fragment_type` properties for current fragment. While traversing the
-/// tree, count how many table ids should be allocated in this fragment.
-// TODO: Should we store the concurrency in StreamFragment directly?
+/// `requires_singleton` and `fragment_type` properties for current fragment.
 fn build_fragment(
     state: &mut BuildFragmentGraphState,
     current_fragment: &mut StreamFragment,
@@ -200,30 +231,46 @@ fn build_fragment(
 ) -> Result<StreamNode> {
     // Update current fragment based on the node we're visiting.
     match stream_node.get_node_body()? {
-        NodeBody::Source(_) => current_fragment.fragment_type = FragmentType::Source,
+        NodeBody::BarrierRecv(_) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::BarrierRecv as u32
+        }
 
-        NodeBody::Materialize(_) => current_fragment.fragment_type = FragmentType::Mview,
+        NodeBody::Source(_) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::Source as u32;
+        }
 
-        NodeBody::Sink(_) => current_fragment.fragment_type = FragmentType::Sink,
+        NodeBody::Materialize(_) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::Mview as u32;
+        }
 
-        // TODO: Force singleton for TopN as a workaround. We should implement two phase TopN.
-        NodeBody::TopN(_) => current_fragment.is_singleton = true,
+        NodeBody::Sink(_) => current_fragment.fragment_type_mask |= FragmentTypeFlag::Sink as u32,
 
-        // FIXME: workaround for single-fragment mview on singleton upstream mview.
+        NodeBody::TopN(_) => current_fragment.requires_singleton = true,
+
         NodeBody::Chain(node) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::ChainNode as u32;
             // memorize table id for later use
             state
                 .dependent_table_ids
                 .insert(TableId::new(node.table_id));
             current_fragment.upstream_table_ids.push(node.table_id);
-            current_fragment.is_singleton = node.is_singleton;
+        }
+
+        NodeBody::Now(_) => {
+            // TODO: Remove this and insert a `BarrierRecv` instead.
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::Now as u32;
+            current_fragment.requires_singleton = true;
+        }
+
+        NodeBody::Values(_) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::Values as u32;
+            current_fragment.requires_singleton = true;
         }
 
         _ => {}
     };
 
     // handle join logic
-    // TODO: frontend won't generate delta index join now, so this branch will never hit.
     if let NodeBody::DeltaIndexJoin(delta_index_join) = stream_node.node_body.as_mut().unwrap() {
         if delta_index_join.get_join_type()? == JoinType::Inner
             && delta_index_join.condition.is_none()
@@ -246,8 +293,6 @@ fn build_fragment(
                 // Exchange node indicates a new child fragment.
                 NodeBody::Exchange(exchange_node) => {
                     let exchange_node_strategy = exchange_node.get_strategy()?.clone();
-                    let is_simple_dispatcher =
-                        exchange_node_strategy.get_type()? == DispatcherType::Simple;
 
                     // Exchange node should have only one input.
                     let [input]: [_; 1] = std::mem::take(&mut child_node.input).try_into().unwrap();
@@ -257,14 +302,10 @@ fn build_fragment(
                         current_fragment.fragment_id,
                         StreamFragmentEdge {
                             dispatch_strategy: exchange_node_strategy,
-                            same_worker_node: false,
                             link_id: child_node.operator_id,
                         },
                     );
 
-                    if is_simple_dispatcher {
-                        current_fragment.is_singleton = true;
-                    }
                     Ok(child_node)
                 }
 

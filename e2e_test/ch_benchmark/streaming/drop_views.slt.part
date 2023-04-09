@@ -11,7 +11,16 @@ statement ok
 drop materialized view ch_benchmark_q4;
 
 statement ok
+drop materialized view ch_benchmark_q5;
+
+statement ok
 drop materialized view ch_benchmark_q6;
+
+statement ok
+drop materialized view ch_benchmark_q7;
+
+statement ok
+drop materialized view ch_benchmark_q8;
 
 statement ok
 drop materialized view ch_benchmark_q9;
@@ -42,6 +51,9 @@ drop materialized view ch_benchmark_q17;
 
 statement ok
 drop materialized view ch_benchmark_q18;
+
+statement ok
+drop materialized view ch_benchmark_q19;
 
 statement ok
 drop materialized view ch_benchmark_q20;

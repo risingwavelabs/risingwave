@@ -1,4 +1,4 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Reverse;
-use std::collections::{BTreeMap, BinaryHeap, VecDeque};
+use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -25,6 +24,7 @@ use risingwave_common::catalog::Schema;
 
 use super::error::StreamExecutorError;
 use super::exchange::input::BoxedInput;
+use super::watermark::*;
 use super::*;
 use crate::executor::exchange::input::new_input;
 use crate::executor::monitor::StreamingMetrics;
@@ -85,12 +85,12 @@ impl MergeExecutor {
     }
 
     #[cfg(test)]
-    pub fn for_test(inputs: Vec<super::exchange::permit::Receiver>) -> Self {
+    pub fn for_test(inputs: Vec<super::exchange::permit::Receiver>, schema: Schema) -> Self {
         use super::exchange::input::LocalInput;
         use crate::executor::exchange::input::Input;
 
         Self::new(
-            Schema::default(),
+            schema,
             vec![],
             ActorContext::create(114),
             514,
@@ -108,12 +108,12 @@ impl MergeExecutor {
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(self: Box<Self>) {
+    async fn execute_inner(mut self: Box<Self>) {
         // Futures of all active upstreams.
         let select_all = SelectReceivers::new(self.actor_context.id, self.upstreams);
         let actor_id = self.actor_context.id;
         let actor_id_str = actor_id.to_string();
-        let upstream_fragment_id_str = self.upstream_fragment_id.to_string();
+        let mut upstream_fragment_id_str = self.upstream_fragment_id.to_string();
 
         // Channels that're blocked by the barrier to align.
         let mut start_time = minstant::Instant::now();
@@ -144,13 +144,44 @@ impl MergeExecutor {
                     );
                     barrier.passed_actors.push(actor_id);
 
+                    if let Some(Mutation::Update { dispatchers, .. }) = barrier.mutation.as_deref()
+                    {
+                        if select_all
+                            .upstream_actor_ids()
+                            .iter()
+                            .any(|actor_id| dispatchers.contains_key(actor_id))
+                        {
+                            // `Watermark` of upstream may become stale after downstream scaling.
+                            select_all
+                                .buffered_watermarks
+                                .values_mut()
+                                .for_each(|buffers| buffers.clear());
+                        }
+                    }
+
                     if let Some(update) =
                         barrier.as_update_merge(self.actor_context.id, self.upstream_fragment_id)
                     {
-                        if !update.added_upstream_actor_id.is_empty() {
+                        let new_upstream_fragment_id = update
+                            .new_upstream_fragment_id
+                            .unwrap_or(self.upstream_fragment_id);
+                        let added_upstream_actor_id = update.added_upstream_actor_id.clone();
+                        let removed_upstream_actor_id: HashSet<_> =
+                            if update.new_upstream_fragment_id.is_some() {
+                                select_all.upstream_actor_ids().iter().copied().collect()
+                            } else {
+                                update.removed_upstream_actor_id.iter().copied().collect()
+                            };
+
+                        // `Watermark` of upstream may become stale after upstream scaling.
+                        select_all
+                            .buffered_watermarks
+                            .values_mut()
+                            .for_each(|buffers| buffers.clear());
+
+                        if !added_upstream_actor_id.is_empty() {
                             // Create new upstreams receivers.
-                            let new_upstreams: Vec<_> = update
-                                .added_upstream_actor_id
+                            let new_upstreams: Vec<_> = added_upstream_actor_id
                                 .iter()
                                 .map(|&upstream_actor_id| {
                                     new_input(
@@ -159,7 +190,7 @@ impl MergeExecutor {
                                         self.actor_context.id,
                                         self.fragment_id,
                                         upstream_actor_id,
-                                        self.upstream_fragment_id,
+                                        new_upstream_fragment_id,
                                     )
                                 })
                                 .try_collect()
@@ -174,24 +205,31 @@ impl MergeExecutor {
 
                             // Add the new upstreams to select.
                             select_all.add_upstreams_from(select_new);
+
+                            // Add buffers to the buffered watermarks for all cols
+                            select_all
+                                .buffered_watermarks
+                                .values_mut()
+                                .for_each(|buffers| {
+                                    buffers.add_buffers(added_upstream_actor_id.clone())
+                                });
                         }
 
-                        if !update.get_removed_upstream_actor_id().is_empty() {
+                        if !removed_upstream_actor_id.is_empty() {
                             // Remove upstreams.
-                            select_all.remove_upstreams(
-                                &update.removed_upstream_actor_id.iter().copied().collect(),
-                            );
+                            select_all.remove_upstreams(&removed_upstream_actor_id);
 
-                            let col_idxes =
-                                select_all.buffered_watermarks.keys().cloned().collect_vec();
-                            for col_idx in col_idxes {
+                            for buffers in select_all.buffered_watermarks.values_mut() {
                                 // Call `check_heap` in case the only upstream(s) that does not have
                                 // watermark in heap is removed
-                                if let Some(watermark) = select_all.check_watermark_heap(col_idx) {
-                                    yield Message::Watermark(watermark);
-                                }
+                                buffers.remove_buffer(removed_upstream_actor_id.clone());
                             }
                         }
+
+                        self.upstream_fragment_id = new_upstream_fragment_id;
+                        upstream_fragment_id_str = new_upstream_fragment_id.to_string();
+
+                        select_all.update_actor_ids();
                     }
                 }
             }
@@ -220,21 +258,6 @@ impl Executor for MergeExecutor {
     }
 }
 
-#[derive(Default)]
-struct StagedWatermarks {
-    in_heap: bool,
-    staged: VecDeque<Watermark>,
-}
-
-struct BufferedWatermarks {
-    /// We store the smallest watermark of each upstream, because the next watermark to emit is
-    /// among them.
-    pub first_buffered_watermarks: BinaryHeap<Reverse<(Watermark, ActorId)>>,
-    /// We buffer other watermarks of each upstream. The next-to-smallest one will become the
-    /// smallest when the smallest is emitted and be moved into heap.
-    pub other_buffered_watermarks: BTreeMap<ActorId, StagedWatermarks>,
-}
-
 /// A stream for merging messages from multiple upstreams.
 pub struct SelectReceivers {
     /// The barrier we're aligning to. If this is `None`, then `blocked_upstreams` is empty.
@@ -243,11 +266,13 @@ pub struct SelectReceivers {
     blocked: Vec<BoxedInput>,
     /// The upstreams that're not blocked and can be polled.
     active: FuturesUnordered<StreamFuture<BoxedInput>>,
+    /// All upstream actor ids.
+    upstream_actor_ids: Vec<ActorId>,
 
     /// The actor id of this fragment.
     actor_id: u32,
     /// watermark column index -> `BufferedWatermarks`
-    buffered_watermarks: BTreeMap<usize, BufferedWatermarks>,
+    buffered_watermarks: BTreeMap<usize, BufferedWatermarks<ActorId>>,
 }
 
 impl Stream for SelectReceivers {
@@ -320,7 +345,7 @@ impl Stream for SelectReceivers {
         // If this barrier asks the actor to stop, we do not reset the active upstreams so that the
         // next call would return `Poll::Ready(None)` due to `is_terminated`.
         let upstreams = std::mem::take(&mut self.blocked);
-        if barrier.is_stop_or_update_drop_actor(self.actor_id) {
+        if barrier.is_stop(self.actor_id) {
             drop(upstreams);
         } else {
             self.extend_active(upstreams);
@@ -334,12 +359,13 @@ impl Stream for SelectReceivers {
 impl SelectReceivers {
     fn new(actor_id: u32, upstreams: Vec<BoxedInput>) -> Self {
         assert!(!upstreams.is_empty());
-
+        let upstream_actor_ids = upstreams.iter().map(|input| input.actor_id()).collect();
         let mut this = Self {
             blocked: Vec::with_capacity(upstreams.len()),
             active: Default::default(),
             actor_id,
             barrier: None,
+            upstream_actor_ids,
             buffered_watermarks: Default::default(),
         };
         this.extend_active(upstreams);
@@ -355,64 +381,32 @@ impl SelectReceivers {
             .extend(upstreams.into_iter().map(|s| s.into_future()));
     }
 
-    /// The number of upstreams.
-    fn len(&self) -> usize {
-        self.blocked.len() + self.active.len()
+    fn upstream_actor_ids(&self) -> &[ActorId] {
+        &self.upstream_actor_ids
     }
 
-    /// Check the watermark heap and decide whether to emit a watermark message.
-    fn check_watermark_heap(&mut self, col_idx: usize) -> Option<Watermark> {
-        let len = self.len();
-        let mut watermark_to_transfer = None;
-        let col_data = self.buffered_watermarks.get_mut(&col_idx).unwrap();
-        while !col_data.first_buffered_watermarks.is_empty()
-            && (col_data.first_buffered_watermarks.len() == len
-                || watermark_to_transfer.as_ref().map_or(false, |watermark| {
-                    watermark == &col_data.first_buffered_watermarks.peek().unwrap().0 .0
-                }))
-        {
-            let Reverse((watermark, actor_id)) = col_data.first_buffered_watermarks.pop().unwrap();
-            watermark_to_transfer = Some(watermark);
-            let staged = col_data
-                .other_buffered_watermarks
-                .get_mut(&actor_id)
-                .unwrap();
-            if let Some(first) = staged.staged.pop_front() {
-                col_data
-                    .first_buffered_watermarks
-                    .push(Reverse((first, actor_id)));
-            } else {
-                staged.in_heap = false;
-            }
-        }
-        watermark_to_transfer
+    fn update_actor_ids(&mut self) {
+        self.upstream_actor_ids = self
+            .blocked
+            .iter()
+            .map(|input| input.actor_id())
+            .chain(
+                self.active
+                    .iter()
+                    .map(|input| input.get_ref().unwrap().actor_id()),
+            )
+            .collect();
     }
 
     /// Handle a new watermark message. Optionally returns the watermark message to emit.
     fn handle_watermark(&mut self, actor_id: ActorId, watermark: Watermark) -> Option<Watermark> {
         let col_idx = watermark.col_idx;
-        let len = self.len();
-        let watermarks =
-            self.buffered_watermarks
-                .entry(col_idx)
-                .or_insert_with(|| BufferedWatermarks {
-                    first_buffered_watermarks: BinaryHeap::with_capacity(len),
-                    other_buffered_watermarks: BTreeMap::default(),
-                });
-        let staged = watermarks
-            .other_buffered_watermarks
-            .entry(actor_id)
-            .or_default();
-        if staged.in_heap {
-            staged.staged.push_back(watermark);
-            None
-        } else {
-            staged.in_heap = true;
-            watermarks
-                .first_buffered_watermarks
-                .push(Reverse((watermark, actor_id)));
-            self.check_watermark_heap(col_idx)
-        }
+        // Insert a buffer watermarks when first received from a column.
+        let watermarks = self
+            .buffered_watermarks
+            .entry(col_idx)
+            .or_insert_with(|| BufferedWatermarks::with_ids(self.upstream_actor_ids.clone()));
+        watermarks.handle_watermark(actor_id, watermark)
     }
 
     /// Consume `other` and add its upstreams to `self`. The two streams must be at the clean state
@@ -435,16 +429,6 @@ impl SelectReceivers {
             .map(|s| s.into_inner().unwrap())
             .filter(|u| !upstream_actor_ids.contains(&u.actor_id()));
         self.extend_active(new_upstreams);
-
-        for BufferedWatermarks {
-            first_buffered_watermarks,
-            other_buffered_watermarks,
-        } in self.buffered_watermarks.values_mut()
-        {
-            first_buffered_watermarks
-                .retain(|Reverse((_, actor_id))| !upstream_actor_ids.contains(actor_id));
-            other_buffered_watermarks.retain(|actor_id, _| !upstream_actor_ids.contains(actor_id));
-        }
     }
 }
 
@@ -474,9 +458,9 @@ mod tests {
 
     use super::*;
     use crate::executor::exchange::input::RemoteInput;
-    use crate::executor::exchange::permit::channel;
+    use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::{Barrier, Executor, Mutation};
-    use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
+    use crate::task::test_utils::helper_make_local_actor;
 
     fn build_test_chunk(epoch: u64) -> StreamChunk {
         // The number of items in `ops` is the epoch count.
@@ -490,11 +474,11 @@ mod tests {
         let mut txs = Vec::with_capacity(CHANNEL_NUMBER);
         let mut rxs = Vec::with_capacity(CHANNEL_NUMBER);
         for _i in 0..CHANNEL_NUMBER {
-            let (tx, rx) = channel();
+            let (tx, rx) = channel_for_test();
             txs.push(tx);
             rxs.push(rx);
         }
-        let merger = MergeExecutor::for_test(rxs);
+        let merger = MergeExecutor::for_test(rxs, Schema::default());
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
         let epochs = (10..1000u64).step_by(10).collect_vec();
@@ -574,7 +558,7 @@ mod tests {
         let ctx = Arc::new(SharedContext::for_test());
         let metrics = Arc::new(StreamingMetrics::unused());
 
-        // 1. Register info and channels in context.
+        // 1. Register info in context.
         {
             let mut actor_infos = ctx.actor_infos.write();
 
@@ -582,10 +566,9 @@ mod tests {
                 actor_infos.insert(local_actor_id, helper_make_local_actor(local_actor_id));
             }
         }
-        add_local_channels(
-            ctx.clone(),
-            vec![(untouched, actor_id), (old, actor_id), (new, actor_id)],
-        );
+        // untouched -> actor_id
+        // old -> actor_id
+        // new -> actor_id
 
         let (upstream_fragment_id, fragment_id) = (10, 18);
 
@@ -650,6 +633,7 @@ mod tests {
             (actor_id, upstream_fragment_id) => MergeUpdate {
                 actor_id,
                 upstream_fragment_id,
+                new_upstream_fragment_id: None,
                 added_upstream_actor_id: vec![new],
                 removed_upstream_actor_id: vec![old],
             }
@@ -731,6 +715,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stream_exchange_client() {
+        const BATCHED_PERMITS: usize = 1024;
         let rpc_called = Arc::new(AtomicBool::new(false));
         let server_run = Arc::new(AtomicBool::new(false));
         let addr = "127.0.0.1:12348".parse().unwrap();
@@ -763,6 +748,7 @@ mod tests {
                 (0, 0),
                 (0, 0),
                 Arc::new(StreamingMetrics::unused()),
+                BATCHED_PERMITS,
             )
         };
 

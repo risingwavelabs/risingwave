@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,13 +15,15 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
+use cmd_impl::hummock::SstDumpArgs;
 
 use crate::cmd_impl::hummock::{
     build_compaction_config_vec, list_pinned_snapshots, list_pinned_versions,
 };
+use crate::common::CtlContext;
 
 pub mod cmd_impl;
-pub(crate) mod common;
+pub mod common;
 
 /// risectl provides internal access to the RisingWave cluster. Generally, you will need
 /// to provide the meta address and the state store URL to enable risectl to access the cluster. You
@@ -93,8 +95,11 @@ enum HummockCommands {
 
         #[clap(short, long = "table-id")]
         table_id: u32,
+
+        // data directory for hummock state store. None: use default
+        data_dir: Option<String>,
     },
-    SstDump,
+    SstDump(SstDumpArgs),
     /// trigger a targeted compaction through compaction_group_id
     TriggerManualCompaction {
         #[clap(short, long = "compaction-group-id", default_value_t = 2)]
@@ -131,8 +136,6 @@ enum HummockCommands {
         #[clap(long)]
         sub_level_max_compaction_bytes: Option<u64>,
         #[clap(long)]
-        level0_trigger_file_number: Option<u64>,
-        #[clap(long)]
         level0_tier_compact_file_number: Option<u64>,
         #[clap(long)]
         target_file_size_base: Option<u64>,
@@ -140,6 +143,15 @@ enum HummockCommands {
         compaction_filter_mask: Option<u32>,
         #[clap(long)]
         max_sub_compaction: Option<u32>,
+        #[clap(long)]
+        level0_stop_write_threshold_sub_level_number: Option<u64>,
+    },
+    /// Split given compaction group into two. Moves the given tables to the new group.
+    SplitCompactionGroup {
+        #[clap(long)]
+        compaction_group_id: u64,
+        #[clap(long)]
+        table_ids: Vec<u32>,
     },
 }
 
@@ -149,11 +161,15 @@ enum TableCommands {
     Scan {
         /// name of the materialized view to operate on
         mv_name: String,
+        // data directory for hummock state store. None: use default
+        data_dir: Option<String>,
     },
     /// scan a state table using Id
     ScanById {
         /// id of the state table to operate on
         table_id: u32,
+        // data directory for hummock state store. None: use default
+        data_dir: Option<String>,
     },
     /// list all state tables
     List,
@@ -167,6 +183,8 @@ enum MetaCommands {
     Resume,
     /// get cluster info
     ClusterInfo,
+    /// get source split info
+    SourceSplitInfo,
     /// Reschedule the parallel unit in the stream graph
     ///
     /// The format is `fragment_id-[removed]+[added]`
@@ -190,46 +208,91 @@ enum MetaCommands {
         #[clap(long)]
         dry_run: bool,
     },
+    /// backup meta by taking a meta snapshot
+    BackupMeta,
+    /// delete meta snapshots
+    DeleteMetaSnapshots { snapshot_ids: Vec<u64> },
+
+    /// Create a new connection object
+    CreateConnection {
+        #[clap(long)]
+        connection_name: String,
+        #[clap(long)]
+        provider: String,
+        #[clap(long)]
+        service_name: String,
+        #[clap(long)]
+        availability_zones: String,
+    },
+
+    /// List all existing connections in the catalog
+    ListConnections,
+
+    /// Drop a connection by its name
+    DropConnection {
+        #[clap(long)]
+        connection_name: String,
+    },
 }
 
 pub async fn start(opts: CliOpts) -> Result<()> {
+    let context = CtlContext::default();
+    let result = start_impl(opts, &context).await;
+    context.try_close().await;
+    result
+}
+
+pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
     match opts.command {
         Commands::Compute(ComputeCommands::ShowConfig { host }) => {
             cmd_impl::compute::show_config(&host).await?
         }
         Commands::Hummock(HummockCommands::DisableCommitEpoch) => {
-            cmd_impl::hummock::disable_commit_epoch().await?
+            cmd_impl::hummock::disable_commit_epoch(context).await?
         }
         Commands::Hummock(HummockCommands::ListVersion) => {
-            cmd_impl::hummock::list_version().await?;
+            cmd_impl::hummock::list_version(context).await?;
         }
         Commands::Hummock(HummockCommands::ListVersionDeltas {
             start_id,
             num_epochs,
         }) => {
-            cmd_impl::hummock::list_version_deltas(start_id, num_epochs).await?;
+            cmd_impl::hummock::list_version_deltas(context, start_id, num_epochs).await?;
         }
-        Commands::Hummock(HummockCommands::ListKv { epoch, table_id }) => {
-            cmd_impl::hummock::list_kv(epoch, table_id).await?;
+        Commands::Hummock(HummockCommands::ListKv {
+            epoch,
+            table_id,
+            data_dir,
+        }) => {
+            cmd_impl::hummock::list_kv(context, epoch, table_id, data_dir).await?;
         }
-        Commands::Hummock(HummockCommands::SstDump) => cmd_impl::hummock::sst_dump().await.unwrap(),
+        Commands::Hummock(HummockCommands::SstDump(args)) => {
+            cmd_impl::hummock::sst_dump(context, args).await.unwrap()
+        }
         Commands::Hummock(HummockCommands::TriggerManualCompaction {
             compaction_group_id,
             table_id,
             level,
         }) => {
-            cmd_impl::hummock::trigger_manual_compaction(compaction_group_id, table_id, level)
-                .await?
+            cmd_impl::hummock::trigger_manual_compaction(
+                context,
+                compaction_group_id,
+                table_id,
+                level,
+            )
+            .await?
         }
         Commands::Hummock(HummockCommands::TriggerFullGc {
             sst_retention_time_sec,
-        }) => cmd_impl::hummock::trigger_full_gc(sst_retention_time_sec).await?,
-        Commands::Hummock(HummockCommands::ListPinnedVersions {}) => list_pinned_versions().await?,
+        }) => cmd_impl::hummock::trigger_full_gc(context, sst_retention_time_sec).await?,
+        Commands::Hummock(HummockCommands::ListPinnedVersions {}) => {
+            list_pinned_versions(context).await?
+        }
         Commands::Hummock(HummockCommands::ListPinnedSnapshots {}) => {
-            list_pinned_snapshots().await?
+            list_pinned_snapshots(context).await?
         }
         Commands::Hummock(HummockCommands::ListCompactionGroup) => {
-            cmd_impl::hummock::list_compaction_group().await?
+            cmd_impl::hummock::list_compaction_group(context).await?
         }
         Commands::Hummock(HummockCommands::UpdateCompactionConfig {
             compaction_group_ids,
@@ -237,42 +300,80 @@ pub async fn start(opts: CliOpts) -> Result<()> {
             max_bytes_for_level_multiplier,
             max_compaction_bytes,
             sub_level_max_compaction_bytes,
-            level0_trigger_file_number,
             level0_tier_compact_file_number,
             target_file_size_base,
             compaction_filter_mask,
             max_sub_compaction,
+            level0_stop_write_threshold_sub_level_number,
         }) => {
             cmd_impl::hummock::update_compaction_config(
+                context,
                 compaction_group_ids,
                 build_compaction_config_vec(
                     max_bytes_for_level_base,
                     max_bytes_for_level_multiplier,
                     max_compaction_bytes,
                     sub_level_max_compaction_bytes,
-                    level0_trigger_file_number,
                     level0_tier_compact_file_number,
                     target_file_size_base,
                     compaction_filter_mask,
                     max_sub_compaction,
+                    level0_stop_write_threshold_sub_level_number,
                 ),
             )
             .await?
         }
-        Commands::Table(TableCommands::Scan { mv_name }) => cmd_impl::table::scan(mv_name).await?,
-        Commands::Table(TableCommands::ScanById { table_id }) => {
-            cmd_impl::table::scan_id(table_id).await?
+        Commands::Hummock(HummockCommands::SplitCompactionGroup {
+            compaction_group_id,
+            table_ids,
+        }) => {
+            cmd_impl::hummock::split_compaction_group(context, compaction_group_id, &table_ids)
+                .await?;
         }
-        Commands::Table(TableCommands::List) => cmd_impl::table::list().await?,
-        Commands::Bench(cmd) => cmd_impl::bench::do_bench(cmd).await?,
-        Commands::Meta(MetaCommands::Pause) => cmd_impl::meta::pause().await?,
-        Commands::Meta(MetaCommands::Resume) => cmd_impl::meta::resume().await?,
-        Commands::Meta(MetaCommands::ClusterInfo) => cmd_impl::meta::cluster_info().await?,
+        Commands::Table(TableCommands::Scan { mv_name, data_dir }) => {
+            cmd_impl::table::scan(context, mv_name, data_dir).await?
+        }
+        Commands::Table(TableCommands::ScanById { table_id, data_dir }) => {
+            cmd_impl::table::scan_id(context, table_id, data_dir).await?
+        }
+        Commands::Table(TableCommands::List) => cmd_impl::table::list(context).await?,
+        Commands::Bench(cmd) => cmd_impl::bench::do_bench(context, cmd).await?,
+        Commands::Meta(MetaCommands::Pause) => cmd_impl::meta::pause(context).await?,
+        Commands::Meta(MetaCommands::Resume) => cmd_impl::meta::resume(context).await?,
+        Commands::Meta(MetaCommands::ClusterInfo) => cmd_impl::meta::cluster_info(context).await?,
+        Commands::Meta(MetaCommands::SourceSplitInfo) => {
+            cmd_impl::meta::source_split_info(context).await?
+        }
         Commands::Meta(MetaCommands::Reschedule { plan, dry_run }) => {
-            cmd_impl::meta::reschedule(plan, dry_run).await?
+            cmd_impl::meta::reschedule(context, plan, dry_run).await?
         }
-        Commands::Trace => cmd_impl::trace::trace().await?,
-        Commands::Profile { sleep } => cmd_impl::profile::profile(sleep).await?,
+        Commands::Meta(MetaCommands::BackupMeta) => cmd_impl::meta::backup_meta(context).await?,
+        Commands::Meta(MetaCommands::DeleteMetaSnapshots { snapshot_ids }) => {
+            cmd_impl::meta::delete_meta_snapshots(context, &snapshot_ids).await?
+        }
+        Commands::Meta(MetaCommands::CreateConnection {
+            connection_name,
+            provider,
+            service_name,
+            availability_zones,
+        }) => {
+            cmd_impl::meta::create_connection(
+                context,
+                connection_name,
+                provider,
+                service_name,
+                availability_zones,
+            )
+            .await?
+        }
+        Commands::Meta(MetaCommands::ListConnections) => {
+            cmd_impl::meta::list_connections(context).await?
+        }
+        Commands::Meta(MetaCommands::DropConnection { connection_name }) => {
+            cmd_impl::meta::drop_connection(context, connection_name).await?
+        }
+        Commands::Trace => cmd_impl::trace::trace(context).await?,
+        Commands::Profile { sleep } => cmd_impl::profile::profile(context, sleep).await?,
     }
     Ok(())
 }

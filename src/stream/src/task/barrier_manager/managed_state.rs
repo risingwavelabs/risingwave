@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -97,8 +97,8 @@ impl ManagedBarrierState {
         if to_notify {
             while let Some((
                 _,
-                &BarrierState {
-                    inner: ref barrier_inner,
+                BarrierState {
+                    inner: barrier_inner,
                     ..
                 },
             )) = self.epoch_barrier_state_map.first_key_value()
@@ -123,8 +123,12 @@ impl ManagedBarrierState {
                         chain_actor_id: actor,
                         done: matches!(state, ChainState::Done),
                         consumed_epoch: match state {
-                            ChainState::ConsumingUpstream(consumed_epoch) => consumed_epoch,
+                            ChainState::ConsumingUpstream(consumed_epoch, _) => consumed_epoch,
                             ChainState::Done => epoch,
+                        },
+                        consumed_rows: match state {
+                            ChainState::ConsumingUpstream(_, consumed_rows) => consumed_rows,
+                            ChainState::Done => 0,
                         },
                     })
                     .collect();
@@ -153,6 +157,7 @@ impl ManagedBarrierState {
 
     /// Clear and reset all states.
     pub(crate) fn clear_all_states(&mut self) {
+        tracing::debug!("clear all states in local barrier manager");
         self.epoch_barrier_state_map.clear();
         self.create_mview_progress.clear();
         self.failure_actors.clear();

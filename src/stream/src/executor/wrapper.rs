@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -85,8 +85,9 @@ impl WrapperExecutor {
             extra.metrics,
             stream,
         );
-        // Stack trace
-        let stream = trace::stack_trace(info.clone(), extra.actor_id, extra.executor_id, stream);
+        // Await tree
+        let stream =
+            trace::instrument_await_tree(info.clone(), extra.actor_id, extra.executor_id, stream);
 
         // Schema check
         let stream = schema_check::schema_check(info.clone(), stream);
@@ -113,9 +114,12 @@ impl WrapperExecutor {
             extra.metrics,
             stream,
         );
-        // Stack trace
-        let stream = trace::stack_trace(info.clone(), extra.actor_id, extra.executor_id, stream);
+        // Await tree
+        let stream =
+            trace::instrument_await_tree(info.clone(), extra.actor_id, extra.executor_id, stream);
 
+        // Schema check
+        let stream = schema_check::schema_check(info.clone(), stream);
         // Epoch check
         let stream = epoch_check::epoch_check(info, stream);
 

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
+use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::{ChainNode, ChainType};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
@@ -36,12 +36,6 @@ impl ExecutorBuilder for ChainExecutorBuilder {
     ) -> StreamResult<BoxedExecutor> {
         let [mview, snapshot]: [_; 2] = params.input.try_into().unwrap();
 
-        let upstream_indices: Vec<usize> = node
-            .upstream_column_indices
-            .iter()
-            .map(|&i| i as usize)
-            .collect();
-
         // For reporting the progress.
         let progress = stream
             .context
@@ -51,25 +45,36 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         // its schema.
         let schema = snapshot.schema().clone();
 
+        let output_indices = node
+            .output_indices
+            .iter()
+            .map(|&i| i as usize)
+            .collect_vec();
+
+        // For `Chain`s other than `Backfill`, there should be no extra mapping required. We can
+        // directly output the columns received from the upstream or snapshot.
+        if !matches!(node.chain_type(), ChainType::Backfill) {
+            let all_indices = (0..schema.len()).collect_vec();
+            assert_eq!(output_indices, all_indices);
+        }
+
         let executor = match node.chain_type() {
-            ChainType::Chain => ChainExecutor::new(
-                snapshot,
-                mview,
-                upstream_indices,
-                progress,
-                schema,
-                params.pk_indices,
-            )
-            .boxed(),
-            ChainType::Rearrange => RearrangedChainExecutor::new(
-                snapshot,
-                mview,
-                upstream_indices,
-                progress,
-                schema,
-                params.pk_indices,
-            )
-            .boxed(),
+            ChainType::Chain | ChainType::UpstreamOnly => {
+                let upstream_only = matches!(node.chain_type(), ChainType::UpstreamOnly);
+                ChainExecutor::new(
+                    snapshot,
+                    mview,
+                    progress,
+                    schema,
+                    params.pk_indices,
+                    upstream_only,
+                )
+                .boxed()
+            }
+            ChainType::Rearrange => {
+                RearrangedChainExecutor::new(snapshot, mview, progress, schema, params.pk_indices)
+                    .boxed()
+            }
             ChainType::Backfill => {
                 let table_desc: &StorageTableDesc = node.get_table_desc()?;
                 let table_id = TableId {
@@ -79,9 +84,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 let order_types = table_desc
                     .pk
                     .iter()
-                    .map(|desc| {
-                        OrderType::from_prost(&ProstOrderType::from_i32(desc.order_type).unwrap())
-                    })
+                    .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
                     .collect_vec();
 
                 let column_descs = table_desc
@@ -89,19 +92,27 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     .iter()
                     .map(ColumnDesc::from)
                     .collect_vec();
-                let column_ids = column_descs.iter().map(|x| x.column_id).collect_vec();
+                let column_ids = node
+                    .upstream_column_ids
+                    .iter()
+                    .map(ColumnId::from)
+                    .collect_vec();
 
                 // Use indices based on full table instead of streaming executor output.
-                let pk_indices = table_desc.pk.iter().map(|k| k.index as usize).collect_vec();
+                let pk_indices = table_desc
+                    .pk
+                    .iter()
+                    .map(|k| k.column_index as usize)
+                    .collect_vec();
 
-                let dist_key_indices = table_desc
-                    .dist_key_indices
+                let dist_key_in_pk_indices = table_desc
+                    .dist_key_in_pk_indices
                     .iter()
                     .map(|&k| k as usize)
                     .collect_vec();
                 let distribution = match params.vnode_bitmap {
                     Some(vnodes) => Distribution {
-                        dist_key_indices,
+                        dist_key_in_pk_indices,
                         vnodes: vnodes.into(),
                     },
                     None => Distribution::fallback(),
@@ -119,6 +130,8 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     .iter()
                     .map(|&k| k as usize)
                     .collect_vec();
+                let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
+                let versioned = table_desc.versioned;
                 // TODO: refactor it with from_table_catalog in the future.
                 let table = StorageTable::new_partial(
                     state_store,
@@ -130,15 +143,18 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     distribution,
                     table_option,
                     value_indices,
+                    prefix_hint_len,
+                    versioned,
                 );
 
                 BackfillExecutor::new(
                     table,
                     mview,
-                    upstream_indices,
+                    output_indices,
                     progress,
                     schema,
                     params.pk_indices,
+                    stream.streaming_metrics.clone(),
                 )
                 .boxed()
             }

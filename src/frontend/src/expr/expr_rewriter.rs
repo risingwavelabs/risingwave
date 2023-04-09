@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use super::{
-    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery,
-    TableFunction, WindowFunction,
+    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Parameter, Subquery,
+    TableFunction, UserDefinedFunction, WindowFunction,
 };
 
 /// By default, `ExprRewriter` simply traverses the expression tree and leaves nodes unchanged.
@@ -31,6 +31,8 @@ pub trait ExprRewriter {
             ExprImpl::CorrelatedInputRef(inner) => self.rewrite_correlated_input_ref(*inner),
             ExprImpl::TableFunction(inner) => self.rewrite_table_function(*inner),
             ExprImpl::WindowFunction(inner) => self.rewrite_window_function(*inner),
+            ExprImpl::UserDefinedFunction(inner) => self.rewrite_user_defined_function(*inner),
+            ExprImpl::Parameter(inner) => self.rewrite_parameter(*inner),
         }
     }
     fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
@@ -53,6 +55,9 @@ pub trait ExprRewriter {
             .unwrap()
             .into()
     }
+    fn rewrite_parameter(&mut self, parameter: Parameter) -> ExprImpl {
+        parameter.into()
+    }
     fn rewrite_literal(&mut self, literal: Literal) -> ExprImpl {
         literal.into()
     }
@@ -70,6 +75,7 @@ pub trait ExprRewriter {
             args,
             return_type,
             function_type,
+            udtf_catalog,
         } = table_func;
         let args = args
             .into_iter()
@@ -79,6 +85,7 @@ pub trait ExprRewriter {
             args,
             return_type,
             function_type,
+            udtf_catalog,
         }
         .into()
     }
@@ -102,5 +109,13 @@ pub trait ExprRewriter {
             order_by,
         }
         .into()
+    }
+    fn rewrite_user_defined_function(&mut self, udf: UserDefinedFunction) -> ExprImpl {
+        let UserDefinedFunction { args, catalog } = udf;
+        let args = args
+            .into_iter()
+            .map(|expr| self.rewrite_expr(expr))
+            .collect();
+        UserDefinedFunction { args, catalog }.into()
     }
 }

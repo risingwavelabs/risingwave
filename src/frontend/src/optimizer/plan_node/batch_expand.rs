@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,34 +20,36 @@ use risingwave_pb::batch_plan::expand_node::Subset;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExpandNode;
 
+use super::{generic, ExprRewritable};
 use crate::optimizer::plan_node::{
-    LogicalExpand, PlanBase, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch, ToLocalBatch,
+    PlanBase, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
 use crate::optimizer::property::{Distribution, Order};
 use crate::optimizer::PlanRef;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchExpand {
     pub base: PlanBase,
-    logical: LogicalExpand,
+    logical: generic::Expand<PlanRef>,
 }
 
 impl BatchExpand {
-    pub fn new(logical: LogicalExpand) -> Self {
-        let ctx = logical.base.ctx.clone();
-        let dist = match logical.input().distribution() {
+    pub fn new(logical: generic::Expand<PlanRef>) -> Self {
+        let base = PlanBase::new_logical_with_core(&logical);
+        let ctx = base.ctx;
+        let dist = match logical.input.distribution() {
             Distribution::Single => Distribution::Single,
             Distribution::SomeShard
             | Distribution::HashShard(_)
             | Distribution::UpstreamHashShard(_, _) => Distribution::SomeShard,
             Distribution::Broadcast => unreachable!(),
         };
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
+        let base = PlanBase::new_batch(ctx, base.schema, dist, Order::any());
         BatchExpand { base, logical }
     }
 
-    pub fn column_subsets(&self) -> &Vec<Vec<usize>> {
-        self.logical.column_subsets()
+    pub fn column_subsets(&self) -> &[Vec<usize>] {
+        &self.logical.column_subsets
     }
 }
 
@@ -59,11 +61,13 @@ impl fmt::Display for BatchExpand {
 
 impl PlanTreeNodeUnary for BatchExpand {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let mut logical = self.logical.clone();
+        logical.input = input;
+        Self::new(logical)
     }
 }
 
@@ -76,7 +80,7 @@ impl ToDistributedBatch for BatchExpand {
     }
 }
 
-impl ToBatchProst for BatchExpand {
+impl ToBatchPb for BatchExpand {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Expand(ExpandNode {
             column_subsets: self
@@ -99,3 +103,5 @@ impl ToLocalBatch for BatchExpand {
         Ok(self.clone_with_input(new_input).into())
     }
 }
+
+impl ExprRewritable for BatchExpand {}

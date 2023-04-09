@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,13 +17,16 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use risingwave_common::catalog::TableId;
+use futures::{Stream, StreamExt, TryStreamExt};
+use futures_async_stream::try_stream;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::Epoch;
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType};
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 
-use crate::error::StorageResult;
-use crate::monitor::{MonitoredStateStore, StateStoreMetrics};
+use crate::error::{StorageError, StorageResult};
+use crate::hummock::CachePolicy;
+use crate::monitor::{MonitoredStateStore, MonitoredStorageMetrics};
 use crate::storage_value::StorageValue;
 use crate::write_batch::WriteBatch;
 
@@ -37,66 +40,26 @@ pub trait StateStoreIter: StaticSendSync {
     fn next(&mut self) -> Self::NextFuture<'_>;
 }
 
+pub trait StateStoreIterStreamTrait<Item> = Stream<Item = StorageResult<Item>> + Send + 'static;
 pub trait StateStoreIterExt: StateStoreIter {
-    type CollectFuture<'a>: Future<Output = StorageResult<Vec<<Self as StateStoreIter>::Item>>>
-        + Send
-        + 'a;
+    type ItemStream: StateStoreIterStreamTrait<<Self as StateStoreIter>::Item>;
 
-    fn map<B, F>(self, f: F) -> StateStoreMapIter<Self, F>
-    where
-        Self: Sized,
-        B: Send,
-        F: FnMut(Self::Item) -> B;
-
-    fn collect(&mut self, limit: Option<usize>) -> Self::CollectFuture<'_>;
+    fn into_stream(self) -> Self::ItemStream;
 }
 
+#[try_stream(ok = I::Item, error = StorageError)]
+async fn into_stream_inner<I: StateStoreIter>(mut iter: I) {
+    while let Some(item) = iter.next().await? {
+        yield item;
+    }
+}
+
+pub type StreamTypeOfIter<I> = <I as StateStoreIterExt>::ItemStream;
 impl<I: StateStoreIter> StateStoreIterExt for I {
-    type CollectFuture<'a> =
-        impl Future<Output = StorageResult<Vec<<Self as StateStoreIter>::Item>>> + Send + 'a;
+    type ItemStream = impl Stream<Item = StorageResult<<Self as StateStoreIter>::Item>>;
 
-    fn map<B, F>(self, f: F) -> StateStoreMapIter<Self, F>
-    where
-        Self: Sized,
-        B: Send,
-        F: FnMut(Self::Item) -> B,
-    {
-        StateStoreMapIter { iter: self, f }
-    }
-
-    fn collect(&mut self, limit: Option<usize>) -> Self::CollectFuture<'_> {
-        async move {
-            let mut kvs = Vec::with_capacity(limit.unwrap_or_default());
-
-            for _ in 0..limit.unwrap_or(usize::MAX) {
-                match self.next().await? {
-                    Some(kv) => kvs.push(kv),
-                    None => break,
-                }
-            }
-
-            Ok(kvs)
-        }
-    }
-}
-
-pub struct StateStoreMapIter<I, F> {
-    iter: I,
-    f: F,
-}
-
-impl<B, I, F> StateStoreIter for StateStoreMapIter<I, F>
-where
-    B: Send,
-    I: StateStoreIter,
-    F: FnMut(I::Item) -> B + StaticSendSync,
-{
-    type Item = B;
-
-    type NextFuture<'a> = impl Future<Output = StorageResult<Option<Self::Item>>> + Send + 'a;
-
-    fn next(&mut self) -> Self::NextFuture<'_> {
-        async move { Ok(self.iter.next().await?.map(&mut self.f)) }
+    fn into_stream(self) -> Self::ItemStream {
+        into_stream_inner(self)
     }
 }
 
@@ -104,43 +67,44 @@ where
 macro_rules! define_state_store_read_associated_type {
     () => {
         type GetFuture<'a> = impl GetFutureTrait<'a>;
-        type IterFuture<'a> = impl IterFutureTrait<'a, Self::Iter>;
+        type IterFuture<'a> = impl IterFutureTrait<'a, Self::IterStream>;
     };
 }
 
 pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send + 'a;
-pub trait IterFutureTrait<'a, I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)>> =
+pub type StateStoreIterItem = (FullKey<Bytes>, Bytes);
+pub trait StateStoreIterNextFutureTrait<'a> = NextFutureTrait<'a, StateStoreIterItem>;
+pub trait StateStoreIterItemStream = Stream<Item = StorageResult<StateStoreIterItem>> + Send;
+pub trait StateStoreReadIterStream = StateStoreIterItemStream + 'static;
+
+pub type IterKeyRange = (Bound<KeyPayloadType>, Bound<KeyPayloadType>);
+
+pub trait IterFutureTrait<'a, I: StateStoreReadIterStream> =
     Future<Output = StorageResult<I>> + Send + 'a;
 pub trait StateStoreRead: StaticSendSync {
-    type Iter: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)> + 'static;
+    type IterStream: StateStoreReadIterStream;
 
     type GetFuture<'a>: GetFutureTrait<'a>;
-    type IterFuture<'a>: IterFutureTrait<'a, Self::Iter>;
+    type IterFuture<'a>: IterFutureTrait<'a, Self::IterStream>;
 
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    fn get<'a>(
-        &'a self,
-        key: &'a [u8],
-        epoch: u64,
-        read_options: ReadOptions,
-    ) -> Self::GetFuture<'_>;
+    fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_>;
 
     /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
     /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
-    /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included in
-    /// `key_range`) The returned iterator will iterate data based on a snapshot corresponding to
-    /// the given `epoch`.
+    /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included
+    /// in `key_range`) The returned iterator will iterate data based on a snapshot
+    /// corresponding to the given `epoch`.
     fn iter(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_>;
 }
 
-pub trait ScanFutureTrait<'a> =
-    Future<Output = StorageResult<Vec<(FullKey<Vec<u8>>, Bytes)>>> + Send + 'a;
+pub trait ScanFutureTrait<'a> = Future<Output = StorageResult<Vec<StateStoreIterItem>>> + Send + 'a;
 
 pub trait StateStoreReadExt: StaticSendSync {
     type ScanFuture<'a>: ScanFutureTrait<'a>;
@@ -154,7 +118,7 @@ pub trait StateStoreReadExt: StaticSendSync {
     /// By default, this simply calls `StateStore::iter` to fetch elements.
     fn scan(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         epoch: u64,
         limit: Option<usize>,
         read_options: ReadOptions,
@@ -166,15 +130,20 @@ impl<S: StateStoreRead> StateStoreReadExt for S {
 
     fn scan(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         epoch: u64,
         limit: Option<usize>,
-        read_options: ReadOptions,
+        mut read_options: ReadOptions,
     ) -> Self::ScanFuture<'_> {
+        if limit.is_some() {
+            read_options.prefetch_options.exhaust_iter = false;
+        }
+        let limit = limit.unwrap_or(usize::MAX);
         async move {
             self.iter(key_range, epoch, read_options)
                 .await?
-                .collect(limit)
+                .take(limit)
+                .try_collect()
                 .await
         }
     }
@@ -261,8 +230,8 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
 
     /// Creates a [`MonitoredStateStore`] from this state store, with given `stats`.
-    fn monitored(self, stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {
-        MonitoredStateStore::new(self, stats)
+    fn monitored(self, storage_metrics: Arc<MonitoredStorageMetrics>) -> MonitoredStateStore<Self> {
+        MonitoredStateStore::new(self, storage_metrics)
     }
 
     /// Clears contents in shared buffer.
@@ -271,34 +240,91 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
         todo!()
     }
 
-    fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_>;
+    fn new_local(&self, option: NewLocalOptions) -> Self::NewLocalFuture<'_>;
+
+    /// Validates whether store can serve `epoch` at the moment.
+    fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
+}
+
+pub trait MayExistTrait<'a> = Future<Output = StorageResult<bool>> + Send + 'a;
+
+#[macro_export]
+macro_rules! define_local_state_store_associated_type {
+    () => {
+        type MayExistFuture<'a> = impl MayExistTrait<'a>;
+    };
 }
 
 /// A state store that is dedicated for streaming operator, which only reads the uncommitted data
 /// written by itself. Each local state store is not `Clone`, and is owned by a streaming state
 /// table.
-pub trait LocalStateStore: StateStoreRead + StateStoreWrite + StaticSendSync {
+pub trait LocalStateStore: StaticSendSync {
+    type IterStream<'a>: StateStoreIterItemStream + 'a;
+
+    type MayExistFuture<'a>: MayExistTrait<'a>;
+    type GetFuture<'a>: GetFutureTrait<'a>;
+    type IterFuture<'a>: Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
+    type FlushFuture<'a>: Future<Output = StorageResult<usize>> + Send + 'a;
+
+    /// Point gets a value from the state store.
+    /// The result is based on the latest written snapshot.
+    fn get(&self, key: Bytes, read_options: ReadOptions) -> Self::GetFuture<'_>;
+
+    /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
+    /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
+    /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included
+    /// in `key_range`) The returned iterator will iterate data based on the latest written
+    /// snapshot.
+    fn iter(&self, key_range: IterKeyRange, read_options: ReadOptions) -> Self::IterFuture<'_>;
+
     /// Inserts a key-value entry associated with a given `epoch` into the state store.
-    fn insert(&self, _key: Bytes, _val: Bytes) -> StorageResult<()> {
-        unimplemented!()
-    }
+    fn insert(&mut self, key: Bytes, new_val: Bytes, old_val: Option<Bytes>) -> StorageResult<()>;
 
     /// Deletes a key-value entry from the state store. Only the key-value entry with epoch smaller
     /// than the given `epoch` will be deleted.
-    fn delete(&self, _key: Bytes) -> StorageResult<()> {
-        unimplemented!()
-    }
+    fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()>;
 
-    /// Triggers a flush to persistent storage for the in-memory states.
-    fn flush(&self) -> StorageResult<usize> {
-        unimplemented!()
-    }
+    fn flush(&mut self, delete_ranges: Vec<(Bytes, Bytes)>) -> Self::FlushFuture<'_>;
+
+    fn epoch(&self) -> u64;
+
+    fn is_dirty(&self) -> bool;
+
+    fn init(&mut self, epoch: u64);
 
     /// Updates the monotonically increasing write epoch to `new_epoch`.
     /// All writes after this function is called will be tagged with `new_epoch`. In other words,
     /// the previous write epoch is sealed.
-    fn advance_write_epoch(&mut self, _new_epoch: u64) -> StorageResult<()> {
-        unimplemented!()
+    fn seal_current_epoch(&mut self, next_epoch: u64);
+
+    /// Check existence of a given `key_range`.
+    /// It is better to provide `prefix_hint` in `read_options`, which will be used
+    /// for checking bloom filter if hummock is used. If `prefix_hint` is not provided,
+    /// the false positive rate can be significantly higher because bloom filter cannot
+    /// be used.
+    ///
+    /// Returns:
+    /// - false: `key_range` is guaranteed to be absent in storage.
+    /// - true: `key_range` may or may not exist in storage.
+    fn may_exist(
+        &self,
+        key_range: IterKeyRange,
+        read_options: ReadOptions,
+    ) -> Self::MayExistFuture<'_>;
+}
+
+/// If `exhaust_iter` is true, prefetch will be enabled. Prefetching may increase the memory
+/// footprint of the CN process because the prefetched blocks cannot be evicted.
+#[derive(Default, Clone, Copy)]
+pub struct PrefetchOptions {
+    /// `exhaust_iter` is set `true` only if the return value of `iter()` will definitely be
+    /// exhausted, i.e., will iterate until end.
+    pub exhaust_iter: bool,
+}
+
+impl PrefetchOptions {
+    pub fn new_for_exhaust_iter() -> Self {
+        Self { exhaust_iter: true }
     }
 }
 
@@ -307,12 +333,16 @@ pub struct ReadOptions {
     /// A hint for prefix key to check bloom filter.
     /// If the `prefix_hint` is not None, it should be included in
     /// `key` or `key_range` in the read API.
-    pub prefix_hint: Option<Vec<u8>>,
+    pub prefix_hint: Option<Bytes>,
     pub ignore_range_tombstone: bool,
-    pub check_bloom_filter: bool,
+    pub prefetch_options: PrefetchOptions,
+    pub cache_policy: CachePolicy,
 
     pub retention_seconds: Option<u32>,
     pub table_id: TableId,
+    /// Read from historical hummock version of meta snapshot backup.
+    /// It should only be used by `StorageTable` for batch query.
+    pub read_version_from_backup: bool,
 }
 
 pub fn gen_min_epoch(base_epoch: u64, retention_seconds: Option<&u32>) -> u64 {
@@ -331,4 +361,30 @@ pub fn gen_min_epoch(base_epoch: u64, retention_seconds: Option<&u32>) -> u64 {
 pub struct WriteOptions {
     pub epoch: u64,
     pub table_id: TableId,
+}
+
+#[derive(Clone, Default)]
+pub struct NewLocalOptions {
+    pub table_id: TableId,
+    /// Whether the operation is consistent. The term `consistent` requires the following:
+    ///
+    /// 1. A key cannot be inserted or deleted for more than once, i.e. inserting to an existing
+    /// key or deleting an non-existing key is not allowed.
+    ///
+    /// 2. The old value passed from
+    /// `update` and `delete` should match the original stored value.
+    pub is_consistent_op: bool,
+    pub table_option: TableOption,
+}
+
+impl NewLocalOptions {
+    pub fn for_test(table_id: TableId) -> Self {
+        Self {
+            table_id,
+            is_consistent_op: false,
+            table_option: TableOption {
+                retention_seconds: None,
+            },
+        }
+    }
 }

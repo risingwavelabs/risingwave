@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,12 +18,15 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::LimitNode;
 
-use super::{LogicalLimit, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use super::{
+    ExprRewritable, LogicalLimit, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb,
+    ToDistributedBatch,
+};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Order, RequiredDist};
 
 /// `BatchLimit` implements [`super::LogicalLimit`] to fetch specified rows from input
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchLimit {
     pub base: PlanBase,
     logical: LogicalLimit,
@@ -46,10 +49,25 @@ impl BatchLimit {
         let new_offset = 0;
         let logical_partial_limit = LogicalLimit::new(input, new_limit, new_offset);
         let batch_partial_limit = Self::new(logical_partial_limit);
-        let ensure_single_dist = RequiredDist::single()
-            .enforce_if_not_satisfies(batch_partial_limit.into(), &Order::any())?;
+        let any_order = Order::any();
+        let ensure_single_dist = RequiredDist::single().enforce_if_not_satisfies(
+            batch_partial_limit.into(),
+            if self.order().column_orders.is_empty() {
+                &any_order
+            } else {
+                self.order()
+            },
+        )?;
         let batch_global_limit = self.clone_with_input(ensure_single_dist);
         Ok(batch_global_limit.into())
+    }
+
+    pub fn limit(&self) -> u64 {
+        self.logical.limit
+    }
+
+    pub fn offset(&self) -> u64 {
+        self.logical.offset
     }
 }
 
@@ -80,7 +98,7 @@ impl ToDistributedBatch for BatchLimit {
     }
 }
 
-impl ToBatchProst for BatchLimit {
+impl ToBatchPb for BatchLimit {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Limit(LimitNode {
             limit: self.logical.limit(),
@@ -94,3 +112,5 @@ impl ToLocalBatch for BatchLimit {
         self.two_phase_limit(self.input().to_local()?)
     }
 }
+
+impl ExprRewritable for BatchLimit {}

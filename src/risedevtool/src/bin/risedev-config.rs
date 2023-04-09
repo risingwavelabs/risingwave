@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,15 +14,16 @@
 
 #![allow(clippy::needless_question_mark)]
 
-use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 
-use anyhow::{anyhow, Context, Result};
-use clap::{ArgEnum, Parser, Subcommand};
+use anyhow::{Context, Result};
+use clap::{Parser, Subcommand, ValueEnum};
 use console::style;
 use dialoguer::MultiSelect;
 use enum_iterator::{all, Sequence};
+use fs_err::OpenOptions;
 use itertools::Itertools;
+use risedev::RISEDEV_CONFIG_FILE;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -41,31 +42,32 @@ enum Commands {
     /// Enable one component
     Enable {
         /// Component to enable
-        #[clap(arg_enum)]
+        #[clap(value_enum)]
         component: Components,
     },
     /// Disable one component
     Disable {
         /// Component to disable
-        #[clap(arg_enum)]
+        #[clap(value_enum)]
         component: Components,
     },
     /// Use default configuration
     Default,
 }
 
-#[derive(Clone, Copy, Debug, Sequence, PartialEq, Eq, ArgEnum)]
+#[derive(Clone, Copy, Debug, Sequence, PartialEq, Eq, ValueEnum)]
 pub enum Components {
     #[clap(name = "minio")]
     Minio,
+    Hdfs,
     PrometheusAndGrafana,
     Etcd,
     Kafka,
     Pubsub,
     Redis,
-    ConnectorNode,
     Tracing,
     RustComponents,
+    BuildConnectorNode,
     Dashboard,
     Release,
     AllInOne,
@@ -77,12 +79,13 @@ impl Components {
     pub fn title(&self) -> String {
         match self {
             Self::Minio => "[Component] Hummock: MinIO + MinIO-CLI",
+            Self::Hdfs => "[Component] Hummock: Hdfs Backend",
             Self::PrometheusAndGrafana => "[Component] Metrics: Prometheus + Grafana",
             Self::Etcd => "[Component] Etcd",
             Self::Kafka => "[Component] Kafka",
             Self::Pubsub => "[Component] Google Pubsub",
             Self::Redis => "[Component] Redis",
-            Self::ConnectorNode => "[Component] RisingWave Connector",
+            Self::BuildConnectorNode => "[Build] Build RisingWave Connector (Java)",
             Self::RustComponents => "[Build] Rust components",
             Self::Dashboard => "[Build] Dashboard v2",
             Self::Tracing => "[Component] Tracing: Jaeger",
@@ -97,6 +100,10 @@ impl Components {
     pub fn description(&self) -> String {
         match self {
             Self::Minio => {
+                "
+Required by Hummock state store."
+            }
+            Self::Hdfs => {
                 "
 Required by Hummock state store."
             }
@@ -158,9 +165,9 @@ a dev cluster.
 Required if you want to sink data to redis.
                 "
             }
-            Self::ConnectorNode => {
+            Self::BuildConnectorNode => {
                 "
-Required if you want to create CDC source from external Databases.
+Required if you want to build Connector Node from source locally.
                 "
             }
             Self::HummockTracing => {
@@ -179,6 +186,7 @@ USE_HM_TRACE=true
     pub fn from_env(env: impl AsRef<str>) -> Option<Self> {
         match env.as_ref() {
             "ENABLE_MINIO" => Some(Self::Minio),
+            "ENABLE_HDFS" => Some(Self::Hdfs),
             "ENABLE_PROMETHEUS_GRAFANA" => Some(Self::PrometheusAndGrafana),
             "ENABLE_ETCD" => Some(Self::Etcd),
             "ENABLE_KAFKA" => Some(Self::Kafka),
@@ -192,6 +200,7 @@ USE_HM_TRACE=true
             "ENABLE_REDIS" => Some(Self::Redis),
             "ENABLE_RW_CONNECTOR" => Some(Self::ConnectorNode),
             "ENABLE_HM_TRACE" => Some(Self::HummockTracing),
+            "ENABLE_BUILD_RW_CONNECTOR" => Some(Self::BuildConnectorNode),
             _ => None,
         }
     }
@@ -199,10 +208,11 @@ USE_HM_TRACE=true
     pub fn env(&self) -> String {
         match self {
             Self::Minio => "ENABLE_MINIO",
+            Self::Hdfs => "ENABLE_HDFS",
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
             Self::Etcd => "ENABLE_ETCD",
             Self::Kafka => "ENABLE_KAFKA",
-            Self::Pubsub => "ENABLE_PUBSUB_EMU",
+            Self::Pubsub => "ENABLE_PUBSUB",
             Self::Redis => "ENABLE_REDIS",
             Self::RustComponents => "ENABLE_BUILD_RUST",
             Self::Dashboard => "ENABLE_BUILD_DASHBOARD_V2",
@@ -212,6 +222,7 @@ USE_HM_TRACE=true
             Self::Sanitizer => "ENABLE_SANITIZER",
             Self::ConnectorNode => "ENABLE_RW_CONNECTOR",
             Self::HummockTracing => "ENABLE_HM_TRACE",
+            Self::BuildConnectorNode => "ENABLE_BUILD_RW_CONNECTOR",
         }
         .into()
     }
@@ -221,19 +232,8 @@ USE_HM_TRACE=true
     }
 }
 
-fn configure(chosen: &[Components]) -> Result<Vec<Components>> {
+fn configure(chosen: &[Components]) -> Result<Option<Vec<Components>>> {
     println!("=== Configure RiseDev ===");
-    println!();
-    println!("RiseDev includes several components. You can select the ones you need, so as to reduce build time.");
-    println!();
-    println!(
-        "Use {} to navigate between up / down, use {} to go to next page,\nand use {} to select an item. Press {} to continue.",
-        style("arrow up / down").bold(),
-        style("arrow left / right").bold(),
-        style("space").bold(),
-        style("enter").bold()
-    );
-    println!();
 
     let all_components = all::<Components>().collect_vec();
 
@@ -241,8 +241,7 @@ fn configure(chosen: &[Components]) -> Result<Vec<Components>> {
 
     let items = all_components
         .iter()
-        .enumerate()
-        .map(|(idx, c)| {
+        .map(|c| {
             let title = c.title();
             let desc = style(
                 ("\n".to_string() + c.description().trim())
@@ -251,33 +250,32 @@ fn configure(chosen: &[Components]) -> Result<Vec<Components>> {
             )
             .dim();
 
-            let instruction = if (idx + 1) % ITEMS_PER_PAGE == 0 || idx == all_components.len() - 1
-            {
-                format!(
-                    "\n\n  page {}/{}",
-                    style(((idx + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE).to_string()).bold(),
-                    (all_components.len() + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE,
-                )
-            } else {
-                String::new()
-            };
-
-            (format!("{title}{desc}{instruction}",), chosen.contains(c))
+            (format!("{title}{desc}",), chosen.contains(c))
         })
         .collect_vec();
 
-    let chosen_indices: Vec<usize> = MultiSelect::new()
+    let Some(chosen_indices) = MultiSelect::new()
+        .with_prompt(
+            format!(
+                "RiseDev includes several components. You can select the ones you need, so as to reduce build time\n\n{}: navigate\n{}: confirm and save   {}: quit without saving\n\nPick items with {}",
+                style("↑ / ↓ / ← / → ").reverse(),
+                style("Enter").reverse(),
+                style("Esc / q").reverse(),
+                style("Space").reverse(),
+            )
+        )
         .items_checked(&items)
         .max_length(ITEMS_PER_PAGE)
-        .interact_opt()?
-        .ok_or_else(|| anyhow!("no selection made"))?;
+        .interact_opt()? else {
+        return Ok(None);
+    };
 
     let chosen = chosen_indices
         .into_iter()
         .map(|i| all_components[i])
         .collect_vec();
 
-    Ok(chosen)
+    Ok(Some(chosen))
 }
 
 fn main() -> Result<()> {
@@ -335,7 +333,14 @@ fn main() -> Result<()> {
         Some(Commands::Disable { component }) => {
             chosen.into_iter().filter(|x| x != component).collect()
         }
-        None => configure(&chosen)?,
+        None => match configure(&chosen)? {
+            Some(chosen) => chosen,
+            None => {
+                println!("Quit without saving");
+                println!("=========================");
+                return Ok(());
+            }
+        },
     };
 
     println!("=== Enabled Components ===");
@@ -390,7 +395,7 @@ fn main() -> Result<()> {
     println!(
         "If you want to use these components, please {} in {} to start that component.",
         style("modify the cluster config").yellow().bold(),
-        style("risedev.yml").bold(),
+        style(RISEDEV_CONFIG_FILE).bold(),
     );
     println!("See CONTRIBUTING.md or RiseDev's readme for more information.");
 

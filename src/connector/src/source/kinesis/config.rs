@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,14 +17,12 @@ use std::collections::HashMap;
 use anyhow::{anyhow, Result};
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_config::sts::AssumeRoleProvider;
-use aws_sdk_kinesis::Client;
 use aws_types::credentials::SharedCredentialsProvider;
 use aws_types::region::Region;
-use http::Uri;
 use maplit::hashmap;
 use serde::{Deserialize, Serialize};
 
-use crate::source::kinesis::KinesisProperties;
+use crate::common::KinesisCommon;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AwsAssumeRole {
@@ -91,7 +89,7 @@ impl AwsConfigInfo {
         Ok(config_loader.load().await)
     }
 
-    pub fn build(properties: KinesisProperties) -> Result<Self> {
+    pub fn build(properties: KinesisCommon) -> Result<Self> {
         let stream_name = properties.stream_name;
         let region = properties.stream_region;
 
@@ -139,15 +137,4 @@ pub fn kinesis_demo_properties() -> HashMap<String, String> {
     "connector".to_string() => "kinesis".to_string()};
 
     properties
-}
-
-pub async fn build_client(properties: KinesisProperties) -> Result<Client> {
-    let config = AwsConfigInfo::build(properties)?;
-    let aws_config = config.load().await?;
-    let mut builder = aws_sdk_kinesis::config::Builder::from(&aws_config);
-    if let Some(endpoint) = &config.endpoint {
-        let uri = endpoint.clone().parse::<Uri>().unwrap();
-        builder = builder.endpoint_resolver(aws_smithy_http::endpoint::Endpoint::immutable(uri));
-    }
-    Ok(Client::from_conf(builder.build()))
 }

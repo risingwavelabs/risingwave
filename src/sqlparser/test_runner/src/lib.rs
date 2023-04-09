@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,17 +14,27 @@
 
 // Data-driven tests.
 
+use std::fmt::Display;
+
 use anyhow::{anyhow, Result};
 use risingwave_sqlparser::parser::Parser;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// `TestCase` will be deserialized from yaml.
-#[derive(PartialEq, Eq, Debug, Deserialize)]
-struct TestCase {
-    input: String,
-    formatted_sql: Option<String>,
-    error_msg: Option<String>,
-    formatted_ast: Option<String>,
+#[serde_with::skip_serializing_none]
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TestCase {
+    pub input: String,
+    pub formatted_sql: Option<String>,
+    pub error_msg: Option<String>,
+    pub formatted_ast: Option<String>,
+}
+
+impl Display for TestCase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&serde_yaml::to_string(self).unwrap())
+    }
 }
 
 fn run_test_case(c: TestCase) -> Result<()> {
@@ -97,7 +107,14 @@ pub fn run_all_test_files() {
     use walkdir::WalkDir;
     for entry in WalkDir::new("../tests/testdata/") {
         let entry = entry.unwrap();
-        if !entry.path().is_file() {
+        if !(entry.path().is_file()) {
+            continue;
+        }
+        if !(entry
+            .path()
+            .extension()
+            .map_or(false, |p| p.eq_ignore_ascii_case("yaml")))
+        {
             continue;
         }
         let file_content = std::fs::read_to_string(entry.path()).unwrap();

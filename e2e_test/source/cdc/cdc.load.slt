@@ -1,63 +1,65 @@
 # CDC source basic test
 
 statement ok
-create materialized source products ( id INT,
+create table products ( id INT,
  name STRING,
  description STRING,
  PRIMARY KEY (id)
 ) with (
- connector = 'cdc',
- database.hostname = 'mysql',
- database.port = '3306',
- database.user = 'root',
- database.password = '123456',
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
  database.name = 'mydb',
- table.name = 'products'
-) row format debezium_json;
+ table.name = 'products',
+ server.id = '5085'
+);
 
 statement ok
 create materialized view products_cnt as select count(*) as cnt from products;
 
-# Since timestamp type cannot parse properly, use bigint for order_date instead
 statement ok
-create materialized source orders (
+create table orders (
    order_id int,
-   order_date bigint,
+   order_date timestamp,
    customer_name string,
    price decimal,
    product_id int,
    order_status smallint,
    PRIMARY KEY (order_id)
 ) with (
- connector = 'cdc',
- database.hostname = 'mysql',
- database.port = '3306',
- database.user = 'root',
- database.password = '123456',
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
  database.name = 'mydb',
- table.name = 'orders'
-) row format debezium_json;
+ table.name = 'orders',
+ server.id = '5086'
+);
 
 statement ok
 create materialized view orders_cnt as select count(*) as cnt from orders;
 
 statement ok
-create materialized source shipments (
+create table shipments (
   shipment_id INTEGER,
   order_id INTEGER,
   origin STRING,
   destination STRING,
-  is_arrived smallint,
+  is_arrived boolean,
  PRIMARY KEY (shipment_id)
 ) with (
- connector = 'cdc',
- database.hostname = 'mysql',
- database.port = '3306',
- database.user = 'root',
- database.password = '123456',
- database.name = 'mydb',
- table.name = 'shipments'
-) row format debezium_json;
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'postgres',
+ password = 'postgres',
+ database.name = 'cdc_test',
+ table.name = 'shipments',
+ slot.name = 'shipments'
+);
 
 statement ok
 create materialized view shipments_cnt as select count(*) as cnt from shipments;
@@ -68,3 +70,20 @@ create materialized view enriched_orders as SELECT o.*, p.name, p.description, s
  FROM orders AS o
  LEFT JOIN products AS p ON o.product_id = p.id
  LEFT JOIN shipments AS s ON o.order_id = s.order_id;
+
+statement ok
+create table mytable (
+  v1 INTEGER,
+  v2 INTEGER,
+  v3 STRING,
+ PRIMARY KEY (v1)
+) with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'mydb',
+ table.name = 'mytable',
+ server.id = '5087'
+);

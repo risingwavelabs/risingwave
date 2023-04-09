@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,7 +15,7 @@
 use std::slice;
 
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_expr::expr::{AggKind, ExpressionRef};
 
 /// An aggregation function may accept 0, 1 or 2 arguments.
@@ -62,7 +62,7 @@ pub struct AggCall {
     pub return_type: DataType,
 
     /// Order requirements specified in order by clause of agg call
-    pub order_pairs: Vec<OrderPair>,
+    pub column_orders: Vec<ColumnOrder>,
 
     /// Whether the stream is append-only.
     /// Specific streaming aggregator may optimize its implementation
@@ -71,4 +71,7 @@ pub struct AggCall {
 
     /// Filter of aggregation.
     pub filter: Option<ExpressionRef>,
+
+    /// Should deduplicate the input before aggregation.
+    pub distinct: bool,
 }

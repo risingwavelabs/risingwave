@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,16 +14,19 @@
 
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::error::Result;
 
 use super::{
-    generic, BatchProjectSet, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchProjectSet, ColPrunable, ExprRewritable, LogicalProject,
+    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction};
-use crate::optimizer::plan_node::generic::GenericPlanNode;
-use crate::optimizer::property::{FunctionalDependencySet, Order};
-use crate::utils::{ColIndexMapping, Condition};
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+};
+use crate::optimizer::property::Order;
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 
 /// `LogicalProjectSet` projects one row multiple times according to `select_list`.
 ///
@@ -33,7 +36,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// To have a pk, it has a hidden column `projected_row_id` at the beginning. The implementation of
 /// `LogicalProjectSet` is highly similar to [`LogicalProject`], except for the additional hidden
 /// column.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalProjectSet {
     pub base: PlanBase,
     core: generic::ProjectSet<PlanRef>,
@@ -47,13 +50,7 @@ impl LogicalProjectSet {
         );
 
         let core = generic::ProjectSet { select_list, input };
-
-        let ctx = core.ctx();
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
-        let functional_dependency = Self::derive_fd(&core, core.input.functional_dependency());
-
-        let base = PlanBase::new_logical(ctx, schema, pk_indices.unwrap(), functional_dependency);
+        let base = PlanBase::new_logical_with_core(&core);
 
         LogicalProjectSet { base, core }
     }
@@ -91,6 +88,7 @@ impl LogicalProjectSet {
                         args,
                         return_type,
                         function_type,
+                        udtf_catalog,
                     } = table_func;
                     let args = args
                         .into_iter()
@@ -102,6 +100,7 @@ impl LogicalProjectSet {
                         args,
                         return_type,
                         function_type,
+                        udtf_catalog,
                     }
                     .into()
                 } else {
@@ -169,14 +168,6 @@ impl LogicalProjectSet {
                 LogicalProject::new(inner, select_list).into()
             }
         }
-    }
-
-    fn derive_fd(
-        core: &generic::ProjectSet<PlanRef>,
-        input_fd_set: &FunctionalDependencySet,
-    ) -> FunctionalDependencySet {
-        let i2o = core.i2o_col_mapping();
-        i2o.rewrite_functional_dependency_set(input_fd_set.clone())
     }
 
     pub fn select_list(&self) -> &Vec<ExprImpl> {
@@ -247,17 +238,42 @@ impl fmt::Display for LogicalProjectSet {
 }
 
 impl ColPrunable for LogicalProjectSet {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
-        // TODO: column pruning for ProjectSet
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+        // TODO: column pruning for ProjectSet https://github.com/risingwavelabs/risingwave/issues/8593
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
-        LogicalProject::with_mapping(self.clone().into(), mapping).into()
+        let new_input = {
+            let input = self.input();
+            let required = (0..input.schema().len()).collect_vec();
+            input.prune_col(&required, ctx)
+        };
+        LogicalProject::with_mapping(self.clone_with_input(new_input).into(), mapping).into()
+    }
+}
+
+impl ExprRewritable for LogicalProjectSet {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self {
+            base: self.base.clone_with_new_plan_id(),
+            core,
+        }
+        .into()
     }
 }
 
 impl PredicatePushdown for LogicalProjectSet {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
-        // TODO: predicate pushdown for ProjectSet
-        LogicalFilter::create(self.clone().into(), predicate)
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
+        // TODO: predicate pushdown https://github.com/risingwavelabs/risingwave/issues/8591
+        gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx)
     }
 }
 
@@ -270,8 +286,11 @@ impl ToBatch for LogicalProjectSet {
 }
 
 impl ToStream for LogicalProjectSet {
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input().logical_rewrite_for_stream()?;
+    fn logical_rewrite_for_stream(
+        &self,
+        ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (project_set, out_col_change) =
             self.rewrite_with_input(input.clone(), input_col_change);
 
@@ -303,8 +322,8 @@ impl ToStream for LogicalProjectSet {
 
     // TODO: implement to_stream_with_dist_required like LogicalProject
 
-    fn to_stream(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_stream()?;
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        let new_input = self.input().to_stream(ctx)?;
         let new_logical = self.clone_with_input(new_input);
         Ok(StreamProjectSet::new(new_logical).into())
     }
@@ -319,9 +338,9 @@ mod test {
 
     use super::*;
     use crate::expr::{ExprImpl, InputRef, TableFunction};
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;
-    use crate::session::OptimizerContext;
 
     #[tokio::test]
     async fn fd_derivation_project_set() {

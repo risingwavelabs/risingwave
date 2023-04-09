@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,10 +14,10 @@
 
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::array::{ArrayRef, DataChunk, ListValue};
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, DatumRef, ScalarRefImpl, ToDatumRef};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
@@ -313,21 +313,22 @@ impl ArrayConcatExpression {
     }
 }
 
+#[async_trait::async_trait]
 impl Expression for ArrayConcatExpression {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let left_array = self.left.eval_checked(input)?;
-        let right_array = self.right.eval_checked(input)?;
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let left_array = self.left.eval_checked(input).await?;
+        let right_array = self.right.eval_checked(input).await?;
         let mut builder = self
             .return_type
             .create_array_builder(left_array.len() + right_array.len());
         for (vis, (left, right)) in input
             .vis()
             .iter()
-            .zip_eq(left_array.iter().zip_eq(right_array.iter()))
+            .zip_eq_fast(left_array.iter().zip_eq_fast(right_array.iter()))
         {
             if !vis {
                 builder.append_null();
@@ -338,9 +339,9 @@ impl Expression for ArrayConcatExpression {
         Ok(Arc::new(builder.finish()))
     }
 
-    fn eval_row(&self, input: &Row) -> Result<Datum> {
-        let left_data = self.left.eval_row(input)?;
-        let right_data = self.right.eval_row(input)?;
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        let left_data = self.left.eval_row(input).await?;
+        let right_data = self.right.eval_row(input).await?;
         Ok(self.evaluate(left_data.to_datum_ref(), right_data.to_datum_ref()))
     }
 }
@@ -382,10 +383,11 @@ impl<'a> TryFrom<&'a ExprNode> for ArrayConcatExpression {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
     use risingwave_common::array::DataChunk;
     use risingwave_common::types::ScalarImpl;
-    use risingwave_pb::data::Datum as ProstDatum;
-    use risingwave_pb::expr::expr_node::{RexNode, Type as ProstType};
+    use risingwave_pb::data::PbDatum;
+    use risingwave_pb::expr::expr_node::{PbType, RexNode};
     use risingwave_pb::expr::{ExprNode, FunctionCall};
 
     use super::*;
@@ -393,9 +395,9 @@ mod tests {
 
     fn make_i64_expr_node(value: i64) -> ExprNode {
         ExprNode {
-            expr_type: ProstType::ConstantValue as i32,
+            expr_type: PbType::ConstantValue as i32,
             return_type: Some(DataType::Int64.to_protobuf()),
-            rex_node: Some(RexNode::Constant(ProstDatum {
+            rex_node: Some(RexNode::Constant(PbDatum {
                 body: value.to_be_bytes().to_vec(),
             })),
         }
@@ -403,7 +405,7 @@ mod tests {
 
     fn make_i64_array_expr_node(values: Vec<i64>) -> ExprNode {
         ExprNode {
-            expr_type: ProstType::Array as i32,
+            expr_type: PbType::Array as i32,
             return_type: Some(
                 DataType::List {
                     datatype: Box::new(DataType::Int64),
@@ -418,7 +420,7 @@ mod tests {
 
     fn make_i64_array_array_expr_node(values: Vec<Vec<i64>>) -> ExprNode {
         ExprNode {
-            expr_type: ProstType::Array as i32,
+            expr_type: PbType::Array as i32,
             return_type: Some(
                 DataType::List {
                     datatype: Box::new(DataType::List {
@@ -439,7 +441,7 @@ mod tests {
             let left = make_i64_array_expr_node(vec![42]);
             let right = make_i64_array_expr_node(vec![43]);
             let expr = ExprNode {
-                expr_type: ProstType::ArrayCat as i32,
+                expr_type: PbType::ArrayCat as i32,
                 return_type: Some(
                     DataType::List {
                         datatype: Box::new(DataType::Int64),
@@ -457,7 +459,7 @@ mod tests {
             let left = make_i64_array_array_expr_node(vec![vec![42]]);
             let right = make_i64_array_array_expr_node(vec![vec![43]]);
             let expr = ExprNode {
-                expr_type: ProstType::ArrayCat as i32,
+                expr_type: PbType::ArrayCat as i32,
                 return_type: Some(
                     DataType::List {
                         datatype: Box::new(DataType::Int64),
@@ -475,7 +477,7 @@ mod tests {
             let left = make_i64_array_expr_node(vec![42]);
             let right = make_i64_expr_node(43);
             let expr = ExprNode {
-                expr_type: ProstType::ArrayAppend as i32,
+                expr_type: PbType::ArrayAppend as i32,
                 return_type: Some(
                     DataType::List {
                         datatype: Box::new(DataType::Int64),
@@ -493,7 +495,7 @@ mod tests {
             let left = make_i64_array_array_expr_node(vec![vec![42]]);
             let right = make_i64_array_expr_node(vec![43]);
             let expr = ExprNode {
-                expr_type: ProstType::ArrayAppend as i32,
+                expr_type: PbType::ArrayAppend as i32,
                 return_type: Some(
                     DataType::List {
                         datatype: Box::new(DataType::Int64),
@@ -511,7 +513,7 @@ mod tests {
             let left = make_i64_expr_node(43);
             let right = make_i64_array_expr_node(vec![42]);
             let expr = ExprNode {
-                expr_type: ProstType::ArrayPrepend as i32,
+                expr_type: PbType::ArrayPrepend as i32,
                 return_type: Some(
                     DataType::List {
                         datatype: Box::new(DataType::Int64),
@@ -529,7 +531,7 @@ mod tests {
             let left = make_i64_array_expr_node(vec![43]);
             let right = make_i64_array_array_expr_node(vec![vec![42]]);
             let expr = ExprNode {
-                expr_type: ProstType::ArrayPrepend as i32,
+                expr_type: PbType::ArrayPrepend as i32,
                 return_type: Some(
                     DataType::List {
                         datatype: Box::new(DataType::Int64),
@@ -554,8 +556,8 @@ mod tests {
         .boxed()
     }
 
-    #[test]
-    fn test_array_concat_array_of_primitives() {
+    #[tokio::test]
+    async fn test_array_concat_array_of_primitives() {
         let left = make_i64_array_expr(vec![42]);
         let right = make_i64_array_expr(vec![43, 44]);
         let expr = ArrayConcatExpression::new(
@@ -582,6 +584,7 @@ mod tests {
         ];
         let actual = expr
             .eval(&chunk)
+            .await
             .unwrap()
             .iter()
             .map(|v| v.map(|s| s.into_scalar_impl()))

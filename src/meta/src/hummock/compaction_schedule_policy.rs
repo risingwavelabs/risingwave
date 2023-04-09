@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::HummockContextId;
@@ -41,6 +42,7 @@ pub trait CompactionSchedulePolicy: Send + Sync {
         &mut self,
         context_id: HummockContextId,
         max_concurrent_task_number: u64,
+        cpu_core_num: u32,
     ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>>;
 
     /// Make sure the compactor with `context_id` will not be scheduled until it resubscribes.
@@ -77,6 +79,10 @@ pub trait CompactionSchedulePolicy: Send + Sync {
     fn compactor_num(&self) -> usize;
 
     fn max_concurrent_task_num(&self) -> usize;
+
+    fn total_cpu_core_num(&self) -> u32;
+
+    fn total_running_cpu_core_num(&self) -> u32;
 }
 
 // This strategy is retained just for reference, it is not used.
@@ -141,13 +147,19 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
         &mut self,
         context_id: HummockContextId,
         max_concurrent_task_number: u64,
+        cpu_core_num: u32,
     ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
         let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
         self.compactors.retain(|c| *c != context_id);
         self.compactors.push(context_id);
         self.compactor_map.insert(
             context_id,
-            Arc::new(Compactor::new(context_id, tx, max_concurrent_task_number)),
+            Arc::new(Compactor::new(
+                context_id,
+                tx,
+                max_concurrent_task_number,
+                cpu_core_num,
+            )),
         );
         rx
     }
@@ -189,6 +201,17 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
             .map(|c| c.max_concurrent_task_number() as usize)
             .sum()
     }
+
+    fn total_cpu_core_num(&self) -> u32 {
+        self.compactor_map.values().map(|c| c.total_cpu_core).sum()
+    }
+
+    fn total_running_cpu_core_num(&self) -> u32 {
+        self.compactor_map
+            .values()
+            .map(|c| c.cpu_ratio.load(Ordering::Acquire) * c.total_cpu_core / 100)
+            .sum()
+    }
 }
 
 /// The score must be linear to the input for easy update.
@@ -198,7 +221,6 @@ type Score = i64;
 
 /// Give priority to compactors with the least score. Currently the score is composed only of
 /// pending bytes compaction tasks.
-#[derive(Default)]
 pub struct ScoredPolicy {
     // We use `(score, context_id)` as the key to dedup compactor with the same pending
     // bytes.
@@ -224,6 +246,7 @@ impl ScoredPolicy {
                 .and_modify(|old_score| *old_score += score_delta)
                 .or_insert(score_delta);
         });
+
         Self {
             score_to_compactor: BTreeMap::new(),
             context_id_to_score: compactor_to_score,
@@ -233,7 +256,8 @@ impl ScoredPolicy {
     #[cfg(test)]
     fn for_test() -> Self {
         Self {
-            ..Default::default()
+            score_to_compactor: BTreeMap::default(),
+            context_id_to_score: HashMap::default(),
         }
     }
 
@@ -269,20 +293,35 @@ impl ScoredPolicy {
     }
 }
 
+impl ScoredPolicy {
+    fn fetch_idle_compactor(
+        &self,
+        compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
+    ) -> Option<Arc<Compactor>> {
+        for compactor in self.score_to_compactor.values() {
+            let running_task = *compactor_assigned_task_num
+                .get(&compactor.context_id())
+                .unwrap_or(&0);
+
+            if running_task >= compactor.max_concurrent_task_number() {
+                continue;
+            }
+
+            return Some(compactor.clone());
+        }
+        None
+    }
+}
+
 impl CompactionSchedulePolicy for ScoredPolicy {
     fn next_idle_compactor(
         &self,
         compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
     ) -> Option<Arc<Compactor>> {
-        for compactor in self.score_to_compactor.values() {
-            if *compactor_assigned_task_num
-                .get(&compactor.context_id())
-                .unwrap_or(&0)
-                < compactor.max_concurrent_task_number()
-            {
-                return Some(compactor.clone());
-            }
+        if let Some(compactor) = self.fetch_idle_compactor(compactor_assigned_task_num) {
+            return Some(compactor);
         }
+
         None
     }
 
@@ -298,13 +337,19 @@ impl CompactionSchedulePolicy for ScoredPolicy {
         &mut self,
         context_id: HummockContextId,
         max_concurrent_task_number: u64,
+        cpu_core_num: u32,
     ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
         let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
         // If `context_id` already exists, we only need to update the task channel.
         let score = self.context_id_to_score.entry(context_id).or_insert(0);
         self.score_to_compactor.insert(
             (*score, context_id),
-            Arc::new(Compactor::new(context_id, tx, max_concurrent_task_number)),
+            Arc::new(Compactor::new(
+                context_id,
+                tx,
+                max_concurrent_task_number,
+                cpu_core_num,
+            )),
         );
         rx
     }
@@ -360,6 +405,23 @@ impl CompactionSchedulePolicy for ScoredPolicy {
             .map(|c| c.max_concurrent_task_number() as usize)
             .sum()
     }
+
+    fn total_cpu_core_num(&self) -> u32 {
+        self.score_to_compactor
+            .values()
+            .map(|c| c.total_cpu_core)
+            .sum()
+    }
+
+    fn total_running_cpu_core_num(&self) -> u32 {
+        self.score_to_compactor
+            .values()
+            .map(|c| {
+                (c.cpu_ratio.load(Ordering::Acquire) as f64 * c.total_cpu_core as f64 / 100.0)
+                    .ceil() as u32
+            })
+            .sum()
+    }
 }
 
 #[cfg(test)]
@@ -369,12 +431,13 @@ mod tests {
     use risingwave_common::try_match_expand;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::HummockContextId;
-    use risingwave_pb::hummock::compact_task::TaskStatus;
+    use risingwave_pb::hummock::compact_task::{self, TaskStatus};
     use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
     use risingwave_pb::hummock::{CompactTask, CompactTaskAssignment, InputLevel, SstableInfo};
     use tokio::sync::mpsc::error::TryRecvError;
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
+    use crate::hummock::compaction::default_level_selector;
     use crate::hummock::compaction_schedule_policy::{
         CompactionSchedulePolicy, RoundRobinPolicy, ScoredPolicy,
     };
@@ -413,14 +476,17 @@ mod tests {
                 level_idx: 0,
                 level_type: 0,
                 table_infos: vec![SstableInfo {
-                    id: 0,
+                    object_id: 0,
+                    sst_id: 0,
                     key_range: None,
                     file_size: input_file_size,
                     table_ids: vec![],
                     meta_offset: 0,
                     stale_key_count: 0,
                     total_key_count: 0,
-                    divide_version: 0,
+                    uncompressed_file_size: input_file_size,
+                    min_epoch: 0,
+                    max_epoch: 0,
                 }],
             }],
             splits: vec![],
@@ -438,6 +504,8 @@ mod tests {
             table_options: HashMap::default(),
             current_epoch_time: 0,
             target_sub_level_id: 0,
+            task_type: compact_task::TaskType::Dynamic as i32,
+            split_by_state_table: false,
         }
     }
 
@@ -448,10 +516,10 @@ mod tests {
         assert_eq!(policy.compactors.len(), 0);
         assert_eq!(policy.max_concurrent_task_num(), 0);
 
-        let mut receiver = policy.add_compactor(1, 1000);
+        let mut receiver = policy.add_compactor(1, 1000, 1000);
         assert_eq!(policy.compactors.len(), 1);
         assert_eq!(policy.max_concurrent_task_num(), 1000);
-        let _receiver_2 = policy.add_compactor(2, 1000);
+        let _receiver_2 = policy.add_compactor(2, 1000, 1000);
         assert_eq!(policy.compactors.len(), 2);
         assert_eq!(policy.max_concurrent_task_num(), 2000);
         policy.remove_compactor(2);
@@ -503,7 +571,7 @@ mod tests {
         assert!(compactor_manager.next_compactor().is_none());
 
         // Add a compactor.
-        let mut receiver = compactor_manager.add_compactor(context_id, u64::MAX);
+        let mut receiver = compactor_manager.add_compactor(context_id, u64::MAX, 16);
         assert_eq!(compactor_manager.compactors.len(), 1);
         let compactor = compactor_manager.next_compactor().unwrap();
         // No compact task.
@@ -513,7 +581,10 @@ mod tests {
         ));
 
         let task = hummock_manager
-            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+            .get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                &mut default_level_selector(),
+            )
             .await
             .unwrap()
             .unwrap();
@@ -537,7 +608,7 @@ mod tests {
         let mut policy = RoundRobinPolicy::new();
         let mut receivers = vec![];
         for context_id in 0..5 {
-            receivers.push(policy.add_compactor(context_id, u64::MAX));
+            receivers.push(policy.add_compactor(context_id, u64::MAX, 16));
         }
         assert_eq!(policy.compactors.len(), 5);
         let task = dummy_compact_task(0, 1);
@@ -574,7 +645,7 @@ mod tests {
         assert!(policy.next_compactor().is_none());
 
         // Adding existing compactor does not change score.
-        policy.add_compactor(0, u64::MAX);
+        policy.add_compactor(0, u64::MAX, 16);
         assert_eq!(policy.score_to_compactor.len(), 1);
         assert_eq!(policy.context_id_to_score.len(), existing_tasks.len());
         assert_eq!(*policy.context_id_to_score.get(&0).unwrap(), 1);
@@ -587,11 +658,11 @@ mod tests {
         assert_eq!(policy.context_id_to_score.len(), 0);
         assert_eq!(policy.score_to_compactor.len(), 0);
 
-        policy.add_compactor(1, 1000);
+        policy.add_compactor(1, 1000, 1000);
         assert_eq!(policy.context_id_to_score.len(), 1);
         assert_eq!(policy.score_to_compactor.len(), 1);
         assert_eq!(policy.max_concurrent_task_num(), 1000);
-        let _receiver_2 = policy.add_compactor(2, 1000);
+        let _receiver_2 = policy.add_compactor(2, 1000, 1000);
         assert_eq!(policy.context_id_to_score.len(), 2);
         assert_eq!(policy.score_to_compactor.len(), 2);
         assert_eq!(policy.max_concurrent_task_num(), 2000);
@@ -605,7 +676,7 @@ mod tests {
         assert_eq!(policy.context_id_to_score.len(), 1);
         assert_eq!(policy.score_to_compactor.len(), 0);
 
-        let mut receiver = policy.add_compactor(1, 1000);
+        let mut receiver = policy.add_compactor(1, 1000, 1000);
         assert_eq!(policy.context_id_to_score.len(), 1);
         assert_eq!(policy.score_to_compactor.len(), 1);
         assert_eq!(policy.max_concurrent_task_num(), 1000);
@@ -657,7 +728,7 @@ mod tests {
 
         // Add 3 compactors.
         for context_id in 0..3 {
-            policy.add_compactor(context_id, u64::MAX);
+            policy.add_compactor(context_id, u64::MAX, 16);
         }
 
         let task1 = dummy_compact_task(0, 5);
@@ -714,7 +785,7 @@ mod tests {
 
         // Add 2 compactors.
         for context_id in 0..2 {
-            policy.add_compactor(context_id, 2);
+            policy.add_compactor(context_id, 2, 16);
         }
 
         let task1 = dummy_compact_task(0, 1);

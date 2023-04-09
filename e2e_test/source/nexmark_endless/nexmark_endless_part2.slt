@@ -1,0 +1,44 @@
+include ../../nexmark/create_sources.slt.part
+include ../../streaming/nexmark/views/q7.slt.part
+
+sleep 20s
+
+query I
+select count(*) > 0 from (select * from nexmark_q7 limit 1);
+----
+t
+
+statement ok
+drop materialized view nexmark_q7;
+
+include ../../nexmark/drop_sources.slt.part
+
+include ../../nexmark/create_sources.slt.part
+include ../../streaming/nexmark/views/q8.slt.part
+
+sleep 20s
+
+query I
+select count(*) > 0 from (select * from nexmark_q8 limit 1);
+----
+t
+
+statement ok
+drop materialized view nexmark_q8;
+
+include ../../nexmark/drop_sources.slt.part
+
+include ../../nexmark/create_sources.slt.part
+include ../../streaming/nexmark/views/q9.slt.part
+
+sleep 25s
+
+query I
+select count(*) > 0 from (select * from nexmark_q9 limit 1);
+----
+t
+
+statement ok
+drop materialized view nexmark_q9;
+
+include ../../nexmark/drop_sources.slt.part

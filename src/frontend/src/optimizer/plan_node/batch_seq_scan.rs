@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,16 +20,18 @@ use risingwave_common::error::Result;
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::row_seq_scan_node::ChunkSize;
 use risingwave_pb::batch_plan::{RowSeqScanNode, SysRowSeqScanNode};
-use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
+use risingwave_pb::plan_common::PbColumnDesc;
 
-use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
+use super::{ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch};
 use crate::catalog::ColumnId;
+use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{LogicalScan, ToLocalBatch};
-use crate::optimizer::property::{Distribution, DistributionDisplay};
+use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
 
 /// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSeqScan {
     pub base: PlanBase,
     logical: LogicalScan,
@@ -39,12 +41,12 @@ pub struct BatchSeqScan {
 impl BatchSeqScan {
     fn new_inner(logical: LogicalScan, dist: Distribution, scan_ranges: Vec<ScanRange>) -> Self {
         let ctx = logical.base.ctx.clone();
-        let base = PlanBase::new_batch(
-            ctx,
-            logical.schema().clone(),
-            dist,
-            logical.get_out_column_index_order(),
-        );
+        let order = if scan_ranges.len() > 1 {
+            Order::any()
+        } else {
+            logical.get_out_column_index_order()
+        };
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, order);
 
         {
             // validate scan_range
@@ -212,13 +214,13 @@ impl ToDistributedBatch for BatchSeqScan {
     }
 }
 
-impl ToBatchProst for BatchSeqScan {
+impl ToBatchPb for BatchSeqScan {
     fn to_batch_prost_body(&self) -> NodeBody {
         let column_descs = self
             .logical
             .column_descs()
             .iter()
-            .map(ProstColumnDesc::from)
+            .map(PbColumnDesc::from)
             .collect();
 
         if self.logical.is_sys_table() {
@@ -238,6 +240,11 @@ impl ToBatchProst for BatchSeqScan {
                 scan_ranges: self.scan_ranges.iter().map(|r| r.to_protobuf()).collect(),
                 // To be filled by the scheduler.
                 vnode_bitmap: None,
+                ordered: !self.order().is_any(),
+                chunk_size: self
+                    .logical
+                    .chunk_size()
+                    .map(|chunk_size| ChunkSize { chunk_size }),
             })
         }
     }
@@ -245,6 +252,37 @@ impl ToBatchProst for BatchSeqScan {
 
 impl ToLocalBatch for BatchSeqScan {
     fn to_local(&self) -> Result<PlanRef> {
-        Ok(self.clone_with_dist().into())
+        let dist =
+        if self.logical.is_sys_table() {
+            Distribution::Single
+        } else if let Some(distribution_key) = self.logical.distribution_key()
+        && !distribution_key.is_empty() {
+            Distribution::UpstreamHashShard(
+                distribution_key,
+                self.logical.table_desc().table_id,
+            )
+        } else {
+            // NOTE(kwannoel): This is a hack to force an exchange to always be inserted before scan.
+            Distribution::SomeShard
+        };
+        Ok(Self::new_inner(self.logical.clone(), dist, self.scan_ranges.clone()).into())
+    }
+}
+
+impl ExprRewritable for BatchSeqScan {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_scan()
+                .unwrap()
+                .clone(),
+            self.scan_ranges.clone(),
+        )
+        .into()
     }
 }

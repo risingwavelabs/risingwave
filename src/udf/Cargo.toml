@@ -1,0 +1,21 @@
+[package]
+name = "risingwave_udf"
+version = "0.1.0"
+edition = "2021"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
+[dependencies]
+arrow-array = "36"
+arrow-flight = "36"
+arrow-schema = "36"
+arrow-select = "36"
+futures-util = "0.3.25"
+thiserror = "1"
+tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "macros"] }
+tonic = { version = "0.2", package = "madsim-tonic" }

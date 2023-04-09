@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,7 +15,7 @@
 use std::backtrace::Backtrace;
 use std::sync::Arc;
 
-use risingwave_pb::ProstFieldNotFound;
+use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::RpcError;
 
 use crate::hummock::error::Error as HummockError;
@@ -45,6 +45,9 @@ enum MetaErrorInner {
     #[error("Invalid worker: {0}")]
     InvalidWorker(WorkerId),
 
+    #[error("Invalid parameter: {0}")]
+    InvalidParameter(String),
+
     // Used for catalog errors.
     #[error("{0} id not found: {1}")]
     CatalogIdNotFound(&'static str, u32),
@@ -54,6 +57,15 @@ enum MetaErrorInner {
 
     #[error("Service unavailable: {0}")]
     Unavailable(String),
+
+    #[error("Election failed: {0}")]
+    Election(etcd_client::Error),
+
+    #[error("Cancelled: {0}")]
+    Cancelled(String),
+
+    #[error("SystemParams error: {0}")]
+    SystemParams(String),
 
     #[error(transparent)]
     Internal(anyhow::Error),
@@ -105,6 +117,10 @@ impl MetaError {
         std::matches!(self.inner.borrow(), &MetaErrorInner::InvalidWorker(_))
     }
 
+    pub fn invalid_parameter(s: impl Into<String>) -> Self {
+        MetaErrorInner::InvalidParameter(s.into()).into()
+    }
+
     pub fn catalog_id_not_found<T: Into<u32>>(relation: &'static str, id: T) -> Self {
         MetaErrorInner::CatalogIdNotFound(relation, id.into()).into()
     }
@@ -113,8 +129,16 @@ impl MetaError {
         MetaErrorInner::Duplicated(relation, name.into()).into()
     }
 
+    pub fn system_param<T: ToString>(s: T) -> Self {
+        MetaErrorInner::SystemParams(s.to_string()).into()
+    }
+
     pub fn unavailable(s: String) -> Self {
         MetaErrorInner::Unavailable(s).into()
+    }
+
+    pub fn cancelled(s: String) -> Self {
+        MetaErrorInner::Cancelled(s).into()
     }
 }
 
@@ -130,6 +154,12 @@ impl From<HummockError> for MetaError {
     }
 }
 
+impl From<etcd_client::Error> for MetaError {
+    fn from(e: etcd_client::Error) -> Self {
+        MetaErrorInner::Election(e).into()
+    }
+}
+
 impl From<RpcError> for MetaError {
     fn from(e: RpcError) -> Self {
         MetaErrorInner::RpcError(e).into()
@@ -142,6 +172,15 @@ impl From<anyhow::Error> for MetaError {
     }
 }
 
+impl<E> From<aws_sdk_ec2::types::SdkError<E>> for MetaError
+where
+    E: std::error::Error + Sync + Send + 'static,
+{
+    fn from(e: aws_sdk_ec2::types::SdkError<E>) -> Self {
+        MetaErrorInner::Internal(e.into()).into()
+    }
+}
+
 impl From<MetaError> for tonic::Status {
     fn from(err: MetaError) -> Self {
         match &*err.inner {
@@ -151,13 +190,17 @@ impl From<MetaError> for tonic::Status {
             MetaErrorInner::CatalogIdNotFound(_, _) => tonic::Status::not_found(err.to_string()),
             MetaErrorInner::Duplicated(_, _) => tonic::Status::already_exists(err.to_string()),
             MetaErrorInner::Unavailable(_) => tonic::Status::unavailable(err.to_string()),
+            MetaErrorInner::Cancelled(_) => tonic::Status::cancelled(err.to_string()),
+            MetaErrorInner::InvalidParameter(msg) => {
+                tonic::Status::invalid_argument(msg.to_owned())
+            }
             _ => tonic::Status::internal(err.to_string()),
         }
     }
 }
 
-impl From<ProstFieldNotFound> for MetaError {
-    fn from(e: ProstFieldNotFound) -> Self {
+impl From<PbFieldNotFound> for MetaError {
+    fn from(e: PbFieldNotFound) -> Self {
         MetadataModelError::from(e).into()
     }
 }

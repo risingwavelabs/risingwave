@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -58,7 +58,7 @@ where
             .get_cf(DEFAULT_COLUMN_FAMILY, category_gen_key.as_bytes())
             .await;
         let current_id = match res {
-            Ok(value) => u64::from_be_bytes(value.as_slice().try_into().unwrap()),
+            Ok(value) => memcomparable::from_slice(&value).unwrap(),
             Err(MetaStoreError::ItemNotFound(_)) => start.unwrap_or(0),
             Err(e) => panic!("{:?}", e),
         };
@@ -68,7 +68,7 @@ where
             .put_cf(
                 DEFAULT_COLUMN_FAMILY,
                 category_gen_key.clone().into_bytes(),
-                next_allocate_id.to_be_bytes().to_vec(),
+                memcomparable::to_vec(&next_allocate_id).unwrap(),
             )
             .await
         {
@@ -105,7 +105,7 @@ where
                     .put_cf(
                         DEFAULT_COLUMN_FAMILY,
                         self.category_gen_key.clone().into_bytes(),
-                        next_allocate_id.to_be_bytes().to_vec(),
+                        memcomparable::to_vec(&next_allocate_id).unwrap(),
                     )
                     .await?;
                 *next = next_allocate_id;
@@ -131,15 +131,17 @@ pub mod IdCategory {
     pub const Worker: IdCategoryType = 4;
     pub const Fragment: IdCategoryType = 5;
     pub const Actor: IdCategoryType = 6;
-    pub const HummockSnapshot: IdCategoryType = 7;
+    pub const Backup: IdCategoryType = 7;
     pub const HummockSstableId: IdCategoryType = 8;
     pub const ParallelUnit: IdCategoryType = 9;
-    pub const Source: IdCategoryType = 10;
+    pub const _Source: IdCategoryType = 10;
     pub const HummockCompactionTask: IdCategoryType = 11;
     pub const User: IdCategoryType = 12;
-    pub const Sink: IdCategoryType = 13;
-    pub const Index: IdCategoryType = 14;
+    pub const _Sink: IdCategoryType = 13;
+    pub const _Index: IdCategoryType = 14;
     pub const CompactionGroup: IdCategoryType = 15;
+    pub const Function: IdCategoryType = 16;
+    pub const Connection: IdCategoryType = 17;
 }
 
 pub type IdGeneratorManagerRef<S> = Arc<IdGeneratorManager<S>>;
@@ -152,15 +154,17 @@ pub struct IdGeneratorManager<S> {
     database: Arc<StoredIdGenerator<S>>,
     schema: Arc<StoredIdGenerator<S>>,
     table: Arc<StoredIdGenerator<S>>,
+    function: Arc<StoredIdGenerator<S>>,
     worker: Arc<StoredIdGenerator<S>>,
     fragment: Arc<StoredIdGenerator<S>>,
     actor: Arc<StoredIdGenerator<S>>,
     user: Arc<StoredIdGenerator<S>>,
-    hummock_snapshot: Arc<StoredIdGenerator<S>>,
+    backup: Arc<StoredIdGenerator<S>>,
     hummock_ss_table_id: Arc<StoredIdGenerator<S>>,
     hummock_compaction_task: Arc<StoredIdGenerator<S>>,
     parallel_unit: Arc<StoredIdGenerator<S>>,
     compaction_group: Arc<StoredIdGenerator<S>>,
+    connection: Arc<StoredIdGenerator<S>>,
 }
 
 impl<S> IdGeneratorManager<S>
@@ -181,6 +185,7 @@ where
                 )
                 .await,
             ),
+            function: Arc::new(StoredIdGenerator::new(meta_store.clone(), "function", None).await),
             worker: Arc::new(
                 StoredIdGenerator::new(meta_store.clone(), "worker", Some(META_NODE_ID as u64 + 1))
                     .await,
@@ -197,9 +202,7 @@ where
                 )
                 .await,
             ),
-            hummock_snapshot: Arc::new(
-                StoredIdGenerator::new(meta_store.clone(), "hummock_snapshot", Some(1)).await,
-            ),
+            backup: Arc::new(StoredIdGenerator::new(meta_store.clone(), "backup", Some(1)).await),
             hummock_ss_table_id: Arc::new(
                 StoredIdGenerator::new(meta_store.clone(), "hummock_ss_table_id", Some(1)).await,
             ),
@@ -218,6 +221,9 @@ where
                 )
                 .await,
             ),
+            connection: Arc::new(
+                StoredIdGenerator::new(meta_store.clone(), "connection", None).await,
+            ),
         }
     }
 
@@ -228,15 +234,17 @@ where
             IdCategory::Database => &self.database,
             IdCategory::Schema => &self.schema,
             IdCategory::Table => &self.table,
+            IdCategory::Function => &self.function,
             IdCategory::Fragment => &self.fragment,
             IdCategory::Actor => &self.actor,
             IdCategory::User => &self.user,
-            IdCategory::HummockSnapshot => &self.hummock_snapshot,
+            IdCategory::Backup => &self.backup,
             IdCategory::Worker => &self.worker,
             IdCategory::HummockSstableId => &self.hummock_ss_table_id,
             IdCategory::ParallelUnit => &self.parallel_unit,
             IdCategory::HummockCompactionTask => &self.hummock_compaction_task,
             IdCategory::CompactionGroup => &self.compaction_group,
+            IdCategory::Connection => &self.connection,
             _ => unreachable!(),
         }
     }

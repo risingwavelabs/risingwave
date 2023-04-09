@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,30 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::data::{Array as ProstArray, ArrayType};
+use risingwave_pb::data::{ArrayType, PbArray};
 
-use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta};
+use super::{Array, ArrayBuilder, ArrayMeta};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::collection::estimate_size::EstimateSize;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoolArray {
     bitmap: Bitmap,
     data: Bitmap,
 }
 
 impl BoolArray {
-    pub fn new(bitmap: Bitmap, data: Bitmap) -> Self {
+    pub fn new(data: Bitmap, bitmap: Bitmap) -> Self {
         assert_eq!(bitmap.len(), data.len());
         Self { bitmap, data }
     }
 
-    pub fn from_slice(data: &[Option<bool>]) -> Self {
-        let mut builder = <Self as Array>::Builder::new(data.len());
-        for i in data {
-            builder.append(*i);
-        }
-        builder.finish()
+    pub fn data(&self) -> &Bitmap {
+        &self.data
     }
 
     pub fn to_bitmap(&self) -> Bitmap {
@@ -43,42 +40,57 @@ impl BoolArray {
     }
 }
 
+impl FromIterator<Option<bool>> for BoolArray {
+    fn from_iter<I: IntoIterator<Item = Option<bool>>>(iter: I) -> Self {
+        let iter = iter.into_iter();
+        let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
+        for i in iter {
+            builder.append(i);
+        }
+        builder.finish()
+    }
+}
+
+impl<'a> FromIterator<&'a Option<bool>> for BoolArray {
+    fn from_iter<I: IntoIterator<Item = &'a Option<bool>>>(iter: I) -> Self {
+        iter.into_iter().cloned().collect()
+    }
+}
+
+impl FromIterator<bool> for BoolArray {
+    fn from_iter<I: IntoIterator<Item = bool>>(iter: I) -> Self {
+        let data: Bitmap = iter.into_iter().collect();
+        BoolArray {
+            bitmap: Bitmap::ones(data.len()),
+            data,
+        }
+    }
+}
+
+impl EstimateSize for BoolArray {
+    fn estimated_heap_size(&self) -> usize {
+        self.bitmap.estimated_heap_size() + self.data.estimated_heap_size()
+    }
+}
+
 impl Array for BoolArray {
     type Builder = BoolArrayBuilder;
-    type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = bool;
     type RefItem<'a> = bool;
 
-    fn value_at(&self, idx: usize) -> Option<bool> {
-        if !self.is_null(idx) {
-            // Safety: the above `is_null` check ensures that the index is valid.
-            unsafe { Some(self.data.is_set_unchecked(idx)) }
-        } else {
-            None
-        }
-    }
-
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<bool> {
-        if !self.is_null_unchecked(idx) {
-            Some(self.data.is_set_unchecked(idx))
-        } else {
-            None
-        }
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> bool {
+        self.data.is_set_unchecked(idx)
     }
 
     fn len(&self) -> usize {
         self.data.len()
     }
 
-    fn iter(&self) -> Self::Iter<'_> {
-        ArrayIterator::new(self)
-    }
-
-    fn to_protobuf(&self) -> ProstArray {
+    fn to_protobuf(&self) -> PbArray {
         let value = self.data.to_protobuf();
         let null_bitmap = self.null_bitmap().to_protobuf();
 
-        ProstArray {
+        PbArray {
             null_bitmap: Some(null_bitmap),
             values: vec![value],
             array_type: ArrayType::Bool as i32,
@@ -122,15 +134,15 @@ impl ArrayBuilder for BoolArrayBuilder {
         }
     }
 
-    fn append(&mut self, value: Option<bool>) {
+    fn append_n(&mut self, n: usize, value: Option<bool>) {
         match value {
             Some(x) => {
-                self.bitmap.append(true);
-                self.data.append(x);
+                self.bitmap.append_n(n, true);
+                self.data.append_n(n, x);
             }
             None => {
-                self.bitmap.append(false);
-                self.data.append(bool::default());
+                self.bitmap.append_n(n, false);
+                self.data.append_n(n, false);
             }
         }
     }
@@ -165,6 +177,7 @@ mod tests {
 
     use super::*;
     use crate::array::{read_bool_array, NULL_VAL_FOR_HASH};
+    use crate::util::iter_util::ZipEqFast;
 
     fn helper_test_builder(data: Vec<Option<bool>>) -> BoolArray {
         let mut builder = BoolArrayBuilder::new(data.len());
@@ -188,7 +201,9 @@ mod tests {
             })
             .collect_vec();
         let array = helper_test_builder(v.clone());
-        let res = v.iter().zip_eq(array.iter()).all(|(a, b)| *a == b);
+        assert_eq!(256, array.estimated_heap_size());
+        assert_eq!(320, array.estimated_size());
+        let res = v.iter().zip_eq_fast(array.iter()).all(|(a, b)| *a == b);
         assert!(res);
     }
 
@@ -212,7 +227,10 @@ mod tests {
             let encoded = array.to_protobuf();
             let decoded = read_bool_array(&encoded, num_bits).unwrap().into_bool();
 
-            let equal = array.iter().zip_eq(decoded.iter()).all(|(a, b)| a == b);
+            let equal = array
+                .iter()
+                .zip_eq_fast(decoded.iter())
+                .all(|(a, b)| a == b);
             assert!(equal);
         }
     }
@@ -253,10 +271,12 @@ mod tests {
         let hasher_builder = RandomXxHashBuilder64::default();
         let mut states = vec![hasher_builder.build_hasher(); ARR_LEN];
         vecs.iter().for_each(|v| {
-            v.iter().zip_eq(&mut states).for_each(|(x, state)| match x {
-                Some(inner) => inner.hash(state),
-                None => NULL_VAL_FOR_HASH.hash(state),
-            })
+            v.iter()
+                .zip_eq_fast(&mut states)
+                .for_each(|(x, state)| match x {
+                    Some(inner) => inner.hash(state),
+                    None => NULL_VAL_FOR_HASH.hash(state),
+                })
         });
         let hashes = hash_finish(&mut states[..]);
 

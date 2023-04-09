@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,12 +20,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_connector::source::{
     ConnectorProperties, SplitEnumeratorImpl, SplitId, SplitImpl, SplitMetaData,
 };
-use risingwave_pb::catalog::source::Info::StreamSource;
 use risingwave_pb::catalog::Source;
+use risingwave_pb::connector_service::table_schema::Column;
+use risingwave_pb::connector_service::TableSchema;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
@@ -36,6 +38,7 @@ use tokio::{select, time};
 use crate::barrier::{BarrierScheduler, Command};
 use crate::manager::{CatalogManagerRef, FragmentManagerRef, SourceId};
 use crate::model::{ActorId, FragmentId, TableFragments};
+use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::MetaResult;
 
@@ -46,6 +49,8 @@ pub struct SourceManager<S: MetaStore> {
     pub(crate) paused: Mutex<()>,
     barrier_scheduler: BarrierScheduler<S>,
     core: Mutex<SourceManagerCore<S>>,
+    connector_rpc_endpoint: Option<String>,
+    metrics: Arc<MetaMetrics>,
 }
 
 struct SharedSplitMap {
@@ -55,23 +60,36 @@ struct SharedSplitMap {
 type SharedSplitMapRef = Arc<Mutex<SharedSplitMap>>;
 
 struct ConnectorSourceWorker {
+    source_id: SourceId,
+    source_name: String,
     current_splits: SharedSplitMapRef,
     enumerator: SplitEnumeratorImpl,
     period: Duration,
+    metrics: Arc<MetaMetrics>,
 }
 
 impl ConnectorSourceWorker {
-    pub async fn create(source: &Source, period: Duration) -> MetaResult<Self> {
+    pub async fn create(
+        connector_rpc_endpoint: &Option<String>,
+        source: &Source,
+        period: Duration,
+        metrics: Arc<MetaMetrics>,
+    ) -> MetaResult<Self> {
         let mut properties = ConnectorProperties::extract(source.properties.clone())?;
-        if let ConnectorProperties::Cdc(prop) = &mut properties {
-            prop.as_mut().source_id = source.id;
+        // init cdc properties
+        if let Some(endpoint) = connector_rpc_endpoint {
+            let table_schema = Self::extract_source_schema(source);
+            properties.init_properties_for_cdc(source.id, endpoint.to_string(), Some(table_schema));
         }
         let enumerator = SplitEnumeratorImpl::create(properties).await?;
         let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
         Ok(Self {
+            source_id: source.id,
+            source_name: source.name.clone(),
             current_splits: splits,
             enumerator,
             period,
+            metrics,
         })
     }
 
@@ -99,7 +117,17 @@ impl ConnectorSourceWorker {
     }
 
     async fn tick(&mut self) -> MetaResult<()> {
-        let splits = self.enumerator.list_splits().await?;
+        let source_is_up = |res: i64| {
+            self.metrics
+                .source_is_up
+                .with_label_values(&[self.source_id.to_string().as_str(), &self.source_name])
+                .set(res);
+        };
+        let splits = self.enumerator.list_splits().await.map_err(|e| {
+            source_is_up(0);
+            e
+        })?;
+        source_is_up(1);
         let mut current_splits = self.current_splits.lock().await;
         current_splits.splits.replace(
             splits
@@ -109,6 +137,33 @@ impl ConnectorSourceWorker {
         );
 
         Ok(())
+    }
+
+    fn extract_source_schema(source: &Source) -> TableSchema {
+        let pk_indices = source
+            .pk_column_ids
+            .iter()
+            .map(|&id| {
+                source
+                    .columns
+                    .iter()
+                    .position(|col| col.column_desc.as_ref().unwrap().column_id == id)
+                    .unwrap() as u32
+            })
+            .collect_vec();
+
+        TableSchema {
+            columns: source
+                .columns
+                .iter()
+                .flat_map(|col| &col.column_desc)
+                .map(|col| Column {
+                    name: col.name.clone(),
+                    data_type: col.column_type.as_ref().unwrap().type_name,
+                })
+                .collect(),
+            pk_indices,
+        }
     }
 }
 
@@ -356,18 +411,25 @@ where
     const SOURCE_TICK_INTERVAL: Duration = Duration::from_secs(10);
 
     pub async fn new(
+        connector_rpc_endpoint: Option<String>,
         barrier_scheduler: BarrierScheduler<S>,
         catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
+        metrics: Arc<MetaMetrics>,
     ) -> MetaResult<Self> {
         let mut managed_sources = HashMap::new();
         {
             let sources = catalog_manager.list_sources().await;
 
             for source in sources {
-                if let Some(StreamSource(_)) = source.info {
-                    Self::create_source_worker(&source, &mut managed_sources, false).await?
-                }
+                Self::create_source_worker(
+                    &connector_rpc_endpoint,
+                    &source,
+                    &mut managed_sources,
+                    false,
+                    metrics.clone(),
+                )
+                .await?
             }
         }
 
@@ -389,6 +451,8 @@ where
             barrier_scheduler,
             core,
             paused: Mutex::new(()),
+            connector_rpc_endpoint,
+            metrics,
         })
     }
 
@@ -517,18 +581,33 @@ where
         let mut core = self.core.lock().await;
         if core.managed_sources.contains_key(&source.get_id()) {
             tracing::warn!("source {} already registered", source.get_id());
-        } else if let Some(StreamSource(_)) = source.info {
-            Self::create_source_worker(source, &mut core.managed_sources, true).await?;
+        } else {
+            Self::create_source_worker(
+                &self.connector_rpc_endpoint,
+                source,
+                &mut core.managed_sources,
+                true,
+                self.metrics.clone(),
+            )
+            .await?;
         }
         Ok(())
     }
 
     async fn create_source_worker(
+        connector_rpc_endpoint: &Option<String>,
         source: &Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
         force_tick: bool,
+        metrics: Arc<MetaMetrics>,
     ) -> MetaResult<()> {
-        let mut worker = ConnectorSourceWorker::create(source, Duration::from_secs(10)).await?;
+        let mut worker = ConnectorSourceWorker::create(
+            connector_rpc_endpoint,
+            source,
+            Duration::from_secs(10),
+            metrics,
+        )
+        .await?;
         let current_splits_ref = worker.current_splits.clone();
         tracing::info!("spawning new watcher for source {}", source.id);
 
@@ -643,7 +722,7 @@ mod tests {
     use std::collections::{BTreeMap, HashMap, HashSet};
 
     use anyhow::anyhow;
-    use bytes::Bytes;
+    use risingwave_common::array::JsonbVal;
     use risingwave_connector::source::{SplitId, SplitMetaData};
     use serde::{Deserialize, Serialize};
 
@@ -660,12 +739,12 @@ mod tests {
             format!("{}", self.id).into()
         }
 
-        fn encode_to_bytes(&self) -> Bytes {
-            Bytes::from(serde_json::to_string(self).unwrap())
+        fn encode_to_json(&self) -> JsonbVal {
+            serde_json::to_value(*self).unwrap().into()
         }
 
-        fn restore_from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
-            serde_json::from_slice(bytes).map_err(|e| anyhow!(e))
+        fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
+            serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
         }
     }
 

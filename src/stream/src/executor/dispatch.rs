@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,17 +18,16 @@ use std::future::Future;
 use std::iter::repeat_with;
 use std::sync::Arc;
 
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 use futures::Stream;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
-use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::compress::decompress_data;
-use risingwave_common::util::hash_util::Crc32FastBuilder;
-use risingwave_pb::stream_plan::update_mutation::DispatcherUpdate as ProstDispatcherUpdate;
-use risingwave_pb::stream_plan::Dispatcher as ProstDispatcher;
+use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
+use risingwave_pb::stream_plan::PbDispatcher;
 use smallvec::{smallvec, SmallVec};
 use tracing::event;
 
@@ -106,7 +105,7 @@ impl DispatchExecutorInner {
     /// Add new dispatchers to the executor. Will check whether their ids are unique.
     fn add_dispatchers<'a>(
         &mut self,
-        new_dispatchers: impl IntoIterator<Item = &'a ProstDispatcher>,
+        new_dispatchers: impl IntoIterator<Item = &'a PbDispatcher>,
     ) -> StreamResult<()> {
         let new_dispatchers: Vec<_> = new_dispatchers
             .into_iter()
@@ -136,7 +135,7 @@ impl DispatchExecutorInner {
 
     /// Update the dispatcher BEFORE we actually dispatch this barrier. We'll only add the new
     /// outputs.
-    fn pre_update_dispatcher(&mut self, update: &ProstDispatcherUpdate) -> StreamResult<()> {
+    fn pre_update_dispatcher(&mut self, update: &PbDispatcherUpdate) -> StreamResult<()> {
         let outputs: Vec<_> = update
             .added_downstream_actor_id
             .iter()
@@ -151,24 +150,21 @@ impl DispatchExecutorInner {
 
     /// Update the dispatcher AFTER we dispatch this barrier. We'll remove some outputs and finally
     /// update the hash mapping.
-    fn post_update_dispatcher(&mut self, update: &ProstDispatcherUpdate) -> StreamResult<()> {
+    fn post_update_dispatcher(&mut self, update: &PbDispatcherUpdate) -> StreamResult<()> {
         let ids = update.removed_downstream_actor_id.iter().copied().collect();
 
         let dispatcher = self.find_dispatcher(update.dispatcher_id);
         dispatcher.remove_outputs(&ids);
 
-        match dispatcher {
-            // The hash mapping is only used by the hash dispatcher.
-            DispatcherImpl::Hash(dispatcher) => {
-                dispatcher.hash_mapping = {
-                    let compressed_mapping = update.get_hash_mapping()?;
-                    decompress_data(
-                        &compressed_mapping.original_indices,
-                        &compressed_mapping.data,
-                    )
-                }
-            }
-            _ => assert!(update.hash_mapping.is_none()),
+        // The hash mapping is only used by the hash dispatcher.
+        //
+        // We specify a single upstream hash mapping for scaling the downstream fragment. However,
+        // it's possible that there're multiple upstreams with different exchange types, for
+        // example, the `Broadcast` inner side of the dynamic filter. There're too many combinations
+        // to handle here, so we just ignore the `hash_mapping` field for any other exchange types.
+        if let DispatcherImpl::Hash(dispatcher) = dispatcher {
+            dispatcher.hash_mapping =
+                ActorMapping::from_protobuf(update.get_hash_mapping()?).to_expanded();
         }
 
         Ok(())
@@ -177,7 +173,7 @@ impl DispatchExecutorInner {
     /// For `Add` and `Update`, update the dispatchers before we dispatch the barrier.
     fn pre_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> StreamResult<()> {
         let Some(mutation) = mutation.as_deref() else {
-            return Ok(())
+            return Ok(());
         };
 
         match mutation {
@@ -202,7 +198,7 @@ impl DispatchExecutorInner {
     /// For `Stop` and `Update`, update the dispatchers after we dispatch the barrier.
     fn post_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> StreamResult<()> {
         let Some(mutation) = mutation.as_deref() else {
-            return Ok(())
+            return Ok(());
         };
 
         match mutation {
@@ -265,21 +261,12 @@ impl StreamConsumer for DispatchExecutor {
             #[for_await]
             for msg in input {
                 let msg: Message = msg?;
-                let (barrier, is_watermark) = match msg {
-                    Message::Chunk(_) => (None, false),
-                    Message::Barrier(ref barrier) => (Some(barrier.clone()), false),
-                    Message::Watermark(_) => (None, true),
+                let (barrier, span) = match msg {
+                    Message::Chunk(_) => (None, "dispatch_chunk"),
+                    Message::Barrier(ref barrier) => (Some(barrier.clone()), "dispatch_barrier"),
+                    Message::Watermark(_) => (None, "dispatch_watermark"),
                 };
-                self.inner
-                    .dispatch(msg)
-                    .verbose_stack_trace(if barrier.is_some() {
-                        "dispatch_barrier"
-                    } else if is_watermark {
-                        "dispatch_watermark"
-                    } else {
-                        "dispatch_chunk"
-                    })
-                    .await?;
+                self.inner.dispatch(msg).instrument_await(span).await?;
                 if let Some(barrier) = barrier {
                     yield barrier;
                 }
@@ -300,7 +287,7 @@ impl DispatcherImpl {
     pub fn new(
         context: &SharedContext,
         actor_id: ActorId,
-        dispatcher: &ProstDispatcher,
+        dispatcher: &PbDispatcher,
     ) -> StreamResult<Self> {
         let outputs = dispatcher
             .downstream_actor_id
@@ -308,38 +295,45 @@ impl DispatcherImpl {
             .map(|&down_id| new_output(context, actor_id, down_id))
             .collect::<StreamResult<Vec<_>>>()?;
 
+        let output_indices = dispatcher
+            .output_indices
+            .iter()
+            .map(|&i| i as usize)
+            .collect_vec();
+
         use risingwave_pb::stream_plan::DispatcherType::*;
         let dispatcher_impl = match dispatcher.get_type()? {
             Hash => {
                 assert!(!outputs.is_empty());
-                let column_indices = dispatcher
-                    .column_indices
+                let dist_key_indices = dispatcher
+                    .dist_key_indices
                     .iter()
                     .map(|i| *i as usize)
                     .collect();
 
-                let hash_mapping = {
-                    let compressed_mapping = dispatcher.get_hash_mapping()?;
-                    decompress_data(
-                        &compressed_mapping.original_indices,
-                        &compressed_mapping.data,
-                    )
-                };
+                let hash_mapping =
+                    ActorMapping::from_protobuf(dispatcher.get_hash_mapping()?).to_expanded();
 
                 DispatcherImpl::Hash(HashDataDispatcher::new(
                     outputs,
-                    column_indices,
+                    dist_key_indices,
+                    output_indices,
                     hash_mapping,
                     dispatcher.dispatcher_id,
                 ))
             }
             Broadcast => DispatcherImpl::Broadcast(BroadcastDispatcher::new(
                 outputs,
+                output_indices,
                 dispatcher.dispatcher_id,
             )),
             Simple | NoShuffle => {
                 let [output]: [_; 1] = outputs.try_into().unwrap();
-                DispatcherImpl::Simple(SimpleDispatcher::new(output, dispatcher.dispatcher_id))
+                DispatcherImpl::Simple(SimpleDispatcher::new(
+                    output,
+                    output_indices,
+                    dispatcher.dispatcher_id,
+                ))
             }
             Unspecified => unreachable!(),
         };
@@ -448,14 +442,20 @@ pub trait Dispatcher: Debug + 'static {
 #[derive(Debug)]
 pub struct RoundRobinDataDispatcher {
     outputs: Vec<BoxedOutput>,
+    output_indices: Vec<usize>,
     cur: usize,
     dispatcher_id: DispatcherId,
 }
 
 impl RoundRobinDataDispatcher {
-    pub fn new(outputs: Vec<BoxedOutput>, dispatcher_id: DispatcherId) -> Self {
+    pub fn new(
+        outputs: Vec<BoxedOutput>,
+        output_indices: Vec<usize>,
+        dispatcher_id: DispatcherId,
+    ) -> Self {
         Self {
             outputs,
+            output_indices,
             cur: 0,
             dispatcher_id,
         }
@@ -467,6 +467,7 @@ impl Dispatcher for RoundRobinDataDispatcher {
 
     fn dispatch_data(&mut self, chunk: StreamChunk) -> Self::DataFuture<'_> {
         async move {
+            let chunk = chunk.reorder_columns(&self.output_indices);
             self.outputs[self.cur].send(Message::Chunk(chunk)).await?;
             self.cur += 1;
             self.cur %= self.outputs.len();
@@ -486,9 +487,11 @@ impl Dispatcher for RoundRobinDataDispatcher {
 
     fn dispatch_watermark(&mut self, watermark: Watermark) -> Self::WatermarkFuture<'_> {
         async move {
-            // always broadcast watermark
-            for output in &mut self.outputs {
-                output.send(Message::Watermark(watermark.clone())).await?;
+            if let Some(watermark) = watermark.transform_with_indices(&self.output_indices) {
+                // always broadcast watermark
+                for output in &mut self.outputs {
+                    output.send(Message::Watermark(watermark.clone())).await?;
+                }
             }
             Ok(())
         }
@@ -517,9 +520,10 @@ impl Dispatcher for RoundRobinDataDispatcher {
 pub struct HashDataDispatcher {
     outputs: Vec<BoxedOutput>,
     keys: Vec<usize>,
+    output_indices: Vec<usize>,
     /// Mapping from virtual node to actor id, used for hash data dispatcher to dispatch tasks to
     /// different downstream actors.
-    hash_mapping: Vec<ActorId>,
+    hash_mapping: ExpandedActorMapping,
     dispatcher_id: DispatcherId,
 }
 
@@ -537,12 +541,14 @@ impl HashDataDispatcher {
     pub fn new(
         outputs: Vec<BoxedOutput>,
         keys: Vec<usize>,
-        hash_mapping: Vec<ActorId>,
+        output_indices: Vec<usize>,
+        hash_mapping: ExpandedActorMapping,
         dispatcher_id: DispatcherId,
     ) -> Self {
         Self {
             outputs,
             keys,
+            output_indices,
             hash_mapping,
             dispatcher_id,
         }
@@ -568,9 +574,11 @@ impl Dispatcher for HashDataDispatcher {
 
     fn dispatch_watermark(&mut self, watermark: Watermark) -> Self::WatermarkFuture<'_> {
         async move {
-            // always broadcast watermark
-            for output in &mut self.outputs {
-                output.send(Message::Watermark(watermark.clone())).await?;
+            if let Some(watermark) = watermark.transform_with_indices(&self.output_indices) {
+                // always broadcast watermark
+                for output in &mut self.outputs {
+                    output.send(Message::Watermark(watermark.clone())).await?;
+                }
             }
             Ok(())
         }
@@ -584,13 +592,7 @@ impl Dispatcher for HashDataDispatcher {
             let num_outputs = self.outputs.len();
 
             // get hash value of every line by its key
-            let hash_builder = Crc32FastBuilder;
-            let vnodes = chunk
-                .data_chunk()
-                .get_hash_values(&self.keys, hash_builder)
-                .into_iter()
-                .map(|hash| hash.to_vnode())
-                .collect_vec();
+            let vnodes = VirtualNode::compute_chunk(chunk.data_chunk(), &self.keys);
 
             tracing::trace!(target: "events::stream::dispatch::hash", "\n{}\n keys {:?} => {:?}", chunk.to_pretty_string(), self.keys, vnodes);
 
@@ -600,12 +602,14 @@ impl Dispatcher for HashDataDispatcher {
             let mut last_vnode_when_update_delete = None;
             let mut new_ops: Vec<Op> = Vec::with_capacity(chunk.capacity());
 
+            // Apply output indices after calculating the vnode.
+            let chunk = chunk.reorder_columns(&self.output_indices);
             // TODO: refactor with `Vis`.
             let (ops, columns, visibility) = chunk.into_inner();
 
             let mut build_op_vis = |vnode: VirtualNode, op: Op, visible: bool| {
                 // Build visibility map for every output chunk.
-                for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut()) {
+                for (output, vis_map) in self.outputs.iter().zip_eq_fast(vis_maps.iter_mut()) {
                     vis_map.append(
                         visible && self.hash_mapping[vnode.to_index()] == output.actor_id(),
                     );
@@ -636,16 +640,20 @@ impl Dispatcher for HashDataDispatcher {
 
             match visibility {
                 None => {
-                    vnodes.iter().copied().zip_eq(ops).for_each(|(vnode, op)| {
-                        build_op_vis(vnode, op, true);
-                    });
+                    vnodes
+                        .iter()
+                        .copied()
+                        .zip_eq_fast(ops)
+                        .for_each(|(vnode, op)| {
+                            build_op_vis(vnode, op, true);
+                        });
                 }
                 Some(visibility) => {
                     vnodes
                         .iter()
                         .copied()
-                        .zip_eq(ops)
-                        .zip_eq(visibility.iter())
+                        .zip_eq_fast(ops)
+                        .zip_eq_fast(visibility.iter())
                         .for_each(|((vnode, op), visible)| {
                             build_op_vis(vnode, op, visible);
                         });
@@ -655,7 +663,7 @@ impl Dispatcher for HashDataDispatcher {
             let ops = new_ops;
 
             // individually output StreamChunk integrated with vis_map
-            for (vis_map, output) in vis_maps.into_iter().zip_eq(self.outputs.iter_mut()) {
+            for (vis_map, output) in vis_maps.into_iter().zip_eq_fast(self.outputs.iter_mut()) {
                 let vis_map = vis_map.finish();
                 // columns is not changed in this function
                 let new_stream_chunk =
@@ -694,16 +702,19 @@ impl Dispatcher for HashDataDispatcher {
 #[derive(Debug)]
 pub struct BroadcastDispatcher {
     outputs: HashMap<ActorId, BoxedOutput>,
+    output_indices: Vec<usize>,
     dispatcher_id: DispatcherId,
 }
 
 impl BroadcastDispatcher {
     pub fn new(
         outputs: impl IntoIterator<Item = BoxedOutput>,
+        output_indices: Vec<usize>,
         dispatcher_id: DispatcherId,
     ) -> Self {
         Self {
             outputs: Self::into_pairs(outputs).collect(),
+            output_indices,
             dispatcher_id,
         }
     }
@@ -722,6 +733,7 @@ impl Dispatcher for BroadcastDispatcher {
 
     fn dispatch_data(&mut self, chunk: StreamChunk) -> Self::DataFuture<'_> {
         async move {
+            let chunk = chunk.reorder_columns(&self.output_indices);
             for output in self.outputs.values_mut() {
                 output.send(Message::Chunk(chunk.clone())).await?;
             }
@@ -740,8 +752,11 @@ impl Dispatcher for BroadcastDispatcher {
 
     fn dispatch_watermark(&mut self, watermark: Watermark) -> Self::WatermarkFuture<'_> {
         async move {
-            for output in self.outputs.values_mut() {
-                output.send(Message::Watermark(watermark.clone())).await?;
+            if let Some(watermark) = watermark.transform_with_indices(&self.output_indices) {
+                // always broadcast watermark
+                for output in self.outputs.values_mut() {
+                    output.send(Message::Watermark(watermark.clone())).await?;
+                }
             }
             Ok(())
         }
@@ -783,13 +798,19 @@ pub struct SimpleDispatcher {
     /// Therefore, when dispatching data, we assert that there's exactly one output by
     /// `Self::output`.
     output: SmallVec<[BoxedOutput; 2]>,
+    output_indices: Vec<usize>,
     dispatcher_id: DispatcherId,
 }
 
 impl SimpleDispatcher {
-    pub fn new(output: BoxedOutput, dispatcher_id: DispatcherId) -> Self {
+    pub fn new(
+        output: BoxedOutput,
+        output_indices: Vec<usize>,
+        dispatcher_id: DispatcherId,
+    ) -> Self {
         Self {
             output: smallvec![output],
+            output_indices,
             dispatcher_id,
         }
     }
@@ -821,6 +842,7 @@ impl Dispatcher for SimpleDispatcher {
                 .exactly_one()
                 .expect("expect exactly one output");
 
+            let chunk = chunk.reorder_columns(&self.output_indices);
             output.send(Message::Chunk(chunk)).await
         }
     }
@@ -833,7 +855,10 @@ impl Dispatcher for SimpleDispatcher {
                 .exactly_one()
                 .expect("expect exactly one output");
 
-            output.send(Message::Watermark(watermark)).await
+            if let Some(watermark) = watermark.transform_with_indices(&self.output_indices) {
+                output.send(Message::Watermark(watermark)).await?;
+            }
+            Ok(())
         }
     }
 
@@ -863,13 +888,15 @@ mod tests {
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
     use risingwave_common::catalog::Schema;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::hash_util::Crc32FastBuilder;
+    use risingwave_common::util::iter_util::ZipEqFast;
     use risingwave_pb::stream_plan::DispatcherType;
 
     use super::*;
     use crate::executor::exchange::output::Output;
-    use crate::executor::exchange::permit::channel;
+    use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::receiver::ReceiverExecutor;
-    use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
+    use crate::task::test_utils::helper_make_local_actor;
 
     #[derive(Debug)]
     pub struct MockOutput {
@@ -922,8 +949,13 @@ mod tests {
             .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT / num_outputs])
             .collect_vec();
         hash_mapping.resize(VirtualNode::COUNT, num_outputs as u32);
-        let mut hash_dispatcher =
-            HashDataDispatcher::new(outputs, key_indices.to_vec(), hash_mapping, 0);
+        let mut hash_dispatcher = HashDataDispatcher::new(
+            outputs,
+            key_indices.to_vec(),
+            vec![0, 1, 2],
+            hash_mapping,
+            0,
+        );
 
         let chunk = StreamChunk::from_pretty(
             "  I I I
@@ -971,7 +1003,7 @@ mod tests {
     #[tokio::test]
     async fn test_configuration_change() {
         let _schema = Schema { fields: vec![] };
-        let (tx, rx) = channel();
+        let (tx, rx) = channel_for_test();
         let actor_id = 233;
         let input = Box::new(ReceiverExecutor::for_test(rx));
         let ctx = Arc::new(SharedContext::for_test());
@@ -980,7 +1012,7 @@ mod tests {
         let (untouched, old, new) = (234, 235, 238); // broadcast downstream actors
         let (old_simple, new_simple) = (114, 514); // simple downstream actors
 
-        // 1. Register info and channels in context.
+        // 1. Register info in context.
         {
             let mut actor_infos = ctx.actor_infos.write();
 
@@ -988,22 +1020,13 @@ mod tests {
                 actor_infos.insert(local_actor_id, helper_make_local_actor(local_actor_id));
             }
         }
-        add_local_channels(
-            ctx.clone(),
-            vec![
-                (actor_id, untouched),
-                (actor_id, old),
-                (actor_id, new),
-                (actor_id, old_simple),
-                (actor_id, new_simple),
-            ],
-        );
+        // actor_id -> untouched, old, new, old_simple, new_simple
 
         let broadcast_dispatcher_id = 666;
         let broadcast_dispatcher = DispatcherImpl::new(
             &ctx,
             actor_id,
-            &ProstDispatcher {
+            &PbDispatcher {
                 r#type: DispatcherType::Broadcast as _,
                 dispatcher_id: broadcast_dispatcher_id,
                 downstream_actor_id: vec![untouched, old],
@@ -1016,7 +1039,7 @@ mod tests {
         let simple_dispatcher = DispatcherImpl::new(
             &ctx,
             actor_id,
-            &ProstDispatcher {
+            &PbDispatcher {
                 r#type: DispatcherType::Simple as _,
                 dispatcher_id: simple_dispatcher_id,
                 downstream_actor_id: vec![old_simple],
@@ -1053,7 +1076,7 @@ mod tests {
 
         // 4. Send a configuration change barrier for broadcast dispatcher.
         let dispatcher_updates = maplit::hashmap! {
-            actor_id => vec![ProstDispatcherUpdate {
+            actor_id => vec![PbDispatcherUpdate {
                 actor_id,
                 dispatcher_id: broadcast_dispatcher_id,
                 added_downstream_actor_id: vec![new],
@@ -1104,7 +1127,7 @@ mod tests {
 
         // 9. Send a configuration change barrier for simple dispatcher.
         let dispatcher_updates = maplit::hashmap! {
-            actor_id => vec![ProstDispatcherUpdate {
+            actor_id => vec![PbDispatcherUpdate {
                 actor_id,
                 dispatcher_id: simple_dispatcher_id,
                 added_downstream_actor_id: vec![new_simple],
@@ -1159,8 +1182,13 @@ mod tests {
             .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT / num_outputs])
             .collect_vec();
         hash_mapping.resize(VirtualNode::COUNT, num_outputs as u32);
-        let mut hash_dispatcher =
-            HashDataDispatcher::new(outputs, key_indices.to_vec(), hash_mapping.clone(), 0);
+        let mut hash_dispatcher = HashDataDispatcher::new(
+            outputs,
+            key_indices.to_vec(),
+            (0..dimension).collect(),
+            hash_mapping.clone(),
+            0,
+        );
 
         let mut ops = Vec::new();
         for idx in 0..cardinality {
@@ -1188,12 +1216,12 @@ mod tests {
             }
             let output_idx =
                 hash_mapping[hasher.finish() as usize % VirtualNode::COUNT] as usize - 1;
-            for (builder, val) in builders.iter_mut().zip_eq(one_row.iter()) {
+            for (builder, val) in builders.iter_mut().zip_eq_fast(one_row.iter()) {
                 builder.append(Some(*val));
             }
             output_cols[output_idx]
                 .iter_mut()
-                .zip_eq(one_row.iter())
+                .zip_eq_fast(one_row.iter())
                 .for_each(|(each_column, val)| each_column.push(*val));
             output_ops[output_idx].push(op);
         }
@@ -1224,7 +1252,7 @@ mod tests {
                 real_chunk
                     .columns()
                     .iter()
-                    .zip_eq(output_cols[output_idx].iter())
+                    .zip_eq_fast(output_cols[output_idx].iter())
                     .for_each(|(real_col, expect_col)| {
                         let real_vals = real_chunk
                             .visibility()

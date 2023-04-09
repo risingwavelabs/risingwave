@@ -15,7 +15,7 @@ dependencies = ["prepare"]
 condition = { env_set = [ "ENABLE_ETCD" ] }
 description = "Download and extract Etcd"
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 if [ -d "${PREFIX_BIN}/etcd" ]; then
     exit 0
@@ -34,4 +34,14 @@ mv "${PREFIX_TMP}/${ETCD_RELEASE}" "${PREFIX_BIN}/etcd"
 "${PREFIX_BIN}/etcd/etcd" --version
 "${PREFIX_BIN}/etcd/etcdctl" version
 "${PREFIX_BIN}/etcd/etcdutl" version
+'''
+
+[tasks.clean-etcd-data]
+category = "RiseDev - Components"
+description = "Clean etcd data"
+condition = { env_set = [ "PREFIX_DATA" ] }
+script = '''
+#!/usr/bin/env bash
+set -e
+rm -rf ${PREFIX_DATA}/etcd-*
 '''

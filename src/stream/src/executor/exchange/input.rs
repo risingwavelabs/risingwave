@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +17,6 @@ use std::task::{Context, Poll};
 use std::time::Instant;
 
 use anyhow::Context as _;
-use async_stack_trace::{SpanValue, StackTrace};
 use futures::{pin_mut, Stream};
 use futures_async_stream::try_stream;
 use pin_project::pin_project;
@@ -29,7 +28,7 @@ use risingwave_rpc_client::ComputeClientPool;
 use super::permit::Receiver;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorError;
-use crate::executor::exchange::permit::{Permits, BATCHED_PERMITS};
+use crate::executor::exchange::permit::Permits;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::*;
 use crate::task::{FragmentId, SharedContext, UpDownActorIds, UpDownFragmentIds};
@@ -78,8 +77,8 @@ impl LocalInput {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn run(mut channel: Receiver, actor_id: ActorId) {
-        let span: SpanValue = format!("LocalInput (actor {actor_id})").into();
-        while let Some(msg) = channel.recv().verbose_stack_trace(span.clone()).await {
+        let span: await_tree::Span = format!("LocalInput (actor {actor_id})").into();
+        while let Some(msg) = channel.recv().verbose_instrument_await(span.clone()).await {
             yield msg;
         }
     }
@@ -119,6 +118,7 @@ impl RemoteInput {
         up_down_ids: UpDownActorIds,
         up_down_frag: UpDownFragmentIds,
         metrics: Arc<StreamingMetrics>,
+        batched_permits: usize,
     ) -> Self {
         let actor_id = up_down_ids.0;
 
@@ -130,6 +130,7 @@ impl RemoteInput {
                 up_down_ids,
                 up_down_frag,
                 metrics,
+                batched_permits,
             ),
         }
     }
@@ -141,6 +142,7 @@ impl RemoteInput {
         up_down_ids: UpDownActorIds,
         up_down_frag: UpDownFragmentIds,
         metrics: Arc<StreamingMetrics>,
+        batched_permits_limit: usize,
     ) {
         let client = client_pool.get_by_addr(upstream_addr).await?;
         let (stream, permits_tx) = client
@@ -154,21 +156,16 @@ impl RemoteInput {
 
         let mut rr = 0;
         const SAMPLING_FREQUENCY: u64 = 100;
-        let span: SpanValue = format!("RemoteInput (actor {up_actor_id})").into();
+        let span: await_tree::Span = format!("RemoteInput (actor {up_actor_id})").into();
 
-        let mut batched_permits = 0;
+        let mut batched_permits_accumulated = 0;
 
         pin_mut!(stream);
-        while let Some(data_res) = stream.next().verbose_stack_trace(span.clone()).await {
+        while let Some(data_res) = stream.next().verbose_instrument_await(span.clone()).await {
             match data_res {
                 Ok(GetStreamResponse { message, permits }) => {
                     let msg = message.unwrap();
                     let bytes = Message::get_encoded_len(&msg);
-
-                    metrics
-                        .exchange_recv_size
-                        .with_label_values(&[&up_actor_id, &down_actor_id])
-                        .inc_by(bytes as u64);
 
                     metrics
                         .exchange_frag_recv_size
@@ -190,10 +187,10 @@ impl RemoteInput {
                     rr += 1;
 
                     // Batch the permits we received to reduce the backward `AddPermits` messages.
-                    batched_permits += permits;
-                    if batched_permits >= BATCHED_PERMITS as Permits {
+                    batched_permits_accumulated += permits;
+                    if batched_permits_accumulated >= batched_permits_limit as Permits {
                         permits_tx
-                            .send(std::mem::take(&mut batched_permits))
+                            .send(std::mem::take(&mut batched_permits_accumulated))
                             .context("RemoteInput backward permits channel closed.")?;
                     }
 
@@ -255,6 +252,7 @@ pub(crate) fn new_input(
             (upstream_actor_id, actor_id),
             (upstream_fragment_id, fragment_id),
             metrics,
+            context.config.developer.exchange_batched_permits,
         )
         .boxed_input()
     };

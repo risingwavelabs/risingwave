@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,16 +20,6 @@ use tokio::sync::{mpsc, Semaphore};
 
 use crate::executor::Message;
 
-/// The initial permits that a channel holds, i.e., the maximum row count can be buffered in the
-/// channel.
-const INITIAL_PERMITS: usize = 32768;
-/// The permits that are batched to add back, for reducing the backward `AddPermits` messages in
-/// remote exchange.
-pub const BATCHED_PERMITS: usize = 4096;
-/// The maximum permits required by a chunk. If there're too many rows in a chunk, we only acquire
-/// these permits. [`BATCHED_PERMITS`] is subtracted to avoid deadlock with batching.
-const MAX_CHUNK_PERMITS: usize = INITIAL_PERMITS - BATCHED_PERMITS;
-
 pub type Permits = u32;
 
 /// Message with its required permits.
@@ -43,14 +33,33 @@ pub struct MessageWithPermits {
 }
 
 /// Create a channel for the exchange service
-pub fn channel() -> (Sender, Receiver) {
+pub fn channel(initial_permits: usize, batched_permits: usize) -> (Sender, Receiver) {
     // Use an unbounded channel since we manage the permits manually.
     let (tx, rx) = mpsc::unbounded_channel();
-    let permits = Arc::new(Semaphore::new(INITIAL_PERMITS));
+    let permits = Arc::new(Semaphore::new(initial_permits));
+    let max_chunk_permits: usize = initial_permits - batched_permits;
     (
         Sender {
             tx,
             permits: permits.clone(),
+            max_chunk_permits,
+        },
+        Receiver { rx, permits },
+    )
+}
+
+pub fn channel_for_test() -> (Sender, Receiver) {
+    // Use an unbounded channel since we manage the permits manually.
+    let (tx, rx) = mpsc::unbounded_channel();
+    const INITIAL_PERMITS: usize = 8192;
+    const BATCHED_PERMITS: usize = 1024;
+    let permits = Arc::new(Semaphore::new(INITIAL_PERMITS));
+    let max_chunk_permits: usize = INITIAL_PERMITS - BATCHED_PERMITS;
+    (
+        Sender {
+            tx,
+            permits: permits.clone(),
+            max_chunk_permits,
         },
         Receiver { rx, permits },
     )
@@ -60,6 +69,10 @@ pub fn channel() -> (Sender, Receiver) {
 pub struct Sender {
     tx: mpsc::UnboundedSender<MessageWithPermits>,
     permits: Arc<Semaphore>,
+    /// The maximum permits required by a chunk. If there're too many rows in a chunk, we only
+    /// acquire these permits. [`BATCHED_PERMITS`] is subtracted to avoid deadlock with
+    /// batching.
+    max_chunk_permits: usize,
 }
 
 impl Sender {
@@ -69,8 +82,8 @@ impl Sender {
     pub async fn send(&self, message: Message) -> Result<(), mpsc::error::SendError<Message>> {
         let permits = match &message {
             Message::Chunk(c) => {
-                let p = c.cardinality().clamp(1, MAX_CHUNK_PERMITS);
-                if p == MAX_CHUNK_PERMITS {
+                let p = c.cardinality().clamp(1, self.max_chunk_permits);
+                if p == self.max_chunk_permits {
                     tracing::warn!(cardinality = c.cardinality(), "large chunk in exchange")
                 }
                 p

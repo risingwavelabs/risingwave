@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,19 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use derivative::Derivative;
+use fixedbitset::FixedBitSet;
 use paste::paste;
 use risingwave_common::catalog::Schema;
 
+use super::generic::GenericPlanNode;
 use super::*;
 use crate::for_all_plan_nodes;
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order};
-use crate::session::OptimizerContextRef;
 
 /// the common fields of all nodes, please make a field named `base` in
 /// every planNode and correctly valued it when construct the planNode.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Derivative)]
+#[derivative(PartialEq, Eq, Hash)]
 pub struct PlanBase {
+    #[derivative(PartialEq = "ignore")]
+    #[derivative(Hash = "ignore")]
     pub id: PlanNodeId,
+    #[derivative(PartialEq = "ignore")]
+    #[derivative(Hash = "ignore")]
     pub ctx: OptimizerContextRef,
     pub schema: Schema,
     /// the pk indices of the PlanNode's output, a empty logical_pk vec means there is no pk
@@ -39,6 +47,9 @@ pub struct PlanBase {
     /// means the stream contains only insert operation.
     pub append_only: bool,
     pub functional_dependency: FunctionalDependencySet,
+    /// The watermark column indices of the PlanNode's output. There could be watermark output from
+    /// this stream operator.
+    pub watermark_columns: FixedBitSet,
 }
 
 impl generic::GenericPlanRef for PlanBase {
@@ -53,6 +64,10 @@ impl generic::GenericPlanRef for PlanBase {
     fn ctx(&self) -> OptimizerContextRef {
         self.ctx.clone()
     }
+
+    fn functional_dependency(&self) -> &FunctionalDependencySet {
+        &self.functional_dependency
+    }
 }
 
 impl stream::StreamPlanRef for PlanBase {
@@ -64,6 +79,11 @@ impl stream::StreamPlanRef for PlanBase {
         self.append_only
     }
 }
+impl batch::BatchPlanRef for PlanBase {
+    fn order(&self) -> &Order {
+        &self.order
+    }
+}
 impl PlanBase {
     pub fn new_logical(
         ctx: OptimizerContextRef,
@@ -72,6 +92,7 @@ impl PlanBase {
         functional_dependency: FunctionalDependencySet,
     ) -> Self {
         let id = ctx.next_plan_node_id();
+        let watermark_columns = FixedBitSet::with_capacity(schema.len());
         Self {
             id,
             ctx,
@@ -82,7 +103,17 @@ impl PlanBase {
             // Logical plan node won't touch `append_only` field
             append_only: true,
             functional_dependency,
+            watermark_columns,
         }
+    }
+
+    pub fn new_logical_with_core(node: &impl GenericPlanNode) -> Self {
+        Self::new_logical(
+            node.ctx(),
+            node.schema(),
+            node.logical_pk().unwrap_or_default(),
+            node.functional_dependency(),
+        )
     }
 
     pub fn new_stream(
@@ -92,8 +123,10 @@ impl PlanBase {
         functional_dependency: FunctionalDependencySet,
         dist: Distribution,
         append_only: bool,
+        watermark_columns: FixedBitSet,
     ) -> Self {
         let id = ctx.next_plan_node_id();
+        assert_eq!(watermark_columns.len(), schema.len());
         Self {
             id,
             ctx,
@@ -103,6 +136,7 @@ impl PlanBase {
             logical_pk,
             append_only,
             functional_dependency,
+            watermark_columns,
         }
     }
 
@@ -114,6 +148,7 @@ impl PlanBase {
     ) -> Self {
         let id = ctx.next_plan_node_id();
         let functional_dependency = FunctionalDependencySet::new(schema.len());
+        let watermark_columns = FixedBitSet::with_capacity(schema.len());
         Self {
             id,
             ctx,
@@ -124,6 +159,7 @@ impl PlanBase {
             // Batch plan node won't touch `append_only` field
             append_only: true,
             functional_dependency,
+            watermark_columns,
         }
     }
 
@@ -135,7 +171,14 @@ impl PlanBase {
             plan_node.functional_dependency().clone(),
             plan_node.distribution().clone(),
             plan_node.append_only(),
+            plan_node.watermark_columns().clone(),
         )
+    }
+
+    pub fn clone_with_new_plan_id(&self) -> Self {
+        let mut new = self.clone();
+        new.id = self.ctx.next_plan_node_id();
+        new
     }
 }
 

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,14 +16,13 @@ pub mod utils;
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, SortExecutor};
+use risingwave_common::enable_jemalloc_on_unix;
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use tikv_jemallocator::Jemalloc;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use tokio::runtime::Runtime;
 use utils::{create_input, execute_executor};
 
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
+enable_jemalloc_on_unix!();
 
 fn create_order_by_executor(
     chunk_size: usize,
@@ -31,9 +30,9 @@ fn create_order_by_executor(
     single_column: bool,
 ) -> BoxedExecutor {
     const CHUNK_SIZE: usize = 1024;
-    let (child, order_pairs) = if single_column {
+    let (child, column_orders) = if single_column {
         let input = create_input(&[DataType::Int64], chunk_size, chunk_num);
-        (input, vec![OrderPair::new(0, OrderType::Ascending)])
+        (input, vec![ColumnOrder::new(0, OrderType::ascending())])
     } else {
         let input = create_input(
             &[
@@ -48,16 +47,16 @@ fn create_order_by_executor(
         (
             input,
             vec![
-                OrderPair::new(0, OrderType::Ascending),
-                OrderPair::new(1, OrderType::Descending),
-                OrderPair::new(2, OrderType::Ascending),
+                ColumnOrder::new(0, OrderType::ascending()),
+                ColumnOrder::new(1, OrderType::descending()),
+                ColumnOrder::new(2, OrderType::ascending()),
             ],
         )
     };
 
     Box::new(SortExecutor::new(
         child,
-        order_pairs,
+        column_orders,
         "SortExecutor".into(),
         CHUNK_SIZE,
     ))

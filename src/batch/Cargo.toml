@@ -7,28 +7,27 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
 [dependencies]
 anyhow = "1"
 assert_matches = "1"
 async-recursion = "1"
-async-stream = "0.3"
 async-trait = "0.1"
-byteorder = "1"
-bytes = "1"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-crc32fast = "1"
 either = "1"
-farmhash = "1"
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
+hytra = "0.1.2"
 itertools = "0.10"
 minitrace = "0.4"
 num-traits = "0.2"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
-paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
-prost = "0.11"
 risingwave_common = { path = "../common" }
 risingwave_connector = { path = "../connector" }
 risingwave_expr = { path = "../expr" }
@@ -37,12 +36,8 @@ risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_source = { path = "../source" }
 risingwave_storage = { path = "../storage" }
-serde = { version = "1", features = ["derive"] }
-serde-value = "0.7"
 serde_json = "1"
-smallvec = "1"
-static_assertions = "1"
-tempfile = "3"
+task_stats_alloc = { path = "../utils/task_stats_alloc" }
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -57,9 +52,6 @@ tokio-metrics = "0.1.0"
 tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
-tracing-futures = "0.2"
-twox-hash = "1"
-url = "2"
 uuid = "1"
 
 [target.'cfg(not(madsim))'.dependencies]
@@ -69,6 +61,8 @@ workspace-hack = { path = "../workspace-hack" }
 criterion = { version = "0.4", features = ["async_tokio", "async"] }
 rand = "0.8"
 tempfile = "3"
+
+[target.'cfg(unix)'.dev-dependencies]
 tikv-jemallocator = "0.5"
 
 [[bench]]
@@ -77,10 +71,6 @@ harness = false
 
 [[bench]]
 name = "nested_loop_join"
-harness = false
-
-[[bench]]
-name = "sort_merge_join"
 harness = false
 
 [[bench]]

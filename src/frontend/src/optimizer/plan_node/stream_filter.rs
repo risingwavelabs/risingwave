@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,42 +14,44 @@
 
 use std::fmt;
 
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::FilterNode;
 
-use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::{Expr, ExprImpl};
+use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::PlanBase;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::Condition;
 
 /// `StreamFilter` implements [`super::LogicalFilter`]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamFilter {
     pub base: PlanBase,
-    logical: LogicalFilter,
+    logical: generic::Filter<PlanRef>,
 }
 
 impl StreamFilter {
-    pub fn new(logical: LogicalFilter) -> Self {
-        let ctx = logical.base.ctx.clone();
-        let input = logical.input();
-        let pk_indices = logical.base.logical_pk.to_vec();
+    pub fn new(logical: generic::Filter<PlanRef>) -> Self {
+        let base = PlanBase::new_logical_with_core(&logical);
+        let ctx = base.ctx;
+        let input = logical.input.clone();
+        let pk_indices = base.logical_pk;
         let dist = input.distribution().clone();
         // Filter executor won't change the append-only behavior of the stream.
         let base = PlanBase::new_stream(
             ctx,
-            logical.schema().clone(),
+            base.schema,
             pk_indices,
-            logical.functional_dependency().clone(),
+            base.functional_dependency,
             dist,
-            logical.input().append_only(),
+            input.append_only(),
+            input.watermark_columns().clone(),
         );
         StreamFilter { base, logical }
     }
 
     pub fn predicate(&self) -> &Condition {
-        self.logical.predicate()
+        &self.logical.predicate
     }
 }
 
@@ -61,20 +63,34 @@ impl fmt::Display for StreamFilter {
 
 impl PlanTreeNodeUnary for StreamFilter {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let mut logical = self.logical.clone();
+        logical.input = input;
+        Self::new(logical)
     }
 }
 
 impl_plan_tree_node_for_unary! { StreamFilter }
 
 impl StreamNode for StreamFilter {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
-        ProstStreamNode::Filter(FilterNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
+        PbNodeBody::Filter(FilterNode {
             search_condition: Some(ExprImpl::from(self.predicate().clone()).to_expr_proto()),
         })
+    }
+}
+
+impl ExprRewritable for StreamFilter {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut logical = self.logical.clone();
+        logical.rewrite_exprs(r);
+        Self::new(logical).into()
     }
 }

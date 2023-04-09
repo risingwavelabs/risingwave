@@ -2,5 +2,6 @@ query IT rowsort
 SELECT nspname FROM pg_catalog.pg_namespace;
 ----
 information_schema
-public
 pg_catalog
+public
+rw_catalog

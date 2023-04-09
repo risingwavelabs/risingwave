@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,31 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
 use std::marker::PhantomData;
 
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::{ArrayImpl, Op};
+use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::{Row, RowExt};
-use risingwave_common::types::{Datum, DatumRef, ScalarImpl};
+use risingwave_common::row::{OwnedRow, RowExt};
+use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
-use smallvec::SmallVec;
 
-use super::state_cache::array_agg::ArrayAgg;
-use super::state_cache::extreme::ExtremeAgg;
-use super::state_cache::string_agg::StringAgg;
-use super::state_cache::{CacheKey, GenericStateCache, StateCache};
+use super::agg_state_cache::{AggStateCache, GenericAggStateCache, StateCacheInputBatch};
+use super::minput_agg_impl::array_agg::ArrayAgg;
+use super::minput_agg_impl::extreme::ExtremeAgg;
+use super::minput_agg_impl::string_agg::StringAgg;
 use super::AggCall;
+use crate::common::cache::{OrderedStateCache, TopNStateCache};
 use crate::common::table::state_table::StateTable;
-use crate::common::{iter_state_table, StateTableColumnMapping};
+use crate::common::StateTableColumnMapping;
 use crate::executor::{PkIndices, StreamExecutorResult};
 
 /// Aggregation state as a materialization of input chunks.
@@ -58,7 +58,7 @@ pub struct MaterializedInputState<S: StateStore> {
     state_table_order_col_indices: Vec<usize>,
 
     /// Cache of state table.
-    cache: Box<dyn StateCache>,
+    cache: Box<dyn AggStateCache + Send + Sync>,
 
     /// Serializer for cache key.
     cache_key_serializer: OrderedRowSerde,
@@ -72,7 +72,6 @@ impl<S: StateStore> MaterializedInputState<S> {
         agg_call: &AggCall,
         pk_indices: &PkIndices,
         col_mapping: &StateTableColumnMapping,
-        row_count: usize,
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> Self {
@@ -82,22 +81,22 @@ impl<S: StateStore> MaterializedInputState<S> {
                 // `min`/`max` need not to order by any other columns, but have to
                 // order by the agg value implicitly.
                 let order_type = if agg_call.kind == AggKind::Min {
-                    OrderType::Ascending
+                    OrderType::ascending()
                 } else {
-                    OrderType::Descending
+                    OrderType::descending()
                 };
                 (vec![arg_col_indices[0]], vec![order_type])
             } else {
                 agg_call
-                    .order_pairs
+                    .column_orders
                     .iter()
-                    .map(|p| (p.column_idx, p.order_type))
+                    .map(|p| (p.column_index, p.order_type))
                     .unzip()
             };
 
         let pk_len = pk_indices.len();
         order_col_indices.extend(pk_indices.iter());
-        order_types.extend(itertools::repeat_n(OrderType::Ascending, pk_len));
+        order_types.extend(itertools::repeat_n(OrderType::ascending(), pk_len));
 
         // map argument columns to state table column indices
         let state_table_arg_col_indices = arg_col_indices
@@ -125,28 +124,23 @@ impl<S: StateStore> MaterializedInputState<S> {
             .collect_vec();
         let cache_key_serializer = OrderedRowSerde::new(cache_key_data_types, order_types);
 
-        let cache_capacity = if matches!(agg_call.kind, AggKind::Min | AggKind::Max) {
-            extreme_cache_size
-        } else {
-            usize::MAX
+        let cache: Box<dyn AggStateCache + Send + Sync> = match agg_call.kind {
+            AggKind::Min | AggKind::Max | AggKind::FirstValue => Box::new(
+                GenericAggStateCache::new(TopNStateCache::new(extreme_cache_size), ExtremeAgg),
+            ),
+            AggKind::StringAgg => Box::new(GenericAggStateCache::new(
+                OrderedStateCache::new(),
+                StringAgg,
+            )),
+            AggKind::ArrayAgg => Box::new(GenericAggStateCache::new(
+                OrderedStateCache::new(),
+                ArrayAgg,
+            )),
+            _ => panic!(
+                "Agg kind `{}` is not expected to have materialized input state",
+                agg_call.kind
+            ),
         };
-
-        let cache: Box<dyn StateCache> =
-            match agg_call.kind {
-                AggKind::Min | AggKind::Max | AggKind::FirstValue => Box::new(
-                    GenericStateCache::new(ExtremeAgg, cache_capacity, row_count),
-                ),
-                AggKind::StringAgg => {
-                    Box::new(GenericStateCache::new(StringAgg, cache_capacity, row_count))
-                }
-                AggKind::ArrayAgg => {
-                    Box::new(GenericStateCache::new(ArrayAgg, cache_capacity, row_count))
-                }
-                _ => panic!(
-                    "Agg kind `{}` is not expected to have materialized input state",
-                    agg_call.kind
-                ),
-            };
 
         Self {
             arg_col_indices,
@@ -181,16 +175,24 @@ impl<S: StateStore> MaterializedInputState<S> {
     pub async fn get_output(
         &mut self,
         state_table: &StateTable<S>,
-        group_key: Option<&Row>,
+        group_key: Option<&OwnedRow>,
     ) -> StreamExecutorResult<Datum> {
         if !self.cache.is_synced() {
-            let all_data_iter = iter_state_table(state_table, group_key).await?;
+            let mut cache_filler = self.cache.begin_syncing();
+
+            let all_data_iter = state_table
+                .iter_with_pk_prefix(
+                    &group_key,
+                    PrefetchOptions {
+                        exhaust_iter: cache_filler.capacity().is_none(),
+                    },
+                )
+                .await?;
             pin_mut!(all_data_iter);
 
-            let mut cache_filler = self.cache.begin_syncing();
             #[for_await]
-            for state_row in all_data_iter.take(cache_filler.capacity()) {
-                let state_row: Cow<'_, Row> = state_row?;
+            for state_row in all_data_iter.take(cache_filler.capacity().unwrap_or(usize::MAX)) {
+                let state_row: OwnedRow = state_row?;
                 let cache_key = {
                     let mut cache_key = Vec::new();
                     self.cache_key_serializer.serialize(
@@ -206,76 +208,12 @@ impl<S: StateStore> MaterializedInputState<S> {
                     .iter()
                     .map(|i| state_row[*i].as_ref().map(ScalarImpl::as_scalar_ref_impl))
                     .collect();
-                cache_filler.insert(cache_key, cache_value);
+                cache_filler.append(cache_key, cache_value);
             }
+            cache_filler.finish();
         }
         assert!(self.cache.is_synced());
         Ok(self.cache.get_output())
-    }
-}
-
-// TODO(yuchao): May extract common logic here to `struct [Data/Stream]ChunkRef` if there's other
-// usage in the future. https://github.com/risingwavelabs/risingwave/pull/5908#discussion_r1002896176
-pub struct StateCacheInputBatch<'a> {
-    idx: usize,
-    ops: Ops<'a>,
-    visibility: Option<&'a Bitmap>,
-    columns: &'a [&'a ArrayImpl],
-    cache_key_serializer: &'a OrderedRowSerde,
-    arg_col_indices: &'a [usize],
-    order_col_indices: &'a [usize],
-}
-
-impl<'a> StateCacheInputBatch<'a> {
-    fn new(
-        ops: Ops<'a>,
-        visibility: Option<&'a Bitmap>,
-        columns: &'a [&'a ArrayImpl],
-        cache_key_serializer: &'a OrderedRowSerde,
-        arg_col_indices: &'a [usize],
-        order_col_indices: &'a [usize],
-    ) -> Self {
-        let first_idx = visibility.map_or(0, |v| v.next_set_bit(0).unwrap_or(ops.len()));
-        Self {
-            idx: first_idx,
-            ops,
-            visibility,
-            columns,
-            cache_key_serializer,
-            arg_col_indices,
-            order_col_indices,
-        }
-    }
-}
-
-impl<'a> Iterator for StateCacheInputBatch<'a> {
-    type Item = (Op, CacheKey, SmallVec<[DatumRef<'a>; 2]>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.idx >= self.ops.len() {
-            None
-        } else {
-            let op = self.ops[self.idx];
-            let key = {
-                let mut key = Vec::new();
-                self.cache_key_serializer.serialize_datums(
-                    self.order_col_indices
-                        .iter()
-                        .map(|col_idx| self.columns[*col_idx].value_at(self.idx)),
-                    &mut key,
-                );
-                key
-            };
-            let value = self
-                .arg_col_indices
-                .iter()
-                .map(|col_idx| self.columns[*col_idx].value_at(self.idx))
-                .collect();
-            self.idx = self.visibility.map_or(self.idx + 1, |v| {
-                v.next_set_bit(self.idx + 1).unwrap_or(self.ops.len())
-            });
-            Some((op, key, value))
-        }
     }
 }
 
@@ -288,11 +226,12 @@ mod tests {
     use rand::Rng;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
-    use risingwave_common::row::Row;
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::EpochPair;
-    use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_common::util::iter_util::ZipEqFast;
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_expr::expr::AggKind;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
@@ -352,9 +291,10 @@ mod tests {
             kind,
             args: AggArgs::Unary(arg_type.clone(), arg_idx),
             return_type: arg_type,
-            order_pairs: vec![],
+            column_orders: vec![],
             append_only: false,
             filter: None,
+            distinct: false,
         }
     }
 
@@ -377,8 +317,8 @@ mod tests {
             &input_schema,
             vec![2, 3],
             vec![
-                OrderType::Ascending, // for AggKind::Min
-                OrderType::Ascending,
+                OrderType::ascending(), // for AggKind::Min
+                OrderType::ascending(),
             ],
         )
         .await;
@@ -387,16 +327,12 @@ mod tests {
             &agg_call,
             &input_pk_indices,
             &mapping,
-            0,
             usize::MAX,
             &input_schema,
         );
 
-        let epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
-        epoch.inc();
-
-        let mut row_count = 0;
 
         {
             let chunk = create_chunk(
@@ -408,14 +344,13 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            row_count += 2;
 
             let (ops, columns, visibility) = chunk.into_inner();
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -434,13 +369,13 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            row_count += 2;
 
             let (ops, columns, visibility) = chunk.into_inner();
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
+            epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -457,7 +392,6 @@ mod tests {
                 &agg_call,
                 &input_pk_indices,
                 &mapping,
-                row_count,
                 usize::MAX,
                 &input_schema,
             );
@@ -492,8 +426,8 @@ mod tests {
             &input_schema,
             vec![2, 3],
             vec![
-                OrderType::Descending, // for AggKind::Max
-                OrderType::Ascending,
+                OrderType::descending(), // for AggKind::Max
+                OrderType::ascending(),
             ],
         )
         .await;
@@ -502,16 +436,12 @@ mod tests {
             &agg_call,
             &input_pk_indices,
             &mapping,
-            0,
             usize::MAX,
             &input_schema,
         );
 
-        let epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
-        epoch.inc();
-
-        let mut row_count = 0;
 
         {
             let chunk = create_chunk(
@@ -523,14 +453,13 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            row_count += 2;
 
             let (ops, columns, visibility) = chunk.into_inner();
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -549,13 +478,13 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            row_count += 2;
 
             let (ops, columns, visibility) = chunk.into_inner();
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
+            epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -572,7 +501,6 @@ mod tests {
                 &agg_call,
                 &input_pk_indices,
                 &mapping,
-                row_count,
                 usize::MAX,
                 &input_schema,
             );
@@ -608,8 +536,8 @@ mod tests {
             &input_schema,
             vec![0, 3],
             vec![
-                OrderType::Ascending, // for AggKind::Min
-                OrderType::Ascending,
+                OrderType::ascending(), // for AggKind::Min
+                OrderType::ascending(),
             ],
         )
         .await;
@@ -617,22 +545,20 @@ mod tests {
             &input_schema,
             vec![1, 3],
             vec![
-                OrderType::Descending, // for AggKind::Max
-                OrderType::Ascending,
+                OrderType::descending(), // for AggKind::Max
+                OrderType::ascending(),
             ],
         )
         .await;
 
-        let epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(1);
         table_1.init_epoch(epoch);
         table_2.init_epoch(epoch);
-        epoch.inc();
 
         let mut state_1 = MaterializedInputState::new(
             &agg_call_1,
             &input_pk_indices,
             &mapping_1,
-            0,
             usize::MAX,
             &input_schema,
         );
@@ -640,7 +566,6 @@ mod tests {
             &agg_call_2,
             &input_pk_indices,
             &mapping_2,
-            0,
             usize::MAX,
             &input_schema,
         );
@@ -673,15 +598,16 @@ mod tests {
 
             [chunk_1, chunk_2]
                 .into_iter()
-                .zip_eq([&mut state_1, &mut state_2])
+                .zip_eq_fast([&mut state_1, &mut state_2])
                 .try_for_each(|(chunk, state)| {
                     let (ops, columns, visibility) = chunk.into_inner();
                     let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
                     state.apply_chunk(&ops, visibility.as_ref(), &columns)
                 })?;
 
-            table_1.commit_for_test(epoch).await.unwrap();
-            table_2.commit_for_test(epoch).await.unwrap();
+            epoch.inc();
+            table_1.commit(epoch).await.unwrap();
+            table_2.commit(epoch).await.unwrap();
 
             match state_1.get_output(&table_1, group_key.as_ref()).await? {
                 Some(ScalarImpl::Utf8(s)) => {
@@ -713,15 +639,15 @@ mod tests {
         let input_schema = Schema::new(vec![field1, field2, field3, field4]);
 
         let agg_call = create_extreme_agg_call(AggKind::Max, DataType::Int32, 1); // max(b)
-        let group_key = Some(Row::new(vec![Some(8.into())]));
+        let group_key = Some(OwnedRow::new(vec![Some(8.into())]));
 
         let (mut table, mapping) = create_mem_state_table(
             &input_schema,
             vec![2, 1, 3],
             vec![
-                OrderType::Ascending,  // c ASC
-                OrderType::Descending, // b DESC for AggKind::Max
-                OrderType::Ascending,  // _row_id ASC
+                OrderType::ascending(),  // c ASC
+                OrderType::descending(), // b DESC for AggKind::Max
+                OrderType::ascending(),  // _row_id ASC
             ],
         )
         .await;
@@ -730,16 +656,12 @@ mod tests {
             &agg_call,
             &input_pk_indices,
             &mapping,
-            0,
             usize::MAX,
             &input_schema,
         );
 
-        let epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
-        epoch.inc();
-
-        let mut row_count = 0;
 
         {
             let chunk = create_chunk(
@@ -750,14 +672,13 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            row_count += 2;
 
             let (ops, columns, visibility) = chunk.into_inner();
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -776,13 +697,13 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            row_count += 1;
 
             let (ops, columns, visibility) = chunk.into_inner();
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
+            epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -799,7 +720,6 @@ mod tests {
                 &agg_call,
                 &input_pk_indices,
                 &mapping,
-                row_count,
                 usize::MAX,
                 &input_schema,
             );
@@ -832,21 +752,19 @@ mod tests {
             &input_schema,
             vec![0, 1],
             vec![
-                OrderType::Ascending, // for AggKind::Min
-                OrderType::Ascending,
+                OrderType::ascending(), // for AggKind::Min
+                OrderType::ascending(),
             ],
         )
         .await;
 
-        let epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
-        epoch.inc();
 
         let mut state = MaterializedInputState::new(
             &agg_call,
             &input_pk_indices,
             &mapping,
-            0,
             1024,
             &input_schema,
         );
@@ -882,8 +800,8 @@ mod tests {
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -916,7 +834,8 @@ mod tests {
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
+            epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -947,8 +866,8 @@ mod tests {
             &input_schema,
             vec![0, 1],
             vec![
-                OrderType::Ascending, // for AggKind::Min
-                OrderType::Ascending,
+                OrderType::ascending(), // for AggKind::Min
+                OrderType::ascending(),
             ],
         )
         .await;
@@ -957,14 +876,12 @@ mod tests {
             &agg_call,
             &input_pk_indices,
             &mapping,
-            0,
             3, // cache capacity = 3 for easy testing
             &input_schema,
         );
 
-        let epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
-        epoch.inc();
 
         {
             let chunk = create_chunk(
@@ -979,8 +896,8 @@ mod tests {
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -1006,8 +923,8 @@ mod tests {
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -1035,7 +952,8 @@ mod tests {
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
+            epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -1067,12 +985,13 @@ mod tests {
             kind: AggKind::StringAgg,
             args: AggArgs::Binary([DataType::Varchar, DataType::Varchar], [0, 1]),
             return_type: DataType::Varchar,
-            order_pairs: vec![
-                OrderPair::new(2, OrderType::Ascending),  // b ASC
-                OrderPair::new(0, OrderType::Descending), // a DESC
+            column_orders: vec![
+                ColumnOrder::new(2, OrderType::ascending()),  // b ASC
+                ColumnOrder::new(0, OrderType::descending()), // a DESC
             ],
             append_only: false,
             filter: None,
+            distinct: false,
         };
         let group_key = None;
 
@@ -1080,9 +999,9 @@ mod tests {
             &input_schema,
             vec![2, 0, 4, 1],
             vec![
-                OrderType::Ascending,  // _row_id ASC
-                OrderType::Descending, // a DESC
-                OrderType::Ascending,  // b ASC
+                OrderType::ascending(),  // b ASC
+                OrderType::descending(), // a DESC
+                OrderType::ascending(),  // _row_id ASC
             ],
         )
         .await;
@@ -1091,14 +1010,12 @@ mod tests {
             &agg_call,
             &input_pk_indices,
             &mapping,
-            0,
             usize::MAX,
             &input_schema,
         );
 
-        let epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
-        epoch.inc();
 
         {
             let chunk = create_chunk(
@@ -1114,8 +1031,8 @@ mod tests {
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -1138,7 +1055,8 @@ mod tests {
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
+            epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -1169,12 +1087,13 @@ mod tests {
             kind: AggKind::ArrayAgg,
             args: AggArgs::Unary(DataType::Int32, 1), // array_agg(b)
             return_type: DataType::Int32,
-            order_pairs: vec![
-                OrderPair::new(2, OrderType::Ascending),  // c ASC
-                OrderPair::new(0, OrderType::Descending), // a DESC
+            column_orders: vec![
+                ColumnOrder::new(2, OrderType::ascending()),  // c ASC
+                ColumnOrder::new(0, OrderType::descending()), // a DESC
             ],
             append_only: false,
             filter: None,
+            distinct: false,
         };
         let group_key = None;
 
@@ -1182,9 +1101,9 @@ mod tests {
             &input_schema,
             vec![2, 0, 3, 1],
             vec![
-                OrderType::Ascending,  // c ASC
-                OrderType::Descending, // a DESC
-                OrderType::Ascending,  // _row_id ASC
+                OrderType::ascending(),  // c ASC
+                OrderType::descending(), // a DESC
+                OrderType::ascending(),  // _row_id ASC
             ],
         )
         .await;
@@ -1193,15 +1112,12 @@ mod tests {
             &agg_call,
             &input_pk_indices,
             &mapping,
-            0,
             usize::MAX,
             &input_schema,
         );
 
-        let epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
-        epoch.inc();
-
         {
             let chunk = create_chunk(
                 " T i i I
@@ -1216,8 +1132,8 @@ mod tests {
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -1245,7 +1161,8 @@ mod tests {
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
+            epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {

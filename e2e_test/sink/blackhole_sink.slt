@@ -1,0 +1,39 @@
+statement ok
+CREATE TABLE t5 (v1 int primary key, v2 int);
+
+statement ok
+CREATE MATERIALIZED VIEW mv5 AS SELECT * FROM t5;
+
+statement ok
+CREATE SINK s5 AS select * from t5 WITH (
+    connector = 'blackhole'
+);
+
+statement ok
+CREATE SINK s5mv AS select mv5.v1 as v1, mv5.v2 as v2 from mv5 WITH (
+    connector = 'blackhole'
+);
+
+statement ok
+INSERT INTO t5 VALUES (101, 102), (101, 102), (102, 102), (103, 102), (105, 102), (108, 102), (113, 102), (121, 102);
+
+statement error
+DROP TABLE t5;
+
+statement ok
+DROP SINK s5;
+
+statement error
+DROP MATERIALIZED VIEW mv5;
+
+statement ok
+DROP SINK s5mv;
+
+statement ok
+DROP MATERIALIZED VIEW mv5;
+
+statement ok
+DROP TABLE t5;
+
+statement ok
+FLUSH;

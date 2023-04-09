@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -27,13 +27,25 @@ pub async fn schema_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
     for message in input {
         let message = message?;
 
-        if let Message::Chunk(chunk) = &message {
-            risingwave_common::util::schema_check::schema_check(
+        match &message {
+            Message::Chunk(chunk) => risingwave_common::util::schema_check::schema_check(
                 info.schema.fields().iter().map(|f| &f.data_type),
                 chunk.columns(),
-            )
-            .unwrap_or_else(|e| panic!("schema check failed on {}: {}", info.identity, e));
+            ),
+            Message::Watermark(watermark) => {
+                let expected = info.schema.fields()[watermark.col_idx].data_type();
+                let found = &watermark.data_type;
+                if &expected != found {
+                    Err(format!(
+                        "watermark type mismatched: expected {expected}, found {found}"
+                    ))
+                } else {
+                    Ok(())
+                }
+            }
+            Message::Barrier(_) => Ok(()),
         }
+        .unwrap_or_else(|e| panic!("schema check failed on {}: {}", info.identity, e));
 
         yield message;
     }

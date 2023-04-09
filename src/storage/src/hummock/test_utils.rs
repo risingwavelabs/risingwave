@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,11 +15,11 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::{Stream, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
-use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use super::iterator::test_utils::iterator_test_table_key_of;
@@ -27,6 +27,7 @@ use super::{
     CompressionAlgorithm, HummockResult, InMemWriter, SstableMeta, SstableWriterOptions,
     DEFAULT_RESTART_INTERVAL,
 };
+use crate::error::StorageResult;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
@@ -34,11 +35,11 @@ use crate::hummock::{
     SstableStoreRef, SstableWriter,
 };
 use crate::monitor::StoreLocalStatistic;
+use crate::opts::StorageOpts;
 use crate::storage_value::StorageValue;
-use crate::store::StateStoreIter;
 
-pub fn default_config_for_test() -> StorageConfig {
-    StorageConfig {
+pub fn default_opts_for_test() -> StorageOpts {
+    StorageOpts {
         sstable_size_mb: 4,
         block_size_kb: 64,
         bloom_false_positive: 0.1,
@@ -49,6 +50,7 @@ pub fn default_config_for_test() -> StorageConfig {
         write_conflict_detection_enabled: true,
         block_cache_capacity_mb: 64,
         meta_cache_capacity_mb: 64,
+        high_priority_ratio: 0,
         disable_remote_compactor: false,
         enable_local_spill: false,
         local_object_store: "memory".to_string(),
@@ -79,7 +81,7 @@ pub fn gen_dummy_batch_several_keys(n: usize) -> Vec<(Bytes, StorageValue)> {
 }
 
 pub fn gen_dummy_sst_info(
-    id: HummockSstableId,
+    id: HummockSstableObjectId,
     batches: Vec<SharedBufferBatch>,
     table_id: TableId,
     epoch: HummockEpoch,
@@ -97,7 +99,8 @@ pub fn gen_dummy_sst_info(
         file_size += batch.size() as u64;
     }
     SstableInfo {
-        id,
+        object_id: id,
+        sst_id: id,
         key_range: Some(KeyRange {
             left: FullKey::for_test(table_id, min_table_key, epoch).encode(),
             right: FullKey::for_test(table_id, max_table_key, epoch).encode(),
@@ -108,7 +111,9 @@ pub fn gen_dummy_sst_info(
         meta_offset: 0,
         stale_key_count: 0,
         total_key_count: 0,
-        divide_version: 0,
+        uncompressed_file_size: file_size,
+        min_epoch: 0,
+        max_epoch: 0,
     }
 }
 
@@ -144,7 +149,7 @@ pub async fn gen_test_sstable_data(
 ) -> (Bytes, SstableMeta) {
     let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opts), opts);
     for (key, value) in kv_iter {
-        b.add(&key.to_ref(), value.as_slice(), true).await.unwrap();
+        b.add(key.to_ref(), value.as_slice(), true).await.unwrap();
     }
     let output = b.finish().await.unwrap();
     output.writer_output
@@ -152,14 +157,16 @@ pub async fn gen_test_sstable_data(
 
 /// Write the data and meta to `sstable_store`.
 pub async fn put_sst(
-    sst_id: HummockSstableId,
+    sst_object_id: HummockSstableObjectId,
     data: Bytes,
     mut meta: SstableMeta,
     sstable_store: SstableStoreRef,
     mut options: SstableWriterOptions,
 ) -> HummockResult<SstableInfo> {
     options.policy = CachePolicy::NotFill;
-    let mut writer = sstable_store.clone().create_sst_writer(sst_id, options);
+    let mut writer = sstable_store
+        .clone()
+        .create_sst_writer(sst_object_id, options);
     for block_meta in &meta.block_metas {
         let offset = block_meta.offset as usize;
         let end_offset = offset + block_meta.len as usize;
@@ -169,7 +176,8 @@ pub async fn put_sst(
     }
     meta.meta_offset = writer.data_len() as u64;
     let sst = SstableInfo {
-        id: sst_id,
+        object_id: sst_object_id,
+        sst_id: sst_object_id,
         key_range: Some(KeyRange {
             left: meta.smallest_key.clone(),
             right: meta.largest_key.clone(),
@@ -180,7 +188,9 @@ pub async fn put_sst(
         meta_offset: meta.meta_offset,
         stale_key_count: 0,
         total_key_count: 0,
-        divide_version: 0,
+        uncompressed_file_size: meta.estimated_size as u64,
+        min_epoch: 0,
+        max_epoch: 0,
     };
     let writer_output = writer.finish(meta).await?;
     writer_output.await.unwrap()?;
@@ -188,27 +198,27 @@ pub async fn put_sst(
 }
 
 /// Generates a test table from the given `kv_iter` and put the kv value to `sstable_store`
-pub async fn gen_test_sstable_inner(
+pub async fn gen_test_sstable_inner<B: AsRef<[u8]>>(
     opts: SstableBuilderOptions,
-    sst_id: HummockSstableId,
-    kv_iter: impl Iterator<Item = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>)>,
+    object_id: HummockSstableObjectId,
+    kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,
     range_tombstones: Vec<DeleteRangeTombstone>,
     sstable_store: SstableStoreRef,
     policy: CachePolicy,
-) -> Sstable {
+) -> (Sstable, SstableInfo) {
     let writer_opts = SstableWriterOptions {
         capacity_hint: None,
         tracker: None,
         policy,
     };
-    let writer = sstable_store.clone().create_sst_writer(sst_id, writer_opts);
-    let mut b = SstableBuilder::for_test(sst_id, writer, opts);
+    let writer = sstable_store
+        .clone()
+        .create_sst_writer(object_id, writer_opts);
+    let mut b = SstableBuilder::for_test(object_id, writer, opts);
     for (key, value) in kv_iter {
-        b.add(&key.to_ref(), value.as_slice(), true).await.unwrap();
+        b.add(key.to_ref(), value.as_slice(), true).await.unwrap();
     }
-    for tombstone in range_tombstones {
-        b.add_delete_range(tombstone);
-    }
+    b.add_delete_range(range_tombstones);
     let output = b.finish().await.unwrap();
     output.writer_output.await.unwrap().unwrap();
     let table = sstable_store
@@ -218,19 +228,38 @@ pub async fn gen_test_sstable_inner(
         )
         .await
         .unwrap();
-    table.value().as_ref().clone()
+    (table.value().as_ref().clone(), output.sst_info.sst_info)
 }
 
 /// Generate a test table from the given `kv_iter` and put the kv value to `sstable_store`
-pub async fn gen_test_sstable(
+pub async fn gen_test_sstable<B: AsRef<[u8]>>(
     opts: SstableBuilderOptions,
-    sst_id: HummockSstableId,
-    kv_iter: impl Iterator<Item = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>)>,
+    object_id: HummockSstableObjectId,
+    kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,
     sstable_store: SstableStoreRef,
 ) -> Sstable {
     gen_test_sstable_inner(
         opts,
-        sst_id,
+        object_id,
+        kv_iter,
+        vec![],
+        sstable_store,
+        CachePolicy::NotFill,
+    )
+    .await
+    .0
+}
+
+/// Generate a test table from the given `kv_iter` and put the kv value to `sstable_store`
+pub async fn gen_test_sstable_and_info<B: AsRef<[u8]>>(
+    opts: SstableBuilderOptions,
+    object_id: HummockSstableObjectId,
+    kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,
+    sstable_store: SstableStoreRef,
+) -> (Sstable, SstableInfo) {
+    gen_test_sstable_inner(
+        opts,
+        object_id,
         kv_iter,
         vec![],
         sstable_store,
@@ -242,20 +271,21 @@ pub async fn gen_test_sstable(
 /// Generate a test table from the given `kv_iter` and put the kv value to `sstable_store`
 pub async fn gen_test_sstable_with_range_tombstone(
     opts: SstableBuilderOptions,
-    sst_id: HummockSstableId,
+    object_id: HummockSstableObjectId,
     kv_iter: impl Iterator<Item = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>)>,
     range_tombstones: Vec<DeleteRangeTombstone>,
     sstable_store: SstableStoreRef,
 ) -> Sstable {
     gen_test_sstable_inner(
         opts,
-        sst_id,
+        object_id,
         kv_iter,
         range_tombstones,
         sstable_store,
         CachePolicy::NotFill,
     )
     .await
+    .0
 }
 
 /// Generates a user key with table id 0 and the given `table_key`
@@ -293,26 +323,27 @@ pub fn test_value_of(idx: usize) -> Vec<u8> {
 /// generated by `test_key_of` and `test_value_of`.
 pub async fn gen_default_test_sstable(
     opts: SstableBuilderOptions,
-    sst_id: HummockSstableId,
+    object_id: HummockSstableObjectId,
     sstable_store: SstableStoreRef,
 ) -> Sstable {
     gen_test_sstable(
         opts,
-        sst_id,
+        object_id,
         (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i)))),
         sstable_store,
     )
     .await
 }
 
-pub async fn count_iter(iter: &mut impl StateStoreIter) -> usize {
+pub async fn count_stream<T>(s: impl Stream<Item = StorageResult<T>> + Send) -> usize {
+    futures::pin_mut!(s);
     let mut c: usize = 0;
-    while iter.next().await.unwrap().is_some() {
+    while s.try_next().await.unwrap().is_some() {
         c += 1
     }
     c
 }
 
-pub fn create_small_table_cache() -> Arc<LruCache<HummockSstableId, Box<Sstable>>> {
-    Arc::new(LruCache::new(1, 4))
+pub fn create_small_table_cache() -> Arc<LruCache<HummockSstableObjectId, Box<Sstable>>> {
+    Arc::new(LruCache::new(1, 4, 0))
 }

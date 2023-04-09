@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,7 +15,8 @@
 use risingwave_common::catalog::Schema;
 
 use super::{stream, EqJoinPredicate};
-use crate::session::OptimizerContextRef;
+use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::property::FunctionalDependencySet;
 
 pub mod dynamic_filter;
 pub use dynamic_filter::*;
@@ -41,14 +42,26 @@ mod union;
 pub use union::*;
 mod top_n;
 pub use top_n::*;
+mod share;
+pub use share::*;
 
 pub trait GenericPlanRef {
     fn schema(&self) -> &Schema;
     fn logical_pk(&self) -> &[usize];
+    fn functional_dependency(&self) -> &FunctionalDependencySet;
     fn ctx(&self) -> OptimizerContextRef;
 }
 
 pub trait GenericPlanNode {
+    /// return (schema, `logical_pk`, fds)
+    fn logical_properties(&self) -> (Schema, Option<Vec<usize>>, FunctionalDependencySet) {
+        (
+            self.schema(),
+            self.logical_pk(),
+            self.functional_dependency(),
+        )
+    }
+    fn functional_dependency(&self) -> FunctionalDependencySet;
     fn schema(&self) -> Schema;
     fn logical_pk(&self) -> Option<Vec<usize>>;
     fn ctx(&self) -> OptimizerContextRef;

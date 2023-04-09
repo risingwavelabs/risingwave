@@ -55,7 +55,7 @@ Then, you need simply start compute-node by yourself -- either in command line b
 `risedev.yml` defines all available scenes. Let's take a look at the ci-3cn-1fe config:
 
 ```yaml
-risedev:
+profile:
   ci-3cn-1fe:
     - use: compute-node
       port: 5687
@@ -74,7 +74,7 @@ The RiseDev development cluster will start these 5 services in sequence. The ser
 If you don't want one service, or want them to start in different order, simply remove or switch them. For example, if we only need two compute nodes:
 
 ```yaml
-risedev:
+profile:
   ci-3cn-1fe:
     - use: compute-node
       port: 5687
@@ -88,7 +88,13 @@ risedev:
 
 If you don't want to download some components, you may use the interactive configuration tool `./risedev configure` to disable some components.
 
-That's all! RiseDev will generate a new `server.properties` for the frontend node, and everything will be fine.
+That's all! RiseDev will generate all other configurations for you, and everything will be fine.
+
+### Add New Profiles
+
+RiseDev has some built-in profiles defined under the `profile` section of `risedev.yml`. You can add new profiles by adding new items under the `profile` section.
+
+RiseDev also supports including profiles from `risedev-profiles.user.yml`, which is automatically generated on the first run. This file is designed to be not version controlled, so you can add your own profiles here for customized purposes. Check this file for more information.
 
 ### Logs and Artifacts
 
@@ -100,8 +106,8 @@ That's all! RiseDev will generate a new `server.properties` for the frontend nod
 
 ### Component Preparation
 
-RiseDev uses cargo-make to prepare and download all necessary components. Upon the first time of starting risedev, the config wizard will ask for components to download. The default dev environment requires all components to be installed.
-The configurator will write an env file to risedev-components.user.env.
+RiseDev uses cargo-make to prepare and download all necessary components. Upon the first time of starting RiseDev, the config wizard will ask for components to download. The default dev environment requires all components to be installed.
+The configurator will write an env file to `risedev-components.user.env`.
 
 ```bash
 RISEDEV_CONFIGURED=true
@@ -128,20 +134,21 @@ All steps for downloading components, copying config, and building RisingWave ar
 `risedev.yml` is powerful yet simple. If you want to make changes to the configuration format, you may need to understand how it works. Source code is in `risedevtool/src/config`.
 
 > **Note**
-> 
-> `src/risedevtool/risedev-schema.json` defines the schema for risedev.yml
-> 
+>
+> The schema for RiseDev configuration files is defined under `src/risedevtool/schemas`.
+>
 > You can add the following section to `.vscode/settings.json` to get hover support in VS Code:
-> 
-> ```yml
+>
+> ```json
 >     "yaml.schemas": {
->         "src/risedevtool/risedev-schema.json": "risedev.yml"
+>         "src/risedevtool/schemas/risedev.json": "risedev.yml",
+>         "src/risedevtool/schemas/risedev-profiles.user.json": "risedev-profiles.user.yml"
 >     }
 > ```
 
 #### Template Expanding
 
-`risedev.yml` has two sections: template and risedev. The template section contains templates for a single component. For example:
+`risedev.yml` has two sections: template and profile. The template section contains templates for a single component. For example:
 
 ```yaml
 template:
@@ -154,14 +161,14 @@ template:
     provide-minio: "minio*"
     user-managed: false
 
-risedev:
+profile:
   ci-3cn-1fe:
     - use: compute-node
       port: 5687
       exporter-port: 1222
 ```
 
-risedev will expand this config into:
+RiseDev will expand this config into:
 
 ```yaml
 template:
@@ -174,7 +181,7 @@ template:
     provide-minio: "minio*"
     user-managed: false
 
-risedev:
+profile:
   ci-3cn-1fe:
     - use: compute-node
       address: "127.0.0.1"
@@ -275,21 +282,7 @@ All `provide-` items will be expanded to their corresponding components by id ma
       exporter-port: 1224
 ```
 
-This expanded config will serve as a base config for the following config generator component.
-
-### Config Generator
-
-RiseDev will generate config of each service using modules in risedevtool/src/config_gen. Given the above frontend meta-config, the server.properties will be generated (`risingwave.leader.computenodes` is no longer used):
-
-```apache
-risingwave.pgserver.ip=127.0.0.1
-risingwave.pgserver.port=4567
-risingwave.leader.clustermode=Distributed
-risingwave.leader.computenodes=127.0.0.1:5687,127.0.0.1:5688,127.0.0.1:5689
-
-risingwave.catalog.mode=Remote
-risingwave.meta.node=127.0.0.1:5690
-```
+Based on this expanded config, RiseDev will generate command line arguments or config files for each service before launching them. Check `risedevtool/src/config_gen` for details.
 
 ### RiseDev Service
 

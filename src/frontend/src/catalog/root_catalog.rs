@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,23 +16,25 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{CatalogVersion, IndexId, TableId};
+use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
+use risingwave_common::types::DataType;
+use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
-    Source as ProstSource, Table as ProstTable, View as ProstView,
+    PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
 };
 
+use super::function_catalog::FunctionCatalog;
 use super::source_catalog::SourceCatalog;
 use super::system_catalog::get_sys_catalogs_in_schema;
 use super::view_catalog::ViewCatalog;
 use super::{CatalogError, CatalogResult, SinkId, SourceId, ViewId};
+use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
-use crate::catalog::sink_catalog::SinkCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
-use crate::catalog::{DatabaseId, IndexCatalog, SchemaId};
+use crate::catalog::{ConnectionId, DatabaseId, IndexCatalog, SchemaId};
 
 #[derive(Copy, Clone)]
 pub enum SchemaPath<'a> {
@@ -52,6 +54,28 @@ impl<'a> SchemaPath<'a> {
             None => SchemaPath::Path(search_path, user_name),
         }
     }
+
+    /// Call function `f` for each schema name. Return the first `Some` result.
+    pub fn try_find<T, E>(
+        &self,
+        mut f: impl FnMut(&str) -> Result<Option<T>, E>,
+    ) -> Result<Option<(T, &'a str)>, E> {
+        match self {
+            SchemaPath::Name(schema_name) => Ok(f(schema_name)?.map(|t| (t, *schema_name))),
+            SchemaPath::Path(search_path, user_name) => {
+                for schema_name in search_path.path() {
+                    let mut schema_name: &str = schema_name;
+                    if schema_name == USER_NAME_WILD_CARD {
+                        schema_name = user_name;
+                    }
+                    if let Ok(Some(res)) = f(schema_name) {
+                        return Ok(Some((res, schema_name)));
+                    }
+                }
+                Ok(None)
+            }
+        }
+    }
 }
 
 /// Root catalog of database catalog. It manages all database/schema/table in memory on frontend.
@@ -62,6 +86,7 @@ impl<'a> SchemaPath<'a> {
 /// - catalog (root catalog)
 ///   - database catalog
 ///     - schema catalog
+///       - function catalog
 ///       - table/sink/source/index/view catalog
 ///        - column catalog
 pub struct Catalog {
@@ -69,7 +94,9 @@ pub struct Catalog {
     database_by_name: HashMap<String, DatabaseCatalog>,
     db_name_by_id: HashMap<DatabaseId, String>,
     /// all table catalogs in the cluster identified by universal unique table id.
-    table_by_id: HashMap<TableId, TableCatalog>,
+    table_by_id: HashMap<TableId, Arc<TableCatalog>>,
+    connection_by_id: HashMap<ConnectionId, ConnectionCatalog>,
+    connection_id_by_name: HashMap<String, ConnectionId>,
 }
 
 #[expect(clippy::derivable_impls)]
@@ -80,6 +107,8 @@ impl Default for Catalog {
             database_by_name: HashMap::new(),
             db_name_by_id: HashMap::new(),
             table_by_id: HashMap::new(),
+            connection_by_id: HashMap::new(), // TODO: move to schema_catalog
+            connection_id_by_name: HashMap::new(), // TODO: move to schema_catalog
         }
     }
 }
@@ -96,7 +125,7 @@ impl Catalog {
         self.table_by_id.clear();
     }
 
-    pub fn create_database(&mut self, db: &ProstDatabase) {
+    pub fn create_database(&mut self, db: &PbDatabase) {
         let name = db.name.clone();
         let id = db.id;
 
@@ -106,7 +135,7 @@ impl Catalog {
         self.db_name_by_id.try_insert(id, name).unwrap();
     }
 
-    pub fn create_schema(&mut self, proto: &ProstSchema) {
+    pub fn create_schema(&mut self, proto: &PbSchema) {
         self.get_database_mut(proto.database_id)
             .unwrap()
             .create_schema(proto);
@@ -122,16 +151,17 @@ impl Catalog {
         }
     }
 
-    pub fn create_table(&mut self, proto: &ProstTable) {
-        self.table_by_id.insert(proto.id.into(), proto.into());
-        self.get_database_mut(proto.database_id)
+    pub fn create_table(&mut self, proto: &PbTable) {
+        let table = self
+            .get_database_mut(proto.database_id)
             .unwrap()
             .get_schema_mut(proto.schema_id)
             .unwrap()
             .create_table(proto);
+        self.table_by_id.insert(proto.id.into(), table);
     }
 
-    pub fn create_index(&mut self, proto: &ProstIndex) {
+    pub fn create_index(&mut self, proto: &PbIndex) {
         self.get_database_mut(proto.database_id)
             .unwrap()
             .get_schema_mut(proto.schema_id)
@@ -139,7 +169,7 @@ impl Catalog {
             .create_index(proto);
     }
 
-    pub fn create_source(&mut self, proto: &ProstSource) {
+    pub fn create_source(&mut self, proto: &PbSource) {
         self.get_database_mut(proto.database_id)
             .unwrap()
             .get_schema_mut(proto.schema_id)
@@ -147,7 +177,7 @@ impl Catalog {
             .create_source(proto);
     }
 
-    pub fn create_sink(&mut self, proto: &ProstSink) {
+    pub fn create_sink(&mut self, proto: &PbSink) {
         self.get_database_mut(proto.database_id)
             .unwrap()
             .get_schema_mut(proto.schema_id)
@@ -155,7 +185,7 @@ impl Catalog {
             .create_sink(proto);
     }
 
-    pub fn create_view(&mut self, proto: &ProstView) {
+    pub fn create_view(&mut self, proto: &PbView) {
         self.get_database_mut(proto.database_id)
             .unwrap()
             .get_schema_mut(proto.schema_id)
@@ -163,9 +193,33 @@ impl Catalog {
             .create_view(proto);
     }
 
+    pub fn create_function(&mut self, proto: &PbFunction) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .create_function(proto);
+    }
+
+    pub fn create_connection(&mut self, proto: &PbConnection) {
+        let name = proto.name.clone();
+        let id = proto.id;
+
+        self.connection_by_id.try_insert(id, proto.into()).unwrap();
+        self.connection_id_by_name.try_insert(name, id).unwrap();
+    }
+
+    pub fn drop_connection(&mut self, connection_name: &str) {
+        let id = self.connection_id_by_name.remove(connection_name).unwrap();
+        let _connection = self.connection_by_id.remove(&id).unwrap();
+    }
+
     pub fn drop_database(&mut self, db_id: DatabaseId) {
         let name = self.db_name_by_id.remove(&db_id).unwrap();
-        let _database = self.database_by_name.remove(&name).unwrap();
+        let database = self.database_by_name.remove(&name).unwrap();
+        database.iter_all_table_ids().for_each(|table| {
+            self.table_by_id.remove(&table);
+        });
     }
 
     pub fn drop_schema(&mut self, db_id: DatabaseId, schema_id: SchemaId) {
@@ -181,13 +235,22 @@ impl Catalog {
             .drop_table(tb_id);
     }
 
-    pub fn update_table(&mut self, proto: &ProstTable) {
-        self.table_by_id.insert(proto.id.into(), proto.into());
-        self.get_database_mut(proto.database_id)
+    pub fn update_table(&mut self, proto: &PbTable) {
+        let table = self
+            .get_database_mut(proto.database_id)
             .unwrap()
             .get_schema_mut(proto.schema_id)
             .unwrap()
             .update_table(proto);
+        self.table_by_id.insert(proto.id.into(), table);
+    }
+
+    pub fn update_index(&mut self, proto: &PbIndex) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .update_index(proto);
     }
 
     pub fn drop_source(&mut self, db_id: DatabaseId, schema_id: SchemaId, source_id: SourceId) {
@@ -198,12 +261,28 @@ impl Catalog {
             .drop_source(source_id);
     }
 
+    pub fn update_source(&mut self, proto: &PbSource) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .update_source(proto);
+    }
+
     pub fn drop_sink(&mut self, db_id: DatabaseId, schema_id: SchemaId, sink_id: SinkId) {
         self.get_database_mut(db_id)
             .unwrap()
             .get_schema_mut(schema_id)
             .unwrap()
             .drop_sink(sink_id);
+    }
+
+    pub fn update_sink(&mut self, proto: &PbSink) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .update_sink(proto);
     }
 
     pub fn drop_index(&mut self, db_id: DatabaseId, schema_id: SchemaId, index_id: IndexId) {
@@ -220,6 +299,27 @@ impl Catalog {
             .get_schema_mut(schema_id)
             .unwrap()
             .drop_view(view_id);
+    }
+
+    pub fn update_view(&mut self, proto: &PbView) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .update_view(proto);
+    }
+
+    pub fn drop_function(
+        &mut self,
+        db_id: DatabaseId,
+        schema_id: SchemaId,
+        function_id: FunctionId,
+    ) {
+        self.get_database_mut(db_id)
+            .unwrap()
+            .get_schema_mut(schema_id)
+            .unwrap()
+            .drop_function(function_id);
     }
 
     pub fn get_database_by_name(&self, db_name: &str) -> CatalogResult<&DatabaseCatalog> {
@@ -242,7 +342,7 @@ impl Catalog {
         Ok(self.get_database_by_name(db_name)?.get_all_schema_names())
     }
 
-    pub fn get_all_schema_info(&self, db_name: &str) -> CatalogResult<Vec<ProstSchema>> {
+    pub fn get_all_schema_info(&self, db_name: &str) -> CatalogResult<Vec<PbSchema>> {
         Ok(self.get_database_by_name(db_name)?.get_all_schema_info())
     }
 
@@ -268,7 +368,8 @@ impl Catalog {
     }
 
     pub fn get_table_name_by_id(&self, table_id: TableId) -> CatalogResult<String> {
-        self.get_table_by_id(&table_id).map(|table| table.name)
+        self.get_table_by_id(&table_id)
+            .map(|table| table.name.clone())
     }
 
     pub fn get_schema_by_id(
@@ -304,61 +405,62 @@ impl Catalog {
         ))
     }
 
-    #[inline(always)]
-    fn get_table_by_name_with_schema_name(
-        &self,
-        db_name: &str,
-        schema_name: &str,
-        table_name: &str,
-    ) -> CatalogResult<&Arc<TableCatalog>> {
-        self.get_schema_by_name(db_name, schema_name)?
-            .get_table_by_name(table_name)
-            .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()))
-    }
-
     pub fn get_table_by_name<'a>(
         &self,
         db_name: &str,
         schema_path: SchemaPath<'a>,
         table_name: &str,
     ) -> CatalogResult<(&Arc<TableCatalog>, &'a str)> {
-        match schema_path {
-            SchemaPath::Name(schema_name) => self
-                .get_table_by_name_with_schema_name(db_name, schema_name, table_name)
-                .map(|table_catalog| (table_catalog, schema_name)),
-            SchemaPath::Path(search_path, user_name) => {
-                for path in search_path.path() {
-                    let mut schema_name: &str = path;
-                    if schema_name == USER_NAME_WILD_CARD {
-                        schema_name = user_name;
-                    }
-
-                    if let Ok(table_catalog) =
-                        self.get_table_by_name_with_schema_name(db_name, schema_name, table_name)
-                    {
-                        return Ok((table_catalog, schema_name));
-                    }
-                }
-                Err(CatalogError::NotFound("table", table_name.to_string()))
-            }
-        }
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_table_by_name(table_name))
+            })?
+            .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()))
     }
 
-    pub fn get_table_by_id(&self, table_id: &TableId) -> CatalogResult<TableCatalog> {
+    pub fn get_table_by_id(&self, table_id: &TableId) -> CatalogResult<&Arc<TableCatalog>> {
         self.table_by_id
             .get(table_id)
-            .cloned()
             .ok_or_else(|| CatalogError::NotFound("table id", table_id.to_string()))
+    }
+
+    // Used by test_utils only.
+    pub fn alter_table_name_by_id(&mut self, table_id: &TableId, table_name: &str) {
+        let (mut database_id, mut schema_id) = (0, 0);
+        let mut found = false;
+        for database in self.database_by_name.values() {
+            if !found {
+                for schema in database.iter_schemas() {
+                    if schema.iter_table().any(|t| t.id() == *table_id) {
+                        found = true;
+                        database_id = database.id();
+                        schema_id = schema.id();
+                        break;
+                    }
+                }
+            }
+        }
+
+        if found {
+            let mut table = self
+                .get_table_by_id(table_id)
+                .unwrap()
+                .to_prost(schema_id, database_id);
+            table.name = table_name.to_string();
+            self.update_table(&table);
+        }
     }
 
     #[cfg(test)]
     pub fn insert_table_id_mapping(&mut self, table_id: TableId, fragment_id: super::FragmentId) {
         self.table_by_id.insert(
             table_id,
-            TableCatalog {
+            Arc::new(TableCatalog {
                 fragment_id,
                 ..Default::default()
-            },
+            }),
         );
     }
 
@@ -374,56 +476,19 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()))
     }
 
-    #[inline(always)]
-    fn get_source_by_name_with_schema_name(
-        &self,
-        db_name: &str,
-        schema_name: &str,
-        source_name: &str,
-    ) -> CatalogResult<&Arc<SourceCatalog>> {
-        self.get_schema_by_name(db_name, schema_name)?
-            .get_source_by_name(source_name)
-            .ok_or_else(|| CatalogError::NotFound("source", source_name.to_string()))
-    }
-
     pub fn get_source_by_name<'a>(
         &self,
         db_name: &str,
         schema_path: SchemaPath<'a>,
         source_name: &str,
     ) -> CatalogResult<(&Arc<SourceCatalog>, &'a str)> {
-        match schema_path {
-            SchemaPath::Name(schema_name) => self
-                .get_source_by_name_with_schema_name(db_name, schema_name, source_name)
-                .map(|source_catalog| (source_catalog, schema_name)),
-            SchemaPath::Path(search_path, user_name) => {
-                for path in search_path.path() {
-                    let mut schema_name: &str = path;
-                    if schema_name == USER_NAME_WILD_CARD {
-                        schema_name = user_name;
-                    }
-
-                    if let Ok(source_catalog) =
-                        self.get_source_by_name_with_schema_name(db_name, schema_name, source_name)
-                    {
-                        return Ok((source_catalog, schema_name));
-                    }
-                }
-                Err(CatalogError::NotFound("source", source_name.to_string()))
-            }
-        }
-    }
-
-    #[inline(always)]
-    fn get_sink_by_name_with_schema_name(
-        &self,
-        db_name: &str,
-        schema_name: &str,
-        sink_name: &str,
-    ) -> CatalogResult<&Arc<SinkCatalog>> {
-        self.get_schema_by_name(db_name, schema_name)?
-            .get_sink_by_name(sink_name)
-            .ok_or_else(|| CatalogError::NotFound("sink", sink_name.to_string()))
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_source_by_name(source_name))
+            })?
+            .ok_or_else(|| CatalogError::NotFound("source", source_name.to_string()))
     }
 
     pub fn get_sink_by_name<'a>(
@@ -432,38 +497,13 @@ impl Catalog {
         schema_path: SchemaPath<'a>,
         sink_name: &str,
     ) -> CatalogResult<(&Arc<SinkCatalog>, &'a str)> {
-        match schema_path {
-            SchemaPath::Name(schema_name) => self
-                .get_sink_by_name_with_schema_name(db_name, schema_name, sink_name)
-                .map(|sink_catalog| (sink_catalog, schema_name)),
-            SchemaPath::Path(search_path, user_name) => {
-                for path in search_path.path() {
-                    let mut schema_name: &str = path;
-                    if schema_name == USER_NAME_WILD_CARD {
-                        schema_name = user_name;
-                    }
-
-                    if let Ok(sink_catalog) =
-                        self.get_sink_by_name_with_schema_name(db_name, schema_name, sink_name)
-                    {
-                        return Ok((sink_catalog, schema_name));
-                    }
-                }
-                Err(CatalogError::NotFound("sink", sink_name.to_string()))
-            }
-        }
-    }
-
-    #[inline(always)]
-    fn get_index_by_name_with_schema_name(
-        &self,
-        db_name: &str,
-        schema_name: &str,
-        index_name: &str,
-    ) -> CatalogResult<&Arc<IndexCatalog>> {
-        self.get_schema_by_name(db_name, schema_name)?
-            .get_index_by_name(index_name)
-            .ok_or_else(|| CatalogError::NotFound("index", index_name.to_string()))
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_sink_by_name(sink_name))
+            })?
+            .ok_or_else(|| CatalogError::NotFound("sink", sink_name.to_string()))
     }
 
     pub fn get_index_by_name<'a>(
@@ -472,38 +512,13 @@ impl Catalog {
         schema_path: SchemaPath<'a>,
         index_name: &str,
     ) -> CatalogResult<(&Arc<IndexCatalog>, &'a str)> {
-        match schema_path {
-            SchemaPath::Name(schema_name) => self
-                .get_index_by_name_with_schema_name(db_name, schema_name, index_name)
-                .map(|index_catalog| (index_catalog, schema_name)),
-            SchemaPath::Path(search_path, user_name) => {
-                for path in search_path.path() {
-                    let mut schema_name: &str = path;
-                    if schema_name == USER_NAME_WILD_CARD {
-                        schema_name = user_name;
-                    }
-
-                    if let Ok(index_catalog) =
-                        self.get_index_by_name_with_schema_name(db_name, schema_name, index_name)
-                    {
-                        return Ok((index_catalog, schema_name));
-                    }
-                }
-                Err(CatalogError::NotFound("index", index_name.to_string()))
-            }
-        }
-    }
-
-    #[inline(always)]
-    fn get_view_by_name_with_schema_name(
-        &self,
-        db_name: &str,
-        schema_name: &str,
-        view_name: &str,
-    ) -> CatalogResult<&Arc<ViewCatalog>> {
-        self.get_schema_by_name(db_name, schema_name)?
-            .get_view_by_name(view_name)
-            .ok_or_else(|| CatalogError::NotFound("view", view_name.to_string()))
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_index_by_name(index_name))
+            })?
+            .ok_or_else(|| CatalogError::NotFound("index", index_name.to_string()))
     }
 
     pub fn get_view_by_name<'a>(
@@ -512,26 +527,42 @@ impl Catalog {
         schema_path: SchemaPath<'a>,
         view_name: &str,
     ) -> CatalogResult<(&Arc<ViewCatalog>, &'a str)> {
-        match schema_path {
-            SchemaPath::Name(schema_name) => self
-                .get_view_by_name_with_schema_name(db_name, schema_name, view_name)
-                .map(|view_catalog| (view_catalog, schema_name)),
-            SchemaPath::Path(search_path, user_name) => {
-                for path in search_path.path() {
-                    let mut schema_name: &str = path;
-                    if schema_name == USER_NAME_WILD_CARD {
-                        schema_name = user_name;
-                    }
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_view_by_name(view_name))
+            })?
+            .ok_or_else(|| CatalogError::NotFound("view", view_name.to_string()))
+    }
 
-                    if let Ok(view_catalog) =
-                        self.get_view_by_name_with_schema_name(db_name, schema_name, view_name)
-                    {
-                        return Ok((view_catalog, schema_name));
-                    }
-                }
-                Err(CatalogError::NotFound("view", view_name.to_string()))
-            }
-        }
+    pub fn get_function_by_name_args<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        function_name: &str,
+        args: &[DataType],
+    ) -> CatalogResult<(&Arc<FunctionCatalog>, &'a str)> {
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_function_by_name_args(function_name, args))
+            })?
+            .ok_or_else(|| CatalogError::NotFound("function", function_name.to_string()))
+    }
+
+    pub fn get_connection_by_name(
+        &self,
+        connection_name: &str,
+    ) -> CatalogResult<&ConnectionCatalog> {
+        let connection_id = self
+            .connection_id_by_name
+            .get(connection_name)
+            .ok_or_else(|| CatalogError::NotFound("connection", connection_name.to_string()))?;
+        self.connection_by_id
+            .get(connection_id)
+            .ok_or_else(|| CatalogError::NotFound("connection", connection_name.to_string()))
     }
 
     /// Check the name if duplicated with existing table, materialized view or source.
@@ -543,27 +574,22 @@ impl Catalog {
     ) -> CatalogResult<()> {
         let schema = self.get_schema_by_name(db_name, schema_name)?;
 
-        // Resolve source first.
-        if let Some(source) = schema.get_source_by_name(relation_name) {
-            // TODO: check if it is a materialized source and improve the err msg
-            match source.kind() {
-                super::source_catalog::SourceKind::Table => {
-                    Err(CatalogError::Duplicated("table", relation_name.to_string()))
-                }
-                super::source_catalog::SourceKind::Stream => Err(CatalogError::Duplicated(
-                    "source",
-                    relation_name.to_string(),
-                )),
-            }
-        } else if let Some(table) = schema.get_table_by_name(relation_name) {
-            if table.is_index {
+        if let Some(table) = schema.get_table_by_name(relation_name) {
+            if table.is_index() {
                 Err(CatalogError::Duplicated("index", relation_name.to_string()))
-            } else {
+            } else if table.is_mview() {
                 Err(CatalogError::Duplicated(
                     "materialized view",
                     relation_name.to_string(),
                 ))
+            } else {
+                Err(CatalogError::Duplicated("table", relation_name.to_string()))
             }
+        } else if schema.get_source_by_name(relation_name).is_some() {
+            Err(CatalogError::Duplicated(
+                "source",
+                relation_name.to_string(),
+            ))
         } else if schema.get_sink_by_name(relation_name).is_some() {
             Err(CatalogError::Duplicated("sink", relation_name.to_string()))
         } else if schema.get_view_by_name(relation_name).is_some() {
@@ -594,5 +620,37 @@ impl Catalog {
             .get_schema_by_id(&schema_id)
             .unwrap()
             .get_indexes_by_table_id(&mv_id)
+    }
+
+    pub fn get_id_by_class_name(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'_>,
+        class_name: &str,
+    ) -> CatalogResult<u32> {
+        schema_path
+            .try_find(|schema_name| {
+                let schema = self.get_schema_by_name(db_name, schema_name)?;
+                #[allow(clippy::manual_map)]
+                if let Some(item) = schema.get_system_table_by_name(class_name) {
+                    Ok(Some(item.id().into()))
+                } else if let Some(item) = schema.get_table_by_name(class_name) {
+                    Ok(Some(item.id().into()))
+                } else if let Some(item) = schema.get_index_by_name(class_name) {
+                    Ok(Some(item.id.into()))
+                } else if let Some(item) = schema.get_source_by_name(class_name) {
+                    Ok(Some(item.id))
+                } else if let Some(item) = schema.get_view_by_name(class_name) {
+                    Ok(Some(item.id))
+                } else {
+                    Ok(None)
+                }
+            })?
+            .map(|(id, _)| id)
+            .ok_or_else(|| CatalogError::NotFound("class", class_name.to_string()))
+    }
+
+    pub fn get_all_connections(&self) -> Vec<ConnectionCatalog> {
+        self.connection_by_id.values().cloned().collect_vec()
     }
 }

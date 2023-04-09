@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,14 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod backup_service;
 pub mod cluster_service;
 pub mod ddl_service;
 pub mod health_service;
 pub mod heartbeat_service;
 pub mod hummock_service;
+pub mod meta_member_service;
 pub mod notification_service;
 pub mod scale_service;
 pub mod stream_service;
+pub mod system_params_service;
+pub mod telemetry_service;
 pub mod user_service;
 
 use std::pin::Pin;

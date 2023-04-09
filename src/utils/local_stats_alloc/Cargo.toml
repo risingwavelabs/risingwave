@@ -13,3 +13,9 @@ description = "Local allocator with statistics"
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
+
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]

@@ -8,15 +8,24 @@ license = { workspace = true }
 repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
 [dependencies]
 anyhow = "1"
+async-trait = "0.1"
 bytes = "1"
-clap = { version = "3", features = ["derive"] }
+clap = { version = "4", features = ["derive"] }
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
-parking_lot = "0.12"
+rand = "0.8"
 risingwave_common = { path = "../../common" }
 risingwave_compactor = { path = "../../storage/compactor" }
 risingwave_hummock_sdk = { path = "../../storage/hummock_sdk" }
+risingwave_hummock_test = { path = "../../storage/hummock_test" }
 risingwave_meta = { path = "../../meta" }
 risingwave_object_store = { path = "../../object_store" }
 risingwave_pb = { path = "../../prost" }
@@ -24,7 +33,6 @@ risingwave_rpc_client = { path = "../../rpc_client" }
 risingwave_rt = { path = "../../utils/runtime" }
 risingwave_storage = { path = "../../storage", features = ["test"] }
 risingwave_tracing = { path = "../../tracing" }
-serde = { version = "1", features = ["derive"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
     "rt",
@@ -34,8 +42,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
-toml = "0.5"
-tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]
@@ -43,4 +49,8 @@ workspace-hack = { path = "../../workspace-hack" }
 
 [[bin]]
 name = "compaction-test"
-path = "src/bin/main.rs"
+path = "src/bin/compaction.rs"
+
+[[bin]]
+name = "delete-range-test"
+path = "src/bin/delete_range.rs"

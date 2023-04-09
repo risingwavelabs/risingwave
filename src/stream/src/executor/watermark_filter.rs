@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,23 +18,23 @@ use futures::future::join_all;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::bail;
-use risingwave_common::hash::VirtualNode;
-use risingwave_common::row::{Row, Row2};
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-use risingwave_expr::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpression};
+use risingwave_common::{bail, row};
+use risingwave_expr::expr::{
+    build, BoxedExpression, Expression, InputRefExpression, LiteralExpression,
+};
 use risingwave_expr::Result as ExprResult;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
-use super::filter::SimpleFilterExecutor;
+use super::filter::FilterExecutor;
 use super::{
     ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message, StreamExecutorResult,
 };
 use crate::common::table::state_table::StateTable;
-use crate::common::InfallibleExpression;
 use crate::executor::{expect_first_barrier, Watermark};
 
 /// The executor will generate a `Watermark` after each chunk.
@@ -88,6 +88,10 @@ impl<S: StateStore> Executor for WatermarkFilterExecutor<S> {
     fn identity(&self) -> &str {
         &self.info.identity
     }
+
+    fn info(&self) -> ExecutorInfo {
+        self.info.clone()
+    }
 }
 
 impl<S: StateStore> WatermarkFilterExecutor<S> {
@@ -101,9 +105,6 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
             info,
             mut table,
         } = *self;
-
-        // Remove this after we have upsert.
-        table.disable_sanity_check();
 
         let watermark_type = watermark_expr.return_type();
         assert_eq!(
@@ -144,7 +145,8 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     let watermark_array = watermark_expr
                         .eval_infallible(chunk.data_chunk(), |err| {
                             ctx.on_compute_error(err, &info.identity)
-                        });
+                        })
+                        .await;
 
                     // Build the expression to calculate watermark filter.
                     let watermark_filter_expr = Self::build_watermark_filter_expr(
@@ -165,9 +167,10 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     let pred_output = watermark_filter_expr
                         .eval_infallible(chunk.data_chunk(), |err| {
                             ctx.on_compute_error(err, &info.identity)
-                        });
+                        })
+                        .await;
 
-                    if let Some(output_chunk) = SimpleFilterExecutor::filter(chunk, pred_output)? {
+                    if let Some(output_chunk) = FilterExecutor::filter(chunk, pred_output)? {
                         yield Message::Chunk(output_chunk);
                     };
 
@@ -196,7 +199,8 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                 Message::Barrier(barrier) => {
                     // Update the vnode bitmap for state tables of all agg calls if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(ctx.id) {
-                        let previous_vnode_bitmap = table.update_vnode_bitmap(vnode_bitmap.clone());
+                        let (previous_vnode_bitmap, _cache_may_stale) =
+                            table.update_vnode_bitmap(vnode_bitmap.clone());
 
                         // Take the global max watermark when scaling happens.
                         if previous_vnode_bitmap != vnode_bitmap {
@@ -210,9 +214,9 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                         last_checkpoint_watermark = current_watermark.clone();
                         // Persist the watermark when checkpoint arrives.
                         let vnodes = table.get_vnodes();
-                        for vnode in vnodes.ones() {
-                            let pk = Some(ScalarImpl::Int16(vnode as _));
-                            let row = Row::new(vec![pk, Some(current_watermark.clone())]);
+                        for vnode in vnodes.iter_vnodes() {
+                            let pk = Some(ScalarImpl::Int16(vnode.to_scalar()));
+                            let row = [pk, Some(current_watermark.clone())];
                             // FIXME(yuhao): use upsert.
                             table.insert(row);
                         }
@@ -232,11 +236,13 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         event_time_col_idx: usize,
         watermark: ScalarImpl,
     ) -> ExprResult<BoxedExpression> {
-        new_binary_expr(
+        build(
             Type::GreaterThanOrEqual,
             DataType::Boolean,
-            InputRefExpression::new(watermark_type.clone(), event_time_col_idx).boxed(),
-            LiteralExpression::new(watermark_type, Some(watermark)).boxed(),
+            vec![
+                InputRefExpression::new(watermark_type.clone(), event_time_col_idx).boxed(),
+                LiteralExpression::new(watermark_type, Some(watermark)).boxed(),
+            ],
         )
     }
 
@@ -245,8 +251,8 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         watermark_type: DataType,
     ) -> StreamExecutorResult<ScalarImpl> {
         let watermark_iter_futures = (0..VirtualNode::COUNT).map(|vnode| async move {
-            let pk = Row::new(vec![Some(ScalarImpl::Int16(vnode as _))]);
-            let watermark_row: Option<Row> = table.get_row(&pk).await?;
+            let pk = row::once(Some(ScalarImpl::Int16(vnode as _)));
+            let watermark_row: Option<OwnedRow> = table.get_row(pk).await?;
             match watermark_row {
                 Some(row) => {
                     if row.len() == 1 {
@@ -262,12 +268,6 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
             .await
             .into_iter()
             .try_collect()?;
-
-        if !(watermarks.iter().all(|watermark| watermark.is_none())
-            || watermarks.iter().all(|watermark| watermark.is_some()))
-        {
-            bail!("Watermark for vnodes should be either all None or all Some()");
-        }
 
         // Return the minimal value if the remote max watermark is Null.
         let watermark = watermarks
@@ -285,8 +285,9 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::{IntervalUnit, NaiveDateWrapper};
+    use risingwave_common::types::Date;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_expr::expr::build_from_pretty;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::Distribution;
 
@@ -309,7 +310,9 @@ mod tests {
             .enumerate()
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
-        StateTable::new_with_distribution(
+
+        // TODO: use consistent operations for watermark filter after we have upsert.
+        StateTable::new_with_distribution_inconsistent_op(
             mem_state,
             TableId::new(table_id),
             column_descs,
@@ -324,8 +327,6 @@ mod tests {
     async fn create_watermark_filter_executor(
         mem_state: MemoryStateStore,
     ) -> (BoxedExecutor, MessageSender) {
-        let interval_type = DataType::Interval;
-
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int16),        // pk
@@ -333,22 +334,12 @@ mod tests {
             ],
         };
 
-        let watermark_expr = new_binary_expr(
-            Type::Subtract,
-            WATERMARK_TYPE.clone(),
-            InputRefExpression::new(WATERMARK_TYPE.clone(), 1).boxed(),
-            LiteralExpression::new(
-                interval_type,
-                Some(ScalarImpl::Interval(IntervalUnit::new(0, 1, 0))),
-            )
-            .boxed(),
-        )
-        .unwrap();
+        let watermark_expr = build_from_pretty("(subtract:timestamp $1:timestamp 1day:interval)");
 
         let table = create_in_memory_state_table(
             mem_state,
             &[DataType::Int16, WATERMARK_TYPE],
-            &[OrderType::Ascending],
+            &[OrderType::ascending()],
             &[0],
             &[1],
             0,
@@ -428,8 +419,8 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            watermark!(ScalarImpl::NaiveDateTime(
-                NaiveDateWrapper::from_ymd_uncheck(2022, 11, 7).and_hms_uncheck(0, 0, 0)
+            watermark!(ScalarImpl::Timestamp(
+                Date::from_ymd_uncheck(2022, 11, 7).and_hms_uncheck(0, 0, 0)
             ))
         );
 
@@ -451,8 +442,8 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            watermark!(ScalarImpl::NaiveDateTime(
-                NaiveDateWrapper::from_ymd_uncheck(2022, 11, 9).and_hms_uncheck(0, 0, 0)
+            watermark!(ScalarImpl::Timestamp(
+                Date::from_ymd_uncheck(2022, 11, 9).and_hms_uncheck(0, 0, 0)
             ))
         );
 
@@ -475,8 +466,8 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            watermark!(ScalarImpl::NaiveDateTime(
-                NaiveDateWrapper::from_ymd_uncheck(2022, 11, 9).and_hms_uncheck(0, 0, 0)
+            watermark!(ScalarImpl::Timestamp(
+                Date::from_ymd_uncheck(2022, 11, 9).and_hms_uncheck(0, 0, 0)
             ))
         );
 
@@ -494,8 +485,8 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            watermark!(ScalarImpl::NaiveDateTime(
-                NaiveDateWrapper::from_ymd_uncheck(2022, 11, 13).and_hms_uncheck(0, 0, 0)
+            watermark!(ScalarImpl::Timestamp(
+                Date::from_ymd_uncheck(2022, 11, 13).and_hms_uncheck(0, 0, 0)
             ))
         );
     }

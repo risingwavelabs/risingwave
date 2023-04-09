@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,12 +16,12 @@ use std::ops::Bound::Unbounded;
 use std::sync::Arc;
 
 use crate::hummock::iterator::test_utils::{
-    gen_iterator_test_sstable_base, iterator_test_key_of, iterator_test_user_key_of,
-    iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
+    gen_iterator_test_sstable_base, iterator_test_bytes_key_of, iterator_test_key_of,
+    iterator_test_user_key_of, iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
 };
 use crate::hummock::iterator::{
     BackwardConcatIterator, BackwardUserIterator, ConcatIterator, HummockIterator,
-    HummockIteratorUnion, UnorderedMergeIteratorInner, UserIterator,
+    UnorderedMergeIteratorInner, UserIterator,
 };
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::test_utils::default_builder_opt_for_test;
@@ -32,7 +32,6 @@ use crate::monitor::StoreLocalStatistic;
 #[cfg(feature = "failpoints")]
 async fn test_failpoints_concat_read_err() {
     fail::cfg("disable_block_cache", "return").unwrap();
-    fail::cfg("disable_bloom_filter", "return").unwrap();
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
     let table0 = gen_iterator_test_sstable_base(
@@ -93,7 +92,6 @@ async fn test_failpoints_concat_read_err() {
 #[cfg(feature = "failpoints")]
 async fn test_failpoints_backward_concat_read_err() {
     fail::cfg("disable_block_cache", "return").unwrap();
-    fail::cfg("disable_bloom_filter", "return").unwrap();
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
     let table0 = gen_iterator_test_sstable_base(
@@ -150,7 +148,6 @@ async fn test_failpoints_backward_concat_read_err() {
 #[cfg(feature = "failpoints")]
 async fn test_failpoints_merge_invalid_key() {
     fail::cfg("disable_block_cache", "return").unwrap();
-    fail::cfg("disable_bloom_filter", "return").unwrap();
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
     let table0 = gen_iterator_test_sstable_base(
@@ -205,7 +202,6 @@ async fn test_failpoints_merge_invalid_key() {
 #[cfg(feature = "failpoints")]
 async fn test_failpoints_backward_merge_invalid_key() {
     fail::cfg("disable_block_cache", "return").unwrap();
-    fail::cfg("disable_bloom_filter", "return").unwrap();
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
     let table0 = gen_iterator_test_sstable_base(
@@ -259,7 +255,6 @@ async fn test_failpoints_backward_merge_invalid_key() {
 #[cfg(feature = "failpoints")]
 async fn test_failpoints_user_read_err() {
     fail::cfg("disable_block_cache", "return").unwrap();
-    fail::cfg("disable_bloom_filter", "return").unwrap();
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
     let table0 = gen_iterator_test_sstable_base(
@@ -280,22 +275,22 @@ async fn test_failpoints_user_read_err() {
     .await;
     let mut stats = StoreLocalStatistic::default();
     let iters = vec![
-        HummockIteratorUnion::Fourth(SstableIterator::new(
+        SstableIterator::new(
             sstable_store
                 .sstable(&table0.get_sstable_info(), &mut stats)
                 .await
                 .unwrap(),
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions::default()),
-        )),
-        HummockIteratorUnion::Fourth(SstableIterator::new(
+        ),
+        SstableIterator::new(
             sstable_store
                 .sstable(&table1.get_sstable_info(), &mut stats)
                 .await
                 .unwrap(),
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions::default()),
-        )),
+        ),
     ];
 
     let mi = UnorderedMergeIteratorInner::new(iters);
@@ -307,7 +302,7 @@ async fn test_failpoints_user_read_err() {
     while ui.is_valid() {
         let key = ui.key();
         let val = ui.value();
-        assert_eq!(key, &iterator_test_key_of(i));
+        assert_eq!(key, &iterator_test_bytes_key_of(i));
         assert_eq!(val, iterator_test_value_of(i).as_slice());
         i += 1;
         let result = ui.next().await;
@@ -327,7 +322,6 @@ async fn test_failpoints_user_read_err() {
 #[cfg(feature = "failpoints")]
 async fn test_failpoints_backward_user_read_err() {
     fail::cfg("disable_block_cache", "return").unwrap();
-    fail::cfg("disable_bloom_filter", "return").unwrap();
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
     let table0 = gen_iterator_test_sstable_base(
@@ -348,20 +342,20 @@ async fn test_failpoints_backward_user_read_err() {
     .await;
     let mut stats = StoreLocalStatistic::default();
     let iters = vec![
-        HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
+        BackwardSstableIterator::new(
             sstable_store
                 .sstable(&table0.get_sstable_info(), &mut stats)
                 .await
                 .unwrap(),
             sstable_store.clone(),
-        )),
-        HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
+        ),
+        BackwardSstableIterator::new(
             sstable_store
                 .sstable(&table1.get_sstable_info(), &mut stats)
                 .await
                 .unwrap(),
             sstable_store.clone(),
-        )),
+        ),
     ];
 
     let mi = UnorderedMergeIteratorInner::new(iters);
@@ -374,7 +368,7 @@ async fn test_failpoints_backward_user_read_err() {
         i -= 1;
         let key = ui.key();
         let val = ui.value();
-        assert_eq!(key, &iterator_test_key_of(i));
+        assert_eq!(key, &iterator_test_bytes_key_of(i));
         assert_eq!(val, iterator_test_value_of(i).as_slice());
         let result = ui.next().await;
         if result.is_err() {

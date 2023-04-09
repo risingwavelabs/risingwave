@@ -10,9 +10,9 @@ insert into t values (1.1987, 4.6543), (2.22, 3.3), (1.165, 1.15)
 query RRR rowsort
 select round(v1, 2), round(v2, 1), round(v1, -1) from t
 ----
-1.20 4.7 0
-2.22 3.3 0
-1.17 1.2 0
+1.17	1.2	0
+1.20	4.7	0
+2.22	3.3	0
 
 statement ok
 drop table t

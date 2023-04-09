@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -28,18 +28,50 @@ use super::RwPgResponse;
 use crate::binder::{Binder, Relation};
 use crate::catalog::{CatalogError, IndexCatalog};
 use crate::handler::util::col_descs_to_rows;
-use crate::session::OptimizerContext;
+use crate::handler::HandlerArgs;
 
-pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Result<RwPgResponse> {
-    let session = context.session_ctx;
-    let mut binder = Binder::new(&session);
-    let relation = binder.bind_relation_by_name(table_name.clone(), None)?;
+pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Result<RwPgResponse> {
+    let session = handler_args.session;
+    let mut binder = Binder::new(&session, vec![]);
+    let relation = binder.bind_relation_by_name(table_name.clone(), None, false)?;
     // For Source, it doesn't have table catalog so use get source to get column descs.
-    let (columns, indices): (Vec<ColumnDesc>, Vec<Arc<IndexCatalog>>) = {
-        let (catalogs, indices) = match relation {
-            Relation::Source(s) => (s.catalog.columns, vec![]),
-            Relation::BaseTable(t) => (t.table_catalog.columns, t.table_indexes),
-            Relation::SystemTable(t) => (t.sys_table_catalog.columns, vec![]),
+    let (columns, pk_columns, indices): (Vec<ColumnDesc>, Vec<ColumnDesc>, Vec<Arc<IndexCatalog>>) = {
+        let (column_catalogs, pk_column_catalogs, indices) = match relation {
+            Relation::Source(s) => {
+                let pk_column_catalogs = s
+                    .catalog
+                    .pk_col_ids
+                    .iter()
+                    .map(|&column_id| {
+                        s.catalog
+                            .columns
+                            .iter()
+                            .filter(|x| x.column_id() == column_id)
+                            .exactly_one()
+                            .unwrap()
+                            .clone()
+                    })
+                    .collect_vec();
+                (s.catalog.columns, pk_column_catalogs, vec![])
+            }
+            Relation::BaseTable(t) => {
+                let pk_column_catalogs = t
+                    .table_catalog
+                    .pk()
+                    .iter()
+                    .map(|x| t.table_catalog.columns[x.column_index].clone())
+                    .collect_vec();
+                (t.table_catalog.columns, pk_column_catalogs, t.table_indexes)
+            }
+            Relation::SystemTable(t) => {
+                let pk_column_catalogs = t
+                    .sys_table_catalog
+                    .pk
+                    .iter()
+                    .map(|idx| t.sys_table_catalog.columns[*idx].clone())
+                    .collect_vec();
+                (t.sys_table_catalog.columns, pk_column_catalogs, vec![])
+            }
             _ => {
                 return Err(
                     CatalogError::NotFound("table or source", table_name.to_string()).into(),
@@ -47,9 +79,13 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
             }
         };
         (
-            catalogs
+            column_catalogs
                 .iter()
                 .filter(|c| !c.is_hidden)
+                .map(|c| c.column_desc.clone())
+                .collect(),
+            pk_column_catalogs
+                .iter()
                 .map(|c| c.column_desc.clone())
                 .collect(),
             indices,
@@ -59,21 +95,38 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
     // Convert all column descs to rows
     let mut rows = col_descs_to_rows(columns);
 
+    // Convert primary key to rows
+    if !pk_columns.is_empty() {
+        rows.push(Row::new(vec![
+            Some("primary key".into()),
+            Some(
+                format!(
+                    "{}",
+                    display_comma_separated(&pk_columns.into_iter().map(|x| x.name).collect_vec()),
+                )
+                .into(),
+            ),
+        ]));
+    }
+
     // Convert all indexes to rows
     rows.extend(indices.iter().map(|index| {
         let index_table = index.index_table.clone();
 
-        let index_columns = index_table
+        let index_columns_with_ordering = index_table
             .pk
             .iter()
-            .filter(|x| !index_table.columns[x.index].is_hidden)
-            .map(|x| index_table.columns[x.index].name().to_string())
+            .filter(|x| !index_table.columns[x.column_index].is_hidden)
+            .map(|x| {
+                let index_column_name = index_table.columns[x.column_index].name().to_string();
+                format!("{} {}", index_column_name, x.order_type)
+            })
             .collect_vec();
 
         let pk_column_index_set = index_table
             .pk
             .iter()
-            .map(|x| x.index)
+            .map(|x| x.column_index)
             .collect::<HashSet<_>>();
 
         let include_columns = index_table
@@ -97,7 +150,7 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
                 Some(
                     format!(
                         "index({}) distributed by({})",
-                        display_comma_separated(&index_columns),
+                        display_comma_separated(&index_columns_with_ordering),
                         display_comma_separated(&distributed_by_columns),
                     )
                     .into(),
@@ -106,7 +159,7 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
                 Some(
                     format!(
                         "index({}) include({}) distributed by({})",
-                        display_comma_separated(&index_columns),
+                        display_comma_separated(&index_columns_with_ordering),
                         display_comma_separated(&include_columns),
                         display_comma_separated(&distributed_by_columns),
                     )
@@ -118,19 +171,19 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
 
     // TODO: recover the original user statement
     Ok(PgResponse::new_for_stream(
-        StatementType::DESCRIBE_TABLE,
-        Some(rows.len() as i32),
+        StatementType::DESCRIBE,
+        None,
         rows.into(),
         vec![
             PgFieldDescriptor::new(
                 "Name".to_owned(),
-                DataType::VARCHAR.to_oid(),
-                DataType::VARCHAR.type_len(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
             ),
             PgFieldDescriptor::new(
                 "Type".to_owned(),
-                DataType::VARCHAR.to_oid(),
-                DataType::VARCHAR.type_len(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
             ),
         ],
     ))
@@ -149,12 +202,12 @@ mod tests {
     async fn test_describe_handler() {
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend
-            .run_sql("create table t (v1 int, v2 int);")
+            .run_sql("create table t (v1 int, v2 int, v3 int primary key, v4 int);")
             .await
             .unwrap();
 
         frontend
-            .run_sql("create index idx1 on t (v1,v2);")
+            .run_sql("create index idx1 on t (v1 DESC, v2);")
             .await
             .unwrap();
 
@@ -178,9 +231,12 @@ mod tests {
         }
 
         let expected_columns: HashMap<String, String> = maplit::hashmap! {
-            "v1".into() => "Int32".into(),
-            "v2".into() => "Int32".into(),
-            "idx1".into() => "index(v1, v2) distributed by(v1, v2)".into(),
+            "v1".into() => "integer".into(),
+            "v2".into() => "integer".into(),
+            "v3".into() => "integer".into(),
+            "v4".into() => "integer".into(),
+            "primary key".into() => "v3".into(),
+            "idx1".into() => "index(v1 DESC, v2 ASC, v3 ASC) include(v4) distributed by(v1, v2)".into(),
         };
 
         assert_eq!(columns, expected_columns);

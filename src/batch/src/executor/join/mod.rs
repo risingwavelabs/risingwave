@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,7 +18,6 @@ pub mod hash_join;
 pub mod local_lookup_join;
 mod lookup_join_base;
 pub mod nested_loop_join;
-mod sort_merge_join;
 
 pub use chunked_data::*;
 pub use distributed_lookup_join::*;
@@ -29,14 +28,16 @@ pub use lookup_join_base::*;
 pub use nested_loop_join::*;
 use risingwave_common::array::{DataChunk, RowRef, Vis};
 use risingwave_common::error::Result;
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef};
-use risingwave_pb::plan_common::JoinType as JoinTypeProst;
-pub use sort_merge_join::*;
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_pb::plan_common::JoinType as JoinTypePb;
 
 use crate::error::BatchError;
-use crate::executor::join::JoinType::Inner;
-#[derive(Copy, Clone, Debug, PartialEq)]
+
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub enum JoinType {
+    #[default]
     Inner,
     LeftOuter,
     /// Semi join when probe side should output when matched
@@ -60,17 +61,17 @@ impl JoinType {
         )
     }
 
-    pub fn from_prost(prost: JoinTypeProst) -> Self {
+    pub fn from_prost(prost: JoinTypePb) -> Self {
         match prost {
-            JoinTypeProst::Inner => JoinType::Inner,
-            JoinTypeProst::LeftOuter => JoinType::LeftOuter,
-            JoinTypeProst::LeftSemi => JoinType::LeftSemi,
-            JoinTypeProst::LeftAnti => JoinType::LeftAnti,
-            JoinTypeProst::RightOuter => JoinType::RightOuter,
-            JoinTypeProst::RightSemi => JoinType::RightSemi,
-            JoinTypeProst::RightAnti => JoinType::RightAnti,
-            JoinTypeProst::FullOuter => JoinType::FullOuter,
-            JoinTypeProst::Unspecified => unreachable!(),
+            JoinTypePb::Inner => JoinType::Inner,
+            JoinTypePb::LeftOuter => JoinType::LeftOuter,
+            JoinTypePb::LeftSemi => JoinType::LeftSemi,
+            JoinTypePb::LeftAnti => JoinType::LeftAnti,
+            JoinTypePb::RightOuter => JoinType::RightOuter,
+            JoinTypePb::RightSemi => JoinType::RightSemi,
+            JoinTypePb::RightAnti => JoinType::RightAnti,
+            JoinTypePb::FullOuter => JoinType::FullOuter,
+            JoinTypePb::Unspecified => unreachable!(),
         }
     }
 
@@ -101,12 +102,6 @@ impl JoinType {
 
     fn keep_right(self) -> bool {
         matches!(self, JoinType::RightAnti | JoinType::RightSemi)
-    }
-}
-
-impl Default for JoinType {
-    fn default() -> Self {
-        Inner
     }
 }
 
@@ -154,7 +149,7 @@ fn convert_datum_refs_to_chunk(
         .map(|data_type| data_type.create_array_builder(num_tuples))
         .collect();
     for _i in 0..num_tuples {
-        for (builder, datum_ref) in output_array_builders.iter_mut().zip_eq(datum_refs) {
+        for (builder, datum_ref) in output_array_builders.iter_mut().zip_eq_fast(datum_refs) {
             builder.append_datum(*datum_ref);
         }
     }
@@ -174,7 +169,7 @@ fn convert_row_to_chunk(
     num_tuples: usize,
     data_types: &[DataType],
 ) -> Result<DataChunk> {
-    let datum_refs = row_ref.values().collect_vec();
+    let datum_refs = row_ref.iter().collect_vec();
     convert_datum_refs_to_chunk(&datum_refs, num_tuples, data_types)
 }
 
@@ -183,6 +178,7 @@ mod tests {
 
     use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder, Vis};
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, ScalarRefImpl};
 
     use crate::executor::join::{concatenate, convert_datum_refs_to_chunk};
@@ -227,7 +223,7 @@ mod tests {
             convert_datum_refs_to_chunk(&row, 5, &probe_side_schema.data_types()).unwrap();
         assert_eq!(const_row_chunk.capacity(), 5);
         assert_eq!(
-            const_row_chunk.row_at(2).0.value_at(0),
+            const_row_chunk.row_at(2).0.datum_at(0),
             Some(ScalarRefImpl::Int32(3))
         );
     }

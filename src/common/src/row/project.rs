@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,32 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::Row2;
+use super::Row;
 use crate::types::DatumRef;
 
 /// Row for the [`project`](super::RowExt::project) method.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Project<'i, R> {
     row: R,
     indices: &'i [usize],
 }
 
-impl<'i, R: Row2> PartialEq for Project<'i, R> {
+impl<'i, R: Row> PartialEq for Project<'i, R> {
     fn eq(&self, other: &Self) -> bool {
         self.iter().eq(other.iter())
     }
 }
-impl<'i, R: Row2> Eq for Project<'i, R> {}
+impl<'i, R: Row> Eq for Project<'i, R> {}
 
-impl<'i, R: Row2> Row2 for Project<'i, R> {
-    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
+impl<'i, R: Row> Row for Project<'i, R> {
+    type Iter<'a> = std::iter::Map<std::slice::Iter<'i, usize>, impl FnMut(&'i usize) -> DatumRef<'a>>
     where
         R: 'a,
         'i: 'a;
 
     #[inline]
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        // SAFETY: we have checked that `self.indices` are all valid in `RowExt::project`.
+        // SAFETY: we have checked that `self.indices` are all valid in `new`.
         unsafe { self.row.datum_at_unchecked(self.indices[index]) }
     }
 
@@ -55,12 +55,12 @@ impl<'i, R: Row2> Row2 for Project<'i, R> {
     #[inline]
     fn iter(&self) -> Self::Iter<'_> {
         self.indices.iter().map(|&i|
-                // SAFETY: we have checked that `self.indices` are all valid in `RowExt::project`.
+                // SAFETY: we have checked that `self.indices` are all valid in `new`.
                 unsafe { self.row.datum_at_unchecked(i) })
     }
 }
 
-impl<'i, R: Row2> Project<'i, R> {
+impl<'i, R: Row> Project<'i, R> {
     pub(crate) fn new(row: R, indices: &'i [usize]) -> Self {
         if let Some(index) = indices.iter().find(|&&i| i >= row.len()) {
             panic!(
@@ -76,15 +76,15 @@ impl<'i, R: Row2> Project<'i, R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::row::{Row, RowExt};
+    use crate::row::{OwnedRow, RowExt};
     use crate::types::{ScalarImpl, ScalarRefImpl};
 
     #[test]
     fn test_project_row() {
-        let r0 = Row::new((0..=8).map(|i| Some(ScalarImpl::Int64(i))).collect());
+        let r0 = OwnedRow::new((0..=8).map(|i| Some(ScalarImpl::Int64(i))).collect());
         let indices = vec![1, 1, 4, 5, 1, 4];
 
-        let r_expected = Row::new(
+        let r_expected = OwnedRow::new(
             indices
                 .iter()
                 .map(|&i| Some(ScalarImpl::Int64(i as _)))

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +17,7 @@ use std::collections::BinaryHeap;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 
 use super::storage_table::PkAndRowStream;
 use crate::error::StorageError;
@@ -29,7 +29,7 @@ struct Node<S: PkAndRowStream> {
 
     /// The next item polled from `stream` previously. Since the `eq` and `cmp` must be synchronous
     /// functions, we need to implement peeking manually.
-    peeked: (Vec<u8>, Row),
+    peeked: (Vec<u8>, OwnedRow),
 }
 
 impl<S: PkAndRowStream> PartialEq for Node<S> {
@@ -56,7 +56,7 @@ impl<S: PkAndRowStream> Ord for Node<S> {
 
 /// Merge multiple streams of primary key and rows into a single stream, sorted by primary key.
 /// We should ensure that the primary key from different streams are unique.
-#[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
+#[try_stream(ok = (Vec<u8>, OwnedRow), error = StorageError)]
 pub(super) async fn merge_sort<S>(streams: Vec<S>)
 where
     S: PkAndRowStream + Unpin,
@@ -89,8 +89,11 @@ mod tests {
     use super::*;
     use crate::error::StorageResult;
 
-    fn gen_pk_and_row(i: u8) -> StorageResult<(Vec<u8>, Row)> {
-        Ok((vec![i], Row::new(vec![Some(ScalarImpl::Int64(i as _))])))
+    fn gen_pk_and_row(i: u8) -> StorageResult<(Vec<u8>, OwnedRow)> {
+        Ok((
+            vec![i],
+            OwnedRow::new(vec![Some(ScalarImpl::Int64(i as _))]),
+        ))
     }
 
     #[tokio::test]

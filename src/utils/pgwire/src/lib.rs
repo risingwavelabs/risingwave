@@ -1,18 +1,23 @@
-#![feature(io_error_other)]
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+#![feature(io_error_other)]
 #![feature(lint_reasons, once_cell)]
+#![feature(trait_alias)]
+#![feature(result_option_inspect)]
+#![feature(iterator_try_collect)]
+#![feature(trusted_len)]
 #![expect(clippy::doc_markdown, reason = "FIXME: later")]
 
 pub mod error;

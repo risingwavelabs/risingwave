@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -26,16 +26,27 @@ pub use column::*;
 pub use internal_table::*;
 use parse_display::Display;
 pub use physical_table::*;
+use risingwave_pb::catalog::HandleConflictBehavior as PbHandleConflictBehavior;
 pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
 
-pub use crate::config::constant::hummock;
+pub use crate::constants::hummock;
 use crate::error::Result;
-use crate::row::Row;
+use crate::row::OwnedRow;
+use crate::types::DataType;
+
+/// The global version of the catalog.
+pub type CatalogVersion = u64;
+
+/// The version number of the per-table catalog.
+pub type TableVersionId = u64;
+/// The default version ID for a new table.
+pub const INITIAL_TABLE_VERSION_ID: u64 = 0;
 
 pub const DEFAULT_DATABASE_NAME: &str = "dev";
 pub const DEFAULT_SCHEMA_NAME: &str = "public";
 pub const PG_CATALOG_SCHEMA_NAME: &str = "pg_catalog";
 pub const INFORMATION_SCHEMA_SCHEMA_NAME: &str = "information_schema";
+pub const RW_CATALOG_SCHEMA_NAME: &str = "rw_catalog";
 pub const RESERVED_PG_SCHEMA_PREFIX: &str = "pg_";
 pub const DEFAULT_SUPER_USER: &str = "root";
 pub const DEFAULT_SUPER_USER_ID: u32 = 1;
@@ -46,47 +57,124 @@ pub const DEFAULT_SUPER_USER_FOR_PG_ID: u32 = 2;
 pub const NON_RESERVED_USER_ID: i32 = 11;
 pub const NON_RESERVED_PG_CATALOG_TABLE_ID: i32 = 1001;
 
+pub const SYSTEM_SCHEMAS: [&str; 3] = [
+    PG_CATALOG_SCHEMA_NAME,
+    INFORMATION_SCHEMA_SCHEMA_NAME,
+    RW_CATALOG_SCHEMA_NAME,
+];
+
+pub const ROWID_PREFIX: &str = "_row_id";
+
+pub fn row_id_column_name() -> String {
+    ROWID_PREFIX.to_string()
+}
+
+pub fn is_row_id_column_name(name: &str) -> bool {
+    name.starts_with(ROWID_PREFIX)
+}
+
+/// The column ID preserved for the row ID column.
+pub const ROW_ID_COLUMN_ID: ColumnId = ColumnId::new(0);
+
+/// The column ID offset for user-defined columns.
+///
+/// All IDs of user-defined columns must be greater or equal to this value.
+pub const USER_COLUMN_ID_OFFSET: i32 = ROW_ID_COLUMN_ID.next().get_id();
+
+/// Creates a row ID column (for implicit primary key). It'll always have the ID `0` for now.
+pub fn row_id_column_desc() -> ColumnDesc {
+    ColumnDesc {
+        data_type: DataType::Serial,
+        column_id: ROW_ID_COLUMN_ID,
+        name: row_id_column_name(),
+        field_descs: vec![],
+        type_name: "".to_string(),
+        generated_column: None,
+    }
+}
+
 /// The local system catalog reader in the frontend node.
 #[async_trait]
 pub trait SysCatalogReader: Sync + Send + 'static {
-    async fn read_table(&self, table_id: &TableId) -> Result<Vec<Row>>;
+    async fn read_table(&self, table_id: &TableId) -> Result<Vec<OwnedRow>>;
 }
 
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;
 
-pub type CatalogVersion = u64;
-
-#[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Display, Hash, PartialOrd, PartialEq, Eq)]
+#[display("{database_id}")]
 pub struct DatabaseId {
-    database_id: i32,
+    pub database_id: u32,
 }
 
 impl DatabaseId {
-    pub fn new(database_id: i32) -> Self {
+    pub fn new(database_id: u32) -> Self {
         DatabaseId { database_id }
     }
 
-    pub fn placeholder() -> i32 {
-        i32::MAX - 1
+    pub fn placeholder() -> Self {
+        DatabaseId {
+            database_id: u32::MAX - 1,
+        }
     }
 }
 
-#[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
+impl From<u32> for DatabaseId {
+    fn from(id: u32) -> Self {
+        Self::new(id)
+    }
+}
+
+impl From<&u32> for DatabaseId {
+    fn from(id: &u32) -> Self {
+        Self::new(*id)
+    }
+}
+
+impl From<DatabaseId> for u32 {
+    fn from(id: DatabaseId) -> Self {
+        id.database_id
+    }
+}
+
+#[derive(Clone, Debug, Default, Display, Hash, PartialOrd, PartialEq, Eq)]
+#[display("{schema_id}")]
 pub struct SchemaId {
-    schema_id: i32,
+    pub schema_id: u32,
 }
 
 impl SchemaId {
-    pub fn new(schema_id: i32) -> Self {
+    pub fn new(schema_id: u32) -> Self {
         SchemaId { schema_id }
     }
 
-    pub fn placeholder() -> i32 {
-        i32::MAX - 1
+    pub fn placeholder() -> Self {
+        SchemaId {
+            schema_id: u32::MAX - 1,
+        }
+    }
+}
+
+impl From<u32> for SchemaId {
+    fn from(id: u32) -> Self {
+        Self::new(id)
+    }
+}
+
+impl From<&u32> for SchemaId {
+    fn from(id: &u32) -> Self {
+        Self::new(*id)
+    }
+}
+
+impl From<SchemaId> for u32 {
+    fn from(id: SchemaId) -> Self {
+        id.schema_id
     }
 }
 
 #[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
+#[display("{table_id}")]
 pub struct TableId {
     pub table_id: u32,
 }
@@ -126,8 +214,6 @@ impl From<TableId> for u32 {
     }
 }
 
-// TODO: TableOption is duplicated with the properties in table catalog, We can refactor later to
-// directly fetch such options from catalog when creating compaction jobs.
 #[derive(Clone, Debug, PartialEq, Default, Copy)]
 pub struct TableOption {
     pub retention_seconds: Option<u32>, // second
@@ -179,6 +265,7 @@ impl TableOption {
 }
 
 #[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq)]
+#[display("{index_id}")]
 pub struct IndexId {
     pub index_id: u32,
 }
@@ -208,5 +295,113 @@ impl From<u32> for IndexId {
 impl From<IndexId> for u32 {
     fn from(id: IndexId) -> Self {
         id.index_id
+    }
+}
+
+#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
+pub struct FunctionId(pub u32);
+
+impl FunctionId {
+    pub const fn new(id: u32) -> Self {
+        FunctionId(id)
+    }
+
+    pub const fn placeholder() -> Self {
+        FunctionId(u32::MAX - 1)
+    }
+
+    pub fn function_id(&self) -> u32 {
+        self.0
+    }
+}
+
+impl From<u32> for FunctionId {
+    fn from(id: u32) -> Self {
+        Self::new(id)
+    }
+}
+
+impl From<&u32> for FunctionId {
+    fn from(id: &u32) -> Self {
+        Self::new(*id)
+    }
+}
+
+impl From<FunctionId> for u32 {
+    fn from(id: FunctionId) -> Self {
+        id.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
+#[display("{user_id}")]
+pub struct UserId {
+    pub user_id: u32,
+}
+
+impl UserId {
+    pub const fn new(user_id: u32) -> Self {
+        UserId { user_id }
+    }
+
+    pub const fn placeholder() -> Self {
+        UserId {
+            user_id: u32::MAX - 1,
+        }
+    }
+}
+
+impl From<u32> for UserId {
+    fn from(id: u32) -> Self {
+        Self::new(id)
+    }
+}
+
+impl From<&u32> for UserId {
+    fn from(id: &u32) -> Self {
+        Self::new(*id)
+    }
+}
+
+impl From<UserId> for u32 {
+    fn from(id: UserId) -> Self {
+        id.user_id
+    }
+}
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ConflictBehavior {
+    #[default]
+    NoCheck,
+    Overwrite,
+    IgnoreConflict,
+}
+
+impl ConflictBehavior {
+    pub fn from_protobuf(tb_conflict_behavior: &PbHandleConflictBehavior) -> Self {
+        match tb_conflict_behavior {
+            PbHandleConflictBehavior::Overwrite => ConflictBehavior::Overwrite,
+            PbHandleConflictBehavior::Ignore => ConflictBehavior::IgnoreConflict,
+            // This is for backward compatibility, in the previous version
+            // `ConflictBehaviorUnspecified' represented `NoCheck`, so just treat it as `NoCheck`.
+            PbHandleConflictBehavior::NoCheck
+            | PbHandleConflictBehavior::ConflictBehaviorUnspecified => ConflictBehavior::NoCheck,
+        }
+    }
+
+    pub fn to_protobuf(self) -> PbHandleConflictBehavior {
+        match self {
+            ConflictBehavior::NoCheck => PbHandleConflictBehavior::NoCheck,
+            ConflictBehavior::Overwrite => PbHandleConflictBehavior::Overwrite,
+            ConflictBehavior::IgnoreConflict => PbHandleConflictBehavior::Ignore,
+        }
+    }
+
+    pub fn debug_to_string(self) -> String {
+        match self {
+            ConflictBehavior::NoCheck => "NoCheck".to_string(),
+            ConflictBehavior::Overwrite => "Overwrite".to_string(),
+            ConflictBehavior::IgnoreConflict => "IgnoreConflict".to_string(),
+        }
     }
 }

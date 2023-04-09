@@ -1,0 +1,14 @@
+- input: SELECT 'a''b'
+  formatted_sql: SELECT 'a''b'
+
+- input: SELECT e'a\'b'
+  formatted_sql: SELECT E'a\'b'
+
+- input: SELECT e'a''b'
+  formatted_sql: SELECT E'a\'b'
+
+- input: SELECT '\\'
+  formatted_sql: SELECT '\\'
+
+- input: SELECT e'\\'
+  formatted_sql: SELECT E'\\'

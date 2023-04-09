@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,14 +15,16 @@
 use std::ops::Index;
 
 use itertools::Itertools;
-use risingwave_pb::plan_common::Field as ProstField;
+use risingwave_pb::plan_common::{PbColumnDesc, PbField};
 
 use super::ColumnDesc;
 use crate::array::ArrayBuilderImpl;
+use crate::types::struct_type::StructType;
 use crate::types::DataType;
+use crate::util::iter_util::ZipEqFast;
 
 /// The field in the schema of the executor's return data
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Field {
     pub data_type: DataType,
     pub name: String,
@@ -40,10 +42,21 @@ impl std::fmt::Debug for Field {
 }
 
 impl Field {
-    pub fn to_prost(&self) -> ProstField {
-        ProstField {
+    pub fn to_prost(&self) -> PbField {
+        PbField {
             data_type: Some(self.data_type.to_protobuf()),
             name: self.name.to_string(),
+        }
+    }
+}
+
+impl From<&ColumnDesc> for Field {
+    fn from(desc: &ColumnDesc) -> Self {
+        Self {
+            data_type: desc.data_type.clone(),
+            name: desc.name.clone(),
+            sub_fields: desc.field_descs.iter().map(|d| d.into()).collect_vec(),
+            type_name: desc.type_name.clone(),
         }
     }
 }
@@ -59,6 +72,17 @@ impl From<ColumnDesc> for Field {
                 .map(Into::into)
                 .collect(),
             type_name: column_desc.type_name,
+        }
+    }
+}
+
+impl From<&PbColumnDesc> for Field {
+    fn from(pb_column_desc: &PbColumnDesc) -> Self {
+        Self {
+            data_type: pb_column_desc.column_type.as_ref().unwrap().into(),
+            name: pb_column_desc.name.clone(),
+            sub_fields: pb_column_desc.field_descs.iter().map(Into::into).collect(),
+            type_name: pb_column_desc.type_name.clone(),
         }
     }
 }
@@ -90,12 +114,17 @@ macro_rules! schema_unnamed {
 }
 
 /// the schema of the executor's return data
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Schema {
     pub fields: Vec<Field>,
 }
 
 impl Schema {
+    pub fn empty() -> &'static Self {
+        static EMPTY: Schema = Schema { fields: Vec::new() };
+        &EMPTY
+    }
+
     pub fn len(&self) -> usize {
         self.fields.len()
     }
@@ -135,7 +164,7 @@ impl Schema {
             .collect()
     }
 
-    pub fn to_prost(&self) -> Vec<ProstField> {
+    pub fn to_prost(&self) -> Vec<PbField> {
         self.fields
             .clone()
             .into_iter()
@@ -197,24 +226,13 @@ impl Field {
     }
 }
 
-impl From<&ProstField> for Field {
-    fn from(prost_field: &ProstField) -> Self {
+impl From<&PbField> for Field {
+    fn from(prost_field: &PbField) -> Self {
         Self {
             data_type: DataType::from(prost_field.get_data_type().expect("data type not found")),
             name: prost_field.get_name().clone(),
             sub_fields: vec![],
             type_name: String::new(),
-        }
-    }
-}
-
-impl From<&ColumnDesc> for Field {
-    fn from(desc: &ColumnDesc) -> Self {
-        Self {
-            data_type: desc.data_type.clone(),
-            name: desc.name.clone(),
-            sub_fields: desc.field_descs.iter().map(|d| d.into()).collect_vec(),
-            type_name: desc.type_name.clone(),
         }
     }
 }
@@ -232,6 +250,18 @@ impl FromIterator<Field> for Schema {
         Schema {
             fields: iter.into_iter().collect::<Vec<_>>(),
         }
+    }
+}
+
+impl From<&StructType> for Schema {
+    fn from(t: &StructType) -> Self {
+        Schema::new(
+            t.fields
+                .iter()
+                .zip_eq_fast(t.field_names.iter())
+                .map(|(d, s)| Field::with_name(d.clone(), s))
+                .collect(),
+        )
     }
 }
 

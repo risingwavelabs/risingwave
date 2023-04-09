@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{SetExpr, SetOperator};
 
+use super::statement::RewriteExprsRecursive;
 use crate::binder::{BindContext, Binder, BoundQuery, BoundSelect, BoundValues};
 use crate::expr::{CorrelatedId, Depth};
 
@@ -34,6 +35,20 @@ pub enum BoundSetExpr {
         left: Box<BoundSetExpr>,
         right: Box<BoundSetExpr>,
     },
+}
+
+impl RewriteExprsRecursive for BoundSetExpr {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
+        match self {
+            BoundSetExpr::Select(inner) => inner.rewrite_exprs_recursive(rewriter),
+            BoundSetExpr::Query(inner) => inner.rewrite_exprs_recursive(rewriter),
+            BoundSetExpr::Values(inner) => inner.rewrite_exprs_recursive(rewriter),
+            BoundSetExpr::SetOperation { left, right, .. } => {
+                left.rewrite_exprs_recursive(rewriter);
+                right.rewrite_exprs_recursive(rewriter);
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -110,8 +125,9 @@ impl Binder {
                 match op {
                     SetOperator::Union => {
                         let left = Box::new(self.bind_set_expr(*left)?);
-                        // Reset context for right side.
-                        self.context = BindContext::default();
+                        // Reset context for right side, but keep `cte_to_relation`.
+                        let new_context = std::mem::take(&mut self.context);
+                        self.context.cte_to_relation = new_context.cte_to_relation.clone();
                         let right = Box::new(self.bind_set_expr(*right)?);
 
                         if left.schema().fields.len() != right.schema().fields.len() {
@@ -125,7 +141,7 @@ impl Binder {
                             .schema()
                             .fields
                             .iter()
-                            .zip_eq(right.schema().fields.iter())
+                            .zip_eq_fast(right.schema().fields.iter())
                         {
                             if a.data_type != b.data_type {
                                 return Err(ErrorCode::InvalidInputSyntax(format!(
@@ -144,6 +160,7 @@ impl Binder {
                         // select a from t2 union all select b from t2 order by a+1; should throw an
                         // error.
                         self.context = BindContext::default();
+                        self.context.cte_to_relation = new_context.cte_to_relation;
                         Ok(BoundSetExpr::SetOperation {
                             op: BoundSetOperation::Union,
                             all,

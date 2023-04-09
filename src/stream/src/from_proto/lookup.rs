@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
-use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::LookupNode;
+use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::Distribution;
 
 use super::*;
-use crate::common::table::state_table::StateTable;
 use crate::executor::{LookupExecutor, LookupExecutorParams};
 
 pub struct LookupExecutorBuilder;
@@ -42,7 +42,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             .get_arrangement_table_info()?
             .arrange_key_orders
             .iter()
-            .map(OrderPair::from_prost)
+            .map(ColumnOrder::from_protobuf)
             .collect();
 
         let arrangement_col_descs = lookup
@@ -51,14 +51,81 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             .iter()
             .map(ColumnDesc::from)
             .collect();
-        let state_table = StateTable::from_table_catalog(
-            lookup.arrangement_table.as_ref().unwrap(),
+
+        let table_desc: &StorageTableDesc = lookup
+            .get_arrangement_table_info()?
+            .table_desc
+            .as_ref()
+            .unwrap();
+
+        let table_id = TableId {
+            table_id: table_desc.table_id,
+        };
+
+        let order_types = table_desc
+            .pk
+            .iter()
+            .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
+            .collect_vec();
+
+        let column_descs = table_desc
+            .columns
+            .iter()
+            .map(ColumnDesc::from)
+            .collect_vec();
+        let column_ids = column_descs.iter().map(|x| x.column_id).collect_vec();
+
+        // Use indices based on full table instead of streaming executor output.
+        let pk_indices = table_desc
+            .pk
+            .iter()
+            .map(|k| k.column_index as usize)
+            .collect_vec();
+
+        let dist_key_in_pk_indices = table_desc
+            .dist_key_in_pk_indices
+            .iter()
+            .map(|&k| k as usize)
+            .collect_vec();
+        let distribution = match params.vnode_bitmap {
+            Some(vnodes) => Distribution {
+                dist_key_in_pk_indices,
+                vnodes: vnodes.into(),
+            },
+            None => Distribution::fallback(),
+        };
+
+        let table_option = TableOption {
+            retention_seconds: if table_desc.retention_seconds > 0 {
+                Some(table_desc.retention_seconds)
+            } else {
+                None
+            },
+        };
+        let value_indices = table_desc
+            .get_value_indices()
+            .iter()
+            .map(|&k| k as usize)
+            .collect_vec();
+        let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
+        let versioned = table_desc.versioned;
+
+        let storage_table = StorageTable::new_partial(
             store,
-            params.vnode_bitmap.map(Arc::new),
-        )
-        .await;
+            table_id,
+            column_descs,
+            column_ids,
+            order_types,
+            pk_indices,
+            distribution,
+            table_option,
+            value_indices,
+            prefix_hint_len,
+            versioned,
+        );
 
         Ok(Box::new(LookupExecutor::new(LookupExecutorParams {
+            ctx: params.actor_context,
             schema: params.schema,
             arrangement,
             stream,
@@ -69,13 +136,9 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             stream_join_key_indices: lookup.stream_key.iter().map(|x| *x as usize).collect(),
             arrange_join_key_indices: lookup.arrange_key.iter().map(|x| *x as usize).collect(),
             column_mapping: lookup.column_mapping.iter().map(|x| *x as usize).collect(),
-            state_table,
-            lru_manager: stream_manager.context.lru_manager.clone(),
-            cache_size: stream_manager
-                .config
-                .developer
-                .unsafe_stream_join_cache_size,
-            chunk_size: params.env.config().developer.stream_chunk_size,
+            storage_table,
+            watermark_epoch: stream_manager.get_watermark_epoch(),
+            chunk_size: params.env.config().developer.chunk_size,
         })))
     }
 }

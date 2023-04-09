@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,33 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeSet;
+use std::collections::HashSet;
 
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::row::{Row, Row2};
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 
-use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
+use crate::cache::{new_unbounded, ExecutorCache};
+use crate::task::AtomicU64Ref;
 
 /// A cache for lookup's arrangement side.
 pub struct LookupCache {
-    data: ExecutorCache<Row, BTreeSet<Row>>,
+    data: ExecutorCache<OwnedRow, HashSet<OwnedRow>>,
 }
 
 impl LookupCache {
     /// Lookup a row in cache. If not found, return `None`.
-    pub fn lookup(&mut self, key: &Row) -> Option<&BTreeSet<Row>> {
+    pub fn lookup(&mut self, key: &OwnedRow) -> Option<&HashSet<OwnedRow>> {
         self.data.get(key)
     }
 
     /// Update a key after lookup cache misses.
-    pub fn batch_update(&mut self, key: Row, value: impl Iterator<Item = Row>) {
+    pub fn batch_update(&mut self, key: OwnedRow, value: impl Iterator<Item = OwnedRow>) {
         self.data.push(key, value.collect());
     }
 
     /// Apply a batch from the arrangement side
     pub fn apply_batch(&mut self, chunk: StreamChunk, arrange_join_keys: &[usize]) {
         for (op, row) in chunk.rows() {
-            let key = row.row_by_indices(arrange_join_keys);
+            let key = row.project(arrange_join_keys).into_owned_row();
             if let Some(values) = self.data.get_mut(&key) {
                 // the item is in cache, update it
                 match op {
@@ -63,12 +64,13 @@ impl LookupCache {
         self.data.update_epoch(epoch);
     }
 
-    pub fn new(lru_manager: Option<LruManagerRef>, cache_size: usize) -> Self {
-        let cache = if let Some(lru_manager) = lru_manager {
-            ExecutorCache::Managed(lru_manager.create_cache())
-        } else {
-            ExecutorCache::Local(EvictableHashMap::new(cache_size))
-        };
+    /// Clear the cache.
+    pub fn clear(&mut self) {
+        self.data.clear();
+    }
+
+    pub fn new(watermark_epoch: AtomicU64Ref) -> Self {
+        let cache = ExecutorCache::new(new_unbounded(watermark_epoch));
         Self { data: cache }
     }
 }

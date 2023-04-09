@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package common;
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message Status {
@@ -31,6 +32,7 @@ enum WorkerType {
   COMPUTE_NODE = 2;
   RISE_CTL = 3;
   COMPACTOR = 4;
+  META = 5;
 }
 
 message ParallelUnit {
@@ -62,7 +64,37 @@ message Buffer {
 
 // Vnode mapping for stream fragments. Stores mapping from virtual node to parallel unit id.
 message ParallelUnitMapping {
-  uint32 fragment_id = 1;
-  repeated uint64 original_indices = 2;
-  repeated uint32 data = 3;
+  repeated uint32 original_indices = 1;
+  repeated uint32 data = 2;
+}
+
+message BatchQueryEpoch {
+  oneof epoch {
+    uint64 committed = 1;
+    uint64 current = 2;
+    uint64 backup = 3;
+  }
+}
+
+enum Direction {
+  DIRECTION_UNSPECIFIED = 0;
+  DIRECTION_ASCENDING = 1;
+  DIRECTION_DESCENDING = 2;
+}
+
+enum NullsAre {
+  NULLS_ARE_UNSPECIFIED = 0;
+  NULLS_ARE_LARGEST = 1;
+  NULLS_ARE_SMALLEST = 2;
+}
+
+message OrderType {
+  Direction direction = 1;
+  NullsAre nulls_are = 2;
+}
+
+// Column index with an order type (ASC or DESC). Used to represent a sort key (`repeated ColumnOrder`).
+message ColumnOrder {
+  uint32 column_index = 1;
+  OrderType order_type = 2;
 }

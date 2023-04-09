@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
@@ -25,11 +25,12 @@ use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 
 use crate::error::StorageResult;
+use crate::mem_table::MemtableLocalStateStore;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
     define_state_store_associated_type, define_state_store_read_associated_type,
-    define_state_store_write_associated_type, StateStore, StateStoreIter,
+    define_state_store_write_associated_type,
 };
 
 pub type BytesFullKey = FullKey<Bytes>;
@@ -41,7 +42,7 @@ pub trait RangeKv: Clone + Send + Sync + 'static {
         &self,
         range: BytesFullKeyRange,
         limit: Option<usize>,
-    ) -> StorageResult<Vec<(FullKey<Vec<u8>>, Option<Bytes>)>>;
+    ) -> StorageResult<Vec<(BytesFullKey, Option<Bytes>)>>;
 
     fn ingest_batch(
         &self,
@@ -58,13 +59,13 @@ impl RangeKv for BTreeMapRangeKv {
         &self,
         range: BytesFullKeyRange,
         limit: Option<usize>,
-    ) -> StorageResult<Vec<(FullKey<Vec<u8>>, Option<Bytes>)>> {
+    ) -> StorageResult<Vec<(BytesFullKey, Option<Bytes>)>> {
         let limit = limit.unwrap_or(usize::MAX);
         Ok(self
             .read()
             .range(range)
             .take(limit)
-            .map(|(key, value)| (key.to_ref().to_vec(), value.clone()))
+            .map(|(key, value)| (key.clone(), value.clone()))
             .collect())
     }
 
@@ -123,7 +124,7 @@ pub mod sled {
             &self,
             range: BytesFullKeyRange,
             limit: Option<usize>,
-        ) -> StorageResult<Vec<(FullKey<Vec<u8>>, Option<Bytes>)>> {
+        ) -> StorageResult<Vec<(BytesFullKey, Option<Bytes>)>> {
             let (left, right) = range;
             let full_key_ref_bound = (
                 left.as_ref().map(FullKey::to_ref),
@@ -137,7 +138,7 @@ pub mod sled {
             let mut ret = vec![];
             for result in self.inner.range((left_encoded, right_encoded)).take(limit) {
                 let (key, value) = result?;
-                let full_key = FullKey::decode_reverse_epoch(key.as_ref()).to_vec();
+                let full_key = FullKey::decode_reverse_epoch(key.as_ref()).copy_into();
                 if !full_key_ref_bound.contains(&full_key.to_ref()) {
                     continue;
                 }
@@ -293,7 +294,7 @@ mod batched_iter {
     pub struct Iter<R: RangeKv> {
         inner: R,
         range: BytesFullKeyRange,
-        current: std::vec::IntoIter<(FullKey<Vec<u8>>, Option<Bytes>)>,
+        current: std::vec::IntoIter<(FullKey<Bytes>, Option<Bytes>)>,
     }
 
     impl<R: RangeKv> Iter<R> {
@@ -325,7 +326,7 @@ mod batched_iter {
             if let Some((last_key, _)) = batch.last() {
                 let full_key = FullKey::new(
                     last_key.user_key.table_id,
-                    TableKey(Bytes::from(last_key.user_key.table_key.0.clone())),
+                    TableKey(last_key.user_key.table_key.0.clone()),
                     last_key.epoch,
                 );
                 self.range.0 = Bound::Excluded(full_key);
@@ -337,15 +338,12 @@ mod batched_iter {
 
     impl<R: RangeKv> Iter<R> {
         #[allow(clippy::type_complexity)]
-        pub fn next(&mut self) -> StorageResult<Option<(FullKey<Vec<u8>>, Option<Bytes>)>> {
+        pub fn next(&mut self) -> StorageResult<Option<(BytesFullKey, Option<Bytes>)>> {
             match self.current.next() {
-                Some((key, value)) => Ok(Some((key.to_ref().to_vec(), value))),
+                Some((key, value)) => Ok(Some((key, value))),
                 None => {
                     self.refill()?;
-                    Ok(self
-                        .current
-                        .next()
-                        .map(|(key, value)| (key.to_ref().to_vec(), value)))
+                    Ok(self.current.next())
                 }
             }
         }
@@ -508,7 +506,7 @@ impl MemoryStateStore {
 impl<R: RangeKv> RangeKvStateStore<R> {
     fn scan(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         epoch: u64,
         table_id: TableId,
         limit: Option<usize>,
@@ -540,18 +538,13 @@ impl<R: RangeKv> RangeKvStateStore<R> {
 }
 
 impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
-    type Iter = RangeKvStateStoreIter<R>;
+    type IterStream = StreamTypeOfIter<RangeKvStateStoreIter<R>>;
 
     define_state_store_read_associated_type!();
 
-    fn get<'a>(
-        &'a self,
-        key: &'a [u8],
-        epoch: u64,
-        read_options: ReadOptions,
-    ) -> Self::GetFuture<'_> {
+    fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
         async move {
-            let range_bounds = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
+            let range_bounds = (Bound::Included(key.clone()), Bound::Included(key));
             // We do not really care about vnodes here, so we just use the default value.
             let res = self.scan(range_bounds, epoch, read_options.table_id, Some(1))?;
 
@@ -565,7 +558,7 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
 
     fn iter(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
@@ -576,7 +569,8 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
                     to_full_key_range(read_options.table_id, key_range),
                 ),
                 epoch,
-            ))
+            )
+            .into_stream())
         }
     }
 }
@@ -586,12 +580,30 @@ impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
 
     fn ingest_batch(
         &self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
-        _delete_ranges: Vec<(Bytes, Bytes)>,
+        mut kv_pairs: Vec<(Bytes, StorageValue)>,
+        delete_ranges: Vec<(Bytes, Bytes)>,
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
             let epoch = write_options.epoch;
+
+            let mut delete_keys = BTreeSet::new();
+            for del_range in delete_ranges {
+                let fullkey_start =
+                    FullKey::new(write_options.table_id, TableKey(del_range.0), epoch);
+                let fullkey_end =
+                    FullKey::new(write_options.table_id, TableKey(del_range.1), epoch);
+                for (key, _) in self.inner.range(
+                    (Bound::Included(fullkey_start), Bound::Excluded(fullkey_end)),
+                    None,
+                )? {
+                    delete_keys.insert(key.user_key.table_key.0);
+                }
+            }
+            for key in delete_keys {
+                kv_pairs.push((key, StorageValue::new_delete()));
+            }
+
             let mut size = 0;
             self.inner
                 .ingest_batch(kv_pairs.into_iter().map(|(key, value)| {
@@ -606,10 +618,8 @@ impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
     }
 }
 
-impl<R: RangeKv> LocalStateStore for RangeKvStateStore<R> {}
-
 impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
-    type Local = Self;
+    type Local = MemtableLocalStateStore<Self>;
 
     type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
@@ -638,8 +648,12 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
         async move { Ok(()) }
     }
 
-    fn new_local(&self, _table_id: TableId) -> Self::NewLocalFuture<'_> {
-        async { self.clone() }
+    fn new_local(&self, option: NewLocalOptions) -> Self::NewLocalFuture<'_> {
+        async move { MemtableLocalStateStore::new(self.clone(), option) }
+    }
+
+    fn validate_read_epoch(&self, _epoch: HummockReadEpoch) -> StorageResult<()> {
+        Ok(())
     }
 }
 
@@ -648,7 +662,7 @@ pub struct RangeKvStateStoreIter<R: RangeKv> {
 
     epoch: HummockEpoch,
 
-    last_key: Option<UserKey<Vec<u8>>>,
+    last_key: Option<UserKey<Bytes>>,
 
     /// For supporting semantic of `Fuse`
     stopped: bool,
@@ -666,9 +680,9 @@ impl<R: RangeKv> RangeKvStateStoreIter<R> {
 }
 
 impl<R: RangeKv> StateStoreIter for RangeKvStateStoreIter<R> {
-    type Item = (FullKey<Vec<u8>>, Bytes);
+    type Item = StateStoreIterItem;
 
-    type NextFuture<'a> = impl Future<Output = StorageResult<Option<Self::Item>>> + Send + 'a;
+    type NextFuture<'a> = impl StateStoreIterNextFutureTrait<'a>;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
@@ -690,7 +704,7 @@ impl<R: RangeKv> StateStoreIter for RangeKvStateStoreIter<R> {
 }
 
 impl<R: RangeKv> RangeKvStateStoreIter<R> {
-    fn next_inner(&mut self) -> StorageResult<Option<(FullKey<Vec<u8>>, Bytes)>> {
+    fn next_inner(&mut self) -> StorageResult<Option<StateStoreIterItem>> {
         while let Some((key, value)) = self.inner.next()? {
             if key.epoch > self.epoch {
                 continue;
@@ -757,8 +771,8 @@ mod tests {
             state_store
                 .scan(
                     (
-                        Bound::Included(b"a".to_vec()),
-                        Bound::Included(b"b".to_vec()),
+                        Bound::Included(Bytes::from("a")),
+                        Bound::Included(Bytes::from("b")),
                     ),
                     0,
                     TableId::default(),
@@ -767,13 +781,13 @@ mod tests {
                 .unwrap(),
             vec![
                 (
-                    FullKey::for_test(Default::default(), b"a".to_vec(), 0)
+                    FullKey::for_test(Default::default(), Bytes::from("a"), 0)
                         .encode()
                         .into(),
                     b"v1".to_vec().into()
                 ),
                 (
-                    FullKey::for_test(Default::default(), b"b".to_vec(), 0)
+                    FullKey::for_test(Default::default(), Bytes::from("b"), 0)
                         .encode()
                         .into(),
                     b"v1".to_vec().into()
@@ -784,8 +798,8 @@ mod tests {
             state_store
                 .scan(
                     (
-                        Bound::Included(b"a".to_vec()),
-                        Bound::Included(b"b".to_vec()),
+                        Bound::Included(Bytes::from("a")),
+                        Bound::Included(Bytes::from("b")),
                     ),
                     0,
                     TableId::default(),
@@ -803,8 +817,8 @@ mod tests {
             state_store
                 .scan(
                     (
-                        Bound::Included(b"a".to_vec()),
-                        Bound::Included(b"b".to_vec()),
+                        Bound::Included(Bytes::from("a")),
+                        Bound::Included(Bytes::from("b")),
                     ),
                     1,
                     TableId::default(),
@@ -820,42 +834,42 @@ mod tests {
         );
         assert_eq!(
             state_store
-                .get(b"a", 0, ReadOptions::default(),)
+                .get(Bytes::from("a"), 0, ReadOptions::default(),)
+                .await
+                .unwrap(),
+            Some(Bytes::from("v1"))
+        );
+        assert_eq!(
+            state_store
+                .get(Bytes::copy_from_slice(b"b"), 0, ReadOptions::default(),)
                 .await
                 .unwrap(),
             Some(b"v1".to_vec().into())
         );
         assert_eq!(
             state_store
-                .get(b"b", 0, ReadOptions::default(),)
-                .await
-                .unwrap(),
-            Some(b"v1".to_vec().into())
-        );
-        assert_eq!(
-            state_store
-                .get(b"c", 0, ReadOptions::default(),)
+                .get(Bytes::copy_from_slice(b"c"), 0, ReadOptions::default(),)
                 .await
                 .unwrap(),
             None
         );
         assert_eq!(
             state_store
-                .get(b"a", 1, ReadOptions::default(),)
+                .get(Bytes::copy_from_slice(b"a"), 1, ReadOptions::default(),)
                 .await
                 .unwrap(),
             Some(b"v2".to_vec().into())
         );
         assert_eq!(
             state_store
-                .get(b"b", 1, ReadOptions::default(),)
+                .get(Bytes::from("b"), 1, ReadOptions::default(),)
                 .await
                 .unwrap(),
             None
         );
         assert_eq!(
             state_store
-                .get(b"c", 1, ReadOptions::default())
+                .get(Bytes::from("c"), 1, ReadOptions::default())
                 .await
                 .unwrap(),
             None

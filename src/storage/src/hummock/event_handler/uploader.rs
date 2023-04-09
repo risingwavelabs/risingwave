@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -27,9 +27,9 @@ use futures::future::{try_join_all, TryJoinAll};
 use futures::FutureExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{info_in_release, CompactionGroupId, HummockEpoch, LocalSstableInfo};
 use tokio::task::JoinHandle;
-use tracing::{error, warn};
+use tracing::error;
 
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -46,12 +46,22 @@ pub type SpawnUploadTask = Arc<
         + 'static,
 >;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct UploadTaskInfo {
     pub task_size: usize,
     pub epochs: Vec<HummockEpoch>,
     pub imm_ids: Vec<ImmId>,
     pub compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
+}
+
+impl Debug for UploadTaskInfo {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UploadTaskInfo")
+            .field("task_size", &self.task_size)
+            .field("epochs", &self.epochs)
+            .field("imm_ids", &self.imm_ids)
+            .finish()
+    }
 }
 
 /// A wrapper for a uploading task that compacts and uploads the imm payload. Task context are
@@ -103,6 +113,7 @@ impl UploadingTask {
             .buffer_tracker
             .global_upload_task_size()
             .fetch_add(task_size, Relaxed);
+        info_in_release!("start upload task: {:?}", task_info);
         let join_handle = (context.spawn_upload_task)(payload.clone(), task_info.clone());
         Self {
             payload,
@@ -116,14 +127,17 @@ impl UploadingTask {
     /// Poll the result of the uploading task
     fn poll_result(&mut self, cx: &mut Context<'_>) -> Poll<HummockResult<StagingSstableInfo>> {
         Poll::Ready(match ready!(self.join_handle.poll_unpin(cx)) {
-            Ok(task_result) => task_result.map(|ssts| {
-                StagingSstableInfo::new(
-                    ssts,
-                    self.task_info.epochs.clone(),
-                    self.task_info.imm_ids.clone(),
-                    self.task_info.task_size,
-                )
-            }),
+            Ok(task_result) => task_result
+                .inspect(|_| info_in_release!("upload task finish {:?}", self.task_info))
+                .map(|ssts| {
+                    StagingSstableInfo::new(
+                        ssts,
+                        self.task_info.epochs.clone(),
+                        self.task_info.imm_ids.clone(),
+                        self.task_info.task_size,
+                    )
+                }),
+
             Err(err) => Err(HummockError::other(format!(
                 "fail to join upload join handle: {:?}",
                 err
@@ -138,7 +152,10 @@ impl UploadingTask {
             match result {
                 Ok(sstables) => return Poll::Ready(sstables),
                 Err(e) => {
-                    error!("a flush task {:?} failed. {:?}", self.task_info, e);
+                    error!(
+                        "a flush task {:?} failed, start retry. Task info: {:?}",
+                        self.task_info, e
+                    );
                     self.join_handle =
                         (self.spawn_upload_task)(self.payload.clone(), self.task_info.clone());
                     // It is important not to return Poll::pending here immediately, because the new
@@ -230,6 +247,13 @@ struct SealedData {
 }
 
 impl SealedData {
+    fn clear(&mut self) {
+        self.epochs.clear();
+
+        self.spilled_data.clear();
+        self.imms.clear();
+    }
+
     /// Add the data of a newly sealed epoch.
     ///
     /// Note: it may happen that, for example, currently we hold `imms` and `spilled_data` of epoch
@@ -402,6 +426,10 @@ impl HummockUploader {
         &self.context.buffer_tracker
     }
 
+    pub(crate) fn max_sealed_epoch(&self) -> HummockEpoch {
+        self.max_sealed_epoch
+    }
+
     pub(crate) fn max_synced_epoch(&self) -> HummockEpoch {
         self.max_synced_epoch
     }
@@ -431,6 +459,7 @@ impl HummockUploader {
     }
 
     pub(crate) fn seal_epoch(&mut self, epoch: HummockEpoch) {
+        info_in_release!("epoch {} is sealed", epoch);
         assert!(
             epoch > self.max_sealed_epoch,
             "sealing a sealed epoch {}. {}",
@@ -452,12 +481,15 @@ impl HummockUploader {
                     .expect("we have checked non-empty");
                 self.sealed_data.seal_new_epoch(epoch, unsealed_data);
             } else {
-                warn!("epoch {} to seal has no data", epoch);
+                info_in_release!("epoch {} to seal has no data", epoch);
             }
+        } else {
+            info_in_release!("epoch {} to seal has no data", epoch);
         }
     }
 
     pub(crate) fn start_sync_epoch(&mut self, epoch: HummockEpoch) {
+        info_in_release!("start sync epoch: {}", epoch);
         assert!(
             epoch > self.max_syncing_epoch,
             "the epoch {} has started syncing already: {}",
@@ -567,18 +599,18 @@ impl HummockUploader {
         }
     }
 
-    pub(crate) fn try_flush(&mut self) {
-        if self.buffer_tracker().need_more_flush() {
+    pub(crate) fn may_flush(&mut self) {
+        if self.context.buffer_tracker.need_more_flush() {
             self.sealed_data.flush(&self.context);
         }
 
         if self.context.buffer_tracker.need_more_flush() {
             // iterate from older epoch to newer epoch
             for unsealed_data in self.unsealed_data.values_mut() {
+                unsealed_data.flush(&self.context);
                 if !self.context.buffer_tracker.need_more_flush() {
                     break;
                 }
-                unsealed_data.flush(&self.context);
             }
         }
     }
@@ -590,8 +622,7 @@ impl HummockUploader {
         self.max_sealed_epoch = max_committed_epoch;
         self.synced_data.clear();
         self.syncing_data.clear();
-        self.sealed_data.spilled_data.clear();
-        self.sealed_data.imms.clear();
+        self.sealed_data.clear();
         self.unsealed_data.clear();
 
         // TODO: call `abort` on the uploading task join handle
@@ -758,14 +789,23 @@ mod tests {
         epoch: HummockEpoch,
         limiter: Option<&MemoryLimiter>,
     ) -> ImmutableMemtable {
+        let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(vec![(
+            Bytes::from(dummy_table_key()),
+            StorageValue::new_delete(),
+        )]);
+        let size = SharedBufferBatch::measure_batch_size(&sorted_items);
+        let tracker = match limiter {
+            Some(limiter) => Some(limiter.require_memory(size as u64).await),
+            None => None,
+        };
         SharedBufferBatch::build_shared_buffer_batch(
             epoch,
-            vec![(Bytes::from(dummy_table_key()), StorageValue::new_delete())],
+            sorted_items,
+            size,
             vec![],
             TEST_TABLE_ID,
-            limiter,
+            tracker,
         )
-        .await
     }
 
     async fn gen_imm(epoch: HummockEpoch) -> ImmutableMemtable {
@@ -778,9 +818,10 @@ mod tests {
     ) -> Vec<LocalSstableInfo> {
         let start_full_key = FullKey::new(TEST_TABLE_ID, TableKey(dummy_table_key()), start_epoch);
         let end_full_key = FullKey::new(TEST_TABLE_ID, TableKey(dummy_table_key()), end_epoch);
-        let gen_sst_id = (start_epoch << 8) + end_epoch;
+        let gen_sst_object_id = (start_epoch << 8) + end_epoch;
         vec![LocalSstableInfo::for_test(SstableInfo {
-            id: gen_sst_id,
+            object_id: gen_sst_object_id,
+            sst_id: gen_sst_object_id,
             key_range: Some(KeyRange {
                 left: start_full_key.encode(),
                 right: end_full_key.encode(),
@@ -791,7 +832,9 @@ mod tests {
             meta_offset: 0,
             stale_key_count: 0,
             total_key_count: 0,
-            divide_version: 0,
+            uncompressed_file_size: 0,
+            min_epoch: 0,
+            max_epoch: 0,
         })]
     }
 
@@ -1139,7 +1182,7 @@ mod tests {
         let (await_start1, finish_tx1) =
             new_task_notifier(vec![imm1_2.batch_id(), imm1_1.batch_id()]);
         let (await_start2, finish_tx2) = new_task_notifier(vec![imm2.batch_id()]);
-        uploader.try_flush();
+        uploader.may_flush();
         await_start1.await;
         await_start2.await;
 
@@ -1166,7 +1209,7 @@ mod tests {
         let imm1_3 = gen_imm_with_limiter(epoch1, memory_limiter).await;
         uploader.add_imm(imm1_3.clone());
         let (await_start1_3, finish_tx1_3) = new_task_notifier(vec![imm1_3.batch_id()]);
-        uploader.try_flush();
+        uploader.may_flush();
         await_start1_3.await;
         let imm1_4 = gen_imm_with_limiter(epoch1, memory_limiter).await;
         uploader.add_imm(imm1_4.clone());
@@ -1186,12 +1229,12 @@ mod tests {
         let imm3_1 = gen_imm_with_limiter(epoch3, memory_limiter).await;
         uploader.add_imm(imm3_1.clone());
         let (await_start3_1, finish_tx3_1) = new_task_notifier(vec![imm3_1.batch_id()]);
-        uploader.try_flush();
+        uploader.may_flush();
         await_start3_1.await;
         let imm3_2 = gen_imm_with_limiter(epoch3, memory_limiter).await;
         uploader.add_imm(imm3_2.clone());
         let (await_start3_2, finish_tx3_2) = new_task_notifier(vec![imm3_2.batch_id()]);
-        uploader.try_flush();
+        uploader.may_flush();
         await_start3_2.await;
         let imm3_3 = gen_imm_with_limiter(epoch3, memory_limiter).await;
         uploader.add_imm(imm3_3.clone());

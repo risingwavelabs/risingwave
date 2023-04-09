@@ -7,4 +7,7 @@
 # interferes with crash-recovery testing.
 # test: tablespace
 
-test: boolean varchar int2 int4 float4 comments
+test: boolean varchar text int2 int4 int8 float4 float8 comments
+test: strings date time timestamp interval
+test: case arrays
+test: jsonb

@@ -1,8 +1,8 @@
-# Remove this if your x86_64 target does not support AVX2 vector extensions. #5367
+# RisingWave cannot compile without SIMD. #7259
+
 [target.x86_64-unknown-linux-gnu]
 rustflags = ["-Ctarget-feature=+avx2"]
 
-# Remove this if your aarch64 target does not support NEON vector extensions. #5367
 [target.aarch64-unknown-linux-gnu]
 rustflags = ["-Ctarget-feature=+neon"]
 
@@ -12,6 +12,9 @@ rustflags = [
     "-Clink-arg=-fuse-ld=lld",       #2781
     "-Clink-arg=-Wl,--no-rosegment", #4574
 ]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-Ctarget-feature=+avx2"]
 
 [target.aarch64-apple-darwin]
 rustflags = [
@@ -26,6 +29,7 @@ rustflags = [
     # lints
     # TODO: use lint configuration in cargo https://github.com/rust-lang/cargo/issues/5034
     "-Funused_must_use",
+    "-Aclippy::uninlined_format_args",
     "-Wclippy::dbg_macro",
     "-Wclippy::disallowed_methods",
     "-Wclippy::disallowed_types",

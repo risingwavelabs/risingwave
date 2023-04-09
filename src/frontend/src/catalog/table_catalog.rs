@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,15 +14,19 @@
 
 use std::collections::{HashMap, HashSet};
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{TableDesc, TableId};
-use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
-use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, Table as ProstTable};
+use risingwave_common::catalog::{
+    ColumnCatalog, ConflictBehavior, TableDesc, TableId, TableVersionId,
+};
+use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
+use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
+use risingwave_pb::catalog::PbTable;
 
-use super::column_catalog::ColumnCatalog;
-use super::{DatabaseId, FragmentId, SchemaId};
-use crate::optimizer::property::FieldOrder;
+use super::{ColumnId, DatabaseId, FragmentId, RelationCatalog, SchemaId};
+use crate::user::UserId;
 use crate::WithOptions;
 
 /// Includes full information about a table.
@@ -32,7 +36,7 @@ use crate::WithOptions;
 /// - a materialized view
 /// - an index
 ///
-/// Use `self.kind()` to determine the type of the table.
+/// Use `self.table_type()` to determine the type of the table.
 ///
 /// # Column ID & Column Index
 ///
@@ -58,7 +62,8 @@ use crate::WithOptions;
 ///
 /// - **Distribution Key**: the columns used to partition the data. It must be a subset of the order
 ///   key.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(test, derive(Default))]
 pub struct TableCatalog {
     pub id: TableId,
 
@@ -66,26 +71,28 @@ pub struct TableCatalog {
 
     pub name: String,
 
-    /// All columns in this table
+    /// All columns in this table.
     pub columns: Vec<ColumnCatalog>,
 
     /// Key used as materialize's storage key prefix, including MV order columns and stream_key.
-    pub pk: Vec<FieldOrder>,
+    pub pk: Vec<ColumnOrder>,
 
     /// pk_indices of the corresponding materialize operator's output.
     pub stream_key: Vec<usize>,
 
-    pub is_index: bool,
+    /// Type of the table. Used to distinguish user-created tables, materialized views, index
+    /// tables, and internal tables.
+    pub table_type: TableType,
 
     /// Distribution key column indices.
     pub distribution_key: Vec<usize>,
 
-    /// The appendonly attribute is derived from `StreamMaterialize` and `StreamTableScan` relies
-    /// on this to derive an append-only stream plan
-    pub appendonly: bool,
+    /// The append-only attribute is derived from `StreamMaterialize` and `StreamTableScan` relies
+    /// on this to derive an append-only stream plan.
+    pub append_only: bool,
 
     /// Owner of the table.
-    pub owner: u32,
+    pub owner: UserId,
 
     /// Properties of the table. For example, `appendonly` or `retention_seconds`.
     pub properties: WithOptions,
@@ -94,25 +101,110 @@ pub struct TableCatalog {
     pub fragment_id: FragmentId,
 
     /// An optional column index which is the vnode of each row computed by the table's consistent
-    /// hash distribution
-    pub vnode_col_idx: Option<usize>,
+    /// hash distribution.
+    pub vnode_col_index: Option<usize>,
+
+    /// An optional column index of row id. If the primary key is specified by users, this will be
+    /// `None`.
+    pub row_id_index: Option<usize>,
 
     /// The column indices which are stored in the state store's value with row-encoding. Currently
-    /// is not supported yet and expected to be `[0..columns.len()]`
+    /// is not supported yet and expected to be `[0..columns.len()]`.
     pub value_indices: Vec<usize>,
 
-    /// Definition of the materialized view.
+    /// The full `CREATE TABLE` or `CREATE MATERIALIZED VIEW` definition of the table.
     pub definition: String,
 
-    pub handle_pk_conflict: bool,
+    /// The behavior of handling incoming pk conflict from source executor, we can overwrite or
+    /// ignore conflict pk. For normal materialize executor and other executors, this field will be
+    /// `No Check`.
+    pub conflict_behavior: ConflictBehavior,
+
+    pub read_prefix_len_hint: usize,
+
+    /// Per-table catalog version, used by schema change. `None` for internal tables and tests.
+    pub version: Option<TableVersion>,
+
+    /// The column indices which could receive watermarks.
+    pub watermark_columns: FixedBitSet,
+
+    /// Optional field specifies the distribution key indices in pk.
+    /// See https://github.com/risingwavelabs/risingwave/issues/8377 for more information.
+    pub dist_key_in_pk: Vec<usize>,
 }
 
-pub enum TableKind {
-    /// Refer to [`crate::handler::drop_table::check_source`] for how to distinguish between a
-    /// table and a source.
-    TableOrSource,
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum TableType {
+    /// Tables created by `CREATE TABLE`.
+    Table,
+    /// Tables created by `CREATE MATERIALIZED VIEW`.
+    MaterializedView,
+    /// Tables serving as index for `TableType::Table` or `TableType::MaterializedView`.
     Index,
-    MView,
+    /// Internal tables for executors.
+    Internal,
+}
+
+#[cfg(test)]
+impl Default for TableType {
+    fn default() -> Self {
+        Self::Table
+    }
+}
+
+impl TableType {
+    fn from_prost(prost: PbTableType) -> Self {
+        match prost {
+            PbTableType::Table => Self::Table,
+            PbTableType::MaterializedView => Self::MaterializedView,
+            PbTableType::Index => Self::Index,
+            PbTableType::Internal => Self::Internal,
+            PbTableType::Unspecified => unreachable!(),
+        }
+    }
+
+    pub(crate) fn to_prost(self) -> PbTableType {
+        match self {
+            Self::Table => PbTableType::Table,
+            Self::MaterializedView => PbTableType::MaterializedView,
+            Self::Index => PbTableType::Index,
+            Self::Internal => PbTableType::Internal,
+        }
+    }
+}
+
+/// The version of a table, used by schema change. See [`PbTableVersion`].
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct TableVersion {
+    pub version_id: TableVersionId,
+    pub next_column_id: ColumnId,
+}
+
+impl TableVersion {
+    /// Create an initial version for a table, with the given max column id.
+    #[cfg(test)]
+    pub fn new_initial_for_test(max_column_id: ColumnId) -> Self {
+        use risingwave_common::catalog::INITIAL_TABLE_VERSION_ID;
+
+        Self {
+            version_id: INITIAL_TABLE_VERSION_ID,
+            next_column_id: max_column_id.next(),
+        }
+    }
+
+    pub fn from_prost(prost: PbTableVersion) -> Self {
+        Self {
+            version_id: prost.version,
+            next_column_id: ColumnId::from(prost.next_column_id),
+        }
+    }
+
+    pub fn to_prost(&self) -> PbTableVersion {
+        PbTableVersion {
+            version: self.version_id,
+            next_column_id: self.next_column_id.into(),
+        }
+    }
 }
 
 impl TableCatalog {
@@ -126,18 +218,43 @@ impl TableCatalog {
         self
     }
 
-    pub fn handle_pk_conflict(&self) -> bool {
-        self.handle_pk_conflict
+    pub fn conflict_behavior(&self) -> ConflictBehavior {
+        self.conflict_behavior
     }
 
-    pub fn kind(&self) -> TableKind {
-        if self.is_index {
-            TableKind::Index
-        } else if self.associated_source_id.is_none() {
-            TableKind::MView
-        } else {
-            TableKind::TableOrSource
-        }
+    pub fn table_type(&self) -> TableType {
+        self.table_type
+    }
+
+    pub fn is_table(&self) -> bool {
+        self.table_type == TableType::Table
+    }
+
+    pub fn is_internal_table(&self) -> bool {
+        self.table_type == TableType::Internal
+    }
+
+    pub fn is_mview(&self) -> bool {
+        self.table_type == TableType::MaterializedView
+    }
+
+    pub fn is_index(&self) -> bool {
+        self.table_type == TableType::Index
+    }
+
+    /// Returns an error if `DROP` statements are used on the wrong type of table.
+    #[must_use]
+    pub fn bad_drop_error(&self) -> RwError {
+        let msg = match self.table_type {
+            TableType::MaterializedView => {
+                "Use `DROP MATERIALIZED VIEW` to drop a materialized view."
+            }
+            TableType::Index => "Use `DROP INDEX` to drop an index.",
+            TableType::Table => "Use `DROP TABLE` to drop a table.",
+            TableType::Internal => "Internal tables cannot be dropped.",
+        };
+
+        ErrorCode::InvalidInputSyntax(msg.to_owned()).into()
     }
 
     /// Get the table catalog's associated source id.
@@ -146,33 +263,49 @@ impl TableCatalog {
         self.associated_source_id
     }
 
+    pub fn has_associated_source(&self) -> bool {
+        self.associated_source_id.is_some()
+    }
+
     /// Get a reference to the table catalog's columns.
     pub fn columns(&self) -> &[ColumnCatalog] {
         &self.columns
     }
 
     /// Get a reference to the table catalog's pk desc.
-    pub fn pk(&self) -> &[FieldOrder] {
+    pub fn pk(&self) -> &[ColumnOrder] {
         self.pk.as_ref()
+    }
+
+    /// Get the column IDs of the primary key.
+    pub fn pk_column_ids(&self) -> Vec<ColumnId> {
+        self.pk
+            .iter()
+            .map(|x| self.columns[x.column_index].column_id())
+            .collect()
     }
 
     /// Get a [`TableDesc`] of the table.
     pub fn table_desc(&self) -> TableDesc {
         use risingwave_common::catalog::TableOption;
 
-        let table_options = TableOption::build_table_option(&self.properties);
+        let table_options =
+            TableOption::build_table_option(&self.properties.inner().clone().into_iter().collect());
 
         TableDesc {
             table_id: self.id,
-            pk: self.pk.iter().map(FieldOrder::to_order_pair).collect(),
+            pk: self.pk.clone(),
             stream_key: self.stream_key.clone(),
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_key: self.distribution_key.clone(),
-            appendonly: self.appendonly,
+            append_only: self.append_only,
             retention_seconds: table_options
                 .retention_seconds
                 .unwrap_or(TABLE_OPTION_DUMMY_RETENTION_SECOND),
             value_indices: self.value_indices.clone(),
+            read_prefix_len_hint: self.read_prefix_len_hint,
+            watermark_columns: self.watermark_columns.clone(),
+            versioned: self.version.is_some(),
         }
     }
 
@@ -185,16 +318,31 @@ impl TableCatalog {
         self.distribution_key.as_ref()
     }
 
-    pub fn to_internal_table_prost(&self) -> ProstTable {
+    pub fn to_internal_table_prost(&self) -> PbTable {
         use risingwave_common::catalog::{DatabaseId, SchemaId};
         self.to_prost(
-            SchemaId::placeholder() as u32,
-            DatabaseId::placeholder() as u32,
+            SchemaId::placeholder().schema_id,
+            DatabaseId::placeholder().database_id,
         )
     }
 
-    pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {
-        ProstTable {
+    /// Returns the SQL statement that can be used to create this table.
+    pub fn create_sql(&self) -> String {
+        self.definition.clone()
+    }
+
+    /// Get a reference to the table catalog's version.
+    pub fn version(&self) -> Option<&TableVersion> {
+        self.version.as_ref()
+    }
+
+    /// Get the table's version id. Returns `None` if the table has no version field.
+    pub fn version_id(&self) -> Option<TableVersionId> {
+        self.version().map(|v| v.version_id)
+    }
+
+    pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> PbTable {
+        PbTable {
             id: self.id.table_id,
             schema_id,
             database_id,
@@ -206,35 +354,60 @@ impl TableCatalog {
             optional_associated_source_id: self
                 .associated_source_id
                 .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
-            is_index: self.is_index,
+            table_type: self.table_type.to_prost() as i32,
             distribution_key: self
                 .distribution_key
                 .iter()
                 .map(|k| *k as i32)
                 .collect_vec(),
-            appendonly: self.appendonly,
+            append_only: self.append_only,
             owner: self.owner,
-            properties: self.properties.inner().clone(),
+            properties: self.properties.inner().clone().into_iter().collect(),
             fragment_id: self.fragment_id,
-            vnode_col_idx: self
-                .vnode_col_idx
-                .map(|i| ProstColumnIndex { index: i as _ }),
+            vnode_col_index: self.vnode_col_index.map(|i| i as _),
+            row_id_index: self.row_id_index.map(|i| i as _),
             value_indices: self.value_indices.iter().map(|x| *x as _).collect(),
             definition: self.definition.clone(),
-            handle_pk_conflict: self.handle_pk_conflict,
+            read_prefix_len_hint: self.read_prefix_len_hint as u32,
+            version: self.version.as_ref().map(TableVersion::to_prost),
+            watermark_indices: self.watermark_columns.ones().map(|x| x as _).collect_vec(),
+            dist_key_in_pk: self.dist_key_in_pk.iter().map(|x| *x as _).collect(),
+            handle_pk_conflict_behavior: self.conflict_behavior.to_protobuf().into(),
         }
+    }
+
+    /// Get columns excluding hidden columns and generated golumns.
+    pub fn columns_to_insert(&self) -> impl Iterator<Item = &ColumnCatalog> {
+        self.columns
+            .iter()
+            .filter(|c| !c.is_hidden() && !c.is_generated())
+    }
+
+    pub fn generated_column_names(&self) -> impl Iterator<Item = &str> {
+        self.columns
+            .iter()
+            .filter(|c| c.is_generated())
+            .map(|c| c.name())
+    }
+
+    pub fn has_generated_column(&self) -> bool {
+        self.columns.iter().any(|c| c.is_generated())
     }
 }
 
-impl From<ProstTable> for TableCatalog {
-    fn from(tb: ProstTable) -> Self {
+impl From<PbTable> for TableCatalog {
+    fn from(tb: PbTable) -> Self {
         let id = tb.id;
+        let tb_conflict_behavior = tb.handle_pk_conflict_behavior();
+        let table_type = tb.get_table_type().unwrap();
         let associated_source_id = tb.optional_associated_source_id.map(|id| match id {
             OptionalAssociatedSourceId::AssociatedSourceId(id) => id,
         });
         let name = tb.name.clone();
         let mut col_names = HashSet::new();
         let mut col_index: HashMap<i32, usize> = HashMap::new();
+
+        let conflict_behavior = ConflictBehavior::from_protobuf(&tb_conflict_behavior);
         let columns: Vec<ColumnCatalog> = tb.columns.into_iter().map(ColumnCatalog::from).collect();
         for (idx, catalog) in columns.clone().into_iter().enumerate() {
             let col_name = catalog.name();
@@ -246,7 +419,11 @@ impl From<ProstTable> for TableCatalog {
             col_index.insert(col_id, idx);
         }
 
-        let pk = tb.pk.iter().map(FieldOrder::from_protobuf).collect();
+        let pk = tb.pk.iter().map(ColumnOrder::from_protobuf).collect();
+        let mut watermark_columns = FixedBitSet::with_capacity(columns.len());
+        for idx in &tb.watermark_indices {
+            watermark_columns.insert(*idx as _);
+        }
 
         Self {
             id: id.into(),
@@ -254,28 +431,39 @@ impl From<ProstTable> for TableCatalog {
             name,
             pk,
             columns,
-            is_index: tb.is_index,
+            table_type: TableType::from_prost(table_type),
             distribution_key: tb
                 .distribution_key
                 .iter()
                 .map(|k| *k as usize)
                 .collect_vec(),
             stream_key: tb.stream_key.iter().map(|x| *x as _).collect(),
-            appendonly: tb.appendonly,
+            append_only: tb.append_only,
             owner: tb.owner,
             properties: WithOptions::new(tb.properties),
             fragment_id: tb.fragment_id,
-            vnode_col_idx: tb.vnode_col_idx.map(|x| x.index as usize),
+            vnode_col_index: tb.vnode_col_index.map(|x| x as usize),
+            row_id_index: tb.row_id_index.map(|x| x as usize),
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
-            definition: tb.definition.clone(),
-            handle_pk_conflict: tb.handle_pk_conflict,
+            definition: tb.definition,
+            conflict_behavior,
+            read_prefix_len_hint: tb.read_prefix_len_hint as usize,
+            version: tb.version.map(TableVersion::from_prost),
+            watermark_columns,
+            dist_key_in_pk: tb.dist_key_in_pk.iter().map(|x| *x as _).collect(),
         }
     }
 }
 
-impl From<&ProstTable> for TableCatalog {
-    fn from(tb: &ProstTable) -> Self {
+impl From<&PbTable> for TableCatalog {
+    fn from(tb: &PbTable) -> Self {
         tb.clone().into()
+    }
+}
+
+impl RelationCatalog for TableCatalog {
+    fn owner(&self) -> UserId {
+        self.owner
     }
 }
 
@@ -283,89 +471,83 @@ impl From<&ProstTable> for TableCatalog {
 mod tests {
     use std::collections::HashMap;
 
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-    use risingwave_common::config::constant::hummock::PROPERTIES_RETENTION_SECOND_KEY;
+    use risingwave_common::catalog::{
+        row_id_column_desc, ColumnCatalog, ColumnDesc, ColumnId, TableId,
+    };
+    use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
-    use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-    use risingwave_pb::catalog::Table as ProstTable;
-    use risingwave_pb::plan_common::{
-        ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc,
-    };
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_pb::catalog::PbTable;
+    use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
 
-    use crate::catalog::column_catalog::ColumnCatalog;
-    use crate::catalog::row_id_column_desc;
-    use crate::catalog::table_catalog::TableCatalog;
-    use crate::optimizer::property::{Direction, FieldOrder};
+    use super::*;
+    use crate::catalog::table_catalog::{TableCatalog, TableType};
     use crate::WithOptions;
 
     #[test]
     fn test_into_table_catalog() {
-        let table: TableCatalog = ProstTable {
-            is_index: false,
+        let table: TableCatalog = PbTable {
             id: 0,
             schema_id: 0,
             database_id: 0,
             name: "test".to_string(),
+            table_type: PbTableType::Table as i32,
             columns: vec![
-                ProstColumnCatalog {
-                    column_desc: Some((&row_id_column_desc(ColumnId::new(0))).into()),
+                PbColumnCatalog {
+                    column_desc: Some((&row_id_column_desc()).into()),
                     is_hidden: true,
                 },
-                ProstColumnCatalog {
-                    column_desc: Some(ProstColumnDesc::new_struct(
+                PbColumnCatalog {
+                    column_desc: Some(PbColumnDesc::new_struct(
                         "country",
                         1,
                         ".test.Country",
                         vec![
-                            ProstColumnDesc::new_atomic(
-                                DataType::Varchar.to_protobuf(),
-                                "address",
-                                2,
-                            ),
-                            ProstColumnDesc::new_atomic(
-                                DataType::Varchar.to_protobuf(),
-                                "zipcode",
-                                3,
-                            ),
+                            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "address", 2),
+                            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "zipcode", 3),
                         ],
                     )),
                     is_hidden: false,
                 },
             ],
-            pk: vec![FieldOrder {
-                index: 0,
-                direct: Direction::Asc,
-            }
-            .to_protobuf()],
+            pk: vec![ColumnOrder::new(0, OrderType::ascending()).to_protobuf()],
             stream_key: vec![0],
             dependent_relations: vec![],
             distribution_key: vec![],
             optional_associated_source_id: OptionalAssociatedSourceId::AssociatedSourceId(233)
                 .into(),
-            appendonly: false,
+            append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties: HashMap::from([(
                 String::from(PROPERTIES_RETENTION_SECOND_KEY),
                 String::from("300"),
             )]),
             fragment_id: 0,
-            vnode_col_idx: None,
             value_indices: vec![0],
             definition: "".into(),
-            handle_pk_conflict: false,
+            read_prefix_len_hint: 0,
+            vnode_col_index: None,
+            row_id_index: None,
+            version: Some(PbTableVersion {
+                version: 0,
+                next_column_id: 2,
+            }),
+            watermark_indices: vec![],
+            handle_pk_conflict_behavior: 3,
+            dist_key_in_pk: vec![],
         }
         .into();
 
         assert_eq!(
             table,
             TableCatalog {
-                is_index: false,
                 id: TableId::new(0),
                 associated_source_id: Some(TableId::new(233)),
                 name: "test".to_string(),
+                table_type: TableType::Table,
                 columns: vec![
-                    ColumnCatalog::row_id_column(ColumnId::new(0)),
+                    ColumnCatalog::row_id_column(),
                     ColumnCatalog {
                         column_desc: ColumnDesc {
                             data_type: DataType::new_struct(
@@ -375,43 +557,34 @@ mod tests {
                             column_id: ColumnId::new(1),
                             name: "country".to_string(),
                             field_descs: vec![
-                                ColumnDesc {
-                                    data_type: DataType::Varchar,
-                                    column_id: ColumnId::new(2),
-                                    name: "address".to_string(),
-                                    field_descs: vec![],
-                                    type_name: String::new(),
-                                },
-                                ColumnDesc {
-                                    data_type: DataType::Varchar,
-                                    column_id: ColumnId::new(3),
-                                    name: "zipcode".to_string(),
-                                    field_descs: vec![],
-                                    type_name: String::new(),
-                                }
+                                ColumnDesc::new_atomic(DataType::Varchar, "address", 2),
+                                ColumnDesc::new_atomic(DataType::Varchar, "zipcode", 3),
                             ],
-                            type_name: ".test.Country".to_string()
+                            type_name: ".test.Country".to_string(),
+                            generated_column: None,
                         },
                         is_hidden: false
                     }
                 ],
                 stream_key: vec![0],
-                pk: vec![FieldOrder {
-                    index: 0,
-                    direct: Direction::Asc,
-                }],
+                pk: vec![ColumnOrder::new(0, OrderType::ascending())],
                 distribution_key: vec![],
-                appendonly: false,
+                append_only: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
                 properties: WithOptions::new(HashMap::from([(
                     String::from(PROPERTIES_RETENTION_SECOND_KEY),
                     String::from("300")
                 )])),
                 fragment_id: 0,
-                vnode_col_idx: None,
+                vnode_col_index: None,
+                row_id_index: None,
                 value_indices: vec![0],
                 definition: "".into(),
-                handle_pk_conflict: false
+                conflict_behavior: ConflictBehavior::NoCheck,
+                read_prefix_len_hint: 0,
+                version: Some(TableVersion::new_initial_for_test(ColumnId::new(1))),
+                watermark_columns: FixedBitSet::with_capacity(2),
+                dist_key_in_pk: vec![],
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

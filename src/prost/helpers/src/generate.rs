@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -93,11 +93,11 @@ pub fn implement(field: &Field) -> TokenStream2 {
     if let Some(enum_type) = extract_enum_type_from_field(field) {
         return quote! {
             #[inline(always)]
-            pub fn #getter_fn_name(&self) -> std::result::Result<#enum_type, crate::ProstFieldNotFound> {
+            pub fn #getter_fn_name(&self) -> std::result::Result<#enum_type, crate::PbFieldNotFound> {
                 if self.#field_name.eq(&0) {
-                    return Err(crate::ProstFieldNotFound(stringify!(#field_name)));
+                    return Err(crate::PbFieldNotFound(stringify!(#field_name)));
                 }
-                #enum_type::from_i32(self.#field_name).ok_or_else(|| crate::ProstFieldNotFound(stringify!(#field_name)))
+                #enum_type::from_i32(self.#field_name).ok_or_else(|| crate::PbFieldNotFound(stringify!(#field_name)))
             }
         };
     };
@@ -110,8 +110,8 @@ pub fn implement(field: &Field) -> TokenStream2 {
             let ty = extract_type_from_option(data_type);
             return quote! {
                 #[inline(always)]
-                pub fn #getter_fn_name(&self) -> std::result::Result<&#ty, crate::ProstFieldNotFound> {
-                    self.#field_name.as_ref().ok_or_else(|| crate::ProstFieldNotFound(stringify!(#field_name)))
+                pub fn #getter_fn_name(&self) -> std::result::Result<&#ty, crate::PbFieldNotFound> {
+                    self.#field_name.as_ref().ok_or_else(|| crate::PbFieldNotFound(stringify!(#field_name)))
                 }
             };
         } else if ["u32", "u64", "f32", "f64", "i32", "i64", "bool"]

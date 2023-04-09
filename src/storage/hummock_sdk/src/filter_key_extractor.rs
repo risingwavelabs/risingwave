@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -25,6 +25,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::Table;
 use tokio::sync::Notify;
 
+use crate::info_in_release;
 use crate::key::{get_table_id, TABLE_PREFIX_LEN};
 
 const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -44,24 +45,12 @@ pub enum FilterKeyExtractorImpl {
 
 impl FilterKeyExtractorImpl {
     pub fn from_table(table_catalog: &Table) -> Self {
-        let dist_key_indices: Vec<usize> = table_catalog
-            .distribution_key
-            .iter()
-            .map(|dist_index| *dist_index as usize)
-            .collect();
+        let read_prefix_len = table_catalog.get_read_prefix_len_hint() as usize;
 
-        let pk_indices: Vec<usize> = table_catalog
-            .pk
-            .iter()
-            .map(|col_order| col_order.index as usize)
-            .collect();
-
-        let match_read_pattern =
-            !dist_key_indices.is_empty() && pk_indices.starts_with(&dist_key_indices);
-        if !match_read_pattern {
+        if read_prefix_len == 0 || read_prefix_len > table_catalog.get_pk().len() {
             // for now frontend had not infer the table_id_to_filter_key_extractor, so we
             // use FullKeyFilterKeyExtractor
-            FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor::default())
+            FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor::default())
         } else {
             FilterKeyExtractorImpl::Schema(SchemaFilterKeyExtractor::new(table_catalog))
         }
@@ -78,6 +67,7 @@ macro_rules! impl_filter_key_extractor {
             }
         }
     }
+
 }
 
 macro_rules! for_all_filter_key_extractor_variants {
@@ -136,7 +126,7 @@ pub struct SchemaFilterKeyExtractor {
     /// Prefix key length can be decoded through its `DataType` and `OrderType` which obtained from
     /// `TableCatalog`. `read_pattern_prefix_column` means the count of column to decode prefix
     /// from storage key.
-    read_pattern_prefix_column: usize,
+    read_prefix_len: usize,
     deserializer: OrderedRowSerde,
     // TODO:need some bench test for same prefix case like join (if we need a prefix_cache for same
     // prefix_key)
@@ -145,35 +135,34 @@ pub struct SchemaFilterKeyExtractor {
 impl FilterKeyExtractor for SchemaFilterKeyExtractor {
     fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
         if full_key.len() < TABLE_PREFIX_LEN + VirtualNode::SIZE {
-            return full_key;
+            return &[];
         }
 
         let (_table_prefix, key) = full_key.split_at(TABLE_PREFIX_LEN);
         let (_vnode_prefix, pk) = key.split_at(VirtualNode::SIZE);
 
         // if the key with table_id deserializer fail from schema, that should panic here for early
-        // detection
-        let pk_prefix_len = self
+        // detection.
+
+        let bloom_filter_key_len = self
             .deserializer
-            .deserialize_prefix_len_with_column_indices(pk, 0..self.read_pattern_prefix_column)
+            .deserialize_prefix_len(pk, self.read_prefix_len)
             .unwrap();
 
-        let prefix_len = TABLE_PREFIX_LEN + VirtualNode::SIZE + pk_prefix_len;
-        &full_key[0..prefix_len]
+        let end_position = TABLE_PREFIX_LEN + VirtualNode::SIZE + bloom_filter_key_len;
+        &full_key[TABLE_PREFIX_LEN + VirtualNode::SIZE..end_position]
     }
 }
 
 impl SchemaFilterKeyExtractor {
     pub fn new(table_catalog: &Table) -> Self {
-        let read_pattern_prefix_column = table_catalog.distribution_key.len();
-        assert_ne!(0, read_pattern_prefix_column);
-
-        // column_index in pk
         let pk_indices: Vec<usize> = table_catalog
             .pk
             .iter()
-            .map(|col_order| col_order.index as usize)
+            .map(|col_order| col_order.column_index as usize)
             .collect();
+
+        let read_prefix_len = table_catalog.get_read_prefix_len_hint() as usize;
 
         let data_types = pk_indices
             .iter()
@@ -184,15 +173,11 @@ impl SchemaFilterKeyExtractor {
         let order_types: Vec<OrderType> = table_catalog
             .pk
             .iter()
-            .map(|col_order| {
-                OrderType::from_prost(
-                    &risingwave_pb::plan_common::OrderType::from_i32(col_order.order_type).unwrap(),
-                )
-            })
+            .map(|col_order| OrderType::from_protobuf(col_order.get_order_type().unwrap()))
             .collect();
 
         Self {
-            read_pattern_prefix_column,
+            read_prefix_len,
             deserializer: OrderedRowSerde::new(data_types, order_types),
         }
     }
@@ -275,14 +260,6 @@ impl FilterKeyExtractorManagerInner {
             return FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor::default());
         }
 
-        #[cfg(debug_assertions)]
-        {
-            // for some unit-test not config table_id_set
-            if table_id_set.iter().any(|table_id| *table_id == 0) {
-                return FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor::default());
-            }
-        }
-
         let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
         while !table_id_set.is_empty() {
             let notified = self.notify.notified();
@@ -327,11 +304,13 @@ pub struct FilterKeyExtractorManager {
 impl FilterKeyExtractorManager {
     /// Insert (`table_id`, `filter_key_extractor`) as mapping to `HashMap` for `acquire`
     pub fn update(&self, table_id: u32, filter_key_extractor: Arc<FilterKeyExtractorImpl>) {
+        info_in_release!("update key extractor of {}", table_id);
         self.inner.update(table_id, filter_key_extractor);
     }
 
     /// Remove a mapping by `table_id`
     pub fn remove(&self, table_id: u32) {
+        info_in_release!("remove key extractor of {}", table_id);
         self.inner.remove(table_id);
     }
 
@@ -359,16 +338,18 @@ mod tests {
 
     use bytes::{BufMut, BytesMut};
     use itertools::Itertools;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId};
-    use risingwave_common::config::constant::hummock::PROPERTIES_RETENTION_SECOND_KEY;
+    use risingwave_common::catalog::ColumnDesc;
+    use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_common::row::Row;
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::types::DataType;
     use risingwave_common::types::ScalarImpl::{self};
     use risingwave_common::util::ordered::OrderedRowSerde;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_pb::catalog::Table as ProstTable;
-    use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, ColumnOrder};
+    use risingwave_pb::catalog::table::TableType;
+    use risingwave_pb::catalog::PbTable;
+    use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
+    use risingwave_pb::plan_common::PbColumnCatalog;
     use tokio::task;
 
     use super::{DummyFilterKeyExtractor, FilterKeyExtractor, SchemaFilterKeyExtractor};
@@ -377,6 +358,10 @@ mod tests {
         MultiFilterKeyExtractor,
     };
     use crate::key::TABLE_PREFIX_LEN;
+
+    const fn dummy_vnode() -> [u8; VirtualNode::SIZE] {
+        VirtualNode::from_index(233).to_be_bytes()
+    }
 
     #[test]
     fn test_default_filter_key_extractor() {
@@ -392,92 +377,75 @@ mod tests {
         assert_eq!(full_key, output_key);
     }
 
-    fn build_table_with_prefix_column_num(column_count: u32) -> ProstTable {
-        ProstTable {
-            is_index: false,
+    fn build_table_with_prefix_column_num(column_count: u32) -> PbTable {
+        PbTable {
             id: 0,
             schema_id: 0,
             database_id: 0,
             name: "test".to_string(),
+            table_type: TableType::Table as i32,
             columns: vec![
-                ProstColumnCatalog {
+                PbColumnCatalog {
                     column_desc: Some(
-                        (&ColumnDesc {
-                            data_type: DataType::Int64,
-                            column_id: ColumnId::new(0),
-                            name: "_row_id".to_string(),
-                            field_descs: vec![],
-                            type_name: "".to_string(),
-                        })
-                            .into(),
+                        (&ColumnDesc::new_atomic(DataType::Int64, "_row_id", 0)).into(),
                     ),
                     is_hidden: true,
                 },
-                ProstColumnCatalog {
+                PbColumnCatalog {
                     column_desc: Some(
-                        (&ColumnDesc {
-                            data_type: DataType::Int64,
-                            column_id: ColumnId::new(0),
-                            name: "col_1".to_string(),
-                            field_descs: vec![],
-                            type_name: "Int64".to_string(),
-                        })
-                            .into(),
+                        (&ColumnDesc::new_atomic(DataType::Int64, "col_1", 0)).into(),
                     ),
                     is_hidden: false,
                 },
-                ProstColumnCatalog {
+                PbColumnCatalog {
                     column_desc: Some(
-                        (&ColumnDesc {
-                            data_type: DataType::Float64,
-                            column_id: ColumnId::new(0),
-                            name: "col_2".to_string(),
-                            field_descs: vec![],
-                            type_name: "Float64".to_string(),
-                        })
-                            .into(),
+                        (&ColumnDesc::new_atomic(DataType::Float64, "col_2", 0)).into(),
                     ),
                     is_hidden: false,
                 },
-                ProstColumnCatalog {
+                PbColumnCatalog {
                     column_desc: Some(
-                        (&ColumnDesc {
-                            data_type: DataType::Varchar,
-                            column_id: ColumnId::new(0),
-                            name: "col_3".to_string(),
-                            field_descs: vec![],
-                            type_name: "Varchar".to_string(),
-                        })
-                            .into(),
+                        (&ColumnDesc::new_atomic(DataType::Varchar, "col_3", 0)).into(),
                     ),
                     is_hidden: false,
                 },
             ],
             pk: vec![
-                ColumnOrder {
-                    order_type: 1, // Ascending
-                    index: 1,
+                PbColumnOrder {
+                    column_index: 1,
+                    order_type: Some(PbOrderType {
+                        direction: PbDirection::Ascending as _,
+                        nulls_are: PbNullsAre::Largest as _,
+                    }),
                 },
-                ColumnOrder {
-                    order_type: 1, // Ascending
-                    index: 3,
+                PbColumnOrder {
+                    column_index: 3,
+                    order_type: Some(PbOrderType {
+                        direction: PbDirection::Ascending as _,
+                        nulls_are: PbNullsAre::Largest as _,
+                    }),
                 },
             ],
             stream_key: vec![0],
             dependent_relations: vec![],
             distribution_key: (0..column_count as i32).collect_vec(),
             optional_associated_source_id: None,
-            appendonly: false,
+            append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties: HashMap::from([(
                 String::from(PROPERTIES_RETENTION_SECOND_KEY),
                 String::from("300"),
             )]),
             fragment_id: 0,
-            vnode_col_idx: None,
+            vnode_col_index: None,
+            row_id_index: Some(0),
             value_indices: vec![0],
             definition: "".into(),
-            handle_pk_conflict: false,
+            handle_pk_conflict_behavior: 0,
+            read_prefix_len_hint: 1,
+            version: None,
+            watermark_indices: vec![],
+            dist_key_in_pk: vec![],
         }
     }
 
@@ -486,10 +454,10 @@ mod tests {
         let prost_table = build_table_with_prefix_column_num(1);
         let schema_filter_key_extractor = SchemaFilterKeyExtractor::new(&prost_table);
 
-        let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
+        let order_types: Vec<OrderType> = vec![OrderType::ascending(), OrderType::ascending()];
         let schema = vec![DataType::Int64, DataType::Varchar];
         let serializer = OrderedRowSerde::new(schema, order_types);
-        let row = Row::new(vec![
+        let row = OwnedRow::new(vec![
             Some(ScalarImpl::Int64(100)),
             Some(ScalarImpl::Utf8("abc".into())),
         ]);
@@ -502,15 +470,11 @@ mod tests {
             buf.to_vec()
         };
 
-        let vnode_prefix = "v".as_bytes();
-        assert_eq!(VirtualNode::SIZE, vnode_prefix.len());
+        let vnode_prefix = &dummy_vnode()[..];
 
         let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
         let output_key = schema_filter_key_extractor.extract(&full_key);
-        assert_eq!(
-            TABLE_PREFIX_LEN + VirtualNode::SIZE + 1 + mem::size_of::<i64>(),
-            output_key.len()
-        );
+        assert_eq!(1 + mem::size_of::<i64>(), output_key.len());
     }
 
     #[test]
@@ -524,10 +488,10 @@ mod tests {
                 1,
                 Arc::new(FilterKeyExtractorImpl::Schema(schema_filter_key_extractor)),
             );
-            let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
+            let order_types: Vec<OrderType> = vec![OrderType::ascending(), OrderType::ascending()];
             let schema = vec![DataType::Int64, DataType::Varchar];
             let serializer = OrderedRowSerde::new(schema, order_types);
-            let row = Row::new(vec![
+            let row = OwnedRow::new(vec![
                 Some(ScalarImpl::Int64(100)),
                 Some(ScalarImpl::Utf8("abc".into())),
             ]);
@@ -540,23 +504,17 @@ mod tests {
                 buf.to_vec()
             };
 
-            let vnode_prefix = "v".as_bytes();
-            assert_eq!(VirtualNode::SIZE, vnode_prefix.len());
+            let vnode_prefix = &dummy_vnode()[..];
 
             let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
             let output_key = multi_filter_key_extractor.extract(&full_key);
 
             let data_types = vec![DataType::Int64];
-            let order_types = vec![OrderType::Ascending];
+            let order_types = vec![OrderType::ascending()];
             let deserializer = OrderedRowSerde::new(data_types, order_types);
 
-            let pk_prefix_len = deserializer
-                .deserialize_prefix_len_with_column_indices(&row_bytes, 0..=0)
-                .unwrap();
-            assert_eq!(
-                TABLE_PREFIX_LEN + VirtualNode::SIZE + pk_prefix_len,
-                output_key.len()
-            );
+            let pk_prefix_len = deserializer.deserialize_prefix_len(&row_bytes, 1).unwrap();
+            assert_eq!(pk_prefix_len, output_key.len());
         }
 
         {
@@ -567,10 +525,10 @@ mod tests {
                 2,
                 Arc::new(FilterKeyExtractorImpl::Schema(schema_filter_key_extractor)),
             );
-            let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
+            let order_types: Vec<OrderType> = vec![OrderType::ascending(), OrderType::ascending()];
             let schema = vec![DataType::Int64, DataType::Varchar];
             let serializer = OrderedRowSerde::new(schema, order_types);
-            let row = Row::new(vec![
+            let row = OwnedRow::new(vec![
                 Some(ScalarImpl::Int64(100)),
                 Some(ScalarImpl::Utf8("abc".into())),
             ]);
@@ -583,52 +541,18 @@ mod tests {
                 buf.to_vec()
             };
 
-            let vnode_prefix = "v".as_bytes();
-            assert_eq!(VirtualNode::SIZE, vnode_prefix.len());
+            let vnode_prefix = &dummy_vnode()[..];
 
             let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
             let output_key = multi_filter_key_extractor.extract(&full_key);
 
             let data_types = vec![DataType::Int64, DataType::Varchar];
-            let order_types = vec![OrderType::Ascending, OrderType::Ascending];
+            let order_types = vec![OrderType::ascending(), OrderType::ascending()];
             let deserializer = OrderedRowSerde::new(data_types, order_types);
 
-            let pk_prefix_len = deserializer
-                .deserialize_prefix_len_with_column_indices(&row_bytes, 0..=1)
-                .unwrap();
+            let pk_prefix_len = deserializer.deserialize_prefix_len(&row_bytes, 1).unwrap();
 
-            assert_eq!(
-                TABLE_PREFIX_LEN + VirtualNode::SIZE + pk_prefix_len,
-                output_key.len()
-            );
-        }
-
-        {
-            let full_key_filter_key_extractor = FullKeyFilterKeyExtractor::default();
-            multi_filter_key_extractor.register(
-                3,
-                Arc::new(FilterKeyExtractorImpl::FullKey(
-                    full_key_filter_key_extractor,
-                )),
-            );
-
-            let table_prefix = {
-                let mut buf = BytesMut::with_capacity(TABLE_PREFIX_LEN);
-                buf.put_u32(3);
-                buf.to_vec()
-            };
-
-            let vnode_prefix = "v".as_bytes();
-            assert_eq!(VirtualNode::SIZE, vnode_prefix.len());
-
-            let row_bytes = "full_key".as_bytes();
-
-            let full_key = [&table_prefix, vnode_prefix, row_bytes].concat();
-            let output_key = multi_filter_key_extractor.extract(&full_key);
-            assert_eq!(
-                TABLE_PREFIX_LEN + VirtualNode::SIZE + row_bytes.len(),
-                output_key.len()
-            );
+            assert_eq!(pk_prefix_len, output_key.len());
         }
     }
 

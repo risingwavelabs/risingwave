@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,52 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
-use risingwave_pb::catalog::source::Info;
-use risingwave_pb::catalog::source_info::SourceInfo;
-use risingwave_pb::catalog::Source as ProstSource;
+use risingwave_common::catalog::ColumnCatalog;
+use risingwave_pb::catalog::source::OptionalAssociatedTableId;
+use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 
-use super::column_catalog::ColumnCatalog;
-use super::{ColumnId, SourceId};
+use super::{ColumnId, RelationCatalog, SourceId};
+use crate::catalog::TableId;
+use crate::user::UserId;
 use crate::WithOptions;
 
-pub const KAFKA_CONNECTOR: &str = "kafka";
-
-/// This struct `SourceCatalog` is used in frontend and compared with `ProstSource` it only maintain
-/// information which will be used during optimization.
-///
-/// It can be either a table source or a stream source. Use `self.kind()` to distinguish them.
-#[derive(Clone, Debug)]
+/// This struct `SourceCatalog` is used in frontend.
+/// Compared with `PbSource`, it only maintains information used during optimization.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SourceCatalog {
     pub id: SourceId,
     pub name: String,
     pub columns: Vec<ColumnCatalog>,
     pub pk_col_ids: Vec<ColumnId>,
     pub append_only: bool,
-    pub owner: u32,
-    pub info: SourceInfo,
+    pub owner: UserId,
+    pub info: StreamSourceInfo,
     pub row_id_index: Option<usize>,
-    pub properties: HashMap<String, String>,
+    pub properties: BTreeMap<String, String>,
+    pub watermark_descs: Vec<WatermarkDesc>,
+    pub associated_table_id: Option<TableId>,
 }
 
-#[derive(PartialEq, Eq)]
-pub enum SourceKind {
-    Table,
-    Stream,
-}
-
-impl SourceCatalog {
-    pub fn kind(&self) -> SourceKind {
-        match self.info {
-            SourceInfo::StreamSource(_) => SourceKind::Stream,
-            SourceInfo::TableSource(_) => SourceKind::Table,
-        }
-    }
-}
-
-impl From<&ProstSource> for SourceCatalog {
-    fn from(prost: &ProstSource) -> Self {
+impl From<&PbSource> for SourceCatalog {
+    fn from(prost: &PbSource) -> Self {
         let id = prost.id;
         let name = prost.name.clone();
         let prost_columns = prost.columns.clone();
@@ -68,19 +52,19 @@ impl From<&ProstSource> for SourceCatalog {
             .map(Into::into)
             .collect();
         let with_options = WithOptions::new(prost.properties.clone());
-        let info = match &prost.info {
-            Some(Info::StreamSource(info_inner)) => SourceInfo::StreamSource(info_inner.clone()),
-            Some(Info::TableSource(info_inner)) => SourceInfo::TableSource(info_inner.clone()),
-            None => unreachable!(),
-        };
         let columns = prost_columns.into_iter().map(ColumnCatalog::from).collect();
-        let row_id_index = prost
-            .row_id_index
-            .clone()
-            .map(|row_id_index| row_id_index.index as _);
+        let row_id_index = prost.row_id_index.map(|idx| idx as _);
 
-        let append_only = with_options.append_only();
+        let append_only = row_id_index.is_some();
         let owner = prost.owner;
+        let watermark_descs = prost.get_watermark_descs().clone();
+
+        let associated_table_id = prost
+            .optional_associated_table_id
+            .clone()
+            .map(|id| match id {
+                OptionalAssociatedTableId::AssociatedTableId(id) => id,
+            });
 
         Self {
             id,
@@ -89,9 +73,17 @@ impl From<&ProstSource> for SourceCatalog {
             pk_col_ids,
             append_only,
             owner,
-            info,
+            info: prost.info.clone().unwrap(),
             row_id_index,
             properties: with_options.into_inner(),
+            watermark_descs,
+            associated_table_id: associated_table_id.map(|x| x.into()),
         }
+    }
+}
+
+impl RelationCatalog for SourceCatalog {
+    fn owner(&self) -> UserId {
+        self.owner
     }
 }

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,17 +18,17 @@ use std::mem::size_of;
 
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
-use risingwave_pb::data::{Array as ProstArray, ArrayType};
+use risingwave_pb::data::{ArrayType, PbArray};
 
-use super::{Array, ArrayBuilder, ArrayIterator, ArrayResult};
+use super::{Array, ArrayBuilder, ArrayResult};
+use crate::array::serial_array::Serial;
 use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayMeta};
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::collection::estimate_size::EstimateSize;
 use crate::for_all_native_types;
 use crate::types::decimal::Decimal;
-use crate::types::interval::IntervalUnit;
-use crate::types::{
-    NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, NativeType, Scalar, ScalarRef,
-};
+use crate::types::interval::Interval;
+use crate::types::{Date, NativeType, Scalar, ScalarRef, Time, Timestamp};
 
 /// Physical type of array items which have fixed size.
 pub trait PrimitiveArrayItemType
@@ -119,64 +119,75 @@ macro_rules! impl_primitive_for_others {
 
 impl_primitive_for_others! {
     { Decimal, Decimal, Decimal },
-    { IntervalUnit, Interval, Interval },
-    { NaiveDateWrapper, Date, NaiveDate },
-    { NaiveTimeWrapper, Time, NaiveTime },
-    { NaiveDateTimeWrapper, Timestamp, NaiveDateTime }
+    { Interval, Interval, Interval },
+    { Date, Date, Date },
+    { Time, Time, Time },
+    { Timestamp, Timestamp, Timestamp }
 }
 
 /// `PrimitiveArray` is a collection of primitive types, such as `i32`, `f32`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PrimitiveArray<T: PrimitiveArrayItemType> {
     bitmap: Bitmap,
     data: Vec<T>,
 }
 
-impl<T: PrimitiveArrayItemType> PrimitiveArray<T> {
-    pub fn from_slice(data: &[Option<T>]) -> Self {
-        let mut builder = <Self as Array>::Builder::new(data.len());
-        for i in data {
-            builder.append(*i);
+impl<T: PrimitiveArrayItemType> FromIterator<Option<T>> for PrimitiveArray<T> {
+    fn from_iter<I: IntoIterator<Item = Option<T>>>(iter: I) -> Self {
+        let iter = iter.into_iter();
+        let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
+        for i in iter {
+            builder.append(i);
         }
         builder.finish()
     }
 }
 
+impl<'a, T: PrimitiveArrayItemType> FromIterator<&'a Option<T>> for PrimitiveArray<T> {
+    fn from_iter<I: IntoIterator<Item = &'a Option<T>>>(iter: I) -> Self {
+        iter.into_iter().cloned().collect()
+    }
+}
+
+impl<T: PrimitiveArrayItemType> FromIterator<T> for PrimitiveArray<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let data: Vec<T> = iter.into_iter().collect();
+        PrimitiveArray {
+            bitmap: Bitmap::ones(data.len()),
+            data,
+        }
+    }
+}
+
+impl<T: PrimitiveArrayItemType> PrimitiveArray<T> {
+    /// Build a [`PrimitiveArray`] from iterator and bitmap.
+    ///
+    /// NOTE: The length of `bitmap` must be equal to the length of `iter`.
+    pub fn from_iter_bitmap(iter: impl IntoIterator<Item = T>, bitmap: Bitmap) -> Self {
+        let data: Vec<T> = iter.into_iter().collect();
+        assert_eq!(data.len(), bitmap.len());
+        PrimitiveArray { bitmap, data }
+    }
+}
+
 impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
     type Builder = PrimitiveArrayBuilder<T>;
-    type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = T;
     type RefItem<'a> = T;
 
-    fn value_at(&self, idx: usize) -> Option<T> {
-        if self.is_null(idx) {
-            None
-        } else {
-            Some(self.data[idx])
-        }
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
+        *self.data.get_unchecked(idx)
     }
 
-    /// # Safety
-    ///
-    /// This function is unsafe because it does not check whether the index is within the bounds of
-    /// the array.
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<T> {
-        if self.is_null_unchecked(idx) {
-            None
-        } else {
-            Some(*self.data.get_unchecked(idx))
-        }
+    fn raw_iter(&self) -> impl DoubleEndedIterator<Item = Self::RefItem<'_>> {
+        self.data.iter().cloned()
     }
 
     fn len(&self) -> usize {
         self.data.len()
     }
 
-    fn iter(&self) -> Self::Iter<'_> {
-        ArrayIterator::new(self)
-    }
-
-    fn to_protobuf(&self) -> ProstArray {
+    fn to_protobuf(&self) -> PbArray {
         let mut output_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<T>());
 
         for v in self.iter() {
@@ -188,7 +199,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
             body: output_buffer,
         };
         let null_bitmap = self.null_bitmap().to_protobuf();
-        ProstArray {
+        PbArray {
             null_bitmap: Some(null_bitmap),
             values: vec![buffer],
             array_type: T::array_type() as i32,
@@ -231,15 +242,15 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
         }
     }
 
-    fn append(&mut self, value: Option<T>) {
+    fn append_n(&mut self, n: usize, value: Option<T>) {
         match value {
             Some(x) => {
-                self.bitmap.append(true);
-                self.data.push(x);
+                self.bitmap.append_n(n, true);
+                self.data.extend(std::iter::repeat(x).take(n));
             }
             None => {
-                self.bitmap.append(false);
-                self.data.push(T::default());
+                self.bitmap.append_n(n, false);
+                self.data.extend(std::iter::repeat(T::default()).take(n));
             }
         }
     }
@@ -263,10 +274,16 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
     }
 }
 
+impl<T: PrimitiveArrayItemType> EstimateSize for PrimitiveArray<T> {
+    fn estimated_heap_size(&self) -> usize {
+        self.bitmap.estimated_heap_size() + self.data.capacity() * size_of::<T>()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{OrderedF32, OrderedF64};
+    use crate::types::{F32, F64};
 
     fn helper_test_builder<T: PrimitiveArrayItemType>(data: Vec<Option<T>>) -> PrimitiveArray<T> {
         let mut builder = PrimitiveArrayBuilder::<T>::new(data.len());
@@ -314,7 +331,7 @@ mod tests {
 
     #[test]
     fn test_f32_builder() {
-        let arr = helper_test_builder::<OrderedF32>(
+        let arr = helper_test_builder::<F32>(
             (0..1000)
                 .map(|x| {
                     if x % 2 == 0 {
@@ -332,7 +349,7 @@ mod tests {
 
     #[test]
     fn test_f64_builder() {
-        let arr = helper_test_builder::<OrderedF64>(
+        let arr = helper_test_builder::<F64>(
             (0..1000)
                 .map(|x| {
                     if x % 2 == 0 {

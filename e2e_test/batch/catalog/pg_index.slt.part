@@ -2,7 +2,7 @@ statement ok
 create table tmp(id1 int, id2 int);
 
 statement ok
-create index tmp_id2_idx on tmp(id2);
+create index tmp_id2_idx on tmp(id2) include(id2);
 
 query IT
 select ix.indnatts, ix.indkey from pg_catalog.pg_class t 

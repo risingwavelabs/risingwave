@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,25 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::env;
 use std::fmt::Write;
-use std::fs::{File, OpenOptions};
-use std::io::Read;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use console::style;
+use fs_err::OpenOptions;
 use indicatif::ProgressBar;
 use risedev::util::{complete_spin, fail_spin};
 use risedev::{
     compute_risectl_env, preflight_check, AwsS3Config, CompactorService, ComputeNodeService,
     ConfigExpander, ConfigureTmuxTask, ConnectorNodeService, EnsureStopService, ExecuteContext,
     FrontendService, GrafanaService, JaegerService, KafkaService, MetaNodeService, MinioService,
-    PrometheusService, PubsubService, RedisService, ServiceConfig, Task, ZooKeeperService,
-    RISEDEV_SESSION_NAME,
+    OpendalConfig, PrometheusService, PubsubService, RedisService, ServiceConfig, Task,
+    ZooKeeperService, RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
@@ -66,8 +64,7 @@ impl ProgressManager {
 
 fn task_main(
     manager: &mut ProgressManager,
-    steps: &[String],
-    services: &HashMap<String, ServiceConfig>,
+    services: &Vec<ServiceConfig>,
 ) -> Result<(Vec<(String, Duration)>, String)> {
     let log_path = env::var("PREFIX_LOG")?;
 
@@ -99,8 +96,7 @@ fn task_main(
     // Firstly, ensure that all ports needed is not occupied by previous runs.
     let mut ports = vec![];
 
-    for step in steps {
-        let service = services.get(step).unwrap();
+    for service in services {
         let listen_info = match service {
             ServiceConfig::Minio(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Etcd(c) => Some((c.port, c.id.clone())),
@@ -116,6 +112,7 @@ fn task_main(
             ServiceConfig::Redis(c) => Some((c.port, c.id.clone())),
             ServiceConfig::ZooKeeper(c) => Some((c.port, c.id.clone())),
             ServiceConfig::AwsS3(_) => None,
+            ServiceConfig::OpenDal(_) => None,
             ServiceConfig::RedPanda(_) => None,
             ServiceConfig::ConnectorNode(c) => Some((c.port, c.id.clone())),
         };
@@ -135,8 +132,7 @@ fn task_main(
 
     let mut stat = vec![];
 
-    for step in steps {
-        let service = services.get(step).unwrap();
+    for service in services {
         let start_time = Instant::now();
 
         match service {
@@ -281,6 +277,29 @@ fn task_main(
                 ctx.pb
                     .set_message(format!("using AWS s3 bucket {}", c.bucket));
             }
+            ServiceConfig::OpenDal(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+
+                struct OpendalService(OpendalConfig);
+                impl Task for OpendalService {
+                    fn execute(
+                        &mut self,
+                        _ctx: &mut ExecuteContext<impl std::io::Write>,
+                    ) -> anyhow::Result<()> {
+                        Ok(())
+                    }
+
+                    fn id(&self) -> String {
+                        self.0.id.clone()
+                    }
+                }
+
+                ctx.service(&OpendalService(c.clone()));
+                ctx.complete_spin();
+                ctx.pb
+                    .set_message(format!("using Opendal, namenode =  {}", c.namenode));
+            }
             ServiceConfig::ZooKeeper(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
@@ -347,30 +366,29 @@ fn task_main(
 }
 
 fn main() -> Result<()> {
-    let risedev_config = {
-        let mut content = String::new();
-        File::open("risedev.yml")?.read_to_string(&mut content)?;
-        content
-    };
+    preflight_check()?;
 
     let task_name = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "default".to_string());
 
-    let risedev_config = ConfigExpander::expand(&risedev_config, &task_name)?;
+    let (config_path, risedev_config) = ConfigExpander::expand(".", &task_name)?;
+
+    if let Some(config_path) = &config_path {
+        let target = Path::new(&env::var("PREFIX_CONFIG")?).join("risingwave.toml");
+        fs_err::copy(config_path, target).context("config file not found")?;
+    }
+
     {
         let mut out_str = String::new();
         let mut emitter = YamlEmitter::new(&mut out_str);
         emitter.dump(&risedev_config)?;
-        std::fs::write(
+        fs_err::write(
             Path::new(&env::var("PREFIX_CONFIG")?).join("risedev-expanded.yml"),
             &out_str,
         )?;
     }
-
-    preflight_check()?;
-
-    let (steps, services) = ConfigExpander::select(&risedev_config, &task_name)?;
+    let services = ConfigExpander::deserialize(&risedev_config)?;
 
     let mut manager = ProgressManager::new();
     // Always create a progress before calling `task_main`. Otherwise the progress bar won't be
@@ -379,10 +397,10 @@ fn main() -> Result<()> {
     p.set_prefix("dev cluster");
     p.set_message(format!(
         "starting {} services for {}...",
-        steps.len(),
+        services.len(),
         task_name
     ));
-    let task_result = task_main(&mut manager, &steps, &services);
+    let task_result = task_main(&mut manager, &services);
 
     match task_result {
         Ok(_) => {
@@ -416,9 +434,9 @@ fn main() -> Result<()> {
                 Err(_) => "".into(),
             };
 
-            std::fs::write(
+            fs_err::write(
                 Path::new(&env::var("PREFIX_CONFIG")?).join("risectl-env"),
-                &risectl_env,
+                risectl_env,
             )?;
 
             println!("All services started successfully.");

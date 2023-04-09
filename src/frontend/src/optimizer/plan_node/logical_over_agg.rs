@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,24 +19,25 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay};
 
-use super::generic::{PlanAggOrderByField, PlanAggOrderByFieldDisplay};
 use super::{
-    gen_filter_and_pushdown, ColPrunable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, ToBatch, ToStream,
+    gen_filter_and_pushdown, ColPrunable, ExprRewritable, LogicalProject, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, InputRef, InputRefDisplay, WindowFunction, WindowFunctionType};
-use crate::utils::{ColIndexMapping, Condition};
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+};
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 
 /// Rewritten version of [`WindowFunction`] which uses `InputRef` instead of `ExprImpl`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PlanWindowFunction {
     pub function_type: WindowFunctionType,
     pub return_type: DataType,
     pub partition_by: Vec<InputRef>,
-    /// TODO: rename & move `PlanAggOrderByField` so that it can be better shared like
-    /// [`crate::expr::OrderByExpr`]
-    pub order_by: Vec<PlanAggOrderByField>,
+    pub order_by: Vec<ColumnOrder>,
 }
 
 struct PlanWindowFunctionDisplay<'a> {
@@ -78,9 +79,9 @@ impl<'a> std::fmt::Debug for PlanWindowFunctionDisplay<'a> {
                 write!(
                     f,
                     "{delim}ORDER BY {}",
-                    window_function.order_by.iter().format_with(", ", |e, f| {
-                        f(&PlanAggOrderByFieldDisplay {
-                            plan_agg_order_by_field: e,
+                    window_function.order_by.iter().format_with(", ", |o, f| {
+                        f(&ColumnOrderDisplay {
+                            column_order: o,
                             input_schema: self.input_schema,
                         })
                     })
@@ -96,7 +97,7 @@ impl<'a> std::fmt::Debug for PlanWindowFunctionDisplay<'a> {
 /// `LogicalOverAgg` performs `OVER` window aggregates ([`WindowFunction`]) to its input.
 ///
 /// The output schema is the input schema plus the window functions.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalOverAgg {
     pub base: PlanBase,
     pub window_function: PlanWindowFunction,
@@ -191,11 +192,7 @@ impl LogicalOverAgg {
             .sort_exprs
             .into_iter()
             .map(|e| match e.expr.as_input_ref() {
-                Some(i) => Ok(PlanAggOrderByField {
-                    input: *i.clone(),
-                    direction: e.direction,
-                    nulls_first: e.nulls_first,
-                }),
+                Some(i) => Ok(ColumnOrder::new(i.index(), e.order_type)),
                 None => Err(ErrorCode::NotImplemented(
                     "ORDER BY expression in window function".to_string(),
                     None.into(),
@@ -255,18 +252,29 @@ impl fmt::Display for LogicalOverAgg {
 }
 
 impl ColPrunable for LogicalOverAgg {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
-        LogicalProject::with_mapping(self.clone().into(), mapping).into()
+        let new_input = {
+            let input = self.input();
+            let required = (0..input.schema().len()).collect_vec();
+            input.prune_col(&required, ctx)
+        };
+        LogicalProject::with_mapping(self.clone_with_input(new_input).into(), mapping).into()
     }
 }
 
+impl ExprRewritable for LogicalOverAgg {}
+
 impl PredicatePushdown for LogicalOverAgg {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         let mut window_col = FixedBitSet::with_capacity(self.schema().len());
         window_col.insert(self.schema().len() - 1);
         let (window_pred, other_pred) = predicate.split_disjoint(&window_col);
-        gen_filter_and_pushdown(self, window_pred, other_pred)
+        gen_filter_and_pushdown(self, window_pred, other_pred, ctx)
     }
 }
 
@@ -277,11 +285,14 @@ impl ToBatch for LogicalOverAgg {
 }
 
 impl ToStream for LogicalOverAgg {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         Err(ErrorCode::NotImplemented("OverAgg to stream".to_string(), 4847.into()).into())
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, crate::utils::ColIndexMapping)> {
+    fn logical_rewrite_for_stream(
+        &self,
+        _ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         Err(ErrorCode::NotImplemented("OverAgg to stream".to_string(), 4847.into()).into())
     }
 }

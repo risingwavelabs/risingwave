@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::DataChunk;
-use risingwave_pb::data::DataChunk as ProstDataChunk;
+use risingwave_pb::data::PbDataChunk;
 use tokio::sync::OnceCell;
 
 #[derive(Debug, Clone)]
@@ -21,7 +21,7 @@ pub(super) struct DataChunkInChannel {
     data_chunk: DataChunk,
     /// If the data chunk is only needed to transfer locally,
     /// this field should not be initialized.
-    prost_data_chunk: OnceCell<ProstDataChunk>,
+    prost_data_chunk: OnceCell<PbDataChunk>,
 }
 
 impl DataChunkInChannel {
@@ -32,7 +32,7 @@ impl DataChunkInChannel {
         }
     }
 
-    pub async fn to_protobuf(&self) -> ProstDataChunk {
+    pub async fn to_protobuf(&self) -> PbDataChunk {
         let prost_data_chunk = self
             .prost_data_chunk
             .get_or_init(|| async {

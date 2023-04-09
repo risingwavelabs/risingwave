@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,24 +13,29 @@
 // limitations under the License.
 
 use std::fmt;
+use std::ops::BitAnd;
 
 use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
-use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamHashJoin, StreamNode};
-use crate::expr::Expr;
+use super::generic::{self, GenericPlanRef};
+use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
+use crate::expr::{Expr, ExprRewriter};
+use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
+use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::utils::ColIndexMappingRewriteExt;
 
 /// [`StreamDeltaJoin`] implements [`super::LogicalJoin`] with delta join. It requires its two
 /// inputs to be indexes.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamDeltaJoin {
     pub base: PlanBase,
-    logical: LogicalJoin,
+    logical: generic::Join<PlanRef>,
 
     /// The join condition must be equivalent to `logical.on`, but separated into equal and
     /// non-equal parts to facilitate execution later
@@ -38,30 +43,40 @@ pub struct StreamDeltaJoin {
 }
 
 impl StreamDeltaJoin {
-    pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
-        let ctx = logical.base.ctx.clone();
+    pub fn new(logical: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Self {
+        let base = PlanBase::new_logical_with_core(&logical);
+        let ctx = base.ctx;
         // Inner join won't change the append-only behavior of the stream. The rest might.
-        let append_only = match logical.join_type() {
-            JoinType::Inner => logical.left().append_only() && logical.right().append_only(),
+        let append_only = match logical.join_type {
+            JoinType::Inner => logical.left.append_only() && logical.right.append_only(),
             _ => todo!("delta join only supports inner join for now"),
         };
         if eq_join_predicate.has_non_eq() {
             todo!("non-eq condition not supported for delta join");
         }
-        let dist = StreamHashJoin::derive_dist(
-            logical.left().distribution(),
-            logical.right().distribution(),
-            &logical,
-        );
 
+        // FIXME: delta join could have arbitrary distribution.
+        let dist = Distribution::SomeShard;
+
+        let watermark_columns = {
+            let from_left = logical
+                .l2i_col_mapping()
+                .rewrite_bitset(logical.left.watermark_columns());
+            let from_right = logical
+                .r2i_col_mapping()
+                .rewrite_bitset(logical.right.watermark_columns());
+            let watermark_columns = from_left.bitand(&from_right);
+            logical.i2o_col_mapping().rewrite_bitset(&watermark_columns)
+        };
         // TODO: derive from input
         let base = PlanBase::new_stream(
             ctx,
-            logical.schema().clone(),
-            logical.base.logical_pk.to_vec(),
-            logical.functional_dependency().clone(),
+            base.schema,
+            base.logical_pk,
+            base.functional_dependency,
             dist,
             append_only,
+            watermark_columns,
         );
 
         Self {
@@ -81,7 +96,7 @@ impl fmt::Display for StreamDeltaJoin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("StreamDeltaJoin");
-        builder.field("type", &self.logical.join_type());
+        builder.field("type", &self.logical.join_type);
 
         let mut concat_schema = self.left().schema().fields.clone();
         concat_schema.extend(self.right().schema().fields.clone());
@@ -97,7 +112,7 @@ impl fmt::Display for StreamDeltaJoin {
         if verbose {
             if self
                 .logical
-                .output_indices()
+                .output_indices
                 .iter()
                 .copied()
                 .eq(0..self.logical.internal_column_num())
@@ -107,7 +122,7 @@ impl fmt::Display for StreamDeltaJoin {
                 builder.field(
                     "output",
                     &IndicesDisplay {
-                        indices: self.logical.output_indices(),
+                        indices: &self.logical.output_indices,
                         input_schema: &concat_schema,
                     },
                 );
@@ -120,18 +135,18 @@ impl fmt::Display for StreamDeltaJoin {
 
 impl PlanTreeNodeBinary for StreamDeltaJoin {
     fn left(&self) -> PlanRef {
-        self.logical.left()
+        self.logical.left.clone()
     }
 
     fn right(&self) -> PlanRef {
-        self.logical.right()
+        self.logical.right.clone()
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::new(
-            self.logical.clone_with_left_right(left, right),
-            self.eq_join_predicate.clone(),
-        )
+        let mut logical = self.logical.clone();
+        logical.left = left;
+        logical.right = right;
+        Self::new(logical, self.eq_join_predicate.clone())
     }
 }
 
@@ -141,15 +156,24 @@ impl StreamNode for StreamDeltaJoin {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> NodeBody {
         let left = self.left();
         let right = self.right();
-        let left_table = left.as_stream_index_scan().unwrap();
-        let right_table = right.as_stream_index_scan().unwrap();
-        let left_table_desc = left_table.logical().table_desc();
-        let right_table_desc = right_table.logical().table_desc();
+
+        let left_table = if let Some(stream_table_scan) = left.as_stream_table_scan() {
+            stream_table_scan.logical()
+        } else {
+            unreachable!();
+        };
+        let left_table_desc = left_table.table_desc();
+        let right_table = if let Some(stream_table_scan) = right.as_stream_table_scan() {
+            stream_table_scan.logical()
+        } else {
+            unreachable!();
+        };
+        let right_table_desc = right_table.table_desc();
 
         // TODO: add a separate delta join node in proto, or move fragmenter to frontend so that we
         // don't need an intermediate representation.
         NodeBody::DeltaIndexJoin(DeltaIndexJoinNode {
-            join_type: self.logical.join_type() as i32,
+            join_type: self.logical.join_type as i32,
             left_key: self
                 .eq_join_predicate
                 .left_eq_indexes()
@@ -170,29 +194,45 @@ impl StreamNode for StreamDeltaJoin {
             left_table_id: left_table_desc.table_id.table_id(),
             right_table_id: right_table_desc.table_id.table_id(),
             left_info: Some(ArrangementInfo {
-                arrange_key_orders: left_table_desc.arrange_key_orders_prost(),
+                // TODO: remove it
+                arrange_key_orders: left_table_desc.arrange_key_orders_protobuf(),
+                // TODO: remove it
                 column_descs: left_table
-                    .logical()
                     .column_descs()
                     .iter()
                     .map(ColumnDesc::to_protobuf)
                     .collect(),
+                table_desc: Some(left_table_desc.to_protobuf()),
             }),
             right_info: Some(ArrangementInfo {
-                arrange_key_orders: right_table_desc.arrange_key_orders_prost(),
+                // TODO: remove it
+                arrange_key_orders: right_table_desc.arrange_key_orders_protobuf(),
+                // TODO: remove it
                 column_descs: right_table
-                    .logical()
                     .column_descs()
                     .iter()
                     .map(ColumnDesc::to_protobuf)
                     .collect(),
+                table_desc: Some(right_table_desc.to_protobuf()),
             }),
             output_indices: self
                 .logical
-                .output_indices()
+                .output_indices
                 .iter()
                 .map(|&x| x as u32)
                 .collect(),
         })
+    }
+}
+
+impl ExprRewritable for StreamDeltaJoin {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut logical = self.logical.clone();
+        logical.rewrite_exprs(r);
+        Self::new(logical, self.eq_join_predicate.rewrite_exprs(r)).into()
     }
 }

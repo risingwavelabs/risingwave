@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -94,6 +94,7 @@ where
 
 macro_rules! impl_aggregator {
     ($input:ty, $input_variant:ident, $result:ty, $result_variant:ident) => {
+        #[async_trait::async_trait]
         impl<F> Aggregator for GeneralAgg<$input, F, $result>
         where
             F: for<'a> RTFn<'a, $input, $result>,
@@ -102,7 +103,7 @@ macro_rules! impl_aggregator {
                 self.return_type.clone()
             }
 
-            fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
+            async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
                 if let ArrayImpl::$input_variant(i) =
                     input.column_at(self.input_col_idx).array_ref()
                 {
@@ -112,7 +113,7 @@ macro_rules! impl_aggregator {
                 }
             }
 
-            fn update_multi(
+            async fn update_multi(
                 &mut self,
                 input: &DataChunk,
                 start_row_id: usize,
@@ -154,9 +155,9 @@ impl_aggregator! { BoolArray, Bool, BoolArray, Bool } // TODO(#359): remove once
 impl_aggregator! { StructArray, Struct, StructArray, Struct }
 impl_aggregator! { ListArray, List, ListArray, List }
 impl_aggregator! { IntervalArray, Interval, IntervalArray, Interval }
-impl_aggregator! { NaiveTimeArray, NaiveTime, NaiveTimeArray, NaiveTime }
-impl_aggregator! { NaiveDateArray, NaiveDate, NaiveDateArray, NaiveDate }
-impl_aggregator! { NaiveDateTimeArray, NaiveDateTime, NaiveDateTimeArray, NaiveDateTime }
+impl_aggregator! { TimeArray, Time, TimeArray, Time }
+impl_aggregator! { DateArray, Date, DateArray, Date }
+impl_aggregator! { TimestampArray, Timestamp, TimestampArray, Timestamp }
 
 // count
 impl_aggregator! { I16Array, Int16, I64Array, Int64 } // sum
@@ -169,9 +170,9 @@ impl_aggregator! { BoolArray, Bool, I64Array, Int64 }
 impl_aggregator! { StructArray, Struct, I64Array, Int64 }
 impl_aggregator! { ListArray, List, I64Array, Int64 }
 impl_aggregator! { IntervalArray, Interval, I64Array, Int64 }
-impl_aggregator! { NaiveTimeArray, NaiveTime, I64Array, Int64 }
-impl_aggregator! { NaiveDateArray, NaiveDate, I64Array, Int64 }
-impl_aggregator! { NaiveDateTimeArray, NaiveDateTime, I64Array, Int64 }
+impl_aggregator! { TimeArray, Time, I64Array, Int64 }
+impl_aggregator! { DateArray, Date, I64Array, Int64 }
+impl_aggregator! { TimestampArray, Timestamp, I64Array, Int64 }
 
 // sum
 impl_aggregator! { I64Array, Int64, DecimalArray, Decimal }
@@ -187,7 +188,7 @@ mod tests {
     use crate::expr::AggKind;
     use crate::vector_op::agg::aggregator::create_agg_state_unary;
 
-    fn eval_agg(
+    async fn eval_agg(
         input_type: DataType,
         input: ArrayRef,
         agg_kind: AggKind,
@@ -197,14 +198,16 @@ mod tests {
         let len = input.len();
         let input_chunk = DataChunk::new(vec![Column::new(input)], len);
         let mut agg_state = create_agg_state_unary(input_type, 0, agg_kind, return_type, false)?;
-        agg_state.update_multi(&input_chunk, 0, input_chunk.cardinality())?;
+        agg_state
+            .update_multi(&input_chunk, 0, input_chunk.cardinality())
+            .await?;
         agg_state.output(&mut builder)?;
         Ok(builder.finish())
     }
 
-    #[test]
-    fn vec_sum_int32() -> Result<()> {
-        let input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]);
+    #[tokio::test]
+    async fn vec_sum_int32() -> Result<()> {
+        let input = I32Array::from_iter([1, 2, 3]);
         let agg_kind = AggKind::Sum;
         let input_type = DataType::Int32;
         let return_type = DataType::Int64;
@@ -214,16 +217,17 @@ mod tests {
             agg_kind,
             return_type,
             ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)),
-        )?;
+        )
+        .await?;
         let actual = actual.as_int64();
         let actual = actual.iter().collect::<Vec<_>>();
         assert_eq!(actual, &[Some(6)]);
         Ok(())
     }
 
-    #[test]
-    fn vec_sum_int64() -> Result<()> {
-        let input = I64Array::from_slice(&[Some(1), Some(2), Some(3)]);
+    #[tokio::test]
+    async fn vec_sum_int64() -> Result<()> {
+        let input = I64Array::from_iter([1, 2, 3]);
         let agg_kind = AggKind::Sum;
         let input_type = DataType::Int64;
         let return_type = DataType::Decimal;
@@ -233,16 +237,17 @@ mod tests {
             agg_kind,
             return_type,
             DecimalArrayBuilder::new(0).into(),
-        )?;
+        )
+        .await?;
         let actual: DecimalArray = actual.into();
         let actual = actual.iter().collect::<Vec<Option<Decimal>>>();
         assert_eq!(actual, vec![Some(Decimal::from(6))]);
         Ok(())
     }
 
-    #[test]
-    fn vec_min_float32() -> Result<()> {
-        let input = F32Array::from_slice(&[Some(1.0.into()), Some(2.0.into()), Some(3.0.into())]);
+    #[tokio::test]
+    async fn vec_min_float32() -> Result<()> {
+        let input = F32Array::from_iter([Some(1.0.into()), Some(2.0.into()), Some(3.0.into())]);
         let agg_kind = AggKind::Min;
         let input_type = DataType::Float32;
         let return_type = DataType::Float32;
@@ -252,16 +257,17 @@ mod tests {
             agg_kind,
             return_type,
             ArrayBuilderImpl::Float32(F32ArrayBuilder::new(0)),
-        )?;
+        )
+        .await?;
         let actual = actual.as_float32();
         let actual = actual.iter().collect::<Vec<_>>();
         assert_eq!(actual, &[Some(1.0.into())]);
         Ok(())
     }
 
-    #[test]
-    fn vec_min_char() -> Result<()> {
-        let input = Utf8Array::from_slice(&[Some("b"), Some("aa")]);
+    #[tokio::test]
+    async fn vec_min_char() -> Result<()> {
+        let input = Utf8Array::from_iter(["b", "aa"]);
         let agg_kind = AggKind::Min;
         let input_type = DataType::Varchar;
         let return_type = DataType::Varchar;
@@ -271,19 +277,19 @@ mod tests {
             agg_kind,
             return_type,
             ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0)),
-        )?;
+        )
+        .await?;
         let actual = actual.as_utf8();
         let actual = actual.iter().collect::<Vec<_>>();
         assert_eq!(actual, vec![Some("aa")]);
         Ok(())
     }
 
-    #[test]
-    fn vec_min_list() -> Result<()> {
+    #[tokio::test]
+    async fn vec_min_list() -> Result<()> {
         use risingwave_common::array;
-        let input = ListArray::from_slices(
-            &[true, true, true],
-            vec![
+        let input = ListArray::from_iter(
+            [
                 Some(array! { I32Array, [Some(0)] }.into()),
                 Some(array! { I32Array, [Some(1)] }.into()),
                 Some(array! { I32Array, [Some(2)] }.into()),
@@ -308,7 +314,8 @@ mod tests {
                     datatype: Box::new(DataType::Int32),
                 },
             )),
-        )?;
+        )
+        .await?;
         let actual = actual.as_list();
         let actual = actual.iter().collect::<Vec<_>>();
         assert_eq!(
@@ -320,9 +327,9 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn vec_max_char() -> Result<()> {
-        let input = Utf8Array::from_slice(&[Some("b"), Some("aa")]);
+    #[tokio::test]
+    async fn vec_max_char() -> Result<()> {
+        let input = Utf8Array::from_iter(["b", "aa"]);
         let agg_kind = AggKind::Max;
         let input_type = DataType::Varchar;
         let return_type = DataType::Varchar;
@@ -332,16 +339,17 @@ mod tests {
             agg_kind,
             return_type,
             ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0)),
-        )?;
+        )
+        .await?;
         let actual = actual.as_utf8();
         let actual = actual.iter().collect::<Vec<_>>();
         assert_eq!(actual, vec![Some("b")]);
         Ok(())
     }
 
-    #[test]
-    fn vec_count_int32() -> Result<()> {
-        let test_case = |input: ArrayImpl, expected: &[Option<i64>]| -> Result<()> {
+    #[tokio::test]
+    async fn vec_count_int32() -> Result<()> {
+        async fn test_case(input: ArrayImpl, expected: &[Option<i64>]) -> Result<()> {
             let agg_kind = AggKind::Count;
             let input_type = DataType::Int32;
             let return_type = DataType::Int64;
@@ -351,20 +359,22 @@ mod tests {
                 agg_kind,
                 return_type,
                 ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)),
-            )?;
+            )
+            .await?;
             let actual = actual.as_int64();
             let actual = actual.iter().collect::<Vec<_>>();
             assert_eq!(actual, expected);
             Ok(())
-        };
-        let input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]);
+        }
+        let input = I32Array::from_iter([1, 2, 3]);
         let expected = &[Some(3)];
-        test_case(input.into(), expected)?;
-        let input = I32Array::from_slice(&[]);
+        test_case(input.into(), expected).await?;
+        #[allow(clippy::needless_borrow)]
+        let input = I32Array::from_iter(&[]);
         let expected = &[Some(0)];
-        test_case(input.into(), expected)?;
-        let input = I32Array::from_slice(&[None]);
+        test_case(input.into(), expected).await?;
+        let input = I32Array::from_iter([None]);
         let expected = &[Some(0)];
-        test_case(input.into(), expected)
+        test_case(input.into(), expected).await
     }
 }

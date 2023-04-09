@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,7 +19,7 @@ use crate::hummock::{HummockResult, SstableBuilderOptions, SstableMeta};
 
 /// A consumer of SST data.
 #[async_trait::async_trait]
-pub trait SstableWriter: Send {
+pub trait SstableWriter: Send + Sync {
     type Output;
 
     /// Write an SST block to the writer.
@@ -74,8 +74,8 @@ impl SstableWriter for InMemWriter {
 mod tests {
 
     use bytes::Bytes;
-    use itertools::Itertools;
     use rand::{Rng, SeedableRng};
+    use risingwave_common::util::iter_util::ZipEqFast;
 
     use crate::hummock::sstable::VERSION;
     use crate::hummock::{BlockMeta, InMemWriter, SstableMeta, SstableWriter};
@@ -100,7 +100,7 @@ mod tests {
         }
         let meta = SstableMeta {
             block_metas,
-            bloom_filter: Vec::new(),
+            bloom_filter: vec![],
             estimated_size: 0,
             key_count: 0,
             smallest_key: Vec::new(),
@@ -117,7 +117,7 @@ mod tests {
     async fn test_in_mem_writer() {
         let (data, blocks, meta) = get_sst();
         let mut writer = Box::new(InMemWriter::new(0));
-        for (block, meta) in blocks.iter().zip_eq(meta.block_metas.iter()) {
+        for (block, meta) in blocks.iter().zip_eq_fast(meta.block_metas.iter()) {
             writer.write_block(&block[..], meta).await.unwrap();
         }
 

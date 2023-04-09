@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,7 +14,6 @@
 
 use std::io::Error as IoError;
 
-use anyhow::anyhow;
 use thiserror::Error;
 
 use crate::pg_server::BoxedError;
@@ -42,8 +41,8 @@ pub enum PsqlError {
     IoError(#[from] IoError),
 
     #[error("{0}")]
-    /// Include error for describe, bind, parse, execute etc.
-    Internal(#[from] anyhow::Error),
+    /// Include error for describe, bind.
+    Internal(BoxedError),
 
     #[error("{0}")]
     SslError(String),
@@ -51,10 +50,10 @@ pub enum PsqlError {
 
 impl PsqlError {
     pub fn no_statement() -> Self {
-        PsqlError::Internal(anyhow!("No statement found".to_string()))
+        PsqlError::Internal("No statement found".into())
     }
 
     pub fn no_portal() -> Self {
-        PsqlError::Internal(anyhow!("No portal found".to_string()))
+        PsqlError::Internal("No portal found".into())
     }
 }

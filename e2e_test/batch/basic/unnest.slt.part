@@ -65,13 +65,21 @@ insert into t values (Array[1,2]), (Array[1,NULL]), (Array[3,4,5]), (NULL);
 query I rowsort
 select unnest(x), x from t;
 ----
-NULL {1,NULL}
-1    {1,NULL}
-1    {1,2}
-2    {1,2}
-3    {3,4,5}
-4    {3,4,5}
-5    {3,4,5}
+1	{1,2}
+1	{1,NULL}
+2	{1,2}
+3	{3,4,5}
+4	{3,4,5}
+5	{3,4,5}
+NULL	{1,NULL}
 
 statement ok
 drop table t;
+
+# https://github.com/risingwavelabs/risingwave/issues/7812
+query I rowsort
+select distinct unnest(array[1,1,2,3,1]) as x;
+----
+1
+2
+3

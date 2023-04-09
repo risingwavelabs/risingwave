@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,6 +19,7 @@ use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -81,8 +82,8 @@ impl ValuesExecutor {
                 let chunk_size = self.chunk_size.min(self.rows.len());
                 let mut array_builders = self.schema.create_array_builders(chunk_size);
                 for row in self.rows.by_ref().take(chunk_size) {
-                    for (expr, builder) in row.into_iter().zip_eq(&mut array_builders) {
-                        let out = expr.eval(&one_row_chunk)?;
+                    for (expr, builder) in row.into_iter().zip_eq_fast(&mut array_builders) {
+                        let out = expr.eval(&one_row_chunk).await?;
                         builder.append_array(&out);
                     }
                 }
@@ -128,7 +129,7 @@ impl BoxedExecutorBuilder for ValuesExecutor {
             rows: rows.into_iter(),
             schema: Schema { fields },
             identity: source.plan_node().get_identity().clone(),
-            chunk_size: source.context.get_config().developer.batch_chunk_size,
+            chunk_size: source.context.get_config().developer.chunk_size,
         }))
     }
 }

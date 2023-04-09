@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,12 +19,15 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ProjectSetNode;
 
+use super::ExprRewritable;
+use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{
-    LogicalProjectSet, PlanBase, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch, ToLocalBatch,
+    LogicalProjectSet, PlanBase, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
 use crate::optimizer::PlanRef;
+use crate::utils::ColIndexMappingRewriteExt;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchProjectSet {
     pub base: PlanBase,
     logical: LogicalProjectSet,
@@ -74,7 +77,7 @@ impl ToDistributedBatch for BatchProjectSet {
     // TODO: implement to_distributed_with_required like BatchProject
 }
 
-impl ToBatchProst for BatchProjectSet {
+impl ToBatchPb for BatchProjectSet {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::ProjectSet(ProjectSetNode {
             select_list: self
@@ -91,5 +94,22 @@ impl ToLocalBatch for BatchProjectSet {
     fn to_local(&self) -> Result<PlanRef> {
         let new_input = self.input().to_local()?;
         Ok(self.clone_with_input(new_input).into())
+    }
+}
+
+impl ExprRewritable for BatchProjectSet {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_project_set()
+                .unwrap()
+                .clone(),
+        )
+        .into()
     }
 }

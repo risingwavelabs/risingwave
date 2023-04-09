@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -32,7 +32,9 @@ impl ConnectorNodeService {
 
     fn connector_path(&self) -> Result<PathBuf> {
         let prefix_bin = env::var("PREFIX_BIN")?;
-        Ok(Path::new(&prefix_bin).join("risingwave-connector.jar"))
+        Ok(Path::new(&prefix_bin)
+            .join("connector-node")
+            .join("start-service.sh"))
     }
 }
 
@@ -42,15 +44,10 @@ impl Task for ConnectorNodeService {
         ctx.pb.set_message("starting");
         let path = self.connector_path()?;
         if !path.exists() {
-            return Err(anyhow!("RisingWave connector binary not found in {:?}\nDid you enable risingwave connector feature in `./risedev configure`?", path));
+            return Err(anyhow!("RisingWave connector binary not found in {:?}\nPlease enable building RisingWave connector in `./risedev configure`?", path));
         }
-
-        let mut cmd = Command::new("java");
-        // the main class can be removed in the next version of cdc source
-        cmd.arg("-jar")
-            .arg(path)
-            .arg("--port")
-            .arg(self.config.port.to_string());
+        let mut cmd = Command::new(path);
+        cmd.arg("-p").arg(self.config.port.to_string());
         ctx.run_command(ctx.tmux_run(cmd)?)?;
         ctx.pb.set_message("started");
 

@@ -8,13 +8,15 @@
     "gen-proto": "./scripts/generate_proto.sh",
     "lint": "prettier --check . && next lint",
     "format": "prettier --write . && next lint --fix",
-    "mock-server": "node ./mock-server.js"
+    "mock-server": "node ./mock-server.js",
+    "postinstall": "npm run gen-proto"
   },
   "dependencies": {
     "@chakra-ui/react": "^2.3.1",
     "@emotion/react": "^11.10.4",
     "@emotion/styled": "^11.10.4",
     "@loadable/component": "5.15.2",
+    "@monaco-editor/react": "^4.4.6",
     "@types/d3": "^7.4.0",
     "@types/lodash": "^4.14.184",
     "bootstrap-icons": "^1.9.1",
@@ -34,7 +36,7 @@
     "react-flow-renderer": "10.3.16",
     "react-json-view": "^1.21.3",
     "react-syntax-highlighter": "^15.5.0",
-    "recharts": "^2.1.16",
+    "recharts": "^2.3.2",
     "styled-components": "5.3.0",
     "ts-proto": "^1.131.0"
   },

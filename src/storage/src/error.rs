@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,6 +19,7 @@ use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use thiserror::Error;
 
 use crate::hummock::HummockError;
+use crate::mem_table::MemTableError;
 
 #[derive(Error)]
 pub enum StorageError {
@@ -32,11 +33,21 @@ pub enum StorageError {
     #[error("Deserialize row error {0}.")]
     DeserializeRow(ValueEncodingError),
 
+    #[error("Serialize/deserialize error: {0}")]
+    SerdeError(memcomparable::Error),
+
     #[error("Sled error: {0}")]
     Sled(
         #[backtrace]
         #[from]
         sled::Error,
+    ),
+
+    #[error("MemTable error: {0}")]
+    MemTable(
+        #[backtrace]
+        #[from]
+        Box<MemTableError>,
     ),
 }
 
@@ -45,6 +56,12 @@ pub type StorageResult<T> = std::result::Result<T, StorageError>;
 impl From<ValueEncodingError> for StorageError {
     fn from(error: ValueEncodingError) -> Self {
         StorageError::DeserializeRow(error)
+    }
+}
+
+impl From<memcomparable::Error> for StorageError {
+    fn from(m: memcomparable::Error) -> Self {
+        StorageError::SerdeError(m)
     }
 }
 

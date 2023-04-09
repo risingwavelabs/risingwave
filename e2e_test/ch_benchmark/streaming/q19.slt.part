@@ -1,0 +1,4 @@
+query II rowsort
+select * from ch_benchmark_q19;
+----
+3802492

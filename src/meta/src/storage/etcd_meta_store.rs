@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,13 +16,15 @@ use std::sync::atomic::{self, AtomicI64};
 
 use anyhow;
 use async_trait::async_trait;
-use etcd_client::{Client, Compare, CompareOp, Error as EtcdError, GetOptions, Txn, TxnOp};
+use etcd_client::{Compare, CompareOp, Error as EtcdError, GetOptions, Txn, TxnOp};
 use futures::Future;
 use itertools::Itertools;
+use risingwave_common::config::MetaBackend;
 use tokio::sync::Mutex;
 
 use super::{Key, MetaStore, MetaStoreError, MetaStoreResult, Snapshot, Transaction, Value};
 use crate::storage::etcd_retry_client::EtcdRetryClient as KvClient;
+use crate::storage::WrappedEtcdClient;
 
 impl From<EtcdError> for MetaStoreError {
     fn from(err: EtcdError) -> Self {
@@ -93,7 +95,7 @@ impl SnapshotViewer for GetViewer {
 
     type OutputFuture<'a> = impl Future<Output = MetaStoreResult<(i64, Self::Output)>> + 'a;
 
-    fn view(&self, mut client: KvClient, revision: i64) -> Self::OutputFuture<'_> {
+    fn view(&self, client: KvClient, revision: i64) -> Self::OutputFuture<'_> {
         async move {
             let res = client
                 .get(
@@ -127,7 +129,7 @@ impl SnapshotViewer for ListViewer {
 
     type OutputFuture<'a> = impl Future<Output = MetaStoreResult<(i64, Self::Output)>> + 'a;
 
-    fn view(&self, mut client: KvClient, revision: i64) -> Self::OutputFuture<'_> {
+    fn view(&self, client: KvClient, revision: i64) -> Self::OutputFuture<'_> {
         async move {
             let res = client
                 .get(
@@ -175,9 +177,9 @@ impl Snapshot for EtcdSnapshot {
 }
 
 impl EtcdMetaStore {
-    pub fn new(client: Client) -> Self {
+    pub fn new(client: WrappedEtcdClient) -> Self {
         Self {
-            client: KvClient::new(client.kv_client()),
+            client: KvClient::new(client),
         }
     }
 }
@@ -185,6 +187,10 @@ impl EtcdMetaStore {
 #[async_trait]
 impl MetaStore for EtcdMetaStore {
     type Snapshot = EtcdSnapshot;
+
+    fn meta_store_type(&self) -> MetaBackend {
+        MetaBackend::Etcd
+    }
 
     async fn snapshot(&self) -> Self::Snapshot {
         EtcdSnapshot {

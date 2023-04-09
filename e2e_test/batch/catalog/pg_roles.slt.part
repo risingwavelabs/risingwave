@@ -1,0 +1,4 @@
+query ITTTTTTT
+select * from pg_roles where rolname = 'root';
+----
+1 root t t t t t ********

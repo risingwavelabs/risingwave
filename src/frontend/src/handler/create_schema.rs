@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,19 +18,18 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::ObjectName;
 
-use super::privilege::check_privileges;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::handler::privilege::ObjectCheckItem;
-use crate::session::OptimizerContext;
+use crate::handler::HandlerArgs;
 
 pub async fn handle_create_schema(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     schema_name: ObjectName,
     if_not_exist: bool,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx;
+    let session = handler_args.session;
     let database_name = session.database();
     let schema_name = Binder::resolve_schema_name(schema_name)?;
 
@@ -63,14 +62,11 @@ pub async fn handle_create_schema(
         (db.id(), db.owner())
     };
 
-    check_privileges(
-        &session,
-        &vec![ObjectCheckItem::new(
-            db_owner,
-            Action::Create,
-            Object::DatabaseId(db_id),
-        )],
-    )?;
+    session.check_privileges(&[ObjectCheckItem::new(
+        db_owner,
+        Action::Create,
+        Object::DatabaseId(db_id),
+    )])?;
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer

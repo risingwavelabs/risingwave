@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,74 +16,84 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use futures::pin_mut;
+use futures::{pin_mut, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_pb::connector_service::{DbConnectorProperties, GetEventStreamResponse};
+use risingwave_pb::connector_service::GetEventStreamResponse;
 use risingwave_rpc_client::ConnectorClient;
 
-use crate::source::base::{SourceMessage, SplitReader};
+use crate::impl_common_split_reader_logic;
+use crate::parser::ParserConfig;
+use crate::source::base::SourceMessage;
 use crate::source::cdc::CdcProperties;
-use crate::source::{BoxSourceStream, Column, ConnectorState, SplitImpl};
+use crate::source::{
+    BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitImpl, SplitMetaData,
+    SplitReader,
+};
+
+impl_common_split_reader_logic!(CdcSplitReader, CdcProperties);
 
 pub struct CdcSplitReader {
     source_id: u64,
-    props: CdcProperties,
+    start_offset: Option<String>,
+    conn_props: CdcProperties,
+
+    split_id: SplitId,
+    parser_config: ParserConfig,
+    source_ctx: SourceContextRef,
 }
 
 #[async_trait]
 impl SplitReader for CdcSplitReader {
     type Properties = CdcProperties;
 
+    #[allow(clippy::unused_async)]
     async fn new(
-        props: CdcProperties,
-        state: ConnectorState,
+        conn_props: CdcProperties,
+        splits: Vec<SplitImpl>,
+        parser_config: ParserConfig,
+        source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        if let Some(splits) = state {
-            let split = splits
-                .into_iter()
-                .exactly_one()
-                .map_err(|e| anyhow!("failed to create cdc split reader: {e}"))?;
-
-            if let SplitImpl::Cdc(cdc_split) = split {
-                return Ok(Self {
-                    source_id: cdc_split.source_id as u64,
-                    props,
-                });
-            }
+        assert!(splits.len() == 1);
+        let split = splits.into_iter().next().unwrap();
+        let split_id = split.id();
+        match split {
+            SplitImpl::MySqlCdc(split) | SplitImpl::PostgresCdc(split) => Ok(Self {
+                source_id: split.source_id as u64,
+                start_offset: split.start_offset,
+                conn_props,
+                split_id,
+                parser_config,
+                source_ctx,
+            }),
+            _ => Err(anyhow!(
+                "failed to create cdc split reader: invalid splis info"
+            )),
         }
-        Err(anyhow!("failed to create cdc split reader: invalid state"))
     }
 
-    fn into_stream(self) -> BoxSourceStream {
-        self.into_stream()
+    fn into_stream(self) -> BoxSourceWithStateStream {
+        self.into_chunk_stream()
     }
 }
 
 impl CdcSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
-    pub async fn into_stream(self) {
-        let props = &self.props;
+    async fn into_data_stream(self) {
+        tracing::debug!("cdc props: {:?}", self.conn_props);
         let cdc_client =
-            ConnectorClient::new(HostAddr::from_str(&props.connector_node_addr)?).await?;
+            ConnectorClient::new(HostAddr::from_str(&self.conn_props.connector_node_addr)?).await?;
+
         let cdc_stream = cdc_client
-            .get_event_stream(
+            .start_source_stream(
                 self.source_id,
-                DbConnectorProperties {
-                    database_host: props.database_host.clone(),
-                    database_port: props.database_port.clone(),
-                    database_user: props.database_user.clone(),
-                    database_password: props.database_password.clone(),
-                    database_name: props.database_name.clone(),
-                    table_name: props.table_name.clone(),
-                    partition: props.parititon.clone(),
-                    start_offset: props.start_offset.clone(),
-                    include_schema_events: false,
-                },
+                self.conn_props.source_type_enum()?,
+                self.start_offset,
+                self.conn_props.props,
             )
-            .await?;
+            .await
+            .inspect_err(|err| tracing::error!("connector node start stream error: {}", err))?;
         pin_mut!(cdc_stream);
         #[for_await]
         for event_res in cdc_stream {

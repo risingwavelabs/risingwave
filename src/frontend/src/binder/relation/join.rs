@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,15 +13,15 @@
 // limitations under the License.
 
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Ident, JoinConstraint, JoinOperator, TableFactor, TableWithJoins, Value,
 };
 
 use crate::binder::bind_context::BindContext;
+use crate::binder::statement::RewriteExprsRecursive;
 use crate::binder::{Binder, Relation, COLUMN_GROUP_PREFIX};
-use crate::expr::{Expr as _, ExprImpl};
+use crate::expr::ExprImpl;
 
 #[derive(Debug, Clone)]
 pub struct BoundJoin {
@@ -29,6 +29,15 @@ pub struct BoundJoin {
     pub left: Relation,
     pub right: Relation,
     pub cond: ExprImpl,
+}
+
+impl RewriteExprsRecursive for BoundJoin {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
+        self.left.rewrite_exprs_recursive(rewriter);
+        self.right.rewrite_exprs_recursive(rewriter);
+        let dummy = ExprImpl::literal_bool(true);
+        self.cond = rewriter.rewrite_expr(std::mem::replace(&mut self.cond, dummy));
+    }
 }
 
 impl Binder {
@@ -134,7 +143,7 @@ impl Binder {
                     .indices_of
                     .iter()
                     .filter(|(s, _)| *s != "_row_id") // filter out `_row_id`
-                    .map(|(s, idxes)| (Ident::new(s.to_owned()), idxes))
+                    .map(|(s, idxes)| (Ident::new_unchecked(s.to_owned()), idxes))
                     .collect::<Vec<_>>();
                 columns.sort_by(|a, b| a.0.real_value().cmp(&b.0.real_value()));
 
@@ -198,14 +207,9 @@ impl Binder {
                 (expr, Some(relation))
             }
             JoinConstraint::On(expr) => {
-                let bound_expr = self.bind_expr(expr)?;
-                if bound_expr.return_type() != DataType::Boolean {
-                    return Err(ErrorCode::InternalError(format!(
-                        "argument of ON must be boolean, not type {:?}",
-                        bound_expr.return_type()
-                    ))
-                    .into());
-                }
+                let bound_expr = self
+                    .bind_expr(expr)
+                    .and_then(|expr| expr.enforce_bool_clause("JOIN ON"))?;
                 (bound_expr, None)
             }
         })
@@ -219,12 +223,12 @@ impl Binder {
         if indices.len() == 1 {
             let right_table = context.columns[indices[0]].table_name.clone();
             Ok(Expr::CompoundIdentifier(vec![
-                Ident::new(right_table),
+                Ident::new_unchecked(right_table),
                 column,
             ]))
         } else if let Some(group_id) = context.column_group_context.mapping.get(&indices[0]) {
             Ok(Expr::CompoundIdentifier(vec![
-                Ident::new(format!("{COLUMN_GROUP_PREFIX}{}", group_id)),
+                Ident::new_unchecked(format!("{COLUMN_GROUP_PREFIX}{}", group_id)),
                 column,
             ]))
         } else {

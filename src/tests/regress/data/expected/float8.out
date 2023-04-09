@@ -65,31 +65,31 @@ ERROR:  invalid input syntax for type double precision: "123           5"
 LINE 1: INSERT INTO FLOAT8_TBL(f1) VALUES ('123           5');
                                            ^
 -- special inputs
-SELECT 'NaN'::float8;
+SELECT 'NaN'::float8 AS float8;
  float8 
 --------
     NaN
 (1 row)
 
-SELECT 'nan'::float8;
+SELECT 'nan'::float8 AS float8;
  float8 
 --------
     NaN
 (1 row)
 
-SELECT '   NAN  '::float8;
+SELECT '   NAN  '::float8 AS float8;
  float8 
 --------
     NaN
 (1 row)
 
-SELECT 'infinity'::float8;
+SELECT 'infinity'::float8 AS float8;
   float8  
 ----------
  Infinity
 (1 row)
 
-SELECT '          -INFINiTY   '::float8;
+SELECT '          -INFINiTY   '::float8 AS float8;
   float8   
 -----------
  -Infinity
@@ -138,7 +138,7 @@ SELECT 'nan'::float8 / '0'::float8;
       NaN
 (1 row)
 
-SELECT 'nan'::numeric::float8;
+SELECT 'nan'::numeric::float8 AS float8;
  float8 
 --------
     NaN
@@ -332,13 +332,13 @@ select sign(f1) as sign_f1 from float8_tbl f;
 -- avoid bit-exact output here because operations may not be bit-exact.
 SET extra_float_digits = 0;
 -- square root
-SELECT sqrt(float8 '64') AS eight;
+SELECT sqrt(double precision '64') AS eight;
  eight 
 -------
      8
 (1 row)
 
-SELECT |/ float8 '64' AS eight;
+SELECT |/ double precision '64' AS eight;
  eight 
 -------
      8
@@ -355,159 +355,159 @@ SELECT f.f1, |/f.f1 AS sqrt_f1
 (3 rows)
 
 -- power
-SELECT power(float8 '144', float8 '0.5');
+SELECT power(double precision '144', double precision '0.5');
  power 
 -------
     12
 (1 row)
 
-SELECT power(float8 'NaN', float8 '0.5');
+SELECT power(double precision 'NaN', double precision '0.5');
  power 
 -------
    NaN
 (1 row)
 
-SELECT power(float8 '144', float8 'NaN');
+SELECT power(double precision '144', double precision 'NaN');
  power 
 -------
    NaN
 (1 row)
 
-SELECT power(float8 'NaN', float8 'NaN');
+SELECT power(double precision 'NaN', double precision 'NaN');
  power 
 -------
    NaN
 (1 row)
 
-SELECT power(float8 '-1', float8 'NaN');
+SELECT power(double precision '-1', double precision 'NaN');
  power 
 -------
    NaN
 (1 row)
 
-SELECT power(float8 '1', float8 'NaN');
+SELECT power(double precision '1', double precision 'NaN');
  power 
 -------
      1
 (1 row)
 
-SELECT power(float8 'NaN', float8 '0');
+SELECT power(double precision 'NaN', double precision '0');
  power 
 -------
      1
 (1 row)
 
-SELECT power(float8 'inf', float8 '0');
+SELECT power(double precision 'inf', double precision '0');
  power 
 -------
      1
 (1 row)
 
-SELECT power(float8 '-inf', float8 '0');
+SELECT power(double precision '-inf', double precision '0');
  power 
 -------
      1
 (1 row)
 
-SELECT power(float8 '0', float8 'inf');
+SELECT power(double precision '0', double precision 'inf');
  power 
 -------
      0
 (1 row)
 
-SELECT power(float8 '0', float8 '-inf');
+SELECT power(double precision '0', double precision '-inf');
 ERROR:  zero raised to a negative power is undefined
-SELECT power(float8 '1', float8 'inf');
+SELECT power(double precision '1', double precision 'inf');
  power 
 -------
      1
 (1 row)
 
-SELECT power(float8 '1', float8 '-inf');
+SELECT power(double precision '1', double precision '-inf');
  power 
 -------
      1
 (1 row)
 
-SELECT power(float8 '-1', float8 'inf');
+SELECT power(double precision '-1', double precision 'inf');
  power 
 -------
      1
 (1 row)
 
-SELECT power(float8 '-1', float8 '-inf');
+SELECT power(double precision '-1', double precision '-inf');
  power 
 -------
      1
 (1 row)
 
-SELECT power(float8 '0.1', float8 'inf');
+SELECT power(double precision '0.1', double precision 'inf');
  power 
 -------
      0
 (1 row)
 
-SELECT power(float8 '-0.1', float8 'inf');
+SELECT power(double precision '-0.1', double precision 'inf');
  power 
 -------
      0
 (1 row)
 
-SELECT power(float8 '1.1', float8 'inf');
+SELECT power(double precision '1.1', double precision 'inf');
   power   
 ----------
  Infinity
 (1 row)
 
-SELECT power(float8 '-1.1', float8 'inf');
+SELECT power(double precision '-1.1', double precision 'inf');
   power   
 ----------
  Infinity
 (1 row)
 
-SELECT power(float8 '0.1', float8 '-inf');
+SELECT power(double precision '0.1', double precision '-inf');
   power   
 ----------
  Infinity
 (1 row)
 
-SELECT power(float8 '-0.1', float8 '-inf');
+SELECT power(double precision '-0.1', double precision '-inf');
   power   
 ----------
  Infinity
 (1 row)
 
-SELECT power(float8 '1.1', float8 '-inf');
+SELECT power(double precision '1.1', double precision '-inf');
  power 
 -------
      0
 (1 row)
 
-SELECT power(float8 '-1.1', float8 '-inf');
+SELECT power(double precision '-1.1', double precision '-inf');
  power 
 -------
      0
 (1 row)
 
-SELECT power(float8 'inf', float8 '-2');
+SELECT power(double precision 'inf', double precision '-2');
  power 
 -------
      0
 (1 row)
 
-SELECT power(float8 'inf', float8 '2');
+SELECT power(double precision 'inf', double precision '2');
   power   
 ----------
  Infinity
 (1 row)
 
-SELECT power(float8 'inf', float8 'inf');
+SELECT power(double precision 'inf', double precision 'inf');
   power   
 ----------
  Infinity
 (1 row)
 
-SELECT power(float8 'inf', float8 '-inf');
+SELECT power(double precision 'inf', double precision '-inf');
  power 
 -------
      0
@@ -515,39 +515,39 @@ SELECT power(float8 'inf', float8 '-inf');
 
 -- Intel's icc misoptimizes the code that controls the sign of this result,
 -- even with -mp1.  Pending a fix for that, only test for "is it zero".
-SELECT power(float8 '-inf', float8 '-2') = '0';
+SELECT power(double precision '-inf', double precision '-2') = '0';
  ?column? 
 ----------
  t
 (1 row)
 
-SELECT power(float8 '-inf', float8 '-3');
+SELECT power(double precision '-inf', double precision '-3');
  power 
 -------
     -0
 (1 row)
 
-SELECT power(float8 '-inf', float8 '2');
+SELECT power(double precision '-inf', double precision '2');
   power   
 ----------
  Infinity
 (1 row)
 
-SELECT power(float8 '-inf', float8 '3');
+SELECT power(double precision '-inf', double precision '3');
    power   
 -----------
  -Infinity
 (1 row)
 
-SELECT power(float8 '-inf', float8 '3.5');
+SELECT power(double precision '-inf', double precision '3.5');
 ERROR:  a negative number raised to a non-integer power yields a complex result
-SELECT power(float8 '-inf', float8 'inf');
+SELECT power(double precision '-inf', double precision 'inf');
   power   
 ----------
  Infinity
 (1 row)
 
-SELECT power(float8 '-inf', float8 '-inf');
+SELECT power(double precision '-inf', double precision '-inf');
  power 
 -------
      0
@@ -572,7 +572,7 @@ SELECT exp('inf'::float8), exp('-inf'::float8), exp('nan'::float8);
 (1 row)
 
 -- cube root
-SELECT ||/ float8 '27' AS three;
+SELECT ||/ double precision '27' AS three;
  three 
 -------
      3
@@ -616,7 +616,15 @@ ERROR:  cannot take logarithm of zero
 SELECT ln(f.f1) from FLOAT8_TBL f where f.f1 < '0.0' ;
 ERROR:  cannot take logarithm of a negative number
 SELECT exp(f.f1) from FLOAT8_TBL f;
-ERROR:  value out of range: underflow
+          exp          
+-----------------------
+                     1
+                     0
+                     0
+ 7.399123060905129e-16
+                     1
+(5 rows)
+
 SELECT f.f1 / '0.0' from FLOAT8_TBL f;
 ERROR:  division by zero
 SELECT * FROM FLOAT8_TBL;
@@ -632,130 +640,130 @@ SELECT * FROM FLOAT8_TBL;
 -- hyperbolic functions
 -- we run these with extra_float_digits = 0 too, since different platforms
 -- tend to produce results that vary in the last place.
-SELECT sinh(float8 '1');
+SELECT sinh(double precision '1');
       sinh       
 -----------------
  1.1752011936438
 (1 row)
 
-SELECT cosh(float8 '1');
+SELECT cosh(double precision '1');
        cosh       
 ------------------
  1.54308063481524
 (1 row)
 
-SELECT tanh(float8 '1');
+SELECT tanh(double precision '1');
        tanh        
 -------------------
  0.761594155955765
 (1 row)
 
-SELECT asinh(float8 '1');
+SELECT asinh(double precision '1');
        asinh       
 -------------------
  0.881373587019543
 (1 row)
 
-SELECT acosh(float8 '2');
+SELECT acosh(double precision '2');
       acosh       
 ------------------
  1.31695789692482
 (1 row)
 
-SELECT atanh(float8 '0.5');
+SELECT atanh(double precision '0.5');
        atanh       
 -------------------
  0.549306144334055
 (1 row)
 
 -- test Inf/NaN cases for hyperbolic functions
-SELECT sinh(float8 'infinity');
+SELECT sinh(double precision 'infinity');
    sinh   
 ----------
  Infinity
 (1 row)
 
-SELECT sinh(float8 '-infinity');
+SELECT sinh(double precision '-infinity');
    sinh    
 -----------
  -Infinity
 (1 row)
 
-SELECT sinh(float8 'nan');
+SELECT sinh(double precision 'nan');
  sinh 
 ------
   NaN
 (1 row)
 
-SELECT cosh(float8 'infinity');
+SELECT cosh(double precision 'infinity');
    cosh   
 ----------
  Infinity
 (1 row)
 
-SELECT cosh(float8 '-infinity');
+SELECT cosh(double precision '-infinity');
    cosh   
 ----------
  Infinity
 (1 row)
 
-SELECT cosh(float8 'nan');
+SELECT cosh(double precision 'nan');
  cosh 
 ------
   NaN
 (1 row)
 
-SELECT tanh(float8 'infinity');
+SELECT tanh(double precision 'infinity');
  tanh 
 ------
     1
 (1 row)
 
-SELECT tanh(float8 '-infinity');
+SELECT tanh(double precision '-infinity');
  tanh 
 ------
    -1
 (1 row)
 
-SELECT tanh(float8 'nan');
+SELECT tanh(double precision 'nan');
  tanh 
 ------
   NaN
 (1 row)
 
-SELECT asinh(float8 'infinity');
+SELECT asinh(double precision 'infinity');
   asinh   
 ----------
  Infinity
 (1 row)
 
-SELECT asinh(float8 '-infinity');
+SELECT asinh(double precision '-infinity');
    asinh   
 -----------
  -Infinity
 (1 row)
 
-SELECT asinh(float8 'nan');
+SELECT asinh(double precision 'nan');
  asinh 
 -------
    NaN
 (1 row)
 
 -- acosh(Inf) should be Inf, but some mingw versions produce NaN, so skip test
--- SELECT acosh(float8 'infinity');
-SELECT acosh(float8 '-infinity');
+-- SELECT acosh(double precision 'infinity');
+SELECT acosh(double precision '-infinity');
 ERROR:  input is out of range
-SELECT acosh(float8 'nan');
+SELECT acosh(double precision 'nan');
  acosh 
 -------
    NaN
 (1 row)
 
-SELECT atanh(float8 'infinity');
+SELECT atanh(double precision 'infinity');
 ERROR:  input is out of range
-SELECT atanh(float8 '-infinity');
+SELECT atanh(double precision '-infinity');
 ERROR:  input is out of range
-SELECT atanh(float8 'nan');
+SELECT atanh(double precision 'nan');
  atanh 
 -------
    NaN
@@ -798,7 +806,7 @@ SELECT * FROM FLOAT8_TBL;
 (5 rows)
 
 -- test edge-case coercions to integer
-SELECT '32767.4'::float8::int2;
+SELECT '32767.4'::float8::int2 AS int2;
  int2  
 -------
  32767
@@ -806,7 +814,7 @@ SELECT '32767.4'::float8::int2;
 
 SELECT '32767.6'::float8::int2;
 ERROR:  smallint out of range
-SELECT '-32768.4'::float8::int2;
+SELECT '-32768.4'::float8::int2 AS int2;
   int2  
 --------
  -32768
@@ -814,7 +822,7 @@ SELECT '-32768.4'::float8::int2;
 
 SELECT '-32768.6'::float8::int2;
 ERROR:  smallint out of range
-SELECT '2147483647.4'::float8::int4;
+SELECT '2147483647.4'::float8::int4 AS int4;
     int4    
 ------------
  2147483647
@@ -822,7 +830,7 @@ SELECT '2147483647.4'::float8::int4;
 
 SELECT '2147483647.6'::float8::int4;
 ERROR:  integer out of range
-SELECT '-2147483648.4'::float8::int4;
+SELECT '-2147483648.4'::float8::int4 AS int4;
     int4     
 -------------
  -2147483648
@@ -830,7 +838,7 @@ SELECT '-2147483648.4'::float8::int4;
 
 SELECT '-2147483648.6'::float8::int4;
 ERROR:  integer out of range
-SELECT '9223372036854773760'::float8::int8;
+SELECT '9223372036854773760'::float8::int8 AS int8;
         int8         
 ---------------------
  9223372036854773760
@@ -838,7 +846,7 @@ SELECT '9223372036854773760'::float8::int8;
 
 SELECT '9223372036854775807'::float8::int8;
 ERROR:  bigint out of range
-SELECT '-9223372036854775808.5'::float8::int8;
+SELECT '-9223372036854775808.5'::float8::int8 AS int8;
          int8         
 ----------------------
  -9223372036854775808

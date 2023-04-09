@@ -8,20 +8,27 @@ license = { workspace = true }
 repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
 [dependencies]
+anyhow = "1"
 async-trait = "0.1"
-clap = { version = "3", features = ["derive"] }
-parking_lot = "0.12"
+clap = { version = "4", features = ["derive"] }
 prometheus = { version = "0.13" }
 risingwave_common = { path = "../../common" }
+risingwave_common_proc_macro = { path = "../../common/proc_macro" }
 risingwave_common_service = { path = "../../common/common_service" }
 risingwave_hummock_sdk = { path = "../hummock_sdk" }
 risingwave_object_store = { path = "../../object_store" }
 risingwave_pb = { path = "../../prost" }
 risingwave_rpc_client = { path = "../../rpc_client" }
 risingwave_storage = { path = "../../storage" }
-risingwave_tracing = { path = "../../tracing" }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
     "rt",
@@ -31,9 +38,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
-tokio-retry = "0.3"
-tokio-stream = "0.1"
-toml = "0.5"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 

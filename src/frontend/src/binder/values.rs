@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,9 +16,11 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::Values;
 
 use super::bind_context::Clause;
+use super::statement::RewriteExprsRecursive;
 use crate::binder::Binder;
 use crate::expr::{align_types, CorrelatedId, Depth, ExprImpl};
 
@@ -26,6 +28,21 @@ use crate::expr::{align_types, CorrelatedId, Depth, ExprImpl};
 pub struct BoundValues {
     pub rows: Vec<Vec<ExprImpl>>,
     pub schema: Schema,
+}
+
+impl RewriteExprsRecursive for BoundValues {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
+        let new_rows = std::mem::take(&mut self.rows)
+            .into_iter()
+            .map(|exprs| {
+                exprs
+                    .into_iter()
+                    .map(|expr| rewriter.rewrite_expr(expr))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        self.rows = new_rows;
+    }
 }
 
 impl BoundValues {
@@ -67,6 +84,7 @@ fn values_column_name(values_id: usize, col_id: usize) -> String {
 impl Binder {
     /// Bind [`Values`] with given `expected_types`. If no types are expected, a compatible type for
     /// all rows will be used.
+    /// If values are shorter than expected, `NULL`s will be filled.
     pub(super) fn bind_values(
         &mut self,
         values: Values,
@@ -82,11 +100,23 @@ impl Binder {
             .collect::<Result<Vec<Vec<_>>>>()?;
         self.context.clause = None;
 
-        let num_columns = bound[0].len();
+        // Adding Null values in case user did not specify all columns. E.g.
+        // create table t1 (v1 int, v2 int); insert into t1 (v2) values (5);
+        let mut num_columns = bound[0].len();
         if bound.iter().any(|row| row.len() != num_columns) {
             return Err(
                 ErrorCode::BindError("VALUES lists must all be the same length".into()).into(),
             );
+        }
+        if let Some(expected_types) = &expected_types && expected_types.len() > num_columns {
+            let nulls_to_insert = expected_types.len() - num_columns;
+            for row in &mut bound {
+                for i in 0..nulls_to_insert {
+                    let t = expected_types[num_columns + i].clone();
+                    row.push(ExprImpl::literal_null(t));
+                }
+            }
+            num_columns = expected_types.len();
         }
 
         // Calculate column types.
@@ -108,7 +138,7 @@ impl Binder {
         let schema = Schema::new(
             types
                 .into_iter()
-                .zip_eq(0..num_columns)
+                .zip_eq_fast(0..num_columns)
                 .map(|(ty, col_id)| Field::with_name(ty, values_column_name(values_id, col_id)))
                 .collect(),
         );
@@ -138,8 +168,7 @@ impl Binder {
 
 #[cfg(test)]
 mod tests {
-
-    use itertools::zip_eq;
+    use risingwave_common::util::iter_util::zip_eq_fast;
     use risingwave_sqlparser::ast::{Expr, Value};
 
     use super::*;
@@ -161,14 +190,14 @@ mod tests {
         let schema = Schema::new(
             types
                 .into_iter()
-                .zip_eq(0..n_cols)
+                .zip_eq_fast(0..n_cols)
                 .map(|(ty, col_id)| Field::with_name(ty, values_column_name(0, col_id)))
                 .collect(),
         );
 
         assert_eq!(res.schema, schema);
         for vec in res.rows {
-            for (expr, ty) in zip_eq(vec, schema.data_types()) {
+            for (expr, ty) in zip_eq_fast(vec, schema.data_types()) {
                 assert_eq!(expr.return_type(), ty);
             }
         }

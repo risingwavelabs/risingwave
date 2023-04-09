@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +17,7 @@ use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::row::{Row2, RowExt};
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_common::{bail, row};
 use risingwave_storage::StateStore;
@@ -25,7 +25,6 @@ use risingwave_storage::StateStore;
 use super::approx_distinct_utils::{
     deserialize_buckets_from_list, serialize_buckets, RegisterBucket, StreamingApproxCountDistinct,
 };
-use crate::common::iter_state_table;
 use crate::common::table::state_table::StateTable;
 use crate::executor::aggregation::table::TableStateImpl;
 use crate::executor::StreamExecutorResult;
@@ -113,10 +112,12 @@ impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct
     async fn update_from_state_table(
         &mut self,
         state_table: &StateTable<S>,
-        group_key: Option<&Row>,
+        group_key: Option<&OwnedRow>,
     ) -> StreamExecutorResult<()> {
         let state_row = {
-            let data_iter = iter_state_table(state_table, group_key).await?;
+            let data_iter = state_table
+                .iter_with_pk_prefix(&group_key, Default::default())
+                .await?;
             pin_mut!(data_iter);
             if let Some(state_row) = data_iter.next().await {
                 Some(state_row?)
@@ -125,11 +126,7 @@ impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct
             }
         };
         if let Some(state_row) = state_row {
-            if let ScalarImpl::List(list) = state_row
-                [group_key.map(|row| row.len()).unwrap_or_default()]
-            .as_ref()
-            .unwrap()
-            {
+            if let ScalarImpl::List(list) = state_row[group_key.len()].as_ref().unwrap() {
                 let state = deserialize_buckets_from_list(list.values());
                 for (idx, bucket) in self.registers_mut().iter_mut().enumerate() {
                     if state[idx] != 0 {
@@ -146,7 +143,7 @@ impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct
     async fn flush_state_if_needed(
         &self,
         state_table: &mut StateTable<S>,
-        group_key: Option<&Row>,
+        group_key: Option<&OwnedRow>,
     ) -> StreamExecutorResult<()> {
         let list = Some(ScalarImpl::List(ListValue::new(
             serialize_buckets(
@@ -160,10 +157,12 @@ impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct
             .map(|x| Some(ScalarImpl::Int64(x as i64)))
             .collect_vec(),
         )));
-        let current_row = group_key.unwrap_or_else(Row::empty).chain(row::once(list));
+        let current_row = group_key.chain(row::once(list));
 
         let state_row = {
-            let data_iter = iter_state_table(state_table, group_key).await?;
+            let data_iter = state_table
+                .iter_with_pk_prefix(&group_key, Default::default())
+                .await?;
             pin_mut!(data_iter);
             if let Some(state_row) = data_iter.next().await {
                 Some(state_row?)
@@ -173,7 +172,7 @@ impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct
         };
         match state_row {
             Some(state_row) => {
-                state_table.update(state_row.into_owned(), current_row);
+                state_table.update(state_row, current_row);
             }
             None => {
                 state_table.insert(current_row);

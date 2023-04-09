@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -386,6 +386,161 @@ impl From<CollectInputRef> for FixedBitSet {
 impl Extend<usize> for CollectInputRef {
     fn extend<T: IntoIterator<Item = usize>>(&mut self, iter: T) {
         self.input_bits.extend(iter);
+    }
+}
+
+/// Count `Now`s in the expression.
+#[derive(Clone, Default)]
+pub struct CountNow {}
+
+impl ExprVisitor<usize> for CountNow {
+    fn merge(a: usize, b: usize) -> usize {
+        a + b
+    }
+
+    fn visit_function_call(&mut self, func_call: &FunctionCall) -> usize {
+        if func_call.get_expr_type() == ExprType::Now {
+            1
+        } else {
+            func_call
+                .inputs()
+                .iter()
+                .map(|expr| self.visit_expr(expr))
+                .reduce(Self::merge)
+                .unwrap_or_default()
+        }
+    }
+}
+
+/// analyze if the expression can derive a watermark from some input watermark. If it can
+/// derive, return the input watermark column index
+pub fn try_derive_watermark(expr: &ExprImpl) -> Option<usize> {
+    let a = WatermarkAnalyzer {};
+    if let WatermarkDerivation::Watermark(idx) = a.visit_expr(expr) {
+        return Some(idx);
+    }
+    None
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum WatermarkDerivation {
+    /// the expression will return a constant and not depends on its input.
+    Constant,
+    /// can derive a watermark if an input column has watermark, the usize field is the input
+    /// column index
+    Watermark(usize),
+    /// can not derive a watermark in any cases.
+    None,
+}
+
+#[derive(Clone, Default)]
+struct WatermarkAnalyzer {}
+
+impl WatermarkAnalyzer {
+    fn visit_expr(&self, expr: &ExprImpl) -> WatermarkDerivation {
+        match expr {
+            ExprImpl::InputRef(inner) => WatermarkDerivation::Watermark(inner.index()),
+            ExprImpl::Literal(_) => WatermarkDerivation::Constant,
+            ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
+            ExprImpl::TableFunction(_) => WatermarkDerivation::None,
+            ExprImpl::Subquery(_)
+            | ExprImpl::AggCall(_)
+            | ExprImpl::CorrelatedInputRef(_)
+            | ExprImpl::WindowFunction(_)
+            | ExprImpl::Parameter(_) => unreachable!(),
+            ExprImpl::UserDefinedFunction(_) => WatermarkDerivation::None,
+        }
+    }
+
+    fn visit_unary_op(&self, inputs: &[ExprImpl]) -> WatermarkDerivation {
+        assert_eq!(inputs.len(), 1);
+        self.visit_expr(&inputs[0])
+    }
+
+    fn visit_binary_op(&self, inputs: &[ExprImpl]) -> (WatermarkDerivation, WatermarkDerivation) {
+        assert_eq!(inputs.len(), 2);
+        (self.visit_expr(&inputs[0]), self.visit_expr(&inputs[1]))
+    }
+
+    fn visit_ternary_op(
+        &self,
+        inputs: &[ExprImpl],
+    ) -> (
+        WatermarkDerivation,
+        WatermarkDerivation,
+        WatermarkDerivation,
+    ) {
+        assert_eq!(inputs.len(), 3);
+        (
+            self.visit_expr(&inputs[0]),
+            self.visit_expr(&inputs[1]),
+            self.visit_expr(&inputs[2]),
+        )
+    }
+
+    fn visit_function_call(&self, func_call: &FunctionCall) -> WatermarkDerivation {
+        match func_call.get_expr_type() {
+            ExprType::Unspecified | ExprType::InputRef | ExprType::ConstantValue => unreachable!(),
+            ExprType::Add | ExprType::Multiply => match self.visit_binary_op(func_call.inputs()) {
+                (WatermarkDerivation::Constant, WatermarkDerivation::Constant) => {
+                    WatermarkDerivation::Constant
+                }
+                (WatermarkDerivation::Constant, WatermarkDerivation::Watermark(idx))
+                | (WatermarkDerivation::Watermark(idx), WatermarkDerivation::Constant) => {
+                    WatermarkDerivation::Watermark(idx)
+                }
+                _ => WatermarkDerivation::None,
+            },
+            ExprType::Subtract
+            | ExprType::Divide
+            | ExprType::TumbleStart
+            | ExprType::AtTimeZone => match self.visit_binary_op(func_call.inputs()) {
+                (WatermarkDerivation::Constant, WatermarkDerivation::Constant) => {
+                    WatermarkDerivation::Constant
+                }
+                (WatermarkDerivation::Watermark(idx), WatermarkDerivation::Constant) => {
+                    WatermarkDerivation::Watermark(idx)
+                }
+                _ => WatermarkDerivation::None,
+            },
+            ExprType::Modulus => WatermarkDerivation::None,
+            ExprType::DateTrunc => match func_call.inputs().len() {
+                2 => match self.visit_binary_op(func_call.inputs()) {
+                    (WatermarkDerivation::Constant, WatermarkDerivation::Constant) => {
+                        WatermarkDerivation::Constant
+                    }
+                    (WatermarkDerivation::Constant, WatermarkDerivation::Watermark(idx)) => {
+                        WatermarkDerivation::Watermark(idx)
+                    }
+                    _ => WatermarkDerivation::None,
+                },
+                3 => match self.visit_ternary_op(func_call.inputs()) {
+                    (
+                        WatermarkDerivation::Constant,
+                        WatermarkDerivation::Constant,
+                        WatermarkDerivation::Constant,
+                    ) => WatermarkDerivation::Constant,
+                    (
+                        WatermarkDerivation::Constant,
+                        WatermarkDerivation::Watermark(idx),
+                        WatermarkDerivation::Constant,
+                    ) => WatermarkDerivation::Watermark(idx),
+                    _ => WatermarkDerivation::None,
+                },
+                _ => unreachable!(),
+            },
+            ExprType::ToTimestamp => self.visit_unary_op(func_call.inputs()),
+            ExprType::ToTimestamp1 => WatermarkDerivation::None,
+            ExprType::Cast => {
+                // TODO: need more derivation
+                WatermarkDerivation::None
+            }
+            ExprType::Case => {
+                // TODO: do we need derive watermark when every case can derive a common watermark?
+                WatermarkDerivation::None
+            }
+            _ => WatermarkDerivation::None,
+        }
     }
 }
 

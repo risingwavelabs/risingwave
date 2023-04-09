@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::iter::Peekable;
+use std::str::{from_utf8, Chars};
+
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::{DataType, DateTimeField, Decimal, IntervalUnit, ScalarImpl};
-use risingwave_expr::vector_op::cast::str_parse;
+use risingwave_common::types::{DataType, DateTimeField, Decimal, Interval, ScalarImpl};
 use risingwave_sqlparser::ast::{DateTimeField as AstDateTimeField, Expr, Value};
 
 use crate::binder::Binder;
@@ -26,6 +28,7 @@ impl Binder {
         match value {
             Value::Number(s) => self.bind_number(s),
             Value::SingleQuotedString(s) => self.bind_string(s),
+            Value::CstyleEscapesString(s) => self.bind_string(unescape_c_style(&s)?),
             Value::Boolean(b) => self.bind_bool(b),
             // Both null and string literal will be treated as `unknown` during type inference.
             // See [`ExprImpl::is_unknown`].
@@ -58,15 +61,13 @@ impl Binder {
             (Some(ScalarImpl::Int32(int_32)), DataType::Int32)
         } else if let Ok(int_64) = s.parse::<i64>() {
             (Some(ScalarImpl::Int64(int_64)), DataType::Int64)
-        } else if let Ok(decimal) = str_parse::<Decimal>(&s) {
+        } else if let Ok(decimal) = s.parse::<Decimal>() {
             // Notice: when the length of decimal exceeds 29(>= 30), it will be rounded up.
             (Some(ScalarImpl::Decimal(decimal)), DataType::Decimal)
         } else if let Some(scientific) = Decimal::from_scientific(&s) {
             (Some(ScalarImpl::Decimal(scientific)), DataType::Decimal)
         } else {
-            return Err(RwError::from(ErrorCode::InternalError(format!(
-                "Unable to bind {s} to a number"
-            ))));
+            return Err(ErrorCode::BindError(format!("Number {s} overflows")).into());
         };
         Ok(Literal::new(data, data_type))
     }
@@ -77,7 +78,7 @@ impl Binder {
         leading_field: Option<AstDateTimeField>,
     ) -> Result<Literal> {
         let interval =
-            IntervalUnit::parse_with_fields(&s, leading_field.map(Self::bind_date_time_field))?;
+            Interval::parse_with_fields(&s, leading_field.map(Self::bind_date_time_field))?;
         let datum = Some(ScalarImpl::Interval(interval));
         let literal = Literal::new(datum, DataType::Interval);
 
@@ -129,7 +130,7 @@ impl Binder {
                 },
             )
             .into();
-            return lhs.cast_explicit(ty);
+            return lhs.cast_explicit(ty).map_err(Into::into);
         }
         let inner_type = if let DataType::List { datatype } = &ty {
             *datatype.clone()
@@ -182,8 +183,116 @@ impl Binder {
     }
 }
 
+/// Helper function used to convert string with c-style escapes into a normal string
+/// e.g. 'hello\x3fworld' -> 'hello?world'
+///
+/// Detail of c-style escapes refer from:
+/// <https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-SYNTAX-STRINGS-UESCAPE:~:text=4.1.2.2.%C2%A0String%20Constants%20With%20C%2DStyle%20Escapes>
+fn unescape_c_style(s: &str) -> Result<String> {
+    let mut chars = s.chars().peekable();
+
+    let mut res = String::with_capacity(s.len());
+
+    let hex_byte_process = |chars: &mut Peekable<Chars<'_>>,
+                            res: &mut String,
+                            len: usize,
+                            default_char: char| {
+        let mut unicode_seq: String = String::with_capacity(len);
+        for _ in 0..len {
+            if let Some(c) = chars.peek() && c.is_ascii_hexdigit() {
+                unicode_seq.push(chars.next().unwrap());
+            }else{
+                break;
+            }
+        }
+
+        if unicode_seq.is_empty() && len == 2 {
+            res.push(default_char);
+            return Ok::<(), RwError>(());
+        } else if unicode_seq.len() < len && len != 2 {
+            return Err(ErrorCode::BindError(
+                "invalid unicode sequence: must be \\uXXXX or \\UXXXXXXXX".to_string(),
+            )
+            .into());
+        }
+
+        if len == 2 {
+            let number = [u8::from_str_radix(&unicode_seq, 16)
+                .map_err(|e| ErrorCode::BindError(format!("invalid unicode sequence: {}", e)))?];
+
+            res.push(
+                from_utf8(&number)
+                    .map_err(|err| {
+                        ErrorCode::BindError(format!("invalid unicode sequence: {}", err))
+                    })?
+                    .chars()
+                    .next()
+                    .unwrap(),
+            );
+        } else {
+            let number = u32::from_str_radix(&unicode_seq, 16)
+                .map_err(|e| ErrorCode::BindError(format!("invalid unicode sequence: {}", e)))?;
+            res.push(char::from_u32(number).ok_or_else(|| {
+                ErrorCode::BindError(format!("invalid unicode sequence: {}", unicode_seq))
+            })?);
+        }
+        Ok(())
+    };
+
+    let octal_byte_process = |chars: &mut Peekable<Chars<'_>>, res: &mut String, digit: char| {
+        let mut unicode_seq: String = String::with_capacity(3);
+        unicode_seq.push(digit);
+        for _ in 0..2 {
+            if let Some(c) = chars.peek() && matches!(*c, '0'..='7') {
+                unicode_seq.push(chars.next().unwrap());
+            }else{
+                break;
+            }
+        }
+
+        let number = [u8::from_str_radix(&unicode_seq, 8)
+            .map_err(|e| ErrorCode::BindError(format!("invalid unicode sequence: {}", e)))?];
+
+        res.push(
+            from_utf8(&number)
+                .map_err(|err| ErrorCode::BindError(format!("invalid unicode sequence: {}", err)))?
+                .chars()
+                .next()
+                .unwrap(),
+        );
+        Ok::<(), RwError>(())
+    };
+
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                None => {
+                    return Err(ErrorCode::BindError("unterminated escape sequence".into()).into());
+                }
+                Some(next_c) => match next_c {
+                    'b' => res.push('\u{08}'),
+                    'f' => res.push('\u{0C}'),
+                    'n' => res.push('\n'),
+                    'r' => res.push('\r'),
+                    't' => res.push('\t'),
+                    'x' => hex_byte_process(&mut chars, &mut res, 2, 'x')?,
+                    'u' => hex_byte_process(&mut chars, &mut res, 4, 'u')?,
+                    'U' => hex_byte_process(&mut chars, &mut res, 8, 'U')?,
+                    digit @ '0'..='7' => octal_byte_process(&mut chars, &mut res, digit)?,
+                    _ => res.push(next_c),
+                },
+            }
+        } else {
+            res.push(c);
+        }
+    }
+
+    Ok(res)
+}
+
 #[cfg(test)]
 mod tests {
+    use risingwave_common::types::test_utils::IntervalTestExt;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::build_from_prost;
     use risingwave_sqlparser::ast::Value::Number;
@@ -334,27 +443,27 @@ mod tests {
         ];
         let data = vec![
             Ok(Literal::new(
-                Some(ScalarImpl::Interval(IntervalUnit::from_minutes(60))),
+                Some(ScalarImpl::Interval(Interval::from_minutes(60))),
                 DataType::Interval,
             )),
             Ok(Literal::new(
-                Some(ScalarImpl::Interval(IntervalUnit::from_minutes(60))),
+                Some(ScalarImpl::Interval(Interval::from_minutes(60))),
                 DataType::Interval,
             )),
             Ok(Literal::new(
-                Some(ScalarImpl::Interval(IntervalUnit::from_ymd(1, 0, 0))),
+                Some(ScalarImpl::Interval(Interval::from_ymd(1, 0, 0))),
                 DataType::Interval,
             )),
             Ok(Literal::new(
-                Some(ScalarImpl::Interval(IntervalUnit::from_millis(6 * 1000))),
+                Some(ScalarImpl::Interval(Interval::from_millis(6 * 1000))),
                 DataType::Interval,
             )),
             Ok(Literal::new(
-                Some(ScalarImpl::Interval(IntervalUnit::from_minutes(2))),
+                Some(ScalarImpl::Interval(Interval::from_minutes(2))),
                 DataType::Interval,
             )),
             Ok(Literal::new(
-                Some(ScalarImpl::Interval(IntervalUnit::from_month(1))),
+                Some(ScalarImpl::Interval(Interval::from_month(1))),
                 DataType::Interval,
             )),
         ];

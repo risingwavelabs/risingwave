@@ -5,7 +5,7 @@ on:
     paths: [dashboard/**, proto/**]
 
 concurrency:
-  group: dashbaord-build-${{ github.ref }}
+  group: dashboard-build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -17,30 +17,44 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
-      - run: |
-          git remote add upstream https://github.com/risingwavelabs/risingwave.git
-          git fetch upstream $GITHUB_BASE_REF
       - uses: actions/setup-node@v2
         with:
           node-version: "18"
       - uses: arduino/setup-protoc@v1
         with:
           version: "3.x"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: build
         working-directory: ./dashboard
         run: |
+          echo "::group::npm install"
           npm install
+          echo "::endgroup::"
           npm run gen-proto
 
           git add -A
           if ! git diff --quiet --staged; then
             git reset
             echo "::error::Generated proto files are not up to date."
+
+            echo "::group::check if the branch is out-of-date"
+            git pull origin $GITHUB_HEAD_REF --unshallow
+            git remote add upstream https://github.com/risingwavelabs/risingwave.git
+            git fetch upstream $GITHUB_BASE_REF:$GITHUB_BASE_REF
+
+            echo "origin/$GITHUB_HEAD_REF: $(git rev-parse origin/$GITHUB_HEAD_REF)"
+            echo "upstream/$GITHUB_BASE_REF: $(git rev-parse upstream/$GITHUB_BASE_REF)"
+
+            git merge-base origin/$GITHUB_HEAD_REF upstream/$GITHUB_BASE_REF
+
             FORK_POINT=$(git merge-base origin/$GITHUB_HEAD_REF upstream/$GITHUB_BASE_REF)
+            echo "FORK_POINT: $FORK_POINT"
+            echo "::endgroup::"
+
             if ! git diff --quiet $FORK_POINT..upstream/$GITHUB_BASE_REF -- ../proto; then
-              echo "::error::Your branch is out-of-date. Please update your branch first and then run 'npm run gen-proto' at dashboard/ and commit the changes."
+              echo "::error::Your branch is out-of-date. Please update your branch first and then run 'npm i && npm run gen-proto' at dashboard/ and commit the changes."
             else
-              echo "::error::Please run 'npm run gen-proto' at dashboard/ and commit the changes."
+              echo "::error::Please run 'npm i && npm run gen-proto' at dashboard/ and commit the changes."
             fi
             exit 1
           fi

@@ -9,39 +9,44 @@ To report bugs, create a [GitHub issue](https://github.com/risingwavelabs/rising
 
 ## Table of contents
 
-- [Developer guide](#developer-guide)
-  - [Table of contents](#table-of-contents)
-  - [Read the design docs](#read-the-design-docs)
-  - [Learn about the code structure](#learn-about-the-code-structure)
-  - [Set up the development environment](#set-up-the-development-environment)
-  - [Start and monitor a dev cluster](#start-and-monitor-a-dev-cluster)
-    - [Configure additional components](#configure-additional-components)
-    - [Configure system variables](#configure-system-variables)
-    - [Start the playground with RiseDev](#start-the-playground-with-risedev)
-    - [Start the playground with cargo](#start-the-playground-with-cargo)
-  - [Develop the dashboard](#develop-the-dashboard)
-    - [Dashboard v1](#dashboard-v1)
-    - [Dashboard v2](#dashboard-v2)
-  - [Observability components](#observability-components)
-    - [Cluster Control](#cluster-control)
-    - [Monitoring](#monitoring)
-    - [Tracing](#tracing)
-    - [Dashboard](#dashboard)
-    - [Logging](#logging)
-  - [Test your code changes](#test-your-code-changes)
-    - [Lint](#lint)
-    - [Unit tests](#unit-tests)
-    - [Planner tests](#planner-tests)
-    - [End-to-end tests](#end-to-end-tests)
-    - [End-to-end tests on CI](#end-to-end-tests-on-ci)
-    - [DocSlt tests](#docslt-tests)
-    - [Deterministic simulation tests](#deterministic-simulation-tests)
-  - [Miscellaneous checks](#miscellaneous-checks)
-  - [Update Grafana dashboard](#update-grafana-dashboard)
-  - [Add new files](#add-new-files)
-  - [Add new dependencies](#add-new-dependencies)
-  - [Submit PRs](#submit-prs)
+<!--
+Table of contents generated with markdown-toc:
+http://ecotrust-canada.github.io/markdown-toc/
+-->
 
+- [Read the design docs](#read-the-design-docs)
+- [Learn about the code structure](#learn-about-the-code-structure)
+- [Set up the development environment](#set-up-the-development-environment)
+- [Start and monitor a dev cluster](#start-and-monitor-a-dev-cluster)
+  * [Configure additional components](#configure-additional-components)
+  * [Configure system variables](#configure-system-variables)
+  * [Start the playground with RiseDev](#start-the-playground-with-risedev)
+  * [Start the playground with cargo](#start-the-playground-with-cargo)
+- [Debug playground using vscode](#debug-playground-using-vscode)
+- [Develop the dashboard](#develop-the-dashboard)
+  * [Dashboard v1](#dashboard-v1)
+  * [Dashboard v2](#dashboard-v2)
+- [Observability components](#observability-components)
+  * [Cluster Control](#cluster-control)
+  * [Monitoring](#monitoring)
+  * [Tracing](#tracing)
+  * [Dashboard](#dashboard)
+  * [Logging](#logging)
+- [Test your code changes](#test-your-code-changes)
+  * [Lint](#lint)
+  * [Unit tests](#unit-tests)
+  * [Planner tests](#planner-tests)
+  * [End-to-end tests](#end-to-end-tests)
+  * [End-to-end tests on CI](#end-to-end-tests-on-ci)
+  * [Fuzzing tests](#fuzzing-tests)
+  * [DocSlt tests](#docslt-tests)
+  * [Deterministic simulation tests](#deterministic-simulation-tests)
+- [Miscellaneous checks](#miscellaneous-checks)
+- [Update Grafana dashboard](#update-grafana-dashboard)
+- [Add new files](#add-new-files)
+- [Add new dependencies](#add-new-dependencies)
+- [Submit PRs](#submit-prs)
+- [Profiling](#profiling)
 
 ## Read the design docs
 
@@ -63,11 +68,11 @@ RiseDev is the development mode of RisingWave. To develop RisingWave, you need t
 
 * Rust toolchain
 * CMake
-* protobuf
+* protobuf (>= 3.12.0)
 * OpenSSL
 * PostgreSQL (psql) (>= 14.1)
-* Tmux
-* LLVM 15 (To workaround some bugs in macOS toolchain, see https://github.com/risingwavelabs/risingwave/issues/6205).
+* Tmux (>= v3.2a)
+* LLVM 15 (For macOS only, to workaround some bugs in macOS toolchain. See https://github.com/risingwavelabs/risingwave/issues/6205).
 
 To install the dependencies on macOS, run:
 
@@ -84,6 +89,10 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
 Then you'll be able to compile and start RiseDev!
+
+> **Note**
+>
+> `.cargo/config.toml` contains `rustflags` configurations like `-Clink-arg` and `-Ctarget-feature`. Since it will be [merged](https://doc.rust-lang.org/cargo/reference/config.html#hierarchical-structure) with `$HOME/.cargo/config.toml`, check the config files and make sure they don't conflict if you have global `rustflags` configurations for e.g. linker there.
 
 ## Start and monitor a dev cluster
 
@@ -194,6 +203,10 @@ Then, connect to the playground instance via:
 psql -h localhost -p 4566 -d dev -U root
 ```
 
+## Debug playground using vscode 
+
+To step through risingwave locally with a debugger you can use the `launch.json` and the `tasks.json` provided in `vscode_suggestions`. After adding these files to your local `.vscode` folder you can debug and set breakpoints by launching `Launch 'risingwave p' debug`. 
+
 ## Develop the dashboard
 
 Currently, RisingWave has two versions of dashboards. You can use RiseDev config to select which version to use.
@@ -229,7 +242,7 @@ cargo run --bin risectl -- --help
 ... or
 
 ```
-./risingwave risectl --help
+./risedev ctl --help
 ```
 
 for more information.
@@ -255,7 +268,7 @@ The Rust components use `tokio-tracing` to handle both logging and tracing. The 
 * Third-party libraries: warn
 * Other libraries: debug
 
-If you need to adjust log levels, change the logging filters in `utils/runtime/lib.rs`.
+If you need to adjust log levels, change the logging filters in `src/utils/runtime/src/lib.rs`.
 
 
 ## Test your code changes
@@ -288,6 +301,11 @@ If you want to see the coverage report, run this command:
 ./risedev test-cov
 ```
 
+Some unit tests will not work if the `/tmp` directory is on a TmpFS file system: these unit tests will fail with this
+error message: `Attempting to create cache file on a TmpFS file system. TmpFS cannot be used because it does not support Direct IO.`. 
+If this happens you can override the use of `/tmp` by setting the  environment variable `RISINGWAVE_TEST_DIR` to a 
+directory that is on a non-TmpFS filesystem, the unit tests will then place temporary files under your specified path.
+
 ### Planner tests
 
 RisingWave's SQL frontend has SQL planner tests. For more information, see [Planner Test Guide](../src/frontend/planner_test/README.md).
@@ -299,7 +317,7 @@ Use [sqllogictest-rs](https://github.com/risinglightdb/sqllogictest-rs) to run R
 sqllogictest installation is included when you install test tools with the `./risedev install-tools` command. You may also install it with:
 
 ```shell
-cargo install --git https://github.com/risinglightdb/sqllogictest-rs --bin sqllogictest
+cargo install sqllogictest-bin --locked
 ```
 
 Before running end-to-end tests, you will need to start a full cluster first:
@@ -350,6 +368,12 @@ Basically, CI is using the following two configurations to run the full e2e test
 ```
 
 You can adjust the environment variable to enable some specific code to make all e2e tests pass. Refer to GitHub Action workflow for more information.
+
+### Fuzzing tests
+
+#### SqlSmith
+
+Currently, SqlSmith supports for e2e and frontend fuzzing. Take a look at [Fuzzing tests](../src/tests/sqlsmith/README.md) for more details on running it locally.
 
 ### DocSlt tests
 
@@ -447,16 +471,20 @@ license-eye -c .licenserc.yaml header fix
 
 ## Add new dependencies
 
-To avoid rebuild some common dependencies across different crates in workspace, use
+`./risedev check-hakari`: To avoid rebuild some common dependencies across different crates in workspace, use
 [cargo-hakari](https://docs.rs/cargo-hakari/latest/cargo_hakari/) to ensure all dependencies
 are built with the same feature set across workspace. You'll need to run `cargo hakari generate`
 after deps get updated.
 
-Use [cargo-udeps](https://github.com/est31/cargo-udeps) to find unused dependencies in
-workspace.
+`./risedev check-udeps`: Use [cargo-udeps](https://github.com/est31/cargo-udeps) to find unused dependencies in workspace.
 
-And use [cargo-sort](https://crates.io/crates/cargo-sort) to ensure all deps are get sorted.
+`./risedev check-dep-sort`: Use [cargo-sort](https://crates.io/crates/cargo-sort) to ensure all deps are get sorted.
 
 ## Submit PRs
 
 Instructions about submitting PRs are included in the [contribution guidelines](../CONTRIBUTING.md).
+
+## Profiling
+
+- [CPU Profiling Guide](./cpu-profiling.md)
+- [Memory (Heap) Profiling Guide](./memory-profiling.md)

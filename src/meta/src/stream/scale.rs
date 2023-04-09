@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,20 +23,16 @@ use num_integer::Integer;
 use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
-use risingwave_common::hash::{ParallelUnitId, VirtualNode};
-use risingwave_common::util::prost::is_stream_source;
+use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::common::{worker_node, ActorInfo, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment};
-use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{
-    ActorMapping, DispatcherType, FragmentType, PauseMutation, ResumeMutation, StreamActor,
-    StreamNode,
-};
+use risingwave_pb::stream_plan::{DispatcherType, FragmentTypeFlag, StreamActor, StreamNode};
 use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
+    BroadcastActorInfoTableRequest, BuildActorsRequest, UpdateActorsRequest,
 };
 use uuid::Uuid;
 
@@ -44,7 +40,6 @@ use crate::barrier::{Command, Reschedule};
 use crate::manager::{IdCategory, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::mapping::actor_mapping_from_bitmaps;
 use crate::stream::GlobalStreamManager;
 use crate::MetaResult;
 
@@ -104,20 +99,28 @@ impl RescheduleContext {
 
 /// This function provides an simple balancing method
 /// The specific process is as follows
+///
 /// 1. Calculate the number of target actors, and calculate the average value and the remainder, and
 /// use the average value as expected.
-/// 2. Filter out the actor to be removed and the actor to be retained,
-/// and sort them from largest to smallest (according to the number of virtual nodes held).
-/// 3. Calculate their balance
-///     3.1 For the actors to be removed, the number of virtual nodes per actor is the balance.
-///     3.2 For retained actors, the number of virtual nodes - expected is the balance.
-///     3.3 For newly created actors, -expected is the balance (always negative).
+///
+/// 2. Filter out the actor to be removed and the actor to be retained, and sort them from largest
+/// to smallest (according to the number of virtual nodes held).
+///
+/// 3. Calculate their balance, 1) For the actors to be removed, the number of virtual nodes per
+/// actor is the balance. 2) For retained actors, the number of virtual nodes - expected is the
+/// balance. 3) For newly created actors, -expected is the balance (always negative).
+///
 /// 4. Allocate the remainder, high priority to newly created nodes.
+///
 /// 5. After that, merge removed, retained and created into a queue, with the head of the queue
-/// being the source, and move the vnode to the dest at the end of the queue.
+/// being the source, and move the virtual nodes to the destination at the end of the queue.
 ///
 /// This can handle scale in, scale out, migration, and simultaneous scaling with as much affinity
-/// as possible (still needs to be tested)
+/// as possible.
+///
+/// Note that this function can only rebalance actors whose `vnode_bitmap` is not `None`, in other
+/// words, for `Fragment` of `FragmentDistributionType::Single`, using this function will cause
+/// assert to fail and should be skipped from the upper level.
 ///
 /// The return value is the bitmap distribution after scaling, which covers all virtual node indexes
 pub(crate) fn rebalance_actor_vnode(
@@ -131,12 +134,12 @@ pub(crate) fn rebalance_actor_vnode(
     assert!(target_actor_count > 0);
 
     // represents the balance of each actor, used to sort later
+    #[derive(Debug)]
     struct Balance {
         actor_id: ActorId,
         balance: i32,
         builder: BitmapBuilder,
     }
-
     let (expected, mut remain) = VirtualNode::COUNT.div_rem(&target_actor_count);
 
     tracing::debug!(
@@ -159,10 +162,7 @@ pub(crate) fn rebalance_actor_vnode(
 
     let order_by_bitmap_desc =
         |(_, bitmap_a): &(ActorId, Bitmap), (_, bitmap_b): &(ActorId, Bitmap)| -> Ordering {
-            bitmap_a
-                .num_high_bits()
-                .cmp(&bitmap_b.num_high_bits())
-                .reverse()
+            bitmap_a.count_ones().cmp(&bitmap_b.count_ones()).reverse()
         };
 
     let builder_from_bitmap = |bitmap: &Bitmap| -> BitmapBuilder {
@@ -176,8 +176,8 @@ pub(crate) fn rebalance_actor_vnode(
     let prev_remain = removed
         .iter()
         .map(|(_, bitmap)| {
-            assert!(bitmap.num_high_bits() >= prev_expected);
-            bitmap.num_high_bits() - prev_expected
+            assert!(bitmap.count_ones() >= prev_expected);
+            bitmap.count_ones() - prev_expected
         })
         .sum::<usize>();
 
@@ -186,7 +186,7 @@ pub(crate) fn rebalance_actor_vnode(
 
     let removed_balances = removed.into_iter().map(|(actor_id, bitmap)| Balance {
         actor_id,
-        balance: bitmap.num_high_bits() as i32,
+        balance: bitmap.count_ones() as i32,
         builder: builder_from_bitmap(&bitmap),
     });
 
@@ -194,7 +194,7 @@ pub(crate) fn rebalance_actor_vnode(
         .into_iter()
         .map(|(actor_id, bitmap)| Balance {
             actor_id,
-            balance: bitmap.num_high_bits() as i32 - expected as i32,
+            balance: bitmap.count_ones() as i32 - expected as i32,
             builder: builder_from_bitmap(&bitmap),
         })
         .collect_vec();
@@ -237,7 +237,6 @@ pub(crate) fn rebalance_actor_vnode(
 
     // We will return the full bitmap here after rebalancing,
     // if we want to return only the changed actors, filter balance = 0 here
-
     let mut result = HashMap::with_capacity(target_actor_count);
 
     for balance in &v {
@@ -360,8 +359,6 @@ where
         let mut fragment_dispatcher_map = HashMap::new();
 
         for actor in actor_map.values() {
-            // Question(peng): will a fragment use multiple different dispatchers to connect to the
-            // same downstream fragment?
             for dispatcher in &actor.dispatcher {
                 for downstream_actor_id in &dispatcher.downstream_actor_id {
                     if let Some(downstream_actor) = actor_map.get(downstream_actor_id) {
@@ -380,7 +377,7 @@ where
             }
         }
 
-        // Then, we collect all available upstream
+        // Then, we collect all available upstreams
         let mut upstream_dispatchers: HashMap<
             ActorId,
             Vec<(FragmentId, DispatcherId, DispatcherType)>,
@@ -450,7 +447,12 @@ where
 
                     if let Some(downstream_fragments) = fragment_dispatcher_map.get(&downstream_id)
                     {
-                        queue.extend(downstream_fragments.keys().cloned());
+                        let no_shuffle_downstreams = downstream_fragments
+                            .iter()
+                            .filter(|(_, ty)| **ty == DispatcherType::NoShuffle)
+                            .map(|(fragment_id, _)| fragment_id);
+
+                        queue.extend(no_shuffle_downstreams.copied());
                     }
 
                     no_shuffle_reschedule.insert(
@@ -463,10 +465,11 @@ where
                 }
             }
 
-            if fragment.get_fragment_type()? == FragmentType::Source {
+            if (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0 {
                 let stream_node = fragment.actors.first().unwrap().get_nodes().unwrap();
-                let source_node = TableFragments::find_source_node(stream_node).unwrap();
-                if is_stream_source(source_node) {
+                let source_node =
+                    TableFragments::find_source_node_with_stream_source(stream_node).unwrap();
+                if source_node.source_inner.is_some() {
                     stream_source_fragment_ids.insert(*fragment_id);
                 }
             }
@@ -591,10 +594,24 @@ where
 
             let fragment = ctx.fragment_map.get(fragment_id).unwrap();
 
-            let actor_vnode =
-                rebalance_actor_vnode(&fragment.actors, &actors_to_remove, &actors_to_create);
+            match fragment.distribution_type() {
+                FragmentDistributionType::Single => {
+                    // Skip rebalance action for single distribution (always None)
+                    fragment_actor_bitmap
+                        .insert(fragment.fragment_id as FragmentId, Default::default());
+                }
+                FragmentDistributionType::Hash => {
+                    let actor_vnode = rebalance_actor_vnode(
+                        &fragment.actors,
+                        &actors_to_remove,
+                        &actors_to_create,
+                    );
 
-            fragment_actor_bitmap.insert(fragment.fragment_id as FragmentId, actor_vnode);
+                    fragment_actor_bitmap.insert(fragment.fragment_id as FragmentId, actor_vnode);
+                }
+
+                FragmentDistributionType::Unspecified => unreachable!(),
+            }
         }
 
         // Index for fragment -> { actor -> parallel_unit } after reschedule.
@@ -663,10 +680,13 @@ where
                 return;
             }
 
-            let upstream_fragment_bitmap = fragment_updated_bitmap
+            let fragment = ctx.fragment_map.get(fragment_id).unwrap();
+
+            // If the upstream is a Singleton Fragment, there will be no Bitmap changes
+            let mut upstream_fragment_bitmap = fragment_updated_bitmap
                 .get(upstream_fragment_id)
                 .cloned()
-                .unwrap();
+                .unwrap_or_default();
 
             let upstream_fragment_actor_map = fragment_actors_after_reschedule
                 .get(upstream_fragment_id)
@@ -681,12 +701,13 @@ where
             }
 
             let mut fragment_bitmap = HashMap::new();
-            for (upstream_actor_id, bitmap) in upstream_fragment_bitmap {
-                let parallel_unit_id = upstream_fragment_actor_map.get(&upstream_actor_id).unwrap();
-                let actor_id = parallel_unit_id_to_actor_id.get(parallel_unit_id).unwrap();
+            for (upstream_actor_id, parallel_unit_id) in upstream_fragment_actor_map {
+                let actor_id = parallel_unit_id_to_actor_id.get(&parallel_unit_id).unwrap();
 
-                // Copy the bitmap
-                fragment_bitmap.insert(*actor_id, bitmap);
+                if let Some(bitmap) = upstream_fragment_bitmap.remove(&upstream_actor_id) {
+                    // Copy the bitmap
+                    fragment_bitmap.insert(*actor_id, bitmap);
+                }
 
                 no_shuffle_upstream_actor_map.insert(*actor_id as ActorId, upstream_actor_id);
                 no_shuffle_downstream_actors_map
@@ -695,12 +716,26 @@ where
                     .insert(*fragment_id, *actor_id);
             }
 
+            match fragment.distribution_type() {
+                FragmentDistributionType::Hash => {}
+                FragmentDistributionType::Single => {
+                    // single distribution should update nothing
+                    assert!(fragment_bitmap.is_empty());
+                }
+                FragmentDistributionType::Unspecified => unreachable!(),
+            }
+
             fragment_updated_bitmap
                 .try_insert(*fragment_id, fragment_bitmap)
                 .unwrap();
 
             if let Some(downstream_fragments) = ctx.fragment_dispatcher_map.get(fragment_id) {
-                for downstream_fragment_id in downstream_fragments.keys() {
+                let no_shuffle_downstreams = downstream_fragments
+                    .iter()
+                    .filter(|(_, ty)| **ty == DispatcherType::NoShuffle)
+                    .map(|(fragment_id, _)| fragment_id);
+
+                for downstream_fragment_id in no_shuffle_downstreams {
                     arrange_no_shuffle_relation(
                         ctx,
                         downstream_fragment_id,
@@ -738,9 +773,6 @@ where
             }
         }
 
-        // Note: we must create hanging channels at first, creating hanging channels with upstream
-        // actors after scaling will cause the barrier to fail to push down.
-        let mut worker_hanging_channels: HashMap<WorkerId, Vec<HangingChannel>> = HashMap::new();
         let mut new_created_actors = HashMap::new();
         for fragment_id in reschedules.keys() {
             let actors_to_create = fragment_actors_to_create
@@ -752,42 +784,12 @@ where
 
             assert!(!fragment.actors.is_empty());
 
-            let updated_bitmap = fragment_actor_bitmap.get(fragment_id).unwrap();
-
             for (actor_to_create, sample_actor) in actors_to_create
                 .iter()
-                .zip_eq(repeat(fragment.actors.first().unwrap()).take(actors_to_create.len()))
+                .zip_eq_debug(repeat(fragment.actors.first().unwrap()).take(actors_to_create.len()))
             {
                 let new_actor_id = actor_to_create.0;
-                let new_parallel_unit_id = actor_to_create.1;
                 let mut new_actor = sample_actor.clone();
-
-                let worker = ctx.parallel_unit_id_to_worker(new_parallel_unit_id)?;
-
-                // Because of the transferability of no shuffle, the upstream and downstream actors
-                // of no shuffle are always created at the same time, so the upstream and downstream
-                // scaling process of 1-1 no shuffle does not need to create a hanging channel,
-                // but for the downstream of no shuffle with multiple upstreams (e.g. dynamic filter
-                // actor), the hanging channel from the remaining upstreams to the new actor needs
-                // to be created
-                for upstream_actor_id in &new_actor.upstream_actor_id {
-                    let upstream_worker_id = ctx
-                        .actor_id_to_parallel_unit(upstream_actor_id)?
-                        .worker_node_id;
-                    worker_hanging_channels
-                        .entry(upstream_worker_id)
-                        .or_default()
-                        .push(HangingChannel {
-                            upstream: Some(ActorInfo {
-                                actor_id: *upstream_actor_id,
-                                host: None,
-                            }),
-                            downstream: Some(ActorInfo {
-                                actor_id: *new_actor_id,
-                                host: worker.host.clone(),
-                            }),
-                        });
-                }
 
                 // This should be assigned before the `modify_actor_upstream_and_downstream` call,
                 // because we need to use the new actor id to find the upstream and
@@ -795,9 +797,7 @@ where
                 new_actor.actor_id = *new_actor_id;
 
                 Self::modify_actor_upstream_and_downstream(
-                    &ctx.fragment_map,
-                    &ctx.actor_map,
-                    &ctx.fragment_dispatcher_map,
+                    &ctx,
                     &fragment_actors_to_remove,
                     &fragment_actors_to_create,
                     &fragment_actor_bitmap,
@@ -806,7 +806,10 @@ where
                     &mut new_actor,
                 )?;
 
-                if let Some(bitmap) = updated_bitmap.get(new_actor_id) {
+                if let Some(bitmap) = fragment_actor_bitmap
+                    .get(fragment_id)
+                    .and_then(|actor_bitmaps| actor_bitmaps.get(new_actor_id))
+                {
                     new_actor.vnode_bitmap = Some(bitmap.to_protobuf());
                 }
 
@@ -890,8 +893,7 @@ where
         }
 
         self.create_actors_on_compute_node(
-            &ctx,
-            worker_hanging_channels,
+            &ctx.worker_nodes,
             actor_infos_to_broadcast,
             node_actors_to_create,
             broadcast_worker_ids,
@@ -965,22 +967,23 @@ where
                     if !in_degree_types.contains(&DispatcherType::Hash) {
                         None
                     } else if parallel_unit_to_actor_after_reschedule.len() == 1 {
-                        Some(ActorMapping {
-                            original_indices: vec![VirtualNode::COUNT as u64 - 1],
-                            data: vec![
-                                *parallel_unit_to_actor_after_reschedule
-                                    .first_key_value()
-                                    .unwrap()
-                                    .1,
-                            ],
-                        })
+                        let actor_id = parallel_unit_to_actor_after_reschedule
+                            .into_values()
+                            .next()
+                            .unwrap();
+                        Some(ActorMapping::new_single(actor_id))
                     } else {
-                        Some(actor_mapping_from_bitmaps(
-                            fragment_actor_bitmap.get(&fragment_id).unwrap(),
+                        // Changes of the bitmap must occur in the case of HashDistribution
+                        Some(ActorMapping::from_bitmaps(
+                            &fragment_actor_bitmap[&fragment_id],
                         ))
                     }
                 }
-                FragmentDistributionType::Single => None,
+
+                FragmentDistributionType::Single => {
+                    assert!(fragment_actor_bitmap.get(&fragment_id).unwrap().is_empty());
+                    None
+                }
                 FragmentDistributionType::Unspecified => unreachable!(),
             };
 
@@ -1003,43 +1006,49 @@ where
                 }
             }
 
-            let downstream_fragment_id =
-                if let Some(downstream_fragments) = ctx.fragment_dispatcher_map.get(&fragment_id) {
-                    // Skip NoShuffle fragments' downstream
-                    if ctx
-                        .no_shuffle_source_fragment_ids
-                        .contains(&fragment.fragment_id)
-                    {
-                        None
-                    } else {
-                        let downstream_fragment_id =
-                            downstream_fragments.iter().exactly_one().unwrap().0;
-                        Some(*downstream_fragment_id as FragmentId)
-                    }
-                } else {
-                    None
-                };
+            let downstream_fragment_ids = if let Some(downstream_fragments) =
+                ctx.fragment_dispatcher_map.get(&fragment_id)
+            {
+                // Skip fragments' no-shuffle downstream, as there's no need to update the merger
+                // (receiver) of a no-shuffle downstream
+                downstream_fragments
+                    .iter()
+                    .filter(|(_, dispatcher_type)| *dispatcher_type != &DispatcherType::NoShuffle)
+                    .map(|(fragment_id, _)| *fragment_id)
+                    .collect_vec()
+            } else {
+                vec![]
+            };
 
-            let mut vnode_bitmap_updates = fragment_actor_bitmap.remove(&fragment_id).unwrap();
+            let vnode_bitmap_updates = match fragment.distribution_type() {
+                FragmentDistributionType::Hash => {
+                    let mut vnode_bitmap_updates =
+                        fragment_actor_bitmap.remove(&fragment_id).unwrap();
 
-            // We need to keep the bitmaps from changed actors only,
-            // otherwise the barrier will become very large with many actors
-            for actor_id in actors_after_reschedule.keys() {
-                assert!(vnode_bitmap_updates.contains_key(actor_id));
+                    // We need to keep the bitmaps from changed actors only,
+                    // otherwise the barrier will become very large with many actors
+                    for actor_id in actors_after_reschedule.keys() {
+                        assert!(vnode_bitmap_updates.contains_key(actor_id));
 
-                // retain actor
-                if let Some(actor) = ctx.actor_map.get(actor_id) {
-                    let bitmap = vnode_bitmap_updates.get(actor_id).unwrap();
+                        // retain actor
+                        if let Some(actor) = ctx.actor_map.get(actor_id) {
+                            let bitmap = vnode_bitmap_updates.get(actor_id).unwrap();
 
-                    if let Some(buffer) = actor.vnode_bitmap.as_ref() {
-                        let prev_bitmap = Bitmap::from(buffer);
+                            if let Some(buffer) = actor.vnode_bitmap.as_ref() {
+                                let prev_bitmap = Bitmap::from(buffer);
 
-                        if prev_bitmap.eq(bitmap) {
-                            vnode_bitmap_updates.remove(actor_id);
+                                if prev_bitmap.eq(bitmap) {
+                                    vnode_bitmap_updates.remove(actor_id);
+                                }
+                            }
                         }
                     }
+
+                    vnode_bitmap_updates
                 }
-            }
+                FragmentDistributionType::Single => HashMap::new(),
+                FragmentDistributionType::Unspecified => unreachable!(),
+            };
 
             let upstream_fragment_dispatcher_ids =
                 upstream_fragment_dispatcher_set.into_iter().collect_vec();
@@ -1057,7 +1066,7 @@ where
                     vnode_bitmap_updates,
                     upstream_fragment_dispatcher_ids,
                     upstream_dispatcher_mapping,
-                    downstream_fragment_id,
+                    downstream_fragment_ids,
                     actor_splits,
                 },
             );
@@ -1105,14 +1114,10 @@ where
 
         let _source_pause_guard = self.source_manager.paused.lock().await;
 
-        tracing::trace!("reschedule plan: {:#?}", reschedule_fragment);
+        tracing::debug!("reschedule plan: {:#?}", reschedule_fragment);
 
         self.barrier_scheduler
-            .run_multiple_commands(vec![
-                Command::Plain(Some(Mutation::Pause(PauseMutation {}))),
-                Command::RescheduleFragment(reschedule_fragment),
-                Command::Plain(Some(Mutation::Resume(ResumeMutation {}))),
-            ])
+            .run_command_with_paused(Command::RescheduleFragment(reschedule_fragment))
             .await?;
 
         Ok(())
@@ -1120,14 +1125,13 @@ where
 
     async fn create_actors_on_compute_node(
         &self,
-        ctx: &RescheduleContext,
-        worker_hanging_channels: HashMap<WorkerId, Vec<HangingChannel>>,
+        worker_nodes: &HashMap<WorkerId, WorkerNode>,
         actor_infos_to_broadcast: BTreeMap<u32, ActorInfo>,
         node_actors_to_create: HashMap<WorkerId, Vec<StreamActor>>,
         broadcast_worker_ids: HashSet<u32>,
     ) -> MetaResult<()> {
         for worker_id in &broadcast_worker_ids {
-            let node = ctx.worker_nodes.get(worker_id).unwrap();
+            let node = worker_nodes.get(worker_id).unwrap();
             let client = self.env.stream_client_pool().get(node).await?;
 
             let actor_infos_to_broadcast = actor_infos_to_broadcast.values().cloned().collect();
@@ -1140,38 +1144,20 @@ where
                 .await?;
         }
 
-        let mut worker_hanging_channels = worker_hanging_channels;
-
         for (node_id, stream_actors) in &node_actors_to_create {
-            let node = ctx.worker_nodes.get(node_id).unwrap();
+            let node = worker_nodes.get(node_id).unwrap();
             let client = self.env.stream_client_pool().get(node).await?;
             let request_id = Uuid::new_v4().to_string();
             let request = UpdateActorsRequest {
                 request_id,
                 actors: stream_actors.clone(),
-                hanging_channels: worker_hanging_channels.remove(node_id).unwrap_or_default(),
             };
 
             client.to_owned().update_actors(request).await?;
         }
 
-        for (node_id, hanging_channels) in worker_hanging_channels {
-            let node = ctx.worker_nodes.get(&node_id).unwrap();
-            let client = self.env.stream_client_pool().get(node).await?;
-            let request_id = Uuid::new_v4().to_string();
-
-            client
-                .to_owned()
-                .update_actors(UpdateActorsRequest {
-                    request_id,
-                    actors: vec![],
-                    hanging_channels,
-                })
-                .await?;
-        }
-
         for (node_id, stream_actors) in node_actors_to_create {
-            let node = ctx.worker_nodes.get(&node_id).unwrap();
+            let node = worker_nodes.get(&node_id).unwrap();
             let client = self.env.stream_client_pool().get(node).await?;
             let request_id = Uuid::new_v4().to_string();
 
@@ -1260,11 +1246,8 @@ where
 
     /// Modifies the upstream and downstream actors of the new created actor according to the
     /// overall changes, and is used to handle cascading updates
-    #[allow(clippy::too_many_arguments)]
     fn modify_actor_upstream_and_downstream(
-        fragment_map: &HashMap<FragmentId, Fragment>,
-        actor_map: &HashMap<ActorId, StreamActor>,
-        fragment_relation_map: &HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
+        ctx: &RescheduleContext,
         fragment_actors_to_remove: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
         fragment_actors_to_create: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
         fragment_actor_bitmap: &HashMap<FragmentId, HashMap<ActorId, Bitmap>>,
@@ -1272,11 +1255,12 @@ where
         no_shuffle_downstream_actors_map: &HashMap<ActorId, HashMap<FragmentId, ActorId>>,
         new_actor: &mut StreamActor,
     ) -> MetaResult<()> {
-        let fragment = fragment_map.get(&new_actor.fragment_id).unwrap();
+        let fragment = &ctx.fragment_map.get(&new_actor.fragment_id).unwrap();
         let mut applied_upstream_fragment_actor_ids = HashMap::new();
 
         for upstream_fragment_id in &fragment.upstream_fragment_ids {
-            let upstream_dispatch_type = fragment_relation_map
+            let upstream_dispatch_type = &ctx
+                .fragment_dispatcher_map
                 .get(upstream_fragment_id)
                 .and_then(|map| map.get(&fragment.fragment_id))
                 .unwrap();
@@ -1284,7 +1268,7 @@ where
             match upstream_dispatch_type {
                 DispatcherType::Unspecified => unreachable!(),
                 DispatcherType::Hash | DispatcherType::Broadcast | DispatcherType::Simple => {
-                    let upstream_fragment = fragment_map.get(upstream_fragment_id).unwrap();
+                    let upstream_fragment = &ctx.fragment_map.get(upstream_fragment_id).unwrap();
                     let mut upstream_actor_ids = upstream_fragment
                         .actors
                         .iter()
@@ -1355,7 +1339,7 @@ where
             let downstream_fragment_id = dispatcher
                 .downstream_actor_id
                 .iter()
-                .filter_map(|actor_id| actor_map.get(actor_id).map(|actor| actor.fragment_id))
+                .filter_map(|actor_id| ctx.actor_map.get(actor_id).map(|actor| actor.fragment_id))
                 .dedup()
                 .exactly_one()
                 .unwrap() as FragmentId;
@@ -1366,7 +1350,7 @@ where
                 fragment_actors_to_create.get(&downstream_fragment_id);
 
             match dispatcher.r#type() {
-                d @ (DispatcherType::Hash | DispatcherType::Simple) => {
+                d @ (DispatcherType::Hash | DispatcherType::Simple | DispatcherType::Broadcast) => {
                     if let Some(downstream_actors_to_remove) = downstream_fragment_actors_to_remove
                     {
                         dispatcher
@@ -1394,10 +1378,7 @@ where
                         .unwrap();
                     dispatcher.downstream_actor_id = vec![*downstream_actor_id as ActorId];
                 }
-                d => bail!(
-                    "cascading resolution of {:?} dispatcher is not supported for now",
-                    d
-                ),
+                DispatcherType::Unspecified => unreachable!(),
             }
 
             if let Some(mapping) = dispatcher.hash_mapping.as_mut() {
@@ -1405,7 +1386,7 @@ where
                     fragment_actor_bitmap.get(&downstream_fragment_id)
                 {
                     // If downstream scale in/out
-                    *mapping = actor_mapping_from_bitmaps(downstream_updated_bitmap)
+                    *mapping = ActorMapping::from_bitmaps(downstream_updated_bitmap).to_protobuf();
                 }
             }
         }

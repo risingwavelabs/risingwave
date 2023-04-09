@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,30 +15,38 @@
 use anyhow::{anyhow, ensure, Context, Result};
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, TimeZone, Utc};
+use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use google_cloud_pubsub::client::Client;
 use google_cloud_pubsub::subscription::{SeekTo, Subscription};
-use risingwave_common::{bail, try_match_expand};
+use risingwave_common::bail;
 use tonic::Code;
 
 use super::TaggedReceivedMessage;
+use crate::impl_common_split_reader_logic;
+use crate::parser::ParserConfig;
 use crate::source::google_pubsub::PubsubProperties;
 use crate::source::{
-    BoxSourceStream, Column, ConnectorState, SourceMessage, SplitId, SplitImpl, SplitMetaData,
-    SplitReader,
+    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SplitId, SplitImpl,
+    SplitMetaData, SplitReader,
 };
 
 const PUBSUB_MAX_FETCH_MESSAGES: usize = 1024;
 
+impl_common_split_reader_logic!(PubsubSplitReader, PubsubProperties);
+
 pub struct PubsubSplitReader {
     subscription: Subscription,
-    split_id: SplitId,
     stop_offset: Option<NaiveDateTime>,
+
+    split_id: SplitId,
+    parser_config: ParserConfig,
+    source_ctx: SourceContextRef,
 }
 
 impl PubsubSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
-    pub async fn into_stream(self) {
+    async fn into_data_stream(self) {
         loop {
             let pull_result = self
                 .subscription
@@ -106,16 +114,21 @@ impl SplitReader for PubsubSplitReader {
 
     async fn new(
         properties: PubsubProperties,
-        state: ConnectorState,
+        splits: Vec<SplitImpl>,
+        parser_config: ParserConfig,
+        source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        let splits = state.ok_or_else(|| anyhow!("no default state for reader"))?;
         ensure!(
             splits.len() == 1,
             "the pubsub reader only supports a single split"
         );
-        let split = try_match_expand!(splits.into_iter().next().unwrap(), SplitImpl::GooglePubsub)
-            .map_err(|e| anyhow!(e))?;
+        let split = splits
+            .into_iter()
+            .next()
+            .unwrap()
+            .into_google_pubsub()
+            .unwrap();
 
         // Set environment variables consumed by `google_cloud_pubsub`
         properties.initialize_env();
@@ -152,10 +165,12 @@ impl SplitReader for PubsubSplitReader {
             subscription,
             split_id: split.id(),
             stop_offset,
+            parser_config,
+            source_ctx,
         })
     }
 
-    fn into_stream(self) -> BoxSourceStream {
-        self.into_stream()
+    fn into_stream(self) -> BoxSourceWithStateStream {
+        self.into_chunk_stream()
     }
 }

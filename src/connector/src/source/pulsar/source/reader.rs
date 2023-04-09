@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,7 +16,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, ensure, Result};
 use async_trait::async_trait;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pulsar::consumer::InitialPosition;
@@ -24,16 +24,25 @@ use pulsar::message::proto::MessageIdData;
 use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
 use risingwave_common::try_match_expand;
 
+use crate::impl_common_split_reader_logic;
+use crate::parser::ParserConfig;
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{
-    BoxSourceStream, Column, ConnectorState, SourceMessage, SplitImpl, SplitReader, MAX_CHUNK_SIZE,
+    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SplitId, SplitImpl,
+    SplitMetaData, SplitReader, MAX_CHUNK_SIZE,
 };
+
+impl_common_split_reader_logic!(PulsarSplitReader, PulsarProperties);
 
 pub struct PulsarSplitReader {
     pulsar: Pulsar<TokioExecutor>,
     consumer: Consumer<Vec<u8>, TokioExecutor>,
     split: PulsarSplit,
+
+    split_id: SplitId,
+    parser_config: ParserConfig,
+    source_ctx: SourceContextRef,
 }
 
 // {ledger_id}:{entry_id}:{partition}:{batch_index}
@@ -84,26 +93,21 @@ impl SplitReader for PulsarSplitReader {
 
     async fn new(
         props: PulsarProperties,
-        state: ConnectorState,
+        splits: Vec<SplitImpl>,
+        parser_config: ParserConfig,
+        source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        let splits = state.ok_or_else(|| anyhow!("no default state for reader"))?;
         ensure!(splits.len() == 1, "only support single split");
         let split = try_match_expand!(splits.into_iter().next().unwrap(), SplitImpl::Pulsar)?;
-
-        let service_url = &props.service_url;
+        let pulsar = props.build_pulsar_client().await?;
         let topic = split.topic.to_string();
 
         tracing::debug!("creating consumer for pulsar split topic {}", topic,);
 
-        let pulsar: Pulsar<_> = Pulsar::builder(service_url, TokioExecutor)
-            .build()
-            .await
-            .map_err(|e| anyhow!(e))?;
-
         let builder: ConsumerBuilder<TokioExecutor> = pulsar
             .consumer()
-            .with_topic(topic)
+            .with_topic(&topic)
             .with_subscription_type(SubType::Exclusive)
             .with_subscription(format!(
                 "consumer-{}",
@@ -114,17 +118,35 @@ impl SplitReader for PulsarSplitReader {
             ));
 
         let builder = match split.start_offset.clone() {
-            PulsarEnumeratorOffset::Earliest => builder.with_options(
-                ConsumerOptions::default().with_initial_position(InitialPosition::Earliest),
-            ),
+            PulsarEnumeratorOffset::Earliest => {
+                if topic.starts_with("non-persistent://") {
+                    tracing::warn!("Earliest offset is not supported for non-persistent topic, use Latest instead");
+                    builder.with_options(
+                        ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
+                    )
+                } else {
+                    builder.with_options(
+                        ConsumerOptions::default().with_initial_position(InitialPosition::Earliest),
+                    )
+                }
+            }
             PulsarEnumeratorOffset::Latest => builder.with_options(
                 ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
             ),
-            PulsarEnumeratorOffset::MessageId(m) => builder.with_options(pulsar::ConsumerOptions {
-                durable: Some(false),
-                start_message_id: parse_message_id(m.as_str()).ok(),
-                ..Default::default()
-            }),
+            PulsarEnumeratorOffset::MessageId(m) => {
+                if topic.starts_with("non-persistent://") {
+                    tracing::warn!("MessageId offset is not supported for non-persistent topic, use Latest instead");
+                    builder.with_options(
+                        ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
+                    )
+                } else {
+                    builder.with_options(pulsar::ConsumerOptions {
+                        durable: Some(false),
+                        start_message_id: parse_message_id(m.as_str()).ok(),
+                        ..Default::default()
+                    })
+                }
+            }
 
             PulsarEnumeratorOffset::Timestamp(_) => builder,
         };
@@ -140,23 +162,27 @@ impl SplitReader for PulsarSplitReader {
         Ok(Self {
             pulsar,
             consumer,
+            split_id: split.id(),
             split,
+            parser_config,
+            source_ctx,
         })
     }
 
-    fn into_stream(self) -> BoxSourceStream {
-        self.into_stream()
+    fn into_stream(self) -> BoxSourceWithStateStream {
+        self.into_chunk_stream()
     }
 }
 
 impl PulsarSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
-    pub async fn into_stream(self) {
+    pub(crate) async fn into_data_stream(self) {
         #[for_await]
         for msgs in self.consumer.ready_chunks(MAX_CHUNK_SIZE) {
             let mut res = Vec::with_capacity(msgs.len());
             for msg in msgs {
-                res.push(SourceMessage::from(msg?));
+                let msg = SourceMessage::from(msg?);
+                res.push(msg);
             }
             yield res;
         }

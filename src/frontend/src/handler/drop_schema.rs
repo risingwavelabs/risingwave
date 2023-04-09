@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,21 +15,21 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::ErrorCode::PermissionDenied;
-use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropMode, ObjectName};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
-use crate::session::OptimizerContext;
+use crate::handler::HandlerArgs;
 
 pub async fn handle_drop_schema(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     schema_name: ObjectName,
     if_exist: bool,
     mode: Option<DropMode>,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx;
+    let session = handler_args.session;
     let catalog_reader = session.env().catalog_reader();
     let schema_name = Binder::resolve_schema_name(schema_name)?;
 
@@ -58,9 +58,8 @@ pub async fn handle_drop_schema(
             }
         }
     };
-    let schema_id = {
-        // If the mode is `Restrict` or `None`, the `schema` need to be empty.
-        if Some(DropMode::Restrict) == mode || mode.is_none() {
+    match mode {
+        Some(DropMode::Restrict) | None => {
             if let Some(table) = schema.iter_table().next() {
                 return Err(CatalogError::NotEmpty(
                     "schema",
@@ -69,7 +68,8 @@ pub async fn handle_drop_schema(
                     table.name.clone(),
                 )
                 .into());
-            } else if let Some(source) = schema.iter_source().next() {
+            }
+            if let Some(source) = schema.iter_source().next() {
                 return Err(CatalogError::NotEmpty(
                     "schema",
                     schema_name,
@@ -78,13 +78,13 @@ pub async fn handle_drop_schema(
                 )
                 .into());
             }
-            schema.id()
-        } else {
+        }
+        Some(DropMode::Cascade) => {
             return Err(ErrorCode::NotImplemented(
-                format!("unsupported drop mode: {:?}", mode),
-                TrackingIssue::none(),
+                "drop schema with cascade mode".to_string(),
+                6773.into(),
             )
-            .into());
+            .into())
         }
     };
 
@@ -93,7 +93,7 @@ pub async fn handle_drop_schema(
     }
 
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer.drop_schema(schema_id).await?;
+    catalog_writer.drop_schema(schema.id()).await?;
     Ok(PgResponse::empty_result(StatementType::DROP_SCHEMA))
 }
 

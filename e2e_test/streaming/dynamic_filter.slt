@@ -99,4 +99,47 @@ drop table t1;
 statement ok
 drop table t2;
 
+#  Simple Agg with timestamp/timestamptz
+statement ok
+create table t1 (v1 timestamp);
 
+statement ok
+create table t2 (v2 timestamp with time zone);
+
+statement ok
+create materialized view mv1 as with max_v2 as (select max(v2) max from t2) select v1 from t1, max_v2 where v1 > max;
+
+statement ok
+insert into t1 values ('2001-01-01 19:00:00'), ('2001-01-01 20:00:00'), ('2001-01-01 21:00:00');
+
+# RHS is NULL means predicate is not true
+query I
+select * from mv1 order by v1;
+----
+
+statement ok
+insert into t2 values ('2001-01-01 18:00:00+00:00');
+
+query I
+select * from mv1 order by v1;
+----
+2001-01-01 19:00:00
+2001-01-01 20:00:00
+2001-01-01 21:00:00
+
+statement ok
+insert into t2 values ('2001-01-01 20:00:00+00:00');
+
+query I
+select * from mv1 order by v1;
+----
+2001-01-01 21:00:00
+
+statement ok
+drop materialized view mv1;
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;

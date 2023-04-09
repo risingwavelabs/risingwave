@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,11 +16,12 @@ use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::task_service::GetDataResponse;
 use tonic::Status;
 
-type ExchangeDataSender = tokio::sync::mpsc::Sender<std::result::Result<GetDataResponse, Status>>;
+pub type GetDataResponseResult = std::result::Result<GetDataResponse, Status>;
 
-#[async_trait::async_trait]
+type ExchangeDataSender = tokio::sync::mpsc::Sender<GetDataResponseResult>;
+
 pub trait ExchangeWriter: Send {
-    async fn write(&mut self, resp: GetDataResponse) -> Result<()>;
+    async fn write(&mut self, resp: GetDataResponseResult) -> Result<()>;
 }
 
 pub struct GrpcExchangeWriter {
@@ -41,12 +42,11 @@ impl GrpcExchangeWriter {
     }
 }
 
-#[async_trait::async_trait]
 impl ExchangeWriter for GrpcExchangeWriter {
-    async fn write(&mut self, data: GetDataResponse) -> Result<()> {
+    async fn write(&mut self, data: GetDataResponseResult) -> Result<()> {
         self.written_chunks += 1;
         self.sender
-            .send(Ok(data))
+            .send(data)
             .await
             .to_rw_result_with(|| "failed to write data to ExchangeWriter".into())
     }
@@ -62,7 +62,7 @@ mod tests {
     async fn test_exchange_writer() {
         let (tx, _rx) = tokio::sync::mpsc::channel(10);
         let mut writer = GrpcExchangeWriter::new(tx);
-        writer.write(GetDataResponse::default()).await.unwrap();
+        writer.write(Ok(GetDataResponse::default())).await.unwrap();
         assert_eq!(writer.written_chunks(), 1);
     }
 
@@ -71,7 +71,7 @@ mod tests {
         let (tx, rx) = tokio::sync::mpsc::channel(10);
         drop(rx);
         let mut writer = GrpcExchangeWriter::new(tx);
-        let res = writer.write(GetDataResponse::default()).await;
+        let res = writer.write(Ok(GetDataResponse::default())).await;
         assert!(res.is_err());
     }
 }

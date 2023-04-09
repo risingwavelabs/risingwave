@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,24 +18,21 @@ use std::time::Duration;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableId, NON_RESERVED_PG_CATALOG_TABLE_ID};
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
+use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
 
 use crate::hummock::compaction::ManualCompactionOption;
-use crate::hummock::{
-    CompactionResumeTrigger, CompactorManagerRef, HummockManagerRef, VacuumManagerRef,
-};
+use crate::hummock::{CompactionResumeTrigger, HummockManagerRef, VacuumManagerRef};
 use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
-use crate::MetaError;
 
 pub struct HummockServiceImpl<S>
 where
     S: MetaStore,
 {
     hummock_manager: HummockManagerRef<S>,
-    compactor_manager: CompactorManagerRef,
     vacuum_manager: VacuumManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
 }
@@ -46,13 +43,11 @@ where
 {
     pub fn new(
         hummock_manager: HummockManagerRef<S>,
-        compactor_manager: CompactorManagerRef,
         vacuum_trigger: VacuumManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
         HummockServiceImpl {
             hummock_manager,
-            compactor_manager,
             vacuum_manager: vacuum_trigger,
             fragment_manager,
         }
@@ -85,16 +80,6 @@ where
         Ok(Response::new(GetCurrentVersionResponse {
             status: None,
             current_version: Some(current_version),
-        }))
-    }
-
-    async fn reset_current_version(
-        &self,
-        _request: Request<ResetCurrentVersionRequest>,
-    ) -> Result<Response<ResetCurrentVersionResponse>, Status> {
-        let old_version = self.hummock_manager.reset_current_version().await?;
-        Ok(Response::new(ResetCurrentVersionResponse {
-            old_version: Some(old_version),
         }))
     }
 
@@ -166,6 +151,7 @@ where
                         Some(req.table_stats_change),
                     )
                     .await?;
+
                 Ok(Response::new(ReportCompactionTasksResponse {
                     status: None,
                 }))
@@ -249,18 +235,20 @@ where
                 format!("invalid hummock context {}", context_id),
             ));
         }
-        let rx = self
-            .compactor_manager
-            .add_compactor(context_id, req.max_concurrent_task_number);
+        let compactor_manager = self.hummock_manager.compactor_manager.clone();
+        let max_compactor_task_multiplier =
+            self.hummock_manager.env.opts.max_compactor_task_multiplier;
+
+        let max_task_num = std::cmp::min(
+            req.max_concurrent_task_number,
+            (req.cpu_core_num * max_compactor_task_multiplier) as u64,
+        );
+        let rx = compactor_manager.add_compactor(context_id, max_task_num, req.cpu_core_num);
+
         // Trigger compaction on all compaction groups.
         for cg_id in self.hummock_manager.compaction_group_ids().await {
-            if let Err(e) = self.hummock_manager.try_send_compaction_request(cg_id) {
-                tracing::warn!(
-                    "Failed to schedule compaction for compaction group {}. {}",
-                    cg_id,
-                    e
-                );
-            }
+            self.hummock_manager
+                .try_send_compaction_request(cg_id, compact_task::TaskType::Dynamic);
         }
         self.hummock_manager
             .try_resume_compaction(CompactionResumeTrigger::CompactorAddition { context_id });
@@ -268,16 +256,17 @@ where
     }
 
     // TODO: convert this into a stream.
-    async fn report_compaction_task_progress(
+    async fn compactor_heartbeat(
         &self,
-        request: Request<ReportCompactionTaskProgressRequest>,
-    ) -> Result<Response<ReportCompactionTaskProgressResponse>, Status> {
+        request: Request<CompactorHeartbeatRequest>,
+    ) -> Result<Response<CompactorHeartbeatResponse>, Status> {
         let req = request.into_inner();
-        self.compactor_manager
-            .update_task_heartbeats(req.context_id, &req.progress);
-        Ok(Response::new(ReportCompactionTaskProgressResponse {
-            status: None,
-        }))
+        let compactor_manager = self.hummock_manager.compactor_manager.clone();
+
+        compactor_manager.update_task_heartbeats(req.context_id, &req.progress);
+        compactor_manager.update_compactor_state(req.context_id, req.workload.unwrap());
+
+        Ok(Response::new(CompactorHeartbeatResponse { status: None }))
     }
 
     async fn report_vacuum_task(
@@ -289,23 +278,6 @@ where
         }
         sync_point::sync_point!("AFTER_REPORT_VACUUM");
         Ok(Response::new(ReportVacuumTaskResponse { status: None }))
-    }
-
-    async fn get_compaction_groups(
-        &self,
-        _request: Request<GetCompactionGroupsRequest>,
-    ) -> Result<Response<GetCompactionGroupsResponse>, Status> {
-        let resp = GetCompactionGroupsResponse {
-            status: None,
-            compaction_groups: self
-                .hummock_manager
-                .compaction_groups()
-                .await
-                .iter()
-                .map(|cg| cg.into())
-                .collect(),
-        };
-        Ok(Response::new(resp))
     }
 
     async fn trigger_manual_compaction(
@@ -386,7 +358,7 @@ where
         // RPC immediately.
         tokio::spawn(async move {
             match vacuum_manager
-                .complete_full_gc(request.into_inner().sst_ids)
+                .complete_full_gc(request.into_inner().object_ids)
                 .await
             {
                 Ok(number) => {
@@ -408,8 +380,7 @@ where
             .start_full_gc(Duration::from_secs(
                 request.into_inner().sst_retention_time_sec,
             ))
-            .await
-            .map_err(MetaError::from)?;
+            .await?;
         Ok(Response::new(TriggerFullGcResponse { status: None }))
     }
 
@@ -461,13 +432,7 @@ where
         &self,
         _request: Request<RiseCtlListCompactionGroupRequest>,
     ) -> Result<Response<RiseCtlListCompactionGroupResponse>, Status> {
-        let compaction_groups = self
-            .hummock_manager
-            .compaction_groups()
-            .await
-            .iter()
-            .map(|cg| cg.into())
-            .collect_vec();
+        let compaction_groups = self.hummock_manager.list_compaction_group().await;
         Ok(Response::new(RiseCtlListCompactionGroupResponse {
             status: None,
             compaction_groups,
@@ -507,7 +472,7 @@ where
         } = request.into_inner();
 
         self.hummock_manager
-            .init_metadata_for_replay(tables, compaction_groups)
+            .init_metadata_for_version_replay(tables, compaction_groups)
             .await?;
         Ok(Response::new(InitMetadataForReplayResponse {}))
     }
@@ -517,8 +482,48 @@ where
         request: Request<SetCompactorRuntimeConfigRequest>,
     ) -> Result<Response<SetCompactorRuntimeConfigResponse>, Status> {
         let request = request.into_inner();
-        self.compactor_manager
-            .set_compactor_config(request.context_id, request.config.unwrap().into());
+        let compactor_manager = self.hummock_manager.compactor_manager.clone();
+
+        compactor_manager.set_compactor_config(request.context_id, request.config.unwrap().into());
         Ok(Response::new(SetCompactorRuntimeConfigResponse {}))
+    }
+
+    async fn pin_version(
+        &self,
+        request: Request<PinVersionRequest>,
+    ) -> Result<Response<PinVersionResponse>, Status> {
+        let req = request.into_inner();
+        let payload = self.hummock_manager.pin_version(req.context_id).await?;
+        match payload {
+            Payload::PinnedVersion(version) => Ok(Response::new(PinVersionResponse {
+                pinned_version: Some(version),
+            })),
+            Payload::VersionDeltas(_) => {
+                unreachable!("pin_version should not return version delta")
+            }
+        }
+    }
+
+    async fn split_compaction_group(
+        &self,
+        request: Request<SplitCompactionGroupRequest>,
+    ) -> Result<Response<SplitCompactionGroupResponse>, Status> {
+        let req = request.into_inner();
+        let new_group_id = self
+            .hummock_manager
+            .split_compaction_group(req.group_id, &req.table_ids)
+            .await?;
+        Ok(Response::new(SplitCompactionGroupResponse { new_group_id }))
+    }
+
+    async fn get_scale_compactor(
+        &self,
+        _: Request<GetScaleCompactorRequest>,
+    ) -> Result<Response<GetScaleCompactorResponse>, Status> {
+        let info = self.hummock_manager.get_scale_compactor_info().await;
+        let scale_out_cores = info.scale_out_cores();
+        let mut resp: GetScaleCompactorResponse = info.into();
+        resp.suggest_cores = scale_out_cores;
+        Ok(Response::new(resp))
     }
 }

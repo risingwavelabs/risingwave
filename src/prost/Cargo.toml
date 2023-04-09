@@ -8,17 +8,22 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-bytes = "1"
+enum-as-inner = "0.5"
 pbjson = "0.5"
 prost = "0.11"
 prost-helpers = { path = "helpers" }
-prost-types = "0.11"
 serde = { version = "1", features = ["derive"] }
-tonic = { version = "0.2.4", package = "madsim-tonic" }
+tonic = { version = "0.2.18", package = "madsim-tonic" }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
 [build-dependencies]
 pbjson-build = "0.5"
-tonic-build = { version = "0.2", package = "madsim-tonic-build" }
+tonic-build = { version = "0.2.11", package = "madsim-tonic-build" }
+
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]

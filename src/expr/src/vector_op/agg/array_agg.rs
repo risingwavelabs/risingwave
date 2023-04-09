@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,9 +14,10 @@
 
 use risingwave_common::array::{ArrayBuilder, ArrayBuilderImpl, DataChunk, ListValue, RowRef};
 use risingwave_common::bail;
-use risingwave_common::types::{DataType, Datum, Scalar};
-use risingwave_common::util::ordered::OrderedRow;
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::row::Row;
+use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
+use risingwave_common::util::memcmp_encoding;
+use risingwave_common::util::sort_util::ColumnOrder;
 
 use crate::vector_op::agg::aggregator::Aggregator;
 use crate::Result;
@@ -51,18 +52,19 @@ impl ArrayAggUnordered {
     }
 }
 
+#[async_trait::async_trait]
 impl Aggregator for ArrayAggUnordered {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 
-    fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
+    async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
         let array = input.column_at(self.agg_col_idx).array_ref();
         self.push(array.datum_at(row_id));
         Ok(())
     }
 
-    fn update_multi(
+    async fn update_multi(
         &mut self,
         input: &DataChunk,
         start_row_id: usize,
@@ -70,7 +72,7 @@ impl Aggregator for ArrayAggUnordered {
     ) -> Result<()> {
         self.values.reserve(end_row_id - start_row_id);
         for row_id in start_row_id..end_row_id {
-            self.update_single(input, row_id)?;
+            self.update_single(input, row_id).await?;
         }
         Ok(())
     }
@@ -89,60 +91,54 @@ impl Aggregator for ArrayAggUnordered {
     }
 }
 
+type OrderKey = Vec<u8>;
+
 #[derive(Clone)]
 struct ArrayAggOrdered {
     return_type: DataType,
     agg_col_idx: usize,
-    order_col_indices: Vec<usize>,
-    order_types: Vec<OrderType>,
-    unordered_values: Vec<(OrderedRow, Datum)>,
+    column_orders: Vec<ColumnOrder>,
+    unordered_values: Vec<(OrderKey, Datum)>,
 }
 
 impl ArrayAggOrdered {
-    fn new(return_type: DataType, agg_col_idx: usize, order_pairs: Vec<OrderPair>) -> Self {
-        debug_assert!(matches!(return_type, DataType::List { datatype: _ }));
-        let (order_col_indices, order_types) = order_pairs
-            .into_iter()
-            .map(|p| (p.column_idx, p.order_type))
-            .unzip();
+    fn new(return_type: DataType, agg_col_idx: usize, column_orders: Vec<ColumnOrder>) -> Self {
+        assert!(matches!(return_type, DataType::List { datatype: _ }));
         ArrayAggOrdered {
             return_type,
             agg_col_idx,
-            order_col_indices,
-            order_types,
+            column_orders,
             unordered_values: vec![],
         }
     }
 
     fn push_row(&mut self, row: RowRef<'_>) {
-        let key = OrderedRow::new(
-            row.row_by_indices(&self.order_col_indices),
-            &self.order_types,
-        );
-        let datum = row.value_at(self.agg_col_idx).map(|x| x.into_scalar_impl());
+        let key = memcmp_encoding::encode_row(row, &self.column_orders);
+        let datum = row.datum_at(self.agg_col_idx).to_owned_datum();
         self.unordered_values.push((key, datum));
     }
 
     fn get_result_and_reset(&mut self) -> ListValue {
         let mut rows = std::mem::take(&mut self.unordered_values);
-        rows.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        rows.sort_unstable_by(|(key_a, _), (key_b, _)| key_a.cmp(key_b));
         ListValue::new(rows.into_iter().map(|(_, datum)| datum).collect())
     }
 }
 
+#[async_trait::async_trait]
 impl Aggregator for ArrayAggOrdered {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 
-    fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
+    async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
         let (row, vis) = input.row_at(row_id);
         assert!(vis);
         self.push_row(row);
         Ok(())
     }
 
-    fn update_multi(
+    async fn update_multi(
         &mut self,
         input: &DataChunk,
         start_row_id: usize,
@@ -150,7 +146,7 @@ impl Aggregator for ArrayAggOrdered {
     ) -> Result<()> {
         self.unordered_values.reserve(end_row_id - start_row_id);
         for row_id in start_row_id..end_row_id {
-            self.update_single(input, row_id)?;
+            self.update_single(input, row_id).await?;
         }
         Ok(())
     }
@@ -168,15 +164,15 @@ impl Aggregator for ArrayAggOrdered {
 pub fn create_array_agg_state(
     return_type: DataType,
     agg_col_idx: usize,
-    order_pairs: Vec<OrderPair>,
+    column_orders: Vec<ColumnOrder>,
 ) -> Result<Box<dyn Aggregator>> {
-    if order_pairs.is_empty() {
+    if column_orders.is_empty() {
         Ok(Box::new(ArrayAggUnordered::new(return_type, agg_col_idx)))
     } else {
         Ok(Box::new(ArrayAggOrdered::new(
             return_type,
             agg_col_idx,
-            order_pairs,
+            column_orders,
         )))
     }
 }
@@ -187,11 +183,12 @@ mod tests {
     use risingwave_common::array::Array;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::ScalarRef;
+    use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
 
-    #[test]
-    fn test_array_agg_basic() -> Result<()> {
+    #[tokio::test]
+    async fn test_array_agg_basic() -> Result<()> {
         let chunk = DataChunk::from_pretty(
             "i
              123
@@ -203,7 +200,7 @@ mod tests {
         };
         let mut agg = create_array_agg_state(return_type.clone(), 0, vec![])?;
         let mut builder = return_type.create_array_builder(0);
-        agg.update_multi(&chunk, 0, chunk.cardinality())?;
+        agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;
         let output = builder.finish();
         let actual = output.into_list();
@@ -222,8 +219,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_array_agg_empty() -> Result<()> {
+    #[tokio::test]
+    async fn test_array_agg_empty() -> Result<()> {
         let return_type = DataType::List {
             datatype: Box::new(DataType::Int32),
         };
@@ -244,7 +241,7 @@ mod tests {
              .",
         );
         let mut builder = return_type.create_array_builder(0);
-        agg.update_multi(&chunk, 0, chunk.cardinality())?;
+        agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;
         let output = builder.finish();
         let actual = output.into_list();
@@ -257,8 +254,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_array_agg_with_order() -> Result<()> {
+    #[tokio::test]
+    async fn test_array_agg_with_order() -> Result<()> {
         let chunk = DataChunk::from_pretty(
             "i    i
              123  3
@@ -273,12 +270,12 @@ mod tests {
             return_type.clone(),
             0,
             vec![
-                OrderPair::new(1, OrderType::Ascending),
-                OrderPair::new(0, OrderType::Descending),
+                ColumnOrder::new(1, OrderType::ascending()),
+                ColumnOrder::new(0, OrderType::descending()),
             ],
         )?;
         let mut builder = return_type.create_array_builder(0);
-        agg.update_multi(&chunk, 0, chunk.cardinality())?;
+        agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;
         let output = builder.finish();
         let actual = output.into_list();

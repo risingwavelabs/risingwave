@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,12 +19,14 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::anyhow;
+use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::HummockSnapshot;
 use tokio::sync::{oneshot, watch, RwLock};
 
 use super::notifier::Notifier;
 use super::{Command, Scheduled};
 use crate::hummock::HummockManagerRef;
+use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::MetaResult;
 
@@ -44,7 +46,10 @@ struct Inner {
     /// Force checkpoint in next barrier.
     force_checkpoint: AtomicBool,
 
-    checkpoint_frequency: usize,
+    checkpoint_frequency: AtomicUsize,
+
+    /// Used for recording send latency of each barrier.
+    metrics: Arc<MetaMetrics>,
 }
 
 /// The sender side of the barrier scheduling queue.
@@ -62,6 +67,7 @@ impl<S: MetaStore> BarrierScheduler<S> {
     /// from different managers, and executing them in the barrier manager, respectively.
     pub fn new_pair(
         hummock_manager: HummockManagerRef<S>,
+        metrics: Arc<MetaMetrics>,
         checkpoint_frequency: usize,
     ) -> (Self, ScheduledBarriers) {
         tracing::info!(
@@ -72,8 +78,9 @@ impl<S: MetaStore> BarrierScheduler<S> {
             queue: RwLock::new(VecDeque::new()),
             changed_tx: watch::channel(()).0,
             num_uncheckpointed_barrier: AtomicUsize::new(0),
-            checkpoint_frequency,
+            checkpoint_frequency: AtomicUsize::new(checkpoint_frequency),
             force_checkpoint: AtomicBool::new(false),
+            metrics,
         });
 
         (
@@ -96,6 +103,24 @@ impl<S: MetaStore> BarrierScheduler<S> {
         }
     }
 
+    /// Try to cancel scheduled cmd for create streaming job, return true if cancelled.
+    pub async fn try_cancel_scheduled_create(&self, table_id: TableId) -> bool {
+        let mut queue = self.inner.queue.write().await;
+        if let Some(idx) = queue.iter().position(|scheduled| {
+            if let Command::CreateStreamingJob {table_fragments, ..} = &scheduled.command
+                    && table_fragments.table_id() == table_id {
+                    true
+                } else {
+                    false
+                }
+        }) {
+            queue.remove(idx).unwrap();
+            true
+        } else {
+            false
+        }
+    }
+
     /// Attach `new_notifiers` to the very first scheduled barrier. If there's no one scheduled, a
     /// default barrier will be created. If `new_checkpoint` is true, the barrier will become a
     /// checkpoint.
@@ -115,6 +140,7 @@ impl<S: MetaStore> BarrierScheduler<S> {
                 queue.push_back(Scheduled {
                     notifiers: new_notifiers,
                     command: Command::barrier(),
+                    send_latency_timer: self.inner.metrics.barrier_send_latency.start_timer(),
                     checkpoint: new_checkpoint,
                 });
                 self.inner.changed_tx.send(()).ok();
@@ -135,7 +161,9 @@ impl<S: MetaStore> BarrierScheduler<S> {
     }
 
     /// Run multiple commands and return when they're all completely finished. It's ensured that
-    /// multiple commands is executed continuously and atomically.
+    /// multiple commands are executed continuously.
+    ///
+    /// TODO: atomicity of multiple commands is not guaranteed.
     pub async fn run_multiple_commands(&self, commands: Vec<Command>) -> MetaResult<()> {
         struct Context {
             collect_rx: oneshot::Receiver<MetaResult<()>>,
@@ -156,6 +184,7 @@ impl<S: MetaStore> BarrierScheduler<S> {
             scheduleds.push(Scheduled {
                 checkpoint: command.need_checkpoint(),
                 command,
+                send_latency_timer: self.inner.metrics.barrier_send_latency.start_timer(),
                 notifiers: once(Notifier {
                     collected: Some(collect_tx),
                     finished: Some(finish_tx),
@@ -184,6 +213,13 @@ impl<S: MetaStore> BarrierScheduler<S> {
         }
 
         Ok(())
+    }
+
+    /// Run a command with a `Pause` command before and `Resume` command after it. Used for
+    /// configuration change.
+    pub async fn run_command_with_paused(&self, command: Command) -> MetaResult<()> {
+        self.run_multiple_commands(vec![Command::pause(), command, Command::resume()])
+            .await
     }
 
     /// Run a command and return when it's completely finished.
@@ -226,6 +262,7 @@ impl ScheduledBarriers {
                 // If no command scheduled, create a periodic barrier by default.
                 Scheduled {
                     command: Command::barrier(),
+                    send_latency_timer: self.inner.metrics.barrier_send_latency.start_timer(),
                     notifiers: Default::default(),
                     checkpoint,
                 }
@@ -262,13 +299,20 @@ impl ScheduledBarriers {
         self.inner
             .num_uncheckpointed_barrier
             .load(Ordering::Relaxed)
-            >= self.inner.checkpoint_frequency
+            >= self.inner.checkpoint_frequency.load(Ordering::Relaxed)
             || self.inner.force_checkpoint.load(Ordering::Relaxed)
     }
 
     /// Make the `checkpoint` of the next barrier must be true
     pub(crate) fn force_checkpoint_in_next_barrier(&self) {
         self.inner.force_checkpoint.store(true, Ordering::Relaxed)
+    }
+
+    /// Update the `checkpoint_frequency`
+    pub fn set_checkpoint_frequency(&self, frequency: usize) {
+        self.inner
+            .checkpoint_frequency
+            .store(frequency, Ordering::Relaxed);
     }
 
     /// Update the `num_uncheckpointed_barrier`

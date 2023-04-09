@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,9 +16,10 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 
 use super::{GenericPlanNode, GenericPlanRef};
-use crate::expr::{Expr, ExprDisplay, ExprImpl};
-use crate::session::OptimizerContextRef;
-use crate::utils::ColIndexMapping;
+use crate::expr::{Expr, ExprDisplay, ExprImpl, ExprRewriter};
+use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::property::FunctionalDependencySet;
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
 
 /// [`ProjectSet`] projects one row multiple times according to `select_list`.
 ///
@@ -28,10 +29,20 @@ use crate::utils::ColIndexMapping;
 /// To have a pk, it has a hidden column `projected_row_id` at the beginning. The implementation of
 /// `LogicalProjectSet` is highly similar to [`LogicalProject`], except for the additional hidden
 /// column.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ProjectSet<PlanRef> {
     pub select_list: Vec<ExprImpl>,
     pub input: PlanRef,
+}
+
+impl<PlanRef> ProjectSet<PlanRef> {
+    pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
+        self.select_list = self
+            .select_list
+            .iter()
+            .map(|e| r.rewrite_expr(e.clone()))
+            .collect();
+    }
 }
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for ProjectSet<PlanRef> {
@@ -75,6 +86,11 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for ProjectSet<PlanRef> {
 
     fn ctx(&self) -> OptimizerContextRef {
         self.input.ctx()
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        let i2o = self.i2o_col_mapping();
+        i2o.rewrite_functional_dependency_set(self.input.functional_dependency().clone())
     }
 }
 

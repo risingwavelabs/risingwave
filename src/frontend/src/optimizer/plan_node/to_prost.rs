@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,9 +21,9 @@ use crate::{
     for_all_plan_nodes, for_batch_plan_nodes, for_logical_plan_nodes, for_stream_plan_nodes,
 };
 
-pub trait ToProst: ToBatchProst + StreamNode {}
+pub trait ToPb: ToBatchPb + StreamNode {}
 
-pub trait ToBatchProst {
+pub trait ToBatchPb {
     fn to_batch_prost_body(&self) -> pb_batch_node::NodeBody {
         unimplemented!()
     }
@@ -38,20 +38,20 @@ pub trait StreamNode {
     }
 }
 
-/// impl `ToProst` nodes which have impl `ToBatchProst` and `ToStreamProst`.
+/// impl `ToPb` nodes which have impl `ToBatchPb` and `ToStreamPb`.
 macro_rules! impl_to_prost {
     ($( { $convention:ident, $name:ident }),*) => {
         paste!{
-            $(impl ToProst for [<$convention $name>] { })*
+            $(impl ToPb for [<$convention $name>] { })*
         }
     }
 }
 for_all_plan_nodes! { impl_to_prost }
-/// impl a panic `ToBatchProst` for logical and stream node.
+/// impl a panic `ToBatchPb` for logical and stream node.
 macro_rules! ban_to_batch_prost {
     ($( { $convention:ident, $name:ident }),*) => {
         paste!{
-            $(impl ToBatchProst for [<$convention $name>] {
+            $(impl ToBatchPb for [<$convention $name>] {
                 fn to_batch_prost_body(&self) -> pb_batch_node::NodeBody {
                     panic!("convert into distributed is only allowed on batch plan")
                 }
@@ -61,7 +61,7 @@ macro_rules! ban_to_batch_prost {
 }
 for_logical_plan_nodes! { ban_to_batch_prost }
 for_stream_plan_nodes! { ban_to_batch_prost }
-/// impl a panic `ToStreamProst` for logical and batch node.
+/// impl a panic `ToStreamPb` for logical and batch node.
 macro_rules! ban_to_stream_prost {
     ($( { $convention:ident, $name:ident }),*) => {
         paste!{

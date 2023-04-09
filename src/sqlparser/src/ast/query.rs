@@ -2,7 +2,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -41,6 +41,23 @@ pub struct Query {
     /// `ROW` and `ROWS` as well as `FIRST` and `NEXT` are noise words that don't influence the
     /// effect of the clause. They are provided for ANSI compatibility.
     pub fetch: Option<Fetch>,
+}
+
+impl Query {
+    /// Simple `VALUES` without other clauses.
+    pub fn as_simple_values(&self) -> Option<&Values> {
+        match &self {
+            Query {
+                with: None,
+                body: SetExpr::Values(values),
+                order_by,
+                limit: None,
+                offset: None,
+                fetch: None,
+            } if order_by.is_empty() => Some(values),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for Query {
@@ -284,9 +301,10 @@ impl fmt::Display for Cte {
 pub enum SelectItem {
     /// Any expression, not followed by `[ AS ] alias`
     UnnamedExpr(Expr),
-    /// expr is a table or a column struct, object_name is field.
+    /// Expr is an arbitrary expression, returning either a table or a column.
+    /// Idents are the prefix of `*`, which are consecutive field accesses.
     /// e.g. `(table.v1).*` or `(table).v1.*`
-    ExprQualifiedWildcard(Expr, ObjectName),
+    ExprQualifiedWildcard(Expr, Vec<Ident>),
     /// An expression, followed by `[ AS ] alias`
     ExprWithAlias { expr: Expr, alias: Ident },
     /// `alias.*` or even `schema.table.*`
@@ -300,7 +318,14 @@ impl fmt::Display for SelectItem {
         match &self {
             SelectItem::UnnamedExpr(expr) => write!(f, "{}", expr),
             SelectItem::ExprWithAlias { expr, alias } => write!(f, "{} AS {}", expr, alias),
-            SelectItem::ExprQualifiedWildcard(expr, prefix) => write!(f, "{}.{}.*", expr, prefix),
+            SelectItem::ExprQualifiedWildcard(expr, prefix) => write!(
+                f,
+                "({}){}.*",
+                expr,
+                prefix
+                    .iter()
+                    .format_with("", |i, f| f(&format_args!(".{i}")))
+            ),
             SelectItem::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
             SelectItem::Wildcard => write!(f, "*"),
         }
@@ -331,6 +356,7 @@ pub enum TableFactor {
     Table {
         name: ObjectName,
         alias: Option<TableAlias>,
+        for_system_time_as_of_now: bool,
     },
     Derived {
         lateral: bool,
@@ -355,8 +381,15 @@ pub enum TableFactor {
 impl fmt::Display for TableFactor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TableFactor::Table { name, alias } => {
+            TableFactor::Table {
+                name,
+                alias,
+                for_system_time_as_of_now,
+            } => {
                 write!(f, "{}", name)?;
+                if *for_system_time_as_of_now {
+                    write!(f, " FOR SYSTEM_TIME AS OF NOW()")?;
+                }
                 if let Some(alias) = alias {
                     write!(f, " AS {}", alias)?;
                 }

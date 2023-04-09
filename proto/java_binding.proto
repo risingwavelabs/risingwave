@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package java_binding;
+
+import "catalog.proto";
+import "hummock.proto";
+
+option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
+
+// When `left` or `right` is none, it represents unbounded.
+message KeyRange {
+  enum Bound {
+    UNSPECIFIED = 0;
+    UNBOUNDED = 1;
+    INCLUDED = 2;
+    EXCLUDED = 3;
+  }
+  bytes left = 1;
+  bytes right = 2;
+  Bound left_bound = 3;
+  Bound right_bound = 4;
+}
+
+message ReadPlan {
+  string object_store_url = 1;
+  string data_dir = 2;
+
+  KeyRange key_range = 3;
+  uint32 table_id = 4;
+  uint64 epoch = 5;
+
+  hummock.HummockVersion version = 6;
+  catalog.Table table_catalog = 7;
+
+  repeated uint32 vnode_ids = 8;
+}

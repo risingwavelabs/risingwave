@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -30,7 +30,7 @@ use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
     BatchSstableWriterFactory, CachePolicy, CompressionAlgorithm, HummockResult, MemoryLimiter,
     SstableBuilder, SstableBuilderOptions, SstableStore, SstableWriterFactory,
-    SstableWriterOptions, StreamingSstableWriterFactory, TieredCache,
+    SstableWriterOptions, StreamingSstableWriterFactory, TieredCache, XorFilterBuilder,
 };
 use risingwave_storage::monitor::ObjectStoreMetrics;
 
@@ -61,11 +61,12 @@ impl<F: SstableWriterFactory> LocalTableBuilderFactory<F> {
 
 #[async_trait::async_trait]
 impl<F: SstableWriterFactory> TableBuilderFactory for LocalTableBuilderFactory<F> {
+    type Filter = XorFilterBuilder;
     type Writer = <F as SstableWriterFactory>::Writer;
 
-    async fn open_builder(&self) -> HummockResult<SstableBuilder<Self::Writer>> {
+    async fn open_builder(&mut self) -> HummockResult<SstableBuilder<Self::Writer, Self::Filter>> {
         let id = self.next_id.fetch_add(1, SeqCst);
-        let tracker = self.limiter.require_memory(1).await.unwrap();
+        let tracker = self.limiter.require_memory(1).await;
         let writer_options = SstableWriterOptions {
             capacity_hint: Some(self.options.capacity),
             tracker: Some(tracker),
@@ -86,7 +87,7 @@ fn get_builder_options(capacity_mb: usize) -> SstableBuilderOptions {
         capacity: capacity_mb * 1024 * 1024,
         block_capacity: 1024 * 1024,
         restart_interval: 16,
-        bloom_false_positive: 0.01,
+        bloom_false_positive: 0.001,
         compression_algorithm: CompressionAlgorithm::None,
     }
 }
@@ -101,7 +102,7 @@ async fn build_tables<F: SstableWriterFactory>(
     for i in RANGE {
         builder
             .add_full_key(
-                &FullKey::from_user_key(test_user_key_of(i).as_ref(), 1),
+                FullKey::from_user_key(test_user_key_of(i).as_ref(), 1),
                 HummockValue::put(VALUE),
                 true,
             )
@@ -139,6 +140,7 @@ fn bench_builder(
         "test".to_string(),
         64 << 20,
         128 << 20,
+        0,
         TieredCache::none(),
     ));
 

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use futures_async_stream::try_stream;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{ArrayImpl, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::types::DataType;
 use risingwave_expr::table_function::{build_from_prost, BoxedTableFunction};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -54,12 +55,14 @@ impl TableFunctionExecutor {
             .return_type()
             .create_array_builder(self.chunk_size);
         let mut len = 0;
-        for array in self.table_function.eval(&dummy_chunk)? {
+        for array in self.table_function.eval(&dummy_chunk).await? {
             len += array.len();
             builder.append_array(&array);
         }
-        let ret = DataChunk::new(vec![builder.finish().into()], len);
-        yield ret
+        yield match builder.finish() {
+            ArrayImpl::Struct(s) => DataChunk::from(s),
+            array => DataChunk::new(vec![array.into()], len),
+        };
     }
 }
 
@@ -84,14 +87,21 @@ impl BoxedExecutorBuilder for TableFunctionExecutorBuilder {
 
         let identity = source.plan_node().get_identity().clone();
 
-        let chunk_size = source.context.get_config().developer.batch_chunk_size;
+        let chunk_size = source.context.get_config().developer.chunk_size;
 
         let table_function = build_from_prost(node.table_function.as_ref().unwrap(), chunk_size)?;
 
-        let fields = vec![Field::unnamed(table_function.return_type())];
+        let schema = if let DataType::Struct(fields) = table_function.return_type() {
+            (&*fields).into()
+        } else {
+            Schema {
+                // TODO: should be named
+                fields: vec![Field::unnamed(table_function.return_type())],
+            }
+        };
 
         Ok(Box::new(TableFunctionExecutor {
-            schema: Schema { fields },
+            schema,
             identity,
             table_function,
             chunk_size,

@@ -1,11 +1,15 @@
-query III rowsort
-select * from ch_benchmark_q12;
+query III
+select * from ch_benchmark_q12
+order by o_ol_cnt;
 ----
-        6              20             50
-        7              30             40
-        8              20             66
-        9              46             47
-       10               0             48
-       11               0             49
-       12              11             17
-       13               6              0
+        5              25            155
+        6              30            144
+        7              42            154
+        8              56            104
+        9              27            225
+       10              40            140
+       11              66            242
+       12               0            240
+       13              91            273
+       14             140            266
+       15              60            480

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,19 +15,21 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::Result;
-use risingwave_pb::user::UserInfo;
+use risingwave_pb::user::grant_privilege::{Action, ActionWithGrantOption, Object};
+use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_sqlparser::ast::{CreateUserStatement, UserOption, UserOptions};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::CatalogError;
-use crate::session::OptimizerContext;
+use crate::catalog::{CatalogError, DatabaseId};
+use crate::handler::HandlerArgs;
 use crate::user::user_authentication::encrypted_password;
 
 fn make_prost_user_info(
     user_name: String,
     options: &UserOptions,
     session_user: &UserInfo,
+    database_id: DatabaseId,
 ) -> Result<UserInfo> {
     if !session_user.is_super {
         let require_super = options
@@ -45,10 +47,22 @@ fn make_prost_user_info(
         }
     }
 
+    // Since we don't have concept of PUBLIC group yet, here we simply grant new user with CONNECT
+    // action of session database.
+    let grant_privileges = vec![GrantPrivilege {
+        action_with_opts: vec![ActionWithGrantOption {
+            action: Action::Connect as i32,
+            with_grant_option: true,
+            granted_by: session_user.id,
+        }],
+        object: Some(Object::DatabaseId(database_id)),
+    }];
+
     let mut user_info = UserInfo {
         name: user_name,
         // the LOGIN option is implied if it is not explicitly specified.
         can_login: true,
+        grant_privileges,
         ..Default::default()
     };
 
@@ -81,10 +95,17 @@ fn make_prost_user_info(
 }
 
 pub async fn handle_create_user(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     stmt: CreateUserStatement,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx;
+    let session = handler_args.session;
+    let database_id = {
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        catalog_reader
+            .get_database_by_name(session.database())
+            .expect("session database should exist")
+            .id()
+    };
     let user_info = {
         let user_name = Binder::resolve_user_name(stmt.user_name)?;
         let user_reader = session.env().user_info_reader().read_guard();
@@ -96,7 +117,7 @@ pub async fn handle_create_user(
             .get_user_by_name(session.user_name())
             .ok_or_else(|| CatalogError::NotFound("user", session.user_name().to_string()))?;
 
-        make_prost_user_info(user_name, &stmt.with_options, session_user)?
+        make_prost_user_info(user_name, &stmt.with_options, session_user, database_id)?
     };
 
     let user_info_writer = session.env().user_info_writer();

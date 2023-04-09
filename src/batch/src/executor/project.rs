@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,13 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures_async_stream::try_stream;
+use std::sync::Arc;
+
+use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
-use risingwave_expr::expr::{build_from_prost, BoxedExpression};
+use risingwave_expr::expr::{build_from_prost, BoxedExpression, Expression};
+use risingwave_expr::ExprError;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::executor::{
@@ -43,26 +46,36 @@ impl Executor for ProjectExecutor {
     }
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
-        self.do_execute()
+        (*self).do_execute().boxed()
     }
 }
 
 impl ProjectExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_execute(mut self: Box<Self>) {
-        #[for_await]
-        for data_chunk in self.child.execute() {
-            let data_chunk = data_chunk?;
-            // let data_chunk = data_chunk.compact();
-            let arrays: Vec<Column> = self
-                .expr
-                .iter_mut()
-                .map(|expr| expr.eval(&data_chunk).map(Column::new))
-                .try_collect()?;
-            let (_, vis) = data_chunk.into_parts();
-            let ret = DataChunk::new(arrays, vis);
-            yield ret
-        }
+    fn do_execute(self) -> impl Stream<Item = Result<DataChunk>> + 'static {
+        let Self { expr, child, .. } = self;
+        let expr: Arc<[Box<dyn Expression>]> = expr.into();
+        child
+            .execute()
+            .map(move |data_chunk| {
+                let expr = expr.clone();
+                async move {
+                    let data_chunk = data_chunk?;
+                    let arrays = {
+                        let data_chunk = &data_chunk;
+                        let expr_futs = expr.iter().map(|expr| async move {
+                            Ok::<_, ExprError>(Column::new(expr.eval(data_chunk).await?))
+                        });
+                        let arrays: Vec<Column> = futures::future::join_all(expr_futs)
+                            .await
+                            .into_iter()
+                            .try_collect()?;
+                        arrays
+                    };
+                    let (_, vis) = data_chunk.into_parts();
+                    Ok::<_, RwError>(DataChunk::new(arrays, vis))
+                }
+            })
+            .buffered(16)
     }
 }
 

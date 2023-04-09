@@ -1,0 +1,65 @@
+# We insert `struct<v1 int, v2 struct<v1 int, v2 int>>` into `struct<v1 varchar, v2 struct<v1 varchar, v2 varchar>>`
+# to test if the struct implicit cast works here.
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table st1 (v1 int, v2 struct<v1 int, v2 struct<v1 int, v2 int>>);
+
+statement ok
+create table st2 (v1 int, v2 struct<v1 varchar, v2 struct<v1 varchar, v2 varchar>>);
+
+statement ok
+insert into st1 values(1,(1,(1,null)));
+
+statement ok
+insert into st2 select * from st1;
+
+statement ok
+drop table st1;
+
+statement ok
+drop table st2;
+
+# We compare `struct<v1 int, v2 struct<v1 varchar, v2 int>>` and `struct<v1 varchar, v2 struct<v1 int, v2 varchar>>`
+# to test if both sides of struct implicit cast work here.
+
+statement ok
+create table st (v1 int, v2 struct<v1 int, v2 struct<v1 varchar, v2 int>>, v3 struct<v1 varchar, v2 struct<v1 int, v2 varchar>>);
+
+statement ok
+select v2 = row('1', row('1', '1')), v2 < row('1', row('1', '1')), v2 <= row('1', row('1', '1')) from st;
+
+statement ok
+drop table st;
+
+
+# row(1) should be casted to struct<varchar>
+statement ok
+select row(1) = row('1');
+
+# both sides should be casted to struct<varchar, varchar>
+statement ok
+select row(1, '1') = row('1', 1);
+
+statement ok
+select row(1, row('1', 1)) = row('1', row(1, '1'));
+
+statement error
+select row(1) < row(true);
+
+statement error
+select row(1) < row(1, 1);
+
+# Align row types
+query I
+select CASE WHEN false THEN ROW(1.1, INTERVAL '1') ELSE ROW(0, INTERVAL '1') END;
+----
+(0,00:00:01)
+
+# Align row types
+query I
+select CASE WHEN false THEN ROW(0, INTERVAL '1') ELSE ROW(1.1, INTERVAL '1') END;
+----
+(1.1,00:00:01)

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use risingwave_common::error::Result;
+use risingwave_common::util::sort_util::ColumnOrder;
 
 use crate::binder::BoundSetExpr;
 use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::PlanRef;
-use crate::optimizer::property::FieldOrder;
 use crate::planner::Planner;
 
 impl Planner {
@@ -25,7 +25,7 @@ impl Planner {
         &mut self,
         set_expr: BoundSetExpr,
         extra_order_exprs: Vec<ExprImpl>,
-        order: &[FieldOrder],
+        order: &[ColumnOrder],
     ) -> Result<PlanRef> {
         match set_expr {
             BoundSetExpr::Select(s) => self.plan_select(*s, extra_order_exprs, order),

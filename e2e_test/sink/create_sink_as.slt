@@ -1,20 +1,19 @@
 statement ok
-CREATE TABLE t4 (v1 int, v2 int);
+CREATE TABLE t4 (v1 int primary key, v2 int);
 
 statement ok
 CREATE MATERIALIZED VIEW mv4 AS SELECT * FROM t4;
 
 statement ok
 CREATE SINK s4 AS select mv4.v1 as v1, mv4.v2 as v2 from mv4 WITH (
-    connector = 'mysql',
-    endpoint = '127.0.0.1:3306',
-    user = 'root',
-    database = 'test',
-    table = 't4'
+    connector = 'jdbc',
+    jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
+    table.name = 't4',
+    type = 'upsert'
 );
 
 statement ok
-INSERT INTO t4 VALUES (1, 2), (1, 2), (2, 2), (3, 2), (5, 2), (8, 2), (13, 2), (21, 2);
+INSERT INTO t4 VALUES (1, 2), (2, 2), (3, 2), (5, 2), (8, 2), (13, 2), (21, 2);
 
 statement ok
 DROP SINK s4;

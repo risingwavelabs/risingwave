@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::row::{Row, Row2, RowExt};
+use risingwave_common::row::{OwnedRow, Project, RowExt};
 
 pub mod row_serde_util;
 
@@ -51,7 +51,7 @@ impl ColumnMapping {
     }
 
     /// Project a row with this mapping
-    pub fn project(&self, origin_row: Row) -> Row {
-        origin_row.project(&self.output_indices).into_owned_row()
+    pub fn project(&self, origin_row: OwnedRow) -> Project<'_, OwnedRow> {
+        origin_row.project(&self.output_indices)
     }
 }

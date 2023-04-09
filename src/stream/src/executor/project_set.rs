@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,6 +22,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, I64ArrayBuilder, Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::table_function::ProjectSetSelectItem;
 
 use super::error::StreamExecutorError;
@@ -125,11 +126,12 @@ impl ProjectSetExecutor {
                         .collect_vec();
                     let mut ret_ops = vec![];
 
-                    let results: Vec<_> = self
-                        .select_list
-                        .iter()
-                        .map(|select_item| select_item.eval(&data_chunk))
-                        .try_collect()?;
+                    let mut results = Vec::with_capacity(self.select_list.len());
+                    for select_item in &self.select_list {
+                        let result = select_item.eval(&data_chunk).await?;
+                        results.push(result);
+                    }
+
                     assert!(
                         results
                             .iter()
@@ -166,7 +168,7 @@ impl ProjectSetExecutor {
                             projected_row_id_builder.append(Some(i as i64));
                         }
 
-                        for (item, builder) in items.into_iter().zip_eq(builders.iter_mut()) {
+                        for (item, builder) in items.into_iter().zip_eq_fast(builders.iter_mut()) {
                             match item {
                                 Either::Left(array_ref) => {
                                     builder.append_array(&array_ref);
@@ -208,10 +210,9 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-    use risingwave_expr::expr::{Expression, InputRefExpression, LiteralExpression};
+    use risingwave_expr::expr::{build, Expression, InputRefExpression, LiteralExpression};
     use risingwave_expr::table_function::repeat_tf;
-    use risingwave_pb::expr::expr_node::Type;
+    use risingwave_pb::expr::expr_node::PbType;
 
     use super::super::test_utils::MockSource;
     use super::super::*;
@@ -240,15 +241,16 @@ mod tests {
         };
         let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);
 
-        let left_expr = InputRefExpression::new(DataType::Int64, 0);
-        let right_expr = InputRefExpression::new(DataType::Int64, 1);
-        let test_expr = new_binary_expr(
-            Type::Add,
+        let test_expr = build(
+            PbType::Add,
             DataType::Int64,
-            Box::new(left_expr),
-            Box::new(right_expr),
+            vec![
+                Box::new(InputRefExpression::new(DataType::Int64, 0)),
+                Box::new(InputRefExpression::new(DataType::Int64, 1)),
+            ],
         )
         .unwrap();
+
         let tf1 = repeat_tf(
             LiteralExpression::new(DataType::Int32, Some(1_i32.into())).boxed(),
             1,

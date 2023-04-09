@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,19 +18,20 @@ use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Scalar};
 
-use super::{ColPrunable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
+use super::{ColPrunable, ExprRewritable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
 use crate::expr::{ExprImpl, InputRef, Literal};
-use crate::optimizer::plan_node::generic::{GenericPlanNode, GenericPlanRef};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::stream_union::StreamUnion;
 use crate::optimizer::plan_node::{
-    generic, BatchHashAgg, BatchUnion, LogicalAgg, LogicalProject, PlanTreeNode,
+    generic, BatchHashAgg, BatchUnion, ColumnPruningContext, LogicalAgg, LogicalProject,
+    PlanTreeNode, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::{FunctionalDependencySet, RequiredDist};
+use crate::optimizer::property::RequiredDist;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalUnion` returns the union of the rows of its inputs.
 /// If `all` is false, it needs to eliminate duplicates.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalUnion {
     pub base: PlanBase,
     core: generic::Union<PlanRef>,
@@ -49,16 +50,7 @@ impl LogicalUnion {
             inputs,
             source_col,
         };
-        let ctx = core.ctx();
-        let pk_indices = core.logical_pk();
-        let schema = core.schema();
-        let functional_dependency = FunctionalDependencySet::new(schema.len());
-        let base = PlanBase::new_logical(
-            ctx,
-            schema,
-            pk_indices.unwrap_or_default(),
-            functional_dependency,
-        );
+        let base = PlanBase::new_logical_with_core(&core);
         LogicalUnion { base, core }
     }
 
@@ -67,7 +59,11 @@ impl LogicalUnion {
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(f, "{} {{ all: {} }}", name, self.core.all)
+        self.core.fmt_with_name(f, name)
+    }
+
+    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
+        self.core.fmt_fields_with_builder(builder)
     }
 
     pub fn all(&self) -> bool {
@@ -98,22 +94,28 @@ impl fmt::Display for LogicalUnion {
 }
 
 impl ColPrunable for LogicalUnion {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let new_inputs = self
             .inputs()
             .iter()
-            .map(|input| input.prune_col(required_cols))
+            .map(|input| input.prune_col(required_cols, ctx))
             .collect_vec();
         self.clone_with_inputs(&new_inputs)
     }
 }
 
+impl ExprRewritable for LogicalUnion {}
+
 impl PredicatePushdown for LogicalUnion {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         let new_inputs = self
             .inputs()
             .iter()
-            .map(|input| input.predicate_pushdown(predicate.clone()))
+            .map(|input| input.predicate_pushdown(predicate.clone(), ctx))
             .collect_vec();
         self.clone_with_inputs(&new_inputs)
     }
@@ -142,13 +144,13 @@ impl ToBatch for LogicalUnion {
 }
 
 impl ToStream for LogicalUnion {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         // TODO: use round robin distribution instead of using hash distribution of all inputs.
         let dist = RequiredDist::hash_shard(self.base.logical_pk());
         let new_inputs: Result<Vec<_>> = self
             .inputs()
             .iter()
-            .map(|input| input.to_stream_with_dist_required(&dist))
+            .map(|input| input.to_stream_with_dist_required(&dist, ctx))
             .collect();
         let new_logical = Self::new_with_source_col(true, new_inputs?, self.core.source_col);
         assert!(
@@ -158,12 +160,15 @@ impl ToStream for LogicalUnion {
         Ok(StreamUnion::new(new_logical).into())
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+    fn logical_rewrite_for_stream(
+        &self,
+        ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         let original_schema = self.base.schema.clone();
         let original_schema_len = original_schema.len();
         let mut rewrites = vec![];
         for input in &self.core.inputs {
-            rewrites.push(input.logical_rewrite_for_stream()?);
+            rewrites.push(input.logical_rewrite_for_stream(ctx)?);
         }
 
         let original_schema_contain_all_input_pks =
@@ -295,8 +300,8 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::*;
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::{LogicalValues, PlanTreeNodeUnary};
-    use crate::session::OptimizerContext;
 
     #[tokio::test]
     async fn test_prune_union() {
@@ -311,11 +316,14 @@ mod tests {
 
         let values2 = values1.clone();
 
-        let union = LogicalUnion::new(false, vec![values1.into(), values2.into()]);
+        let union: PlanRef = LogicalUnion::new(false, vec![values1.into(), values2.into()]).into();
 
         // Perform the prune
         let required_cols = vec![1, 2];
-        let plan = union.prune_col(&required_cols);
+        let plan = union.prune_col(
+            &required_cols,
+            &mut ColumnPruningContext::new(union.clone()),
+        );
 
         // Check the result
         let union = plan.as_logical_union().unwrap();

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,123 +12,41 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::Bound;
-use std::fmt::Debug;
-use std::future::Future;
-use std::ops::Deref;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::Result;
-use risingwave_common::util::addr::HostAddr;
-use risingwave_common_service::observer_manager::{Channel, NotificationClient, ObserverManager};
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
-use risingwave_hummock_sdk::HummockReadEpoch;
-use risingwave_meta::hummock::test_utils::setup_compute_env;
-use risingwave_meta::hummock::{HummockManager, HummockManagerRef, MockHummockMetaClient};
-use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
+use risingwave_common_service::observer_manager::ObserverManager;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::filter_key_extractor::{
+    FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
+};
+use risingwave_meta::hummock::test_utils::{
+    register_table_ids_to_compaction_group, setup_compute_env,
+    update_filter_key_extractor_for_table_ids, update_filter_key_extractor_for_tables,
+};
+use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
+use risingwave_meta::manager::MetaSrvEnv;
 use risingwave_meta::storage::{MemStore, MetaStore};
+use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::WorkerNode;
-use risingwave_pb::hummock::pin_version_response;
-use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse, SubscribeType};
+use risingwave_pb::hummock::version_update_payload;
+use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::error::StorageResult;
+use risingwave_storage::hummock::backup_reader::BackupReader;
 use risingwave_storage::hummock::event_handler::HummockEvent;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::observer_manager::HummockObserverNode;
-use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
-use risingwave_storage::hummock::test_utils::default_config_for_test;
-use risingwave_storage::hummock::{HummockStorage, HummockStorageV1};
-use risingwave_storage::monitor::StateStoreMetrics;
+use risingwave_storage::hummock::test_utils::default_opts_for_test;
+use risingwave_storage::hummock::write_limiter::WriteLimiter;
+use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{
-    EmptyFutureTrait, GetFutureTrait, IngestBatchFutureTrait, IterFutureTrait, NextFutureTrait,
-    ReadOptions, StateStoreRead, StateStoreWrite, StaticSendSync, SyncFutureTrait, SyncResult,
-    WriteOptions,
-};
-use risingwave_storage::{
-    define_state_store_associated_type, define_state_store_read_associated_type,
-    define_state_store_write_associated_type, StateStore, StateStoreIter,
-};
+use risingwave_storage::store::*;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
-pub struct TestNotificationClient<S: MetaStore> {
-    addr: HostAddr,
-    notification_manager: NotificationManagerRef<S>,
-    hummock_manager: HummockManagerRef<S>,
-}
-
-pub struct TestChannel<T>(UnboundedReceiver<std::result::Result<T, MessageStatus>>);
-
-#[async_trait::async_trait]
-impl<T: Send + 'static> Channel for TestChannel<T> {
-    type Item = T;
-
-    async fn message(&mut self) -> std::result::Result<Option<T>, MessageStatus> {
-        match self.0.recv().await {
-            None => Ok(None),
-            Some(result) => result.map(|r| Some(r)),
-        }
-    }
-}
-
-impl<S: MetaStore> TestNotificationClient<S> {
-    pub fn new(
-        addr: HostAddr,
-        notification_manager: NotificationManagerRef<S>,
-        hummock_manager: HummockManagerRef<S>,
-    ) -> Self {
-        Self {
-            addr,
-            notification_manager,
-            hummock_manager,
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl<S: MetaStore> NotificationClient for TestNotificationClient<S> {
-    type Channel = TestChannel<SubscribeResponse>;
-
-    async fn subscribe(&self, subscribe_type: SubscribeType) -> Result<Self::Channel> {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-
-        let worker_key = WorkerKey(self.addr.to_protobuf());
-        self.notification_manager
-            .insert_sender(subscribe_type, worker_key.clone(), tx.clone())
-            .await;
-
-        let hummock_version = self
-            .hummock_manager
-            .get_read_guard()
-            .await
-            .current_version
-            .clone();
-        let meta_snapshot = MetaSnapshot {
-            hummock_version: Some(hummock_version),
-            version: Some(Default::default()),
-            ..Default::default()
-        };
-
-        self.notification_manager
-            .notify_snapshot(worker_key, meta_snapshot);
-
-        Ok(TestChannel(rx))
-    }
-}
-
-pub fn get_test_notification_client(
-    env: MetaSrvEnv<MemStore>,
-    hummock_manager_ref: Arc<HummockManager<MemStore>>,
-    worker_node: WorkerNode,
-) -> TestNotificationClient<MemStore> {
-    TestNotificationClient::new(
-        worker_node.get_host().unwrap().into(),
-        env.notification_manager_ref(),
-        hummock_manager_ref,
-    )
-}
+use crate::mock_notification_client::get_notification_client_for_test;
 
 pub async fn prepare_first_valid_version(
     env: MetaSrvEnv<MemStore>,
@@ -141,15 +59,22 @@ pub async fn prepare_first_valid_version(
 ) {
     let (tx, mut rx) = unbounded_channel();
     let notification_client =
-        get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone());
+        get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone());
+    let backup_manager = BackupReader::unused();
+    let write_limiter = WriteLimiter::unused();
     let observer_manager = ObserverManager::new(
         notification_client,
-        HummockObserverNode::new(Arc::new(FilterKeyExtractorManager::default()), tx.clone()),
+        HummockObserverNode::new(
+            Arc::new(FilterKeyExtractorManager::default()),
+            backup_manager,
+            tx.clone(),
+            write_limiter,
+        ),
     )
     .await;
-    let _ = observer_manager.start().await;
+    observer_manager.start().await;
     let hummock_version = match rx.recv().await {
-        Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(
+        Some(HummockEvent::VersionUpdate(version_update_payload::Payload::PinnedVersion(
             version,
         ))) => version,
         _ => unreachable!("should be full version"),
@@ -163,7 +88,36 @@ pub async fn prepare_first_valid_version(
 }
 
 #[async_trait::async_trait]
-pub(crate) trait HummockStateStoreTestTrait: StateStore + StateStoreWrite {
+pub trait TestIngestBatch: LocalStateStore {
+    async fn ingest_batch(
+        &mut self,
+        kv_pairs: Vec<(Bytes, StorageValue)>,
+        delete_ranges: Vec<(Bytes, Bytes)>,
+        write_options: WriteOptions,
+    ) -> StorageResult<usize>;
+}
+
+#[async_trait::async_trait]
+impl<S: LocalStateStore> TestIngestBatch for S {
+    async fn ingest_batch(
+        &mut self,
+        kv_pairs: Vec<(Bytes, StorageValue)>,
+        delete_ranges: Vec<(Bytes, Bytes)>,
+        write_options: WriteOptions,
+    ) -> StorageResult<usize> {
+        assert_eq!(self.epoch(), write_options.epoch);
+        for (key, value) in kv_pairs {
+            match value.user_value {
+                None => self.delete(key, Bytes::new())?,
+                Some(value) => self.insert(key, value, None)?,
+            }
+        }
+        self.flush(delete_ranges).await
+    }
+}
+
+#[async_trait::async_trait]
+pub(crate) trait HummockStateStoreTestTrait: StateStore {
     fn get_pinned_version(&self) -> PinnedVersion;
     async fn seal_and_sync_epoch(&self, epoch: u64) -> StorageResult<SyncResult> {
         self.seal_epoch(epoch, true);
@@ -171,195 +125,17 @@ pub(crate) trait HummockStateStoreTestTrait: StateStore + StateStoreWrite {
     }
 }
 
-fn assert_result_eq<Item: PartialEq + Debug, E>(
-    first: &std::result::Result<Item, E>,
-    second: &std::result::Result<Item, E>,
-) {
-    match (first, second) {
-        (Ok(first), Ok(second)) => {
-            assert_eq!(first, second);
-        }
-        (Err(_), Err(_)) => {}
-        _ => panic!("result not equal"),
-    }
-}
-
-pub(crate) struct LocalGlobalStateStoreHolder<L, G> {
-    pub(crate) local: L,
-    pub(crate) global: G,
-}
-
-impl<L: StateStoreIter<Item: PartialEq + Debug>, G: StateStoreIter<Item = L::Item>> StateStoreIter
-    for LocalGlobalStateStoreHolder<L, G>
-{
-    type Item = L::Item;
-
-    type NextFuture<'a> = impl NextFutureTrait<'a, L::Item>;
-
-    fn next(&mut self) -> Self::NextFuture<'_> {
-        async {
-            let local_result = self.local.next().await;
-            let global_result = self.global.next().await;
-            assert_result_eq(&local_result, &global_result);
-            local_result
-        }
-    }
-}
-
-impl<L: StateStoreRead, G: StateStoreRead> StateStoreRead for LocalGlobalStateStoreHolder<L, G> {
-    type Iter = LocalGlobalStateStoreHolder<L::Iter, G::Iter>;
-
-    define_state_store_read_associated_type!();
-
-    fn get<'a>(
-        &'a self,
-        key: &'a [u8],
-        epoch: u64,
-        read_options: ReadOptions,
-    ) -> Self::GetFuture<'_> {
-        async move {
-            let local = self.local.get(key, epoch, read_options.clone()).await;
-            let global = self.global.get(key, epoch, read_options).await;
-            assert_result_eq(&local, &global);
-            local
-        }
-    }
-
-    fn iter(
-        &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        epoch: u64,
-        read_options: ReadOptions,
-    ) -> Self::IterFuture<'_> {
-        async move {
-            let local_iter = self
-                .local
-                .iter(key_range.clone(), epoch, read_options.clone())
-                .await?;
-            let global_iter = self.global.iter(key_range, epoch, read_options).await?;
-            Ok(LocalGlobalStateStoreHolder {
-                local: local_iter,
-                global: global_iter,
-            })
-        }
-    }
-}
-
-impl<L: StateStoreWrite, G: StaticSendSync> StateStoreWrite for LocalGlobalStateStoreHolder<L, G> {
-    define_state_store_write_associated_type!();
-
-    fn ingest_batch(
-        &self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
-        delete_ranges: Vec<(Bytes, Bytes)>,
-        write_options: WriteOptions,
-    ) -> Self::IngestBatchFuture<'_> {
-        self.local
-            .ingest_batch(kv_pairs, delete_ranges, write_options)
-    }
-}
-
-impl<G: Clone, L: Clone> Clone for LocalGlobalStateStoreHolder<G, L> {
-    fn clone(&self) -> Self {
-        Self {
-            local: self.local.clone(),
-            global: self.global.clone(),
-        }
-    }
-}
-
-impl<G: StateStore> StateStore for LocalGlobalStateStoreHolder<G::Local, G>
-where
-    <G as StateStore>::Local: Clone,
-{
-    type Local = G::Local;
-
-    type NewLocalFuture<'a> = impl Future<Output = G::Local> + Send;
-
-    define_state_store_associated_type!();
-
-    fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
-        self.global.try_wait_epoch(epoch)
-    }
-
-    fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
-        self.global.sync(epoch)
-    }
-
-    fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-        self.global.seal_epoch(epoch, is_checkpoint)
-    }
-
-    fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
-        async move { self.global.clear_shared_buffer().await }
-    }
-
-    fn new_local(&self, _table_id: TableId) -> Self::NewLocalFuture<'_> {
-        async { unimplemented!("should not be called new local again") }
-    }
-}
-
-impl<G: StateStore> LocalGlobalStateStoreHolder<G::Local, G> {
-    pub(crate) async fn new(state_store: G, table_id: TableId) -> Self {
-        LocalGlobalStateStoreHolder {
-            local: state_store.new_local(table_id).await,
-            global: state_store,
-        }
-    }
-}
-
-pub(crate) type HummockV2MixedStateStore =
-    LocalGlobalStateStoreHolder<LocalHummockStorage, HummockStorage>;
-
-impl Deref for HummockV2MixedStateStore {
-    type Target = HummockStorage;
-
-    fn deref(&self) -> &Self::Target {
-        &self.global
-    }
-}
-
-impl HummockStateStoreTestTrait for HummockV2MixedStateStore {
-    fn get_pinned_version(&self) -> PinnedVersion {
-        self.global.get_pinned_version()
-    }
-}
-
-impl HummockStateStoreTestTrait for HummockStorageV1 {
+impl HummockStateStoreTestTrait for HummockStorage {
     fn get_pinned_version(&self) -> PinnedVersion {
         self.get_pinned_version()
     }
 }
 
-pub(crate) async fn with_hummock_storage_v1() -> (HummockStorageV1, Arc<MockHummockMetaClient>) {
-    let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
-    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
-    let meta_client = Arc::new(MockHummockMetaClient::new(
-        hummock_manager_ref.clone(),
-        worker_node.id,
-    ));
-
-    let hummock_storage = HummockStorageV1::new(
-        hummock_options,
-        sstable_store,
-        meta_client.clone(),
-        get_test_notification_client(env, hummock_manager_ref, worker_node),
-        Arc::new(StateStoreMetrics::unused()),
-        Arc::new(risingwave_tracing::RwTracingService::disabled()),
-    )
-    .await
-    .unwrap();
-
-    (hummock_storage, meta_client)
-}
-
-pub(crate) async fn with_hummock_storage_v2(
+pub async fn with_hummock_storage_v2(
     table_id: TableId,
-) -> (HummockV2MixedStateStore, Arc<MockHummockMetaClient>) {
+) -> (HummockStorage, Arc<MockHummockMetaClient>) {
     let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
+    let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
     let meta_client = Arc::new(MockHummockMetaClient::new(
@@ -371,13 +147,113 @@ pub(crate) async fn with_hummock_storage_v2(
         hummock_options,
         sstable_store,
         meta_client.clone(),
-        get_test_notification_client(env, hummock_manager_ref, worker_node),
+        get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
     )
     .await
     .unwrap();
 
-    (
-        HummockV2MixedStateStore::new(hummock_storage, table_id).await,
-        meta_client,
+    register_tables_with_id_for_test(
+        hummock_storage.filter_key_extractor_manager(),
+        &hummock_manager_ref,
+        &[table_id.table_id()],
     )
+    .await;
+
+    (hummock_storage, meta_client)
+}
+
+pub async fn register_tables_with_id_for_test<S: MetaStore>(
+    filter_key_extractor_manager: &FilterKeyExtractorManagerRef,
+    hummock_manager_ref: &HummockManagerRef<S>,
+    table_ids: &[u32],
+) {
+    update_filter_key_extractor_for_table_ids(filter_key_extractor_manager, table_ids);
+    register_table_ids_to_compaction_group(
+        hummock_manager_ref,
+        table_ids,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
+}
+
+pub async fn register_tables_with_catalog_for_test<S: MetaStore>(
+    filter_key_extractor_manager: &FilterKeyExtractorManagerRef,
+    hummock_manager_ref: &HummockManagerRef<S>,
+    tables: &[PbTable],
+) {
+    update_filter_key_extractor_for_tables(filter_key_extractor_manager, tables);
+    let table_ids = tables.iter().map(|t| t.id).collect_vec();
+    register_table_ids_to_compaction_group(
+        hummock_manager_ref,
+        &table_ids,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
+}
+
+pub struct HummockTestEnv {
+    pub storage: HummockStorage,
+    pub manager: HummockManagerRef<MemStore>,
+    pub meta_client: Arc<MockHummockMetaClient>,
+}
+
+impl HummockTestEnv {
+    pub async fn register_table_id(&self, table_id: TableId) {
+        register_tables_with_id_for_test(
+            self.storage.filter_key_extractor_manager(),
+            &self.manager,
+            &[table_id.table_id()],
+        )
+        .await;
+    }
+
+    pub async fn register_table(&self, table: PbTable) {
+        register_tables_with_catalog_for_test(
+            self.storage.filter_key_extractor_manager(),
+            &self.manager,
+            &[table],
+        )
+        .await;
+    }
+
+    // Seal, sync and commit a epoch.
+    // On completion of this function call, the provided epoch should be committed and visible.
+    pub async fn commit_epoch(&self, epoch: u64) {
+        let res = self.storage.seal_and_sync_epoch(epoch).await.unwrap();
+        self.meta_client
+            .commit_epoch(epoch, res.uncommitted_ssts)
+            .await
+            .unwrap();
+        self.storage.try_wait_epoch_for_test(epoch).await;
+    }
+}
+
+pub async fn prepare_hummock_test_env() -> HummockTestEnv {
+    let sstable_store = mock_sstable_store();
+    let hummock_options = Arc::new(default_opts_for_test());
+    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        setup_compute_env(8080).await;
+
+    let hummock_meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager_ref.clone(),
+        worker_node.id,
+    ));
+
+    let notification_client =
+        get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone());
+
+    let storage = HummockStorage::for_test(
+        hummock_options,
+        sstable_store,
+        hummock_meta_client.clone(),
+        notification_client,
+    )
+    .await
+    .unwrap();
+
+    HummockTestEnv {
+        storage,
+        manager: hummock_manager_ref,
+        meta_client: hummock_meta_client,
+    }
 }

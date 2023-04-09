@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_hummock_sdk::compaction_group::StateTableId;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockSstableId};
+use risingwave_hummock_sdk::{HummockContextId, HummockSstableObjectId};
+use risingwave_object_store::object::ObjectError;
 use thiserror::Error;
 
 use crate::model::MetadataModelError;
@@ -27,16 +27,16 @@ pub enum Error {
     InvalidContext(HummockContextId),
     #[error(transparent)]
     MetaStore(anyhow::Error),
+    #[error(transparent)]
+    ObjectStore(ObjectError),
     #[error("compactor {0} is disconnected")]
     CompactorUnreachable(HummockContextId),
     #[error("compaction task {0} already assigned to compactor {1}")]
     CompactionTaskAlreadyAssigned(u64, HummockContextId),
-    #[error("compaction group {0} not found")]
-    InvalidCompactionGroup(CompactionGroupId),
-    #[error("compaction group member {0} not found")]
-    InvalidCompactionGroupMember(StateTableId),
+    #[error("compaction group error: {0}")]
+    CompactionGroup(String),
     #[error("SST {0} is invalid")]
-    InvalidSst(HummockSstableId),
+    InvalidSst(HummockSstableObjectId),
     #[error(transparent)]
     Internal(anyhow::Error),
 }
@@ -53,7 +53,7 @@ impl From<MetaStoreError> for Error {
             MetaStoreError::ItemNotFound(err) => anyhow::anyhow!(err).into(),
             MetaStoreError::TransactionAbort() => {
                 // TODO: need more concrete error from meta store.
-                Error::InvalidContext(0)
+                Error::Internal(anyhow::anyhow!("meta store transaction failed"))
             }
             // TODO: Currently MetaStoreError::Internal is equivalent to EtcdError, which
             // includes both retryable and non-retryable. Need to expand MetaStoreError::Internal
@@ -81,5 +81,11 @@ impl From<Error> for tonic::Status {
 impl From<anyhow::Error> for Error {
     fn from(e: anyhow::Error) -> Self {
         Error::Internal(e)
+    }
+}
+
+impl From<ObjectError> for Error {
+    fn from(e: ObjectError) -> Self {
+        Error::ObjectStore(e)
     }
 }

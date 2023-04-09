@@ -1,16 +1,19 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+// We may remove the entire file once procedual macros are ready for aggregations.
+#![allow(unused_imports)]
 
 //! Macros containing all necessary information for a logical type.
 //!
@@ -72,6 +75,18 @@ macro_rules! list {
 pub(crate) use list;
 
 #[macro_export]
+macro_rules! jsonb {
+    ($macro:ident) => {
+        $macro! {
+            risingwave_common::types::DataType::Jsonb,
+            risingwave_common::array::JsonbArray
+        }
+    };
+}
+
+pub(crate) use jsonb;
+
+#[macro_export]
 macro_rules! int16 {
     ($macro:ident) => {
         $macro! {
@@ -120,6 +135,18 @@ macro_rules! float32 {
 pub(crate) use float32;
 
 #[macro_export]
+macro_rules! serial {
+    ($macro:ident) => {
+        $macro! {
+            risingwave_common::types::DataType::Serial,
+            risingwave_common::array::serial_array::SerialArray
+        }
+    };
+}
+
+pub(crate) use serial;
+
+#[macro_export]
 macro_rules! float64 {
     ($macro:ident) => {
         $macro! {
@@ -148,7 +175,7 @@ macro_rules! date {
     ($macro:ident) => {
         $macro! {
             risingwave_common::types::DataType::Date,
-            risingwave_common::array::NaiveDateArray
+            risingwave_common::array::DateArray
         }
     };
 }
@@ -184,7 +211,7 @@ macro_rules! time {
     ($macro:ident) => {
         $macro! {
             risingwave_common::types::DataType::Time,
-            risingwave_common::array::NaiveTimeArray
+            risingwave_common::array::TimeArray
         }
     };
 }
@@ -196,7 +223,7 @@ macro_rules! timestamp {
     ($macro:ident) => {
         $macro! {
             risingwave_common::types::DataType::Timestamp,
-            risingwave_common::array::NaiveDateTimeArray
+            risingwave_common::array::TimestampArray
         }
     };
 }
@@ -204,16 +231,16 @@ macro_rules! timestamp {
 pub(crate) use timestamp;
 
 #[macro_export]
-macro_rules! timestampz {
+macro_rules! timestamptz {
     ($macro:ident) => {
         $macro! {
-            risingwave_common::types::DataType::Timestampz,
+            risingwave_common::types::DataType::Timestamptz,
             risingwave_common::array::I64Array
         }
     };
 }
 
-pub(crate) use timestampz;
+pub(crate) use timestamptz;
 
 #[macro_export]
 macro_rules! interval {

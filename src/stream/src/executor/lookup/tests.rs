@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,53 +12,43 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
+
 use assert_matches::assert_matches;
 use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::StreamChunkTestExt;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, ConflictBehavior, Field, Schema, TableId};
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::StateStore;
+use risingwave_storage::table::batch_table::storage_table::StorageTable;
 
-use crate::common::table::state_table::StateTable;
 use crate::executor::lookup::impl_::LookupExecutorParams;
 use crate::executor::lookup::LookupExecutor;
 use crate::executor::test_utils::*;
 use crate::executor::{
-    Barrier, BoxedMessageStream, Executor, MaterializeExecutor, Message, PkIndices,
+    ActorContext, Barrier, BoxedMessageStream, Executor, MaterializeExecutor, Message, PkIndices,
 };
 
 fn arrangement_col_descs() -> Vec<ColumnDesc> {
     vec![
-        ColumnDesc {
-            data_type: DataType::Int64,
-            column_id: ColumnId::new(0),
-            name: "rowid_column".to_string(),
-            field_descs: vec![],
-            type_name: "".to_string(),
-        },
-        ColumnDesc {
-            data_type: DataType::Int64,
-            column_id: ColumnId::new(1),
-            name: "join_column".to_string(),
-            field_descs: vec![],
-            type_name: "".to_string(),
-        },
+        ColumnDesc::new_atomic(DataType::Int64, "rowid_column", 0),
+        ColumnDesc::new_atomic(DataType::Int64, "join_column", 1),
     ]
 }
 
-fn arrangement_col_arrange_rules() -> Vec<OrderPair> {
+fn arrangement_col_arrange_rules() -> Vec<ColumnOrder> {
     vec![
-        OrderPair::new(1, OrderType::Ascending),
-        OrderPair::new(0, OrderType::Ascending),
+        ColumnOrder::new(1, OrderType::ascending()),
+        ColumnOrder::new(0, OrderType::ascending()),
     ]
 }
 
-fn arrangement_col_arrange_rules_join_key() -> Vec<OrderPair> {
-    vec![OrderPair::new(1, OrderType::Ascending)]
+fn arrangement_col_arrange_rules_join_key() -> Vec<ColumnOrder> {
+    vec![ColumnOrder::new(1, OrderType::ascending())]
 }
 
 /// Create a test arrangement.
@@ -130,9 +120,8 @@ async fn create_arrangement(
             arrangement_col_arrange_rules(),
             column_ids,
             1,
-            None,
-            0,
-            false,
+            Arc::new(AtomicU64::new(0)),
+            ConflictBehavior::NoCheck,
         )
         .await,
     )
@@ -151,20 +140,8 @@ async fn create_arrangement(
 /// | b  |       |      | 3 -> 4  |
 fn create_source() -> Box<dyn Executor + Send> {
     let columns = vec![
-        ColumnDesc {
-            data_type: DataType::Int64,
-            column_id: ColumnId::new(1),
-            name: "join_column".to_string(),
-            field_descs: vec![],
-            type_name: "".to_string(),
-        },
-        ColumnDesc {
-            data_type: DataType::Int64,
-            column_id: ColumnId::new(2),
-            name: "rowid_column".to_string(),
-            field_descs: vec![],
-            type_name: "".to_string(),
-        },
+        ColumnDesc::new_atomic(DataType::Int64, "join_column", 1),
+        ColumnDesc::new_atomic(DataType::Int64, "rowid_column", 2),
     ];
 
     // Prepare source chunks.
@@ -208,22 +185,6 @@ fn check_chunk_eq(chunk1: &StreamChunk, chunk2: &StreamChunk) {
     assert_eq!(format!("{:?}", chunk1), format!("{:?}", chunk2));
 }
 
-async fn build_state_table_helper<S: StateStore>(
-    s: S,
-    table_id: TableId,
-    columns: Vec<ColumnDesc>,
-    order_types: Vec<OrderPair>,
-    pk_indices: Vec<usize>,
-) -> StateTable<S> {
-    StateTable::new_without_distribution(
-        s,
-        table_id,
-        columns,
-        order_types.iter().map(|pair| pair.order_type).collect_vec(),
-        pk_indices,
-    )
-    .await
-}
 #[tokio::test]
 async fn test_lookup_this_epoch() {
     // TODO: memory state store doesn't support read epoch yet, so it is possible that this test
@@ -233,6 +194,7 @@ async fn test_lookup_this_epoch() {
     let arrangement = create_arrangement(table_id, store.clone()).await;
     let stream = create_source();
     let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
+        ctx: ActorContext::create(0),
         arrangement,
         stream,
         arrangement_col_descs: arrangement_col_descs(),
@@ -248,16 +210,18 @@ async fn test_lookup_this_epoch() {
             Field::with_name(DataType::Int64, "rowid_column"),
             Field::with_name(DataType::Int64, "join_column"),
         ]),
-        state_table: build_state_table_helper(
+        storage_table: StorageTable::for_test(
             store.clone(),
             table_id,
             arrangement_col_descs(),
-            arrangement_col_arrange_rules(),
+            arrangement_col_arrange_rules()
+                .iter()
+                .map(|x| x.order_type)
+                .collect_vec(),
             vec![1, 0],
-        )
-        .await,
-        lru_manager: None,
-        cache_size: 1 << 16,
+            vec![0, 1],
+        ),
+        watermark_epoch: Arc::new(AtomicU64::new(0)),
         chunk_size: 1024,
     }));
     let mut lookup_executor = lookup_executor.execute();
@@ -300,6 +264,7 @@ async fn test_lookup_last_epoch() {
     let arrangement = create_arrangement(table_id, store.clone()).await;
     let stream = create_source();
     let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
+        ctx: ActorContext::create(0),
         arrangement,
         stream,
         arrangement_col_descs: arrangement_col_descs(),
@@ -315,16 +280,18 @@ async fn test_lookup_last_epoch() {
             Field::with_name(DataType::Int64, "join_column"),
             Field::with_name(DataType::Int64, "rowid_column"),
         ]),
-        state_table: build_state_table_helper(
+        storage_table: StorageTable::for_test(
             store.clone(),
             table_id,
             arrangement_col_descs(),
-            arrangement_col_arrange_rules(),
+            arrangement_col_arrange_rules()
+                .iter()
+                .map(|x| x.order_type)
+                .collect_vec(),
             vec![1, 0],
-        )
-        .await,
-        lru_manager: None,
-        cache_size: 1 << 16,
+            vec![0, 1],
+        ),
+        watermark_epoch: Arc::new(AtomicU64::new(0)),
         chunk_size: 1024,
     }));
     let mut lookup_executor = lookup_executor.execute();
@@ -335,20 +302,13 @@ async fn test_lookup_last_epoch() {
     next_msg(&mut msgs, &mut lookup_executor).await;
     next_msg(&mut msgs, &mut lookup_executor).await;
     next_msg(&mut msgs, &mut lookup_executor).await;
-    next_msg(&mut msgs, &mut lookup_executor).await;
 
-    println!("{:#?}", msgs);
-
-    assert_eq!(msgs.len(), 5);
+    assert_eq!(msgs.len(), 4);
     assert_matches!(msgs[0], Message::Barrier(_));
-    assert_matches!(msgs[2], Message::Barrier(_));
-    assert_matches!(msgs[4], Message::Barrier(_));
+    assert_matches!(msgs[1], Message::Barrier(_));
+    assert_matches!(msgs[3], Message::Barrier(_));
 
-    let chunk1 = msgs[1].as_chunk().unwrap();
-    // the arrangement of epoch 0 is not ready yet, should be empty.
-    assert_eq!(chunk1.cardinality(), 0);
-
-    let chunk2 = msgs[3].as_chunk().unwrap();
+    let chunk2 = msgs[2].as_chunk().unwrap();
     let expected_chunk2 = StreamChunk::from_pretty(
         " I I    I I
         - 6 1 2333 6

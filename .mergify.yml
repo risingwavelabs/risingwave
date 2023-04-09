@@ -1,3 +1,18 @@
+shared:
+  - commit_message_template: &commit_message_template |
+      {{title}} (#{{number}})
+      
+      {{body | get_section("## What's changed and what's your intention?")}}
+      {% for user in approved_reviews_by %}
+      Approved-By: {{user}}
+      {%- endfor %}
+      {%- set commit_authors = commits | rejectattr("author", "eq", "mergify[bot]") | unique(false, "email_author")| list -%}
+      {% if commit_authors | length > 1 %}
+      {% for commit in commit_authors %}
+      Co-Authored-By: {{ commit.author }} <{{ commit.email_author }}>
+      {%- endfor %}
+      {%- endif %}
+
 queue_rules:
   - name: default
     conditions:
@@ -7,22 +22,6 @@ queue_rules:
       - "label=mergify/can-merge"
 
 pull_request_rules:
-  - name: Automatic merge on approval (high priority)
-    conditions:
-      - "base=main"
-      - "#approved-reviews-by>=1"
-      - "#changes-requested-reviews-by=0"
-      - "check-success=buildkite/pull-request"
-      - "check-failure!=buildkite/docker"
-      - "check-success=task-list-completed"
-      - "label=mergify/can-merge"
-      - "label=mergify/high-priority"
-    actions:
-      queue:
-        name: default
-        method: squash
-        priority: high
-
   - name: Automatic merge on approval
     conditions:
       - "base=main"
@@ -36,7 +35,7 @@ pull_request_rules:
       queue:
         name: default
         method: squash
-        priority: medium
+        commit_message_template: *commit_message_template
 
   - name: Notify author on queue failure
     conditions:

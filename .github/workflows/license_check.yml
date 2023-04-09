@@ -7,11 +7,13 @@ on:
     - "forks/*"
   pull_request:
     branches: [main]
+  merge_group:
+    types: [checks_requested]
 jobs:
   license-header-check:
     runs-on: ubuntu-latest
     name: license-header-check
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Check License Header
-      uses: apache/skywalking-eyes/header@main
+      uses: apache/skywalking-eyes/header@df70871af1a8109c9a5b1dc824faaf65246c5236

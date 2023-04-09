@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,24 +18,20 @@ use std::pin::Pin;
 use std::sync::{Arc, RwLock};
 use std::task::{Context, Poll};
 
-use futures::{Stream, StreamExt};
-use futures_async_stream::try_stream;
+use futures::Stream;
 use pgwire::pg_server::{BoxedError, Session, SessionId};
-use risingwave_batch::executor::BoxedDataChunkStream;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::RwError;
+use risingwave_common::session_config::QueryMode;
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
-use tracing::debug;
 
+use super::stats::DistributedQueryMetrics;
 use super::QueryExecution;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
-use crate::scheduler::{
-    ExecutionContextRef, HummockSnapshotGuard, HummockSnapshotManagerRef, SchedulerResult,
-};
+use crate::scheduler::{ExecutionContextRef, PinnedHummockSnapshot, SchedulerResult};
 
 pub struct DistributedQueryStream {
     chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
@@ -78,7 +74,6 @@ impl Drop for DistributedQueryStream {
 pub struct QueryResultFetcher {
     task_output_id: TaskOutputId,
     task_host: HostAddress,
-    compute_client_pool: ComputeClientPoolRef,
 
     chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
 
@@ -132,27 +127,28 @@ impl QueryExecutionInfo {
 #[derive(Clone)]
 pub struct QueryManager {
     worker_node_manager: WorkerNodeManagerRef,
-    hummock_snapshot_manager: HummockSnapshotManagerRef,
     compute_client_pool: ComputeClientPoolRef,
     catalog_reader: CatalogReader,
     query_execution_info: QueryExecutionInfoRef,
+    pub query_metrics: Arc<DistributedQueryMetrics>,
+    disrtibuted_query_limit: Option<u64>,
 }
-
-type QueryManagerRef = Arc<QueryManager>;
 
 impl QueryManager {
     pub fn new(
         worker_node_manager: WorkerNodeManagerRef,
-        hummock_snapshot_manager: HummockSnapshotManagerRef,
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
+        query_metrics: Arc<DistributedQueryMetrics>,
+        disrtibuted_query_limit: Option<u64>,
     ) -> Self {
         Self {
             worker_node_manager,
-            hummock_snapshot_manager,
             compute_client_pool,
             catalog_reader,
             query_execution_info: Arc::new(RwLock::new(QueryExecutionInfo::default())),
+            query_metrics,
+            disrtibuted_query_limit,
         }
     }
 
@@ -160,8 +156,14 @@ impl QueryManager {
         &self,
         context: ExecutionContextRef,
         query: Query,
-        pinned_snapshot: HummockSnapshotGuard,
+        pinned_snapshot: PinnedHummockSnapshot,
     ) -> SchedulerResult<DistributedQueryStream> {
+        if let Some(query_limit) = self.disrtibuted_query_limit && self.query_metrics.running_query_num.get() as u64 == query_limit {
+            self.query_metrics.rejected_query_counter.inc();
+            return Err(
+                crate::scheduler::SchedulerError::QueryReachLimit(QueryMode::Distributed, query_limit)
+            )
+        }
         let query_id = query.query_id.clone();
         let query_execution = Arc::new(QueryExecution::new(query, context.session().id()));
 
@@ -181,6 +183,7 @@ impl QueryManager {
                 self.compute_client_pool.clone(),
                 self.catalog_reader.clone(),
                 self.query_execution_info.clone(),
+                self.query_metrics.clone(),
             )
             .await
             .map_err(|err| {
@@ -192,7 +195,6 @@ impl QueryManager {
                     .delete_query(&query_id);
                 err
             })?;
-
         Ok(query_result_fetcher.stream_from_channel())
     }
 
@@ -217,7 +219,6 @@ impl QueryResultFetcher {
     pub fn new(
         task_output_id: TaskOutputId,
         task_host: HostAddress,
-        compute_client_pool: ComputeClientPoolRef,
         chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
         query_id: QueryId,
         query_execution_info: QueryExecutionInfoRef,
@@ -225,31 +226,10 @@ impl QueryResultFetcher {
         Self {
             task_output_id,
             task_host,
-            compute_client_pool,
             chunk_rx,
             query_id,
             query_execution_info,
         }
-    }
-
-    #[try_stream(ok = DataChunk, error = RwError)]
-    async fn run_inner(self) {
-        debug!(
-            "Starting to run query result fetcher, task output id: {:?}, task_host: {:?}",
-            self.task_output_id, self.task_host
-        );
-        let compute_client = self
-            .compute_client_pool
-            .get_by_addr((&self.task_host).into())
-            .await?;
-        let mut stream = compute_client.get_data(self.task_output_id.clone()).await?;
-        while let Some(response) = stream.next().await {
-            yield DataChunk::from_protobuf(response?.get_record_batch()?)?;
-        }
-    }
-
-    fn run(self) -> BoxedDataChunkStream {
-        Box::pin(self.run_inner())
     }
 
     fn stream_from_channel(self) -> DistributedQueryStream {

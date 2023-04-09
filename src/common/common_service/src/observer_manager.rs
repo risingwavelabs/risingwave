@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,7 +16,6 @@ use std::time::Duration;
 
 use risingwave_common::bail;
 use risingwave_common::error::Result;
-use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::subscribe_response::Info;
 use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
 use risingwave_rpc_client::error::RpcError;
@@ -46,6 +45,13 @@ pub struct SubscribeCompactor {}
 impl SubscribeTypeEnum for SubscribeCompactor {
     fn subscribe_type() -> SubscribeType {
         SubscribeType::Compactor
+    }
+}
+
+pub struct SubscribeCompute {}
+impl SubscribeTypeEnum for SubscribeCompute {
+    fn subscribe_type() -> SubscribeType {
+        SubscribeType::Compute
     }
 }
 
@@ -109,28 +115,28 @@ where
             unreachable!();
         };
 
-        let SnapshotVersion {
-            catalog_version,
-            parallel_unit_mapping_version,
-            worker_node_version,
-        } = info.version.clone().unwrap();
-
         notification_vec.retain_mut(|notification| match notification.info.as_ref().unwrap() {
             Info::Database(_)
             | Info::Schema(_)
-            | Info::Table(_)
-            | Info::Source(_)
-            | Info::Sink(_)
-            | Info::Index(_)
-            | Info::View(_)
-            | Info::User(_) => notification.version > catalog_version,
-            Info::ParallelUnitMapping(_) => notification.version > parallel_unit_mapping_version,
-            Info::Node(_) => notification.version > worker_node_version,
+            | Info::RelationGroup(_)
+            | Info::User(_)
+            | Info::Connection(_)
+            | Info::Function(_) => {
+                notification.version > info.version.as_ref().unwrap().catalog_version
+            }
+            Info::ParallelUnitMapping(_) => {
+                notification.version > info.version.as_ref().unwrap().parallel_unit_mapping_version
+            }
+            Info::Node(_) => {
+                notification.version > info.version.as_ref().unwrap().worker_node_version
+            }
             Info::HummockVersionDeltas(version_delta) => {
                 version_delta.version_deltas[0].id > info.hummock_version.as_ref().unwrap().id
             }
             Info::HummockSnapshot(_) => true,
-            Info::Snapshot(_) => unreachable!(),
+            Info::MetaBackupManifestId(_) => true,
+            Info::SystemParams(_) => true,
+            Info::Snapshot(_) | Info::HummockWriteLimits(_) => unreachable!(),
         });
 
         self.observer_states

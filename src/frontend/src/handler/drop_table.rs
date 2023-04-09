@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,46 +13,21 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::ErrorCode::PermissionDenied;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::ObjectName;
 
-use super::privilege::check_super_user;
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::root_catalog::SchemaPath;
-use crate::catalog::source_catalog::SourceKind;
-use crate::catalog::table_catalog::TableKind;
-use crate::session::OptimizerContext;
-
-pub fn check_source(
-    reader: &CatalogReadGuard,
-    db_name: &str,
-    schema_name: &str,
-    table_name: &str,
-) -> Result<()> {
-    if let Ok((s, _)) =
-        reader.get_source_by_name(db_name, SchemaPath::Name(schema_name), table_name)
-    {
-        match s.kind() {
-            SourceKind::Stream => {
-                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                    "Use `DROP SOURCE` to drop a source.".to_owned(),
-                )))
-            }
-            SourceKind::Table => {}
-        }
-    }
-    Ok(())
-}
+use crate::catalog::table_catalog::TableType;
+use crate::handler::HandlerArgs;
 
 pub async fn handle_drop_table(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     table_name: ObjectName,
     if_exists: bool,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx;
+    let session = handler_args.session;
     let db_name = session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let search_path = session.config().get_search_path();
@@ -77,39 +52,18 @@ pub async fn handle_drop_table(
             }
         };
 
-        let schema_catalog = reader
-            .get_schema_by_name(session.database(), schema_name)
-            .unwrap();
-        let schema_owner = schema_catalog.owner();
-        if session.user_id() != table.owner
-            && session.user_id() != schema_owner
-            && !check_super_user(&session)
-        {
-            return Err(PermissionDenied("Do not have the privilege".to_string()).into());
+        session.check_privilege_for_drop_alter(schema_name, &**table)?;
+
+        if table.table_type() != TableType::Table {
+            return Err(table.bad_drop_error());
         }
 
-        match table.kind() {
-            TableKind::TableOrSource => {
-                check_source(&reader, db_name, schema_name, &table_name)?;
-            }
-            TableKind::Index => {
-                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                    "Use `DROP INDEX` to drop an index.".to_owned(),
-                )));
-            }
-            TableKind::MView => {
-                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                    "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
-                )));
-            }
-        }
-
-        (table.associated_source_id().unwrap(), table.id())
+        (table.associated_source_id(), table.id())
     };
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
-        .drop_materialized_source(source_id.table_id(), table_id)
+        .drop_table(source_id.map(|id| id.table_id), table_id)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_TABLE))

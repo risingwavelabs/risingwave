@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,52 +12,50 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{StringWriter, WrittenGuard};
+use std::fmt::Write;
 
-use crate::Result;
+use risingwave_expr_macro::function;
 
-#[inline(always)]
-pub fn overlay(
-    s: &str,
-    new_sub_str: &str,
-    start: i32,
-    writer: StringWriter<'_>,
-) -> Result<WrittenGuard> {
+use crate::{ExprError, Result};
+
+#[function("overlay(varchar, varchar, int32) -> varchar")]
+pub fn overlay(s: &str, new_sub_str: &str, start: i32, writer: &mut dyn Write) -> Result<()> {
     // If count is omitted, it defaults to the length of new_sub_str.
     overlay_for(s, new_sub_str, start, new_sub_str.len() as i32, writer)
 }
 
-#[inline(always)]
+#[function("overlay(varchar, varchar, int32, int32) -> varchar")]
 pub fn overlay_for(
     s: &str,
     new_sub_str: &str,
     start: i32,
     count: i32,
-    writer: StringWriter<'_>,
-) -> Result<WrittenGuard> {
+    writer: &mut dyn Write,
+) -> Result<()> {
     let count = count.max(0) as usize;
 
     // If start is out of range, attach it to the end.
     // Note that indices are 1-based.
-    let start = ((start - 1).max(0) as usize).min(s.len());
+    let start = (start
+        .checked_sub(1)
+        .ok_or(ExprError::NumericOutOfRange)?
+        .max(0) as usize)
+        .min(s.len());
 
     let remaining = start + count;
 
-    let mut writer = writer.begin();
-    writer.write_ref(&s[..start]);
-    writer.write_ref(new_sub_str);
+    writer.write_str(&s[..start]).unwrap();
+    writer.write_str(new_sub_str).unwrap();
 
     if remaining < s.len() {
-        writer.write_ref(&s[remaining..]);
+        writer.write_str(&s[remaining..]).unwrap();
     }
 
-    Ok(writer.finish())
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{Array, ArrayBuilder, Utf8ArrayBuilder};
-
     use super::*;
 
     #[test]
@@ -82,16 +80,13 @@ mod tests {
         ];
 
         for (s, new_sub_str, start, count, expected) in cases {
-            let mut builder = Utf8ArrayBuilder::new(1);
-            let writer = builder.writer();
-            let _guard = match count {
-                None => overlay(s, new_sub_str, start, writer),
-                Some(count) => overlay_for(s, new_sub_str, start, count, writer),
+            let mut writer = String::new();
+            match count {
+                None => overlay(s, new_sub_str, start, &mut writer),
+                Some(count) => overlay_for(s, new_sub_str, start, count, &mut writer),
             }
             .unwrap();
-            let array = builder.finish();
-            let v = array.value_at(0).unwrap();
-            assert_eq!(v, expected);
+            assert_eq!(writer, expected);
         }
     }
 }

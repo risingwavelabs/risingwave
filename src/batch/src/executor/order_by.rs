@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,8 +17,8 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::util::encoding_for_comparison::encode_chunk;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::memcmp_encoding::encode_chunk;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
@@ -33,7 +33,7 @@ use crate::task::BatchTaskContext;
 /// 4. Build and yield data chunks according to the row order
 pub struct SortExecutor {
     child: BoxedExecutor,
-    order_pairs: Vec<OrderPair>,
+    column_orders: Vec<ColumnOrder>,
     identity: String,
     schema: Schema,
     chunk_size: usize,
@@ -64,16 +64,16 @@ impl BoxedExecutorBuilder for SortExecutor {
         let order_by_node =
             try_match_expand!(source.plan_node().get_node_body().unwrap(), NodeBody::Sort)?;
 
-        let order_pairs = order_by_node
+        let column_orders = order_by_node
             .column_orders
             .iter()
-            .map(OrderPair::from_prost)
+            .map(ColumnOrder::from_protobuf)
             .collect();
         Ok(Box::new(SortExecutor::new(
             child,
-            order_pairs,
+            column_orders,
             source.plan_node().get_identity().clone(),
-            source.context.get_config().developer.batch_chunk_size,
+            source.context.get_config().developer.chunk_size,
         )))
     }
 }
@@ -91,7 +91,7 @@ impl SortExecutor {
         }
 
         for chunk in &chunks {
-            let encoded_chunk = encode_chunk(chunk, &self.order_pairs);
+            let encoded_chunk = encode_chunk(chunk, &self.column_orders);
             encoded_rows.extend(
                 encoded_chunk
                     .into_iter()
@@ -117,14 +117,14 @@ impl SortExecutor {
 impl SortExecutor {
     pub fn new(
         child: BoxedExecutor,
-        order_pairs: Vec<OrderPair>,
+        column_orders: Vec<ColumnOrder>,
         identity: String,
         chunk_size: usize,
     ) -> Self {
         let schema = child.schema().clone();
         Self {
             child,
-            order_pairs,
+            column_orders,
             identity,
             schema,
             chunk_size,
@@ -140,10 +140,7 @@ mod tests {
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_common::types::{
-        DataType, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
-        OrderedF32, Scalar,
-    };
+    use risingwave_common::types::{DataType, Date, Interval, Scalar, Time, Timestamp, F32};
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
@@ -166,20 +163,20 @@ mod tests {
              2 2
              3 1",
         ));
-        let order_pairs = vec![
-            OrderPair {
-                column_idx: 1,
-                order_type: OrderType::Ascending,
+        let column_orders = vec![
+            ColumnOrder {
+                column_index: 1,
+                order_type: OrderType::ascending(),
             },
-            OrderPair {
-                column_idx: 0,
-                order_type: OrderType::Ascending,
+            ColumnOrder {
+                column_index: 0,
+                order_type: OrderType::ascending(),
             },
         ];
 
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
-            order_pairs,
+            column_orders,
             "SortExecutor2".to_string(),
             CHUNK_SIZE,
         ));
@@ -216,19 +213,19 @@ mod tests {
               2.2 -1.1
               3.3 -2.2",
         ));
-        let order_pairs = vec![
-            OrderPair {
-                column_idx: 1,
-                order_type: OrderType::Ascending,
+        let column_orders = vec![
+            ColumnOrder {
+                column_index: 1,
+                order_type: OrderType::ascending(),
             },
-            OrderPair {
-                column_idx: 0,
-                order_type: OrderType::Ascending,
+            ColumnOrder {
+                column_index: 0,
+                order_type: OrderType::ascending(),
             },
         ];
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
-            order_pairs,
+            column_orders,
             "SortExecutor2".to_string(),
             CHUNK_SIZE,
         ));
@@ -265,19 +262,19 @@ mod tests {
              2.2 2.2
              3.3 1.1",
         ));
-        let order_pairs = vec![
-            OrderPair {
-                column_idx: 1,
-                order_type: OrderType::Ascending,
+        let column_orders = vec![
+            ColumnOrder {
+                column_index: 1,
+                order_type: OrderType::ascending(),
             },
-            OrderPair {
-                column_idx: 0,
-                order_type: OrderType::Ascending,
+            ColumnOrder {
+                column_index: 0,
+                order_type: OrderType::ascending(),
             },
         ];
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
-            order_pairs,
+            column_orders,
             "SortExecutor2".to_string(),
             CHUNK_SIZE,
         ));
@@ -335,23 +332,23 @@ mod tests {
         );
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(input_chunk);
-        let order_pairs = vec![
-            OrderPair {
-                column_idx: 2,
-                order_type: OrderType::Ascending,
+        let column_orders = vec![
+            ColumnOrder {
+                column_index: 2,
+                order_type: OrderType::ascending(),
             },
-            OrderPair {
-                column_idx: 1,
-                order_type: OrderType::Descending,
+            ColumnOrder {
+                column_index: 1,
+                order_type: OrderType::descending(),
             },
-            OrderPair {
-                column_idx: 0,
-                order_type: OrderType::Ascending,
+            ColumnOrder {
+                column_index: 0,
+                order_type: OrderType::ascending(),
             },
         ];
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
-            order_pairs,
+            column_orders,
             "SortExecutor".to_string(),
             CHUNK_SIZE,
         ));
@@ -379,12 +376,12 @@ mod tests {
             vec![
                 column! { Utf8Array, [Some("abc"), Some("b"), Some("abc"), Some("abcdefgh"), Some("b")] },
                 column! { DecimalArray, [None, Some(-3), None, None, Some(7)] },
-                column! { NaiveDateArray, [
-                Some(NaiveDateWrapper::with_days(123).unwrap()),
-                Some(NaiveDateWrapper::with_days(789).unwrap()),
-                Some(NaiveDateWrapper::with_days(456).unwrap()),
+                column! { DateArray, [
+                Some(Date::with_days(123).unwrap()),
+                Some(Date::with_days(789).unwrap()),
+                Some(Date::with_days(456).unwrap()),
                 None,
-                Some(NaiveDateWrapper::with_days(345).unwrap())] },
+                Some(Date::with_days(345).unwrap())] },
             ],
             5,
         );
@@ -397,34 +394,34 @@ mod tests {
             vec![
                 column! { Utf8Array, [Some("b"), Some("b"), Some("abcdefgh"), Some("abc"), Some("abc")] },
                 column! { DecimalArray, [Some(7), Some(-3), None, None, None] },
-                column! { NaiveDateArray, [
-                Some(NaiveDateWrapper::with_days(345).unwrap()),
-                Some(NaiveDateWrapper::with_days(789).unwrap()),
+                column! { DateArray, [
+                Some(Date::with_days(345).unwrap()),
+                Some(Date::with_days(789).unwrap()),
                 None,
-                Some(NaiveDateWrapper::with_days(123).unwrap()),
-                Some(NaiveDateWrapper::with_days(456).unwrap())] },
+                Some(Date::with_days(123).unwrap()),
+                Some(Date::with_days(456).unwrap())] },
             ],
             5,
         );
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(input_chunk);
-        let order_pairs = vec![
-            OrderPair {
-                column_idx: 0,
-                order_type: OrderType::Descending,
+        let column_orders = vec![
+            ColumnOrder {
+                column_index: 0,
+                order_type: OrderType::descending(),
             },
-            OrderPair {
-                column_idx: 1,
-                order_type: OrderType::Descending,
+            ColumnOrder {
+                column_index: 1,
+                order_type: OrderType::descending(),
             },
-            OrderPair {
-                column_idx: 2,
-                order_type: OrderType::Ascending,
+            ColumnOrder {
+                column_index: 2,
+                order_type: OrderType::ascending(),
             },
         ];
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
-            order_pairs,
+            column_orders,
             "SortExecutor".to_string(),
             CHUNK_SIZE,
         ));
@@ -450,23 +447,23 @@ mod tests {
         // 7:89  .     .
         let input_chunk = DataChunk::new(
             vec![
-                column! { NaiveTimeArray, [
+                column! { TimeArray, [
                 None,
-                Some(NaiveTimeWrapper::with_secs_nano(4, 56).unwrap()),
+                Some(Time::with_secs_nano(4, 56).unwrap()),
                 None,
-                Some(NaiveTimeWrapper::with_secs_nano(4, 56).unwrap()),
-                Some(NaiveTimeWrapper::with_secs_nano(7, 89).unwrap())] },
-                column! { NaiveDateTimeArray, [
-                Some(NaiveDateTimeWrapper::with_secs_nsecs(1, 23).unwrap()),
-                Some(NaiveDateTimeWrapper::with_secs_nsecs(4, 56).unwrap()),
-                Some(NaiveDateTimeWrapper::with_secs_nsecs(7, 89).unwrap()),
-                Some(NaiveDateTimeWrapper::with_secs_nsecs(4, 56).unwrap()),
+                Some(Time::with_secs_nano(4, 56).unwrap()),
+                Some(Time::with_secs_nano(7, 89).unwrap())] },
+                column! { TimestampArray, [
+                Some(Timestamp::with_secs_nsecs(1, 23).unwrap()),
+                Some(Timestamp::with_secs_nsecs(4, 56).unwrap()),
+                Some(Timestamp::with_secs_nsecs(7, 89).unwrap()),
+                Some(Timestamp::with_secs_nsecs(4, 56).unwrap()),
                 None] },
                 column! { IntervalArray, [
                 None,
-                Some(IntervalUnit::new(1, 2, 3)),
+                Some(Interval::from_month_day_usec(1, 2, 3)),
                 None,
-                Some(IntervalUnit::new(4, 5, 6)),
+                Some(Interval::from_month_day_usec(4, 5, 6)),
                 None] },
             ],
             5,
@@ -478,21 +475,21 @@ mod tests {
         // .     7:89  .
         let output_chunk = DataChunk::new(
             vec![
-                column! { NaiveTimeArray, [
-                Some(NaiveTimeWrapper::with_secs_nano(4, 56).unwrap()),
-                Some(NaiveTimeWrapper::with_secs_nano(4, 56).unwrap()),
-                Some(NaiveTimeWrapper::with_secs_nano(7, 89).unwrap()),
+                column! { TimeArray, [
+                Some(Time::with_secs_nano(4, 56).unwrap()),
+                Some(Time::with_secs_nano(4, 56).unwrap()),
+                Some(Time::with_secs_nano(7, 89).unwrap()),
                 None,
                 None] },
-                column! { NaiveDateTimeArray, [
-                Some(NaiveDateTimeWrapper::with_secs_nsecs(4, 56).unwrap()),
-                Some(NaiveDateTimeWrapper::with_secs_nsecs(4, 56).unwrap()),
+                column! { TimestampArray, [
+                Some(Timestamp::with_secs_nsecs(4, 56).unwrap()),
+                Some(Timestamp::with_secs_nsecs(4, 56).unwrap()),
                 None,
-                Some(NaiveDateTimeWrapper::with_secs_nsecs(1, 23).unwrap()),
-                Some(NaiveDateTimeWrapper::with_secs_nsecs(7, 89).unwrap())] },
+                Some(Timestamp::with_secs_nsecs(1, 23).unwrap()),
+                Some(Timestamp::with_secs_nsecs(7, 89).unwrap())] },
                 column! { IntervalArray, [
-                Some(IntervalUnit::new(4, 5, 6)),
-                Some(IntervalUnit::new(1, 2, 3)),
+                Some(Interval::from_month_day_usec(4, 5, 6)),
+                Some(Interval::from_month_day_usec(1, 2, 3)),
                 None,
                 None,
                 None] },
@@ -501,23 +498,23 @@ mod tests {
         );
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(input_chunk);
-        let order_pairs = vec![
-            OrderPair {
-                column_idx: 0,
-                order_type: OrderType::Ascending,
+        let column_orders = vec![
+            ColumnOrder {
+                column_index: 0,
+                order_type: OrderType::ascending(),
             },
-            OrderPair {
-                column_idx: 1,
-                order_type: OrderType::Ascending,
+            ColumnOrder {
+                column_index: 1,
+                order_type: OrderType::ascending(),
             },
-            OrderPair {
-                column_idx: 2,
-                order_type: OrderType::Descending,
+            ColumnOrder {
+                column_index: 2,
+                order_type: OrderType::descending(),
             },
         ];
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
-            order_pairs,
+            column_orders,
             "SortExecutor".to_string(),
             CHUNK_SIZE,
         ));
@@ -544,6 +541,7 @@ mod tests {
             0,
             ArrayMeta::Struct {
                 children: Arc::new([DataType::Varchar, DataType::Float32]),
+                children_names: vec![].into(),
             },
         );
         let mut list_builder = ListArrayBuilder::with_meta(
@@ -563,13 +561,13 @@ mod tests {
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
                             Some("abcd".into()),
-                            Some(OrderedF32::from(-1.2).to_scalar_value()),
+                            Some(F32::from(-1.2).to_scalar_value()),
                         ]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
                             Some("c".into()),
-                            Some(OrderedF32::from(0.0).to_scalar_value()),
+                            Some(F32::from(0.0).to_scalar_value()),
                         ]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
@@ -578,14 +576,11 @@ mod tests {
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
                             Some("c".into()),
-                            Some(OrderedF32::from(0.0).to_scalar_value()),
+                            Some(F32::from(0.0).to_scalar_value()),
                         ]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
-                        val: &StructValue::new(vec![
-                            None,
-                            Some(OrderedF32::from(3.4).to_scalar_value()),
-                        ]),
+                        val: &StructValue::new(vec![None, Some(F32::from(3.4).to_scalar_value())]),
                     }));
                     struct_builder.finish().into()
                 },
@@ -612,6 +607,7 @@ mod tests {
             0,
             ArrayMeta::Struct {
                 children: Arc::new([DataType::Varchar, DataType::Float32]),
+                children_names: vec![].into(),
             },
         );
         let mut list_builder = ListArrayBuilder::with_meta(
@@ -631,29 +627,26 @@ mod tests {
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
                             Some("abcd".into()),
-                            Some(OrderedF32::from(-1.2).to_scalar_value()),
+                            Some(F32::from(-1.2).to_scalar_value()),
                         ]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
                             Some("c".into()),
-                            Some(OrderedF32::from(0.0).to_scalar_value()),
+                            Some(F32::from(0.0).to_scalar_value()),
                         ]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
                             Some("c".into()),
-                            Some(OrderedF32::from(0.0).to_scalar_value()),
+                            Some(F32::from(0.0).to_scalar_value()),
                         ]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![Some("c".into()), None]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
-                        val: &StructValue::new(vec![
-                            None,
-                            Some(OrderedF32::from(3.4).to_scalar_value()),
-                        ]),
+                        val: &StructValue::new(vec![None, Some(F32::from(3.4).to_scalar_value())]),
                     }));
                     struct_builder.finish().into()
                 },
@@ -678,19 +671,19 @@ mod tests {
         );
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(input_chunk);
-        let order_pairs = vec![
-            OrderPair {
-                column_idx: 0,
-                order_type: OrderType::Ascending,
+        let column_orders = vec![
+            ColumnOrder {
+                column_index: 0,
+                order_type: OrderType::ascending(),
             },
-            OrderPair {
-                column_idx: 1,
-                order_type: OrderType::Descending,
+            ColumnOrder {
+                column_index: 1,
+                order_type: OrderType::descending(),
             },
         ];
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
-            order_pairs,
+            column_orders,
             "SortExecutor".to_string(),
             CHUNK_SIZE,
         ));

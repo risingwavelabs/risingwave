@@ -1,6 +1,9 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -euo pipefail
 
-generate-dashboard -o risingwave-dashboard.gen.json risingwave-dashboard.dashboard.py
-jq -c . risingwave-dashboard.gen.json > risingwave-dashboard.json
+for dashboard_name in "risingwave-dev-dashboard" "risingwave-user-dashboard"; do
+    generate-dashboard -o $dashboard_name.gen.json $dashboard_name.dashboard.py
+    jq -c . $dashboard_name.gen.json > $dashboard_name.json
+    cp $dashboard_name.json ../docker/dashboards/
+done

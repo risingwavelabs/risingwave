@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,18 +13,12 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::fmt::Write;
 
-use risingwave_common::array::{StringWriter, WrittenGuard};
+use risingwave_expr_macro::function;
 
-use crate::Result;
-
-#[inline(always)]
-pub fn translate(
-    s: &str,
-    match_str: &str,
-    replace_str: &str,
-    writer: StringWriter<'_>,
-) -> Result<WrittenGuard> {
+#[function("translate(varchar, varchar, varchar) -> varchar")]
+pub fn translate(s: &str, match_str: &str, replace_str: &str, writer: &mut dyn Write) {
     let mut char_map = HashMap::new();
     let mut match_chars = match_str.chars();
     let mut replace_chars = replace_str.chars();
@@ -44,18 +38,17 @@ pub fn translate(
         Some(None) => None,
         None => Some(c),
     });
-
-    Ok(writer.write_from_char_iter(iter))
+    for c in iter {
+        writer.write_char(c).unwrap();
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{Array, ArrayBuilder, Utf8ArrayBuilder};
-
     use super::*;
 
     #[test]
-    fn test_translate() -> Result<()> {
+    fn test_translate() {
         let cases = [
             ("hello world", "lo", "12", "he112 w2r1d"),
             (
@@ -65,22 +58,17 @@ mod tests {
                 "a之初，b本善cb相近，习相远c",
             ),
             (
-                "奇点无限 Singularity Data",
-                "Data ",
+                "奇点无限 RisingWave Labs",
+                "Labs ",
                 "1234",
-                "奇点无限Singul2ri3y1232",
+                "奇点无限Ri4ingW2ve1234",
             ),
         ];
 
         for (s, match_str, replace_str, expected) in cases {
-            let mut builder = Utf8ArrayBuilder::new(1);
-            let writer = builder.writer();
-            let _guard = translate(s, match_str, replace_str, writer)?;
-            let array = builder.finish();
-            let v = array.value_at(0).unwrap();
-            assert_eq!(v, expected);
+            let mut writer = String::new();
+            translate(s, match_str, replace_str, &mut writer);
+            assert_eq!(writer, expected);
         }
-
-        Ok(())
     }
 }

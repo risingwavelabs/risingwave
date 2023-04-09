@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,22 +14,21 @@
 
 use risingwave_common::array::ListRef;
 use risingwave_common::types::{Scalar, ToOwnedDatum};
+use risingwave_expr_macro::function;
 
 use crate::Result;
 
-#[inline(always)]
-pub fn array_access<T: Scalar>(l: Option<ListRef<'_>>, r: Option<i32>) -> Result<Option<T>> {
-    match (l, r) {
-        // index must be greater than 0 following a one-based numbering convention for arrays
-        (Some(list), Some(index)) if index > 0 => {
-            let datumref = list.value_at(index as usize)?;
-            if let Some(scalar) = datumref.to_owned_datum() {
-                Ok(Some(scalar.try_into()?))
-            } else {
-                Ok(None)
-            }
-        }
-        _ => Ok(None),
+#[function("array_access(list, int32) -> *")]
+pub fn array_access<T: Scalar>(list: ListRef<'_>, index: i32) -> Result<Option<T>> {
+    // index must be greater than 0 following a one-based numbering convention for arrays
+    if index < 1 {
+        return Ok(None);
+    }
+    let datumref = list.value_at(index as usize)?;
+    if let Some(scalar) = datumref.to_owned_datum() {
+        Ok(Some(scalar.try_into()?))
+    } else {
+        Ok(None)
     }
 }
 
@@ -50,10 +49,10 @@ mod tests {
         ]);
         let l1 = ListRef::ValueRef { val: &v1 };
 
-        assert_eq!(array_access::<i32>(Some(l1), Some(1)).unwrap(), Some(1));
-        assert_eq!(array_access::<i32>(Some(l1), Some(-1)).unwrap(), None);
-        assert_eq!(array_access::<i32>(Some(l1), Some(0)).unwrap(), None);
-        assert_eq!(array_access::<i32>(Some(l1), Some(4)).unwrap(), None);
+        assert_eq!(array_access::<i32>(l1, 1).unwrap(), Some(1));
+        assert_eq!(array_access::<i32>(l1, -1).unwrap(), None);
+        assert_eq!(array_access::<i32>(l1, 0).unwrap(), None);
+        assert_eq!(array_access::<i32>(l1, 4).unwrap(), None);
     }
 
     #[test]
@@ -75,15 +74,15 @@ mod tests {
         let l3 = ListRef::ValueRef { val: &v3 };
 
         assert_eq!(
-            array_access::<Box<str>>(Some(l1), Some(1)).unwrap(),
+            array_access::<Box<str>>(l1, 1).unwrap(),
             Some("来自".into())
         );
         assert_eq!(
-            array_access::<Box<str>>(Some(l2), Some(2)).unwrap(),
+            array_access::<Box<str>>(l2, 2).unwrap(),
             Some("荷兰".into())
         );
         assert_eq!(
-            array_access::<Box<str>>(Some(l3), Some(3)).unwrap(),
+            array_access::<Box<str>>(l3, 3).unwrap(),
             Some("的爱".into())
         );
     }
@@ -102,7 +101,7 @@ mod tests {
         ]);
         let l = ListRef::ValueRef { val: &v };
         assert_eq!(
-            array_access::<ListValue>(Some(l), Some(1)).unwrap(),
+            array_access::<ListValue>(l, 1).unwrap(),
             Some(ListValue::new(vec![
                 Some(ScalarImpl::Utf8("foo".into())),
                 Some(ScalarImpl::Utf8("bar".into())),

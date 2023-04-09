@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,21 +22,23 @@ use risingwave_hummock_sdk::LocalSstableInfo;
 use tokio::task::JoinHandle;
 
 use crate::hummock::compactor::task_progress::TaskProgress;
+use crate::hummock::sstable::filter::FilterBuilder;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     BatchUploadWriter, CachePolicy, DeleteRangeTombstone, HummockResult, MemoryLimiter,
     RangeTombstonesCollector, SstableBuilder, SstableBuilderOptions, SstableWriter,
-    SstableWriterOptions,
+    SstableWriterOptions, XorFilterBuilder,
 };
-use crate::monitor::StateStoreMetrics;
+use crate::monitor::CompactorMetrics;
 
 pub type UploadJoinHandle = JoinHandle<HummockResult<()>>;
 
 #[async_trait::async_trait]
 pub trait TableBuilderFactory {
     type Writer: SstableWriter<Output = UploadJoinHandle>;
-    async fn open_builder(&self) -> HummockResult<SstableBuilder<Self::Writer>>;
+    type Filter: FilterBuilder;
+    async fn open_builder(&mut self) -> HummockResult<SstableBuilder<Self::Writer, Self::Filter>>;
 }
 
 pub struct SplitTableOutput {
@@ -57,10 +59,10 @@ where
 
     sst_outputs: Vec<SplitTableOutput>,
 
-    current_builder: Option<SstableBuilder<F::Writer>>,
+    current_builder: Option<SstableBuilder<F::Writer, F::Filter>>,
 
     /// Statistics.
-    pub stats: Arc<StateStoreMetrics>,
+    pub compactor_metrics: Arc<CompactorMetrics>,
 
     /// Update the number of sealed Sstables.
     task_progress: Option<Arc<TaskProgress>>,
@@ -68,6 +70,8 @@ where
     last_sealed_key: UserKey<Vec<u8>>,
     pub del_agg: Arc<RangeTombstonesCollector>,
     key_range: KeyRange,
+    last_table_id: u32,
+    split_by_table: bool,
 }
 
 impl<F> CapacitySplitTableBuilder<F>
@@ -77,10 +81,11 @@ where
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
     pub fn new(
         builder_factory: F,
-        stats: Arc<StateStoreMetrics>,
+        compactor_metrics: Arc<CompactorMetrics>,
         task_progress: Option<Arc<TaskProgress>>,
         del_agg: Arc<RangeTombstonesCollector>,
         key_range: KeyRange,
+        split_by_table: bool,
     ) -> Self {
         let start_key = if key_range.left.is_empty() {
             UserKey::default()
@@ -92,11 +97,13 @@ where
             builder_factory,
             sst_outputs: Vec::new(),
             current_builder: None,
-            stats,
+            compactor_metrics,
             task_progress,
             del_agg,
             last_sealed_key: start_key,
             key_range,
+            last_table_id: 0,
+            split_by_table,
         }
     }
 
@@ -105,11 +112,13 @@ where
             builder_factory,
             sst_outputs: Vec::new(),
             current_builder: None,
-            stats: Arc::new(StateStoreMetrics::unused()),
+            compactor_metrics: Arc::new(CompactorMetrics::unused()),
             task_progress: None,
             last_sealed_key: UserKey::default(),
             del_agg: Arc::new(RangeTombstonesCollector::for_test()),
             key_range: KeyRange::inf(),
+            last_table_id: 0,
+            split_by_table: false,
         }
     }
 
@@ -132,12 +141,17 @@ where
     /// allowed, where `allow_split` should be `false`.
     pub async fn add_full_key(
         &mut self,
-        full_key: &FullKey<&[u8]>,
+        full_key: FullKey<&[u8]>,
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
     ) -> HummockResult<()> {
+        let mut switch_builder = false;
+        if self.split_by_table && full_key.user_key.table_id.table_id != self.last_table_id {
+            self.last_table_id = full_key.user_key.table_id.table_id;
+            switch_builder = true;
+        }
         if let Some(builder) = self.current_builder.as_ref() {
-            if is_new_user_key && builder.reach_capacity() {
+            if is_new_user_key && (switch_builder || builder.reach_capacity()) {
                 let delete_ranges = self
                     .del_agg
                     .get_tombstone_between(&self.last_sealed_key.as_ref(), &full_key.user_key);
@@ -161,12 +175,10 @@ where
     /// will be no-op.
     pub async fn seal_current(
         &mut self,
-        delete_ranges: Vec<DeleteRangeTombstone>,
+        range_tombstones: Vec<DeleteRangeTombstone>,
     ) -> HummockResult<()> {
         if let Some(mut builder) = self.current_builder.take() {
-            for tombstone in delete_ranges {
-                builder.add_delete_range(tombstone);
-            }
+            builder.add_delete_range(range_tombstones);
             let builder_output = builder.finish().await?;
             {
                 // report
@@ -176,30 +188,35 @@ where
                 }
 
                 if builder_output.bloom_filter_size != 0 {
-                    self.stats
+                    self.compactor_metrics
                         .sstable_bloom_filter_size
                         .observe(builder_output.bloom_filter_size as _);
                 }
 
                 if builder_output.sst_info.file_size() != 0 {
-                    self.stats
+                    self.compactor_metrics
                         .sstable_file_size
                         .observe(builder_output.sst_info.file_size() as _);
                 }
 
                 if builder_output.avg_key_size != 0 {
-                    self.stats
+                    self.compactor_metrics
                         .sstable_avg_key_size
                         .observe(builder_output.avg_key_size as _);
                 }
 
                 if builder_output.avg_value_size != 0 {
-                    self.stats
+                    self.compactor_metrics
                         .sstable_avg_value_size
                         .observe(builder_output.avg_value_size as _);
                 }
-            }
 
+                if builder_output.epoch_count != 0 {
+                    self.compactor_metrics
+                        .sstable_distinct_epoch_count
+                        .observe(builder_output.epoch_count as _);
+                }
+            }
             self.sst_outputs.push(SplitTableOutput {
                 upload_join_handle: builder_output.writer_output,
                 sst_info: builder_output.sst_info,
@@ -254,11 +271,14 @@ impl LocalTableBuilderFactory {
 
 #[async_trait::async_trait]
 impl TableBuilderFactory for LocalTableBuilderFactory {
+    type Filter = XorFilterBuilder;
     type Writer = BatchUploadWriter;
 
-    async fn open_builder(&self) -> HummockResult<SstableBuilder<BatchUploadWriter>> {
+    async fn open_builder(
+        &mut self,
+    ) -> HummockResult<SstableBuilder<BatchUploadWriter, XorFilterBuilder>> {
         let id = self.next_id.fetch_add(1, SeqCst);
-        let tracker = self.limiter.require_memory(1).await.unwrap();
+        let tracker = self.limiter.require_memory(1).await;
         let writer_options = SstableWriterOptions {
             capacity_hint: Some(self.options.capacity),
             tracker: Some(tracker),
@@ -320,7 +340,7 @@ mod tests {
         for i in 0..table_capacity {
             builder
                 .add_full_key(
-                    &FullKey::from_user_key(
+                    FullKey::from_user_key(
                         test_user_key_of(i).as_ref(),
                         (table_capacity - i) as u64,
                     ),
@@ -350,7 +370,7 @@ mod tests {
                 epoch -= 1;
                 builder
                     .add_full_key(
-                        &FullKey::from_user_key(test_user_key_of(1).as_ref(), epoch),
+                        FullKey::from_user_key(test_user_key_of(1).as_ref(), epoch),
                         HummockValue::put(b"v"),
                         true,
                     )
@@ -388,7 +408,7 @@ mod tests {
             opts,
         ));
         builder
-            .add_full_key(&test_key_of(0).to_ref(), HummockValue::put(b"v"), false)
+            .add_full_key(test_key_of(0).to_ref(), HummockValue::put(b"v"), false)
             .await
             .unwrap();
     }
@@ -404,14 +424,15 @@ mod tests {
         ]);
         let mut builder = CapacitySplitTableBuilder::new(
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
-            Arc::new(StateStoreMetrics::unused()),
+            Arc::new(CompactorMetrics::unused()),
             None,
             builder.build(0, false),
             KeyRange::inf(),
+            false,
         );
         builder
             .add_full_key(
-                &FullKey::for_test(table_id, b"k", 233),
+                FullKey::for_test(table_id, b"k", 233),
                 HummockValue::put(b"v"),
                 false,
             )
@@ -433,5 +454,34 @@ mod tests {
             key_range.right,
             FullKey::for_test(table_id, b"kkk", u64::MAX).encode()
         );
+    }
+
+    #[tokio::test]
+    async fn test_only_delete_range() {
+        let block_size = 1 << 10;
+        let table_capacity = 4 * block_size;
+        let opts = SstableBuilderOptions {
+            capacity: table_capacity,
+            block_capacity: block_size,
+            restart_interval: DEFAULT_RESTART_INTERVAL,
+            bloom_false_positive: 0.1,
+            compression_algorithm: CompressionAlgorithm::None,
+        };
+        let table_id = TableId::new(1);
+        let mut builder = DeleteRangeAggregatorBuilder::default();
+        builder.add_tombstone(vec![
+            DeleteRangeTombstone::new(table_id, b"k".to_vec(), b"kkk".to_vec(), 100),
+            DeleteRangeTombstone::new(table_id, b"aaa".to_vec(), b"ddd".to_vec(), 200),
+        ]);
+        let builder = CapacitySplitTableBuilder::new(
+            LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
+            Arc::new(CompactorMetrics::unused()),
+            None,
+            builder.build(0, false),
+            KeyRange::inf(),
+            false,
+        );
+        let results = builder.finish().await.unwrap();
+        assert_eq!(results[0].sst_info.sst_info.table_ids, vec![1]);
     }
 }

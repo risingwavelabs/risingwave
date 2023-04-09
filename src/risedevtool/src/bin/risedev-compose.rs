@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,16 +13,18 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::fs::{self, File};
 use std::io::Read;
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use console::style;
+use fs_err::{self, File};
+use itertools::Itertools;
 use risedev::{
     compose_deploy, compute_risectl_env, Compose, ComposeConfig, ComposeDeployConfig, ComposeFile,
     ComposeService, ComposeVolume, ConfigExpander, DockerImageConfig, ServiceConfig,
+    RISEDEV_CONFIG_FILE,
 };
 use serde::Deserialize;
 
@@ -60,13 +62,7 @@ fn load_docker_image_config(
 fn main() -> Result<()> {
     let opts = RiseDevComposeOpts::parse();
 
-    let risedev_config_content = {
-        let mut content = String::new();
-        File::open("risedev.yml")?.read_to_string(&mut content)?;
-        content
-    };
-
-    let (risedev_config, compose_deploy_config) = if opts.deploy {
+    let (risedev_config, compose_deploy_config, rw_config_path) = if opts.deploy {
         let compose_deploy_config = {
             let mut content = String::new();
             File::open("risedev-compose.yml")?.read_to_string(&mut content)?;
@@ -74,43 +70,38 @@ fn main() -> Result<()> {
         };
         let compose_deploy_config: ComposeDeployConfig =
             serde_yaml::from_str(&compose_deploy_config)?;
-
-        (
-            ConfigExpander::expand_with_extra_info(
-                &risedev_config_content,
-                &opts.profile,
+        let extra_info = compose_deploy_config
+            .instances
+            .iter()
+            .map(|i| (format!("dns-host:{}", i.id), i.dns_host.clone()))
+            .chain(
                 compose_deploy_config
-                    .instances
+                    .risedev_extra_args
                     .iter()
-                    .map(|i| (format!("dns-host:{}", i.id), i.dns_host.clone()))
-                    .chain(
-                        compose_deploy_config
-                            .risedev_extra_args
-                            .iter()
-                            .map(|(k, v)| (k.clone(), v.clone())),
-                    )
-                    .collect(),
-            )?,
-            Some(compose_deploy_config),
-        )
+                    .map(|(k, v)| (k.clone(), v.clone())),
+            )
+            .collect();
+
+        let (config_path, expanded_config) =
+            ConfigExpander::expand_with_extra_info(".", &opts.profile, extra_info)?;
+        (expanded_config, Some(compose_deploy_config), config_path)
     } else {
-        (
-            ConfigExpander::expand(&risedev_config_content, &opts.profile)?,
-            None,
-        )
+        let (config_path, expanded_config) = ConfigExpander::expand(".", &opts.profile)?;
+        (expanded_config, None, config_path)
     };
 
     let compose_config = ComposeConfig {
         image: load_docker_image_config(
-            &risedev_config_content,
+            &fs_err::read_to_string(RISEDEV_CONFIG_FILE)?,
             compose_deploy_config
                 .as_ref()
                 .and_then(|x| x.risingwave_image_override.as_ref()),
         )?,
         config_directory: opts.directory.clone(),
+        rw_config_path,
     };
 
-    let (steps, services) = ConfigExpander::select(&risedev_config, &opts.profile)?;
+    let services = ConfigExpander::deserialize(&risedev_config)?;
 
     let mut compose_services: BTreeMap<String, BTreeMap<String, ComposeService>> = BTreeMap::new();
     let mut service_on_node: BTreeMap<String, String> = BTreeMap::new();
@@ -119,8 +110,9 @@ fn main() -> Result<()> {
     let mut log_buffer = String::new();
     use std::fmt::Write;
 
-    for step in &steps {
-        let service = services.get(step).unwrap();
+    for service in &services {
+        let step = service.id();
+
         let compose_deploy_config = compose_deploy_config.as_ref();
         let (address, mut compose) = match service {
             ServiceConfig::Minio(c) => {
@@ -172,7 +164,7 @@ fn main() -> Result<()> {
                         .green(),
                         style(&arg).green()
                     )?;
-                    fs::write(
+                    fs_err::write(
                         Path::new(&opts.directory).join("tpch-bench-args-frontend"),
                         arg,
                     )?;
@@ -211,6 +203,7 @@ fn main() -> Result<()> {
             ServiceConfig::ZooKeeper(_) => {
                 return Err(anyhow!("not supported, please use redpanda instead"))
             }
+            ServiceConfig::OpenDal(_) => continue,
             ServiceConfig::AwsS3(_) => continue,
             ServiceConfig::RedPanda(c) => {
                 if opts.deploy {
@@ -220,7 +213,7 @@ fn main() -> Result<()> {
                         "-- Redpanda --\ntpch-bench: {}\n",
                         style(&arg).green()
                     )?;
-                    fs::write(
+                    fs_err::write(
                         Path::new(&opts.directory).join("tpch-bench-args-kafka"),
                         arg,
                     )?;
@@ -240,7 +233,7 @@ fn main() -> Result<()> {
             .entry(address.clone())
             .or_default()
             .insert(step.to_string(), compose);
-        service_on_node.insert(step.clone(), address);
+        service_on_node.insert(step.to_string(), address);
     }
 
     if opts.deploy {
@@ -278,7 +271,7 @@ fn main() -> Result<()> {
                 )?;
             }
 
-            fs::write(
+            fs_err::write(
                 Path::new(&opts.directory).join(format!("{}.yml", node)),
                 yaml,
             )?;
@@ -289,7 +282,7 @@ fn main() -> Result<()> {
 
         compose_deploy(
             Path::new(&opts.directory),
-            &steps,
+            &services.iter().map(|s| s.id().to_string()).collect_vec(),
             &compose_deploy_config.as_ref().unwrap().instances,
             &compose_config,
             &service_on_node,
@@ -297,7 +290,7 @@ fn main() -> Result<()> {
 
         println!("\n{}", log_buffer);
 
-        std::fs::write(
+        fs_err::write(
             Path::new(&opts.directory).join("_message.partial.sh"),
             log_buffer,
         )?;
@@ -317,7 +310,7 @@ fn main() -> Result<()> {
 
         let yaml = serde_yaml::to_string(&compose_file)?;
 
-        fs::write(Path::new(&opts.directory).join("docker-compose.yml"), yaml)?;
+        fs_err::write(Path::new(&opts.directory).join("docker-compose.yml"), yaml)?;
     }
 
     Ok(())

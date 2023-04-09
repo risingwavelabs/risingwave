@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,66 +14,54 @@
 
 //! Local execution for batch query.
 use std::collections::HashMap;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
-use futures::Stream;
+use anyhow::Context;
+use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pgwire::pg_server::BoxedError;
+use rand::seq::SliceRandom;
 use risingwave_batch::executor::{BoxedDataChunkStream, ExecutorBuilder};
 use risingwave_batch::task::TaskId;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::error::RwError;
+use risingwave_common::hash::ParallelUnitMapping;
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::stream_cancel::{cancellable_stream, Tripwire};
 use risingwave_connector::source::SplitMetaData;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
-    ExchangeInfo, ExchangeSource, LocalExecutePlan, PlanFragment, PlanNode as PlanNodeProst,
-    TaskId as ProstTaskId, TaskOutputId,
+    ExchangeInfo, ExchangeSource, LocalExecutePlan, PbTaskId, PlanFragment, PlanNode as PlanNodePb,
+    TaskOutputId,
 };
+use risingwave_pb::common::WorkerNode;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
 use uuid::Uuid;
 
-use super::plan_fragmenter::{PartitionInfo, QueryStageRef};
-use super::HummockSnapshotGuard;
+use super::plan_fragmenter::{PartitionInfo, QueryStage, QueryStageRef};
+use crate::catalog::TableId;
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
-use crate::scheduler::SchedulerResult;
+use crate::scheduler::{PinnedHummockSnapshot, SchedulerResult};
 use crate::session::{AuthContext, FrontendEnv};
 
-pub struct LocalQueryStream {
-    data_stream: BoxedDataChunkStream,
-}
-
-impl Stream for LocalQueryStream {
-    type Item = Result<DataChunk, BoxedError>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match self.data_stream.as_mut().poll_next(cx) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(chunk) => match chunk {
-                Some(chunk_result) => match chunk_result {
-                    Ok(chunk) => Poll::Ready(Some(Ok(chunk))),
-                    Err(err) => Poll::Ready(Some(Err(Box::new(err)))),
-                },
-                None => Poll::Ready(None),
-            },
-        }
-    }
-}
+pub type LocalQueryStream = ReceiverStream<Result<DataChunk, BoxedError>>;
 
 pub struct LocalQueryExecution {
     sql: String,
     query: Query,
     front_env: FrontendEnv,
     // The snapshot will be released when LocalQueryExecution is dropped.
-    snapshot: HummockSnapshotGuard,
+    snapshot: PinnedHummockSnapshot,
     auth_context: Arc<AuthContext>,
+    cancel_flag: Option<Tripwire<Result<DataChunk, BoxedError>>>,
 }
 
 impl LocalQueryExecution {
@@ -81,8 +69,9 @@ impl LocalQueryExecution {
         query: Query,
         front_env: FrontendEnv,
         sql: S,
-        snapshot: HummockSnapshotGuard,
+        snapshot: PinnedHummockSnapshot,
         auth_context: Arc<AuthContext>,
+        cancel_flag: Tripwire<Result<DataChunk, BoxedError>>,
     ) -> Self {
         Self {
             sql: sql.into(),
@@ -90,6 +79,7 @@ impl LocalQueryExecution {
             front_env,
             snapshot,
             auth_context,
+            cancel_flag: Some(cancel_flag),
         }
     }
 
@@ -115,8 +105,7 @@ impl LocalQueryExecution {
             &plan_node,
             &task_id,
             context,
-            // TODO: Add support to use current epoch when needed
-            self.snapshot.get_committed_epoch(),
+            self.snapshot.get_batch_query_epoch(),
         );
         let executor = executor.build().await?;
 
@@ -130,10 +119,29 @@ impl LocalQueryExecution {
         Box::pin(self.run_inner())
     }
 
-    pub fn stream_rows(self) -> LocalQueryStream {
-        LocalQueryStream {
-            data_stream: self.run(),
-        }
+    pub fn stream_rows(mut self) -> LocalQueryStream {
+        let (sender, receiver) = mpsc::channel(10);
+        let tripwire = self.cancel_flag.take().unwrap();
+
+        let mut data_stream = {
+            let s = self.run().map(|r| r.map_err(|e| Box::new(e) as BoxedError));
+            Box::pin(cancellable_stream(s, tripwire))
+        };
+
+        let future = async move {
+            while let Some(r) = data_stream.next().await {
+                if (sender.send(r).await).is_err() {
+                    tracing::info!("Receiver closed.");
+                }
+            }
+        };
+
+        #[cfg(madsim)]
+        tokio::spawn(future);
+        #[cfg(not(madsim))]
+        tokio::task::spawn_blocking(move || futures::executor::block_on(future));
+
+        ReceiverStream::new(receiver)
     }
 
     /// Convert query to plan fragment.
@@ -149,7 +157,7 @@ impl LocalQueryExecution {
     fn create_plan_fragment(&self) -> SchedulerResult<PlanFragment> {
         let root_stage_id = self.query.root_stage_id();
         let root_stage = self.query.stage_graph.stages.get(&root_stage_id).unwrap();
-        assert_eq!(root_stage.parallelism, 1);
+        assert_eq!(root_stage.parallelism.unwrap(), 1);
         let second_stage_id = self.query.stage_graph.get_child_stages(&root_stage_id);
         let plan_node_prost = match second_stage_id {
             None => {
@@ -195,7 +203,7 @@ impl LocalQueryExecution {
         execution_plan_node: &ExecutionPlanNode,
         second_stages: &mut Option<HashMap<StageId, QueryStageRef>>,
         partition: Option<PartitionInfo>,
-    ) -> SchedulerResult<PlanNodeProst> {
+    ) -> SchedulerResult<PlanNodePb> {
         match execution_plan_node.plan_node_type {
             PlanNodeType::BatchExchange => {
                 let exchange_source_stage_id = execution_plan_node
@@ -230,7 +238,7 @@ impl LocalQueryExecution {
                     let workers = self.front_env.worker_node_manager().get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
 
                     for (idx, (worker_node, partition)) in
-                        (workers.into_iter().zip_eq(vnode_bitmaps.into_iter())).enumerate()
+                        (workers.into_iter().zip_eq_fast(vnode_bitmaps.into_iter())).enumerate()
                     {
                         let second_stage_plan_node = self.convert_plan_node(
                             &second_stage.root,
@@ -246,12 +254,11 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            // TODO: Add support to use current epoch when needed
-                            epoch: self.snapshot.get_committed_epoch(),
+                            epoch: Some(self.snapshot.get_batch_query_epoch()),
                         };
                         let exchange_source = ExchangeSource {
                             task_output_id: Some(TaskOutputId {
-                                task_id: Some(ProstTaskId {
+                                task_id: Some(PbTaskId {
                                     task_id: idx as u32,
                                     stage_id: exchange_source_stage_id,
                                     query_id: self.query.query_id.id.clone(),
@@ -264,7 +271,7 @@ impl LocalQueryExecution {
                         sources.push(exchange_source);
                     }
                 } else if let Some(source_info) = &second_stage.source_info {
-                    for (id,split) in source_info.split_info().iter().enumerate() {
+                    for (id,split) in source_info.split_info().unwrap().iter().enumerate() {
                         let second_stage_plan_node = self.convert_plan_node(
                             &second_stage.root,
                             &mut None,
@@ -279,14 +286,13 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            // TODO: Add support to use current epoch when needed
-                            epoch: self.snapshot.get_committed_epoch(),
+                            epoch: Some(self.snapshot.get_batch_query_epoch()),
                         };
                         // NOTE: select a random work node here.
                         let worker_node = self.front_env.worker_node_manager().next_random()?;
                         let exchange_source = ExchangeSource {
                             task_output_id: Some(TaskOutputId {
-                                task_id: Some(ProstTaskId {
+                                task_id: Some(PbTaskId {
                                     task_id: id as u32,
                                     stage_id: exchange_source_stage_id,
                                     query_id: self.query.query_id.id.clone(),
@@ -312,22 +318,17 @@ impl LocalQueryExecution {
 
                     let local_execute_plan = LocalExecutePlan {
                         plan: Some(second_stage_plan_fragment),
-                        // TODO: Add support to use current epoch when needed
-                        epoch: self.snapshot.get_committed_epoch(),
+                        epoch: Some(self.snapshot.get_batch_query_epoch()),
                     };
 
-                    let workers = if second_stage.parallelism == 1 {
-                        vec![self.front_env.worker_node_manager().next_random()?]
-                    } else {
-                        self.front_env.worker_node_manager().list_worker_nodes()
-                    };
+                    let workers = self.choose_worker(&second_stage)?;
                     *sources = workers
                         .iter()
                         .enumerate()
                         .map(|(idx, worker_node)| {
                             let exchange_source = ExchangeSource {
                                 task_output_id: Some(TaskOutputId {
-                                    task_id: Some(ProstTaskId {
+                                    task_id: Some(PbTaskId {
                                         task_id: idx as u32,
                                         stage_id: exchange_source_stage_id,
                                         query_id: self.query.query_id.id.clone(),
@@ -342,7 +343,7 @@ impl LocalQueryExecution {
                         .collect();
                 }
 
-                Ok(PlanNodeProst {
+                Ok(PlanNodePb {
                     /// Since all the rest plan is embedded into the exchange node,
                     /// there is no children any more.
                     children: vec![],
@@ -366,7 +367,7 @@ impl LocalQueryExecution {
                     _ => unreachable!(),
                 }
 
-                Ok(PlanNodeProst {
+                Ok(PlanNodePb {
                     children: vec![],
                     // TODO: Generate meaningful identify
                     identity: Uuid::new_v4().to_string(),
@@ -387,7 +388,7 @@ impl LocalQueryExecution {
                     _ => unreachable!(),
                 }
 
-                Ok(PlanNodeProst {
+                Ok(PlanNodePb {
                     children: vec![],
                     // TODO: Generate meaningful identify
                     identity: Uuid::new_v4().to_string(),
@@ -402,19 +403,12 @@ impl LocalQueryExecution {
                             .inner_side_table_desc
                             .as_ref()
                             .expect("no side table desc");
-                        node.inner_side_vnode_mapping = self
-                            .front_env
-                            .catalog_reader()
-                            .read_guard()
-                            .get_table_by_id(&side_table_desc.table_id.into())
-                            .map(|table| {
-                                self.front_env
-                                    .worker_node_manager()
-                                    .get_fragment_mapping(&table.fragment_id)
-                            })
-                            .ok()
-                            .flatten()
-                            .unwrap_or_default();
+                        let mapping = self
+                            .get_vnode_mapping(&side_table_desc.table_id.into())
+                            .context("side table not found")?;
+
+                        // TODO: should we use `pb::ParallelUnitMapping` here?
+                        node.inner_side_vnode_mapping = mapping.to_expanded();
                         node.worker_nodes =
                             self.front_env.worker_node_manager().list_worker_nodes();
                     }
@@ -427,7 +421,7 @@ impl LocalQueryExecution {
                     partition,
                 )?;
 
-                Ok(PlanNodeProst {
+                Ok(PlanNodePb {
                     children: vec![left_child],
                     identity: Uuid::new_v4().to_string(),
                     node_body: Some(node_body),
@@ -438,15 +432,53 @@ impl LocalQueryExecution {
                     .children
                     .iter()
                     .map(|e| self.convert_plan_node(e, second_stages, partition.clone()))
-                    .collect::<SchedulerResult<Vec<PlanNodeProst>>>()?;
+                    .collect::<SchedulerResult<Vec<PlanNodePb>>>()?;
 
-                Ok(PlanNodeProst {
+                Ok(PlanNodePb {
                     children,
                     // TODO: Generate meaningful identify
                     identity: Uuid::new_v4().to_string(),
                     node_body: Some(execution_plan_node.node.clone()),
                 })
             }
+        }
+    }
+
+    #[inline(always)]
+    fn get_vnode_mapping(&self, table_id: &TableId) -> Option<ParallelUnitMapping> {
+        let reader = self.front_env.catalog_reader().read_guard();
+        reader
+            .get_table_by_id(table_id)
+            .map(|table| {
+                self.front_env
+                    .worker_node_manager()
+                    .get_fragment_mapping(&table.fragment_id)
+            })
+            .ok()
+            .flatten()
+    }
+
+    fn choose_worker(&self, stage: &Arc<QueryStage>) -> SchedulerResult<Vec<WorkerNode>> {
+        if stage.parallelism.unwrap() == 1 {
+            if let NodeBody::Insert(insert_node) = &stage.root.node
+                && let Some(vnode_mapping) = self.get_vnode_mapping(&insert_node.table_id.into()) {
+                    let worker_node = {
+                        let parallel_unit_ids = vnode_mapping.iter_unique().collect_vec();
+                        let candidates = self.front_env
+                            .worker_node_manager()
+                            .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
+                        candidates.choose(&mut rand::thread_rng()).unwrap().clone()
+                    };
+                    Ok(vec![worker_node])
+            } else {
+                Ok(vec![self.front_env.worker_node_manager().next_random()?])
+            }
+        } else {
+            let mut workers = Vec::with_capacity(stage.parallelism.unwrap() as usize);
+            for _ in 0..stage.parallelism.unwrap() {
+                workers.push(self.front_env.worker_node_manager().next_random()?);
+            }
+            Ok(workers)
         }
     }
 }

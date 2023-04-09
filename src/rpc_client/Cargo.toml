@@ -7,12 +7,19 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
-async_stack_trace = { path = "../utils/async_stack_trace" }
+either = "1.8.1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-paste = "1"
+itertools = "0.10.5"
+lru = "0.10.0"
 rand = "0.8"
 risingwave_common = { path = "../common" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
@@ -30,7 +37,8 @@ tokio-retry = "0.3"
 tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
+url = "2.3.1"
 
 [target.'cfg(not(madsim))'.dependencies]
-moka = { version = "0.9", features = ["future"] }
+moka = { version = "0.10", features = ["future"] }
 workspace-hack = { path = "../workspace-hack" }

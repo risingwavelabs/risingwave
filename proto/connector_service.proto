@@ -2,28 +2,43 @@ syntax = "proto3";
 
 package connector_service;
 
+import "catalog.proto";
 import "data.proto";
 
 option java_outer_classname = "ConnectorServiceProto";
 option java_package = "com.risingwave.proto";
 
-message SinkConfig {
-  message TableSchema {
-    message Column {
-      string name = 1;
-      data.DataType.TypeName data_type = 2;
-    }
-    repeated Column columns = 1;
-    repeated uint32 pk_indices = 2;
+message TableSchema {
+  message Column {
+    string name = 1;
+    data.DataType.TypeName data_type = 2;
   }
-  string sink_type = 1;
+  repeated Column columns = 1;
+  repeated uint32 pk_indices = 2;
+}
+
+message ValidationError {
+  string error_message = 1;
+}
+
+/* Sink Service */
+
+message SinkConfig {
+  string connector_type = 1;
   map<string, string> properties = 2;
   TableSchema table_schema = 3;
+}
+
+enum SinkPayloadFormat {
+  FORMAT_UNSPECIFIED = 0;
+  JSON = 1;
+  STREAM_CHUNK = 2;
 }
 
 message SinkStreamRequest {
   message StartSink {
     SinkConfig sink_config = 1;
+    SinkPayloadFormat format = 2;
   }
 
   message WriteBatch {
@@ -35,8 +50,13 @@ message SinkStreamRequest {
       repeated RowOp row_ops = 1;
     }
 
+    message StreamChunkPayload {
+      bytes binary_data = 1;
+    }
+
     oneof payload {
       JsonPayload json_payload = 1;
+      StreamChunkPayload stream_chunk_payload = 2;
     }
 
     uint64 batch_id = 3;
@@ -83,17 +103,17 @@ message SinkResponse {
   }
 }
 
-message DbConnectorProperties {
-  string database_host = 1;
-  string database_port = 2;
-  string database_user = 3;
-  string database_password = 4;
-  string database_name = 5;
-  string table_name = 6;
-  string partition = 7;
-  string start_offset = 8;
-  bool include_schema_events = 9;
+message ValidateSinkRequest {
+  SinkConfig sink_config = 1;
+  catalog.SinkType sink_type = 2;
 }
+
+message ValidateSinkResponse {
+  // On validation failure, we return the error.
+  ValidationError error = 1;
+}
+
+/* Source Service */
 
 message CdcMessage {
   string payload = 1;
@@ -101,9 +121,31 @@ message CdcMessage {
   string offset = 3;
 }
 
+enum SourceType {
+  UNSPECIFIED = 0;
+  MYSQL = 1;
+  POSTGRES = 2;
+}
+
 message GetEventStreamRequest {
-  uint64 source_id = 1;
-  DbConnectorProperties properties = 2;
+  message ValidateProperties {
+    uint64 source_id = 1;
+    SourceType source_type = 2;
+    map<string, string> properties = 3;
+    TableSchema table_schema = 4;
+  }
+
+  message StartSource {
+    uint64 source_id = 1;
+    SourceType source_type = 2;
+    string start_offset = 3;
+    map<string, string> properties = 4;
+  }
+
+  oneof request {
+    ValidateProperties validate = 1;
+    StartSource start = 2;
+  }
 }
 
 message GetEventStreamResponse {
@@ -113,5 +155,6 @@ message GetEventStreamResponse {
 
 service ConnectorService {
   rpc SinkStream(stream SinkStreamRequest) returns (stream SinkResponse);
+  rpc ValidateSink(ValidateSinkRequest) returns (ValidateSinkResponse);
   rpc GetEventStream(GetEventStreamRequest) returns (stream GetEventStreamResponse);
 }

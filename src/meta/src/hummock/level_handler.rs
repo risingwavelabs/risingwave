@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -66,7 +66,7 @@ impl LevelHandler {
         level
             .table_infos
             .iter()
-            .any(|table| self.compacting_files.contains_key(&table.id))
+            .any(|table| self.compacting_files.contains_key(&table.sst_id))
     }
 
     pub fn add_pending_task(&mut self, task_id: u64, target_level: usize, ssts: &[SstableInfo]) {
@@ -74,9 +74,9 @@ impl LevelHandler {
         let mut table_ids = vec![];
         let mut total_file_size = 0;
         for sst in ssts {
-            self.compacting_files.insert(sst.id, task_id);
+            self.compacting_files.insert(sst.get_sst_id(), task_id);
             total_file_size += sst.file_size;
-            table_ids.push(sst.id);
+            table_ids.push(sst.get_sst_id());
         }
 
         self.pending_tasks.push(RunningCompactTask {
@@ -111,6 +111,10 @@ impl LevelHandler {
             .iter()
             .map(|task| task.task_id)
             .collect_vec()
+    }
+
+    pub fn get_pending_tasks(&self) -> Vec<RunningCompactTask> {
+        self.pending_tasks.clone()
     }
 }
 

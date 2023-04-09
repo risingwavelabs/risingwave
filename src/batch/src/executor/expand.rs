@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -68,9 +68,8 @@ impl ExpandExecutor {
             for new_columns in
                 Column::expand_columns(cardinality, columns, self.column_subsets.to_owned())
             {
-                #[for_await]
                 for data_chunk in
-                    data_chunk_builder.trunc_data_chunk(DataChunk::new(new_columns?, vis.clone()))
+                    data_chunk_builder.append_chunk(DataChunk::new(new_columns?, vis.clone()))
                 {
                     yield data_chunk;
                 }
@@ -125,7 +124,7 @@ impl BoxedExecutorBuilder for ExpandExecutor {
         Ok(Box::new(Self::new(
             input,
             column_subsets,
-            source.context.get_config().developer.batch_chunk_size,
+            source.context.get_config().developer.chunk_size,
         )))
     }
 }

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,21 +15,12 @@ pub mod utils;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, JoinType, NestedLoopJoinExecutor};
-use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
-use risingwave_expr::expr::build_from_prost;
-use risingwave_pb::data::data_type::TypeName;
-use risingwave_pb::data::Datum as ProstDatum;
-use risingwave_pb::expr::expr_node::RexNode;
-use risingwave_pb::expr::expr_node::Type::{
-    ConstantValue as TConstValue, Equal, InputRef, Modulus,
-};
-use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
-use tikv_jemallocator::Jemalloc;
+use risingwave_common::enable_jemalloc_on_unix;
+use risingwave_common::types::DataType;
+use risingwave_expr::expr::build_from_pretty;
 use utils::{bench_join, create_input};
 
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
+enable_jemalloc_on_unix!();
 
 fn create_nested_loop_join_executor(
     join_type: JoinType,
@@ -43,85 +34,6 @@ fn create_nested_loop_join_executor(
     let left_input = create_input(&[DataType::Int64], left_chunk_size, left_chunk_num);
     let right_input = create_input(&[DataType::Int64], right_chunk_size, right_chunk_num);
 
-    // Expression: $1 % 2 == $2 % 3
-    let join_expr = {
-        let left_input_ref = ExprNode {
-            expr_type: InputRef as i32,
-            return_type: Some(risingwave_pb::data::DataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: 0 })),
-        };
-
-        let right_input_ref = ExprNode {
-            expr_type: InputRef as i32,
-            return_type: Some(risingwave_pb::data::DataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: 1 })),
-        };
-
-        let literal2 = ExprNode {
-            expr_type: TConstValue as i32,
-            return_type: Some(risingwave_pb::data::DataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::Constant(ProstDatum {
-                body: serialize_datum_to_bytes(Some(ScalarImpl::Int64(2)).as_ref()),
-            })),
-        };
-
-        let literal3 = ExprNode {
-            expr_type: TConstValue as i32,
-            return_type: Some(risingwave_pb::data::DataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::Constant(ProstDatum {
-                body: serialize_datum_to_bytes(Some(ScalarImpl::Int64(3)).as_ref()),
-            })),
-        };
-
-        // $1 % 2
-        let left_mod2 = ExprNode {
-            expr_type: Modulus as i32,
-            return_type: Some(risingwave_pb::data::DataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children: vec![left_input_ref, literal2],
-            })),
-        };
-
-        // $2 % 3
-        let right_mod3 = ExprNode {
-            expr_type: Modulus as i32,
-            return_type: Some(risingwave_pb::data::DataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children: vec![right_input_ref, literal3],
-            })),
-        };
-
-        // $1 % 2 == $2 % 3
-        ExprNode {
-            expr_type: Equal as i32,
-            return_type: Some(risingwave_pb::data::DataType {
-                type_name: TypeName::Boolean as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children: vec![left_mod2, right_mod3],
-            })),
-        }
-    };
-
     let output_indices = match join_type {
         JoinType::LeftSemi | JoinType::LeftAnti => vec![0],
         JoinType::RightSemi | JoinType::RightAnti => vec![0],
@@ -129,7 +41,11 @@ fn create_nested_loop_join_executor(
     };
 
     Box::new(NestedLoopJoinExecutor::new(
-        build_from_prost(&join_expr).unwrap(),
+        build_from_pretty(
+            "(equal:boolean
+                (modulus:int8 $0:int8 2:int8) 
+                (modulus:int8 $1:int8 3:int8))",
+        ),
         join_type,
         output_indices,
         left_input,

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,8 +13,6 @@
 // limitations under the License.
 
 use std::collections::{btree_map, BTreeMap};
-
-use risingwave_common::collection::estimate_size::EstimateSize;
 
 use super::*;
 
@@ -32,56 +30,35 @@ type JoinEntryStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueTy
 ///
 /// If a `JoinEntryState` exists for a join key, the all records under this
 /// join key will be presented in the cache.
+#[derive(Default)]
 pub struct JoinEntryState {
-    /// The full copy of the state. If evicted, it will be `None`.
-    cached: BTreeMap<PkType, StateValueType, SharedStatsAlloc<Global>>,
-
-    /// Allocator for counting the memory usage of the `cached` map itself.
-    allocator: SharedStatsAlloc<Global>,
-
-    /// Estimated heap size of the keys and values in the `cached` map.
-    estimated_content_heap_size: usize,
-}
-
-impl Default for JoinEntryState {
-    fn default() -> Self {
-        // TODO: may use static rc here.
-        let allocator = StatsAlloc::new(Global).shared();
-        Self {
-            cached: BTreeMap::new_in(allocator.clone()),
-            allocator,
-            estimated_content_heap_size: 0,
-        }
-    }
+    /// The full copy of the state.
+    cached: BTreeMap<PkType, StateValueType>,
 }
 
 impl JoinEntryState {
     /// Insert into the cache.
     pub fn insert(&mut self, key: PkType, value: StateValueType) {
-        self.estimated_content_heap_size = self
-            .estimated_content_heap_size
-            .saturating_add(key.estimated_heap_size())
-            .saturating_add(value.estimated_heap_size());
-
         self.cached.try_insert(key, value).unwrap();
     }
 
     /// Delete from the cache.
     pub fn remove(&mut self, pk: PkType) {
-        let value = self.cached.remove(&pk).unwrap();
-
-        self.estimated_content_heap_size = self
-            .estimated_content_heap_size
-            .saturating_sub(pk.estimated_heap_size())
-            .saturating_sub(value.estimated_heap_size());
+        self.cached.remove(&pk).unwrap();
     }
 
-    /// Note: To make the estimated size accurate, the caller should ensure that it does not mutate
-    /// the size (or capacity) of the [`StateValueType`].
-    pub fn values_mut<'a, 'b: 'a>(
+    /// Note: the first item in the tuple is the mutable reference to the value in this entry, while
+    /// the second item is the decoded value. To mutate the degree, one **must not** forget to apply
+    /// the changes to the first item.
+    pub fn values_mut<'a>(
         &'a mut self,
-        data_types: &'b [DataType],
-    ) -> impl Iterator<Item = (&'a mut StateValueType, StreamExecutorResult<JoinRow>)> + 'a {
+        data_types: &'a [DataType],
+    ) -> impl Iterator<
+        Item = (
+            &'a mut StateValueType,
+            StreamExecutorResult<JoinRow<OwnedRow>>,
+        ),
+    > + 'a {
         self.cached.values_mut().map(|encoded| {
             let decoded = encoded.decode(data_types);
             (encoded, decoded)
@@ -94,18 +71,12 @@ impl JoinEntryState {
     }
 }
 
-impl EstimateSize for JoinEntryState {
-    fn estimated_heap_size(&self) -> usize {
-        self.estimated_content_heap_size // heap size of keys and values
-         + self.allocator.bytes_in_use() // heap size of the btree-map itself
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
     use risingwave_common::array::*;
     use risingwave_common::types::ScalarImpl;
+    use risingwave_common::util::iter_util::ZipEqDebug;
 
     use super::*;
 
@@ -124,18 +95,18 @@ mod tests {
         );
 
         for row_ref in data_chunk.rows() {
-            let row: Row = row_ref.into_owned_row();
+            let row: OwnedRow = row_ref.into_owned_row();
             let value_indices = (0..row.len() - 1).collect_vec();
             let pk = pk_indices.iter().map(|idx| row[*idx].clone()).collect_vec();
             // Pk is only a `i64` here, so encoding method does not matter.
-            let pk = Row::new(pk).project(&value_indices).value_serialize();
+            let pk = OwnedRow::new(pk).project(&value_indices).value_serialize();
             let join_row = JoinRow { row, degree: 0 };
             managed_state.insert(pk, join_row.encode());
         }
 
         for ((_, matched_row), (d1, d2)) in managed_state
             .values_mut(&col_types)
-            .zip_eq(col1.iter().zip_eq(col2.iter()))
+            .zip_eq_debug(col1.iter().zip_eq_debug(col2.iter()))
         {
             let matched_row = matched_row.unwrap();
             assert_eq!(matched_row.row[0], Some(ScalarImpl::Int64(*d1)));

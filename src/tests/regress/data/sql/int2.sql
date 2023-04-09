@@ -85,8 +85,8 @@ SELECT i.f1, i.f1 / smallint '2' AS x FROM INT2_TBL i;
 SELECT i.f1, i.f1 / int '2' AS x FROM INT2_TBL i;
 
 -- corner cases
---@ SELECT (-1::int2<<15)::text;
---@ SELECT ((-1::int2<<15)+1::int2)::text;
+SELECT (-1::int2<<15)::text AS text;
+SELECT ((-1::int2<<15)+1::int2)::text AS text;
 
 -- check sane handling of INT16_MIN overflow cases
 SELECT (-32768)::int2 * (-1)::int2;

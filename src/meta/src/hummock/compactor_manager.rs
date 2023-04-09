@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Deref;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockContextId};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
-    CancelCompactTask, CompactTask, CompactTaskAssignment, CompactTaskProgress,
+    CancelCompactTask, CompactTask, CompactTaskAssignment, CompactTaskProgress, CompactorWorkload,
     SubscribeCompactTasksResponse,
 };
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -46,6 +46,9 @@ pub struct Compactor {
     context_id: HummockContextId,
     sender: Sender<MetaResult<SubscribeCompactTasksResponse>>,
     max_concurrent_task_number: AtomicU64,
+    // state
+    pub cpu_ratio: AtomicU32,
+    pub total_cpu_core: u32,
 }
 
 struct TaskHeartbeat {
@@ -60,11 +63,14 @@ impl Compactor {
         context_id: HummockContextId,
         sender: Sender<MetaResult<SubscribeCompactTasksResponse>>,
         max_concurrent_task_number: u64,
+        cpu_core_num: u32,
     ) -> Self {
         Self {
             context_id,
             sender,
             max_concurrent_task_number: AtomicU64::new(max_concurrent_task_number),
+            cpu_ratio: AtomicU32::new(0),
+            total_cpu_core: cpu_core_num,
         }
     }
 
@@ -104,6 +110,10 @@ impl Compactor {
     pub fn set_config(&self, config: CompactorRuntimeConfig) {
         self.max_concurrent_task_number
             .store(config.max_concurrent_task_number, Ordering::Relaxed);
+    }
+
+    pub fn is_busy(&self, limit: u32) -> bool {
+        self.cpu_ratio.load(Ordering::Acquire) > limit
     }
 }
 
@@ -198,11 +208,24 @@ impl CompactorManager {
         &self,
         context_id: HummockContextId,
         max_concurrent_task_number: u64,
+        cpu_core_num: u32,
     ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
         let mut policy = self.policy.write();
-        let rx = policy.add_compactor(context_id, max_concurrent_task_number);
-        tracing::info!("Added compactor session {}", context_id);
+        let rx = policy.add_compactor(context_id, max_concurrent_task_number, cpu_core_num);
+        tracing::info!(
+            "Added compactor session {} cpu_core_num {}",
+            context_id,
+            cpu_core_num
+        );
         rx
+    }
+
+    /// Used when meta exiting to support graceful shutdown.
+    pub fn abort_all_compactors(&self) {
+        let mut policy = self.policy.write();
+        while let Some(compactor) = policy.next_compactor() {
+            policy.remove_compactor(compactor.context_id);
+        }
     }
 
     pub fn pause_compactor(&self, context_id: HummockContextId) {
@@ -387,6 +410,25 @@ impl CompactorManager {
     pub fn max_concurrent_task_number(&self) -> usize {
         self.policy.read().max_concurrent_task_num()
     }
+
+    /// Update compactor state based on its workload.
+    pub fn update_compactor_state(
+        &self,
+        context_id: HummockContextId,
+        workload: CompactorWorkload,
+    ) {
+        if let Some(compactor) = self.policy.read().get_compactor(context_id) {
+            compactor.cpu_ratio.store(workload.cpu, Ordering::Release);
+        }
+    }
+
+    pub fn total_cpu_core_num(&self) -> u32 {
+        self.policy.read().total_cpu_core_num()
+    }
+
+    pub fn total_running_cpu_core_num(&self) -> u32 {
+        self.policy.read().total_running_cpu_core_num()
+    }
 }
 
 #[cfg(test)]
@@ -396,6 +438,7 @@ mod tests {
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::hummock::CompactTaskProgress;
 
+    use crate::hummock::compaction::default_level_selector;
     use crate::hummock::test_utils::{add_ssts, setup_compute_env};
     use crate::hummock::CompactorManager;
 
@@ -407,10 +450,13 @@ mod tests {
             let context_id = worker_node.id;
             let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
             let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
-            let _receiver = compactor_manager.add_compactor(context_id, 1);
+            let _receiver = compactor_manager.add_compactor(context_id, 1, 1);
             let _compactor = hummock_manager.get_idle_compactor().await.unwrap();
             let task = hummock_manager
-                .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+                .get_compact_task(
+                    StaticCompactionGroupId::StateDefault.into(),
+                    &mut default_level_selector(),
+                )
                 .await
                 .unwrap()
                 .unwrap();
@@ -472,7 +518,7 @@ mod tests {
         // Test add
         assert_eq!(compactor_manager.compactor_num(), 0);
         assert!(compactor_manager.get_compactor(context_id).is_none());
-        compactor_manager.add_compactor(context_id, 1);
+        compactor_manager.add_compactor(context_id, 1, 1);
         assert_eq!(compactor_manager.compactor_num(), 1);
         assert_eq!(
             compactor_manager
@@ -486,7 +532,7 @@ mod tests {
         assert_eq!(compactor_manager.compactor_num(), 0);
         assert!(compactor_manager.get_compactor(context_id).is_none());
         for _ in 0..3 {
-            compactor_manager.add_compactor(context_id, 1);
+            compactor_manager.add_compactor(context_id, 1, 1);
             assert_eq!(compactor_manager.compactor_num(), 1);
             assert_eq!(
                 compactor_manager

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,22 +13,35 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::fmt::Debug;
 use std::ops::Bound::*;
 use std::ops::{Bound, Deref, DerefMut, RangeBounds};
 use std::ptr;
 
-use bytes::{Buf, BufMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::epoch::INVALID_EPOCH;
+use risingwave_common::hash::VirtualNode;
 
 use crate::HummockEpoch;
 
 pub const EPOCH_LEN: usize = std::mem::size_of::<HummockEpoch>();
 pub const TABLE_PREFIX_LEN: usize = std::mem::size_of::<u32>();
+// Max length for key overlap and diff length. See KeyPrefix::encode.
+pub const MAX_KEY_LEN: usize = u16::MAX as usize;
 
-pub type TableKeyRange = (Bound<TableKey<Vec<u8>>>, Bound<TableKey<Vec<u8>>>);
-pub type UserKeyRange = (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>);
-pub type FullKeyRange = (Bound<FullKey<Vec<u8>>>, Bound<FullKey<Vec<u8>>>);
+pub type KeyPayloadType = Bytes;
+pub type TableKeyRange = (
+    Bound<TableKey<KeyPayloadType>>,
+    Bound<TableKey<KeyPayloadType>>,
+);
+pub type UserKeyRange = (
+    Bound<UserKey<KeyPayloadType>>,
+    Bound<UserKey<KeyPayloadType>>,
+);
+pub type FullKeyRange = (
+    Bound<FullKey<KeyPayloadType>>,
+    Bound<FullKey<KeyPayloadType>>,
+);
 
 /// Converts user key to full key by appending `epoch` to the user key.
 pub fn key_with_epoch(mut user_key: Vec<u8>, epoch: HummockEpoch) -> Vec<u8> {
@@ -265,35 +278,38 @@ pub fn prev_full_key(full_key: &[u8]) -> Vec<u8> {
 }
 
 /// Get the end bound of the given `prefix` when transforming it to a key range.
-pub fn end_bound_of_prefix(prefix: &[u8]) -> Bound<Vec<u8>> {
+pub fn end_bound_of_prefix(prefix: &[u8]) -> Bound<Bytes> {
     if let Some((s, e)) = next_key_no_alloc(prefix) {
-        let mut res = Vec::with_capacity(s.len() + 1);
-        res.extend_from_slice(s);
-        res.push(e);
-        Excluded(res)
+        let mut buf = BytesMut::with_capacity(s.len() + 1);
+        buf.extend_from_slice(s);
+        buf.put_u8(e);
+        Excluded(buf.freeze())
     } else {
         Unbounded
     }
 }
 
 /// Get the start bound of the given `prefix` when it is excluded from the range.
-pub fn start_bound_of_excluded_prefix(prefix: &[u8]) -> Bound<Vec<u8>> {
+pub fn start_bound_of_excluded_prefix(prefix: &[u8]) -> Bound<Bytes> {
     if let Some((s, e)) = next_key_no_alloc(prefix) {
-        let mut res = Vec::with_capacity(s.len() + 1);
-        res.extend_from_slice(s);
-        res.push(e);
-        Included(res)
+        let mut buf = BytesMut::with_capacity(s.len() + 1);
+        buf.extend_from_slice(s);
+        buf.put_u8(e);
+        Included(buf.freeze())
     } else {
         panic!("the prefix is the maximum value")
     }
 }
 
 /// Transform the given `prefix` to a key range.
-pub fn range_of_prefix(prefix: &[u8]) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
+pub fn range_of_prefix(prefix: &[u8]) -> (Bound<Bytes>, Bound<Bytes>) {
     if prefix.is_empty() {
         (Unbounded, Unbounded)
     } else {
-        (Included(prefix.to_vec()), end_bound_of_prefix(prefix))
+        (
+            Included(Bytes::copy_from_slice(prefix)),
+            end_bound_of_prefix(prefix),
+        )
     }
 }
 
@@ -301,23 +317,28 @@ pub fn range_of_prefix(prefix: &[u8]) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
 pub fn prefixed_range<B: AsRef<[u8]>>(
     range: impl RangeBounds<B>,
     prefix: &[u8],
-) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
-    let start = match range.start_bound() {
-        Included(b) => Included([prefix, b.as_ref()].concat()),
+) -> (Bound<Bytes>, Bound<Bytes>) {
+    let prefixed = |b: &B| -> Bytes {
+        let mut buf = BytesMut::with_capacity(prefix.len() + b.as_ref().len());
+        buf.extend_from_slice(prefix);
+        buf.extend_from_slice(b.as_ref());
+        buf.freeze()
+    };
+
+    let start: Bound<Bytes> = match range.start_bound() {
+        Included(b) => Included(prefixed(b)),
         Excluded(b) => {
-            let b = b.as_ref();
-            assert!(!b.is_empty());
-            Excluded([prefix, b].concat())
+            assert!(!b.as_ref().is_empty());
+            Excluded(prefixed(b))
         }
-        Unbounded => Included(prefix.to_vec()),
+        Unbounded => Included(Bytes::copy_from_slice(prefix)),
     };
 
     let end = match range.end_bound() {
-        Included(b) => Included([prefix, b.as_ref()].concat()),
+        Included(b) => Included(prefixed(b)),
         Excluded(b) => {
-            let b = b.as_ref();
-            assert!(!b.is_empty());
-            Excluded([prefix, b].concat())
+            assert!(!b.as_ref().is_empty());
+            Excluded(prefixed(b))
         }
         Unbounded => end_bound_of_prefix(prefix),
     };
@@ -325,13 +346,35 @@ pub fn prefixed_range<B: AsRef<[u8]>>(
     (start, end)
 }
 
+pub trait CopyFromSlice {
+    fn copy_from_slice(slice: &[u8]) -> Self;
+}
+
+impl CopyFromSlice for Vec<u8> {
+    fn copy_from_slice(slice: &[u8]) -> Self {
+        Vec::from(slice)
+    }
+}
+
+impl CopyFromSlice for Bytes {
+    fn copy_from_slice(slice: &[u8]) -> Self {
+        Bytes::copy_from_slice(slice)
+    }
+}
+
 /// [`TableKey`] is an internal concept in storage. It's a wrapper around the key directly from the
 /// user, to make the code clearer and avoid confusion with encoded [`UserKey`] and [`FullKey`].
 ///
 /// Its name come from the assumption that Hummock is always accessed by a table-like structure
 /// identified by a [`TableId`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct TableKey<T: AsRef<[u8]>>(pub T);
+
+impl<T: AsRef<[u8]>> Debug for TableKey<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TableKey {{ {} }}", hex::encode(self.0.as_ref()))
+    }
+}
 
 impl<T: AsRef<[u8]>> Deref for TableKey<T> {
     type Target = T;
@@ -354,7 +397,7 @@ impl<T: AsRef<[u8]>> AsRef<[u8]> for TableKey<T> {
 }
 
 #[inline]
-pub fn map_table_key_range(range: (Bound<Vec<u8>>, Bound<Vec<u8>>)) -> TableKeyRange {
+pub fn map_table_key_range(range: (Bound<KeyPayloadType>, Bound<KeyPayloadType>)) -> TableKeyRange {
     (range.0.map(TableKey), range.1.map(TableKey))
 }
 
@@ -363,12 +406,22 @@ pub fn map_table_key_range(range: (Bound<Vec<u8>>, Bound<Vec<u8>>)) -> TableKeyR
 /// will group these two values into one struct for convenient filtering.
 ///
 /// The encoded format is | `table_id` | `table_key` |.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct UserKey<T: AsRef<[u8]>> {
     // When comparing `UserKey`, we first compare `table_id`, then `table_key`. So the order of
     // declaration matters.
     pub table_id: TableId,
     pub table_key: TableKey<T>,
+}
+
+impl<T: AsRef<[u8]>> Debug for UserKey<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "UserKey {{ {}, {:?} }}",
+            self.table_id.table_id, self.table_key
+        )
+    }
 }
 
 impl<T: AsRef<[u8]>> UserKey<T> {
@@ -393,6 +446,10 @@ impl<T: AsRef<[u8]>> UserKey<T> {
         buf.put_slice(self.table_key.as_ref());
     }
 
+    pub fn encode_table_key_into(&self, buf: &mut impl BufMut) {
+        buf.put_slice(self.table_key.as_ref());
+    }
+
     /// Encode in to a buffer.
     pub fn encode_length_prefixed(&self, buf: &mut impl BufMut) {
         buf.put_u32(self.table_id.table_id());
@@ -414,6 +471,15 @@ impl<T: AsRef<[u8]>> UserKey<T> {
     pub fn encoded_len(&self) -> usize {
         self.table_key.as_ref().len() + TABLE_PREFIX_LEN
     }
+
+    pub fn get_vnode_id(&self) -> usize {
+        VirtualNode::from_be_bytes(
+            self.table_key.as_ref()[..VirtualNode::SIZE]
+                .try_into()
+                .expect("slice with incorrect length"),
+        )
+        .to_index()
+    }
 }
 
 impl<'a> UserKey<&'a [u8]> {
@@ -429,7 +495,23 @@ impl<'a> UserKey<&'a [u8]> {
     }
 
     pub fn to_vec(self) -> UserKey<Vec<u8>> {
-        UserKey::new(self.table_id, TableKey(Vec::from(*self.table_key)))
+        self.copy_into()
+    }
+
+    pub fn copy_into<T: CopyFromSlice + AsRef<[u8]>>(self) -> UserKey<T> {
+        UserKey {
+            table_id: self.table_id,
+            table_key: TableKey(T::copy_from_slice(self.table_key.0)),
+        }
+    }
+}
+
+impl<'a, T: AsRef<[u8]> + Clone> UserKey<&'a T> {
+    pub fn cloned(self) -> UserKey<T> {
+        UserKey {
+            table_id: self.table_id,
+            table_key: TableKey(self.table_key.0.clone()),
+        }
     }
 }
 
@@ -461,13 +543,11 @@ impl UserKey<Vec<u8>> {
         self.table_key.clear();
         self.table_key.extend_from_slice(other.table_key.as_ref());
     }
-}
 
-impl Default for UserKey<Vec<u8>> {
-    fn default() -> Self {
-        Self {
-            table_id: TableId::default(),
-            table_key: TableKey(Vec::new()),
+    pub fn into_bytes(self) -> UserKey<Bytes> {
+        UserKey {
+            table_id: self.table_id,
+            table_key: TableKey(Bytes::from(self.table_key.0)),
         }
     }
 }
@@ -475,10 +555,16 @@ impl Default for UserKey<Vec<u8>> {
 /// [`FullKey`] is an internal concept in storage. It associates [`UserKey`] with an epoch.
 ///
 /// The encoded format is | `user_key` | `epoch` |.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct FullKey<T: AsRef<[u8]>> {
     pub user_key: UserKey<T>,
     pub epoch: HummockEpoch,
+}
+
+impl<T: AsRef<[u8]>> Debug for FullKey<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "FullKey {{ {:?}, {} }}", self.user_key, self.epoch)
+    }
 }
 
 impl<T: AsRef<[u8]>> FullKey<T> {
@@ -515,6 +601,12 @@ impl<T: AsRef<[u8]>> FullKey<T> {
         buf
     }
 
+    // Encode in to a buffer.
+    pub fn encode_into_without_table_id(&self, buf: &mut impl BufMut) {
+        self.user_key.encode_table_key_into(buf);
+        buf.put_u64(self.epoch);
+    }
+
     pub fn encode_reverse_epoch(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(
             TABLE_PREFIX_LEN + self.user_key.table_key.as_ref().len() + EPOCH_LEN,
@@ -546,6 +638,20 @@ impl<'a> FullKey<&'a [u8]> {
         }
     }
 
+    /// Construct a [`FullKey`] from a byte slice without `table_id` encoded.
+    pub fn from_slice_without_table_id(
+        table_id: TableId,
+        slice_without_table_id: &'a [u8],
+    ) -> Self {
+        let epoch_pos = slice_without_table_id.len() - EPOCH_LEN;
+        let epoch = (&slice_without_table_id[epoch_pos..]).get_u64();
+
+        Self {
+            user_key: UserKey::new(table_id, TableKey(&slice_without_table_id[..epoch_pos])),
+            epoch,
+        }
+    }
+
     /// Construct a [`FullKey`] from a byte slice.
     pub fn decode_reverse_epoch(slice: &'a [u8]) -> Self {
         let epoch_pos = slice.len() - EPOCH_LEN;
@@ -558,9 +664,24 @@ impl<'a> FullKey<&'a [u8]> {
     }
 
     pub fn to_vec(self) -> FullKey<Vec<u8>> {
+        self.copy_into()
+    }
+
+    pub fn copy_into<T: CopyFromSlice + AsRef<[u8]>>(self) -> FullKey<T> {
         FullKey {
-            user_key: self.user_key.to_vec(),
+            user_key: self.user_key.copy_into(),
             epoch: self.epoch,
+        }
+    }
+}
+
+impl FullKey<Vec<u8>> {
+    /// Calling this method may accidentally cause memory allocation when converting `Vec` into
+    /// `Bytes`
+    pub fn into_bytes(self) -> FullKey<Bytes> {
+        FullKey {
+            epoch: self.epoch,
+            user_key: self.user_key.into_bytes(),
         }
     }
 }
@@ -583,17 +704,6 @@ impl FullKey<Vec<u8>> {
     }
 }
 
-impl Default for FullKey<Vec<u8>> {
-    // Note: Calling `is_empty` on `FullKey::default` will return `true`, so it can be used to
-    // represent unbounded range.
-    fn default() -> Self {
-        Self {
-            user_key: UserKey::default(),
-            epoch: INVALID_EPOCH,
-        }
-    }
-}
-
 impl<T: AsRef<[u8]> + Ord + Eq> Ord for FullKey<T> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // When `user_key` is the same, greater epoch comes first.
@@ -609,23 +719,51 @@ impl<T: AsRef<[u8]> + Ord + Eq> PartialOrd for FullKey<T> {
     }
 }
 
+pub trait EmptySliceRef {
+    fn empty_slice_ref<'a>() -> &'a Self;
+}
+
+static EMPTY_BYTES: Bytes = Bytes::new();
+impl EmptySliceRef for Bytes {
+    fn empty_slice_ref<'a>() -> &'a Self {
+        &EMPTY_BYTES
+    }
+}
+
+static EMPTY_VEC: Vec<u8> = Vec::new();
+impl EmptySliceRef for Vec<u8> {
+    fn empty_slice_ref<'a>() -> &'a Self {
+        &EMPTY_VEC
+    }
+}
+
+const EMPTY_SLICE: &[u8] = b"";
+impl<'a> EmptySliceRef for &'a [u8] {
+    fn empty_slice_ref<'b>() -> &'b Self {
+        &EMPTY_SLICE
+    }
+}
+
 /// Bound table key range with table id to generate a new user key range.
-pub fn bound_table_key_range<T: AsRef<[u8]>>(
+pub fn bound_table_key_range<T: AsRef<[u8]> + EmptySliceRef>(
     table_id: TableId,
     table_key_range: &impl RangeBounds<TableKey<T>>,
-) -> UserKeyRange {
+) -> (Bound<UserKey<&T>>, Bound<UserKey<&T>>) {
     let start = match table_key_range.start_bound() {
-        Included(b) => Included(UserKey::new(table_id, TableKey(b.as_ref().to_vec()))),
-        Excluded(b) => Excluded(UserKey::new(table_id, TableKey(b.as_ref().to_vec()))),
-        Unbounded => Included(UserKey::new(table_id, TableKey(b"".to_vec()))),
+        Included(b) => Included(UserKey::new(table_id, TableKey(&b.0))),
+        Excluded(b) => Excluded(UserKey::new(table_id, TableKey(&b.0))),
+        Unbounded => Included(UserKey::new(table_id, TableKey(T::empty_slice_ref()))),
     };
 
     let end = match table_key_range.end_bound() {
-        Included(b) => Included(UserKey::new(table_id, TableKey(b.as_ref().to_vec()))),
-        Excluded(b) => Excluded(UserKey::new(table_id, TableKey(b.as_ref().to_vec()))),
+        Included(b) => Included(UserKey::new(table_id, TableKey(&b.0))),
+        Excluded(b) => Excluded(UserKey::new(table_id, TableKey(&b.0))),
         Unbounded => {
             if let Some(next_table_id) = table_id.table_id().checked_add(1) {
-                Excluded(UserKey::new(next_table_id.into(), TableKey(b"".to_vec())))
+                Excluded(UserKey::new(
+                    next_table_id.into(),
+                    TableKey(T::empty_slice_ref()),
+                ))
             } else {
                 Unbounded
             }
@@ -650,6 +788,14 @@ mod tests {
         let key = FullKey::for_test(TableId::new(1), &table_key[..], 1);
         let buf = key.encode();
         assert_eq!(FullKey::decode(&buf), key);
+        let mut table_key = vec![1];
+        let a = FullKey::for_test(TableId::new(1), table_key.clone(), 1);
+        table_key[0] = 2;
+        let b = FullKey::for_test(TableId::new(1), table_key.clone(), 1);
+        table_key[0] = 129;
+        let c = FullKey::for_test(TableId::new(1), table_key, 1);
+        assert!(a.lt(&b));
+        assert!(b.lt(&c));
     }
 
     #[test]
@@ -687,8 +833,8 @@ mod tests {
                 )
             ),
             (
-                Included(UserKey::for_test(TableId::default(), b"a".to_vec())),
-                Included(UserKey::for_test(TableId::default(), b"b".to_vec()),)
+                Included(UserKey::for_test(TableId::default(), &b"a".to_vec())),
+                Included(UserKey::for_test(TableId::default(), &b"b".to_vec()),)
             )
         );
         assert_eq!(
@@ -697,8 +843,8 @@ mod tests {
                 &(Included(TableKey(b"a".to_vec())), Unbounded)
             ),
             (
-                Included(UserKey::for_test(TableId::from(1), b"a".to_vec())),
-                Excluded(UserKey::for_test(TableId::from(2), b"".to_vec()),)
+                Included(UserKey::for_test(TableId::from(1), &b"a".to_vec())),
+                Excluded(UserKey::for_test(TableId::from(2), &b"".to_vec()),)
             )
         );
         assert_eq!(
@@ -707,7 +853,7 @@ mod tests {
                 &(Included(TableKey(b"a".to_vec())), Unbounded)
             ),
             (
-                Included(UserKey::for_test(TableId::from(u32::MAX), b"a".to_vec())),
+                Included(UserKey::for_test(TableId::from(u32::MAX), &b"a".to_vec())),
                 Unbounded,
             )
         );

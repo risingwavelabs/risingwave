@@ -1,0 +1,123 @@
+# Before running this test:
+#   python3 e2e_test/udf/test.py
+
+# Create a function.
+statement ok
+create function int_42() returns int language python as int_42 using link 'http://localhost:8815';
+
+# Argument or return type mismatch.
+statement error argument mismatch
+create function foo(int) returns int language python as int_42 using link 'http://localhost:8815';
+
+statement error return type mismatch
+create function foo() returns real language python as int_42 using link 'http://localhost:8815';
+
+# Create another function.
+statement ok
+create function gcd(int, int) returns int language python as gcd using link 'http://localhost:8815';
+
+# Create a function with the same name but different arguments.
+statement ok
+create function gcd(int, int, int) returns int language python as gcd3 using link 'http://localhost:8815';
+
+# Create a function with the same name and arguments.
+statement error exists
+create function gcd(int, int) returns int language python as gcd using link 'http://localhost:8815';
+
+# Create a function that returns multiple columns.
+statement ok
+create function extract_tcp_info(bytea) returns struct<src_ip varchar, dst_ip varchar, src_port smallint, dst_port smallint>
+language python as extract_tcp_info using link 'http://localhost:8815';
+
+# Create a table function.
+statement ok
+create function series(int) returns table (x int) language python as series using link 'http://localhost:8815';
+
+# Create a table function that returns multiple columns.
+statement ok
+create function series2(int) returns table (x int, y varchar) language python as series2 using link 'http://localhost:8815';
+
+statement ok
+create function hex_to_dec(varchar) returns decimal language python as hex_to_dec using link 'http://localhost:8815';
+
+statement ok
+create function array_access(varchar[], int) returns varchar language python as array_access using link 'http://localhost:8815';
+
+query I
+select int_42();
+----
+42
+
+query I
+select gcd(25, 15);
+----
+5
+
+query I
+select gcd(25, 15, 3);
+----
+1
+
+query I
+select hex_to_dec('000000000000000000000000000000000000000000c0f6346334241a61f90a36');
+----
+233276425899864771438119478
+
+query T
+select array_access(ARRAY['a', 'b', 'c'], 2);
+----
+b
+
+query I
+select series(5);
+----
+0
+1
+2
+3
+4
+
+query IT
+select * from series2(3);
+----
+0 #0
+1 #1
+2 #2
+
+query T
+select series2(3);
+----
+(0,#0)
+(1,#1)
+(2,#2)
+
+# TODO: support argument implicit cast for UDF
+# e.g. extract_tcp_info(E'\\x45');
+
+query T
+select extract_tcp_info(E'\\x45000034a8a8400040065b8ac0a8000ec0a80001035d20b6d971b900000000080020200493310000020405b4' :: bytea);
+----
+(192.168.0.14,192.168.0.1,861,8374)
+
+query TTII
+select (extract_tcp_info(E'\\x45000034a8a8400040065b8ac0a8000ec0a80001035d20b6d971b900000000080020200493310000020405b4' :: BYTEA)).*;
+----
+192.168.0.14 192.168.0.1 861 8374
+
+# TODO: drop function without arguments
+
+# # Drop a function but ambiguous.
+# statement error is not unique
+# drop function gcd;
+
+# Drop a function
+statement ok
+drop function int_42();
+
+# Drop a function
+statement ok
+drop function gcd(int, int);
+
+# Drop a function
+statement ok
+drop function gcd(int, int, int);

@@ -1,12 +1,11 @@
-# Todo: The precision is different from PostgresSql, Same issue in TPCH. We use `round` to ignore the imprecision.
 statement ok
 create materialized view ch_benchmark_q1 as
 select   ol_number,
          sum(ol_quantity) as sum_qty,
-         round(sum(ol_amount::numeric), 1) as sum_amount,
-         round(avg(ol_quantity)::numeric, 1) as avg_qty,
-         round(avg(ol_amount)::numeric, 1) as avg_amount,
+         sum(round(ol_amount::decimal,0)) as sum_amount,
+         round(avg(ol_quantity)::decimal, 0) as avg_qty,
+         round(avg(ol_amount)::decimal, 0) as avg_amount,
          count(*) as count_order
 from     orderline
 where    ol_delivery_d > '2007-01-02 00:00:00.000000'
-group by ol_number order by ol_number;
+group by ol_number;

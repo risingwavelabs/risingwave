@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,12 +16,12 @@
 
 use std::marker::PhantomData;
 
-use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{Datum, Scalar, ScalarRef};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::ExprError;
 
 use super::{StreamingAggImpl, StreamingAggInput, StreamingAggOutput};
@@ -276,7 +276,7 @@ where
     ) -> StreamExecutorResult<()> {
         match visibility {
             None => {
-                for (op, data) in ops.iter().zip_eq(data.iter()) {
+                for (op, data) in ops.iter().zip_eq_fast(data.iter()) {
                     match op {
                         Op::Insert | Op::UpdateInsert => {
                             self.result = S::accumulate(self.result.as_ref(), data)?
@@ -288,8 +288,10 @@ where
                 }
             }
             Some(visibility) => {
-                for ((visible, op), data) in
-                    visibility.iter().zip_eq(ops.iter()).zip_eq(data.iter())
+                for ((visible, op), data) in visibility
+                    .iter()
+                    .zip_eq_fast(ops.iter())
+                    .zip_eq_fast(data.iter())
                 {
                     if visible {
                         match op {
@@ -404,9 +406,9 @@ impl_fold_agg! { I64Array, Int64, DecimalArray }
 impl_fold_agg! { I64Array, Int64, StructArray }
 impl_fold_agg! { I64Array, Int64, ListArray }
 impl_fold_agg! { I64Array, Int64, IntervalArray }
-impl_fold_agg! { I64Array, Int64, NaiveTimeArray }
-impl_fold_agg! { I64Array, Int64, NaiveDateArray }
-impl_fold_agg! { I64Array, Int64, NaiveDateTimeArray }
+impl_fold_agg! { I64Array, Int64, TimeArray }
+impl_fold_agg! { I64Array, Int64, DateArray }
+impl_fold_agg! { I64Array, Int64, TimestampArray }
 // max/min
 impl_fold_agg! { I16Array, Int16, I16Array }
 impl_fold_agg! { I32Array, Int32, I32Array }
@@ -414,11 +416,12 @@ impl_fold_agg! { F32Array, Float32, F32Array }
 impl_fold_agg! { F64Array, Float64, F64Array }
 impl_fold_agg! { DecimalArray, Decimal, DecimalArray }
 impl_fold_agg! { Utf8Array, Utf8, Utf8Array }
+impl_fold_agg! { BytesArray, Bytea, BytesArray }
 impl_fold_agg! { StructArray, Struct, StructArray }
 impl_fold_agg! { IntervalArray, Interval, IntervalArray }
-impl_fold_agg! { NaiveTimeArray, NaiveTime, NaiveTimeArray }
-impl_fold_agg! { NaiveDateArray, NaiveDate, NaiveDateArray }
-impl_fold_agg! { NaiveDateTimeArray, NaiveDateTime, NaiveDateTimeArray }
+impl_fold_agg! { TimeArray, Time, TimeArray }
+impl_fold_agg! { DateArray, Date, DateArray }
+impl_fold_agg! { TimestampArray, Timestamp, TimestampArray }
 // sum
 impl_fold_agg! { DecimalArray, Decimal, I64Array }
 // avg
@@ -427,7 +430,7 @@ impl_fold_agg! { F64Array, Float64, F32Array }
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::I64Array;
-    use risingwave_common::types::OrderedF64;
+    use risingwave_common::types::F64;
     use risingwave_common::{array, array_nonnull};
 
     use super::*;
@@ -500,7 +503,7 @@ mod tests {
                 .map(|(c, v)| {
                     (
                         if c == '+' { Op::Insert } else { Op::Delete },
-                        Some(OrderedF64::from(v)),
+                        Some(F64::from(v)),
                     )
                 })
                 .unzip();
@@ -508,12 +511,12 @@ mod tests {
             agg.apply_batch(
                 &ops,
                 None,
-                &[&ArrayImpl::Float64(F64Array::from_slice(&data))],
+                &[&ArrayImpl::Float64(F64Array::from_iter(&data))],
             )
             .unwrap();
             assert_eq!(
                 agg.get_output().unwrap().unwrap().as_float64(),
-                &OrderedF64::from(expected)
+                &F64::from(expected)
             );
         }
     }

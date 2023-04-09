@@ -11,20 +11,23 @@ repository = { workspace = true }
 static-link = ["workspace-config/enable-static-link"]
 static-log-level = ["workspace-config/enable-static-log-level"]
 
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack", "workspace-config", "task_stats_alloc"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack", "workspace-config", "task_stats_alloc"]
+
 [dependencies]
 anyhow = "1"
-clap = { version = "3", features = ["derive"] }
-global_stats_alloc = { path = "../utils/global_stats_alloc" }
-log = { version = "0.4" }
-risingwave_compaction_test = { path = "../tests/compaction_test" }
+clap = { version = "4", features = ["derive"] }
+risingwave_common = { path = "../common" }
 risingwave_compactor = { path = "../storage/compactor" }
 risingwave_compute = { path = "../compute" }
 risingwave_ctl = { path = "../ctl" }
 risingwave_frontend = { path = "../frontend" }
 risingwave_meta = { path = "../meta" }
 risingwave_rt = { path = "../utils/runtime" }
-stats_alloc = "0.1"
-tikv-jemallocator = { version = "0.5", features = ["profiling", "stats"] }
+task_stats_alloc = { path = "../utils/task_stats_alloc" }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -35,9 +38,12 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
     "tracing",
 ] }
-tracing = { version = "0.1" }
+
 workspace-config = { path = "../utils/workspace-config", optional = true }
 workspace-hack = { path = "../workspace-hack" }
+
+[target.'cfg(unix)'.dependencies]
+tikv-jemallocator = { version = "0.5", features = ["profiling", "stats"] }
 
 [[bin]]
 name = "frontend"

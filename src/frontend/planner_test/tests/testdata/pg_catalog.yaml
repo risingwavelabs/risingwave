@@ -2,10 +2,10 @@
 - sql: |
     select * from pg_catalog.pg_type
   logical_plan: |
-    LogicalProject { exprs: [pg_type.oid, pg_type.typname] }
-    └─LogicalScan { table: pg_type, columns: [pg_type.oid, pg_type.typname] }
+    LogicalProject { exprs: [pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory] }
+    └─LogicalScan { table: pg_type, columns: [pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory] }
   batch_plan: |
-    BatchScan { table: pg_type, columns: [pg_type.oid, pg_type.typname], distribution: Single }
+    BatchScan { table: pg_type, columns: [pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory], distribution: Single }
 - sql: |
     select * from pg_catalog.pg_namespace
   logical_plan: |
@@ -35,3 +35,10 @@
     └─BatchProject { exprs: [pg_user.name] }
       └─BatchFilter { predicate: (1:Int32 = pg_user.usesysid) }
         └─BatchScan { table: pg_user, columns: [pg_user.name, pg_user.usesysid], distribution: Single }
+- sql: |
+    select 'pg_namespace'::regclass
+  logical_plan: |
+    LogicalProject { exprs: [2:Int32] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+  batch_plan: |
+    BatchValues { rows: [[2:Int32]] }

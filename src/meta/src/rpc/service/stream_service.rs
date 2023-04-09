@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_pb::meta::list_table_fragments_response::{
     ActorInfo, FragmentInfo, TableFragmentInfo,
 };
@@ -23,8 +24,9 @@ use risingwave_pb::meta::*;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierScheduler;
-use crate::manager::{FragmentManagerRef, MetaSrvEnv};
+use crate::manager::{CatalogManagerRef, FragmentManagerRef, MetaSrvEnv};
 use crate::storage::MetaStore;
+use crate::stream::GlobalStreamManagerRef;
 
 pub type TonicResponse<T> = Result<Response<T>, Status>;
 
@@ -35,6 +37,8 @@ where
 {
     env: MetaSrvEnv<S>,
     barrier_scheduler: BarrierScheduler<S>,
+    stream_manager: GlobalStreamManagerRef<S>,
+    catalog_manager: CatalogManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
 }
 
@@ -45,11 +49,15 @@ where
     pub fn new(
         env: MetaSrvEnv<S>,
         barrier_scheduler: BarrierScheduler<S>,
+        stream_manager: GlobalStreamManagerRef<S>,
+        catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
         StreamServiceImpl {
             env,
             barrier_scheduler,
+            stream_manager,
+            catalog_manager,
             fragment_manager,
         }
     }
@@ -70,6 +78,23 @@ where
             status: None,
             snapshot: Some(snapshot),
         }))
+    }
+
+    async fn cancel_creating_jobs(
+        &self,
+        request: Request<CancelCreatingJobsRequest>,
+    ) -> TonicResponse<CancelCreatingJobsResponse> {
+        let req = request.into_inner();
+        let table_ids = self
+            .catalog_manager
+            .find_creating_streaming_job_ids(req.infos)
+            .await;
+        if !table_ids.is_empty() {
+            self.stream_manager
+                .cancel_streaming_jobs(table_ids.into_iter().map(TableId::from).collect_vec())
+                .await;
+        }
+        Ok(Response::new(CancelCreatingJobsResponse { status: None }))
     }
 
     #[cfg_attr(coverage, no_coverage)]
@@ -103,6 +128,7 @@ where
                                     .collect_vec(),
                             })
                             .collect_vec(),
+                        env: Some(tf.env.to_protobuf()),
                     },
                 )
             })

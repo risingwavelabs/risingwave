@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,12 +14,14 @@
 
 use std::fmt;
 
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::{PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::stream::StreamPlanRef;
+use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamRowIdGen {
     pub base: PlanBase,
     input: PlanRef,
@@ -28,13 +30,21 @@ pub struct StreamRowIdGen {
 
 impl StreamRowIdGen {
     pub fn new(input: PlanRef, row_id_index: usize) -> Self {
+        let distribution = if input.append_only() {
+            // remove exchange for append only source
+            Distribution::HashShard(vec![row_id_index])
+        } else {
+            input.distribution().clone()
+        };
+
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
             input.logical_pk().to_vec(),
             input.functional_dependency().clone(),
-            input.distribution().clone(),
+            distribution,
             input.append_only(),
+            input.watermark_columns().clone(),
         );
         Self {
             base,
@@ -67,11 +77,13 @@ impl PlanTreeNodeUnary for StreamRowIdGen {
 impl_plan_tree_node_for_unary! {StreamRowIdGen}
 
 impl StreamNode for StreamRowIdGen {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
 
-        ProstStreamNode::RowIdGen(RowIdGenNode {
+        PbNodeBody::RowIdGen(RowIdGenNode {
             row_id_index: self.row_id_index as _,
         })
     }
 }
+
+impl ExprRewritable for StreamRowIdGen {}

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,7 +18,7 @@ use std::sync::Arc;
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::task_service::task_service_server::TaskService;
 use risingwave_pb::task_service::{
-    AbortTaskRequest, AbortTaskResponse, CreateTaskRequest, ExecuteRequest, GetDataResponse,
+    CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest, GetDataResponse,
     TaskInfoResponse,
 };
 use tokio_stream::wrappers::ReceiverStream;
@@ -26,7 +26,8 @@ use tonic::{Request, Response, Status};
 
 use crate::rpc::service::exchange::GrpcExchangeWriter;
 use crate::task::{
-    self, BatchEnvironment, BatchManager, BatchTaskExecution, ComputeNodeContext, TaskId,
+    BatchEnvironment, BatchManager, BatchTaskExecution, ComputeNodeContext, StateReporter, TaskId,
+    TASK_STATUS_BUFFER_SIZE,
 };
 
 const LOCAL_EXECUTE_BUFFER_SIZE: usize = 64;
@@ -42,11 +43,14 @@ impl BatchServiceImpl {
         BatchServiceImpl { mgr, env }
     }
 }
-pub(crate) type TaskInfoResponseResult = std::result::Result<TaskInfoResponse, Status>;
+
+pub type TaskInfoResponseResult = Result<TaskInfoResponse, Status>;
+pub type GetDataResponseResult = Result<GetDataResponse, Status>;
+
 #[async_trait::async_trait]
 impl TaskService for BatchServiceImpl {
     type CreateTaskStream = ReceiverStream<TaskInfoResponseResult>;
-    type ExecuteStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
+    type ExecuteStream = ReceiverStream<GetDataResponseResult>;
 
     #[cfg_attr(coverage, no_coverage)]
     async fn create_task(
@@ -59,16 +63,19 @@ impl TaskService for BatchServiceImpl {
             epoch,
         } = request.into_inner();
 
+        let (state_tx, state_rx) = tokio::sync::mpsc::channel(TASK_STATUS_BUFFER_SIZE);
+        let state_reporter = StateReporter::new_with_dist_sender(state_tx);
         let res = self
             .mgr
             .fire_task(
                 task_id.as_ref().expect("no task id found"),
                 plan.expect("no plan found").clone(),
-                epoch,
+                epoch.expect("no epoch found"),
                 ComputeNodeContext::new(
                     self.env.clone(),
                     TaskId::from(task_id.as_ref().expect("no task id found")),
                 ),
+                state_reporter,
             )
             .await;
         match res {
@@ -78,8 +85,7 @@ impl TaskService for BatchServiceImpl {
                 // Will be used for receive task status update.
                 // Note: we introduce this hack cuz `.execute()` do not produce a status stream,
                 // but still share `.async_execute()` and `.try_execute()`.
-                self.mgr
-                    .get_task_receiver(&task::TaskId::from(&task_id.unwrap())),
+                state_rx,
             ))),
             Err(e) => {
                 error!("failed to fire task {}", e);
@@ -89,14 +95,15 @@ impl TaskService for BatchServiceImpl {
     }
 
     #[cfg_attr(coverage, no_coverage)]
-    async fn abort_task(
+    async fn cancel_task(
         &self,
-        req: Request<AbortTaskRequest>,
-    ) -> Result<Response<AbortTaskResponse>, Status> {
+        req: Request<CancelTaskRequest>,
+    ) -> Result<Response<CancelTaskResponse>, Status> {
         let req = req.into_inner();
+        tracing::trace!("Aborting task: {:?}", req.get_task_id().unwrap());
         self.mgr
-            .abort_task(req.get_task_id().expect("no task id found"));
-        Ok(Response::new(AbortTaskResponse { status: None }))
+            .cancel_task(req.get_task_id().expect("no task id found"));
+        Ok(Response::new(CancelTaskResponse { status: None }))
     }
 
     #[cfg_attr(coverage, no_coverage)]
@@ -111,6 +118,7 @@ impl TaskService for BatchServiceImpl {
         } = req.into_inner();
         let task_id = task_id.expect("no task id found");
         let plan = plan.expect("no plan found").clone();
+        let epoch = epoch.expect("no epoch found");
         let context = ComputeNodeContext::new_for_local(self.env.clone());
         trace!(
             "local execute request: plan:{:?} with task id:{:?}",
@@ -119,8 +127,8 @@ impl TaskService for BatchServiceImpl {
         );
         let task = BatchTaskExecution::new(&task_id, plan, context, epoch, self.mgr.runtime())?;
         let task = Arc::new(task);
-
-        if let Err(e) = task.clone().async_execute().await {
+        let (tx, rx) = tokio::sync::mpsc::channel(LOCAL_EXECUTE_BUFFER_SIZE);
+        if let Err(e) = task.clone().async_execute(None).await {
             error!(
                 "failed to build executors and trigger execution of Task {:?}: {}",
                 task_id, e
@@ -141,20 +149,14 @@ impl TaskService for BatchServiceImpl {
             );
             e
         })?;
-        let (tx, rx) = tokio::sync::mpsc::channel(LOCAL_EXECUTE_BUFFER_SIZE);
-
         let mut writer = GrpcExchangeWriter::new(tx.clone());
-        let finish = output
-            .take_data_with_num(&mut writer, tx.capacity())
-            .await?;
-        if !finish {
-            self.mgr.runtime().spawn(async move {
-                match output.take_data(&mut writer).await {
-                    Ok(_) => Ok(()),
-                    Err(e) => tx.send(Err(e.into())).await,
-                }
-            });
-        }
+        // Always spawn a task and do not block current function.
+        self.mgr.runtime().spawn(async move {
+            match output.take_data(&mut writer).await {
+                Ok(_) => Ok(()),
+                Err(e) => tx.send(Err(e.into())).await,
+            }
+        });
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 }

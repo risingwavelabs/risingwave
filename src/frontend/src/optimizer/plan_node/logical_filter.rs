@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,22 +16,26 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::error::Result;
+use risingwave_common::types::DataType;
 
-use super::generic::{self, GenericPlanNode};
 use super::{
-    ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, ToBatch, ToStream,
+    generic, ColPrunable, CollectInputRef, ExprRewritable, LogicalProject, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
-use crate::expr::{assert_input_ref, ExprImpl};
-use crate::optimizer::plan_node::{BatchFilter, StreamFilter};
-use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
+use crate::expr::{assert_input_ref, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
+use crate::optimizer::plan_node::{
+    BatchFilter, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
+    StreamFilter, ToStreamContext,
+};
+use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalFilter` iterates over its input and returns elements for which `predicate` evaluates to
 /// true, filtering out the others.
 ///
 /// If the condition allows nulls, then a null value is treated the same as false.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalFilter {
     pub base: PlanBase,
     core: generic::Filter<PlanRef>,
@@ -39,30 +43,12 @@ pub struct LogicalFilter {
 
 impl LogicalFilter {
     pub fn new(input: PlanRef, predicate: Condition) -> Self {
-        let ctx = input.ctx();
+        let _ctx = input.ctx();
         for cond in &predicate.conjunctions {
             assert_input_ref!(cond, input.schema().fields().len());
         }
-        let mut functional_dependency = input.functional_dependency().clone();
-        for i in &predicate.conjunctions {
-            if let Some((col, _)) = i.as_eq_const() {
-                functional_dependency.add_constant_columns(&[col.index()])
-            } else if let Some((left, right)) = i.as_eq_cond() {
-                functional_dependency
-                    .add_functional_dependency_by_column_indices(&[left.index()], &[right.index()]);
-                functional_dependency
-                    .add_functional_dependency_by_column_indices(&[right.index()], &[left.index()]);
-            }
-        }
         let core = generic::Filter { predicate, input };
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
-        let base = PlanBase::new_logical(
-            ctx,
-            schema,
-            pk_indices.unwrap_or_default(),
-            functional_dependency,
-        );
+        let base = PlanBase::new_logical_with_core(&core);
         LogicalFilter { base, core }
     }
 
@@ -75,7 +61,30 @@ impl LogicalFilter {
         }
     }
 
-    /// the function will check if the predicate is bool expression
+    /// Create a `LogicalFilter` to filter the rows with all keys are null.
+    pub fn filter_if_keys_all_null(input: PlanRef, key: &[usize]) -> PlanRef {
+        let schema = input.schema();
+        let cond = key.iter().fold(ExprImpl::literal_bool(false), |expr, i| {
+            ExprImpl::FunctionCall(
+                FunctionCall::new_unchecked(
+                    ExprType::Or,
+                    vec![
+                        expr,
+                        FunctionCall::new_unchecked(
+                            ExprType::IsNotNull,
+                            vec![InputRef::new(*i, schema.fields()[*i].data_type.clone()).into()],
+                            DataType::Boolean,
+                        )
+                        .into(),
+                    ],
+                    DataType::Boolean,
+                )
+                .into(),
+            )
+        });
+        LogicalFilter::create_with_expr(input, cond)
+    }
+
     pub fn create_with_expr(input: PlanRef, predicate: ExprImpl) -> PlanRef {
         let predicate = Condition::with_expr(predicate);
         Self::new(input, predicate).into()
@@ -84,20 +93,6 @@ impl LogicalFilter {
     /// Get the predicate of the logical join.
     pub fn predicate(&self) -> &Condition {
         &self.core.predicate
-    }
-
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let input = self.input();
-        let input_schema = input.schema();
-        write!(
-            f,
-            "{} {{ predicate: {} }}",
-            name,
-            ConditionDisplay {
-                condition: self.predicate(),
-                input_schema
-            }
-        )
     }
 }
 
@@ -125,12 +120,12 @@ impl_plan_tree_node_for_unary! {LogicalFilter}
 
 impl fmt::Display for LogicalFilter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalFilter")
+        self.core.fmt_with_name(f, "LogicalFilter")
     }
 }
 
 impl ColPrunable for LogicalFilter {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let required_cols_bitset = FixedBitSet::from_iter(required_cols.iter().copied());
 
         let mut visitor = CollectInputRef::with_capacity(self.input().schema().len());
@@ -149,7 +144,8 @@ impl ColPrunable for LogicalFilter {
         );
         predicate = predicate.rewrite_expr(&mut mapping);
 
-        let filter = LogicalFilter::new(self.input().prune_col(&input_required_cols), predicate);
+        let filter =
+            LogicalFilter::new(self.input().prune_col(&input_required_cols, ctx), predicate);
         if input_required_cols == required_cols {
             filter.into()
         } else {
@@ -170,30 +166,77 @@ impl ColPrunable for LogicalFilter {
     }
 }
 
+impl ExprRewritable for LogicalFilter {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self {
+            base: self.base.clone_with_new_plan_id(),
+            core,
+        }
+        .into()
+    }
+}
+
 impl PredicatePushdown for LogicalFilter {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         let predicate = predicate.and(self.predicate().clone());
-        self.input().predicate_pushdown(predicate)
+        self.input().predicate_pushdown(predicate, ctx)
     }
 }
 
 impl ToBatch for LogicalFilter {
     fn to_batch(&self) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
-        let new_logical = self.clone_with_input(new_input);
+        let mut new_logical = self.core.clone();
+        new_logical.input = new_input;
         Ok(BatchFilter::new(new_logical).into())
     }
 }
 
 impl ToStream for LogicalFilter {
-    fn to_stream(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_stream()?;
-        let new_logical = self.clone_with_input(new_input);
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        let new_input = self.input().to_stream(ctx)?;
+
+        let predicate = self.predicate();
+        let has_now = predicate
+            .conjunctions
+            .iter()
+            .any(|cond| cond.count_nows() > 0);
+        if has_now {
+            if predicate
+                .conjunctions
+                .iter()
+                .any(|expr| expr.count_nows() > 0 && expr.as_now_comparison_cond().is_none())
+            {
+                bail!(
+                    "Conditions containing now must be of the form `input_expr cmp now() [+- const_expr]` or \
+                    `now() [+- const_expr] cmp input_expr`, where `input_expr` references a column \
+                    and contains no `now()`."
+                );
+            }
+            bail!(
+                "All `now()` exprs were valid, but the condition must have at least one now expr as a lower bound."
+            );
+        }
+        let mut new_logical = self.core.clone();
+        new_logical.input = new_input;
         Ok(StreamFilter::new(new_logical).into())
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input().logical_rewrite_for_stream()?;
+    fn logical_rewrite_for_stream(
+        &self,
+        ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (filter, out_col_change) = self.rewrite_with_input(input, input_col_change);
         Ok((filter.into(), out_col_change))
     }
@@ -201,7 +244,6 @@ impl ToStream for LogicalFilter {
 
 #[cfg(test)]
 mod tests {
-
     use std::collections::HashSet;
 
     use risingwave_common::catalog::{Field, Schema};
@@ -210,9 +252,9 @@ mod tests {
 
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;
-    use crate::session::OptimizerContext;
 
     #[tokio::test]
     /// Pruning
@@ -255,7 +297,10 @@ mod tests {
 
         // Perform the prune
         let required_cols = vec![2];
-        let plan = filter.prune_col(&required_cols);
+        let plan = filter.prune_col(
+            &required_cols,
+            &mut ColumnPruningContext::new(filter.clone()),
+        );
 
         // Check the result
         let project = plan.as_logical_project().unwrap();
@@ -267,7 +312,7 @@ mod tests {
         assert_eq!(filter.schema().fields().len(), 2);
         assert_eq!(filter.schema().fields()[0], fields[1]);
         assert_eq!(filter.schema().fields()[1], fields[2]);
-        assert_eq!(filter.id().0, 3);
+        assert_eq!(filter.id().0, 4);
 
         let expr: ExprImpl = filter.predicate().clone().into();
         let call = expr.as_function_call().unwrap();
@@ -320,7 +365,10 @@ mod tests {
 
         // Perform the prune
         let required_cols = vec![1, 0];
-        let plan = filter.prune_col(&required_cols);
+        let plan = filter.prune_col(
+            &required_cols,
+            &mut ColumnPruningContext::new(filter.clone()),
+        );
 
         // Check the result
         let project = plan.as_logical_project().unwrap();
@@ -381,11 +429,15 @@ mod tests {
             )
             .unwrap(),
         ));
-        let filter = LogicalFilter::new(values.into(), Condition::with_expr(predicate));
+        let filter: PlanRef =
+            LogicalFilter::new(values.into(), Condition::with_expr(predicate)).into();
 
         // Perform the prune
         let required_cols = vec![1, 2];
-        let plan = filter.prune_col(&required_cols);
+        let plan = filter.prune_col(
+            &required_cols,
+            &mut ColumnPruningContext::new(filter.clone()),
+        );
 
         // Check the result
         let filter = plan.as_logical_filter().unwrap();

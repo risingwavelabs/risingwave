@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,6 +16,8 @@ use std::fmt::{Display, Formatter};
 
 use itertools::Itertools;
 use prometheus::proto::Histogram;
+
+use crate::util::iter_util::ZipEqFast;
 
 #[derive(Clone, Default, Debug)]
 pub struct MyHistogram {
@@ -57,7 +59,7 @@ impl MyHistogram {
                 false => prev
                     .count_list
                     .iter()
-                    .zip_eq(cur.count_list.iter())
+                    .zip_eq_fast(cur.count_list.iter())
                     .map(|(&pb, &cb)| cb - pb)
                     .collect_vec(),
             },
@@ -76,7 +78,11 @@ impl MyHistogram {
         let threshold = (sample_count as f64 * (p / 100.0_f64)).ceil() as u64;
         let mut last_upper_bound = 0.0;
         let mut last_count = 0;
-        for (&upper_bound, &count) in self.upper_bound_list.iter().zip_eq(self.count_list.iter()) {
+        for (&upper_bound, &count) in self
+            .upper_bound_list
+            .iter()
+            .zip_eq_fast(self.count_list.iter())
+        {
             if count >= threshold {
                 // assume scale linearly within this bucket,
                 // return a value between last_upper_bound and upper_bound

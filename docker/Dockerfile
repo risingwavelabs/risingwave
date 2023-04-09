@@ -1,8 +1,10 @@
-FROM ubuntu:22.04 as builder
+FROM ubuntu:22.04 as base
 
 ENV LANG en_US.utf8
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl pkg-config bash lld
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl pkg-config bash lld maven unzip
+
+FROM base as builder
 
 SHELL ["/bin/bash", "-c"]
 
@@ -16,6 +18,14 @@ COPY ./ /risingwave
 
 ENV PATH /root/.cargo/bin/:$PATH
 
+ENV IN_CONTAINER=1
+
+ARG GIT_SHA
+ENV GIT_SHA=$GIT_SHA
+
+RUN curl -LO https://github.com/risingwavelabs/risingwave/archive/refs/heads/dashboard-artifact.zip
+RUN unzip dashboard-artifact.zip && mv risingwave-dashboard-artifact /risingwave/ui && rm dashboard-artifact.zip
+
 # We need to add the `rustfmt` dependency, otherwise `risingwave_pb` will not compile
 RUN rustup self update \
   && rustup set profile minimal \
@@ -23,60 +33,31 @@ RUN rustup self update \
   && rustup component add rustfmt
 
 RUN cargo fetch
-RUN mkdir -p /risingwave/bin
 
-ARG simd_disabled=false
-
-RUN if [ "$simd_disabled" == "true" ]; then \
-  echo "Disabling SIMD build flags for risingwave" && \
-  . scripts/cargo-config-disable-simd.sh; \
-  fi
-
-RUN cargo build -p risingwave_cmd -p risingwave_cmd_all --release --features "static-link static-log-level" && \
-  mv /risingwave/target/release/{frontend,compute-node,meta-node,compactor,risingwave} /risingwave/bin/ && \
+RUN cargo build -p risingwave_cmd_all -p risingwave_java_binding --release --features "static-link static-log-level" && \
+  mkdir -p /risingwave/bin && mv /risingwave/target/release/risingwave /risingwave/bin/ && \
+  mkdir -p /risingwave/lib && mv /risingwave/target/release/librisingwave_java_binding.so /risingwave/lib && \
   cargo clean
-RUN for component in "risingwave" "compute-node" "meta-node" "frontend" "compactor"; do \
-  objcopy --compress-debug-sections=zlib-gnu /risingwave/bin/${component}; \
-  done
+
+RUN cd /risingwave/java && mvn -B package -Dmaven.test.skip=true && \
+    mkdir -p /risingwave/bin/connector-node && \
+    tar -zxvf /risingwave/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
 
 FROM ubuntu:22.04 as image-base
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install ca-certificates && rm -rf /var/lib/{apt,dpkg,cache,log}/
-
-FROM image-base as frontend-node
-LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwave
-RUN mkdir -p /risingwave/bin
-COPY --from=builder /risingwave/bin/frontend /risingwave/bin/frontend
-EXPOSE 4566
-ENTRYPOINT [ "/risingwave/bin/frontend" ]
-
-FROM image-base as compute-node
-LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwave
-RUN mkdir -p /risingwave/bin
-COPY --from=builder /risingwave/bin/compute-node /risingwave/bin/compute-node
-EXPOSE 5687
-ENTRYPOINT [ "/risingwave/bin/compute-node" ]
-
-FROM image-base as meta-node
-LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwave
-RUN mkdir -p /risingwave/bin
-COPY --from=builder /risingwave/bin/meta-node /risingwave/bin/meta-node
-EXPOSE 5690
-ENTRYPOINT [ "/risingwave/bin/meta-node" ]
-
-FROM image-base as compactor-node
-LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwave
-RUN mkdir -p /risingwave/bin
-COPY --from=builder /risingwave/bin/compactor /risingwave/bin/compactor
-EXPOSE 6660
-ENTRYPOINT [ "/risingwave/bin/compactor" ]
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install ca-certificates openjdk-11-jdk && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
 FROM image-base as risingwave
 LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwave
-RUN mkdir -p /risingwave/bin
+RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
 COPY --from=builder /risingwave/bin/risingwave /risingwave/bin/risingwave
-# Copy risedev.yml into container
-COPY ./risedev.yml /risedev.yml
+COPY --from=builder /risingwave/bin/connector-node /risingwave/bin/connector-node
+COPY --from=builder /risingwave/ui /risingwave/ui
+COPY --from=builder /risingwave/lib/librisingwave_java_binding.so /risingwave/lib/librisingwave_java_binding.so
+# Set java.library.path env to /risingwave/lib
+ENV RW_JAVA_BINDING_LIB_PATH /risingwave/lib
 # Set default playground mode to docker-playground profile
 ENV PLAYGROUND_PROFILE docker-playground
+# Set default dashboard UI to local path instead of github proxy
+ENV RW_DASHBOARD_UI_PATH /risingwave/ui
 ENTRYPOINT [ "/risingwave/bin/risingwave" ]
 CMD [ "playground" ]

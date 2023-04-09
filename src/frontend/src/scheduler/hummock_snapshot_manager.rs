@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,7 +19,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
-use risingwave_common::util::epoch::INVALID_EPOCH;
+use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
+use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::HummockSnapshot;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::{channel as once_channel, Sender as Callback};
@@ -32,7 +33,31 @@ use crate::scheduler::{SchedulerError, SchedulerResult};
 const UNPIN_INTERVAL_SECS: u64 = 10;
 
 pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
-pub type PinnedHummockSnapshot = HummockSnapshotGuard;
+pub enum PinnedHummockSnapshot {
+    FrontendPinned(
+        HummockSnapshotGuard,
+        // `only_checkpoint_visible`.
+        // It's embedded here because we always use it together with snapshot.
+        bool,
+    ),
+    /// Other arbitrary epoch, e.g. user specified.
+    /// Availability and consistency of underlying data should be guaranteed accordingly.
+    /// Currently it's only used for querying meta snapshot backup.
+    Other(Epoch),
+}
+
+impl PinnedHummockSnapshot {
+    pub fn get_batch_query_epoch(&self) -> BatchQueryEpoch {
+        match self {
+            PinnedHummockSnapshot::FrontendPinned(s, checkpoint) => {
+                s.get_batch_query_epoch(*checkpoint)
+            }
+            PinnedHummockSnapshot::Other(e) => BatchQueryEpoch {
+                epoch: Some(batch_query_epoch::Epoch::Backup(e.0)),
+            },
+        }
+    }
+}
 
 type SnapshotRef = Arc<ArcSwap<HummockSnapshot>>;
 
@@ -73,12 +98,13 @@ pub struct HummockSnapshotGuard {
 }
 
 impl HummockSnapshotGuard {
-    pub fn get_committed_epoch(&self) -> u64 {
-        self.snapshot.committed_epoch
-    }
-
-    pub fn get_current_epoch(&self) -> u64 {
-        self.snapshot.current_epoch
+    pub fn get_batch_query_epoch(&self, checkpoint: bool) -> BatchQueryEpoch {
+        let epoch = if checkpoint {
+            batch_query_epoch::Epoch::Committed(self.snapshot.committed_epoch)
+        } else {
+            batch_query_epoch::Epoch::Current(self.snapshot.current_epoch)
+        };
+        BatchQueryEpoch { epoch: Some(epoch) }
     }
 }
 
@@ -165,7 +191,7 @@ impl HummockSnapshotManager {
         }
     }
 
-    pub async fn acquire(&self, query_id: &QueryId) -> SchedulerResult<PinnedHummockSnapshot> {
+    pub async fn acquire(&self, query_id: &QueryId) -> SchedulerResult<HummockSnapshotGuard> {
         let (sender, rc) = once_channel();
         let msg = EpochOperation::RequestEpoch {
             query_id: query_id.clone(),
@@ -196,6 +222,10 @@ impl HummockSnapshotManager {
             current_epoch: std::cmp::max(prev.current_epoch, snapshot.current_epoch),
         });
     }
+
+    pub fn latest_snapshot_current_epoch(&self) -> Epoch {
+        self.latest_snapshot.load().current_epoch.into()
+    }
 }
 
 struct HummockSnapshotManagerCore {
@@ -215,34 +245,6 @@ impl HummockSnapshotManagerCore {
             epoch_to_query_ids: BTreeMap::default(),
             last_unpin_snapshot: Arc::new(AtomicU64::new(INVALID_EPOCH)),
             latest_snapshot,
-        }
-    }
-
-    /// Retrieve max committed epoch from meta with an rpc. This method provides
-    /// better epoch freshness.
-    async fn get_epoch_for_query_from_rpc(
-        &mut self,
-        batches: &mut Vec<(QueryId, Callback<SchedulerResult<HummockSnapshot>>)>,
-    ) -> HummockSnapshot {
-        let ret = self.meta_client.get_epoch().await;
-        match ret {
-            Ok(snapshot) => {
-                self.notify_epoch_assigned_for_queries(&snapshot, batches);
-                snapshot
-            }
-            Err(e) => {
-                for (id, cb) in batches.drain(..) {
-                    let _ = cb.send(Err(SchedulerError::Internal(anyhow!(
-                        "Failed to get epoch for query: {:?} because of RPC Error: {:?}",
-                        id,
-                        e
-                    ))));
-                }
-                HummockSnapshot {
-                    committed_epoch: INVALID_EPOCH,
-                    current_epoch: INVALID_EPOCH,
-                }
-            }
         }
     }
 

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,27 +15,71 @@
 use std::collections::{BTreeMap, HashMap};
 
 use comfy_table::{Attribute, Cell, Row, Table};
+use itertools::Itertools;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::meta::GetClusterInfoResponse;
+use risingwave_pb::source::ConnectorSplits;
+use risingwave_pb::stream_plan::FragmentTypeFlag;
 
-use crate::common::MetaServiceOpts;
+use crate::CtlContext;
 
-pub async fn get_cluster_info() -> anyhow::Result<GetClusterInfoResponse> {
-    let meta_opts = MetaServiceOpts::from_env()?;
-    let meta_client = meta_opts.create_meta_client().await?;
-
+pub async fn get_cluster_info(context: &CtlContext) -> anyhow::Result<GetClusterInfoResponse> {
+    let meta_client = context.meta_client().await?;
     let response = meta_client.get_cluster_info().await?;
     Ok(response)
 }
 
-pub async fn cluster_info() -> anyhow::Result<()> {
+pub async fn source_split_info(context: &CtlContext) -> anyhow::Result<()> {
+    let GetClusterInfoResponse {
+        worker_nodes: _,
+        source_infos: _,
+        table_fragments,
+        mut actor_splits,
+    } = get_cluster_info(context).await?;
+
+    for table_fragment in &table_fragments {
+        if table_fragment.actor_splits.is_empty() {
+            continue;
+        }
+
+        println!("Table #{}", table_fragment.table_id);
+
+        for fragment in table_fragment.fragments.values() {
+            if fragment.fragment_type_mask & FragmentTypeFlag::Source as u32 == 0 {
+                continue;
+            }
+
+            println!("\tFragment #{}", fragment.fragment_id);
+            for actor in &fragment.actors {
+                let ConnectorSplits { splits } = actor_splits.remove(&actor.actor_id).unwrap();
+                let splits = splits
+                    .iter()
+                    .map(|split| SplitImpl::try_from(split).unwrap())
+                    .map(|split| split.id())
+                    .collect_vec();
+
+                println!(
+                    "\t\tActor #{} ({}): [{}]",
+                    actor.actor_id,
+                    splits.len(),
+                    splits.join(",")
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
     let GetClusterInfoResponse {
         worker_nodes,
         table_fragments,
         actor_splits: _,
         source_infos: _,
-    } = get_cluster_info().await?;
+    } = get_cluster_info(context).await?;
 
     // Fragment ID -> [Parallel Unit ID -> (Parallel Unit, Actor)]
     let mut fragments = BTreeMap::new();

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Exits as soon as any line fails.
 set -euo pipefail
@@ -25,9 +25,10 @@ done
 shift $((OPTIND -1))
 
 echo "--- Rust cargo-sort check"
-cargo sort -c -w
+cargo sort --check --workspace
 
 echo "--- Rust cargo-hakari check"
+cargo hakari generate --diff
 cargo hakari verify
 
 echo "--- Rust format check"
@@ -40,26 +41,19 @@ cargo build \
     -p risingwave_regress_test \
     -p risingwave_sqlsmith \
     -p risingwave_compaction_test \
+    -p risingwave_backup_cmd \
+    -p risingwave_java_binding \
+    -p risingwave_e2e_extended_mode_test \
     --features "static-link static-log-level" --profile "$profile"
 
-echo "--- Compress debug info for artifacts"
-objcopy --compress-debug-sections=zlib-gnu target/"$target"/risingwave
-objcopy --compress-debug-sections=zlib-gnu target/"$target"/sqlsmith
-objcopy --compress-debug-sections=zlib-gnu target/"$target"/compaction-test
-objcopy --compress-debug-sections=zlib-gnu target/"$target"/risingwave_regress_test
-objcopy --compress-debug-sections=zlib-gnu target/"$target"/risedev-dev
+# the file name suffix of artifact for risingwave_java_binding is so only for linux. It is dylib for MacOS
+artifacts=(risingwave sqlsmith compaction-test backup-restore risingwave_regress_test risingwave_e2e_extended_mode_test risedev-dev delete-range-test librisingwave_java_binding.so)
 
 echo "--- Show link info"
 ldd target/"$target"/risingwave
 
 echo "--- Upload artifacts"
-cp target/"$target"/compaction-test ./compaction-test-"$profile"
-cp target/"$target"/risingwave ./risingwave-"$profile"
-cp target/"$target"/risedev-dev ./risedev-dev-"$profile"
-cp target/"$target"/risingwave_regress_test ./risingwave_regress_test-"$profile"
-cp target/"$target"/sqlsmith ./sqlsmith-"$profile"
-buildkite-agent artifact upload risingwave-"$profile"
-buildkite-agent artifact upload risedev-dev-"$profile"
-buildkite-agent artifact upload risingwave_regress_test-"$profile"
-buildkite-agent artifact upload ./sqlsmith-"$profile"
-buildkite-agent artifact upload ./compaction-test-"$profile"
+echo -n "${artifacts[*]}" | parallel -d ' ' "mv target/$target/{} ./{}-$profile && buildkite-agent artifact upload ./{}-$profile"
+
+echo "--- Show sccache stats"
+sccache --show-stats

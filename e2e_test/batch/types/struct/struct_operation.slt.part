@@ -2,6 +2,9 @@
 # Copyright 2018-2022 Stichting DuckDB Foundation 
 
 statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
 CREATE TABLE a(id INTEGER, b STRUCT<i INTEGER, j INTEGER>);
 
 statement ok

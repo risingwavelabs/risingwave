@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,21 +16,25 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use crate::expr::{ExprType, FunctionCall, InputRef, InputRefDisplay};
+use crate::expr::{
+    ExprRewriter, ExprType, FunctionCall, InequalityInputPair, InputRef, InputRefDisplay,
+};
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// The join predicate used in optimizer
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct EqJoinPredicate {
     /// Other conditions, linked with `AND` conjunction.
     other_cond: Condition,
 
-    /// The equal columns indexes(in the input schema) both sides,
-    /// the first is from the left table and the second is from the right table.
-    /// The third is `null_safe` flag.
+    /// `Vec` of `(left_col_index, right_col_index, null_safe)`,
+    /// representing a conjunction of `left_col_index = right_col_index`
+    ///
+    /// Note: `right_col_index` starts from `left_cols_num`
     eq_keys: Vec<(InputRef, InputRef, bool)>,
 
     left_cols_num: usize,
+    right_cols_num: usize,
 }
 
 impl fmt::Display for EqJoinPredicate {
@@ -76,11 +80,13 @@ impl EqJoinPredicate {
         other_cond: Condition,
         eq_keys: Vec<(InputRef, InputRef, bool)>,
         left_cols_num: usize,
+        right_cols_num: usize,
     ) -> Self {
         Self {
             other_cond,
             eq_keys,
             left_cols_num,
+            right_cols_num,
         }
     }
 
@@ -101,7 +107,7 @@ impl EqJoinPredicate {
     /// ```
     pub fn create(left_cols_num: usize, right_cols_num: usize, on_clause: Condition) -> Self {
         let (eq_keys, other_cond) = on_clause.split_eq_keys(left_cols_num, right_cols_num);
-        Self::new(other_cond, eq_keys, left_cols_num)
+        Self::new(other_cond, eq_keys, left_cols_num, right_cols_num)
     }
 
     /// Get join predicate's eq conds.
@@ -155,15 +161,48 @@ impl EqJoinPredicate {
     }
 
     /// Get a reference to the join predicate's eq keys.
+    ///
+    /// Note: `right_col_index` starts from `left_cols_num`
     pub fn eq_keys(&self) -> &[(InputRef, InputRef, bool)] {
         self.eq_keys.as_ref()
     }
 
+    /// `Vec` of `(left_col_index, right_col_index)`.
+    ///
+    /// Note: `right_col_index` starts from `0`
     pub fn eq_indexes(&self) -> Vec<(usize, usize)> {
         self.eq_keys
             .iter()
             .map(|(left, right, _)| (left.index(), right.index() - self.left_cols_num))
             .collect()
+    }
+
+    pub(crate) fn inequality_pairs(&self) -> (usize, Vec<(usize, InequalityInputPair)>) {
+        (
+            self.left_cols_num,
+            self.other_cond()
+                .extract_inequality_keys(self.left_cols_num, self.right_cols_num),
+        )
+    }
+
+    /// Note: `right_col_index` starts from `0`
+    pub fn eq_indexes_typed(&self) -> Vec<(InputRef, InputRef)> {
+        self.eq_keys
+            .iter()
+            .cloned()
+            .map(|(left, mut right, _)| {
+                right.index -= self.left_cols_num;
+                (left, right)
+            })
+            .collect()
+    }
+
+    pub fn eq_keys_are_type_aligned(&self) -> bool {
+        let mut aligned = true;
+        for (l, r, _) in &self.eq_keys {
+            aligned &= l.data_type == r.data_type;
+        }
+        aligned
     }
 
     pub fn left_eq_indexes(&self) -> Vec<usize> {
@@ -173,7 +212,7 @@ impl EqJoinPredicate {
             .collect()
     }
 
-    /// return the eq keys column index **based on the right input schema**
+    /// Note: `right_col_index` starts from `0`
     pub fn right_eq_indexes(&self) -> Vec<usize> {
         self.eq_keys
             .iter()
@@ -199,6 +238,42 @@ impl EqJoinPredicate {
             map[right.index - left_cols_num] = Some(left.index);
         }
         ColIndexMapping::new(map)
+    }
+
+    /// return the eq columns index mapping from left inputs to right inputs
+    pub fn l2r_eq_columns_mapping(&self, left_cols_num: usize) -> ColIndexMapping {
+        let mut map = vec![None; left_cols_num];
+        for (left, right, _) in self.eq_keys() {
+            map[left.index] = Some(right.index - left_cols_num);
+        }
+        ColIndexMapping::new(map)
+    }
+
+    /// Reorder the `eq_keys` according to the `reorder_idx`.
+    pub fn reorder(self, reorder_idx: &[usize]) -> Self {
+        assert!(reorder_idx.len() <= self.eq_keys.len());
+        let mut new_eq_keys = Vec::with_capacity(self.eq_keys.len());
+        for idx in reorder_idx {
+            new_eq_keys.push(self.eq_keys[*idx].clone());
+        }
+        for idx in 0..self.eq_keys.len() {
+            if !reorder_idx.contains(&idx) {
+                new_eq_keys.push(self.eq_keys[idx].clone());
+            }
+        }
+
+        Self::new(
+            self.other_cond,
+            new_eq_keys,
+            self.left_cols_num,
+            self.right_cols_num,
+        )
+    }
+
+    pub fn rewrite_exprs(&self, rewriter: &mut (impl ExprRewriter + ?Sized)) -> Self {
+        let mut new = self.clone();
+        new.other_cond = new.other_cond.rewrite_expr(rewriter);
+        new
     }
 }
 

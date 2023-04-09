@@ -16,3 +16,9 @@ include ./views/q18.slt.part
 include ./views/q20.slt.part
 include ./views/q21.slt.part
 include ./views/q22.slt.part
+include ./views/q101.slt.part
+include ./views/q102.slt.part
+include ./views/q103.slt.part
+include ./views/q104.slt.part
+include ./views/q105.slt.part
+include ./views/q106.slt.part

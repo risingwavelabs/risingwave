@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,7 +18,7 @@ use anyhow::{anyhow, Error, Result};
 use regex::{Match, Regex};
 use risingwave_pb::meta::reschedule_request::Reschedule;
 
-use crate::common::MetaServiceOpts;
+use crate::CtlContext;
 
 const RESCHEDULE_MATCH_REGEXP: &str =
     r"^(?P<fragment>\d+)(?:-\[(?P<removed>\d+(?:,\d+)*)])?(?:\+\[(?P<added>\d+(?:,\d+)*)])?$";
@@ -52,9 +52,8 @@ const RESCHEDULE_ADDED_KEY: &str = "added";
 //         removed_parallel_units: [],
 //     },
 // }
-pub async fn reschedule(mut plan: String, dry_run: bool) -> Result<()> {
-    let meta_opts = MetaServiceOpts::from_env()?;
-    let meta_client = meta_opts.create_meta_client().await?;
+pub async fn reschedule(context: &CtlContext, mut plan: String, dry_run: bool) -> Result<()> {
+    let meta_client = context.meta_client().await?;
 
     let regex = Regex::new(RESCHEDULE_MATCH_REGEXP)?;
     let mut reschedules = HashMap::new();

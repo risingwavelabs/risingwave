@@ -1,13 +1,13 @@
 # fail with invalid emulator_host
 statement error
-CREATE MATERIALIZED SOURCE s1 (v1 int, v2 varchar) WITH (
+CREATE TABLE s1 (v1 int, v2 varchar) WITH (
     pubsub.subscription = 'test-subscription-1',
     pubsub.emulator_host = 'localhost:5981',
     pubsub.split_count = 3
 ) row format json;
 
 statement ok
-CREATE MATERIALIZED SOURCE s1 (v1 int, v2 varchar) WITH (
+CREATE TABLE s1 (v1 int, v2 varchar) WITH (
     connector = 'google_pubsub',
     pubsub.subscription = 'test-subscription-1',
     pubsub.emulator_host = 'localhost:5980',
@@ -18,11 +18,11 @@ statement ok
 SELECT * FROM s1;
 
 statement ok
-DROP SOURCE s1;
+DROP TABLE s1;
 
 # fail with invalid subscription
 statement error
-CREATE MATERIALIZED SOURCE s2 (v1 int, v2 varchar) WITH (
+CREATE TABLE s2 (v1 int, v2 varchar) WITH (
     connector = 'google_pubsub',
     pubsub.subscription = 'test-subscription-not-2',
     pubsub.emulator_host = 'localhost:5980',
@@ -30,7 +30,7 @@ CREATE MATERIALIZED SOURCE s2 (v1 int, v2 varchar) WITH (
 ) row format json;
 
 statement ok
-CREATE MATERIALIZED SOURCE s2 (v1 int, v2 varchar) WITH (
+CREATE TABLE s2 (v1 int, v2 varchar) WITH (
     connector = 'google_pubsub',
     pubsub.subscription = 'test-subscription-2',
     pubsub.emulator_host = 'localhost:5980',
@@ -39,7 +39,7 @@ CREATE MATERIALIZED SOURCE s2 (v1 int, v2 varchar) WITH (
 
 # fail with invalid split count
 statement error
-CREATE MATERIALIZED SOURCE s3 (v1 int, v2 varchar) WITH (
+CREATE TABLE s3 (v1 int, v2 varchar) WITH (
     connector = 'google_pubsub',
     pubsub.subscription = 'test-subscription-3',
     pubsub.emulator_host = 'localhost:5980',
@@ -48,7 +48,7 @@ CREATE MATERIALIZED SOURCE s3 (v1 int, v2 varchar) WITH (
 
 # fail if both start_offset and start_snapshot are provided
 statement error
-CREATE MATERIALIZED SOURCE s3 (v1 int, v2 varchar) WITH (
+CREATE TABLE s3 (v1 int, v2 varchar) WITH (
     connector = 'google_pubsub',
     pubsub.subscription = 'test-subscription-3',
     pubsub.emulator_host = 'localhost:5980',
@@ -67,27 +67,27 @@ flush;
 query IT rowsort
 select v1, v2 FROM s2;
 ----
+0 name5
 0 name9
-3 name2
-7 name5
+1 name0
 1 name7
+2 name0
+2 name3
+3 name2
 3 name9
 4 name6
-5 name3
-8 name8
-9 name2
-2 name3
 4 name7
-7 name0
-1 name0
-2 name0
-6 name3
-0 name5
+5 name3
 5 name8
+6 name3
 6 name4
+7 name0
+7 name5
+8 name8
 8 name9
+9 name2
 9 name2
 
 statement ok
-DROP SOURCE s2;
+DROP TABLE s2;
 

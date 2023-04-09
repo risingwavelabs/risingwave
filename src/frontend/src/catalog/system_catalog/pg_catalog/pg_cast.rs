@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,7 +15,7 @@
 use std::sync::LazyLock;
 
 use itertools::Itertools;
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
@@ -31,14 +31,14 @@ pub const PG_CAST_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Varchar, "castcontext"),
 ];
 
-pub static PG_CAST_DATA_ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
+pub static PG_CAST_DATA_ROWS: LazyLock<Vec<OwnedRow>> = LazyLock::new(|| {
     let mut cast_array = cast_map_array();
     cast_array.sort();
     cast_array
         .iter()
         .enumerate()
         .map(|(idx, (src, target, ctx))| {
-            Row::new(vec![
+            OwnedRow::new(vec![
                 Some(ScalarImpl::Int32(idx as i32)),
                 Some(ScalarImpl::Int32(DataType::from(*src).to_oid())),
                 Some(ScalarImpl::Int32(DataType::from(*target).to_oid())),

@@ -2,12 +2,16 @@ syntax = "proto3";
 
 package expr;
 
+import "common.proto";
 import "data.proto";
-import "plan_common.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message ExprNode {
+  // a "pure function" will be defined as having `1 < expr_node as i32 <= 600`.
+  // Please modify this definition if adding a pure function that does not belong
+  // to this range.
   enum Type {
     UNSPECIFIED = 0;
     INPUT_REF = 1;
@@ -30,6 +34,8 @@ message ExprNode {
     OR = 22;
     NOT = 23;
     IN = 24;
+    SOME = 25;
+    ALL = 26;
     // bitwise operators
     BITWISE_AND = 31;
     BITWISE_OR = 32;
@@ -39,10 +45,18 @@ message ExprNode {
     BITWISE_SHIFT_RIGHT = 36;
     // date functions
     EXTRACT = 101;
+    DATE_PART = 102;
     TUMBLE_START = 103;
+    // From f64 to timestamp.
+    // e.g. `select to_timestamp(1672044740.0)`
     TO_TIMESTAMP = 104;
     AT_TIME_ZONE = 105;
     DATE_TRUNC = 106;
+    // Parse text to timestamp by format string.
+    // e.g. `select to_timestamp('2022 08 21', 'YYYY MM DD')`
+    TO_TIMESTAMP1 = 107;
+    // Performs a cast with additional timezone information.
+    CAST_WITH_TIME_ZONE = 108;
     // other functions
     CAST = 201;
     SUBSTR = 202;
@@ -80,6 +94,26 @@ message ExprNode {
     BIT_LENGTH = 230;
     OVERLAY = 231;
     REGEXP_MATCH = 232;
+    POW = 233;
+    EXP = 234;
+    CHR = 235;
+    STARTS_WITH = 236;
+    INITCAP = 237;
+    LPAD = 238;
+    RPAD = 239;
+    REVERSE = 240;
+    STRPOS = 241 [deprecated = true]; // duplicated with POSITION
+    TO_ASCII = 242;
+    TO_HEX = 243;
+    QUOTE_IDENT = 244;
+    SIN = 245;
+    COS = 246;
+    TAN = 247;
+    COT = 248;
+    ASIN = 249;
+    ACOS = 250;
+    ATAN = 251;
+    ATAN2 = 252;
 
     // Boolean comparison
     IS_TRUE = 301;
@@ -98,22 +132,44 @@ message ExprNode {
     ARRAY = 521;
     ARRAY_ACCESS = 522;
     ROW = 523;
+    ARRAY_TO_STRING = 524;
     // Array functions
     ARRAY_CAT = 531;
     ARRAY_APPEND = 532;
     ARRAY_PREPEND = 533;
-    // Search operator and Search ARGument
-    SEARCH = 998;
-    SARG = 999;
+    FORMAT_TYPE = 534;
+    ARRAY_DISTINCT = 535;
+    ARRAY_LENGTH = 536;
+    CARDINALITY = 537;
+
+    // Jsonb functions
+
+    // jsonb -> int, jsonb -> text, jsonb #> text[] that returns jsonb
+    JSONB_ACCESS_INNER = 600;
+    // jsonb ->> int, jsonb ->> text, jsonb #>> text[] that returns text
+    JSONB_ACCESS_STR = 601;
+    JSONB_TYPEOF = 602;
+    JSONB_ARRAY_LENGTH = 603;
+
+    // Functions that return a constant value
+    PI = 610;
+
+    // Non-pure functions below (> 1000)
+    // ------------------------
     // Internal functions
     VNODE = 1101;
+    // Non-deterministic functions
+    NOW = 2022;
+    // User defined functions
+    UDF = 3000;
   }
   Type expr_type = 1;
   data.DataType return_type = 3;
   oneof rex_node {
-    InputRefExpr input_ref = 4;
+    uint32 input_ref = 4;
     data.Datum constant = 5;
     FunctionCall func_call = 6;
+    UserDefinedFunction udf = 7;
   }
 }
 
@@ -124,14 +180,20 @@ message TableFunction {
     UNNEST = 2;
     REGEXP_MATCHES = 3;
     RANGE = 4;
+    // User defined table function
+    UDTF = 100;
   }
   Type function_type = 1;
   repeated expr.ExprNode args = 2;
   data.DataType return_type = 3;
+  // optional. only used when the type is UDTF.
+  UserDefinedTableFunction udtf = 4;
 }
 
-message InputRefExpr {
-  int32 column_idx = 1;
+// Reference to an upstream column, containing its index and data type.
+message InputRef {
+  uint32 index = 1;
+  data.DataType type = 2;
 }
 
 // The items which can occur in the select list of `ProjectSet` operator.
@@ -185,21 +247,31 @@ message AggCall {
     ARRAY_AGG = 8;
     FIRST_VALUE = 9;
     SUM0 = 10;
-  }
-  message Arg {
-    InputRefExpr input = 1;
-    data.DataType type = 2;
+    VAR_POP = 11;
+    VAR_SAMP = 12;
+    STDDEV_POP = 13;
+    STDDEV_SAMP = 14;
   }
   Type type = 1;
-  repeated Arg args = 2;
+  repeated InputRef args = 2;
   data.DataType return_type = 3;
   bool distinct = 4;
-  message OrderByField {
-    InputRefExpr input = 1;
-    data.DataType type = 2;
-    plan_common.OrderType direction = 3;
-    bool nulls_first = 4;
-  }
-  repeated OrderByField order_by_fields = 5;
+  repeated common.ColumnOrder order_by = 5;
   ExprNode filter = 6;
+}
+
+message UserDefinedFunction {
+  repeated ExprNode children = 1;
+  string name = 2;
+  repeated data.DataType arg_types = 3;
+  string language = 4;
+  string link = 5;
+  string identifier = 6;
+}
+
+message UserDefinedTableFunction {
+  repeated data.DataType arg_types = 3;
+  string language = 4;
+  string link = 5;
+  string identifier = 6;
 }

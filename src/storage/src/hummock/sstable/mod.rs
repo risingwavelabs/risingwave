@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,42 +18,52 @@
 mod block;
 
 use std::fmt::{Debug, Formatter};
+use std::ops::{BitXor, Bound};
 
 pub use block::*;
 mod block_iterator;
 pub use block_iterator::*;
 mod bloom;
-use bloom::Bloom;
+mod xor_filter;
+pub use bloom::BloomFilterBuilder;
+pub use xor_filter::XorFilterBuilder;
+use xor_filter::XorFilterReader;
 pub mod builder;
 pub use builder::*;
 pub mod writer;
 use risingwave_common::catalog::TableId;
+use risingwave_object_store::object::BlockLocation;
 pub use writer::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
 use bytes::{Buf, BufMut};
-use fail::fail_point;
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
-use risingwave_hummock_sdk::key::{TableKey, UserKey};
-use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
+use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType, TableKey, UserKey};
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 #[cfg(test)]
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 mod delete_range_aggregator;
-mod sstable_id_manager;
+mod filter;
+mod sstable_object_id_manager;
 mod utils;
+
 pub use delete_range_aggregator::{
     get_delete_range_epoch_from_sstable, DeleteRangeAggregator, DeleteRangeAggregatorBuilder,
     RangeTombstonesCollector, SstableDeleteRangeIterator,
 };
-pub use sstable_id_manager::*;
+pub use filter::FilterBuilder;
+pub use sstable_object_id_manager::*;
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
+use xxhash_rust::{xxh32, xxh64};
 
 use self::utils::{xxhash64_checksum, xxhash64_verify};
 use super::{HummockError, HummockResult};
+use crate::hummock::CachePolicy;
+use crate::store::ReadOptions;
 
 const DEFAULT_META_BUFFER_CAPACITY: usize = 4096;
 const MAGIC: u32 = 0x5785ab73;
@@ -117,8 +127,9 @@ impl DeleteRangeTombstone {
 /// [`Sstable`] is a handle for accessing SST.
 #[derive(Clone)]
 pub struct Sstable {
-    pub id: HummockSstableId,
+    pub id: HummockSstableObjectId,
     pub meta: SstableMeta,
+    pub filter_reader: XorFilterReader,
 }
 
 impl Debug for Sstable {
@@ -131,26 +142,48 @@ impl Debug for Sstable {
 }
 
 impl Sstable {
-    pub fn new(id: HummockSstableId, meta: SstableMeta) -> Self {
-        Self { id, meta }
-    }
-
-    pub fn has_bloom_filter(&self) -> bool {
-        !self.meta.bloom_filter.is_empty()
-    }
-
-    pub fn surely_not_have_user_key(&self, user_key: &[u8]) -> bool {
-        let enable_bloom_filter: fn() -> bool = || {
-            fail_point!("disable_bloom_filter", |_| false);
-            true
-        };
-        if enable_bloom_filter() && self.has_bloom_filter() {
-            let hash = farmhash::fingerprint32(user_key);
-            let bloom = Bloom::new(&self.meta.bloom_filter);
-            bloom.surely_not_have_hash(hash)
-        } else {
-            false
+    pub fn new(id: HummockSstableObjectId, mut meta: SstableMeta) -> Self {
+        let filter_data = std::mem::take(&mut meta.bloom_filter);
+        let filter_reader = XorFilterReader::new(filter_data);
+        Self {
+            id,
+            meta,
+            filter_reader,
         }
+    }
+
+    #[inline(always)]
+    pub fn has_bloom_filter(&self) -> bool {
+        !self.filter_reader.is_empty()
+    }
+
+    pub fn calculate_block_info(&self, block_index: usize) -> (BlockLocation, usize) {
+        let block_meta = &self.meta.block_metas[block_index];
+        let block_loc = BlockLocation {
+            offset: block_meta.offset as usize,
+            size: block_meta.len as usize,
+        };
+        let uncompressed_capacity = block_meta.uncompressed_size as usize;
+        (block_loc, uncompressed_capacity)
+    }
+
+    #[inline(always)]
+    pub fn hash_for_bloom_filter_u32(dist_key: &[u8], table_id: u32) -> u32 {
+        let dist_key_hash = xxh32::xxh32(dist_key, 0);
+        // congyi adds this because he aims to dedup keys in different tables
+        table_id.bitxor(dist_key_hash)
+    }
+
+    #[inline(always)]
+    pub fn hash_for_bloom_filter(dist_key: &[u8], table_id: u32) -> u64 {
+        let dist_key_hash = xxh64::xxh64(dist_key, 0);
+        // congyi adds this because he aims to dedup keys in different tables
+        (table_id as u64).bitxor(dist_key_hash)
+    }
+
+    #[inline(always)]
+    pub fn may_match_hash(&self, hash: u64) -> bool {
+        self.filter_reader.may_match(hash)
     }
 
     pub fn block_count(&self) -> usize {
@@ -159,13 +192,14 @@ impl Sstable {
 
     #[inline]
     pub fn estimate_size(&self) -> usize {
-        8 /* id */ + self.meta.encoded_size()
+        8 /* id */ + self.filter_reader.estimate_size() + self.meta.encoded_size()
     }
 
     #[cfg(test)]
     pub fn get_sstable_info(&self) -> SstableInfo {
         SstableInfo {
-            id: self.id,
+            object_id: self.id,
+            sst_id: self.id,
             key_range: Some(KeyRange {
                 left: self.meta.smallest_key.clone(),
                 right: self.meta.largest_key.clone(),
@@ -176,7 +210,9 @@ impl Sstable {
             meta_offset: self.meta.meta_offset,
             stale_key_count: 0,
             total_key_count: self.meta.key_count as u64,
-            divide_version: 0,
+            uncompressed_file_size: self.meta.estimated_size as u64,
+            min_epoch: 0,
+            max_epoch: 0,
         }
     }
 }
@@ -219,6 +255,10 @@ impl BlockMeta {
     pub fn encoded_size(&self) -> usize {
         16 /* offset + len + key len + uncompressed size */ + self.smallest_key.len()
     }
+
+    pub fn table_id(&self) -> TableId {
+        FullKey::decode(&self.smallest_key).user_key.table_id
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -245,7 +285,9 @@ impl SstableMeta {
     /// | estimated size (4B) | key count (4B) |
     /// | smallest key len (4B) | smallest key |
     /// | largest key len (4B) | largest key |
+    /// | M (4B) |
     /// | range-tombstone 0 | ... | range-tombstone M-1 |
+    /// | file offset of this meta block (8B) |
     /// | checksum (8B) | version (4B) | magic (4B) |
     /// ```
     pub fn encode_to_bytes(&self) -> Vec<u8> {
@@ -265,11 +307,11 @@ impl SstableMeta {
         buf.put_u32_le(self.key_count);
         put_length_prefixed_slice(buf, &self.smallest_key);
         put_length_prefixed_slice(buf, &self.largest_key);
-        buf.put_u64_le(self.meta_offset);
         buf.put_u32_le(self.range_tombstone_list.len() as u32);
         for tombstone in &self.range_tombstone_list {
             tombstone.encode(buf);
         }
+        buf.put_u64_le(self.meta_offset);
         let checksum = xxhash64_checksum(&buf[start_offset..]);
         buf.put_u64_le(checksum);
         buf.put_u32_le(VERSION);
@@ -306,13 +348,13 @@ impl SstableMeta {
         let key_count = buf.get_u32_le();
         let smallest_key = get_length_prefixed_slice(buf);
         let largest_key = get_length_prefixed_slice(buf);
-        let meta_offset = buf.get_u64_le();
         let range_del_count = buf.get_u32_le() as usize;
         let mut range_tombstone_list = Vec::with_capacity(range_del_count);
         for _ in 0..range_del_count {
             let tombstone = DeleteRangeTombstone::decode(buf);
             range_tombstone_list.push(tombstone);
         }
+        let meta_offset = buf.get_u64_le();
 
         Ok(Self {
             block_metas,
@@ -358,7 +400,17 @@ impl SstableMeta {
 
 #[derive(Default)]
 pub struct SstableIteratorReadOptions {
-    pub prefetch: bool,
+    pub cache_policy: CachePolicy,
+    pub must_iterated_end_user_key: Option<Bound<UserKey<KeyPayloadType>>>,
+}
+
+impl From<&ReadOptions> for SstableIteratorReadOptions {
+    fn from(read_options: &ReadOptions) -> Self {
+        Self {
+            cache_policy: read_options.cache_policy,
+            must_iterated_end_user_key: None,
+        }
+    }
 }
 
 #[cfg(test)]

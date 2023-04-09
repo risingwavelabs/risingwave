@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,12 +19,13 @@ use std::time::Duration;
 
 use futures::{stream, StreamExt};
 use itertools::Itertools;
-use risingwave_hummock_sdk::HummockSstableId;
+use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{FullScanTask, VacuumTask};
 
 use super::CompactorManagerRef;
+use crate::backup_restore::BackupManagerRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{ClusterManagerRef, MetaSrvEnv};
@@ -36,10 +37,11 @@ pub type VacuumManagerRef<S> = Arc<VacuumManager<S>>;
 pub struct VacuumManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     hummock_manager: HummockManagerRef<S>,
+    backup_manager: BackupManagerRef<S>,
     /// Use the CompactorManager to dispatch VacuumTask.
     compactor_manager: CompactorManagerRef,
-    /// SST ids which have been dispatched to vacuum nodes but are not replied yet.
-    pending_sst_ids: parking_lot::RwLock<HashSet<HummockSstableId>>,
+    /// SST object ids which have been dispatched to vacuum nodes but are not replied yet.
+    pending_object_ids: parking_lot::RwLock<HashSet<HummockSstableObjectId>>,
 }
 
 impl<S> VacuumManager<S>
@@ -49,13 +51,15 @@ where
     pub fn new(
         env: MetaSrvEnv<S>,
         hummock_manager: HummockManagerRef<S>,
+        backup_manager: BackupManagerRef<S>,
         compactor_manager: CompactorManagerRef,
     ) -> Self {
         Self {
             env,
             hummock_manager,
+            backup_manager,
             compactor_manager,
-            pending_sst_ids: Default::default(),
+            pending_object_ids: Default::default(),
         }
     }
 
@@ -63,7 +67,6 @@ where
     ///
     /// Returns number of deleted deltas
     pub async fn vacuum_metadata(&self) -> MetaResult<usize> {
-        self.hummock_manager.proceed_version_checkpoint().await?;
         let batch_size = 64usize;
         let mut total_deleted = 0;
         loop {
@@ -72,44 +75,48 @@ where
                 .delete_version_deltas(batch_size)
                 .await?;
             total_deleted += deleted;
-            if remain < batch_size {
+            if total_deleted == 0 || remain < batch_size {
                 break;
             }
         }
         Ok(total_deleted)
     }
 
-    /// Schedules deletion of SSTs from object store
+    /// Schedules deletion of SST objects from object store
     ///
-    /// Returns SSTs scheduled in worker node.
-    pub async fn vacuum_sst_data(&self) -> MetaResult<Vec<HummockSstableId>> {
-        // Select SSTs to delete.
-        let ssts_to_delete = {
-            // 1. Retry the pending SSTs first.
-            // It is possible some vacuum workers have been asked to vacuum these SSTs previously,
-            // but they don't report the results yet due to either latency or failure.
-            // This is OK since trying to delete the same SST multiple times is safe.
-            let pending_sst_ids = self.pending_sst_ids.read().iter().cloned().collect_vec();
-            if !pending_sst_ids.is_empty() {
-                pending_sst_ids
+    /// Returns SST objects scheduled in worker node.
+    pub async fn vacuum_sst_data(&self) -> MetaResult<Vec<HummockSstableObjectId>> {
+        // Select SST objects to delete.
+        let objects_to_delete = {
+            // 1. Retry the pending SST objects first.
+            // It is possible some vacuum workers have been asked to vacuum these SST objects
+            // previously, but they don't report the results yet due to either latency
+            // or failure. This is OK since trying to delete the same SST object
+            // multiple times is safe.
+            let pending_object_ids = self.pending_object_ids.read().iter().cloned().collect_vec();
+            if !pending_object_ids.is_empty() {
+                pending_object_ids
             } else {
-                // 2. If no pending SSTs, then fetch new ones.
-                let ssts_to_delete = self.hummock_manager.get_ssts_to_delete().await;
-                if ssts_to_delete.is_empty() {
+                // 2. If no pending SST objects, then fetch new ones.
+                let mut objects_to_delete = self.hummock_manager.get_objects_to_delete().await;
+                self.filter_out_pinned_ssts(&mut objects_to_delete).await?;
+                if objects_to_delete.is_empty() {
                     return Ok(vec![]);
                 }
-                // Track these SST ids, so that we can remove them from metadata later.
-                self.pending_sst_ids.write().extend(ssts_to_delete.clone());
-                ssts_to_delete
+                // Track these SST object ids, so that we can remove them from metadata later.
+                self.pending_object_ids
+                    .write()
+                    .extend(objects_to_delete.clone());
+                objects_to_delete
             }
         };
 
         // Dispatch the vacuum task
         let mut batch_idx = 0;
         let batch_size = 500usize;
-        let mut sent_batch = Vec::with_capacity(ssts_to_delete.len());
-        while batch_idx < ssts_to_delete.len() {
-            let delete_batch = ssts_to_delete
+        let mut sent_batch = Vec::with_capacity(objects_to_delete.len());
+        while batch_idx < objects_to_delete.len() {
+            let delete_batch = objects_to_delete
                 .iter()
                 .skip(batch_idx)
                 .take(batch_size)
@@ -129,7 +136,7 @@ where
                 .send_task(Task::VacuumTask(VacuumTask {
                     // The SST id doesn't necessarily have a counterpart SST file in S3, but
                     // it's OK trying to delete it.
-                    sstable_ids: delete_batch.clone(),
+                    sstable_object_ids: delete_batch.clone(),
                 }))
                 .await
             {
@@ -156,24 +163,45 @@ where
         Ok(sent_batch)
     }
 
-    /// Acknowledges deletion of SSTs and deletes corresponding metadata.
-    pub async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> MetaResult<()> {
-        let deleted_sst_ids = self
-            .pending_sst_ids
-            .read()
+    async fn filter_out_pinned_ssts(
+        &self,
+        objects_to_delete: &mut Vec<HummockSstableObjectId>,
+    ) -> MetaResult<()> {
+        let reject: HashSet<HummockSstableObjectId> =
+            self.backup_manager.list_pinned_ssts().into_iter().collect();
+        // Ack these SSTs immediately, because they tend to be pinned for long time.
+        // They will be GCed during full GC when they are no longer pinned.
+        let to_ack = objects_to_delete
             .iter()
-            .filter(|p| vacuum_task.sstable_ids.contains(p))
+            .filter(|s| reject.contains(s))
             .cloned()
             .collect_vec();
-        if !deleted_sst_ids.is_empty() {
-            self.hummock_manager
-                .ack_deleted_ssts(&deleted_sst_ids)
-                .await?;
-            self.pending_sst_ids
-                .write()
-                .retain(|p| !deleted_sst_ids.contains(p));
+        if to_ack.is_empty() {
+            return Ok(());
         }
-        tracing::info!("Finish vacuuming SSTs {:?}", vacuum_task.sstable_ids);
+        self.hummock_manager.ack_deleted_objects(&to_ack).await?;
+        objects_to_delete.retain(|s| !reject.contains(s));
+        Ok(())
+    }
+
+    /// Acknowledges deletion of SSTs and deletes corresponding metadata.
+    pub async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> MetaResult<()> {
+        let deleted_object_ids = self
+            .pending_object_ids
+            .read()
+            .iter()
+            .filter(|p| vacuum_task.sstable_object_ids.contains(p))
+            .cloned()
+            .collect_vec();
+        if !deleted_object_ids.is_empty() {
+            self.hummock_manager
+                .ack_deleted_objects(&deleted_object_ids)
+                .await?;
+            self.pending_object_ids
+                .write()
+                .retain(|p| !deleted_object_ids.contains(p));
+        }
+        tracing::info!("Finish vacuuming SSTs {:?}", vacuum_task.sstable_object_ids);
         Ok(())
     }
 
@@ -212,8 +240,8 @@ where
 
     /// Given candidate SSTs to GC, filter out false positive.
     /// Returns number of SSTs to GC.
-    pub async fn complete_full_gc(&self, sst_ids: Vec<HummockSstableId>) -> Result<usize> {
-        if sst_ids.is_empty() {
+    pub async fn complete_full_gc(&self, object_ids: Vec<HummockSstableObjectId>) -> Result<usize> {
+        if object_ids.is_empty() {
             tracing::info!("SST full scan returns no SSTs.");
             return Ok(0);
         }
@@ -224,16 +252,19 @@ where
             spin_interval,
         )
         .await?;
-        let sst_number = sst_ids.len();
+        let sst_number = object_ids.len();
         // 1. filter by watermark
-        let sst_ids = sst_ids.into_iter().filter(|s| *s < watermark).collect_vec();
+        let object_ids = object_ids
+            .into_iter()
+            .filter(|s| *s < watermark)
+            .collect_vec();
         // 2. filter by version
         let number = self
             .hummock_manager
-            .extend_ssts_to_delete_from_scan(&sst_ids)
+            .extend_objects_to_delete_from_scan(&object_ids)
             .await;
         tracing::info!("GC watermark is {}. SST full scan returns {} SSTs. {} remains after filtered by GC watermark. {} remains after filtered by hummock version.",
-            watermark, sst_number, sst_ids.len(), number);
+            watermark, sst_number, object_ids.len(), number);
         Ok(number)
     }
 }
@@ -247,11 +278,11 @@ where
 pub async fn collect_global_gc_watermark<S>(
     cluster_manager: ClusterManagerRef<S>,
     spin_interval: Duration,
-) -> Result<HummockSstableId>
+) -> Result<HummockSstableObjectId>
 where
     S: MetaStore,
 {
-    let mut global_watermark = HummockSstableId::MAX;
+    let mut global_watermark = HummockSstableObjectId::MAX;
     let workers = vec![
         cluster_manager
             .list_worker_node(WorkerType::ComputeNode, None)
@@ -304,7 +335,7 @@ where
         // None means either the worker has gone or the worker has not set a watermark.
         global_watermark = cmp::min(
             global_watermark,
-            worker_watermark.unwrap_or(HummockSstableId::MAX),
+            worker_watermark.unwrap_or(HummockSstableObjectId::MAX),
         );
     }
     Ok(global_watermark)
@@ -316,33 +347,28 @@ mod tests {
     use std::time::Duration;
 
     use itertools::Itertools;
-    use risingwave_hummock_sdk::HummockSstableId;
+    use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId};
     use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
     use risingwave_pb::hummock::VacuumTask;
 
+    use crate::backup_restore::BackupManager;
     use crate::hummock::test_utils::{add_test_tables, setup_compute_env};
-    use crate::hummock::{start_vacuum_scheduler, CompactorManager, VacuumManager};
+    use crate::hummock::VacuumManager;
     use crate::MetaOpts;
-
-    #[tokio::test]
-    async fn test_shutdown_vacuum() {
-        let (env, hummock_manager, _cluster_manager, _worker_node) = setup_compute_env(80).await;
-        let compactor_manager = Arc::new(CompactorManager::for_test());
-        let vacuum = Arc::new(VacuumManager::new(env, hummock_manager, compactor_manager));
-        let (join_handle, shutdown_sender) =
-            start_vacuum_scheduler(vacuum, Duration::from_secs(60));
-        shutdown_sender.send(()).unwrap();
-        join_handle.await.unwrap();
-    }
 
     #[tokio::test]
     async fn test_vacuum() {
         let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
         let context_id = worker_node.id;
         let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
+        let backup_manager = Arc::new(BackupManager::for_test(
+            env.clone(),
+            hummock_manager.clone(),
+        ));
         let vacuum = Arc::new(VacuumManager::new(
             env,
             hummock_manager.clone(),
+            backup_manager,
             compactor_manager.clone(),
         ));
         assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 0);
@@ -350,19 +376,25 @@ mod tests {
             VacuumManager::vacuum_sst_data(&vacuum).await.unwrap().len(),
             0
         );
+        hummock_manager.pin_version(context_id).await.unwrap();
         let sst_infos = add_test_tables(hummock_manager.as_ref(), context_id).await;
-        // Current state: {v0: [], v1: [test_tables], v2: [test_tables_2, to_delete:test_tables],
-        // v3: [test_tables_2, test_tables_3]}
+        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 0);
+        hummock_manager.create_version_checkpoint(1).await.unwrap();
+        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 6);
+        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 0);
 
-        // Makes checkpoint and extends deltas_to_delete. Deletes deltas of v0->v1 and v2->v3.
-        // Delta of v1->v2 cannot be deleted yet because it's used by ssts_to_delete.
-        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 2);
+        assert!(hummock_manager.get_objects_to_delete().await.is_empty());
+        hummock_manager
+            .unpin_version_before(context_id, HummockVersionId::MAX)
+            .await
+            .unwrap();
+        assert!(!hummock_manager.get_objects_to_delete().await.is_empty());
         // No SST deletion is scheduled because no available worker.
         assert_eq!(
             VacuumManager::vacuum_sst_data(&vacuum).await.unwrap().len(),
             0
         );
-        let _receiver = compactor_manager.add_compactor(context_id, u64::MAX);
+        let _receiver = compactor_manager.add_compactor(context_id, u64::MAX, 16);
         // SST deletion is scheduled.
         assert_eq!(
             VacuumManager::vacuum_sst_data(&vacuum).await.unwrap().len(),
@@ -373,24 +405,19 @@ mod tests {
             VacuumManager::vacuum_sst_data(&vacuum).await.unwrap().len(),
             3
         );
-        // The delta cannot be deleted yet.
-        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 0);
-
         // The vacuum task is reported.
         vacuum
             .report_vacuum_task(VacuumTask {
-                sstable_ids: sst_infos
+                sstable_object_ids: sst_infos
                     .first()
                     .unwrap()
                     .iter()
-                    .map(|s| s.id)
+                    .map(|s| s.get_object_id())
                     .collect_vec(),
             })
             .await
             .unwrap();
-        // The delta can be deleted now.
-        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 1);
-        // No ssts_to_delete.
+        // No objects_to_delete.
         assert_eq!(
             VacuumManager::vacuum_sst_data(&vacuum).await.unwrap().len(),
             0
@@ -402,6 +429,10 @@ mod tests {
         let (mut env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
         let context_id = worker_node.id;
         let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
+        let backup_manager = Arc::new(BackupManager::for_test(
+            env.clone(),
+            hummock_manager.clone(),
+        ));
         // Use smaller spin interval to accelerate test.
         env.opts = Arc::new(MetaOpts {
             collect_gc_watermark_spin_interval_sec: 1,
@@ -410,6 +441,7 @@ mod tests {
         let vacuum = Arc::new(VacuumManager::new(
             env,
             hummock_manager.clone(),
+            backup_manager,
             compactor_manager.clone(),
         ));
 
@@ -421,7 +453,7 @@ mod tests {
             .await
             .unwrap());
 
-        let mut receiver = compactor_manager.add_compactor(context_id, u64::MAX);
+        let mut receiver = compactor_manager.add_compactor(context_id, u64::MAX, 16);
 
         assert!(vacuum
             .start_full_gc(Duration::from_secs(
@@ -435,7 +467,7 @@ mod tests {
                 panic!()
             }
         };
-        // min_sst_retention_time_sec overwrite user provided value.
+        // min_sst_retention_time_sec override user provided value.
         assert_eq!(
             vacuum.env.opts.min_sst_retention_time_sec,
             full_scan_task.sst_retention_time_sec
@@ -453,7 +485,7 @@ mod tests {
                 panic!()
             }
         };
-        // min_sst_retention_time_sec doesn't overwrite user provided value.
+        // min_sst_retention_time_sec doesn't override user provided value.
         assert_eq!(
             vacuum.env.opts.min_sst_retention_time_sec + 1,
             full_scan_task.sst_retention_time_sec
@@ -470,7 +502,7 @@ mod tests {
                 cluster_manager
                     .heartbeat(
                         context_id,
-                        vec![Info::HummockGcWatermark(HummockSstableId::MAX)],
+                        vec![Info::HummockGcWatermark(HummockSstableObjectId::MAX)],
                     )
                     .await
                     .unwrap();
@@ -483,18 +515,20 @@ mod tests {
 
         // All committed SST ids should be excluded from GC.
         let sst_infos = add_test_tables(hummock_manager.as_ref(), context_id).await;
-        let committed_sst_ids = sst_infos
+        let committed_object_ids = sst_infos
             .into_iter()
             .flatten()
-            .map(|s| s.id)
+            .map(|s| s.get_object_id())
             .sorted()
             .collect_vec();
-        assert!(!committed_sst_ids.is_empty());
-        let max_committed_sst_id = *committed_sst_ids.iter().max().unwrap();
+        assert!(!committed_object_ids.is_empty());
+        let max_committed_object_id = *committed_object_ids.iter().max().unwrap();
         assert_eq!(
             1,
             vacuum
-                .complete_full_gc([committed_sst_ids, vec![max_committed_sst_id + 1]].concat())
+                .complete_full_gc(
+                    [committed_object_ids, vec![max_committed_object_id + 1]].concat()
+                )
                 .await
                 .unwrap()
         );

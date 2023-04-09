@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,54 +16,16 @@
 
 use std::sync::Arc;
 
-use itertools::{multizip, Itertools};
 use risingwave_common::array::*;
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar};
+use risingwave_expr_macro::build_function;
 use risingwave_pb::expr::expr_node::Type;
 
 use super::{BoxedExpression, Expression};
-use crate::expr::template::BinaryNullableExpression;
-use crate::vector_op::array_access::array_access;
-use crate::vector_op::cmp::{
-    general_is_distinct_from, general_is_not_distinct_from, str_is_distinct_from,
-    str_is_not_distinct_from,
-};
 use crate::vector_op::conjunction::{and, or};
-use crate::{for_all_cmp_variants, ExprError, Result};
-
-macro_rules! gen_nullable_cmp_impl {
-    ([$l:expr, $r:expr, $ret:expr], $( { $i1:ident, $i2:ident, $cast:ident, $func:ident} ),* $(,)?) => {
-        match ($l.return_type(), $r.return_type()) {
-            $(
-                ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {
-                    Box::new(
-                        BinaryNullableExpression::<
-                            $i1! { type_array },
-                            $i2! { type_array },
-                            BoolArray,
-                            _
-                        >::new(
-                            $l,
-                            $r,
-                            $ret,
-                            $func::<
-                                <$i1! { type_array } as Array>::OwnedItem,
-                                <$i2! { type_array } as Array>::OwnedItem,
-                                <$cast! { type_array } as Array>::OwnedItem
-                            >,
-                        )
-                    )
-                }
-            ),*
-            _ => {
-                return Err(ExprError::UnsupportedFunction(format!(
-                    "{:?} cmp {:?}",
-                    $l.return_type(), $r.return_type()
-                )));
-            }
-        }
-    };
-}
+use crate::Result;
 
 pub struct BinaryShortCircuitExpression {
     expr_ia1: BoxedExpression,
@@ -81,382 +43,194 @@ impl std::fmt::Debug for BinaryShortCircuitExpression {
     }
 }
 
+#[async_trait::async_trait]
 impl Expression for BinaryShortCircuitExpression {
     fn return_type(&self) -> DataType {
         DataType::Boolean
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let init_vis = input.vis();
-        let mut input = input.clone();
-        let len = input.capacity();
-        let mut children_array = Vec::with_capacity(2);
-        for child in [&self.expr_ia1, &self.expr_ia2] {
-            let res = child.eval_checked(&input)?;
-            let res_bool = res.as_bool();
-            let orig_vis = input.vis();
-            let res_vis: Vis = match self.expr_type {
-                // For `Or` operator, if res of left part is not null and is true, we do not want to
-                // calculate right part because the result must be true.
-                Type::Or => (!(res_bool.to_bitmap())).into(),
-                // For `And` operator, If res of left part is not null and is false, we do not want
-                // to calculate right part because the result must be false.
-                Type::And => (res_bool.to_bitmap() | !res_bool.null_bitmap()).into(),
-                _ => unimplemented!(),
-            };
-            let new_vis = orig_vis & res_vis;
-            input.set_vis(new_vis);
-            children_array.push(res);
-        }
-        let mut builder =
-            <BoolArray as Array>::Builder::with_meta(len, (&self.return_type()).into());
-        match self.expr_type {
-            Type::Or => {
-                for (((v_ia1, v_ia2), init_visible), final_visible) in multizip((
-                    children_array[0].as_bool().iter(),
-                    children_array[1].as_bool().iter(),
-                ))
-                .zip_eq(init_vis.iter())
-                .zip_eq(input.vis().iter())
-                {
-                    if init_visible {
-                        builder.append(if final_visible {
-                            or(v_ia1, v_ia2)?
-                        } else {
-                            Some(true)
-                        });
-                    } else {
-                        builder.append_null()
-                    }
-                }
-            }
-            Type::And => {
-                for (((v_ia1, v_ia2), init_visible), final_visible) in multizip((
-                    children_array[0].as_bool().iter(),
-                    children_array[1].as_bool().iter(),
-                ))
-                .zip_eq(init_vis.iter())
-                .zip_eq(input.vis().iter())
-                {
-                    if init_visible {
-                        builder.append(if final_visible {
-                            and(v_ia1, v_ia2)?
-                        } else {
-                            Some(false)
-                        });
-                    } else {
-                        builder.append_null()
-                    }
-                }
-            }
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let left = self.expr_ia1.eval_checked(input).await?;
+        let left = left.as_bool();
+
+        let res_vis: Vis = match self.expr_type {
+            // For `Or` operator, if res of left part is not null and is true, we do not want to
+            // calculate right part because the result must be true.
+            Type::Or => (!left.to_bitmap()).into(),
+            // For `And` operator, If res of left part is not null and is false, we do not want
+            // to calculate right part because the result must be false.
+            Type::And => (left.data() | !left.null_bitmap()).into(),
             _ => unimplemented!(),
-        }
-        Ok(Arc::new(builder.finish().into()))
-    }
-
-    fn eval_row(&self, input: &Row) -> Result<Datum> {
-        let ret_ia1 = self.expr_ia1.eval_row(input)?.map(|x| x.into_bool());
-        match self.expr_type {
-            Type::Or => {
-                if ret_ia1 == Some(true) {
-                    return Ok(Some(true.to_scalar_value()));
-                }
-            }
-            Type::And => {
-                if ret_ia1 == Some(false) {
-                    return Ok(Some(false.to_scalar_value()));
-                }
-            }
-            _ => unimplemented!(),
-        }
-        let ret_ia2 = self.expr_ia2.eval_row(input)?.map(|x| x.into_bool());
-        match self.expr_type {
-            Type::Or => Ok(or(ret_ia1, ret_ia2)?.map(|x| x.to_scalar_value())),
-            Type::And => Ok(and(ret_ia1, ret_ia2)?.map(|x| x.to_scalar_value())),
-            _ => unimplemented!(),
-        }
-    }
-}
-
-impl BinaryShortCircuitExpression {
-    pub fn new(expr_ia1: BoxedExpression, expr_ia2: BoxedExpression, expr_type: Type) -> Self {
-        Self {
-            expr_ia1,
-            expr_ia2,
-            expr_type,
-        }
-    }
-}
-
-pub fn new_nullable_binary_expr(
-    expr_type: Type,
-    ret: DataType,
-    l: BoxedExpression,
-    r: BoxedExpression,
-) -> Result<BoxedExpression> {
-    let expr = match expr_type {
-        Type::ArrayAccess => build_array_access_expr(ret, l, r),
-        Type::And => Box::new(BinaryShortCircuitExpression::new(l, r, expr_type)),
-        Type::Or => Box::new(BinaryShortCircuitExpression::new(l, r, expr_type)),
-        Type::IsDistinctFrom => new_distinct_from_expr(l, r, ret)?,
-        Type::IsNotDistinctFrom => new_not_distinct_from_expr(l, r, ret)?,
-        tp => {
-            return Err(ExprError::UnsupportedFunction(format!(
-                "{:?}({:?}, {:?})",
-                tp,
-                l.return_type(),
-                r.return_type(),
-            )));
-        }
-    };
-    Ok(expr)
-}
-
-fn build_array_access_expr(
-    ret: DataType,
-    l: BoxedExpression,
-    r: BoxedExpression,
-) -> BoxedExpression {
-    macro_rules! array_access_expression {
-        ($array:ty) => {
-            Box::new(
-                BinaryNullableExpression::<ListArray, I32Array, $array, _>::new(
-                    l,
-                    r,
-                    ret,
-                    array_access,
-                ),
-            )
         };
+        let new_vis = input.vis() & res_vis;
+        let mut input1 = input.clone();
+        input1.set_vis(new_vis);
+
+        let right = self.expr_ia2.eval_checked(&input1).await?;
+        let right = right.as_bool();
+        assert_eq!(left.len(), right.len());
+
+        let mut bitmap = match input.visibility() {
+            Some(vis) => vis.clone(),
+            None => Bitmap::ones(input.capacity()),
+        };
+        bitmap &= left.null_bitmap();
+        bitmap &= right.null_bitmap();
+
+        let c = match self.expr_type {
+            Type::Or => {
+                let data = left.to_bitmap() | right.to_bitmap();
+                bitmap |= &data; // is_true || is_true
+                BoolArray::new(data, bitmap)
+            }
+            Type::And => {
+                let data = left.to_bitmap() & right.to_bitmap();
+                bitmap |= !left.data() & left.null_bitmap(); // is_false
+                bitmap |= !right.data() & right.null_bitmap(); // is_false
+                BoolArray::new(data, bitmap)
+            }
+            _ => unimplemented!(),
+        };
+        Ok(Arc::new(c.into()))
     }
 
-    match ret {
-        DataType::Boolean => array_access_expression!(BoolArray),
-        DataType::Int16 => array_access_expression!(I16Array),
-        DataType::Int32 => array_access_expression!(I32Array),
-        DataType::Int64 => array_access_expression!(I64Array),
-        DataType::Float32 => array_access_expression!(F32Array),
-        DataType::Float64 => array_access_expression!(F64Array),
-        DataType::Decimal => array_access_expression!(DecimalArray),
-        DataType::Date => array_access_expression!(NaiveDateArray),
-        DataType::Varchar => array_access_expression!(Utf8Array),
-        DataType::Bytea => array_access_expression!(BytesArray),
-        DataType::Time => array_access_expression!(NaiveTimeArray),
-        DataType::Timestamp => array_access_expression!(NaiveDateTimeArray),
-        DataType::Timestampz => array_access_expression!(PrimitiveArray::<i64>),
-        DataType::Interval => array_access_expression!(IntervalArray),
-        DataType::Struct { .. } => array_access_expression!(StructArray),
-        DataType::List { .. } => array_access_expression!(ListArray),
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        let ret_ia1 = self.expr_ia1.eval_row(input).await?.map(|x| x.into_bool());
+        match self.expr_type {
+            Type::Or if ret_ia1 == Some(true) => return Ok(Some(true.to_scalar_value())),
+            Type::And if ret_ia1 == Some(false) => return Ok(Some(false.to_scalar_value())),
+            _ => {}
+        }
+        let ret_ia2 = self.expr_ia2.eval_row(input).await?.map(|x| x.into_bool());
+        match self.expr_type {
+            Type::Or => Ok(or(ret_ia1, ret_ia2).map(|x| x.to_scalar_value())),
+            Type::And => Ok(and(ret_ia1, ret_ia2).map(|x| x.to_scalar_value())),
+            _ => unimplemented!(),
+        }
     }
 }
 
-pub fn new_distinct_from_expr(
-    l: BoxedExpression,
-    r: BoxedExpression,
-    ret: DataType,
-) -> Result<BoxedExpression> {
-    use crate::expr::data_types::*;
-
-    let expr: BoxedExpression = match (l.return_type(), r.return_type()) {
-        (DataType::Varchar, DataType::Varchar) => Box::new(BinaryNullableExpression::<
-            Utf8Array,
-            Utf8Array,
-            BoolArray,
-            _,
-        >::new(
-            l, r, ret, str_is_distinct_from
-        )),
-        _ => {
-            for_all_cmp_variants! {gen_nullable_cmp_impl, l, r, ret, general_is_distinct_from}
-        }
-    };
-    Ok(expr)
+#[build_function("and(boolean, boolean) -> boolean")]
+fn build_and_expr(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
+    let mut iter = children.into_iter();
+    Ok(Box::new(BinaryShortCircuitExpression {
+        expr_ia1: iter.next().unwrap(),
+        expr_ia2: iter.next().unwrap(),
+        expr_type: Type::And,
+    }))
 }
 
-pub fn new_not_distinct_from_expr(
-    l: BoxedExpression,
-    r: BoxedExpression,
-    ret: DataType,
-) -> Result<BoxedExpression> {
-    use crate::expr::data_types::*;
-
-    let expr: BoxedExpression = match (l.return_type(), r.return_type()) {
-        (DataType::Varchar, DataType::Varchar) => Box::new(BinaryNullableExpression::<
-            Utf8Array,
-            Utf8Array,
-            BoolArray,
-            _,
-        >::new(
-            l, r, ret, str_is_not_distinct_from
-        )),
-        _ => {
-            for_all_cmp_variants! {gen_nullable_cmp_impl, l, r, ret, general_is_not_distinct_from}
-        }
-    };
-    Ok(expr)
+#[build_function("or(boolean, boolean) -> boolean")]
+fn build_or_expr(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
+    let mut iter = children.into_iter();
+    Ok(Box::new(BinaryShortCircuitExpression {
+        expr_ia1: iter.next().unwrap(),
+        expr_ia2: iter.next().unwrap(),
+        expr_type: Type::Or,
+    }))
 }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::row::Row;
-    use risingwave_common::types::Scalar;
-    use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::expr::expr_node::Type;
+    use risingwave_common::array::DataChunk;
+    use risingwave_common::test_prelude::DataChunkTestExt;
 
-    use crate::expr::build_from_prost;
-    use crate::expr::test_utils::make_expression;
+    use crate::expr::build_from_pretty;
 
-    #[test]
-    fn test_and() {
-        let lhs = vec![
-            Some(true),
-            Some(true),
-            Some(true),
-            Some(false),
-            Some(false),
-            Some(false),
-            None,
-            None,
-            None,
-        ];
-        let rhs = vec![
-            Some(true),
-            Some(false),
-            None,
-            Some(true),
-            Some(false),
-            None,
-            Some(true),
-            Some(false),
-            None,
-        ];
-        let target = vec![
-            Some(true),
-            Some(false),
-            None,
-            Some(false),
-            Some(false),
-            Some(false),
-            None,
-            Some(false),
-            None,
-        ];
-
-        let expr = make_expression(Type::And, &[TypeName::Boolean, TypeName::Boolean], &[0, 1]);
-        let vec_executor = build_from_prost(&expr).unwrap();
-
-        for i in 0..lhs.len() {
-            let row = Row::new(vec![
-                lhs[i].map(|x| x.to_scalar_value()),
-                rhs[i].map(|x| x.to_scalar_value()),
-            ]);
-            let res = vec_executor.eval_row(&row).unwrap();
-            let expected = target[i].map(|x| x.to_scalar_value());
-            assert_eq!(res, expected);
-        }
+    #[tokio::test]
+    async fn test_and() {
+        let (input, target) = DataChunk::from_pretty(
+            "
+            B B B
+            t t t
+            t f f
+            t . .
+            f t f
+            f f f
+            f . f
+            . t .
+            . f f
+            . . .
+        ",
+        )
+        .split_column_at(2);
+        let expr = build_from_pretty("(and:boolean $0:boolean $1:boolean)");
+        let result = expr.eval(&input).await.unwrap();
+        assert_eq!(result, target.column_at(0).array());
     }
 
-    #[test]
-    fn test_or() {
-        let lhs = vec![
-            Some(true),
-            Some(true),
-            Some(true),
-            Some(false),
-            Some(false),
-            Some(false),
-            None,
-            None,
-            None,
-        ];
-        let rhs = vec![
-            Some(true),
-            Some(false),
-            None,
-            Some(true),
-            Some(false),
-            None,
-            Some(true),
-            Some(false),
-            None,
-        ];
-        let target = vec![
-            Some(true),
-            Some(true),
-            Some(true),
-            Some(true),
-            Some(false),
-            None,
-            Some(true),
-            None,
-            None,
-        ];
-
-        let expr = make_expression(Type::Or, &[TypeName::Boolean, TypeName::Boolean], &[0, 1]);
-        let vec_executor = build_from_prost(&expr).unwrap();
-
-        for i in 0..lhs.len() {
-            let row = Row::new(vec![
-                lhs[i].map(|x| x.to_scalar_value()),
-                rhs[i].map(|x| x.to_scalar_value()),
-            ]);
-            let res = vec_executor.eval_row(&row).unwrap();
-            let expected = target[i].map(|x| x.to_scalar_value());
-            assert_eq!(res, expected);
-        }
+    #[tokio::test]
+    async fn test_or() {
+        let (input, target) = DataChunk::from_pretty(
+            "
+            B B B
+            t t t
+            t f t
+            t . t
+            f t t
+            f f f
+            f . .
+            . t t
+            . f .
+            . . .
+        ",
+        )
+        .split_column_at(2);
+        let expr = build_from_pretty("(or:boolean $0:boolean $1:boolean)");
+        let result = expr.eval(&input).await.unwrap();
+        assert_eq!(result, target.column_at(0).array());
     }
 
-    #[test]
-    fn test_is_distinct_from() {
-        let lhs = vec![None, None, Some(1), Some(2), Some(3)];
-        let rhs = vec![None, Some(1), None, Some(2), Some(4)];
-        let target = vec![Some(false), Some(true), Some(true), Some(false), Some(true)];
-
-        let expr = make_expression(
-            Type::IsDistinctFrom,
-            &[TypeName::Int32, TypeName::Int32],
-            &[0, 1],
-        );
-        let vec_executor = build_from_prost(&expr).unwrap();
-
-        for i in 0..lhs.len() {
-            let row = Row::new(vec![
-                lhs[i].map(|x| x.to_scalar_value()),
-                rhs[i].map(|x| x.to_scalar_value()),
-            ]);
-            let res = vec_executor.eval_row(&row).unwrap();
-            let expected = target[i].map(|x| x.to_scalar_value());
-            assert_eq!(res, expected);
-        }
+    #[tokio::test]
+    async fn test_is_distinct_from() {
+        let (input, target) = DataChunk::from_pretty(
+            "
+            i i B
+            . . f
+            . 1 t
+            1 . t
+            2 2 f
+            3 4 t
+        ",
+        )
+        .split_column_at(2);
+        let expr = build_from_pretty("(is_distinct_from:boolean $0:int4 $1:int4)");
+        let result = expr.eval(&input).await.unwrap();
+        assert_eq!(result, target.column_at(0).array());
     }
 
-    #[test]
-    fn test_is_not_distinct_from() {
-        let lhs = vec![None, None, Some(1), Some(2), Some(3)];
-        let rhs = vec![None, Some(1), None, Some(2), Some(4)];
-        let target = vec![
-            Some(true),
-            Some(false),
-            Some(false),
-            Some(true),
-            Some(false),
-        ];
+    #[tokio::test]
+    async fn test_is_not_distinct_from() {
+        let (input, target) = DataChunk::from_pretty(
+            "
+            i i B
+            . . t
+            . 1 f
+            1 . f
+            2 2 t
+            3 4 f
+            ",
+        )
+        .split_column_at(2);
+        let expr = build_from_pretty("(is_not_distinct_from:boolean $0:int4 $1:int4)");
+        let result = expr.eval(&input).await.unwrap();
+        assert_eq!(result, target.column_at(0).array());
+    }
 
-        let expr = make_expression(
-            Type::IsNotDistinctFrom,
-            &[TypeName::Int32, TypeName::Int32],
-            &[0, 1],
-        );
-        let vec_executor = build_from_prost(&expr).unwrap();
-
-        for i in 0..lhs.len() {
-            let row = Row::new(vec![
-                lhs[i].map(|x| x.to_scalar_value()),
-                rhs[i].map(|x| x.to_scalar_value()),
-            ]);
-            let res = vec_executor.eval_row(&row).unwrap();
-            let expected = target[i].map(|x| x.to_scalar_value());
-            assert_eq!(res, expected);
-        }
+    #[tokio::test]
+    async fn test_format_type() {
+        let (input, target) = DataChunk::from_pretty(
+            "
+            i       i T
+            16      0 boolean
+            21      . smallint
+            9527    0 ???
+            .       0 .
+            ",
+        )
+        .split_column_at(2);
+        let expr = build_from_pretty("(format_type:varchar $0:int4 $1:int4)");
+        let result = expr.eval(&input).await.unwrap();
+        assert_eq!(result, target.column_at(0).array());
     }
 }

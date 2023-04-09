@@ -19,9 +19,28 @@ select a.attname, a.atttypid, a.attlen, a.attnum from pg_catalog.pg_class t
 ----
 id2 23 4 1
 
-
 statement ok
 drop view view1;
+
+statement ok
+drop table tmp;
+
+statement ok
+create table tmp(id1 int, id2 int, id3 int, id4 int);
+
+statement ok
+create index tmp_idx on tmp(id2) include(id1, id3);
+
+query TT
+select i.relname, a.attname, ix.indkey from pg_catalog.pg_class t 
+    join pg_catalog.pg_index ix on t.oid = ix.indrelid
+    join pg_catalog.pg_class i on i.oid = ix.indexrelid
+    join pg_catalog.pg_attribute a on t.oid = a.attrelid and a.attnum = ANY(ix.indkey)
+    where t.relname = 'tmp' order by a.attnum;
+----
+tmp_idx id1 {2,1,3}
+tmp_idx id2 {2,1,3}
+tmp_idx id3 {2,1,3}
 
 statement ok
 drop table tmp;

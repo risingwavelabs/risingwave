@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,13 +18,13 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeNode, MergeSortExchangeNode};
 
-use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, DistributionDisplay, Order, OrderDisplay};
 
 /// `BatchExchange` imposes a particular distribution on its input
 /// without changing its content.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchExchange {
     pub base: PlanBase,
     input: PlanRef,
@@ -74,7 +74,7 @@ impl ToDistributedBatch for BatchExchange {
 }
 
 /// The serialization of Batch Exchange is default cuz it will be rewritten in scheduler.
-impl ToBatchProst for BatchExchange {
+impl ToBatchPb for BatchExchange {
     fn to_batch_prost_body(&self) -> NodeBody {
         if self.base.order.is_any() {
             NodeBody::Exchange(ExchangeNode {
@@ -87,7 +87,7 @@ impl ToBatchProst for BatchExchange {
                     sources: vec![],
                     input_schema: self.base.schema.to_prost(),
                 }),
-                column_orders: self.base.order.to_protobuf(&self.base.schema),
+                column_orders: self.base.order.to_protobuf(),
             })
         }
     }
@@ -98,3 +98,5 @@ impl ToLocalBatch for BatchExchange {
         unreachable!()
     }
 }
+
+impl ExprRewritable for BatchExchange {}

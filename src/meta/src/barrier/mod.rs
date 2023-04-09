@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -25,9 +25,11 @@ use prometheus::HistogramTimer;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
-use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableId};
+use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::ddl_service::DdlProgress;
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::stream_plan::Barrier;
 use risingwave_pb::stream_service::{
@@ -50,7 +52,8 @@ use crate::barrier::snapshot::SnapshotManager;
 use crate::barrier::BarrierEpochState::{Completed, InFlight};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, MetaSrvEnv, WorkerId,
+    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, LocalNotification, MetaSrvEnv,
+    WorkerId,
 };
 use crate::model::{ActorId, BarrierManagerState};
 use crate::rpc::metrics::MetaMetrics;
@@ -83,6 +86,7 @@ enum BarrierManagerStatus {
 struct Scheduled {
     command: Command,
     notifiers: Vec<Notifier>,
+    send_latency_timer: HistogramTimer,
     /// Choose a different barrier(checkpoint == true) according to it
     checkpoint: bool,
 }
@@ -118,9 +122,6 @@ pub enum CommandChanges {
 /// barrier manager and meta store, some actions like "drop materialized view" or "create mv on mv"
 /// must be done in barrier manager transactional using [`Command`].
 pub struct GlobalBarrierManager<S: MetaStore> {
-    /// The maximal interval for sending a barrier.
-    interval: Duration,
-
     /// Enable recovery or not when failover.
     enable_recovery: bool,
 
@@ -147,6 +148,8 @@ pub struct GlobalBarrierManager<S: MetaStore> {
     metrics: Arc<MetaMetrics>,
 
     pub(crate) env: MetaSrvEnv<S>,
+
+    tracker: Mutex<CreateMviewProgressTracker<S>>,
 }
 
 /// Controls the concurrent execution of commands.
@@ -214,6 +217,17 @@ where
         Ok(!self.finished_commands.is_empty())
     }
 
+    fn cancel_command(&mut self, cancelled_command: TrackingCommand<S>) {
+        if let Some(index) = self
+            .command_ctx_queue
+            .iter()
+            .position(|x| x.command_ctx.prev_epoch == cancelled_command.context.prev_epoch)
+        {
+            self.command_ctx_queue.remove(index);
+            self.remove_changes(cancelled_command.context.command.changes());
+        }
+    }
+
     /// Before resolving the actors to be sent or collected, we should first record the newly
     /// created table and added actors into checkpoint control, so that `can_actor_send_or_collect`
     /// will return `true`.
@@ -249,10 +263,6 @@ where
         match command.changes() {
             CommandChanges::DropTables(tables) => {
                 assert!(
-                    self.creating_tables.is_disjoint(&tables),
-                    "conflict table in concurrent checkpoint"
-                );
-                assert!(
                     self.dropping_tables.is_disjoint(&tables),
                     "duplicated table in concurrent checkpoint"
                 );
@@ -273,7 +283,8 @@ where
 
     /// Barrier can be sent to and collected from an actor if:
     /// 1. The actor is Running and not being dropped or removed in rescheduling.
-    /// 2. The actor is Inactive and belongs to a creating MV or adding in rescheduling.
+    /// 2. The actor is Inactive and belongs to a creating MV or adding in rescheduling and not
+    /// belongs to a canceling command.
     fn can_actor_send_or_collect(
         &self,
         s: ActorState,
@@ -286,7 +297,7 @@ where
             self.creating_tables.contains(&table_id) || self.adding_actors.contains(&actor_id);
 
         match s {
-            ActorState::Inactive => adding,
+            ActorState::Inactive => adding && !removing,
             ActorState::Running => !removing,
             ActorState::Unspecified => unreachable!(),
         }
@@ -382,6 +393,13 @@ where
         in_flight_not_full && !should_pause
     }
 
+    /// Check whether the target epoch is managed by `CheckpointControl`.
+    pub fn contains_epoch(&self, epoch: u64) -> bool {
+        self.command_ctx_queue
+            .iter()
+            .any(|x| x.command_ctx.prev_epoch.0 == epoch)
+    }
+
     /// After some command is committed, the changes will be applied to the meta store so we can
     /// remove the changes from checkpoint control.
     pub fn remove_changes(&mut self, changes: CommandChanges) {
@@ -449,6 +467,13 @@ enum BarrierEpochState {
     Completed(Vec<BarrierCompleteResponse>),
 }
 
+/// The result of barrier completion.
+#[derive(Debug)]
+struct BarrierCompletion {
+    prev_epoch: u64,
+    result: MetaResult<Vec<BarrierCompleteResponse>>,
+}
+
 impl<S> GlobalBarrierManager<S>
 where
     S: MetaStore,
@@ -466,19 +491,11 @@ where
         metrics: Arc<MetaMetrics>,
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
-        let interval = env.opts.barrier_interval;
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
-        tracing::info!(
-            "Starting barrier manager with: interval={:?}, enable_recovery={}, in_flight_barrier_nums={}",
-            interval,
-            enable_recovery,
-            in_flight_barrier_nums,
-        );
 
         let snapshot_manager = SnapshotManager::new(hummock_manager.clone()).into();
-
+        let tracker = CreateMviewProgressTracker::new();
         Self {
-            interval,
             enable_recovery,
             status: Mutex::new(BarrierManagerStatus::Starting),
             scheduled_barriers,
@@ -491,6 +508,7 @@ where
             source_manager,
             metrics,
             env,
+            tracker: Mutex::new(tracker),
         }
     }
 
@@ -517,7 +535,21 @@ where
 
     /// Start an infinite loop to take scheduled barriers and send them.
     async fn run(&self, mut shutdown_rx: Receiver<()>) {
-        let mut tracker = CreateMviewProgressTracker::new();
+        // Initialize the barrier manager.
+        let interval = Duration::from_millis(
+            self.env
+                .system_params_manager()
+                .get_params()
+                .await
+                .barrier_interval_ms() as u64,
+        );
+        tracing::info!(
+            "Starting barrier manager with: interval={:?}, enable_recovery={}, in_flight_barrier_nums={}",
+            interval,
+            self.enable_recovery,
+            self.in_flight_barrier_nums,
+        );
+
         let mut state = BarrierManagerState::create(self.env.meta_store()).await;
         if self.enable_recovery {
             // handle init, here we simply trigger a recovery process to achieve the consistency. We
@@ -533,112 +565,136 @@ where
                 .update_inflight_prev_epoch(self.env.meta_store())
                 .await
                 .unwrap();
+        } else if self.fragment_manager.has_any_table_fragments().await {
+            panic!(
+                "Some streaming jobs already exist in meta, please start with recovery enabled \
+            or clean up the metadata using `./risedev clean-data`"
+            );
         }
         self.set_status(BarrierManagerStatus::Running).await;
-        let mut min_interval = tokio::time::interval(self.interval);
+
+        let mut min_interval = tokio::time::interval(interval);
         min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let mut barrier_timer: Option<HistogramTimer> = None;
         let (barrier_complete_tx, mut barrier_complete_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut checkpoint_control = CheckpointControl::new(self.metrics.clone());
+        let (local_notification_tx, mut local_notification_rx) =
+            tokio::sync::mpsc::unbounded_channel();
+        self.env
+            .notification_manager()
+            .insert_local_sender(local_notification_tx)
+            .await;
+
+        // Start the event loop.
         loop {
             tokio::select! {
                 biased;
+
                 // Shutdown
                 _ = &mut shutdown_rx => {
                     tracing::info!("Barrier manager is stopped");
-                    return;
+                    break;
                 }
-                result = barrier_complete_rx.recv() => {
-                    checkpoint_control.update_barrier_nums_metrics();
-
-                    let (prev_epoch, result) = result.unwrap();
-                    self.barrier_complete_and_commit(
-                        prev_epoch,
-                        result,
+                // Checkpoint frequency changes.
+                notification = local_notification_rx.recv() => {
+                    self.handle_local_notification(notification.unwrap());
+                }
+                // Barrier completes.
+                completion = barrier_complete_rx.recv() => {
+                    self.handle_barrier_complete(
+                        completion.unwrap(),
                         &mut state,
-                        &mut tracker,
                         &mut checkpoint_control,
                     )
                     .await;
-                    continue;
                 }
-                // there's barrier scheduled.
-                _ = self.scheduled_barriers.wait_one(), if checkpoint_control.can_inject_barrier(self.in_flight_barrier_nums) => {}
-                // Wait for the minimal interval,
-                _ = min_interval.tick(), if checkpoint_control.can_inject_barrier(self.in_flight_barrier_nums) => {}
-            }
 
-            if let Some(barrier_timer) = barrier_timer {
-                barrier_timer.observe_duration();
+                // There's barrier scheduled.
+                _ = self.scheduled_barriers.wait_one(), if checkpoint_control.can_inject_barrier(self.in_flight_barrier_nums) => {
+                    min_interval.reset(); // Reset the interval as we have a new barrier.
+                    self.handle_new_barrier(&barrier_complete_tx, &mut state, &mut checkpoint_control).await;
+                }
+                // Minimum interval reached.
+                _ = min_interval.tick(), if checkpoint_control.can_inject_barrier(self.in_flight_barrier_nums) => {
+                    self.handle_new_barrier(&barrier_complete_tx, &mut state, &mut checkpoint_control).await;
+                }
             }
-            barrier_timer = Some(self.metrics.barrier_send_latency.start_timer());
-            let Scheduled {
-                command,
-                notifiers,
-                checkpoint,
-            } = self.scheduled_barriers.pop_or_default().await;
-            let info = self
-                .resolve_actor_info(&mut checkpoint_control, &command)
-                .await;
-            // When there's no actors exist in the cluster, we don't need to send the barrier. This
-            // is an advance optimization. Besides if another barrier comes immediately,
-            // it may send a same epoch and fail the epoch check.
-            if info.nothing_to_do() {
-                notifiers.into_iter().for_each(Notifier::notify_all);
-                continue;
-            }
-            let prev_epoch = state.in_flight_prev_epoch;
-            let new_epoch = prev_epoch.next();
-            state.in_flight_prev_epoch = new_epoch;
-            assert!(
-                new_epoch > prev_epoch,
-                "new{:?},prev{:?}",
-                new_epoch,
-                prev_epoch
-            );
-            state
-                .update_inflight_prev_epoch(self.env.meta_store())
-                .await
-                .unwrap();
-
-            let command_ctx = Arc::new(CommandContext::new(
-                self.fragment_manager.clone(),
-                self.snapshot_manager.clone(),
-                self.env.stream_client_pool_ref(),
-                info,
-                prev_epoch,
-                new_epoch,
-                command,
-                checkpoint,
-                self.source_manager.clone(),
-            ));
-            let mut notifiers = notifiers;
-            notifiers.iter_mut().for_each(Notifier::notify_to_send);
-
-            checkpoint_control.enqueue_command(command_ctx.clone(), notifiers);
-            self.inject_barrier(command_ctx, barrier_complete_tx.clone())
-                .await;
         }
+    }
+
+    /// Handle the new barrier from the scheduled queue and inject it.
+    async fn handle_new_barrier(
+        &self,
+        barrier_complete_tx: &UnboundedSender<BarrierCompletion>,
+        state: &mut BarrierManagerState,
+        checkpoint_control: &mut CheckpointControl<S>,
+    ) {
+        assert!(checkpoint_control.can_inject_barrier(self.in_flight_barrier_nums));
+
+        let Scheduled {
+            command,
+            notifiers,
+            send_latency_timer,
+            checkpoint,
+        } = self.scheduled_barriers.pop_or_default().await;
+        let info = self.resolve_actor_info(checkpoint_control, &command).await;
+
+        let prev_epoch = state.in_flight_prev_epoch;
+        let new_epoch = prev_epoch.next();
+        state.in_flight_prev_epoch = new_epoch;
+        assert!(
+            new_epoch > prev_epoch,
+            "new{:?},prev{:?}",
+            new_epoch,
+            prev_epoch
+        );
+        state
+            .update_inflight_prev_epoch(self.env.meta_store())
+            .await
+            .unwrap();
+
+        let command_ctx = Arc::new(CommandContext::new(
+            self.fragment_manager.clone(),
+            self.snapshot_manager.clone(),
+            self.env.stream_client_pool_ref(),
+            info,
+            prev_epoch,
+            new_epoch,
+            command,
+            checkpoint,
+            self.source_manager.clone(),
+        ));
+        let mut notifiers = notifiers;
+        notifiers.iter_mut().for_each(Notifier::notify_to_send);
+        send_latency_timer.observe_duration();
+
+        checkpoint_control.enqueue_command(command_ctx.clone(), notifiers);
+        self.inject_barrier(command_ctx, barrier_complete_tx).await;
     }
 
     /// Inject a barrier to all CNs and spawn a task to collect it
     async fn inject_barrier(
         &self,
         command_context: Arc<CommandContext<S>>,
-        barrier_complete_tx: UnboundedSender<(u64, MetaResult<Vec<BarrierCompleteResponse>>)>,
+        barrier_complete_tx: &UnboundedSender<BarrierCompletion>,
     ) {
         let prev_epoch = command_context.prev_epoch.0;
         let result = self.inject_barrier_inner(command_context.clone()).await;
         match result {
             Ok(node_need_collect) => {
-                let _ = tokio::spawn(Self::collect_barrier(
+                // todo: the collect handler should be abort when recovery.
+                tokio::spawn(Self::collect_barrier(
                     node_need_collect,
                     self.env.stream_client_pool_ref(),
                     command_context,
-                    barrier_complete_tx,
+                    barrier_complete_tx.clone(),
                 ));
             }
-            Err(e) => barrier_complete_tx.send((prev_epoch, Err(e))).unwrap(),
+            Err(e) => {
+                let _ = barrier_complete_tx.send(BarrierCompletion {
+                    prev_epoch,
+                    result: Err(e),
+                });
+            }
         }
     }
 
@@ -703,7 +759,7 @@ where
         node_need_collect: HashMap<WorkerId, bool>,
         client_pool_ref: StreamClientPoolRef,
         command_context: Arc<CommandContext<S>>,
-        barrier_complete_tx: UnboundedSender<(u64, MetaResult<Vec<BarrierCompleteResponse>>)>,
+        barrier_complete_tx: UnboundedSender<BarrierCompletion>,
     ) {
         let prev_epoch = command_context.prev_epoch.0;
         let info = command_context.info.clone();
@@ -732,40 +788,53 @@ where
             }
         });
 
-        let result = try_join_all(collect_futures).await;
-        barrier_complete_tx
-            .send((prev_epoch, result.map_err(Into::into)))
-            .unwrap();
+        let result = try_join_all(collect_futures).await.map_err(Into::into);
+        let _ = barrier_complete_tx
+            .send(BarrierCompletion { prev_epoch, result })
+            .inspect_err(|err| tracing::warn!("failed to complete barrier: {err}"));
     }
 
-    /// Changes the state is `Complete`, and try commit all epoch that state is `Complete` in
+    /// Changes the state to `Complete`, and try to commit all epoch that state is `Complete` in
     /// order. If commit is err, all nodes will be handled.
-    async fn barrier_complete_and_commit(
+    async fn handle_barrier_complete(
         &self,
-        prev_epoch: u64,
-        result: MetaResult<Vec<BarrierCompleteResponse>>,
+        completion: BarrierCompletion,
         state: &mut BarrierManagerState,
-        tracker: &mut CreateMviewProgressTracker<S>,
         checkpoint_control: &mut CheckpointControl<S>,
     ) {
+        checkpoint_control.update_barrier_nums_metrics();
+
+        let BarrierCompletion { prev_epoch, result } = completion;
+
+        // Received barrier complete responses with an epoch that is not managed by checkpoint
+        // control, which means a recovery has been triggered. We should ignore it because
+        // trying to complete and commit the epoch is not necessary and could cause
+        // meaningless recovery again.
+        if !checkpoint_control.contains_epoch(prev_epoch) {
+            tracing::warn!(
+                "received barrier complete response for an unknown epoch: {}",
+                prev_epoch
+            );
+            return;
+        }
+
         if let Err(err) = result {
+            // FIXME: If it is a connector source error occurred in the init barrier, we should pass
+            // back to frontend
             fail_point!("inject_barrier_err_success");
             let fail_node = checkpoint_control.barrier_failed();
-            tracing::warn!("Failed to commit epoch {}: {:?}", prev_epoch, err);
-            self.do_recovery(err, fail_node, state, tracker, checkpoint_control)
+            tracing::warn!("Failed to complete epoch {}: {:?}", prev_epoch, err);
+            self.do_recovery(err, fail_node, state, checkpoint_control)
                 .await;
             return;
         }
-        // change the state is Complete
+        // change the state to Complete
         let mut complete_nodes = checkpoint_control.barrier_completed(prev_epoch, result.unwrap());
         // try commit complete nodes
         let (mut index, mut err_msg) = (0, None);
         for (i, node) in complete_nodes.iter_mut().enumerate() {
             assert!(matches!(node.state, Completed(_)));
-            if let Err(err) = self
-                .complete_barrier(node, tracker, checkpoint_control)
-                .await
-            {
+            if let Err(err) = self.complete_barrier(node, checkpoint_control).await {
                 index = i;
                 err_msg = Some(err);
                 break;
@@ -776,7 +845,7 @@ where
             let fail_nodes = complete_nodes
                 .drain(index..)
                 .chain(checkpoint_control.barrier_failed().into_iter());
-            self.do_recovery(err, fail_nodes, state, tracker, checkpoint_control)
+            self.do_recovery(err, fail_nodes, state, checkpoint_control)
                 .await;
         }
     }
@@ -786,7 +855,6 @@ where
         err: MetaError,
         fail_nodes: impl IntoIterator<Item = EpochNode<S>>,
         state: &mut BarrierManagerState,
-        tracker: &mut CreateMviewProgressTracker<S>,
         checkpoint_control: &mut CheckpointControl<S>,
     ) {
         checkpoint_control.clear_changes();
@@ -804,7 +872,12 @@ where
         if self.enable_recovery {
             // If failed, enter recovery mode.
             self.set_status(BarrierManagerStatus::Recovering).await;
+            let mut tracker = self.tracker.lock().await;
             *tracker = CreateMviewProgressTracker::new();
+            self.snapshot_manager
+                .unpin_all()
+                .await
+                .expect("unpin meta's snapshots");
             let new_epoch = self.recovery(state.in_flight_prev_epoch).await;
             state.in_flight_prev_epoch = new_epoch;
             state
@@ -821,7 +894,6 @@ where
     async fn complete_barrier(
         &self,
         node: &mut EpochNode<S>,
-        tracker: &mut CreateMviewProgressTracker<S>,
         checkpoint_control: &mut CheckpointControl<S>,
     ) -> MetaResult<()> {
         let prev_epoch = node.command_ctx.prev_epoch.0;
@@ -830,40 +902,23 @@ where
                 // We must ensure all epochs are committed in ascending order,
                 // because the storage engine will query from new to old in the order in which
                 // the L0 layer files are generated.
-                // See https://github.com/singularity-data/risingwave/issues/1251
+                // See https://github.com/risingwave-labs/risingwave/issues/1251
                 let checkpoint = node.command_ctx.checkpoint;
-                let mut sst_to_worker: HashMap<HummockSstableId, WorkerId> = HashMap::new();
-                let mut synced_ssts: Vec<ExtendedSstableInfo> = vec![];
-                for resp in resps.iter_mut() {
-                    let mut t: Vec<ExtendedSstableInfo> = resp
-                        .synced_sstables
-                        .iter_mut()
-                        .map(|grouped| {
-                            let sst_info =
-                                std::mem::take(&mut grouped.sst).expect("field not None");
-                            sst_to_worker.insert(sst_info.id, resp.worker_id);
-                            ExtendedSstableInfo::new(
-                                grouped.compaction_group_id,
-                                sst_info,
-                                std::mem::take(&mut grouped.table_stats_map),
-                            )
-                        })
-                        .collect_vec();
-                    synced_ssts.append(&mut t);
-                }
-
+                let (sst_to_worker, synced_ssts) = collect_synced_ssts(resps);
                 // hummock_manager commit epoch.
+                let mut new_snapshot = None;
                 if prev_epoch == INVALID_EPOCH {
                     assert!(
                         synced_ssts.is_empty(),
                         "no sstables should be produced in the first epoch"
                     );
                 } else if checkpoint {
-                    self.hummock_manager
+                    new_snapshot = self
+                        .hummock_manager
                         .commit_epoch(node.command_ctx.prev_epoch.0, synced_ssts, sst_to_worker)
                         .await?;
                 } else {
-                    self.hummock_manager.update_current_epoch(prev_epoch)?;
+                    new_snapshot = Some(self.hummock_manager.update_current_epoch(prev_epoch));
                     // if we collect a barrier(checkpoint = false),
                     // we need to ensure that command is Plain and the notifier's checkpoint is
                     // false
@@ -871,6 +926,16 @@ where
                 }
 
                 node.command_ctx.post_collect().await?;
+                // Notify new snapshot after fragment_mapping changes have been notified in
+                // `post_collect`.
+                if let Some(snapshot) = new_snapshot {
+                    self.env
+                        .notification_manager()
+                        .notify_frontend_without_version(
+                            Operation::Update, // Frontends don't care about operation.
+                            Info::HummockSnapshot(snapshot),
+                        );
+                }
 
                 // Notify about collected.
                 let mut notifiers = take(&mut node.notifiers);
@@ -878,17 +943,31 @@ where
                     notifier.notify_collected();
                 });
 
+                // Save `cancelled_command` for Create MVs.
+                let actors_to_cancel = node.command_ctx.actors_to_cancel();
+                let cancelled_command = if !actors_to_cancel.is_empty() {
+                    let mut tracker = self.tracker.lock().await;
+                    tracker.find_cancelled_command(actors_to_cancel)
+                } else {
+                    None
+                };
+
                 // Save `finished_commands` for Create MVs.
                 let finished_commands = {
                     let mut commands = vec![];
-                    if let Some(command) = tracker.add(TrackingCommand {
-                        context: node.command_ctx.clone(),
-                        notifiers,
-                    }) {
+                    let version_stats = self.hummock_manager.get_version_stats().await;
+                    let mut tracker = self.tracker.lock().await;
+                    if let Some(command) = tracker.add(
+                        TrackingCommand {
+                            context: node.command_ctx.clone(),
+                            notifiers,
+                        },
+                        &version_stats,
+                    ) {
                         commands.push(command);
                     }
                     for progress in resps.iter().flat_map(|r| &r.create_mview_progress) {
-                        if let Some(command) = tracker.update(progress) {
+                        if let Some(command) = tracker.update(progress, &version_stats) {
                             commands.push(command);
                         }
                     }
@@ -905,6 +984,10 @@ where
                 if remaining {
                     assert!(!checkpoint);
                     self.scheduled_barriers.force_checkpoint_in_next_barrier();
+                }
+
+                if let Some(command) = cancelled_command {
+                    checkpoint_control.cancel_command(command);
                 }
 
                 node.timer.take().unwrap().observe_duration();
@@ -941,6 +1024,45 @@ where
 
         info
     }
+
+    pub async fn get_ddl_progress(&self) -> Vec<DdlProgress> {
+        self.tracker.lock().await.gen_ddl_progress()
+    }
+
+    /// Only handle `SystemParamsChange`.
+    fn handle_local_notification(&self, notification: LocalNotification) {
+        if let LocalNotification::SystemParamsChange(p) = notification {
+            self.scheduled_barriers
+                .set_checkpoint_frequency(p.checkpoint_frequency() as usize)
+        }
+    }
 }
 
 pub type BarrierManagerRef<S> = Arc<GlobalBarrierManager<S>>;
+
+fn collect_synced_ssts(
+    resps: &mut [BarrierCompleteResponse],
+) -> (
+    HashMap<HummockSstableObjectId, WorkerId>,
+    Vec<ExtendedSstableInfo>,
+) {
+    let mut sst_to_worker: HashMap<HummockSstableObjectId, WorkerId> = HashMap::new();
+    let mut synced_ssts: Vec<ExtendedSstableInfo> = vec![];
+    for resp in resps.iter_mut() {
+        let mut t: Vec<ExtendedSstableInfo> = resp
+            .synced_sstables
+            .iter_mut()
+            .map(|grouped| {
+                let sst_info = std::mem::take(&mut grouped.sst).expect("field not None");
+                sst_to_worker.insert(sst_info.get_object_id(), resp.worker_id);
+                ExtendedSstableInfo::new(
+                    grouped.compaction_group_id,
+                    sst_info,
+                    std::mem::take(&mut grouped.table_stats_map),
+                )
+            })
+            .collect_vec();
+        synced_ssts.append(&mut t);
+    }
+    (sst_to_worker, synced_ssts)
+}

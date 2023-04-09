@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,21 +16,19 @@ use prost::Message;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::CompactTaskAssignment;
 
+use crate::hummock::model::HUMMOCK_COMPACT_TASK_ASSIGNMENT;
 use crate::model::{MetadataModel, MetadataModelResult};
-
-/// `cf(compact_task_assignment)`: `CompactTaskId` -> `CompactTaskAssignment`
-const HUMMOCK_COMPACT_TASK_ASSIGNMENT: &str = "cf/compact_task_assignment";
 
 /// `AssignedCompactTasks` tracks compact tasks assigned to context id.
 impl MetadataModel for CompactTaskAssignment {
     type KeyType = HummockCompactionTaskId;
-    type ProstType = CompactTaskAssignment;
+    type PbType = CompactTaskAssignment;
 
     fn cf_name() -> String {
         HUMMOCK_COMPACT_TASK_ASSIGNMENT.to_string()
     }
 
-    fn to_protobuf(&self) -> Self::ProstType {
+    fn to_protobuf(&self) -> Self::PbType {
         self.clone()
     }
 
@@ -38,7 +36,7 @@ impl MetadataModel for CompactTaskAssignment {
         self.encode_to_vec()
     }
 
-    fn from_protobuf(prost: Self::ProstType) -> Self {
+    fn from_protobuf(prost: Self::PbType) -> Self {
         prost
     }
 

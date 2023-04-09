@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,11 +16,15 @@ use std::fmt::Debug;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::ErrorCode::BindError;
+use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::hash::MAX_GROUP_KEYS;
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Distinct, Expr, Select, SelectItem};
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_sqlparser::ast::{DataType as AstDataType, Distinct, Expr, Select, SelectItem};
 
 use super::bind_context::{Clause, ColumnBinding};
+use super::statement::RewriteExprsRecursive;
 use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
@@ -41,6 +45,33 @@ pub struct BoundSelect {
     pub group_by: Vec<ExprImpl>,
     pub having: Option<ExprImpl>,
     schema: Schema,
+}
+
+impl RewriteExprsRecursive for BoundSelect {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
+        self.distinct.rewrite_exprs_recursive(rewriter);
+
+        let new_select_items = std::mem::take(&mut self.select_items)
+            .into_iter()
+            .map(|expr| rewriter.rewrite_expr(expr))
+            .collect::<Vec<_>>();
+        self.select_items = new_select_items;
+
+        if let Some(from) = &mut self.from {
+            from.rewrite_exprs_recursive(rewriter);
+        }
+
+        self.where_clause =
+            std::mem::take(&mut self.where_clause).map(|expr| rewriter.rewrite_expr(expr));
+
+        let new_group_by = std::mem::take(&mut self.group_by)
+            .into_iter()
+            .map(|expr| rewriter.rewrite_expr(expr))
+            .collect::<Vec<_>>();
+        self.group_by = new_group_by;
+
+        self.having = std::mem::take(&mut self.having).map(|expr| rewriter.rewrite_expr(expr));
+    }
 }
 
 impl BoundSelect {
@@ -103,6 +134,18 @@ pub enum BoundDistinct {
     DistinctOn(Vec<ExprImpl>),
 }
 
+impl RewriteExprsRecursive for BoundDistinct {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
+        if let Self::DistinctOn(exprs) = self {
+            let new_exprs = std::mem::take(exprs)
+                .into_iter()
+                .map(|expr| rewriter.rewrite_expr(expr))
+                .collect::<Vec<_>>();
+            exprs.extend(new_exprs);
+        }
+    }
+}
+
 impl BoundDistinct {
     pub const fn is_all(&self) -> bool {
         matches!(self, Self::All)
@@ -128,14 +171,23 @@ impl Binder {
         self.context.clause = Some(Clause::Where);
         let selection = select
             .selection
-            .map(|expr| self.bind_expr(expr))
+            .map(|expr| {
+                self.bind_expr(expr)
+                    .and_then(|expr| expr.enforce_bool_clause("WHERE"))
+            })
             .transpose()?;
         self.context.clause = None;
 
-        Self::require_bool_clause(&selection, "WHERE")?;
-
         // Bind GROUP BY clause.
         self.context.clause = Some(Clause::GroupBy);
+        let number_of_group_keys = select.group_by.len();
+        if number_of_group_keys > MAX_GROUP_KEYS {
+            return Err(BindError(format!(
+                "Number of Group Keys: {}, exceeded maximum: {}",
+                number_of_group_keys, MAX_GROUP_KEYS,
+            ))
+            .into());
+        }
         let group_by = select
             .group_by
             .into_iter()
@@ -145,14 +197,19 @@ impl Binder {
 
         // Bind HAVING clause.
         self.context.clause = Some(Clause::Having);
-        let having = select.having.map(|expr| self.bind_expr(expr)).transpose()?;
-        Self::require_bool_clause(&having, "HAVING")?;
+        let having = select
+            .having
+            .map(|expr| {
+                self.bind_expr(expr)
+                    .and_then(|expr| expr.enforce_bool_clause("HAVING"))
+            })
+            .transpose()?;
         self.context.clause = None;
 
         // Store field from `ExprImpl` to support binding `field_desc` in `subquery`.
         let fields = select_items
             .iter()
-            .zip_eq(aliases.iter())
+            .zip_eq_fast(aliases.iter())
             .map(|(s, a)| {
                 let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
                 Ok(Field::with_name(s.return_type(), name))
@@ -180,21 +237,9 @@ impl Binder {
         for item in select_items {
             match item {
                 SelectItem::UnnamedExpr(expr) => {
-                    let (select_expr, alias) = match &expr.clone() {
-                        Expr::Identifier(ident) => {
-                            (self.bind_expr(expr)?, Some(ident.real_value()))
-                        }
-                        Expr::CompoundIdentifier(idents) => (
-                            self.bind_expr(expr)?,
-                            idents.last().map(|ident| ident.real_value()),
-                        ),
-                        Expr::FieldIdentifier(field_expr, idents) => (
-                            self.bind_single_field_column(*field_expr.clone(), idents)?,
-                            idents.last().map(|ident| ident.real_value()),
-                        ),
-                        _ => (self.bind_expr(expr)?, None),
-                    };
-                    select_list.push(select_expr);
+                    let alias = derive_alias(&expr);
+                    let bound = self.bind_expr(expr)?;
+                    select_list.push(bound);
                     aliases.push(alias);
                 }
                 SelectItem::ExprWithAlias { expr, alias } => {
@@ -217,8 +262,8 @@ impl Binder {
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
-                SelectItem::ExprQualifiedWildcard(expr, idents) => {
-                    let (exprs, names) = self.bind_wildcard_field_column(expr, &idents.0)?;
+                SelectItem::ExprQualifiedWildcard(expr, prefix) => {
+                    let (exprs, names) = self.bind_wildcard_field_column(expr, prefix)?;
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
@@ -262,6 +307,31 @@ impl Binder {
         Ok((select_list, aliases))
     }
 
+    pub fn bind_returning_list(
+        &mut self,
+        returning_items: Vec<SelectItem>,
+    ) -> Result<(Vec<ExprImpl>, Vec<Field>)> {
+        let (returning_list, aliases) = self.bind_select_list(returning_items)?;
+        if returning_list
+            .iter()
+            .any(|expr| expr.has_agg_call() || expr.has_window_function())
+        {
+            return Err(RwError::from(ErrorCode::BindError(
+                "should not have agg/window in the `RETURNING` list".to_string(),
+            )));
+        }
+
+        let fields = returning_list
+            .iter()
+            .zip_eq_fast(aliases.iter())
+            .map(|(s, a)| {
+                let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
+                Ok::<Field, RwError>(Field::with_name(s.return_type(), name))
+            })
+            .try_collect()?;
+        Ok((returning_list, fields))
+    }
+
     /// `bind_get_user_by_id_select` binds a select statement that returns a single user name by id,
     /// this is used for function `pg_catalog.get_user_by_id()`.
     pub fn bind_get_user_by_id_select(&mut self, input: &ExprImpl) -> Result<BoundSelect> {
@@ -289,6 +359,7 @@ impl Binder {
             Some(PG_CATALOG_SCHEMA_NAME),
             PG_USER_TABLE_NAME,
             None,
+            false,
         )?);
         let where_clause = Some(
             FunctionCall::new(
@@ -361,20 +432,6 @@ impl Binder {
             .unzip()
     }
 
-    fn require_bool_clause(expr: &Option<ExprImpl>, clause: &str) -> Result<()> {
-        if let Some(expr) = expr {
-            let return_type = expr.return_type();
-            if return_type != DataType::Boolean {
-                return Err(ErrorCode::InternalError(format!(
-                    "argument of {} must be boolean, not type {:?}",
-                    clause, return_type
-                ))
-                .into());
-            }
-        }
-        Ok(())
-    }
-
     fn bind_distinct_on(&mut self, distinct: Distinct) -> Result<BoundDistinct> {
         Ok(match distinct {
             Distinct::All => BoundDistinct::All,
@@ -388,4 +445,59 @@ impl Binder {
             }
         })
     }
+}
+
+fn derive_alias(expr: &Expr) -> Option<String> {
+    match expr.clone() {
+        Expr::Identifier(ident) => Some(ident.real_value()),
+        Expr::CompoundIdentifier(idents) => idents.last().map(|ident| ident.real_value()),
+        Expr::FieldIdentifier(_, idents) => idents.last().map(|ident| ident.real_value()),
+        Expr::Function(func) => Some(func.name.real_value()),
+        Expr::Extract { .. } => Some("extract".to_string()),
+        Expr::Case { .. } => Some("case".to_string()),
+        Expr::Cast { expr, data_type } => {
+            derive_alias(&expr).or_else(|| data_type_to_alias(&data_type))
+        }
+        Expr::TypedString { data_type, .. } => data_type_to_alias(&data_type),
+        Expr::Value(risingwave_sqlparser::ast::Value::Interval { .. }) => {
+            Some("interval".to_string())
+        }
+        Expr::Row(_) => Some("row".to_string()),
+        Expr::Array(_) => Some("array".to_string()),
+        Expr::ArrayIndex { obj, index: _ } => derive_alias(&obj),
+        _ => None,
+    }
+}
+
+fn data_type_to_alias(data_type: &AstDataType) -> Option<String> {
+    let alias = match data_type {
+        AstDataType::Char(_) => "bpchar".to_string(),
+        AstDataType::Varchar => "varchar".to_string(),
+        AstDataType::Uuid => "uuid".to_string(),
+        AstDataType::Decimal(_, _) => "numeric".to_string(),
+        AstDataType::Real | AstDataType::Float(Some(1..=24)) => "float4".to_string(),
+        AstDataType::Double | AstDataType::Float(Some(25..=53) | None) => "float8".to_string(),
+        AstDataType::Float(Some(0 | 54..)) => unreachable!(),
+        AstDataType::SmallInt => "int2".to_string(),
+        AstDataType::Int => "int4".to_string(),
+        AstDataType::BigInt => "int8".to_string(),
+        AstDataType::Boolean => "bool".to_string(),
+        AstDataType::Date => "date".to_string(),
+        AstDataType::Time(tz) => format!("time{}", if *tz { "z" } else { "" }),
+        AstDataType::Timestamp(tz) => {
+            format!("timestamp{}", if *tz { "tz" } else { "" })
+        }
+        AstDataType::Interval => "interval".to_string(),
+        AstDataType::Regclass => "regclass".to_string(),
+        AstDataType::Text => "text".to_string(),
+        AstDataType::Bytea => "bytea".to_string(),
+        AstDataType::Array(ty) => return data_type_to_alias(ty),
+        AstDataType::Custom(ty) => format!("{}", ty),
+        AstDataType::Struct(_) => {
+            // Note: Postgres doesn't have anonymous structs
+            return None;
+        }
+    };
+
+    Some(alias)
 }

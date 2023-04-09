@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,14 +14,14 @@
 
 use std::marker::PhantomData;
 
-use fixedbitset::FixedBitSet;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::RwError;
-use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
+use risingwave_common::hash::{HashKey, NullBitmap, PrecomputedBuildHasher};
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::expr::BoxedExpression;
@@ -66,13 +66,7 @@ impl<K: HashKey> LookupJoinBase<K> {
     pub async fn do_execute(mut self: Box<Self>) {
         let outer_side_schema = self.outer_side_input.schema().clone();
 
-        let null_matched = {
-            let mut null_matched = FixedBitSet::with_capacity(self.null_safe.len());
-            for (idx, col_null_matched) in self.null_safe.iter().copied().enumerate() {
-                null_matched.set(idx, col_null_matched);
-            }
-            null_matched
-        };
+        let null_matched: NullBitmap = self.null_safe.into();
 
         let mut outer_side_batch_read_stream: BoxedDataChunkListStream =
             utils::batch_read(self.outer_side_input.execute(), AT_LEAST_OUTER_SIDE_ROWS);
@@ -88,7 +82,7 @@ impl<K: HashKey> LookupJoinBase<K> {
                         self.outer_side_key_idxs
                             .iter()
                             .take(self.lookup_prefix_len)
-                            .map(|&idx| row.value_at(idx).to_owned_datum())
+                            .map(|&idx| row.datum_at(idx).to_owned_datum())
                             .collect_vec()
                     })
                 })
@@ -185,9 +179,8 @@ impl<K: HashKey> LookupJoinBase<K> {
                     DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
                 #[for_await]
                 for chunk in stream {
-                    #[for_await]
                     for output_chunk in output_chunk_builder
-                        .trunc_data_chunk(chunk?.reorder_columns(&self.output_indices))
+                        .append_chunk(chunk?.reorder_columns(&self.output_indices))
                     {
                         yield output_chunk
                     }

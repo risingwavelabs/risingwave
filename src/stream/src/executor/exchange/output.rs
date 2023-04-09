@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,8 +15,9 @@
 use std::fmt::Debug;
 
 use anyhow::anyhow;
-use async_stack_trace::{SpanValue, StackTrace};
 use async_trait::async_trait;
+use await_tree::InstrumentAwait;
+use derivative::Derivative;
 use risingwave_common::util::addr::is_local_address;
 use tokio::sync::mpsc::error::SendError;
 
@@ -44,20 +45,16 @@ pub trait Output: Debug + Send + Sync + 'static {
 pub type BoxedOutput = Box<dyn Output>;
 
 /// `LocalOutput` sends data to a local channel.
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub struct LocalOutput {
     actor_id: ActorId,
 
-    span: SpanValue,
+    #[derivative(Debug = "ignore")]
+    span: await_tree::Span,
 
+    #[derivative(Debug = "ignore")]
     ch: Sender,
-}
-
-impl Debug for LocalOutput {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LocalOutput")
-            .field("actor_id", &self.actor_id)
-            .finish()
-    }
 }
 
 impl LocalOutput {
@@ -75,11 +72,11 @@ impl Output for LocalOutput {
     async fn send(&mut self, message: Message) -> StreamResult<()> {
         self.ch
             .send(message)
-            .verbose_stack_trace(self.span.clone())
+            .verbose_instrument_await(self.span.clone())
             .await
             .map_err(|SendError(message)| {
                 anyhow!(
-                    "failed to send message to actor {}: {:#?}",
+                    "failed to send message to actor {}: {:?}",
                     self.actor_id,
                     message
                 )
@@ -97,20 +94,16 @@ impl Output for LocalOutput {
 ///
 /// [`ExchangeService`]: risingwave_pb::task_service::exchange_service_server::ExchangeService
 // FIXME: can we just use the same `Output` with local and compacts it in gRPC server?
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub struct RemoteOutput {
     actor_id: ActorId,
 
-    span: SpanValue,
+    #[derivative(Debug = "ignore")]
+    span: await_tree::Span,
 
+    #[derivative(Debug = "ignore")]
     ch: Sender,
-}
-
-impl Debug for RemoteOutput {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RemoteOutput")
-            .field("actor_id", &self.actor_id)
-            .finish()
-    }
 }
 
 impl RemoteOutput {
@@ -133,7 +126,7 @@ impl Output for RemoteOutput {
 
         self.ch
             .send(message)
-            .verbose_stack_trace(self.span.clone())
+            .verbose_instrument_await(self.span.clone())
             .await
             .map_err(|SendError(message)| {
                 anyhow!(

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,13 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod agg;
-pub mod build_expr_from_prost;
-pub mod data_types;
+//! Expressions in RisingWave.
+//!
+//! All expressions are implemented under the [`Expression`] trait.
+//!
+//! ## Construction
+//!
+//! Expressions can be constructed by functions like [`new_binary_expr`],
+//! which returns a [`BoxedExpression`].
+//!
+//! They can also be transformed from the prost [`ExprNode`] using the [`build_from_prost`]
+//! function.
+//!
+//! ## Evaluation
+//!
+//! Expressions can be evaluated using the [`eval`] function.
+//!
+//! [`ExprNode`]: risingwave_pb::expr::ExprNode
+//! [`eval`]: Expression::eval
+
+// These modules define concrete expression structures.
 mod expr_array_concat;
-mod expr_binary_bytes;
-pub mod expr_binary_nonnull;
-pub mod expr_binary_nullable;
+mod expr_array_distinct;
+mod expr_array_length;
+mod expr_array_to_string;
+mod expr_binary_nonnull;
+mod expr_binary_nullable;
+mod expr_cardinality;
 mod expr_case;
 mod expr_coalesce;
 mod expr_concat_ws;
@@ -26,49 +46,47 @@ mod expr_field;
 mod expr_in;
 mod expr_input_ref;
 mod expr_is_null;
+mod expr_jsonb_access;
 mod expr_literal;
 mod expr_nested_construct;
-mod expr_quaternary_bytes;
-mod expr_regexp;
-mod expr_ternary_bytes;
+mod expr_now;
+pub mod expr_regexp;
+mod expr_some_all;
 mod expr_to_char_const_tmpl;
-pub mod expr_unary;
+mod expr_to_timestamp_const_tmpl;
+mod expr_udf;
+mod expr_unary;
 mod expr_vnode;
-mod template;
 
-use std::convert::TryFrom;
+mod agg;
+mod build;
+pub(crate) mod data_types;
+pub(crate) mod template;
+pub(crate) mod template_fast;
+pub mod test_utils;
+
 use std::sync::Arc;
 
-pub use agg::AggKind;
-pub use expr_input_ref::InputRefExpression;
-pub use expr_literal::*;
 use risingwave_common::array::{ArrayRef, DataChunk};
-use risingwave_common::row::Row;
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
-use risingwave_pb::expr::ExprNode;
+use static_assertions::const_assert;
 
-use super::Result;
-use crate::expr::build_expr_from_prost::*;
-use crate::expr::expr_array_concat::ArrayConcatExpression;
-use crate::expr::expr_case::CaseExpression;
-use crate::expr::expr_coalesce::CoalesceExpression;
-use crate::expr::expr_concat_ws::ConcatWsExpression;
-use crate::expr::expr_field::FieldExpression;
-use crate::expr::expr_in::InExpression;
-use crate::expr::expr_nested_construct::NestedConstructExpression;
-use crate::expr::expr_regexp::RegexpMatchExpression;
-use crate::expr::expr_vnode::VnodeExpression;
-use crate::ExprError;
-
-pub type ExpressionRef = Arc<dyn Expression>;
+pub use self::agg::AggKind;
+pub use self::build::*;
+pub use self::expr_input_ref::InputRefExpression;
+pub use self::expr_literal::LiteralExpression;
+use super::{ExprError, Result};
 
 /// Instance of an expression
+#[async_trait::async_trait]
 pub trait Expression: std::fmt::Debug + Sync + Send {
+    /// Get the return data type.
     fn return_type(&self) -> DataType;
 
     /// Eval the result with extra checks.
-    fn eval_checked(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let res = self.eval(input)?;
+    async fn eval_checked(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let res = self.eval(input).await?;
 
         // TODO: Decide to use assert or debug_assert by benchmarks.
         assert_eq!(res.len(), input.capacity());
@@ -81,11 +99,17 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     /// # Arguments
     ///
     /// * `input` - input data of the Project Executor
-    fn eval(&self, input: &DataChunk) -> Result<ArrayRef>;
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef>;
 
     /// Evaluate the expression in row-based execution.
-    fn eval_row(&self, input: &Row) -> Result<Datum>;
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum>;
 
+    /// Evaluate if the expression is constant.
+    fn eval_const(&self) -> Result<Datum> {
+        Err(ExprError::NotConstant)
+    }
+
+    /// Wrap the expression in a Box.
     fn boxed(self) -> BoxedExpression
     where
         Self: Sized + Send + 'static,
@@ -94,63 +118,52 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     }
 }
 
-pub type BoxedExpression = Box<dyn Expression>;
+impl dyn Expression {
+    pub async fn eval_infallible(&self, input: &DataChunk, on_err: impl Fn(ExprError)) -> ArrayRef {
+        const_assert!(!STRICT_MODE);
 
-pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
-    use risingwave_pb::expr::expr_node::Type::*;
-
-    match prost.get_expr_type().unwrap() {
-        // Fixed number of arguments and based on `Unary/Binary/Ternary/...Expression`
-        Cast | Upper | Lower | Md5 | Not | IsTrue | IsNotTrue | IsFalse | IsNotFalse | IsNull
-        | IsNotNull | Neg | Ascii | Abs | Ceil | Floor | Round | BitwiseNot | CharLength
-        | BoolOut | OctetLength | BitLength | ToTimestamp => build_unary_expr_prost(prost),
-        Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual | Add
-        | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | TumbleStart
-        | Position | BitwiseShiftLeft | BitwiseShiftRight | BitwiseAnd | BitwiseOr | BitwiseXor
-        | ConcatOp | AtTimeZone => build_binary_expr_prost(prost),
-        And | Or | IsDistinctFrom | IsNotDistinctFrom | ArrayAccess => {
-            build_nullable_binary_expr_prost(prost)
+        if let Ok(array) = self.eval(input).await {
+            return array;
         }
-        ToChar => build_to_char_expr(prost),
-        Length => build_length_expr(prost),
-        Replace => build_replace_expr(prost),
-        Like => build_like_expr(prost),
-        Repeat => build_repeat_expr(prost),
-        SplitPart => build_split_part_expr(prost),
-        Translate => build_translate_expr(prost),
 
-        // Variable number of arguments and based on `Unary/Binary/Ternary/...Expression`
-        Substr => build_substr_expr(prost),
-        Overlay => build_overlay_expr(prost),
-        Trim => build_trim_expr(prost),
-        Ltrim => build_ltrim_expr(prost),
-        Rtrim => build_rtrim_expr(prost),
-        DateTrunc => build_date_trunc_expr(prost),
-
-        // Dedicated types
-        In => InExpression::try_from(prost).map(Expression::boxed),
-        Case => CaseExpression::try_from(prost).map(Expression::boxed),
-        Coalesce => CoalesceExpression::try_from(prost).map(Expression::boxed),
-        ConcatWs => ConcatWsExpression::try_from(prost).map(Expression::boxed),
-        ConstantValue => LiteralExpression::try_from(prost).map(Expression::boxed),
-        InputRef => InputRefExpression::try_from(prost).map(Expression::boxed),
-        Field => FieldExpression::try_from(prost).map(Expression::boxed),
-        Array => NestedConstructExpression::try_from(prost).map(Expression::boxed),
-        Row => NestedConstructExpression::try_from(prost).map(Expression::boxed),
-        RegexpMatch => RegexpMatchExpression::try_from(prost).map(Expression::boxed),
-        ArrayCat | ArrayAppend | ArrayPrepend => {
-            // Now we implement these three functions as a single expression for the
-            // sake of simplicity. If performance matters at some time, we can split
-            // the implementation to improve performance.
-            ArrayConcatExpression::try_from(prost).map(Expression::boxed)
+        // When eval failed, recompute in row-based execution
+        // and pad with NULL for each failed row.
+        let mut array_builder = self.return_type().create_array_builder(input.cardinality());
+        for row in input.rows_with_holes() {
+            if let Some(row) = row {
+                let datum = self
+                    .eval_row_infallible(&row.into_owned_row(), &on_err)
+                    .await;
+                array_builder.append_datum(&datum);
+            } else {
+                array_builder.append_null();
+            }
         }
-        Vnode => VnodeExpression::try_from(prost).map(Expression::boxed),
-        _ => Err(ExprError::UnsupportedFunction(format!(
-            "{:?}",
-            prost.get_expr_type()
-        ))),
+        Arc::new(array_builder.finish())
+    }
+
+    pub async fn eval_row_infallible(&self, input: &OwnedRow, on_err: impl Fn(ExprError)) -> Datum {
+        const_assert!(!STRICT_MODE);
+
+        self.eval_row(input).await.unwrap_or_else(|err| {
+            on_err(err);
+            None
+        })
     }
 }
 
-mod test_utils;
-pub use test_utils::*;
+/// An owned dynamically typed [`Expression`].
+pub type BoxedExpression = Box<dyn Expression>;
+
+/// A reference to a dynamically typed [`Expression`].
+pub type ExpressionRef = Arc<dyn Expression>;
+
+/// Controls the behavior when a compute error happens.
+///
+/// - If set to `false`, `NULL` will be inserted.
+/// - TODO: If set to `true`, The MV will be suspended and removed from further checkpoints. It can
+///   still be used to serve outdated data without corruption.
+///
+/// See also <https://github.com/risingwavelabs/risingwave/issues/4625>.
+#[allow(dead_code)]
+const STRICT_MODE: bool = false;

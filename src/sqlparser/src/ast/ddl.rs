@@ -2,7 +2,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -77,6 +77,34 @@ pub enum AlterTableOperation {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterIndexOperation {
+    RenameIndex { index_name: ObjectName },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterViewOperation {
+    RenameView { view_name: ObjectName },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterSinkOperation {
+    RenameSink { sink_name: ObjectName },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterSourceOperation {
+    RenameSource { source_name: ObjectName },
+}
+
 impl fmt::Display for AlterTableOperation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -133,6 +161,46 @@ impl fmt::Display for AlterTableOperation {
     }
 }
 
+impl fmt::Display for AlterIndexOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterIndexOperation::RenameIndex { index_name } => {
+                write!(f, "RENAME TO {index_name}")
+            }
+        }
+    }
+}
+
+impl fmt::Display for AlterViewOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterViewOperation::RenameView { view_name } => {
+                write!(f, "RENAME TO {view_name}")
+            }
+        }
+    }
+}
+
+impl fmt::Display for AlterSinkOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterSinkOperation::RenameSink { sink_name } => {
+                write!(f, "RENAME TO {sink_name}")
+            }
+        }
+    }
+}
+
+impl fmt::Display for AlterSourceOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterSourceOperation::RenameSource { source_name } => {
+                write!(f, "RENAME TO {source_name}")
+            }
+        }
+    }
+}
+
 /// An `ALTER COLUMN` (`Statement::AlterTable`) operation
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -172,6 +240,21 @@ impl fmt::Display for AlterColumnOperation {
                 }
             }
         }
+    }
+}
+
+/// The watermark on source.
+/// `WATERMARK FOR <column> AS (<expr>)`
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct SourceWatermark {
+    pub column: Ident,
+    pub expr: Expr,
+}
+
+impl fmt::Display for SourceWatermark {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "WATERMARK FOR {} AS {}", self.column, self.expr,)
     }
 }
 
@@ -257,7 +340,7 @@ impl fmt::Display for TableConstraint {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ColumnDef {
     pub name: Ident,
-    pub data_type: DataType,
+    pub data_type: Option<DataType>,
     pub collation: Option<ObjectName>,
     pub options: Vec<ColumnOptionDef>,
 }
@@ -271,7 +354,7 @@ impl ColumnDef {
     ) -> Self {
         ColumnDef {
             name,
-            data_type,
+            data_type: Some(data_type),
             collation,
             options,
         }
@@ -280,7 +363,16 @@ impl ColumnDef {
 
 impl fmt::Display for ColumnDef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {}", self.name, self.data_type)?;
+        write!(
+            f,
+            "{} {}",
+            self.name,
+            if let Some(data_type) = &self.data_type {
+                data_type.to_string()
+            } else {
+                "None".to_string()
+            }
+        )?;
         for option in &self.options {
             write!(f, " {}", option)?;
         }
@@ -347,6 +439,8 @@ pub enum ColumnOption {
     /// - MySQL's `AUTO_INCREMENT` or SQLite's `AUTOINCREMENT`
     /// - ...
     DialectSpecific(Vec<Token>),
+    /// AS ( <generation_expr> )`
+    GeneratedColumns(Expr),
 }
 
 impl fmt::Display for ColumnOption {
@@ -379,6 +473,7 @@ impl fmt::Display for ColumnOption {
             }
             Check(expr) => write!(f, "CHECK ({})", expr),
             DialectSpecific(val) => write!(f, "{}", display_separated(val, " ")),
+            GeneratedColumns(expr) => write!(f, "AS {}", expr),
         }
     }
 }

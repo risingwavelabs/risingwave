@@ -1,11 +1,11 @@
 /*
- * Copyright 2022 Singularity Data
+ * Copyright 2023 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -39,15 +39,29 @@ import FragmentGraph from "../components/FragmentGraph"
 import Title from "../components/Title"
 import { ActorBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
-import { StreamNode } from "../proto/gen/stream_plan"
-import { getFragments, getMaterializedViews } from "./api/streaming"
+import { Dispatcher, StreamNode } from "../proto/gen/stream_plan"
+import useFetch from "./api/fetch"
+import { getFragments, getStreamingJobs } from "./api/streaming"
+
+interface DispatcherNode {
+  [actorId: number]: Dispatcher[]
+}
+
+/** Associated data of each plan node in the fragment graph, including the dispatchers. */
+export interface PlanNodeDatum {
+  name: string
+  children?: PlanNodeDatum[]
+  operatorId: string | number
+  node: StreamNode | DispatcherNode
+  extraInfo?: string
+}
 
 function buildPlanNodeDependency(
   fragment: TableFragments_Fragment
-): d3.HierarchyNode<any> {
-  const actor = fragment.actors[0]
+): d3.HierarchyNode<PlanNodeDatum> {
+  const firstActor = fragment.actors[0]
 
-  const hierarchyActorNode = (node: StreamNode): any => {
+  const hierarchyActorNode = (node: StreamNode): PlanNodeDatum => {
     return {
       name: node.nodeBody?.$case.toString() || "unknown",
       children: (node.input || []).map(hierarchyActorNode),
@@ -56,13 +70,24 @@ function buildPlanNodeDependency(
     }
   }
 
+  let dispatcherName = "noDispatcher"
+  if (firstActor.dispatcher.length > 1) {
+    dispatcherName = "multipleDispatchers"
+  } else if (firstActor.dispatcher.length === 1) {
+    dispatcherName = `${toLower(firstActor.dispatcher[0].type)}Dispatcher`
+  }
+
+  const dispatcherNode = fragment.actors.reduce((obj, actor) => {
+    obj[actor.actorId] = actor.dispatcher
+    return obj
+  }, {} as DispatcherNode)
+
   return d3.hierarchy({
-    name:
-      actor.dispatcher.map((d) => `${toLower(d.type)}Dispatcher`).join(",") ||
-      "noDispatcher",
+    name: dispatcherName,
     extraInfo: `Actor ${fragment.actors.map((a) => a.actorId).join(", ")}`,
-    children: actor.nodes ? [hierarchyActorNode(actor.nodes)] : [],
+    children: firstActor.nodes ? [hierarchyActorNode(firstActor.nodes)] : [],
     operatorId: "dispatcher",
+    node: dispatcherNode,
   })
 }
 
@@ -101,34 +126,8 @@ function buildFragmentDependencyAsEdges(fragments: TableFragments): ActorBox[] {
 
 const SIDEBAR_WIDTH = 200
 
-function useFetch<T>(fetchFn: () => Promise<T>) {
-  const [response, setResponse] = useState<T>()
-  const toast = useToast()
-
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const res = await fetchFn()
-        setResponse(res)
-      } catch (e: any) {
-        toast({
-          title: "Error Occurred",
-          description: e.toString(),
-          status: "error",
-          duration: 5000,
-          isClosable: true,
-        })
-        console.error(e)
-      }
-    }
-    fetchData()
-  }, [toast, fetchFn])
-
-  return { response }
-}
-
 export default function Streaming() {
-  const { response: mvList } = useFetch(getMaterializedViews)
+  const { response: relationList } = useFetch(getStreamingJobs)
   const { response: fragmentList } = useFetch(getFragments)
 
   const [selectedFragmentId, setSelectedFragmentId] = useState<number>()
@@ -137,8 +136,8 @@ export default function Streaming() {
   const fragmentDependencyCallback = useCallback(() => {
     if (fragmentList) {
       if (router.query.id) {
-        const mvId = parseInt(router.query.id as string)
-        const fragments = fragmentList.find((x) => x.tableId === mvId)
+        const id = parseInt(router.query.id as string)
+        const fragments = fragmentList.find((x) => x.tableId === id)
         if (fragments) {
           const fragmentDep = buildFragmentDependencyAsEdges(fragments)
           return {
@@ -153,15 +152,15 @@ export default function Streaming() {
   }, [fragmentList, router.query.id])
 
   useEffect(() => {
-    if (mvList) {
+    if (relationList) {
       if (!router.query.id) {
-        if (mvList.length > 0) {
-          router.replace(`?id=${mvList[0].id}`)
+        if (relationList.length > 0) {
+          router.replace(`?id=${relationList[0].id}`)
         }
       }
     }
     return () => {}
-  }, [router, router.query.id, mvList])
+  }, [router, router.query.id, relationList])
 
   const fragmentDependency = fragmentDependencyCallback()?.fragmentDep
   const fragmentDependencyDag = fragmentDependencyCallback()?.fragmentDepDag
@@ -170,7 +169,10 @@ export default function Streaming() {
   const planNodeDependenciesCallback = useCallback(() => {
     const fragments_ = fragments?.fragments
     if (fragments_) {
-      const planNodeDependencies = new Map<string, d3.HierarchyNode<any>>()
+      const planNodeDependencies = new Map<
+        string,
+        d3.HierarchyNode<PlanNodeDatum>
+      >()
       for (const fragmentId in fragments_) {
         const fragment = fragments_[fragmentId]
         const dep = buildPlanNodeDependency(fragment)
@@ -183,32 +185,32 @@ export default function Streaming() {
 
   const planNodeDependencies = planNodeDependenciesCallback()
 
-  const mvInfoCallback = useCallback(() => {
+  const relationInfoCallback = useCallback(() => {
     const id = router.query.id
     if (id) {
-      if (mvList) {
-        return mvList.find((x) => x.id == parseInt(id as string))
+      if (relationList) {
+        return relationList.find((x) => x.id == parseInt(id as string))
       }
     }
     return undefined
-  }, [mvList, router.query.id])
+  }, [relationList, router.query.id])
 
-  const mvInfo = mvInfoCallback()
+  const relationInfo = relationInfoCallback()
 
   const [searchActorId, setSearchActorId] = useState<string>("")
   const [searchFragId, setSearchFragId] = useState<string>("")
 
-  const setMvId = (id: number) => router.replace(`?id=${id}`)
+  const setRelationId = (id: number) => router.replace(`?id=${id}`)
 
   const toast = useToast()
 
   const handleSearchFragment = () => {
     const searchFragIdInt = parseInt(searchFragId)
     if (fragmentList) {
-      for (const mv of fragmentList) {
-        for (const fragmentId in mv.fragments) {
-          if (mv.fragments[fragmentId].fragmentId == searchFragIdInt) {
-            setMvId(mv.tableId)
+      for (const tf of fragmentList) {
+        for (const fragmentId in tf.fragments) {
+          if (tf.fragments[fragmentId].fragmentId == searchFragIdInt) {
+            setRelationId(tf.tableId)
             setSelectedFragmentId(searchFragIdInt)
             return
           }
@@ -228,12 +230,12 @@ export default function Streaming() {
   const handleSearchActor = () => {
     const searchActorIdInt = parseInt(searchActorId)
     if (fragmentList) {
-      for (const mv of fragmentList) {
-        for (const fragmentId in mv.fragments) {
-          const fragment = mv.fragments[fragmentId]
+      for (const tf of fragmentList) {
+        for (const fragmentId in tf.fragments) {
+          const fragment = tf.fragments[fragmentId]
           for (const actor of fragment.actors) {
             if (actor.actorId == searchActorIdInt) {
-              setMvId(mv.tableId)
+              setRelationId(tf.tableId)
               setSelectedFragmentId(fragment.fragmentId)
               return
             }
@@ -263,41 +265,39 @@ export default function Streaming() {
           height="full"
         >
           <FormControl>
-            <FormLabel>Materialized View</FormLabel>
+            <FormLabel>Relations</FormLabel>
             <Input
-              list="mvList"
+              list="relationList"
               spellCheck={false}
               onChange={(event) => {
-                const id = mvList?.find((x) => x.name == event.target.value)?.id
+                const id = relationList?.find(
+                  (x) => x.name == event.target.value
+                )?.id
                 if (id) {
-                  setMvId(id)
+                  setRelationId(id)
                 }
               }}
               placeholder="Search..."
               mb={2}
             ></Input>
-            <datalist id="mvList">
-              {mvList &&
-                mvList
-                  .filter((mv) => !mv.name.startsWith("__"))
-                  .map((mv) => (
-                    <option value={mv.name} key={mv.id}>
-                      ({mv.id}) {mv.name}
-                    </option>
-                  ))}
+            <datalist id="relationList">
+              {relationList &&
+                relationList.map((r) => (
+                  <option value={r.name} key={r.id}>
+                    ({r.id}) {r.name}
+                  </option>
+                ))}
             </datalist>
             <Select
               value={router.query.id}
-              onChange={(event) => setMvId(parseInt(event.target.value))}
+              onChange={(event) => setRelationId(parseInt(event.target.value))}
             >
-              {mvList &&
-                mvList
-                  .filter((mv) => !mv.name.startsWith("__"))
-                  .map((mv) => (
-                    <option value={mv.id} key={mv.name}>
-                      ({mv.id}) {mv.name}
-                    </option>
-                  ))}
+              {relationList &&
+                relationList.map((r) => (
+                  <option value={r.id} key={r.name}>
+                    ({r.id}) {r.name}
+                  </option>
+                ))}
             </Select>
           </FormControl>
           <FormControl>
@@ -323,9 +323,9 @@ export default function Streaming() {
           </FormControl>
           <Flex height="full" width="full" flexDirection="column">
             <Text fontWeight="semibold">Plan</Text>
-            {mvInfo && (
+            {relationInfo && (
               <Text>
-                {mvInfo.id} - {mvInfo.name}
+                {relationInfo.id} - {relationInfo.name}
               </Text>
             )}
             {fragmentDependencyDag && (

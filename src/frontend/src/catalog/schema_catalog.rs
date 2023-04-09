@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,23 +16,19 @@ use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common::catalog::{valid_table_name, IndexId, TableId};
-use risingwave_pb::catalog::{
-    Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink, Source as ProstSource,
-    Table as ProstTable, View as ProstView,
-};
+use risingwave_common::catalog::{valid_table_name, FunctionId, IndexId, TableId};
+use risingwave_common::types::DataType;
+use risingwave_connector::sink::catalog::SinkCatalog;
+use risingwave_pb::catalog::{PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView};
 
-use super::source_catalog::{SourceCatalog, SourceKind};
-use super::ViewId;
+use super::{SinkId, SourceId, ViewId};
+use crate::catalog::function_catalog::FunctionCatalog;
 use crate::catalog::index_catalog::IndexCatalog;
-use crate::catalog::sink_catalog::SinkCatalog;
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::catalog::SchemaId;
-
-pub type SourceId = u32;
-pub type SinkId = u32;
 
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {
@@ -49,6 +45,8 @@ pub struct SchemaCatalog {
     indexes_by_table_id: HashMap<TableId, Vec<Arc<IndexCatalog>>>,
     view_by_name: HashMap<String, Arc<ViewCatalog>>,
     view_by_id: HashMap<ViewId, Arc<ViewCatalog>>,
+    function_by_name: HashMap<String, HashMap<Vec<DataType>, Arc<FunctionCatalog>>>,
+    function_by_id: HashMap<FunctionId, Arc<FunctionCatalog>>,
 
     // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
     system_table_by_name: HashMap<String, SystemCatalog>,
@@ -56,7 +54,7 @@ pub struct SchemaCatalog {
 }
 
 impl SchemaCatalog {
-    pub fn create_table(&mut self, prost: &ProstTable) {
+    pub fn create_table(&mut self, prost: &PbTable) -> Arc<TableCatalog> {
         let name = prost.name.clone();
         let id = prost.id.into();
         let table: TableCatalog = prost.into();
@@ -65,7 +63,8 @@ impl SchemaCatalog {
         self.table_by_name
             .try_insert(name, table_ref.clone())
             .unwrap();
-        self.table_by_id.try_insert(id, table_ref).unwrap();
+        self.table_by_id.try_insert(id, table_ref.clone()).unwrap();
+        table_ref
     }
 
     pub fn create_sys_table(&mut self, sys_table: SystemCatalog) {
@@ -74,14 +73,53 @@ impl SchemaCatalog {
             .unwrap();
     }
 
-    pub fn update_table(&mut self, prost: &ProstTable) {
+    pub fn update_table(&mut self, prost: &PbTable) -> Arc<TableCatalog> {
         let name = prost.name.clone();
         let id = prost.id.into();
         let table: TableCatalog = prost.into();
         let table_ref = Arc::new(table);
 
+        let old_table = self.table_by_id.get(&id).unwrap();
+        // check if table name get updated.
+        if old_table.name() != name {
+            self.table_by_name.remove(old_table.name());
+        }
         self.table_by_name.insert(name, table_ref.clone());
-        self.table_by_id.insert(id, table_ref);
+        self.table_by_id.insert(id, table_ref.clone());
+        table_ref
+    }
+
+    pub fn update_index(&mut self, prost: &PbIndex) {
+        let name = prost.name.clone();
+        let id = prost.id.into();
+        let old_index = self.index_by_id.get(&id).unwrap();
+        let index_table = self.get_table_by_id(&prost.index_table_id.into()).unwrap();
+        let primary_table = self
+            .get_table_by_id(&prost.primary_table_id.into())
+            .unwrap();
+        let index: IndexCatalog = IndexCatalog::build_from(prost, index_table, primary_table);
+        let index_ref = Arc::new(index);
+
+        // check if index name get updated.
+        if old_index.name != name {
+            self.index_by_name.remove(&old_index.name);
+        }
+        self.index_by_name.insert(name, index_ref.clone());
+        self.index_by_id.insert(id, index_ref.clone());
+
+        match self.indexes_by_table_id.entry(index_ref.primary_table.id) {
+            Occupied(mut entry) => {
+                let pos = entry
+                    .get()
+                    .iter()
+                    .position(|x| x.id == index_ref.id)
+                    .unwrap();
+                *entry.get_mut().get_mut(pos).unwrap() = index_ref;
+            }
+            Vacant(_entry) => {
+                unreachable!()
+            }
+        };
     }
 
     pub fn drop_table(&mut self, id: TableId) {
@@ -90,7 +128,7 @@ impl SchemaCatalog {
         self.indexes_by_table_id.remove(&table_ref.id);
     }
 
-    pub fn create_index(&mut self, prost: &ProstIndex) {
+    pub fn create_index(&mut self, prost: &PbIndex) {
         let name = prost.name.clone();
         let id = prost.id.into();
 
@@ -131,7 +169,7 @@ impl SchemaCatalog {
         };
     }
 
-    pub fn create_source(&mut self, prost: &ProstSource) {
+    pub fn create_source(&mut self, prost: &PbSource) {
         let name = prost.name.clone();
         let id = prost.id;
         let source = SourceCatalog::from(prost);
@@ -148,7 +186,23 @@ impl SchemaCatalog {
         self.source_by_name.remove(&source_ref.name).unwrap();
     }
 
-    pub fn create_sink(&mut self, prost: &ProstSink) {
+    pub fn update_source(&mut self, prost: &PbSource) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let source = SourceCatalog::from(prost);
+        let source_ref = Arc::new(source);
+
+        let old_source = self.source_by_id.get(&id).unwrap();
+        // check if source name get updated.
+        if old_source.name != name {
+            self.source_by_name.remove(&old_source.name);
+        }
+
+        self.source_by_name.insert(name, source_ref.clone());
+        self.source_by_id.insert(id, source_ref);
+    }
+
+    pub fn create_sink(&mut self, prost: &PbSink) {
         let name = prost.name.clone();
         let id = prost.id;
         let sink = SinkCatalog::from(prost);
@@ -165,7 +219,23 @@ impl SchemaCatalog {
         self.sink_by_name.remove(&sink_ref.name).unwrap();
     }
 
-    pub fn create_view(&mut self, prost: &ProstView) {
+    pub fn update_sink(&mut self, prost: &PbSink) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let sink = SinkCatalog::from(prost);
+        let sink_ref = Arc::new(sink);
+
+        let old_sink = self.sink_by_id.get(&id).unwrap();
+        // check if sink name get updated.
+        if old_sink.name != name {
+            self.sink_by_name.remove(&old_sink.name);
+        }
+
+        self.sink_by_name.insert(name, sink_ref.clone());
+        self.sink_by_id.insert(id, sink_ref);
+    }
+
+    pub fn create_view(&mut self, prost: &PbView) {
         let name = prost.name.clone();
         let id = prost.id;
         let view = ViewCatalog::from(prost);
@@ -182,15 +252,66 @@ impl SchemaCatalog {
         self.view_by_name.remove(&view_ref.name).unwrap();
     }
 
+    pub fn update_view(&mut self, prost: &PbView) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let view = ViewCatalog::from(prost);
+        let view_ref = Arc::new(view);
+
+        let old_view = self.view_by_id.get(&id).unwrap();
+        // check if view name get updated.
+        if old_view.name != name {
+            self.view_by_name.remove(&old_view.name);
+        }
+
+        self.view_by_name.insert(name, view_ref.clone());
+        self.view_by_id.insert(id, view_ref);
+    }
+
+    pub fn create_function(&mut self, prost: &PbFunction) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let function = FunctionCatalog::from(prost);
+        let args = function.arg_types.clone();
+        let function_ref = Arc::new(function);
+
+        self.function_by_name
+            .entry(name)
+            .or_default()
+            .try_insert(args, function_ref.clone())
+            .expect("function already exists with same argument types");
+        self.function_by_id
+            .try_insert(id.into(), function_ref)
+            .expect("function id exists");
+    }
+
+    pub fn drop_function(&mut self, id: FunctionId) {
+        let function_ref = self
+            .function_by_id
+            .remove(&id)
+            .expect("function not found by id");
+        self.function_by_name
+            .get_mut(&function_ref.name)
+            .expect("function not found by name")
+            .remove(&function_ref.arg_types)
+            .expect("function not found by argument types");
+    }
+
+    pub fn iter_all(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
+        self.table_by_name.values()
+    }
+
     pub fn iter_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
             .iter()
-            .filter(|(_, v)| {
-                // Internally, a table with an associated source can be
-                // MATERIALIZED SOURCE or TABLE.
-                v.associated_source_id.is_some()
-                    && self.get_source_by_name(v.name()).unwrap().kind() == SourceKind::Table
-            })
+            .filter(|(_, v)| v.is_table())
+            .map(|(_, v)| v)
+    }
+
+    pub fn iter_internal_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
+        self.table_by_name
+            .iter()
+            .filter(|(_, v)| v.is_internal_table())
             .map(|(_, v)| v)
     }
 
@@ -204,9 +325,7 @@ impl SchemaCatalog {
     pub fn iter_mv(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
             .iter()
-            .filter(|(_, v)| {
-                v.associated_source_id.is_none() && valid_table_name(&v.name) && !v.is_index
-            })
+            .filter(|(_, v)| v.is_mview() && valid_table_name(&v.name))
             .map(|(_, v)| v)
     }
 
@@ -215,22 +334,9 @@ impl SchemaCatalog {
         self.index_by_name.values()
     }
 
-    /// Iterate all sources, including the materialized sources.
+    /// Iterate all sources
     pub fn iter_source(&self) -> impl Iterator<Item = &Arc<SourceCatalog>> {
-        self.source_by_name
-            .iter()
-            .filter(|(_, v)| v.kind() == SourceKind::Stream)
-            .map(|(_, v)| v)
-    }
-
-    /// Iterate the materialized sources.
-    pub fn iter_materialized_source(&self) -> impl Iterator<Item = &Arc<SourceCatalog>> {
-        self.source_by_name
-            .iter()
-            .filter(|(name, v)| {
-                v.kind() == SourceKind::Stream && self.table_by_name.get(*name).is_some()
-            })
-            .map(|(_, v)| v)
+        self.source_by_name.values()
     }
 
     pub fn iter_sink(&self) -> impl Iterator<Item = &Arc<SinkCatalog>> {
@@ -290,6 +396,14 @@ impl SchemaCatalog {
         self.view_by_name.get(view_name)
     }
 
+    pub fn get_function_by_name_args(
+        &self,
+        name: &str,
+        args: &[DataType],
+    ) -> Option<&Arc<FunctionCatalog>> {
+        self.function_by_name.get(name)?.get(args)
+    }
+
     pub fn id(&self) -> SchemaId {
         self.id
     }
@@ -303,8 +417,8 @@ impl SchemaCatalog {
     }
 }
 
-impl From<&ProstSchema> for SchemaCatalog {
-    fn from(schema: &ProstSchema) -> Self {
+impl From<&PbSchema> for SchemaCatalog {
+    fn from(schema: &PbSchema) -> Self {
         Self {
             id: schema.id,
             owner: schema.owner,
@@ -321,6 +435,8 @@ impl From<&ProstSchema> for SchemaCatalog {
             system_table_by_name: HashMap::new(),
             view_by_name: HashMap::new(),
             view_by_id: HashMap::new(),
+            function_by_name: HashMap::new(),
+            function_by_id: HashMap::new(),
         }
     }
 }

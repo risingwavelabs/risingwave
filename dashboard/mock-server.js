@@ -1,11 +1,11 @@
 /*
- * Copyright 2022 Singularity Data
+ * Copyright 2023 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -38,6 +38,26 @@ app.get("/materialized_views", (req, res, next) => {
   res.json(require("./mock/materialized_views.json"))
 })
 
+app.get("/tables", (req, res, next) => {
+  res.json(require("./mock/tables.json"))
+})
+
+app.get("/indexes", (req, res, next) => {
+  res.json(require("./mock/indexes.json"))
+})
+
+app.get("/internal_tables", (req, res, next) => {
+  res.json(require("./mock/internal_tables.json"))
+})
+
+app.get("/sinks", (req, res, next) => {
+  res.json(require("./mock/sinks.json"))
+})
+
+app.get("/sources", (req, res, next) => {
+  res.json(require("./mock/sources.json"))
+})
+
 app.get("/clusters/0", (req, res, next) => {
   res.json(require("./mock/cluster_0.json"))
 })
@@ -50,10 +70,10 @@ app.get("/clusters/2", (req, res, next) => {
   res.json(require("./mock/cluster_2.json"))
 })
 
-app.get("/sources/", (req, res, next) => {
-  res.json(require("./mock/sources.json"))
-})
-
 app.get("/metrics/cluster", (req, res, next) => {
   res.json(require("./mock/metrics_cluster.json"))
+})
+
+app.get("/monitor/await_tree/1", (req, res, next) => {
+  res.json(require("./mock/await_tree_1.json"))
 })

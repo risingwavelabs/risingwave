@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,11 +14,10 @@
 
 use anyhow::Result;
 
-use crate::common::MetaServiceOpts;
+use crate::CtlContext;
 
-pub async fn list() -> Result<()> {
-    let meta_opts = MetaServiceOpts::from_env()?;
-    let meta = meta_opts.create_meta_client().await?;
+pub async fn list(context: &CtlContext) -> Result<()> {
+    let meta = context.meta_client().await?;
     let mvs = meta.risectl_list_state_tables().await?;
     for mv in mvs {
         println!("#{}: {}", mv.id, mv.name);

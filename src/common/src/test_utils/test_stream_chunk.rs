@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +17,7 @@ use itertools::Itertools;
 use crate::array::column::Column;
 use crate::array::{F32Array, I32Array, I64Array, Op, StreamChunk};
 use crate::catalog::{Field, Schema};
-use crate::row::Row;
+use crate::row::OwnedRow;
 use crate::types::{DataType, Datum, ScalarImpl};
 
 pub trait TestStreamChunk {
@@ -37,9 +37,9 @@ pub trait TestStreamChunk {
 
     fn op_at(&self, idx: usize) -> Op;
 
-    fn row_at(&self, idx: usize) -> Row;
+    fn row_at(&self, idx: usize) -> OwnedRow;
 
-    fn row_with_op_at(&self, idx: usize) -> (Op, Row) {
+    fn row_with_op_at(&self, idx: usize) -> (Op, OwnedRow) {
         (self.op_at(idx), self.row_at(idx))
     }
 
@@ -83,11 +83,7 @@ impl BigStreamChunk {
             .collect();
 
         let col = {
-            let array = I32Array::from_slice(
-                &std::iter::repeat(Some(114_514))
-                    .take(capacity)
-                    .collect_vec(),
-            );
+            let array = I32Array::from_iter(std::iter::repeat(114_514).take(capacity));
             Column::from(array)
         };
 
@@ -114,8 +110,8 @@ impl TestStreamChunk for BigStreamChunk {
         self.0.ops()[i]
     }
 
-    fn row_at(&self, _idx: usize) -> Row {
-        Row::new(vec![Some(ScalarImpl::Int32(114_514))])
+    fn row_at(&self, _idx: usize) -> OwnedRow {
+        OwnedRow::new(vec![Some(ScalarImpl::Int32(114_514))])
     }
 }
 
@@ -173,20 +169,20 @@ impl TestStreamChunk for WhatEverStreamChunk {
         }
     }
 
-    fn row_at(&self, idx: usize) -> Row {
+    fn row_at(&self, idx: usize) -> OwnedRow {
         match idx {
-            0 => Row::new(vec![
+            0 => OwnedRow::new(vec![
                 Some(1i32.into()),
                 Some(4.0f32.into()),
                 Some(5i64.into()),
             ]),
-            1 => Row::new(vec![Some(2i32.into()), None, Some(6i64.into())]),
-            2 => Row::new(vec![
+            1 => OwnedRow::new(vec![Some(2i32.into()), None, Some(6i64.into())]),
+            2 => OwnedRow::new(vec![
                 Some(3i32.into()),
                 Some(2.2f32.into()),
                 Some(8i64.into()),
             ]),
-            3 => Row::new(vec![
+            3 => OwnedRow::new(vec![
                 Some(4i32.into()),
                 Some(1.8f32.into()),
                 Some(9i64.into()),

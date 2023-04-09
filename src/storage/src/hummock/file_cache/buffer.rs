@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use parking_lot::RwLock;
-use risingwave_common::cache::LruCache;
+use risingwave_common::cache::{CachePriority, LruCache};
 
 use super::LRU_SHARD_BITS;
 use crate::hummock::{TieredCacheEntryHolder, TieredCacheKey, TieredCacheValue};
@@ -73,15 +73,16 @@ where
         Self {
             capacity,
             core: Arc::new(RwLock::new(TwoLevelBufferCore {
-                active_buffer: Arc::new(LruCache::new(LRU_SHARD_BITS, capacity)),
-                frozen_buffer: Arc::new(LruCache::new(LRU_SHARD_BITS, capacity)),
+                active_buffer: Arc::new(LruCache::new(LRU_SHARD_BITS, capacity, 0)),
+                frozen_buffer: Arc::new(LruCache::new(LRU_SHARD_BITS, capacity, 0)),
             })),
         }
     }
 
     pub fn insert(&self, hash: u64, key: K, charge: usize, value: V) {
         let core = self.core.read();
-        core.active_buffer.insert(key, hash, charge, value);
+        core.active_buffer
+            .insert(key, hash, charge, value, CachePriority::High);
     }
 
     pub fn get(&self, hash: u64, key: &K) -> Option<TieredCacheEntryHolder<K, V>> {
@@ -114,7 +115,7 @@ where
     }
 
     pub fn rotate(&self) -> Buffer<K, V> {
-        let mut buffer = Arc::new(LruCache::new(LRU_SHARD_BITS, self.capacity));
+        let mut buffer = Arc::new(LruCache::new(LRU_SHARD_BITS, self.capacity, 0));
         let mut core = self.core.write();
         std::mem::swap(&mut buffer, &mut core.active_buffer);
         std::mem::swap(&mut buffer, &mut core.frozen_buffer);

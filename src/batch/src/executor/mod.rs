@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -62,6 +62,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PlanNode;
+use risingwave_pb::common::BatchQueryEpoch;
 pub use row_seq_scan::*;
 pub use sort_agg::*;
 pub use source::*;
@@ -120,7 +121,7 @@ pub struct ExecutorBuilder<'a, C> {
     pub plan_node: &'a PlanNode,
     pub task_id: &'a TaskId,
     context: C,
-    epoch: u64,
+    epoch: BatchQueryEpoch,
 }
 
 macro_rules! build_executor {
@@ -136,7 +137,12 @@ macro_rules! build_executor {
 }
 
 impl<'a, C: Clone> ExecutorBuilder<'a, C> {
-    pub fn new(plan_node: &'a PlanNode, task_id: &'a TaskId, context: C, epoch: u64) -> Self {
+    pub fn new(
+        plan_node: &'a PlanNode,
+        task_id: &'a TaskId,
+        context: C,
+        epoch: BatchQueryEpoch,
+    ) -> Self {
         Self {
             plan_node,
             task_id,
@@ -147,7 +153,12 @@ impl<'a, C: Clone> ExecutorBuilder<'a, C> {
 
     #[must_use]
     pub fn clone_for_plan(&self, plan_node: &'a PlanNode) -> Self {
-        ExecutorBuilder::new(plan_node, self.task_id, self.context.clone(), self.epoch)
+        ExecutorBuilder::new(
+            plan_node,
+            self.task_id,
+            self.context.clone(),
+            self.epoch.clone(),
+        )
     }
 
     pub fn plan_node(&self) -> &PlanNode {
@@ -158,8 +169,8 @@ impl<'a, C: Clone> ExecutorBuilder<'a, C> {
         &self.context
     }
 
-    pub fn epoch(&self) -> u64 {
-        self.epoch
+    pub fn epoch(&self) -> BatchQueryEpoch {
+        self.epoch.clone()
     }
 }
 
@@ -197,7 +208,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::Values => ValuesExecutor,
             NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
             NodeBody::HashJoin => HashJoinExecutor<()>,
-            NodeBody::SortMergeJoin => SortMergeJoinExecutor,
+            // NodeBody::SortMergeJoin => SortMergeJoinExecutor,
             NodeBody::HashAgg => HashAggExecutorBuilder,
             NodeBody::MergeSortExchange => MergeSortExchangeExecutorBuilder,
             NodeBody::TableFunction => TableFunctionExecutorBuilder,
@@ -218,7 +229,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
 
 #[cfg(test)]
 mod tests {
-
+    use risingwave_hummock_sdk::to_committed_batch_query_epoch;
     use risingwave_pb::batch_plan::PlanNode;
 
     use crate::executor::ExecutorBuilder;
@@ -238,7 +249,7 @@ mod tests {
             &plan_node,
             task_id,
             ComputeNodeContext::for_test(),
-            u64::MAX,
+            to_committed_batch_query_epoch(u64::MAX),
         );
         let child_plan = &PlanNode {
             ..Default::default()

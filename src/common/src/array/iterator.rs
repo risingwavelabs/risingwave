@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,8 +15,6 @@
 use std::iter::TrustedLen;
 
 use super::Array;
-use crate::array::ArrayImpl;
-use crate::types::DatumRef;
 
 pub struct ArrayIterator<'a, A: Array> {
     data: &'a A,
@@ -29,8 +27,6 @@ impl<'a, A: Array> ArrayIterator<'a, A> {
     }
 }
 
-unsafe impl<'a, A: Array> TrustedLen for ArrayIterator<'a, A> {}
-
 impl<'a, A: Array> Iterator for ArrayIterator<'a, A> {
     type Item = Option<A::RefItem<'a>>;
 
@@ -38,7 +34,8 @@ impl<'a, A: Array> Iterator for ArrayIterator<'a, A> {
         if self.pos >= self.data.len() {
             None
         } else {
-            let item = self.data.value_at(self.pos);
+            // SAFETY: bounds check is done by `self.pos < self.data.len()`.
+            let item = unsafe { self.data.value_at_unchecked(self.pos) };
             self.pos += 1;
             Some(item)
         }
@@ -50,54 +47,15 @@ impl<'a, A: Array> Iterator for ArrayIterator<'a, A> {
     }
 }
 
-pub struct ArrayImplIterator<'a> {
-    data: &'a ArrayImpl,
-    pos: usize,
-}
-
-impl<'a> ArrayImplIterator<'a> {
-    pub fn new(data: &'a ArrayImpl) -> Self {
-        Self { data, pos: 0 }
-    }
-}
-
-unsafe impl<'a> TrustedLen for ArrayImplIterator<'a> {}
-
-impl<'a> Iterator for ArrayImplIterator<'a> {
-    type Item = DatumRef<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.pos >= self.data.len() {
-            None
-        } else {
-            let item = self.data.value_at(self.pos);
-            self.pos += 1;
-            Some(item)
-        }
-    }
-
-    fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        if self.pos + n >= self.data.len() {
-            None
-        } else {
-            let item = self.data.value_at(self.pos + n);
-            self.pos += n + 1;
-            Some(item)
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let size = self.data.len() - self.pos;
-        (size, Some(size))
-    }
-}
+impl<'a, A: Array> ExactSizeIterator for ArrayIterator<'a, A> {}
+unsafe impl<'a, A: Array> TrustedLen for ArrayIterator<'a, A> {}
 
 #[cfg(test)]
 mod tests {
     use paste::paste;
 
     use super::*;
-    use crate::array::ArrayBuilder;
+    use crate::array::{ArrayBuilder, ArrayImpl};
     use crate::for_all_variants;
 
     macro_rules! test_trusted_len {

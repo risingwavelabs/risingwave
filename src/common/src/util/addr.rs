@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,9 +15,8 @@
 use std::net::SocketAddr;
 use std::str::FromStr;
 
-use risingwave_pb::common::HostAddress as ProstHostAddress;
-
-use crate::error::{internal_error, Result};
+use anyhow::anyhow;
+use risingwave_pb::common::PbHostAddress;
 
 /// General host address and port.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -31,7 +30,6 @@ impl std::fmt::Display for HostAddr {
         write!(f, "{}:{}", self.host, self.port)
     }
 }
-
 impl From<SocketAddr> for HostAddr {
     fn from(addr: SocketAddr) -> Self {
         HostAddr {
@@ -42,39 +40,39 @@ impl From<SocketAddr> for HostAddr {
 }
 
 impl TryFrom<&str> for HostAddr {
-    type Error = crate::error::RwError;
+    type Error = anyhow::Error;
 
-    fn try_from(s: &str) -> Result<Self> {
-        let addr = url::Url::parse(&format!("http://{}", s))
-            .map_err(|e| internal_error(format!("{}: {}", e, s)))?;
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        let addr =
+            url::Url::parse(&format!("http://{}", s)).map_err(|e| anyhow!("{}: {}", e, s))?;
         Ok(HostAddr {
             host: addr
                 .host()
-                .ok_or_else(|| internal_error("invalid host"))?
+                .ok_or_else(|| anyhow!("invalid host"))?
                 .to_string(),
-            port: addr.port().ok_or_else(|| internal_error("invalid port"))?,
+            port: addr.port().ok_or_else(|| anyhow!("invalid port"))?,
         })
     }
 }
 
 impl TryFrom<&String> for HostAddr {
-    type Error = crate::error::RwError;
+    type Error = anyhow::Error;
 
-    fn try_from(s: &String) -> Result<Self> {
+    fn try_from(s: &String) -> Result<Self, Self::Error> {
         Self::try_from(s.as_str())
     }
 }
 
 impl FromStr for HostAddr {
-    type Err = crate::error::RwError;
+    type Err = anyhow::Error;
 
-    fn from_str(s: &str) -> Result<Self> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::try_from(s)
     }
 }
 
-impl From<&ProstHostAddress> for HostAddr {
-    fn from(addr: &ProstHostAddress) -> Self {
+impl From<&PbHostAddress> for HostAddr {
+    fn from(addr: &PbHostAddress) -> Self {
         HostAddr {
             host: addr.get_host().to_string(),
             port: addr.get_port() as u16,
@@ -83,8 +81,8 @@ impl From<&ProstHostAddress> for HostAddr {
 }
 
 impl HostAddr {
-    pub fn to_protobuf(&self) -> ProstHostAddress {
-        ProstHostAddress {
+    pub fn to_protobuf(&self) -> PbHostAddress {
+        PbHostAddress {
             host: self.host.clone(),
             port: self.port as i32,
         }

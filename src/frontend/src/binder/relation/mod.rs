@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,27 +13,42 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
+use std::ops::Deref;
 use std::str::FromStr;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    Field, TableId, DEFAULT_SCHEMA_NAME, RW_INTERNAL_TABLE_FUNCTION_NAME,
+    Field, Schema, TableId, DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME,
+    RW_INTERNAL_TABLE_FUNCTION_NAME,
 };
 use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
-use risingwave_sqlparser::ast::{FunctionArg, Ident, ObjectName, TableAlias, TableFactor};
+use risingwave_common::types::DataType;
+use risingwave_sqlparser::ast::{
+    Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias, TableFactor,
+};
 
+use self::watermark::is_watermark_func;
 use super::bind_context::ColumnBinding;
-use crate::binder::{Binder, BoundSetExpr};
-use crate::expr::{Expr, ExprImpl, TableFunction, TableFunctionType};
+use super::statement::RewriteExprsRecursive;
+use crate::binder::Binder;
+use crate::catalog::function_catalog::FunctionKind;
+use crate::catalog::system_catalog::pg_catalog::{
+    PG_GET_KEYWORDS_FUNC_NAME, PG_KEYWORDS_TABLE_NAME,
+};
+use crate::expr::{Expr, ExprImpl, InputRef, TableFunction, TableFunctionType};
 
 mod join;
+mod share;
 mod subquery;
 mod table_or_source;
+mod watermark;
 mod window_table_function;
 
 pub use join::BoundJoin;
+pub use share::BoundShare;
 pub use subquery::BoundSubquery;
-pub use table_or_source::{BoundBaseTable, BoundSource, BoundSystemTable, BoundTableSource};
+pub use table_or_source::{BoundBaseTable, BoundSource, BoundSystemTable};
+pub use watermark::BoundWatermark;
 pub use window_table_function::{BoundWindowTableFunction, WindowTableFunctionKind};
 
 use crate::expr::{CorrelatedId, Depth};
@@ -49,27 +64,31 @@ pub enum Relation {
     Join(Box<BoundJoin>),
     WindowTableFunction(Box<BoundWindowTableFunction>),
     TableFunction(Box<TableFunction>),
+    Watermark(Box<BoundWatermark>),
+    Share(Box<BoundShare>),
+}
+
+impl RewriteExprsRecursive for Relation {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
+        match self {
+            Relation::Subquery(inner) => inner.rewrite_exprs_recursive(rewriter),
+            Relation::Join(inner) => inner.rewrite_exprs_recursive(rewriter),
+            Relation::WindowTableFunction(inner) => inner.rewrite_exprs_recursive(rewriter),
+            Relation::Watermark(inner) => inner.rewrite_exprs_recursive(rewriter),
+            Relation::Share(inner) => inner.rewrite_exprs_recursive(rewriter),
+            Relation::TableFunction(inner) => {
+                let new_args = std::mem::take(&mut inner.args)
+                    .into_iter()
+                    .map(|expr| rewriter.rewrite_expr(expr))
+                    .collect();
+                inner.args = new_args;
+            }
+            _ => {}
+        }
+    }
 }
 
 impl Relation {
-    pub fn contains_sys_table(&self) -> bool {
-        match self {
-            Relation::SystemTable(_) => true,
-            Relation::Subquery(s) => {
-                if let BoundSetExpr::Select(select) = &s.query.body
-                    && let Some(relation) = &select.from {
-                    relation.contains_sys_table()
-                } else {
-                    false
-                }
-            },
-            Relation::Join(j) => {
-                j.left.contains_sys_table() || j.right.contains_sys_table()
-            },
-            _ => false,
-        }
-    }
-
     pub fn is_correlated(&self, depth: Depth) -> bool {
         match self {
             Relation::Subquery(subquery) => subquery.query.is_correlated(depth),
@@ -169,9 +188,34 @@ impl Binder {
         Self::resolve_single_name(name.0, "index name")
     }
 
+    /// return the `view_name`
+    pub fn resolve_view_name(name: ObjectName) -> Result<String> {
+        Self::resolve_single_name(name.0, "view name")
+    }
+
+    /// return the `sink_name`
+    pub fn resolve_sink_name(name: ObjectName) -> Result<String> {
+        Self::resolve_single_name(name.0, "sink name")
+    }
+
+    /// return the `table_name`
+    pub fn resolve_table_name(name: ObjectName) -> Result<String> {
+        Self::resolve_single_name(name.0, "table name")
+    }
+
+    /// return the `source_name`
+    pub fn resolve_source_name(name: ObjectName) -> Result<String> {
+        Self::resolve_single_name(name.0, "source name")
+    }
+
     /// return the `user_name`
     pub fn resolve_user_name(name: ObjectName) -> Result<String> {
         Self::resolve_single_name(name.0, "user name")
+    }
+
+    /// return the `connection_name`
+    pub fn resolve_connection_name(name: ObjectName) -> Result<String> {
+        Self::resolve_single_name(name.0, "connection name")
     }
 
     /// Fill the [`BindContext`](super::BindContext) for table.
@@ -245,12 +289,13 @@ impl Binder {
         &mut self,
         name: ObjectName,
         alias: Option<TableAlias>,
+        for_system_time_as_of_now: bool,
     ) -> Result<Relation> {
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
-        if schema_name.is_none() && let Some(bound_query) = self.cte_to_relation.get(&table_name) {
+        if schema_name.is_none() && let Some(item) = self.context.cte_to_relation.get(&table_name) {
             // Handles CTE
 
-            let (query, mut original_alias) = bound_query.clone();
+            let (share_id, query, mut original_alias) = item.deref().clone();
             debug_assert_eq!(original_alias.name.real_value(), table_name); // The original CTE alias ought to be its table name.
 
             if let Some(from_alias) = alias {
@@ -270,13 +315,52 @@ impl Binder {
                     .fields
                     .iter()
                     .map(|f| (false, f.clone())),
-                table_name,
+                table_name.clone(),
                 Some(original_alias),
             )?;
-            Ok(Relation::Subquery(Box::new(BoundSubquery { query })))
+
+            // Share the CTE.
+            let input_relation = Relation::Subquery(Box::new(BoundSubquery { query }));
+            let share_relation = Relation::Share(Box::new(BoundShare { share_id, input: input_relation }));
+            Ok(share_relation)
         } else {
 
-            self.bind_relation_by_name_inner(schema_name.as_deref(), &table_name, alias)
+            self.bind_relation_by_name_inner(schema_name.as_deref(), &table_name, alias, for_system_time_as_of_now)
+        }
+    }
+
+    // Bind a relation provided a function arg.
+    fn bind_relation_by_function_arg(
+        &mut self,
+        arg: Option<FunctionArg>,
+        err_msg: &str,
+    ) -> Result<(Relation, ObjectName)> {
+        let Some(FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))) = arg else {
+            return Err(ErrorCode::BindError(err_msg.to_string()).into());
+        };
+        let table_name = match expr {
+            ParserExpr::Identifier(ident) => Ok::<_, RwError>(ObjectName(vec![ident])),
+            ParserExpr::CompoundIdentifier(idents) => Ok(ObjectName(idents)),
+            _ => Err(ErrorCode::BindError(err_msg.to_string()).into()),
+        }?;
+
+        Ok((
+            self.bind_relation_by_name(table_name.clone(), None, false)?,
+            table_name,
+        ))
+    }
+
+    // Bind column provided a function arg.
+    fn bind_column_by_function_args(
+        &mut self,
+        arg: Option<FunctionArg>,
+        err_msg: &str,
+    ) -> Result<Box<InputRef>> {
+        if let Some(time_col_arg) = arg
+          && let Some(ExprImpl::InputRef(time_col)) = self.bind_function_arg(time_col_arg)?.into_iter().next() {
+            Ok(time_col)
+        } else {
+            Err(ErrorCode::BindError(err_msg.to_string()).into())
         }
     }
 
@@ -306,52 +390,82 @@ impl Binder {
             .map_or(DEFAULT_SCHEMA_NAME.to_string(), |arg| arg.to_string());
 
         let table_name = self.catalog.get_table_name_by_id(table_id)?;
-        self.bind_relation_by_name_inner(Some(&schema), &table_name, alias)
+        self.bind_relation_by_name_inner(Some(&schema), &table_name, alias, false)
     }
 
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
         match table_factor {
-            TableFactor::Table { name, alias } => self.bind_relation_by_name(name, alias),
+            TableFactor::Table {
+                name,
+                alias,
+                for_system_time_as_of_now,
+            } => self.bind_relation_by_name(name, alias, for_system_time_as_of_now),
             TableFactor::TableFunction { name, alias, args } => {
                 let func_name = &name.0[0].real_value();
                 if func_name.eq_ignore_ascii_case(RW_INTERNAL_TABLE_FUNCTION_NAME) {
                     return self.bind_internal_table(args, alias);
                 }
-                if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {
-                    let args: Vec<ExprImpl> = args
-                        .into_iter()
-                        .map(|arg| self.bind_function_arg(arg))
-                        .flatten_ok()
-                        .try_collect()?;
-                    let tf = TableFunction::new(table_function_type, args)?;
-                    let columns = [(
-                        false,
-                        Field {
-                            data_type: tf.return_type(),
-                            name: tf.function_type.name().to_string(),
-                            sub_fields: vec![],
-                            type_name: "".to_string(),
-                        },
-                    )]
-                    .into_iter();
-
-                    self.bind_table_to_context(
-                        columns,
-                        tf.function_type.name().to_string(),
+                if func_name.eq_ignore_ascii_case(PG_GET_KEYWORDS_FUNC_NAME)
+                    || name.real_value().eq_ignore_ascii_case(
+                        format!("{}.{}", PG_CATALOG_SCHEMA_NAME, PG_GET_KEYWORDS_FUNC_NAME)
+                            .as_str(),
+                    )
+                {
+                    return self.bind_relation_by_name_inner(
+                        Some(PG_CATALOG_SCHEMA_NAME),
+                        PG_KEYWORDS_TABLE_NAME,
                         alias,
-                    )?;
-
-                    return Ok(Relation::TableFunction(Box::new(tf)));
+                        false,
+                    );
                 }
-                let kind = WindowTableFunctionKind::from_str(func_name).map_err(|_| {
-                    ErrorCode::NotImplemented(
-                        format!("unknown table function kind: {}", func_name),
+                if let Ok(kind) = WindowTableFunctionKind::from_str(func_name) {
+                    return Ok(Relation::WindowTableFunction(Box::new(
+                        self.bind_window_table_function(alias, kind, args)?,
+                    )));
+                }
+                if is_watermark_func(func_name) {
+                    return Ok(Relation::Watermark(Box::new(
+                        self.bind_watermark(alias, args)?,
+                    )));
+                };
+
+                let args: Vec<ExprImpl> = args
+                    .into_iter()
+                    .map(|arg| self.bind_function_arg(arg))
+                    .flatten_ok()
+                    .try_collect()?;
+                let tf = if let Some(func) = self
+                    .catalog
+                    .first_valid_schema(
+                        &self.db_name,
+                        &self.search_path,
+                        &self.auth_context.user_name,
+                    )?
+                    .get_function_by_name_args(
+                        func_name,
+                        &args.iter().map(|arg| arg.return_type()).collect_vec(),
+                    ) && matches!(func.kind, FunctionKind::Table { .. })
+                {
+                    TableFunction::new_user_defined(func.clone(), args)
+                } else if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {
+                    TableFunction::new(table_function_type, args)?
+                } else {
+                    return Err(ErrorCode::NotImplemented(
+                        format!("unknown table function: {}", func_name),
                         1191.into(),
                     )
-                })?;
-                Ok(Relation::WindowTableFunction(Box::new(
-                    self.bind_window_table_function(alias, kind, args)?,
-                )))
+                    .into());
+                };
+                let columns = if let DataType::Struct(s) = tf.return_type() {
+                    let schema = Schema::from(&*s);
+                    schema.fields.into_iter().map(|f| (false, f)).collect_vec()
+                } else {
+                    vec![(false, Field::with_name(tf.return_type(), tf.name()))]
+                };
+
+                self.bind_table_to_context(columns, tf.name().to_string(), alias)?;
+
+                Ok(Relation::TableFunction(Box::new(tf)))
             }
             TableFactor::Derived {
                 lateral,

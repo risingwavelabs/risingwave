@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId, INVALID_VERSION_ID};
 use risingwave_pb::hummock::{HummockVersion, Level};
 use risingwave_rpc_client::HummockMetaClient;
@@ -117,19 +117,6 @@ impl PinnedVersion {
         }
     }
 
-    pub(crate) fn new_local_related_pin_version(&self, version: HummockVersion) -> Self {
-        assert_eq!(
-            self.version.id, version.id,
-            "local related version {} to pin not equal to current version id {}",
-            version.id, self.version.id
-        );
-        PinnedVersion {
-            version: Arc::new(version),
-            compaction_group_index: self.compaction_group_index.clone(),
-            guard: self.guard.clone(),
-        }
-    }
-
     pub fn id(&self) -> HummockVersionId {
         self.version.id
     }
@@ -150,10 +137,6 @@ impl PinnedVersion {
     }
 
     pub fn levels(&self, table_id: TableId) -> Vec<&Level> {
-        #[cfg(any(test, feature = "test"))]
-        if table_id.table_id() == 0 {
-            return self.version.get_combined_levels();
-        }
         match self.compaction_group_index.get(&table_id) {
             Some(compaction_group_id) => self.levels_by_compaction_groups_id(*compaction_group_id),
             None => vec![],

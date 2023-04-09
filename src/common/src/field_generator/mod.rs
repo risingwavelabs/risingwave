@@ -1,4 +1,4 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,12 +19,13 @@ mod varchar;
 use std::time::Duration;
 
 use anyhow::Result;
+use chrono::{DateTime, FixedOffset};
 pub use numeric::*;
 use serde_json::Value;
 pub use timestamp::*;
 pub use varchar::*;
 
-use crate::array::StructValue;
+use crate::array::{ListValue, StructValue};
 use crate::types::{DataType, Datum, ScalarImpl};
 
 pub const DEFAULT_MIN: i16 = i16::MIN;
@@ -51,7 +52,13 @@ pub trait NumericFieldRandomGenerator {
 
 /// fields that can be continuously generated impl this trait
 pub trait NumericFieldSequenceGenerator {
-    fn new(start: Option<String>, end: Option<String>, offset: u64, step: u64) -> Result<Self>
+    fn new(
+        start: Option<String>,
+        end: Option<String>,
+        offset: u64,
+        step: u64,
+        event_offset: u64,
+    ) -> Result<Self>
     where
         Self: Sized;
 
@@ -61,15 +68,11 @@ pub trait NumericFieldSequenceGenerator {
 }
 
 /// the way that datagen create the field data. such as 'sequence' or 'random'.
+#[derive(Default)]
 pub enum FieldKind {
     Sequence,
+    #[default]
     Random,
-}
-
-impl Default for FieldKind {
-    fn default() -> Self {
-        FieldKind::Random
-    }
 }
 
 pub enum FieldGeneratorImpl {
@@ -86,6 +89,7 @@ pub enum FieldGeneratorImpl {
     Varchar(VarcharField),
     Timestamp(TimestampField),
     Struct(Vec<(String, FieldGeneratorImpl)>),
+    List(Box<FieldGeneratorImpl>, usize),
 }
 
 impl FieldGeneratorImpl {
@@ -95,6 +99,7 @@ impl FieldGeneratorImpl {
         end: Option<String>,
         split_index: u64,
         split_num: u64,
+        offset: u64,
     ) -> Result<Self> {
         match data_type {
             DataType::Int16 => Ok(FieldGeneratorImpl::I16Sequence(I16SequenceField::new(
@@ -102,30 +107,35 @@ impl FieldGeneratorImpl {
                 end,
                 split_index,
                 split_num,
+                offset,
             )?)),
             DataType::Int32 => Ok(FieldGeneratorImpl::I32Sequence(I32SequenceField::new(
                 start,
                 end,
                 split_index,
                 split_num,
+                offset,
             )?)),
             DataType::Int64 => Ok(FieldGeneratorImpl::I64Sequence(I64SequenceField::new(
                 start,
                 end,
                 split_index,
                 split_num,
+                offset,
             )?)),
             DataType::Float32 => Ok(FieldGeneratorImpl::F32Sequence(F32SequenceField::new(
                 start,
                 end,
                 split_index,
                 split_num,
+                offset,
             )?)),
             DataType::Float64 => Ok(FieldGeneratorImpl::F64Sequence(F64SequenceField::new(
                 start,
                 end,
                 split_index,
                 split_num,
+                offset,
             )?)),
             _ => unimplemented!(),
         }
@@ -153,16 +163,18 @@ impl FieldGeneratorImpl {
             DataType::Float64 => Ok(FieldGeneratorImpl::F64Random(F64RandomField::new(
                 min, max, seed,
             )?)),
-            _ => unimplemented!(),
+            _ => unimplemented!("DataType: {}", data_type),
         }
     }
 
     pub fn with_timestamp(
+        base: Option<DateTime<FixedOffset>>,
         max_past: Option<String>,
         max_past_mode: Option<String>,
         seed: u64,
     ) -> Result<Self> {
         Ok(FieldGeneratorImpl::Timestamp(TimestampField::new(
+            base,
             max_past,
             max_past_mode,
             seed,
@@ -179,7 +191,16 @@ impl FieldGeneratorImpl {
         Ok(FieldGeneratorImpl::Struct(fields))
     }
 
-    pub fn generate(&mut self, offset: u64) -> Value {
+    pub fn with_list(field: FieldGeneratorImpl, length_option: Option<String>) -> Result<Self> {
+        let list_length = if let Some(length_option) = length_option {
+            length_option.parse::<usize>()?
+        } else {
+            DEFAULT_LENGTH
+        };
+        Ok(FieldGeneratorImpl::List(Box::new(field), list_length))
+    }
+
+    pub fn generate_json(&mut self, offset: u64) -> Value {
         match self {
             FieldGeneratorImpl::I16Sequence(f) => f.generate(),
             FieldGeneratorImpl::I32Sequence(f) => f.generate(),
@@ -196,9 +217,15 @@ impl FieldGeneratorImpl {
             FieldGeneratorImpl::Struct(fields) => {
                 let map = fields
                     .iter_mut()
-                    .map(|(name, gen)| (name.clone(), gen.generate(offset)))
+                    .map(|(name, gen)| (name.clone(), gen.generate_json(offset)))
                     .collect();
                 Value::Object(map)
+            }
+            FieldGeneratorImpl::List(field, list_length) => {
+                let vec = (0..*list_length)
+                    .map(|_| field.generate_json(offset))
+                    .collect::<Vec<_>>();
+                Value::Array(vec)
             }
         }
     }
@@ -224,6 +251,12 @@ impl FieldGeneratorImpl {
                     .collect();
                 Some(ScalarImpl::Struct(StructValue::new(data)))
             }
+            FieldGeneratorImpl::List(field, list_length) => {
+                let data = (0..*list_length)
+                    .map(|_| field.generate_datum(offset))
+                    .collect::<Vec<_>>();
+                Some(ScalarImpl::List(ListValue::new(data)))
+            }
         }
     }
 }
@@ -244,6 +277,7 @@ mod tests {
                     Some("20".to_string()),
                     split_index,
                     split_num,
+                    0,
                 )
                 .unwrap(),
             );
@@ -251,7 +285,7 @@ mod tests {
 
         for step in 0..5 {
             for (index, i32_field) in i32_fields.iter_mut().enumerate() {
-                let value = i32_field.generate(0);
+                let value = i32_field.generate_json(0);
                 assert!(value.is_number());
                 let num = value.as_u64();
                 let expected_num = split_num * step + 1 + index as u64;
@@ -275,18 +309,18 @@ mod tests {
             let mut generator = match data_type {
                 DataType::Varchar => FieldGeneratorImpl::with_varchar(None, seed).unwrap(),
                 DataType::Timestamp => {
-                    FieldGeneratorImpl::with_timestamp(None, None, seed).unwrap()
+                    FieldGeneratorImpl::with_timestamp(None, None, None, seed).unwrap()
                 }
                 _ => FieldGeneratorImpl::with_number_random(data_type, None, None, seed).unwrap(),
             };
 
-            let val1 = generator.generate(1);
-            let val2 = generator.generate(2);
+            let val1 = generator.generate_json(1);
+            let val2 = generator.generate_json(2);
 
             assert_ne!(val1, val2);
 
-            let val1_new = generator.generate(1);
-            let val2_new = generator.generate(2);
+            let val1_new = generator.generate_json(1);
+            let val2_new = generator.generate_json(2);
 
             assert_eq!(val1_new, val1);
             assert_eq!(val2_new, val2);
@@ -302,5 +336,17 @@ mod tests {
             assert_eq!(datum1_new, datum1);
             assert_eq!(datum2_new, datum2);
         }
+    }
+
+    #[test]
+    fn test_deterministic_timestamp() {
+        let seed = 1234;
+        let base_time: DateTime<FixedOffset> =
+            DateTime::parse_from_rfc3339("2020-01-01T00:00:00+00:00").unwrap();
+        let mut generator =
+            FieldGeneratorImpl::with_timestamp(Some(base_time), None, None, seed).unwrap();
+        let val1 = generator.generate_json(1);
+        let val2 = generator.generate_json(1);
+        assert_eq!(val1, val2);
     }
 }

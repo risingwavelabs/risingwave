@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,16 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
+use std::borrow::Cow;
 
-use crate::catalog::Field;
+use itertools::Itertools;
+use risingwave_pb::plan_common::{GeneratedColumnDesc, PbColumnCatalog, PbColumnDesc};
+
+use super::row_id_column_desc;
+use crate::catalog::{Field, ROW_ID_COLUMN_ID};
 use crate::error::ErrorCode;
 use crate::types::DataType;
 
 /// Column ID is the unique identifier of a column in a table. Different from table ID, column ID is
 /// not globally unique.
-#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ColumnId(i32);
 
 impl std::fmt::Debug for ColumnId {
@@ -37,14 +40,31 @@ impl ColumnId {
 }
 
 impl ColumnId {
-    pub fn get_id(&self) -> i32 {
+    pub const fn get_id(&self) -> i32 {
         self.0
+    }
+
+    /// Returns the subsequent column id.
+    #[must_use]
+    pub const fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
+
+    pub fn apply_delta_if_not_row_id(&mut self, delta: i32) {
+        if self.0 != ROW_ID_COLUMN_ID.get_id() {
+            self.0 += delta;
+        }
     }
 }
 
 impl From<i32> for ColumnId {
     fn from(column_id: i32) -> Self {
         Self::new(column_id)
+    }
+}
+impl From<&i32> for ColumnId {
+    fn from(column_id: &i32) -> Self {
+        Self::new(*column_id)
     }
 }
 
@@ -66,13 +86,14 @@ impl std::fmt::Display for ColumnId {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ColumnDesc {
     pub data_type: DataType,
     pub column_id: ColumnId,
     pub name: String,
     pub field_descs: Vec<ColumnDesc>,
     pub type_name: String,
+    pub generated_column: Option<GeneratedColumnDesc>,
 }
 
 impl ColumnDesc {
@@ -83,12 +104,13 @@ impl ColumnDesc {
             name: String::new(),
             field_descs: vec![],
             type_name: String::new(),
+            generated_column: None,
         }
     }
 
     /// Convert to proto
-    pub fn to_protobuf(&self) -> ProstColumnDesc {
-        ProstColumnDesc {
+    pub fn to_protobuf(&self) -> PbColumnDesc {
+        PbColumnDesc {
             column_type: Some(self.data_type.to_protobuf()),
             column_id: self.column_id.get_id(),
             name: self.name.clone(),
@@ -99,6 +121,7 @@ impl ColumnDesc {
                 .map(|f| f.to_protobuf())
                 .collect_vec(),
             type_name: self.type_name.clone(),
+            generated_column: self.generated_column.clone(),
         }
     }
 
@@ -141,6 +164,7 @@ impl ColumnDesc {
             name: name.to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
+            generated_column: None,
         }
     }
 
@@ -160,6 +184,7 @@ impl ColumnDesc {
             name: name.to_string(),
             field_descs: fields,
             type_name: type_name.to_string(),
+            generated_column: None,
         }
     }
 
@@ -174,16 +199,21 @@ impl ColumnDesc {
                 .map(Self::from_field_without_column_id)
                 .collect_vec(),
             type_name: field.type_name.clone(),
+            generated_column: None,
         }
     }
 
     pub fn from_field_without_column_id(field: &Field) -> Self {
         Self::from_field_with_column_id(field, 0)
     }
+
+    pub fn is_generated(&self) -> bool {
+        self.generated_column.is_some()
+    }
 }
 
-impl From<ProstColumnDesc> for ColumnDesc {
-    fn from(prost: ProstColumnDesc) -> Self {
+impl From<PbColumnDesc> for ColumnDesc {
+    fn from(prost: PbColumnDesc) -> Self {
         let field_descs: Vec<ColumnDesc> = prost
             .field_descs
             .into_iter()
@@ -195,17 +225,18 @@ impl From<ProstColumnDesc> for ColumnDesc {
             name: prost.name,
             type_name: prost.type_name,
             field_descs,
+            generated_column: prost.generated_column,
         }
     }
 }
 
-impl From<&ProstColumnDesc> for ColumnDesc {
-    fn from(prost: &ProstColumnDesc) -> Self {
+impl From<&PbColumnDesc> for ColumnDesc {
+    fn from(prost: &PbColumnDesc) -> Self {
         prost.clone().into()
     }
 }
 
-impl From<&ColumnDesc> for ProstColumnDesc {
+impl From<&ColumnDesc> for PbColumnDesc {
     fn from(c: &ColumnDesc) -> Self {
         Self {
             column_type: c.data_type.to_protobuf().into(),
@@ -213,28 +244,127 @@ impl From<&ColumnDesc> for ProstColumnDesc {
             name: c.name.clone(),
             field_descs: c.field_descs.iter().map(ColumnDesc::to_protobuf).collect(),
             type_name: c.type_name.clone(),
+            generated_column: c.generated_column.clone(),
         }
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ColumnCatalog {
+    pub column_desc: ColumnDesc,
+    pub is_hidden: bool,
+}
+
+impl ColumnCatalog {
+    /// Get the column catalog's is hidden.
+    pub fn is_hidden(&self) -> bool {
+        self.is_hidden
+    }
+
+    /// If the column is a generated column
+    pub fn is_generated(&self) -> bool {
+        self.column_desc.generated_column.is_some()
+    }
+
+    /// Get a reference to the column desc's data type.
+    pub fn data_type(&self) -> &DataType {
+        &self.column_desc.data_type
+    }
+
+    /// Get the column desc's column id.
+    pub fn column_id(&self) -> ColumnId {
+        self.column_desc.column_id
+    }
+
+    /// Get a reference to the column desc's name.
+    pub fn name(&self) -> &str {
+        self.column_desc.name.as_ref()
+    }
+
+    /// Convert column catalog to proto
+    pub fn to_protobuf(&self) -> PbColumnCatalog {
+        PbColumnCatalog {
+            column_desc: Some(self.column_desc.to_protobuf()),
+            is_hidden: self.is_hidden,
+        }
+    }
+
+    /// Creates a row ID column (for implicit primary key).
+    pub fn row_id_column() -> Self {
+        Self {
+            column_desc: row_id_column_desc(),
+            is_hidden: true,
+        }
+    }
+}
+
+impl From<PbColumnCatalog> for ColumnCatalog {
+    fn from(prost: PbColumnCatalog) -> Self {
+        Self {
+            column_desc: prost.column_desc.unwrap().into(),
+            is_hidden: prost.is_hidden,
+        }
+    }
+}
+
+impl ColumnCatalog {
+    pub fn name_with_hidden(&self) -> Cow<'_, str> {
+        if self.is_hidden {
+            Cow::Owned(format!("{}(hidden)", self.column_desc.name))
+        } else {
+            Cow::Borrowed(&self.column_desc.name)
+        }
+    }
+}
+
+pub fn columns_extend(preserved_columns: &mut Vec<ColumnCatalog>, columns: Vec<ColumnCatalog>) {
+    debug_assert_eq!(ROW_ID_COLUMN_ID.get_id(), 0);
+    let mut max_incoming_column_id = ROW_ID_COLUMN_ID.get_id();
+    columns.iter().for_each(|column| {
+        let column_id = column.column_id().get_id();
+        if column_id > max_incoming_column_id {
+            max_incoming_column_id = column_id;
+        }
+    });
+    preserved_columns.iter_mut().for_each(|column| {
+        column
+            .column_desc
+            .column_id
+            .apply_delta_if_not_row_id(max_incoming_column_id)
+    });
+
+    preserved_columns.extend(columns);
+}
+
+pub fn is_column_ids_dedup(columns: &[ColumnCatalog]) -> bool {
+    let mut column_ids = columns
+        .iter()
+        .map(|column| column.column_id().get_id())
+        .collect_vec();
+    column_ids.sort();
+    let original_len = column_ids.len();
+    column_ids.dedup();
+    column_ids.len() == original_len
+}
+
 #[cfg(test)]
 pub mod tests {
-    use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
+    use risingwave_pb::plan_common::PbColumnDesc;
 
     use crate::catalog::ColumnDesc;
     use crate::test_prelude::*;
     use crate::types::DataType;
 
-    pub fn build_prost_desc() -> ProstColumnDesc {
+    pub fn build_prost_desc() -> PbColumnDesc {
         let city = vec![
-            ProstColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.address", 2),
-            ProstColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.zipcode", 3),
+            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.address", 2),
+            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.zipcode", 3),
         ];
         let country = vec![
-            ProstColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.address", 1),
-            ProstColumnDesc::new_struct("country.city", 4, ".test.City", city),
+            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.address", 1),
+            PbColumnDesc::new_struct("country.city", 4, ".test.City", city),
         ];
-        ProstColumnDesc::new_struct("country", 5, ".test.Country", country)
+        PbColumnDesc::new_struct("country", 5, ".test.Country", country)
     }
 
     pub fn build_desc() -> ColumnDesc {

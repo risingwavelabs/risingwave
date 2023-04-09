@@ -6,18 +6,13 @@ import "common.proto";
 import "hummock.proto";
 import "stream_plan.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
-
-message HangingChannel {
-  common.ActorInfo upstream = 1;
-  common.ActorInfo downstream = 2;
-}
 
 // Describe the fragments which will be running on this node
 message UpdateActorsRequest {
   string request_id = 1;
   repeated stream_plan.StreamActor actors = 2;
-  repeated HangingChannel hanging_channels = 3;
 }
 
 message UpdateActorsResponse {
@@ -79,6 +74,7 @@ message BarrierCompleteResponse {
     uint32 chain_actor_id = 1;
     bool done = 2;
     uint64 consumed_epoch = 3;
+    uint64 consumed_rows = 4;
   }
   string request_id = 1;
   common.Status status = 2;

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,18 +15,17 @@
 #![cfg_attr(coverage, feature(no_coverage))]
 
 use anyhow::Result;
-use tikv_jemallocator::Jemalloc;
+use risingwave_common::enable_jemalloc_on_unix;
 
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
+enable_jemalloc_on_unix!();
 
 #[cfg_attr(coverage, no_coverage)]
 fn main() -> Result<()> {
-    use clap::StructOpt;
+    use clap::Parser;
 
     let opts = risingwave_ctl::CliOpts::parse();
 
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
 
     // Note: Use a simple current thread runtime for ctl.
     // When there's a heavy workload, multiple thread runtime seems to respond slowly. May need

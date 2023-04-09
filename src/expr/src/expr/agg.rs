@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -34,6 +34,10 @@ pub enum AggKind {
     ApproxCountDistinct,
     ArrayAgg,
     FirstValue,
+    VarPop,
+    VarSamp,
+    StddevPop,
+    StddevSamp,
 }
 
 impl TryFrom<Type> for AggKind {
@@ -51,6 +55,10 @@ impl TryFrom<Type> for AggKind {
             Type::ApproxCountDistinct => Ok(AggKind::ApproxCountDistinct),
             Type::ArrayAgg => Ok(AggKind::ArrayAgg),
             Type::FirstValue => Ok(AggKind::FirstValue),
+            Type::StddevPop => Ok(AggKind::StddevPop),
+            Type::StddevSamp => Ok(AggKind::StddevSamp),
+            Type::VarPop => Ok(AggKind::VarPop),
+            Type::VarSamp => Ok(AggKind::VarSamp),
             Type::Unspecified => bail!("Unrecognized agg."),
         }
     }
@@ -69,6 +77,10 @@ impl AggKind {
             Self::ApproxCountDistinct => Type::ApproxCountDistinct,
             Self::ArrayAgg => Type::ArrayAgg,
             Self::FirstValue => Type::FirstValue,
+            Self::StddevPop => Type::StddevPop,
+            Self::StddevSamp => Type::StddevSamp,
+            Self::VarPop => Type::VarPop,
+            Self::VarSamp => Type::VarSamp,
         }
     }
 }

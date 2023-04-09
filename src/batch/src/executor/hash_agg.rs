@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,6 +22,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::vector_op::agg::{AggStateFactory, BoxedAggState};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
@@ -133,7 +134,7 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
             child,
             source.task_id.clone(),
             identity,
-            source.context.get_config().developer.batch_chunk_size,
+            source.context.get_config().developer.chunk_size,
         )
     }
 }
@@ -212,7 +213,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
 
                 // TODO: currently not a vectorized implementation
                 for state in states {
-                    state.update_single(&chunk, row_id)?
+                    state.update_single(&chunk, row_id).await?
                 }
             }
         }
@@ -245,7 +246,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 key.deserialize_to_builders(&mut group_builders[..], &self.group_key_types)?;
                 states
                     .into_iter()
-                    .zip_eq(&mut agg_builders)
+                    .zip_eq_fast(&mut agg_builders)
                     .try_for_each(|(mut aggregator, builder)| aggregator.output(builder))?;
             }
             if !has_next {
@@ -269,9 +270,9 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType as ProstDataType;
-    use risingwave_pb::expr::agg_call::{Arg, Type};
-    use risingwave_pb::expr::{AggCall, InputRefExpr};
+    use risingwave_pb::data::PbDataType;
+    use risingwave_pb::expr::agg_call::Type;
+    use risingwave_pb::expr::{AggCall, InputRef};
 
     use super::*;
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
@@ -306,19 +307,19 @@ mod tests {
 
         let agg_call = AggCall {
             r#type: Type::Sum as i32,
-            args: vec![Arg {
-                input: Some(InputRefExpr { column_idx: 2 }),
-                r#type: Some(ProstDataType {
+            args: vec![InputRef {
+                index: 2,
+                r#type: Some(PbDataType {
                     type_name: TypeName::Int32 as i32,
                     ..Default::default()
                 }),
             }],
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
             distinct: false,
-            order_by_fields: vec![],
+            order_by: vec![],
             filter: None,
         };
 
@@ -381,12 +382,12 @@ mod tests {
         let agg_call = AggCall {
             r#type: Type::Count as i32,
             args: vec![],
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
             distinct: false,
-            order_by_fields: vec![],
+            order_by: vec![],
             filter: None,
         };
 

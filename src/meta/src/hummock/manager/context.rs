@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,7 +19,7 @@ use fail::fail_point;
 use function_name::named;
 use itertools::Itertools;
 use risingwave_hummock_sdk::{
-    ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableId,
+    ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableObjectId,
 };
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{HummockVersion, ValidationTask};
@@ -29,6 +29,7 @@ use crate::hummock::manager::{
     commit_multi_var, read_lock, start_measure_real_process_timer, write_lock,
 };
 use crate::hummock::HummockManager;
+use crate::manager::META_NODE_ID;
 use crate::model::{BTreeMapTransaction, ValTransaction};
 use crate::storage::{MetaStore, Transaction};
 
@@ -54,7 +55,7 @@ where
         let mut compaction_guard = write_lock!(self, compaction).await;
         let compaction = compaction_guard.deref_mut();
         let (compact_statuses, compact_task_assignment) =
-            compaction.cancel_assigned_tasks_for_context_ids(context_ids.as_ref())?;
+            compaction.cancel_assigned_tasks_for_context_ids(context_ids.as_ref());
         for context_id in context_ids.as_ref() {
             self.compactor_manager
                 .purge_heartbeats_for_context(*context_id);
@@ -130,7 +131,7 @@ where
         &self,
         epoch: HummockEpoch,
         sstables: &Vec<ExtendedSstableInfo>,
-        sst_to_context: &HashMap<HummockSstableId, HummockContextId>,
+        sst_to_context: &HashMap<HummockSstableObjectId, HummockContextId>,
         current_version: &HummockVersion,
     ) -> Result<()> {
         for (sst_id, context_id) in sst_to_context {
@@ -186,5 +187,9 @@ where
         }
         .await;
         Ok(())
+    }
+
+    pub async fn release_meta_context(&self) -> Result<()> {
+        self.release_contexts([META_NODE_ID]).await
     }
 }

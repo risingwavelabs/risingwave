@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,19 +15,27 @@
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayImpl, Op, StreamChunk, Vis};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::BoxedExpression;
 
-use super::{
-    ActorContextRef, Executor, ExecutorInfo, PkIndicesRef, SimpleExecutor, SimpleExecutorWrapper,
-    StreamExecutorResult,
-};
-use crate::common::InfallibleExpression;
+use super::*;
 
-pub type FilterExecutor = SimpleExecutorWrapper<SimpleFilterExecutor>;
+/// `FilterExecutor` filters data with the `expr`. The `expr` takes a chunk of data,
+/// and returns a boolean array on whether each item should be retained. And then,
+/// `FilterExecutor` will insert, delete or update element into next executor according
+/// to the result of the expression.
+pub struct FilterExecutor {
+    ctx: ActorContextRef,
+    info: ExecutorInfo,
+    input: BoxedExecutor,
+
+    /// Expression of the current filter, note that the filter must always have the same output for
+    /// the same input.
+    expr: BoxedExpression,
+}
 
 impl FilterExecutor {
     pub fn new(
@@ -36,37 +44,10 @@ impl FilterExecutor {
         expr: BoxedExpression,
         executor_id: u64,
     ) -> Self {
-        let info = input.info();
-
-        SimpleExecutorWrapper {
-            input,
-            inner: SimpleFilterExecutor::new(ctx, info, expr, executor_id),
-        }
-    }
-}
-
-/// `FilterExecutor` filters data with the `expr`. The `expr` takes a chunk of data,
-/// and returns a boolean array on whether each item should be retained. And then,
-/// `FilterExecutor` will insert, delete or update element into next executor according
-/// to the result of the expression.
-pub struct SimpleFilterExecutor {
-    ctx: ActorContextRef,
-    info: ExecutorInfo,
-
-    /// Expression of the current filter, note that the filter must always have the same output for
-    /// the same input.
-    expr: BoxedExpression,
-}
-
-impl SimpleFilterExecutor {
-    pub fn new(
-        ctx: ActorContextRef,
-        input_info: ExecutorInfo,
-        expr: BoxedExpression,
-        executor_id: u64,
-    ) -> Self {
+        let input_info = input.info();
         Self {
             ctx,
+            input,
             info: ExecutorInfo {
                 schema: input_info.schema,
                 pk_indices: input_info.pk_indices,
@@ -97,7 +78,7 @@ impl SimpleFilterExecutor {
         });
 
         if let ArrayImpl::Bool(bool_array) = &*filter {
-            for (op, res) in ops.into_iter().zip_eq(bool_array.iter()) {
+            for (op, res) in ops.into_iter().zip_eq_fast(bool_array.iter()) {
                 // SAFETY: ops.len() == pred_output.len() == visibility.len()
                 let res = res.unwrap_or(false);
                 match op {
@@ -146,7 +127,7 @@ impl SimpleFilterExecutor {
 
         let new_visibility = new_visibility.finish();
 
-        Ok(if new_visibility.num_high_bits() > 0 {
+        Ok(if new_visibility.count_ones() > 0 {
             let new_chunk = StreamChunk::new(new_ops, columns, Some(new_visibility));
             Some(new_chunk)
         } else {
@@ -155,7 +136,7 @@ impl SimpleFilterExecutor {
     }
 }
 
-impl Debug for SimpleFilterExecutor {
+impl Debug for FilterExecutor {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FilterExecutor")
             .field("expr", &self.expr)
@@ -163,17 +144,7 @@ impl Debug for SimpleFilterExecutor {
     }
 }
 
-impl SimpleExecutor for SimpleFilterExecutor {
-    fn map_filter_chunk(&self, chunk: StreamChunk) -> StreamExecutorResult<Option<StreamChunk>> {
-        let chunk = chunk.compact();
-
-        let pred_output = self.expr.eval_infallible(chunk.data_chunk(), |err| {
-            self.ctx.on_compute_error(err, self.identity())
-        });
-
-        Self::filter(chunk, pred_output)
-    }
-
+impl Executor for FilterExecutor {
     fn schema(&self) -> &Schema {
         &self.info.schema
     }
@@ -185,6 +156,40 @@ impl SimpleExecutor for SimpleFilterExecutor {
     fn identity(&self) -> &str {
         &self.info.identity
     }
+
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        self.execute_inner().boxed()
+    }
+}
+
+impl FilterExecutor {
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn execute_inner(self) {
+        let input = self.input.execute();
+        #[for_await]
+        for msg in input {
+            let msg = msg?;
+            match msg {
+                Message::Watermark(w) => yield Message::Watermark(w),
+                Message::Chunk(chunk) => {
+                    let chunk = chunk.compact();
+
+                    let pred_output = self
+                        .expr
+                        .eval_infallible(chunk.data_chunk(), |err| {
+                            self.ctx.on_compute_error(err, &self.info.identity)
+                        })
+                        .await;
+
+                    match Self::filter(chunk, pred_output)? {
+                        Some(new_chunk) => yield Message::Chunk(new_chunk),
+                        None => continue,
+                    }
+                }
+                m => yield m,
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -194,9 +199,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-    use risingwave_expr::expr::InputRefExpression;
-    use risingwave_pb::expr::expr_node::Type;
+    use risingwave_expr::expr::build_from_pretty;
 
     use super::super::test_utils::MockSource;
     use super::super::*;
@@ -230,15 +233,8 @@ mod tests {
         };
         let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);
 
-        let left_expr = InputRefExpression::new(DataType::Int64, 0);
-        let right_expr = InputRefExpression::new(DataType::Int64, 1);
-        let test_expr = new_binary_expr(
-            Type::GreaterThan,
-            DataType::Boolean,
-            Box::new(left_expr),
-            Box::new(right_expr),
-        )
-        .unwrap();
+        let test_expr = build_from_pretty("(greater_than:boolean $0:int8 $1:int8)");
+
         let filter = Box::new(FilterExecutor::new(
             ActorContext::create(123),
             Box::new(source),

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, RowRef,
 };
 use risingwave_common::bail;
 use risingwave_common::types::DataType;
-use risingwave_common::util::ordered::OrderedRow;
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::memcmp_encoding;
+use risingwave_common::util::sort_util::ColumnOrder;
 
 use crate::vector_op::agg::aggregator::Aggregator;
 use crate::Result;
@@ -54,12 +54,13 @@ impl StringAggUnordered {
     }
 }
 
+#[async_trait::async_trait]
 impl Aggregator for StringAggUnordered {
     fn return_type(&self) -> DataType {
         DataType::Varchar
     }
 
-    fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
+    async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
         if let (ArrayImpl::Utf8(agg_col), ArrayImpl::Utf8(delim_col)) = (
             input.column_at(self.agg_col_idx).array_ref(),
             input.column_at(self.delim_col_idx).array_ref(),
@@ -75,7 +76,7 @@ impl Aggregator for StringAggUnordered {
         }
     }
 
-    fn update_multi(
+    async fn update_multi(
         &mut self,
         input: &DataChunk,
         start_row_id: usize,
@@ -87,7 +88,7 @@ impl Aggregator for StringAggUnordered {
         ) {
             for (value, delim) in agg_col
                 .iter()
-                .zip_eq(delim_col.iter())
+                .zip_eq_fast(delim_col.iter())
                 .skip(start_row_id)
                 .take(end_row_id - start_row_id)
                 .filter(|(v, _)| v.is_some())
@@ -111,6 +112,8 @@ impl Aggregator for StringAggUnordered {
     }
 }
 
+type OrderKey = Vec<u8>;
+
 #[derive(Clone)]
 struct StringAggData {
     value: String,
@@ -121,31 +124,22 @@ struct StringAggData {
 struct StringAggOrdered {
     agg_col_idx: usize,
     delim_col_idx: usize,
-    order_col_indices: Vec<usize>,
-    order_types: Vec<OrderType>,
-    unordered_values: Vec<(OrderedRow, StringAggData)>,
+    column_orders: Vec<ColumnOrder>,
+    unordered_values: Vec<(OrderKey, StringAggData)>,
 }
 
 impl StringAggOrdered {
-    fn new(agg_col_idx: usize, delim_col_idx: usize, order_pairs: Vec<OrderPair>) -> Self {
-        let (order_col_indices, order_types) = order_pairs
-            .into_iter()
-            .map(|p| (p.column_idx, p.order_type))
-            .unzip();
+    fn new(agg_col_idx: usize, delim_col_idx: usize, column_orders: Vec<ColumnOrder>) -> Self {
         Self {
             agg_col_idx,
             delim_col_idx,
-            order_col_indices,
-            order_types,
+            column_orders,
             unordered_values: vec![],
         }
     }
 
     fn push_row(&mut self, value: &str, delim: &str, row: RowRef<'_>) {
-        let key = OrderedRow::new(
-            row.row_by_indices(&self.order_col_indices),
-            &self.order_types,
-        );
+        let key = memcmp_encoding::encode_row(row, &self.column_orders);
         self.unordered_values.push((
             key,
             StringAggData {
@@ -160,7 +154,7 @@ impl StringAggOrdered {
         if rows.is_empty() {
             return None;
         }
-        rows.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        rows.sort_unstable_by(|(key_a, _), (key_b, _)| key_a.cmp(key_b));
         let mut rows_iter = rows.into_iter();
         let mut result = rows_iter.next().unwrap().1.value;
         for (_, data) in rows_iter {
@@ -171,12 +165,13 @@ impl StringAggOrdered {
     }
 }
 
+#[async_trait::async_trait]
 impl Aggregator for StringAggOrdered {
     fn return_type(&self) -> DataType {
         DataType::Varchar
     }
 
-    fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
+    async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
         if let (ArrayImpl::Utf8(agg_col), ArrayImpl::Utf8(delim_col)) = (
             input.column_at(self.agg_col_idx).array_ref(),
             input.column_at(self.delim_col_idx).array_ref(),
@@ -194,7 +189,7 @@ impl Aggregator for StringAggOrdered {
         }
     }
 
-    fn update_multi(
+    async fn update_multi(
         &mut self,
         input: &DataChunk,
         start_row_id: usize,
@@ -206,7 +201,7 @@ impl Aggregator for StringAggOrdered {
         ) {
             for (row_id, (value, delim)) in agg_col
                 .iter()
-                .zip_eq(delim_col.iter())
+                .zip_eq_fast(delim_col.iter())
                 .enumerate()
                 .skip(start_row_id)
                 .take(end_row_id - start_row_id)
@@ -236,9 +231,9 @@ impl Aggregator for StringAggOrdered {
 pub fn create_string_agg_state(
     agg_col_idx: usize,
     delim_col_idx: usize,
-    order_pairs: Vec<OrderPair>,
+    column_orders: Vec<ColumnOrder>,
 ) -> Result<Box<dyn Aggregator>> {
-    if order_pairs.is_empty() {
+    if column_orders.is_empty() {
         Ok(Box::new(StringAggUnordered::new(
             agg_col_idx,
             delim_col_idx,
@@ -247,7 +242,7 @@ pub fn create_string_agg_state(
         Ok(Box::new(StringAggOrdered::new(
             agg_col_idx,
             delim_col_idx,
-            order_pairs,
+            column_orders,
         )))
     }
 }
@@ -255,12 +250,12 @@ pub fn create_string_agg_state(
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{DataChunk, DataChunkTestExt, Utf8ArrayBuilder};
-    use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
     use super::*;
 
-    #[test]
-    fn test_string_agg_basic() -> Result<()> {
+    #[tokio::test]
+    async fn test_string_agg_basic() -> Result<()> {
         let chunk = DataChunk::from_pretty(
             "T   T
              aaa ,
@@ -270,7 +265,7 @@ mod tests {
         );
         let mut agg = create_string_agg_state(0, 1, vec![])?;
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
-        agg.update_multi(&chunk, 0, chunk.cardinality())?;
+        agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;
         let output = builder.finish();
         let actual = output.as_utf8();
@@ -280,8 +275,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_string_agg_complex() -> Result<()> {
+    #[tokio::test]
+    async fn test_string_agg_complex() -> Result<()> {
         let chunk = DataChunk::from_pretty(
             "T   T
              aaa ,
@@ -291,7 +286,7 @@ mod tests {
         );
         let mut agg = create_string_agg_state(0, 1, vec![])?;
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
-        agg.update_multi(&chunk, 0, chunk.cardinality())?;
+        agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;
         let output = builder.finish();
         let actual = output.as_utf8();
@@ -301,8 +296,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_string_agg_with_order() -> Result<()> {
+    #[tokio::test]
+    async fn test_string_agg_with_order() -> Result<()> {
         let chunk = DataChunk::from_pretty(
             "T T   i i
              _ aaa 1 3
@@ -314,13 +309,13 @@ mod tests {
             1,
             0,
             vec![
-                OrderPair::new(2, OrderType::Ascending),
-                OrderPair::new(3, OrderType::Descending),
-                OrderPair::new(1, OrderType::Descending),
+                ColumnOrder::new(2, OrderType::ascending()),
+                ColumnOrder::new(3, OrderType::descending()),
+                ColumnOrder::new(1, OrderType::descending()),
             ],
         )?;
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
-        agg.update_multi(&chunk, 0, chunk.cardinality())?;
+        agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;
         let output = builder.finish();
         let actual = output.as_utf8();

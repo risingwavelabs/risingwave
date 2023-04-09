@@ -1,0 +1,31 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE t (data struct<id varchar, name varchar>[]);
+
+statement ok
+INSERT INTO t VALUES (ARRAY[ROW('a', 'b'), ROW('c', 'd')]);
+
+query T
+select data from t;
+----
+{"(a,b)","(c,d)"}
+
+query T
+select data[1] from t;
+----
+(a,b)
+
+query T
+select (data[1]).id from t;
+----
+a
+
+query T
+select (case when true then data[1] end).id from t;
+----
+a
+
+statement ok
+DROP TABLE t;

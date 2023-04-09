@@ -1,18 +1,16 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-use std::sync::Arc;
 
 use futures::channel::{mpsc, oneshot};
 use futures::stream::select_with_strategy;
@@ -40,8 +38,6 @@ pub struct RearrangedChainExecutor {
 
     upstream: BoxedExecutor,
 
-    upstream_indices: Arc<[usize]>,
-
     progress: CreateMviewProgress,
 
     actor_id: ActorId,
@@ -49,35 +45,19 @@ pub struct RearrangedChainExecutor {
     info: ExecutorInfo,
 }
 
-fn mapping(upstream_indices: &[usize], msg: Message) -> Message {
-    match msg {
-        Message::Watermark(_) => {
-            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
-        }
-
-        Message::Chunk(chunk) => {
-            let (ops, columns, visibility) = chunk.into_inner();
-            let mapped_columns = upstream_indices
-                .iter()
-                .map(|&i| columns[i].clone())
-                .collect();
-            Message::Chunk(StreamChunk::new(ops, mapped_columns, visibility))
-        }
-        _ => msg,
-    }
-}
-
 #[derive(Debug)]
 enum RearrangedMessage {
     RearrangedBarrier(Barrier),
     PhantomBarrier(Barrier),
     Chunk(StreamChunk),
+    // This watermark is just a place holder.
+    Watermark,
 }
 
 impl RearrangedMessage {
     fn phantom_into(self) -> Option<Message> {
         match self {
-            RearrangedMessage::RearrangedBarrier(_) => None,
+            RearrangedMessage::RearrangedBarrier(_) | RearrangedMessage::Watermark => None,
             RearrangedMessage::PhantomBarrier(barrier) => Message::Barrier(barrier).into(),
             RearrangedMessage::Chunk(chunk) => Message::Chunk(chunk).into(),
         }
@@ -87,10 +67,7 @@ impl RearrangedMessage {
 impl RearrangedMessage {
     fn rearranged_from(msg: Message) -> Self {
         match msg {
-            Message::Watermark(_) => {
-                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
-            }
-
+            Message::Watermark(_) => RearrangedMessage::Watermark,
             Message::Chunk(chunk) => RearrangedMessage::Chunk(chunk),
             Message::Barrier(barrier) => RearrangedMessage::RearrangedBarrier(barrier),
         }
@@ -98,10 +75,7 @@ impl RearrangedMessage {
 
     fn phantom_from(msg: Message) -> Self {
         match msg {
-            Message::Watermark(_) => {
-                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
-            }
-
+            Message::Watermark(_) => RearrangedMessage::Watermark,
             Message::Chunk(chunk) => RearrangedMessage::Chunk(chunk),
             Message::Barrier(barrier) => RearrangedMessage::PhantomBarrier(barrier),
         }
@@ -112,7 +86,6 @@ impl RearrangedChainExecutor {
     pub fn new(
         snapshot: BoxedExecutor,
         upstream: BoxedExecutor,
-        upstream_indices: Vec<usize>,
         progress: CreateMviewProgress,
         schema: Schema,
         pk_indices: PkIndices,
@@ -125,7 +98,6 @@ impl RearrangedChainExecutor {
             },
             snapshot,
             upstream,
-            upstream_indices: upstream_indices.into(),
             actor_id: progress.actor_id(),
             progress,
         }
@@ -133,12 +105,7 @@ impl RearrangedChainExecutor {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        // 0. Project the upstream with `upstream_indices`.
-        let upstream_indices = self.upstream_indices.clone();
-        let mut upstream = self
-            .upstream
-            .execute()
-            .map(move |result| result.map(|msg| mapping(&upstream_indices, msg)));
+        let mut upstream = Box::pin(self.upstream.execute());
 
         // 1. Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
@@ -147,7 +114,7 @@ impl RearrangedChainExecutor {
         // If the barrier is a conf change of creating this mview, init snapshot from its epoch
         // and begin to consume the snapshot.
         // Otherwise, it means we've recovered and the snapshot is already consumed.
-        let to_consume_snapshot = first_barrier.is_add_dispatcher(self.actor_id);
+        let to_consume_snapshot = first_barrier.is_newly_added(self.actor_id);
 
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier.clone());
@@ -190,6 +157,8 @@ impl RearrangedChainExecutor {
             let mut last_rearranged_epoch = create_epoch;
             let mut stop_rearrange_tx = Some(stop_rearrange_tx);
 
+            let mut processed_rows: u64 = 0;
+
             // 6. Consume the merged `rearranged` stream.
             #[for_await]
             for rearranged_msg in &mut rearranged {
@@ -201,8 +170,11 @@ impl RearrangedChainExecutor {
                     // consumed the whole snapshot and be on the upstream now.
                     RearrangedMessage::PhantomBarrier(barrier) => {
                         // Update the progress since we've consumed all chunks before this phantom.
-                        self.progress
-                            .update(last_rearranged_epoch.curr, barrier.epoch.curr);
+                        self.progress.update(
+                            last_rearranged_epoch.curr,
+                            barrier.epoch.curr,
+                            processed_rows,
+                        );
 
                         if barrier.epoch.curr >= last_rearranged_epoch.curr {
                             // Stop the background rearrangement task.
@@ -218,7 +190,13 @@ impl RearrangedChainExecutor {
                         last_rearranged_epoch = barrier.epoch;
                         yield Message::Barrier(barrier);
                     }
-                    RearrangedMessage::Chunk(chunk) => yield Message::Chunk(chunk),
+                    RearrangedMessage::Chunk(chunk) => {
+                        processed_rows += chunk.cardinality() as u64;
+                        yield Message::Chunk(chunk)
+                    }
+                    RearrangedMessage::Watermark => {
+                        // Ignore watermark during snapshot consumption.
+                    }
                 }
             }
 
@@ -272,7 +250,6 @@ impl RearrangedChainExecutor {
     /// after stopped.
     ///
     /// Check `execute_inner` for more details.
-    #[expect(clippy::needless_lifetimes, reason = "code generated by try_stream")]
     #[try_stream(ok = Barrier, error = StreamExecutorError)]
     async fn rearrange_barrier<U>(
         upstream: &mut U,
@@ -327,6 +304,10 @@ impl Executor for RearrangedChainExecutor {
 
     fn identity(&self) -> &str {
         &self.info.identity
+    }
+
+    fn info(&self) -> ExecutorInfo {
+        self.info.clone()
     }
 }
 

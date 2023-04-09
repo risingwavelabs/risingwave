@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,11 +14,13 @@
 
 use enum_as_inner::EnumAsInner;
 use fixedbitset::FixedBitSet;
+use futures::FutureExt;
 use paste::paste;
 use risingwave_common::array::ListValue;
-use risingwave_common::error::Result;
+use risingwave_common::error::Result as RwResult;
 use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_expr::expr::{build_from_prost, AggKind};
+use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{ExprNode, ProjectSetSelectItem};
 
 mod agg_call;
@@ -26,8 +28,10 @@ mod correlated_input_ref;
 mod function_call;
 mod input_ref;
 mod literal;
+mod parameter;
 mod subquery;
 mod table_function;
+mod user_defined_function;
 mod window_function;
 
 mod order_by_expr;
@@ -36,28 +40,30 @@ pub use order_by_expr::{OrderBy, OrderByExpr};
 mod expr_mutator;
 mod expr_rewriter;
 mod expr_visitor;
+mod session_timezone;
 mod type_inference;
 mod utils;
 
 pub use agg_call::AggCall;
 pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef, Depth};
-pub use function_call::{FunctionCall, FunctionCallDisplay};
-pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
-pub use literal::Literal;
-pub use subquery::{Subquery, SubqueryKind};
-pub use table_function::{TableFunction, TableFunctionType};
-pub use window_function::{WindowFunction, WindowFunctionType};
-
-pub type ExprType = risingwave_pb::expr::expr_node::Type;
-
 pub use expr_mutator::ExprMutator;
 pub use expr_rewriter::ExprRewriter;
 pub use expr_visitor::ExprVisitor;
+pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
+pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
+pub use literal::Literal;
+pub use parameter::Parameter;
+pub use risingwave_pb::expr::expr_node::Type as ExprType;
+pub use session_timezone::SessionTimezone;
+pub use subquery::{Subquery, SubqueryKind};
+pub use table_function::{TableFunction, TableFunctionType};
 pub use type_inference::{
-    agg_func_sigs, align_types, cast_map_array, cast_ok, cast_sigs, func_sigs, infer_type,
-    least_restrictive, AggFuncSig, CastContext, CastSig, FuncSign,
+    agg_func_sigs, align_types, cast_map_array, cast_ok, cast_sigs, func_sigs, infer_some_all,
+    infer_type, least_restrictive, AggFuncSig, CastContext, CastSig, FuncSign,
 };
+pub use user_defined_function::UserDefinedFunction;
 pub use utils::*;
+pub use window_function::{WindowFunction, WindowFunctionType};
 
 /// the trait of bound expressions
 pub trait Expr: Into<ExprImpl> {
@@ -92,7 +98,9 @@ impl_expr_impl!(
     AggCall,
     Subquery,
     TableFunction,
-    WindowFunction
+    WindowFunction,
+    UserDefinedFunction,
+    Parameter
 );
 
 impl ExprImpl {
@@ -100,6 +108,12 @@ impl ExprImpl {
     #[inline(always)]
     pub fn literal_int(v: i32) -> Self {
         Literal::new(Some(v.to_scalar_value()), DataType::Int32).into()
+    }
+
+    /// A literal float64 value.
+    #[inline(always)]
+    pub fn literal_f64(v: f64) -> Self {
+        Literal::new(Some(v.into()), DataType::Float64).into()
     }
 
     /// A literal boolean value.
@@ -156,6 +170,12 @@ impl ExprImpl {
         visitor.into()
     }
 
+    /// Count `Now`s in the expression.
+    pub fn count_nows(&self) -> usize {
+        let mut visitor = CountNow::default();
+        visitor.visit_expr(self)
+    }
+
     /// Check whether self is literal NULL.
     pub fn is_null(&self) -> bool {
         matches!(self, ExprImpl::Literal(literal) if literal.get_data().is_none())
@@ -164,21 +184,39 @@ impl ExprImpl {
     /// Check whether self is a literal NULL or literal string.
     pub fn is_unknown(&self) -> bool {
         matches!(self, ExprImpl::Literal(literal) if literal.return_type() == DataType::Varchar)
+            || matches!(self, ExprImpl::Parameter(parameter) if !parameter.has_infer())
     }
 
     /// Shorthand to create cast expr to `target` type in implicit context.
-    pub fn cast_implicit(self, target: DataType) -> Result<ExprImpl> {
+    pub fn cast_implicit(self, target: DataType) -> Result<ExprImpl, CastError> {
         FunctionCall::new_cast(self, target, CastContext::Implicit)
     }
 
     /// Shorthand to create cast expr to `target` type in assign context.
-    pub fn cast_assign(self, target: DataType) -> Result<ExprImpl> {
+    pub fn cast_assign(self, target: DataType) -> Result<ExprImpl, CastError> {
         FunctionCall::new_cast(self, target, CastContext::Assign)
     }
 
     /// Shorthand to create cast expr to `target` type in explicit context.
-    pub fn cast_explicit(self, target: DataType) -> Result<ExprImpl> {
+    pub fn cast_explicit(self, target: DataType) -> Result<ExprImpl, CastError> {
         FunctionCall::new_cast(self, target, CastContext::Explicit)
+    }
+
+    /// Shorthand to enforce implicit cast to boolean
+    pub fn enforce_bool_clause(self, clause: &str) -> RwResult<ExprImpl> {
+        if self.is_unknown() {
+            let inner = self.cast_implicit(DataType::Boolean)?;
+            return Ok(inner);
+        }
+        let return_type = self.return_type();
+        if return_type != DataType::Boolean {
+            bail!(
+                "argument of {} must be boolean, not type {:?}",
+                clause,
+                return_type
+            )
+        }
+        Ok(self)
     }
 
     /// Create "cast" expr to string (`varchar`) type. This is different from a real cast, as
@@ -191,28 +229,31 @@ impl ExprImpl {
     /// References in `PostgreSQL`:
     /// * [cast](https://github.com/postgres/postgres/blob/a3ff08e0b08dbfeb777ccfa8f13ebaa95d064c04/src/include/catalog/pg_cast.dat#L437-L444)
     /// * [impl](https://github.com/postgres/postgres/blob/27b77ecf9f4d5be211900eda54d8155ada50d696/src/backend/utils/adt/bool.c#L204-L209)
-    pub fn cast_output(self) -> Result<ExprImpl> {
+    pub fn cast_output(self) -> RwResult<ExprImpl> {
         if self.return_type() == DataType::Boolean {
             return Ok(FunctionCall::new(ExprType::BoolOut, vec![self])?.into());
         }
         // Use normal cast for other types. Both `assign` and `explicit` can pass the castability
         // check and there is no difference.
         self.cast_assign(DataType::Varchar)
+            .map_err(|err| err.into())
     }
 
     /// Evaluate the expression on the given input.
     ///
     /// TODO: This is a naive implementation. We should avoid proto ser/de.
     /// Tracking issue: <https://github.com/risingwavelabs/risingwave/issues/3479>
-    fn eval_row(&self, input: &Row) -> Result<Datum> {
+    async fn eval_row(&self, input: &OwnedRow) -> RwResult<Datum> {
         let backend_expr = build_from_prost(&self.to_expr_proto())?;
-        backend_expr.eval_row(input).map_err(Into::into)
+        Ok(backend_expr.eval_row(input).await?)
     }
 
     /// Evaluate a constant expression.
-    pub fn eval_row_const(&self) -> Result<Datum> {
+    pub fn eval_row_const(&self) -> RwResult<Datum> {
         assert!(self.is_const());
-        self.eval_row(Row::empty())
+        self.eval_row(&OwnedRow::empty())
+            .now_or_never()
+            .expect("constant expression should not be async")
     }
 }
 
@@ -249,6 +290,30 @@ macro_rules! impl_has_variant {
 }
 
 impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery, TableFunction, WindowFunction}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct InequalityInputPair {
+    /// Input index of greater side of inequality.
+    pub(crate) key_required_larger: usize,
+    /// Input index of less side of inequality.
+    pub(crate) key_required_smaller: usize,
+    /// greater >= less + delta_expression
+    pub(crate) delta_expression: Option<(ExprType, ExprImpl)>,
+}
+
+impl InequalityInputPair {
+    fn new(
+        key_required_larger: usize,
+        key_required_smaller: usize,
+        delta_expression: Option<(ExprType, ExprImpl)>,
+    ) -> Self {
+        Self {
+            key_required_larger,
+            key_required_smaller,
+            delta_expression,
+        }
+    }
+}
 
 impl ExprImpl {
     /// This function is not meant to be called. In most cases you would want
@@ -500,17 +565,18 @@ impl ExprImpl {
         }
     }
 
-    pub fn as_comparison_cond(&self) -> Option<(InputRef, ExprType, InputRef)> {
-        fn reverse_comparison(comparison: ExprType) -> ExprType {
-            match comparison {
-                ExprType::LessThan => ExprType::GreaterThan,
-                ExprType::LessThanOrEqual => ExprType::GreaterThanOrEqual,
-                ExprType::GreaterThan => ExprType::LessThan,
-                ExprType::GreaterThanOrEqual => ExprType::LessThanOrEqual,
-                _ => unreachable!(),
-            }
+    pub fn reverse_comparison(comparison: ExprType) -> ExprType {
+        match comparison {
+            ExprType::LessThan => ExprType::GreaterThan,
+            ExprType::LessThanOrEqual => ExprType::GreaterThanOrEqual,
+            ExprType::GreaterThan => ExprType::LessThan,
+            ExprType::GreaterThanOrEqual => ExprType::LessThanOrEqual,
+            ExprType::Equal | ExprType::IsNotDistinctFrom => comparison,
+            _ => unreachable!(),
         }
+    }
 
+    pub fn as_comparison_cond(&self) -> Option<(InputRef, ExprType, InputRef)> {
         if let ExprImpl::FunctionCall(function_call) = self {
             match function_call.get_expr_type() {
                 ty @ (ExprType::LessThan
@@ -522,7 +588,7 @@ impl ExprImpl {
                         if x.index < y.index {
                             Some((*x, ty, *y))
                         } else {
-                            Some((*y, reverse_comparison(ty), *x))
+                            Some((*y, Self::reverse_comparison(ty), *x))
                         }
                     } else {
                         None
@@ -532,6 +598,132 @@ impl ExprImpl {
             }
         } else {
             None
+        }
+    }
+
+    /// Accepts expressions of the form `input_expr cmp now() [+- const_expr]` or
+    /// `now() [+- const_expr] cmp input_expr`, where `input_expr` contains an
+    /// `InputRef` and contains no `now()`.
+    ///
+    /// Canonicalizes to the first ordering and returns `(input_expr, cmp, now_expr)`
+    pub fn as_now_comparison_cond(&self) -> Option<(ExprImpl, ExprType, ExprImpl)> {
+        if let ExprImpl::FunctionCall(function_call) = self {
+            match function_call.get_expr_type() {
+                ty @ (ExprType::LessThan
+                | ExprType::LessThanOrEqual
+                | ExprType::GreaterThan
+                | ExprType::GreaterThanOrEqual) => {
+                    let (_, op1, op2) = function_call.clone().decompose_as_binary();
+                    if op1.count_nows() == 0
+                        && op1.has_input_ref()
+                        && op2.count_nows() > 0
+                        && op2.is_now_offset()
+                    {
+                        Some((op1, ty, op2))
+                    } else if op2.count_nows() == 0
+                        && op2.has_input_ref()
+                        && op1.count_nows() > 0
+                        && op1.is_now_offset()
+                    {
+                        Some((op2, Self::reverse_comparison(ty), op1))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Accepts expressions of the form `InputRef cmp InputRef [+- const_expr]` or
+    /// `InputRef [+- const_expr] cmp InputRef`.
+    pub(crate) fn as_input_comparison_cond(&self) -> Option<InequalityInputPair> {
+        if let ExprImpl::FunctionCall(function_call) = self {
+            match function_call.get_expr_type() {
+                ty @ (ExprType::LessThan
+                | ExprType::LessThanOrEqual
+                | ExprType::GreaterThan
+                | ExprType::GreaterThanOrEqual) => {
+                    let (_, mut op1, mut op2) = function_call.clone().decompose_as_binary();
+                    if matches!(ty, ExprType::LessThan | ExprType::LessThanOrEqual) {
+                        std::mem::swap(&mut op1, &mut op2);
+                    }
+                    if let (Some((lft_input, lft_offset)), Some((rht_input, rht_offset))) =
+                        (op1.as_input_offset(), op2.as_input_offset())
+                    {
+                        match (lft_offset, rht_offset) {
+                            (Some(_), Some(_)) => None,
+                            (None, rht_offset @ Some(_)) => {
+                                Some(InequalityInputPair::new(lft_input, rht_input, rht_offset))
+                            }
+                            (Some((operator, operand)), None) => Some(InequalityInputPair::new(
+                                lft_input,
+                                rht_input,
+                                Some((
+                                    if operator == ExprType::Add {
+                                        ExprType::Subtract
+                                    } else {
+                                        ExprType::Add
+                                    },
+                                    operand,
+                                )),
+                            )),
+                            (None, None) => {
+                                Some(InequalityInputPair::new(lft_input, rht_input, None))
+                            }
+                        }
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Checks if expr is of the form `now() [+- const_expr]`
+    fn is_now_offset(&self) -> bool {
+        if let ExprImpl::FunctionCall(f) = self {
+            match f.get_expr_type() {
+                ExprType::Now => true,
+                ExprType::Add | ExprType::Subtract => {
+                    let (_, lhs, rhs) = f.clone().decompose_as_binary();
+                    lhs.as_function_call()
+                        .map(|f| f.get_expr_type() == ExprType::Now)
+                        .unwrap_or(false)
+                        && rhs.is_const()
+                }
+                _ => false,
+            }
+        } else {
+            false
+        }
+    }
+
+    /// Returns the `InputRef` and offset of a predicate if it matches
+    /// the form `InputRef [+- const_expr]`, else returns None.
+    fn as_input_offset(&self) -> Option<(usize, Option<(ExprType, ExprImpl)>)> {
+        match self {
+            ExprImpl::InputRef(input_ref) => Some((input_ref.index(), None)),
+            ExprImpl::FunctionCall(function_call) => {
+                let expr_type = function_call.get_expr_type();
+                match expr_type {
+                    ExprType::Add | ExprType::Subtract => {
+                        let (_, lhs, rhs) = function_call.clone().decompose_as_binary();
+                        if let ExprImpl::InputRef(input_ref) = &lhs && rhs.is_const() {
+                            Some((input_ref.index(), Some((expr_type, rhs))))
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
         }
     }
 
@@ -645,6 +837,25 @@ impl ExprImpl {
             }),
         }
     }
+
+    pub fn from_expr_proto(proto: &ExprNode) -> RwResult<Self> {
+        let rex_node = proto.get_rex_node()?;
+        let ret_type = proto.get_return_type()?.into();
+        let expr_type = proto.get_expr_type()?;
+        Ok(match rex_node {
+            RexNode::InputRef(column_index) => Self::InputRef(Box::new(InputRef::from_expr_proto(
+                *column_index as _,
+                ret_type,
+            )?)),
+            RexNode::Constant(_) => Self::Literal(Box::new(Literal::from_expr_proto(proto)?)),
+            RexNode::Udf(udf) => Self::UserDefinedFunction(Box::new(
+                UserDefinedFunction::from_expr_proto(udf, ret_type)?,
+            )),
+            RexNode::FuncCall(function_call) => Self::FunctionCall(Box::new(
+                FunctionCall::from_expr_proto(function_call, expr_type, ret_type)?,
+            )),
+        })
+    }
 }
 
 impl Expr for ExprImpl {
@@ -658,6 +869,8 @@ impl Expr for ExprImpl {
             ExprImpl::CorrelatedInputRef(expr) => expr.return_type(),
             ExprImpl::TableFunction(expr) => expr.return_type(),
             ExprImpl::WindowFunction(expr) => expr.return_type(),
+            ExprImpl::UserDefinedFunction(expr) => expr.return_type(),
+            ExprImpl::Parameter(expr) => expr.return_type(),
         }
     }
 
@@ -675,6 +888,8 @@ impl Expr for ExprImpl {
             ExprImpl::WindowFunction(_e) => {
                 unreachable!("Window function should not be converted to ExprNode")
             }
+            ExprImpl::UserDefinedFunction(e) => e.to_expr_proto(),
+            ExprImpl::Parameter(e) => e.to_expr_proto(),
         }
     }
 }
@@ -706,6 +921,10 @@ impl std::fmt::Debug for ExprImpl {
                 }
                 Self::TableFunction(arg0) => f.debug_tuple("TableFunction").field(arg0).finish(),
                 Self::WindowFunction(arg0) => f.debug_tuple("WindowFunction").field(arg0).finish(),
+                Self::UserDefinedFunction(arg0) => {
+                    f.debug_tuple("UserDefinedFunction").field(arg0).finish()
+                }
+                Self::Parameter(arg0) => f.debug_tuple("Parameter").field(arg0).finish(),
             };
         }
         match self {
@@ -717,6 +936,8 @@ impl std::fmt::Debug for ExprImpl {
             Self::CorrelatedInputRef(x) => write!(f, "{:?}", x),
             Self::TableFunction(x) => write!(f, "{:?}", x),
             Self::WindowFunction(x) => write!(f, "{:?}", x),
+            Self::UserDefinedFunction(x) => write!(f, "{:?}", x),
+            Self::Parameter(x) => write!(f, "{:?}", x),
         }
     }
 }
@@ -758,6 +979,8 @@ impl std::fmt::Debug for ExprDisplay<'_> {
                 // TODO: WindowFunctionCallVerboseDisplay
                 write!(f, "{:?}", x)
             }
+            ExprImpl::UserDefinedFunction(x) => write!(f, "{:?}", x),
+            ExprImpl::Parameter(x) => write!(f, "{:?}", x),
         }
     }
 }
@@ -781,9 +1004,11 @@ macro_rules! assert_eq_input_ref {
 
 #[cfg(test)]
 pub(crate) use assert_eq_input_ref;
+use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 
+use self::function_call::CastError;
 use crate::binder::BoundSetExpr;
 use crate::utils::Condition;
 

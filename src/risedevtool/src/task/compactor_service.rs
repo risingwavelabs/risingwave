@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,10 +20,7 @@ use std::process::Command;
 use anyhow::Result;
 
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{
-    add_meta_node, add_storage_backend, CompactorConfig, ExecuteContext, HummockInMemoryStrategy,
-    Task,
-};
+use crate::{add_meta_node, CompactorConfig, ExecuteContext, Task};
 
 pub struct CompactorService {
     config: CompactorConfig,
@@ -46,14 +43,14 @@ impl CompactorService {
 
     /// Apply command args according to config
     pub fn apply_command_args(cmd: &mut Command, config: &CompactorConfig) -> Result<()> {
-        cmd.arg("--host")
+        cmd.arg("--listen-addr")
             .arg(format!("{}:{}", config.listen_address, config.port))
             .arg("--prometheus-listener-addr")
             .arg(format!(
                 "{}:{}",
                 config.listen_address, config.exporter_port
             ))
-            .arg("--client-address")
+            .arg("--advertise-addr")
             .arg(format!("{}:{}", config.address, config.port))
             .arg("--metrics-level")
             .arg("1")
@@ -65,16 +62,6 @@ impl CompactorService {
             cmd.arg("--compaction-worker-threads-number")
                 .arg(format!("{}", compaction_worker_threads_number));
         }
-
-        let provide_minio = config.provide_minio.as_ref().unwrap();
-        let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
-        add_storage_backend(
-            &config.id,
-            provide_minio,
-            provide_aws_s3,
-            HummockInMemoryStrategy::Shared,
-            cmd,
-        )?;
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         add_meta_node(provide_meta_node, cmd)?;
@@ -104,7 +91,7 @@ impl Task for CompactorService {
             // See https://linux.die.net/man/3/jemalloc for the descriptions of profiling options
             cmd.env(
                 "_RJEM_MALLOC_CONF",
-                "prof:true,lg_prof_interval:34,lg_prof_sample:19,prof_prefix:compactor",
+                "prof:true,lg_prof_interval:38,lg_prof_sample:19,prof_prefix:compactor",
             );
         }
 

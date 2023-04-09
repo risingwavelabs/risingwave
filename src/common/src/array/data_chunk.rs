@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,23 +16,43 @@ use std::fmt;
 use std::hash::BuildHasher;
 use std::sync::Arc;
 
+use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
-use risingwave_pb::data::DataChunk as ProstDataChunk;
+use risingwave_pb::data::PbDataChunk;
 
-use super::{ArrayResult, Vis};
+use super::{Array, ArrayResult, StructArray, Vis};
 use crate::array::column::Column;
 use crate::array::data_chunk_iter::RowRef;
-use crate::array::{ArrayBuilderImpl, StructValue};
+use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::hash::HashCode;
-use crate::row::{Row, Row2};
+use crate::row::Row;
 use crate::types::struct_type::StructType;
 use crate::types::to_text::ToText;
-use crate::types::{DataType, Datum, NaiveDateTimeWrapper, ToOwnedDatum};
+use crate::types::{DataType, ToOwnedDatum};
 use crate::util::hash_util::finalize_hashers;
-use crate::util::value_encoding::serialize_datum;
+use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
+use crate::util::value_encoding::{
+    estimate_serialize_datum_size, serialize_datum_into, ValueRowSerializer,
+};
 
-/// `DataChunk` is a collection of arrays with visibility mask.
+/// [`DataChunk`] is a collection of Columns,
+/// a with visibility mask for each row.
+/// For instance, we could have a [`DataChunk`] of this format.
+/// | v1 | v2 | v3 |
+/// |----|----|----|
+/// | 1  | a  | t  |
+/// | 2  | b  | f  |
+/// | 3  | c  | t  |
+/// | 4  | d  | f  |
+///
+/// Our columns are v1, v2, v3.
+/// Then, if the Visibility Mask hides rows 2 and 4,
+/// We will only have these rows visible:
+/// | v1 | v2 | v3 |
+/// |----|----|----|
+/// | 1  | a  | t  |
+/// | 3  | c  | t  |
 #[derive(Clone, PartialEq)]
 #[must_use]
 pub struct DataChunk {
@@ -44,11 +64,8 @@ impl DataChunk {
     /// Create a `DataChunk` with `columns` and visibility. The visibility can either be a `Bitmap`
     /// or a simple cardinality number.
     pub fn new<V: Into<Vis>>(columns: Vec<Column>, vis: V) -> Self {
-        let vis = vis.into();
-        let capacity = match &vis {
-            Vis::Bitmap(b) => b.len(),
-            Vis::Compact(c) => *c,
-        };
+        let vis: Vis = vis.into();
+        let capacity = vis.len();
         for column in &columns {
             assert_eq!(capacity, column.array_ref().len());
         }
@@ -65,14 +82,14 @@ impl DataChunk {
     }
 
     /// Build a `DataChunk` with rows.
-    pub fn from_rows(rows: &[Row], data_types: &[DataType]) -> Self {
+    pub fn from_rows(rows: &[impl Row], data_types: &[DataType]) -> Self {
         let mut array_builders = data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(1))
             .collect::<Vec<_>>();
 
         for row in rows {
-            for (datum, builder) in row.iter().zip_eq(array_builders.iter_mut()) {
+            for (datum, builder) in row.iter().zip_eq_debug(array_builders.iter_mut()) {
                 builder.append_datum(datum);
             }
         }
@@ -109,21 +126,31 @@ impl DataChunk {
     /// `cardinality` returns the number of visible tuples
     pub fn cardinality(&self) -> usize {
         match &self.vis2 {
-            Vis::Bitmap(b) => b.num_high_bits(),
+            Vis::Bitmap(b) => b.count_ones(),
             Vis::Compact(len) => *len,
         }
     }
 
     /// `capacity` returns physical length of any chunk column
     pub fn capacity(&self) -> usize {
-        match &self.vis2 {
-            Vis::Bitmap(b) => b.len(),
-            Vis::Compact(len) => *len,
-        }
+        self.vis2.len()
     }
 
     pub fn vis(&self) -> &Vis {
         &self.vis2
+    }
+
+    pub fn selectivity(&self) -> f64 {
+        match &self.vis2 {
+            Vis::Bitmap(b) => {
+                if b.is_empty() {
+                    0.0
+                } else {
+                    b.count_ones() as f64 / b.len() as f64
+                }
+            }
+            Vis::Compact(_) => 1.0,
+        }
     }
 
     pub fn with_visibility(&self, visibility: Bitmap) -> Self {
@@ -131,14 +158,7 @@ impl DataChunk {
     }
 
     pub fn visibility(&self) -> Option<&Bitmap> {
-        self.get_visibility_ref()
-    }
-
-    pub fn get_visibility_ref(&self) -> Option<&Bitmap> {
-        match &self.vis2 {
-            Vis::Bitmap(b) => Some(b),
-            Vis::Compact(_) => None,
-        }
+        self.vis2.as_visibility()
     }
 
     pub fn set_vis(&mut self, vis: Vis) {
@@ -163,12 +183,19 @@ impl DataChunk {
         &self.columns
     }
 
-    pub fn to_protobuf(&self) -> ProstDataChunk {
+    pub fn split_column_at(&self, idx: usize) -> (Self, Self) {
+        let (left, right) = self.columns.split_at(idx);
+        let left = DataChunk::new(left.to_vec(), self.vis2.clone());
+        let right = DataChunk::new(right.to_vec(), self.vis2.clone());
+        (left, right)
+    }
+
+    pub fn to_protobuf(&self) -> PbDataChunk {
         assert!(
             matches!(self.vis2, Vis::Compact(_)),
             "must be compacted before transfer"
         );
-        let mut proto = ProstDataChunk {
+        let mut proto = PbDataChunk {
             cardinality: self.cardinality() as u32,
             columns: Default::default(),
         };
@@ -181,7 +208,18 @@ impl DataChunk {
     }
 
     /// `compact` will convert the chunk to compact format.
-    /// Compact format means that `visibility == None`.
+    /// Compacting removes the hidden rows, and returns a new visibility
+    /// mask which indicates this.
+    ///
+    /// `compact` has trade-offs:
+    ///
+    /// Cost:
+    /// It has to rebuild the each column, meaning it will incur cost
+    /// of copying over bytes from the original column array to the new one.
+    ///
+    /// Benefit:
+    /// The main benefit is that the data chunk is smaller, taking up less memory.
+    /// We can also save the cost of iterating over many hidden rows.
     pub fn compact(self) -> Self {
         match &self.vis2 {
             Vis::Compact(_) => self,
@@ -200,7 +238,7 @@ impl DataChunk {
         }
     }
 
-    pub fn from_protobuf(proto: &ProstDataChunk) -> ArrayResult<Self> {
+    pub fn from_protobuf(proto: &PbDataChunk) -> ArrayResult<Self> {
         let mut columns = vec![];
         for any_col in proto.get_columns() {
             let cardinality = proto.get_cardinality() as usize;
@@ -253,7 +291,7 @@ impl DataChunk {
             let end_row_idx = start_row_idx + actual_acquire - 1;
             array_builders
                 .iter_mut()
-                .zip_eq(chunks[chunk_idx].columns())
+                .zip_eq_fast(chunks[chunk_idx].columns())
                 .for_each(|(builder, column)| {
                     let mut array_builder = column
                         .array_ref()
@@ -295,6 +333,7 @@ impl DataChunk {
         Ok(new_chunks)
     }
 
+    /// Compute hash values for each row.
     pub fn get_hash_values<H: BuildHasher>(
         &self,
         column_idxes: &[usize],
@@ -302,6 +341,7 @@ impl DataChunk {
     ) -> Vec<HashCode> {
         let mut states = Vec::with_capacity(self.capacity());
         states.resize_with(self.capacity(), || hasher_builder.build_hasher());
+        // Compute hash for the specified columns.
         for column_idx in column_idxes {
             let array = self.column_at(*column_idx).array();
             array.hash_vec(&mut states[..]);
@@ -319,10 +359,7 @@ impl DataChunk {
     /// * bool - whether this tuple is visible
     pub fn row_at(&self, pos: usize) -> (RowRef<'_>, bool) {
         let row = self.row_at_unchecked_vis(pos);
-        let vis = match &self.vis2 {
-            Vis::Bitmap(bitmap) => bitmap.is_set(pos),
-            Vis::Compact(_) => true,
-        };
+        let vis = self.vis2.is_set(pos);
         (row, vis)
     }
 
@@ -341,7 +378,7 @@ impl DataChunk {
         table.load_preset("||--+-++|    ++++++\n");
         for row in self.rows() {
             let cells: Vec<_> = row
-                .values()
+                .iter()
                 .map(|v| {
                     match v {
                         None => "".to_owned(), // null
@@ -359,11 +396,7 @@ impl DataChunk {
     /// `[c, b, a]`. If `column_mapping` is [2, 0], then the output will be `[c, a]`
     /// If the input mapping is identity mapping, no reorder will be performed.
     pub fn reorder_columns(self, column_mapping: &[usize]) -> Self {
-        if column_mapping
-            .iter()
-            .copied()
-            .eq((0..self.columns().len()).into_iter())
-        {
+        if column_mapping.iter().copied().eq(0..self.columns().len()) {
             return self;
         }
         let mut new_columns = Vec::with_capacity(column_mapping.len());
@@ -384,7 +417,7 @@ impl DataChunk {
             .map(|col| col.array_ref().create_builder(indexes.len()))
             .collect();
         for &i in indexes {
-            for (builder, col) in array_builders.iter_mut().zip_eq(&self.columns) {
+            for (builder, col) in array_builders.iter_mut().zip_eq_fast(&self.columns) {
                 builder.append_datum(col.array_ref().value_at(i));
             }
         }
@@ -395,15 +428,17 @@ impl DataChunk {
         DataChunk::new(columns, indexes.len())
     }
 
-    /// Serialize each rows into value encoding bytes.
+    /// Serialize each row into value encoding bytes.
     ///
-    /// the returned vector's size is self.capacity() and for the invisible row will give a empty
-    /// vec<u8>
-    pub fn serialize(&self) -> Vec<Vec<u8>> {
-        match &self.vis2 {
+    /// The returned vector's size is `self.capacity()` and for the invisible row will give a empty
+    /// bytes.
+    // Note(bugen): should we exclude the invisible rows in the output so that the caller won't need
+    // to handle visibility again?
+    pub fn serialize(&self) -> Vec<Bytes> {
+        let buffers = match &self.vis2 {
             Vis::Bitmap(vis) => {
                 let rows_num = vis.len();
-                let mut buffers = vec![vec![]; rows_num];
+                let mut buffers = vec![BytesMut::new(); rows_num];
                 for c in &self.columns {
                     let c = c.array_ref();
                     assert_eq!(c.len(), rows_num);
@@ -411,7 +446,7 @@ impl DataChunk {
                         // SAFETY(value_at_unchecked): the idx is always in bound.
                         unsafe {
                             if vis.is_set_unchecked(i) {
-                                serialize_datum(c.value_at_unchecked(i), buffer);
+                                serialize_datum_into(c.value_at_unchecked(i), buffer);
                             }
                         }
                     }
@@ -419,19 +454,53 @@ impl DataChunk {
                 buffers
             }
             Vis::Compact(rows_num) => {
-                let mut buffers = vec![vec![]; *rows_num];
+                let mut buffers = vec![BytesMut::new(); *rows_num];
                 for c in &self.columns {
                     let c = c.array_ref();
                     assert_eq!(c.len(), *rows_num);
                     for (i, buffer) in buffers.iter_mut().enumerate() {
                         // SAFETY(value_at_unchecked): the idx is always in bound.
                         unsafe {
-                            serialize_datum(c.value_at_unchecked(i), buffer);
+                            serialize_datum_into(c.value_at_unchecked(i), buffer);
                         }
                     }
                 }
                 buffers
             }
+        };
+
+        buffers.into_iter().map(BytesMut::freeze).collect_vec()
+    }
+
+    /// Serialize each row into bytes with given serializer.
+    ///
+    /// This is similar to `serialize` but it uses a custom serializer. Prefer `serialize` if
+    /// possible since it might be more efficient due to columnar operations.
+    pub fn serialize_with(&self, serializer: &impl ValueRowSerializer) -> Vec<Bytes> {
+        let mut results = Vec::with_capacity(self.capacity());
+        for row in self.rows_with_holes() {
+            results.push(if let Some(row) = row {
+                serializer.serialize(row).into()
+            } else {
+                Bytes::new()
+            });
+        }
+        results
+    }
+
+    /// Estimate size of hash keys. Their indices in a row are indicated by `column_indices`.
+    /// Size here refers to the number of u8s required to store the serialized datum.
+    pub fn estimate_value_encoding_size(&self, column_indices: &[usize]) -> usize {
+        if self.capacity() == 0 {
+            0
+        } else {
+            column_indices
+                .iter()
+                .map(|idx| {
+                    let datum = self.column_at(*idx).array_ref().datum_at(0);
+                    estimate_serialize_datum_size(datum)
+                })
+                .sum()
         }
     }
 }
@@ -445,6 +514,16 @@ impl fmt::Debug for DataChunk {
             self.capacity(),
             self.to_pretty_string()
         )
+    }
+}
+
+impl From<StructArray> for DataChunk {
+    fn from(array: StructArray) -> Self {
+        let columns = array.fields().map(|array| array.clone().into()).collect();
+        Self {
+            columns,
+            vis2: Vis::Compact(array.len()),
+        }
     }
 }
 
@@ -471,12 +550,14 @@ pub trait DataChunkTestExt {
     /// );
     ///
     /// // type chars:
+    /// //     B: bool
     /// //     I: i64
     /// //     i: i32
     /// //     F: f64
     /// //     f: f32
     /// //     T: str
     /// //    TS: Timestamp
+    /// //   SRL: Serial
     /// // {i,f}: struct
     /// ```
     fn from_pretty(s: &str) -> Self;
@@ -495,12 +576,14 @@ impl DataChunkTestExt for DataChunk {
         use crate::types::ScalarImpl;
         fn parse_type(s: &str) -> DataType {
             match s {
+                "B" => DataType::Boolean,
                 "I" => DataType::Int64,
                 "i" => DataType::Int32,
                 "F" => DataType::Float64,
                 "f" => DataType::Float32,
                 "TS" => DataType::Timestamp,
                 "T" => DataType::Varchar,
+                "SRL" => DataType::Serial,
                 array if array.starts_with('{') && array.ends_with('}') => {
                     DataType::Struct(Arc::new(StructType {
                         fields: array[1..array.len() - 1]
@@ -517,10 +600,13 @@ impl DataChunkTestExt for DataChunk {
         let mut lines = s.split('\n').filter(|l| !l.trim().is_empty());
         // initialize array builders from the first line
         let header = lines.next().unwrap().trim();
-        let mut array_builders = header
+        let datatypes = header
             .split_ascii_whitespace()
             .take_while(|c| *c != "//")
             .map(parse_type)
+            .collect::<Vec<_>>();
+        let mut array_builders = datatypes
+            .iter()
             .map(|ty| ty.create_array_builder(1))
             .collect::<Vec<_>>();
         let mut visibility = vec![];
@@ -528,53 +614,16 @@ impl DataChunkTestExt for DataChunk {
             let mut token = line.trim().split_ascii_whitespace();
             // allow `zip` since `token` may longer than `array_builders`
             #[allow(clippy::disallowed_methods)]
-            for (builder, val_str) in array_builders.iter_mut().zip(&mut token) {
-                fn parse_datum(s: &str, builder: &ArrayBuilderImpl) -> Datum {
-                    if s == "." {
-                        return None;
-                    }
-                    Some(match builder {
-                        ArrayBuilderImpl::Int32(_) => ScalarImpl::Int32(
-                            s.parse()
-                                .map_err(|_| panic!("invalid int32: {s:?}"))
-                                .unwrap(),
-                        ),
-                        ArrayBuilderImpl::Int64(_) => ScalarImpl::Int64(
-                            s.parse()
-                                .map_err(|_| panic!("invalid int64: {s:?}"))
-                                .unwrap(),
-                        ),
-                        ArrayBuilderImpl::Float32(_) => ScalarImpl::Float32(
-                            s.parse()
-                                .map_err(|_| panic!("invalid float32: {s:?}"))
-                                .unwrap(),
-                        ),
-                        ArrayBuilderImpl::Float64(_) => ScalarImpl::Float64(
-                            s.parse()
-                                .map_err(|_| panic!("invalid float64: {s:?}"))
-                                .unwrap(),
-                        ),
-                        ArrayBuilderImpl::NaiveDateTime(_) => {
-                            ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
-                                s.parse()
-                                    .map_err(|_| panic!("invalid datetime: {s:?}"))
-                                    .unwrap(),
-                            ))
-                        }
-                        ArrayBuilderImpl::Utf8(_) => ScalarImpl::Utf8(s.into()),
-                        ArrayBuilderImpl::Struct(builder) => {
-                            assert!(s.starts_with('{') && s.ends_with('}'));
-                            let fields = s[1..s.len() - 1]
-                                .split(',')
-                                .zip_eq(&builder.children_array)
-                                .map(|(s, builder)| parse_datum(s, builder))
-                                .collect_vec();
-                            ScalarImpl::Struct(StructValue::new(fields))
-                        }
-                        b => panic!("invalid data type: {b:?}"),
-                    })
-                }
-                builder.append_datum(&parse_datum(val_str, builder));
+            for ((builder, ty), val_str) in
+                array_builders.iter_mut().zip(&datatypes).zip(&mut token)
+            {
+                let datum = match val_str {
+                    "." => None,
+                    "t" => Some(true.into()),
+                    "f" => Some(false.into()),
+                    _ => Some(ScalarImpl::from_text(val_str.as_bytes(), ty).unwrap()),
+                };
+                builder.append_datum(datum);
             }
             let visible = match token.next() {
                 None | Some("//") => true,
@@ -638,8 +687,8 @@ impl DataChunkTestExt for DataChunk {
 
 #[cfg(test)]
 mod tests {
-
     use crate::array::*;
+    use crate::row::Row;
     use crate::{column, column_nonnull};
 
     #[test]
@@ -716,7 +765,7 @@ mod tests {
         let chunk: DataChunk = DataChunk::new(columns, length);
         for row in chunk.rows() {
             for i in 0..num_of_columns {
-                let val = row.value_at(i).unwrap();
+                let val = row.datum_at(i).unwrap();
                 assert_eq!(val.into_int32(), i as i32);
             }
         }

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
-use std::fs;
 use std::os::unix::prelude::PermissionsExt;
 use std::path::Path;
 
@@ -61,7 +60,7 @@ pub fn compose_deploy(
         use std::fmt::Write;
         let ssh_extra_args = "-o \"UserKnownHostsFile=/dev/null\" -o \"StrictHostKeyChecking=no\" -o \"LogLevel=ERROR\"";
         let mut x = String::new();
-        writeln!(x, "#!/bin/bash -e")?;
+        writeln!(x, "#!/usr/bin/env bash -e")?;
         writeln!(x)?;
         writeln!(
             x,
@@ -117,7 +116,7 @@ fi
             let id = &instance.id;
             let base_folder = "~/risingwave-deploy";
             let mut y = String::new();
-            writeln!(y, "#!/bin/bash -e")?;
+            writeln!(y, "#!/usr/bin/env bash -e")?;
             writeln!(y)?;
             writeln!(
                 y,
@@ -136,7 +135,7 @@ fi
                 r#"echo "{id}: $(tput setaf 2)done sync config$(tput sgr0)""#,
             )?;
             let sh = format!("_deploy.{id}.partial.sh");
-            std::fs::write(Path::new(output_directory).join(&sh), y)?;
+            fs_err::write(Path::new(output_directory).join(&sh), y)?;
             writeln!(x, "{sh}")?;
         }
         writeln!(x, "EOF")?;
@@ -152,7 +151,7 @@ fi
         for instance in ec2_instances {
             let id = &instance.id;
             let mut y = String::new();
-            writeln!(y, "#!/bin/bash -e")?;
+            writeln!(y, "#!/usr/bin/env bash -e")?;
             writeln!(
                 y,
                 r#"echo "{id}: $(tput setaf 2)stopping and pulling$(tput sgr0)""#,
@@ -182,7 +181,7 @@ fi
             }
 
             let sh = format!("_stop.{id}.partial.sh");
-            std::fs::write(Path::new(output_directory).join(&sh), y)?;
+            fs_err::write(Path::new(output_directory).join(&sh), y)?;
             writeln!(x, "{sh}")?;
         }
         writeln!(x, "EOF")?;
@@ -226,14 +225,14 @@ fi
         for instance in ec2_instances {
             let id = &instance.id;
             let mut y = String::new();
-            writeln!(y, "#!/bin/bash -e")?;
+            writeln!(y, "#!/usr/bin/env bash -e")?;
             writeln!(y, r#"echo "{id}: $(tput setaf 2)check status$(tput sgr0)""#,)?;
             let public_ip = &instance.public_ip;
             let base_folder = "~/risingwave-deploy";
             writeln!(y, "ssh {ssh_extra_args} ubuntu@{public_ip} \"bash -c 'cd {base_folder} && docker compose ps'\"")?;
 
             let sh = format!("_check.{id}.partial.sh");
-            std::fs::write(Path::new(output_directory).join(&sh), y)?;
+            fs_err::write(Path::new(output_directory).join(&sh), y)?;
             writeln!(x, "{sh}")?;
         }
         writeln!(x, "EOF")?;
@@ -241,9 +240,9 @@ fi
         x
     };
     let deploy_sh = Path::new(output_directory).join("deploy.sh");
-    fs::write(&deploy_sh, &shell_script)?;
-    let mut perms = fs::metadata(&deploy_sh)?.permissions();
+    fs_err::write(&deploy_sh, shell_script)?;
+    let mut perms = fs_err::metadata(&deploy_sh)?.permissions();
     perms.set_mode(perms.mode() | 0o755);
-    fs::set_permissions(&deploy_sh, perms)?;
+    fs_err::set_permissions(&deploy_sh, perms)?;
     Ok(())
 }

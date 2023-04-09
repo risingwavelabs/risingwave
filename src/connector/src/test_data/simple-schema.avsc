@@ -1,0 +1,62 @@
+{
+  "name": "test_student",
+  "type": "record",
+  "fields": [
+    {
+      "name": "id",
+      "type": "int",
+      "default": 0
+    },
+    {
+      "name": "sequence_id",
+      "type": "long",
+      "default": 0
+    },
+    {
+      "name": "name",
+      "type": ["null", "string"]
+    },
+    {
+      "name": "score",
+      "type": "float",
+      "default": 0.0
+    },
+    {
+      "name": "avg_score",
+      "type": "double",
+      "default": 0.0
+    },
+    {
+      "name": "is_lasted",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "name": "entrance_date",
+      "type": "int",
+      "logicalType": "date",
+      "default": null
+    },
+    {
+      "name": "birthday",
+      "type": "long",
+      "logicalType": "timestamp-millis",
+      "default": null
+    },
+    {
+      "name": "anniversary",
+      "type": "long",
+      "logicalType": "timestamp-micros",
+      "default": null
+    },
+    {
+      "name": "passed",
+      "type": {
+        "name": "interval",
+        "type": "fixed",
+        "size": 12
+      },
+      "logicalType": "duration"
+    }
+  ]
+}

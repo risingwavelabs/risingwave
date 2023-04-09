@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,35 +17,35 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
-use risingwave_hummock_sdk::HummockSstableId;
-use risingwave_meta::hummock::test_utils::setup_compute_env;
+use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_meta::hummock::test_utils::{
+    setup_compute_env, update_filter_key_extractor_for_table_ids,
+};
 use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::MetaSrvEnv;
 use risingwave_meta::storage::MemStore;
 use risingwave_pb::common::WorkerNode;
-use risingwave_pb::hummock::pin_version_response::Payload;
+use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::HummockVersion;
-use risingwave_storage::hummock::compactor::Context;
+use risingwave_storage::hummock::compactor::CompactorContext;
 use risingwave_storage::hummock::event_handler::hummock_event_handler::BufferTracker;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::local_version::local_version_manager::{
-    LocalVersionManager, LocalVersionManagerRef,
-};
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use risingwave_storage::hummock::shared_buffer::UncommittedData;
 use risingwave_storage::hummock::test_utils::{
-    default_config_for_test, gen_dummy_batch, gen_dummy_batch_several_keys, gen_dummy_sst_info,
+    default_opts_for_test, gen_dummy_batch, gen_dummy_batch_several_keys, gen_dummy_sst_info,
 };
-use risingwave_storage::hummock::SstableIdManager;
-use risingwave_storage::monitor::StateStoreMetrics;
+use risingwave_storage::hummock::SstableObjectIdManager;
+use risingwave_storage::monitor::CompactorMetrics;
+use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::storage_value::StorageValue;
 
 use crate::test_utils::prepare_first_valid_version;
 
 pub async fn prepare_local_version_manager(
-    opt: Arc<StorageConfig>,
+    opt: Arc<StorageOpts>,
     env: MetaSrvEnv<MemStore>,
     hummock_manager_ref: HummockManagerRef<MemStore>,
     worker_node: WorkerNode,
@@ -60,19 +60,23 @@ pub async fn prepare_local_version_manager(
         worker_node.id,
     ));
 
-    let sstable_id_manager = Arc::new(SstableIdManager::new(
+    let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
         hummock_meta_client.clone(),
         opt.sstable_id_remote_fetch_number,
     ));
 
-    let buffer_tracker = BufferTracker::from_storage_config(&opt);
-    let compactor_context = Arc::new(Context::new_local_compact_context(
-        opt.clone(),
+    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
+    update_filter_key_extractor_for_table_ids(&filter_key_extractor_manager, &[0]);
+
+    let buffer_tracker = BufferTracker::from_storage_opts(&opt);
+    let compactor_context = Arc::new(CompactorContext::new_local_compact_context(
+        opt,
         sstable_store,
         hummock_meta_client,
-        Arc::new(StateStoreMetrics::unused()),
-        sstable_id_manager,
-        Arc::new(FilterKeyExtractorManager::default()),
+        Arc::new(CompactorMetrics::unused()),
+        sstable_object_id_manager,
+        filter_key_extractor_manager,
+        CompactorRuntimeConfig::default(),
     ));
 
     LocalVersionManager::new(pinned_version, compactor_context, buffer_tracker)
@@ -80,7 +84,7 @@ pub async fn prepare_local_version_manager(
 
 #[tokio::test]
 async fn test_update_pinned_version() {
-    let opt = Arc::new(default_config_for_test());
+    let opt = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _, worker_node) = setup_compute_env(8080).await;
     let local_version_manager =
         prepare_local_version_manager(opt, env, hummock_manager_ref, worker_node).await;
@@ -229,7 +233,7 @@ async fn test_update_pinned_version() {
 
 #[tokio::test]
 async fn test_update_uncommitted_ssts() {
-    let mut opt = default_config_for_test();
+    let mut opt = default_opts_for_test();
     opt.share_buffers_sync_parallelism = 2;
     opt.sstable_size_mb = 1;
     let opt = Arc::new(opt);
@@ -421,7 +425,7 @@ async fn test_update_uncommitted_ssts() {
 
 #[tokio::test]
 async fn test_clear_shared_buffer() {
-    let opt = Arc::new(default_config_for_test());
+    let opt = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _, worker_node) = setup_compute_env(8080).await;
     let local_version_manager =
         prepare_local_version_manager(opt, env, hummock_manager_ref, worker_node).await;
@@ -455,15 +459,15 @@ async fn test_clear_shared_buffer() {
 
     assert_eq!(
         local_version_manager
-            .sstable_id_manager()
-            .global_watermark_sst_id(),
-        HummockSstableId::MAX
+            .sstable_object_id_manager()
+            .global_watermark_object_id(),
+        HummockSstableObjectId::MAX
     );
 }
 
 #[tokio::test]
 async fn test_sst_gc_watermark() {
-    let opt = Arc::new(default_config_for_test());
+    let opt = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _, worker_node) = setup_compute_env(8080).await;
     let local_version_manager =
         prepare_local_version_manager(opt, env, hummock_manager_ref, worker_node).await;
@@ -478,9 +482,9 @@ async fn test_sst_gc_watermark() {
 
     assert_eq!(
         local_version_manager
-            .sstable_id_manager()
-            .global_watermark_sst_id(),
-        HummockSstableId::MAX
+            .sstable_object_id_manager()
+            .global_watermark_object_id(),
+        HummockSstableObjectId::MAX
     );
 
     for i in 0..2 {
@@ -492,9 +496,9 @@ async fn test_sst_gc_watermark() {
 
     assert_eq!(
         local_version_manager
-            .sstable_id_manager()
-            .global_watermark_sst_id(),
-        HummockSstableId::MAX
+            .sstable_object_id_manager()
+            .global_watermark_object_id(),
+        HummockSstableObjectId::MAX
     );
 
     for epoch in &epochs {
@@ -506,8 +510,8 @@ async fn test_sst_gc_watermark() {
         // Global watermark determined by epoch 0.
         assert_eq!(
             local_version_manager
-                .sstable_id_manager()
-                .global_watermark_sst_id(),
+                .sstable_object_id_manager()
+                .global_watermark_object_id(),
             1
         );
     }
@@ -522,8 +526,8 @@ async fn test_sst_gc_watermark() {
     // Global watermark determined by epoch 1.
     assert_eq!(
         local_version_manager
-            .sstable_id_manager()
-            .global_watermark_sst_id(),
+            .sstable_object_id_manager()
+            .global_watermark_object_id(),
         2
     );
 
@@ -535,8 +539,8 @@ async fn test_sst_gc_watermark() {
     local_version_manager.try_update_pinned_version(Payload::PinnedVersion(version));
     assert_eq!(
         local_version_manager
-            .sstable_id_manager()
-            .global_watermark_sst_id(),
-        HummockSstableId::MAX
+            .sstable_object_id_manager()
+            .global_watermark_object_id(),
+        HummockSstableObjectId::MAX
     );
 }

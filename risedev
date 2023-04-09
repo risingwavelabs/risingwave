@@ -1,8 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 if [ -z "$(which cargo-make)" ]; then
     echo "Installing cargo-make..."
-    cargo install cargo-make --version "^0.35"
+    cargo install cargo-make --version "^0.35" --locked
 fi
 
 touch risedev-components.user.env

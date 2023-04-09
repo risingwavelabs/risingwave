@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,12 +16,12 @@ use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use nix::sys::statfs::{
     statfs, FsType as NixFsType, BTRFS_SUPER_MAGIC, EXT4_SUPER_MAGIC, TMPFS_MAGIC,
 };
 use parking_lot::RwLock;
-use risingwave_common::cache::{LruCache, LruCacheEventListener};
+use risingwave_common::cache::{CachePriority, LruCache, LruCacheEventListener};
+use risingwave_common::util::iter_util::ZipEqFast;
 use tokio::sync::RwLock as AsyncRwLock;
 use tracing::Instrument;
 
@@ -37,7 +37,7 @@ const CACHE_FILE_FILENAME: &str = "cache";
 
 const FREELIST_DEFAULT_CAPACITY: usize = 64;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub enum FsType {
     Xfs,
     Ext4,
@@ -200,7 +200,7 @@ where
             .instrument(tracing::trace_span!("meta_write_lock_update_slots"))
             .await;
 
-        for (key, bloc) in self.keys.iter().zip_eq(self.blocs.iter()) {
+        for (key, bloc) in self.keys.iter().zip_eq_fast(self.blocs.iter()) {
             slots.push(guard.insert(key, bloc)?);
         }
 
@@ -268,6 +268,7 @@ where
         let fs_block_size = fs_stat.block_size() as usize;
 
         let cf_opts = CacheFileOptions {
+            fs_type,
             // TODO: Make it configurable.
             block_size: fs_block_size,
             fallocate_unit: options.cache_file_fallocate_unit,
@@ -354,6 +355,7 @@ where
                     hash_builder.hash_one(&key),
                     utils::align_up(self.block_size, block_loc.len as usize),
                     slot,
+                    CachePriority::High,
                 );
             }
         }
@@ -380,7 +382,7 @@ where
             .instrument(tracing::trace_span!("meta_file_read_lock"))
             .await;
 
-        let (bloc, _key) = guard.get(slot).ok_or_else(|| Error::InvalidSlot(slot))?;
+        let (bloc, _key) = guard.get(slot).ok_or(Error::InvalidSlot(slot))?;
         let offset = bloc.bidx as u64 * self.block_size as u64;
         let blen = bloc.blen(self.block_size as u32) as usize;
 

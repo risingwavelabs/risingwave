@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,10 +19,10 @@ use std::sync::Arc;
 use bytes::Bytes;
 use crossbeam::atomic::AtomicCell;
 use dashmap::DashMap;
-use risingwave_common::config::StorageConfig;
 
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockEpoch;
+use crate::opts::StorageOpts;
 
 pub struct ConflictDetector {
     // epoch -> key-sets
@@ -40,7 +40,7 @@ impl Default for ConflictDetector {
 }
 
 impl ConflictDetector {
-    pub fn new_from_config(options: &StorageConfig) -> Option<Arc<ConflictDetector>> {
+    pub fn new_from_config(options: &StorageOpts) -> Option<Arc<ConflictDetector>> {
         if options.write_conflict_detection_enabled {
             Some(Arc::new(ConflictDetector::default()))
         } else {
@@ -145,7 +145,6 @@ mod test {
         detector.check_conflict_and_track_write_batch(
             (0..2)
                 .map(|_| (Bytes::from("conflicted-key"), HummockValue::Delete))
-                .into_iter()
                 .collect_vec()
                 .as_slice(),
             233,

@@ -16,10 +16,10 @@ create materialized view mv_proj_is_null as select 10/x is null as v from t;
 query I rowsort
 select * from mv_proj;
 ----
-NULL
-NULL
-5
 10
+5
+NULL
+NULL
 
 # result for 0 is NULL, instead of true
 query B rowsort

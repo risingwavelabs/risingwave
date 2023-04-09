@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use super::{
-    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery,
-    TableFunction, WindowFunction,
+    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Parameter, Subquery,
+    TableFunction, UserDefinedFunction, WindowFunction,
 };
 
 /// Traverse an expression tree.
@@ -41,6 +41,8 @@ pub trait ExprVisitor<R: Default> {
             ExprImpl::CorrelatedInputRef(inner) => self.visit_correlated_input_ref(inner),
             ExprImpl::TableFunction(inner) => self.visit_table_function(inner),
             ExprImpl::WindowFunction(inner) => self.visit_window_function(inner),
+            ExprImpl::UserDefinedFunction(inner) => self.visit_user_defined_function(inner),
+            ExprImpl::Parameter(inner) => self.visit_parameter(inner),
         }
     }
     fn visit_function_call(&mut self, func_call: &FunctionCall) -> R {
@@ -61,6 +63,9 @@ pub trait ExprVisitor<R: Default> {
         r = Self::merge(r, agg_call.order_by().visit_expr(self));
         r = Self::merge(r, agg_call.filter().visit_expr(self));
         r
+    }
+    fn visit_parameter(&mut self, _: &Parameter) -> R {
+        R::default()
     }
     fn visit_literal(&mut self, _: &Literal) -> R {
         R::default()
@@ -83,6 +88,14 @@ pub trait ExprVisitor<R: Default> {
             .unwrap_or_default()
     }
     fn visit_window_function(&mut self, func_call: &WindowFunction) -> R {
+        func_call
+            .args
+            .iter()
+            .map(|expr| self.visit_expr(expr))
+            .reduce(Self::merge)
+            .unwrap_or_default()
+    }
+    fn visit_user_defined_function(&mut self, func_call: &UserDefinedFunction) -> R {
         func_call
             .args
             .iter()

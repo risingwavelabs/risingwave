@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -33,12 +33,16 @@ pub struct ComputeNodeConfig {
     pub provide_minio: Option<Vec<MinioConfig>>,
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
+    pub provide_opendal: Option<Vec<OpendalConfig>>,
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,
     pub provide_jaeger: Option<Vec<JaegerConfig>>,
-    pub provide_compactor: Option<Vec<CompactorConfig>>,
     pub user_managed: bool,
-    pub enable_in_memory_kv_state_backend: bool,
     pub connector_rpc_endpoint: String,
+
+    pub total_memory_bytes: usize,
+    pub memory_control_policy: String,
+    pub streaming_memory_proportion: f64,
+    pub parallelism: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -58,14 +62,17 @@ pub struct MetaNodeConfig {
 
     pub user_managed: bool,
 
+    pub connector_rpc_endpoint: String,
     pub provide_etcd_backend: Option<Vec<EtcdConfig>>,
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
 
-    pub max_heartbeat_interval_secs: u64,
-    pub unsafe_disable_recovery: bool,
-    pub max_idle_secs_to_exit: Option<u64>,
-    pub enable_committed_sst_sanity_check: bool,
-    pub enable_compaction_deterministic: bool,
+    pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
+    pub provide_compactor: Option<Vec<CompactorConfig>>,
+
+    pub provide_aws_s3: Option<Vec<AwsS3Config>>,
+    pub provide_minio: Option<Vec<MinioConfig>>,
+    pub provide_opendal: Option<Vec<OpendalConfig>>,
+    pub enable_in_memory_kv_state_backend: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -102,7 +109,7 @@ pub struct CompactorConfig {
     pub exporter_port: u16,
 
     pub provide_minio: Option<Vec<MinioConfig>>,
-    pub provide_aws_s3: Option<Vec<AwsS3Config>>,
+
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub user_managed: bool,
     pub max_concurrent_task_number: u64,
@@ -179,6 +186,7 @@ pub struct PrometheusConfig {
     pub provide_etcd: Option<Vec<EtcdConfig>>,
     pub provide_redpanda: Option<Vec<RedPandaConfig>>,
     pub provide_frontend: Option<Vec<FrontendConfig>>,
+    pub provide_connector_node: Option<Vec<ConnectorNodeConfig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -216,6 +224,20 @@ pub struct AwsS3Config {
     // 's3_compatible' is true means using other s3 compatible object store, and the access key
     // id and access key secret is configured in a specific profile.
     pub s3_compatible: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct OpendalConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+
+    pub id: String,
+    pub engine: String,
+    pub namenode: String,
+    pub bucket: String,
+    pub root: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -299,6 +321,7 @@ pub struct ConnectorNodeConfig {
     phantom_use: Option<String>,
     pub id: String,
     pub port: u16,
+    pub exporter_port: u16,
     pub address: String,
 }
 
@@ -314,6 +337,7 @@ pub enum ServiceConfig {
     Prometheus(PrometheusConfig),
     Grafana(GrafanaConfig),
     Jaeger(JaegerConfig),
+    OpenDal(OpendalConfig),
     AwsS3(AwsS3Config),
     Kafka(KafkaConfig),
     Pubsub(PubsubConfig),
@@ -342,6 +366,7 @@ impl ServiceConfig {
             Self::Redis(c) => &c.id,
             Self::RedPanda(c) => &c.id,
             Self::ConnectorNode(c) => &c.id,
+            Self::OpenDal(c) => &c.id,
         }
     }
 }

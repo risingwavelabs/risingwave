@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,17 +13,19 @@
 // limitations under the License.
 
 use core::fmt;
+use std::fmt::Write;
 
 use itertools::Itertools;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use super::ddl::SourceWatermark;
 use super::{Ident, ObjectType, Query};
 use crate::ast::{
     display_comma_separated, display_separated, ColumnDef, ObjectName, SqlOption, TableConstraint,
 };
 use crate::keywords::Keyword;
-use crate::parser::{IsOptional, Parser, ParserError};
+use crate::parser::{IsOptional, Parser, ParserError, UPSTREAM_SOURCE_KEY};
 use crate::tokenizer::Token;
 
 /// Consumes token from the parser into an AST node.
@@ -68,6 +70,7 @@ macro_rules! impl_fmt_display {
 //     with_properties: AstOption<WithProperties>,
 //     [Keyword::ROW, Keyword::FORMAT],
 //     source_schema: SourceSchema,
+//     [Keyword::WATERMARK, Keyword::FOR] column [Keyword::AS] <expr>
 // });
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -78,6 +81,7 @@ pub struct CreateSourceStatement {
     pub source_name: ObjectName,
     pub with_properties: WithProperties,
     pub source_schema: SourceSchema,
+    pub source_watermarks: Vec<SourceWatermark>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -85,34 +89,53 @@ pub struct CreateSourceStatement {
 pub enum SourceSchema {
     Protobuf(ProtobufSchema),
     // Keyword::PROTOBUF ProtobufSchema
-    Json,             // Keyword::JSON
-    DebeziumJson,     // Keyword::DEBEZIUM_JSON
-    Avro(AvroSchema), // Keyword::AVRO
-    Maxwell,          // Keyword::MAXWELL
-    CanalJson,        // Keyword::CANAL_JSON
+    Json,                   // Keyword::JSON
+    DebeziumJson,           // Keyword::DEBEZIUM_JSON
+    UpsertJson,             // Keyword::UPSERT_JSON
+    Avro(AvroSchema),       // Keyword::AVRO
+    UpsertAvro(AvroSchema), // Keyword::UpsertAVRO
+    Maxwell,                // Keyword::MAXWELL
+    CanalJson,              // Keyword::CANAL_JSON
+    Csv(CsvInfo),           // Keyword::CSV
+    Native,
+    DebeziumAvro(DebeziumAvroSchema), // Keyword::DEBEZIUM_AVRO
 }
 
 impl ParseTo for SourceSchema {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
-        let schema = if p.parse_keywords(&[Keyword::JSON]) {
-            SourceSchema::Json
-        } else if p.parse_keywords(&[Keyword::PROTOBUF]) {
-            impl_parse_to!(protobuf_schema: ProtobufSchema, p);
-            SourceSchema::Protobuf(protobuf_schema)
-        } else if p.parse_keywords(&[Keyword::DEBEZIUM_JSON]) {
-            SourceSchema::DebeziumJson
-        } else if p.parse_keywords(&[Keyword::AVRO]) {
-            impl_parse_to!(avro_schema: AvroSchema, p);
-            SourceSchema::Avro(avro_schema)
-        } else if p.parse_keywords(&[Keyword::MAXWELL]) {
-            SourceSchema::Maxwell
-        } else if p.parse_keywords(&[Keyword::CANAL_JSON]) {
-            SourceSchema::CanalJson
-        } else {
-            return Err(ParserError::ParserError(
-                "expected JSON | PROTOBUF | DEBEZIUM_JSON | AVRO | MAXWELL | CANAL_JSON after ROW FORMAT".to_string(),
-            ));
+        let id = p.parse_identifier()?;
+        let value = id.value.to_ascii_uppercase();
+        let schema = match &value[..] {
+            "JSON" => SourceSchema::Json,
+            "UPSERT_JSON" => SourceSchema::UpsertJson,
+            "PROTOBUF" => {
+                impl_parse_to!(protobuf_schema: ProtobufSchema, p);
+                SourceSchema::Protobuf(protobuf_schema)
+            }
+            "DEBEZIUM_JSON" => SourceSchema::DebeziumJson,
+            "AVRO" => {
+                impl_parse_to!(avro_schema: AvroSchema, p);
+                SourceSchema::Avro(avro_schema)
+            }
+            "UPSERT_AVRO" => {
+                impl_parse_to!(avro_schema: AvroSchema, p);
+                SourceSchema::UpsertAvro(avro_schema)
+            }
+            "MAXWELL" => SourceSchema::Maxwell,
+            "CANAL_JSON" => SourceSchema::CanalJson,
+            "CSV" => {
+                impl_parse_to!(csv_info: CsvInfo, p);
+                SourceSchema::Csv(csv_info)
+            }
+            "DEBEZIUM_AVRO" => {
+                impl_parse_to!(avro_schema: DebeziumAvroSchema, p);
+                SourceSchema::DebeziumAvro(avro_schema)
+            }
+             _ => return Err(ParserError::ParserError(
+                "expected JSON | UPSERT_JSON | PROTOBUF | DEBEZIUM_JSON | DEBEZIUM_AVRO | AVRO | UPSERT_AVRO | MAXWELL | CANAL_JSON after ROW FORMAT".to_string(),
+            ))
         };
+
         Ok(schema)
     }
 }
@@ -122,10 +145,15 @@ impl fmt::Display for SourceSchema {
         match self {
             SourceSchema::Protobuf(protobuf_schema) => write!(f, "PROTOBUF {}", protobuf_schema),
             SourceSchema::Json => write!(f, "JSON"),
+            SourceSchema::UpsertJson => write!(f, "UPSERT JSON"),
             SourceSchema::Maxwell => write!(f, "MAXWELL"),
             SourceSchema::DebeziumJson => write!(f, "DEBEZIUM JSON"),
             SourceSchema::Avro(avro_schema) => write!(f, "AVRO {}", avro_schema),
+            SourceSchema::UpsertAvro(avro_schema) => write!(f, "UPSERT AVRO {}", avro_schema),
             SourceSchema::CanalJson => write!(f, "CANAL JSON"),
+            SourceSchema::Csv(csv_info) => write!(f, "CSV {}", csv_info),
+            SourceSchema::Native => write!(f, "NATIVE"),
+            SourceSchema::DebeziumAvro(avro_schema) => write!(f, "DEBEZIUM AVRO {}", avro_schema),
         }
     }
 }
@@ -172,28 +200,22 @@ impl fmt::Display for ProtobufSchema {
 }
 
 // sql_grammar!(AvroSchema {
-//     [Keyword::MESSAGE],
-//     message_name: AstString,
-//     [Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION],
-//     row_schema_location: AstString,
+//     [Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION, [Keyword::CONFLUENT, Keyword::SCHEMA,
+// Keyword::REGISTRY]],     row_schema_location: AstString,
 // });
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct AvroSchema {
-    pub message_name: AstString,
     pub row_schema_location: AstString,
     pub use_schema_registry: bool,
 }
 
 impl ParseTo for AvroSchema {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
-        impl_parse_to!([Keyword::MESSAGE], p);
-        impl_parse_to!(message_name: AstString, p);
         impl_parse_to!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], p);
         impl_parse_to!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], p);
         impl_parse_to!(row_schema_location: AstString, p);
         Ok(Self {
-            message_name,
             row_schema_location,
             use_schema_registry,
         })
@@ -203,11 +225,95 @@ impl ParseTo for AvroSchema {
 impl fmt::Display for AvroSchema {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut v: Vec<String> = vec![];
-        impl_fmt_display!([Keyword::MESSAGE], v);
-        impl_fmt_display!(message_name, v, self);
         impl_fmt_display!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], v);
         impl_fmt_display!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], v, self);
         impl_fmt_display!(row_schema_location, v, self);
+        v.iter().join(" ").fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct DebeziumAvroSchema {
+    pub row_schema_location: AstString,
+}
+
+impl ParseTo for DebeziumAvroSchema {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        impl_parse_to!(
+            [
+                Keyword::ROW,
+                Keyword::SCHEMA,
+                Keyword::LOCATION,
+                Keyword::CONFLUENT,
+                Keyword::SCHEMA,
+                Keyword::REGISTRY
+            ],
+            p
+        );
+        impl_parse_to!(row_schema_location: AstString, p);
+        Ok(Self {
+            row_schema_location,
+        })
+    }
+}
+
+impl fmt::Display for DebeziumAvroSchema {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut v: Vec<String> = vec![];
+        impl_fmt_display!(
+            [
+                Keyword::ROW,
+                Keyword::SCHEMA,
+                Keyword::LOCATION,
+                Keyword::CONFLUENT,
+                Keyword::SCHEMA,
+                Keyword::REGISTRY
+            ],
+            v
+        );
+        impl_fmt_display!(row_schema_location, v, self);
+        v.iter().join(" ").fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CsvInfo {
+    pub delimiter: u8,
+    pub has_header: bool,
+}
+
+impl ParseTo for CsvInfo {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        impl_parse_to!(without_header => [Keyword::WITHOUT, Keyword::HEADER], p);
+        impl_parse_to!([Keyword::DELIMITED, Keyword::BY], p);
+        impl_parse_to!(delimiter: AstString, p);
+        let mut chars = delimiter.0.chars().collect_vec();
+        if chars.len() != 1 {
+            return Err(ParserError::ParserError(format!(
+                "The delimiter should be a char, but got {:?}",
+                chars
+            )));
+        }
+        let delimiter = chars.remove(0) as u8;
+        Ok(Self {
+            delimiter,
+            has_header: !without_header,
+        })
+    }
+}
+
+impl fmt::Display for CsvInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut v: Vec<String> = vec![];
+        if !self.has_header {
+            v.push(format!(
+                "{}",
+                AstVec([Keyword::WITHOUT, Keyword::HEADER].to_vec())
+            ));
+        }
+        impl_fmt_display!(delimiter, v, self);
         v.iter().join(" ").fmt(f)
     }
 }
@@ -218,11 +324,45 @@ impl ParseTo for CreateSourceStatement {
         impl_parse_to!(source_name: ObjectName, p);
 
         // parse columns
-        let (columns, constraints) = p.parse_columns()?;
+        let (columns, constraints, source_watermarks) = p.parse_columns_with_watermark()?;
 
         impl_parse_to!(with_properties: WithProperties, p);
-        impl_parse_to!([Keyword::ROW, Keyword::FORMAT], p);
-        impl_parse_to!(source_schema: SourceSchema, p);
+        let option = with_properties
+            .0
+            .iter()
+            .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
+        let connector: String = option.map(|opt| opt.value.to_string()).unwrap_or_default();
+        // row format for cdc source must be debezium json
+        // row format for nexmark source must be native
+        // default row format for datagen source is native
+        let source_schema = if connector.contains("-cdc") {
+            if p.peek_nth_any_of_keywords(0, &[Keyword::ROW])
+                && p.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
+            {
+                return Err(ParserError::ParserError("Row format for cdc connectors should not be set here because it is limited to debezium json".to_string()));
+            }
+            SourceSchema::DebeziumJson
+        } else if connector.contains("nexmark") {
+            if p.peek_nth_any_of_keywords(0, &[Keyword::ROW])
+                && p.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
+            {
+                return Err(ParserError::ParserError("Row format for nexmark connectors should not be set here because it is limited to internal native format".to_string()));
+            }
+            SourceSchema::Native
+        } else if connector.contains("datagen") {
+            if p.peek_nth_any_of_keywords(0, &[Keyword::ROW])
+                && p.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
+            {
+                impl_parse_to!([Keyword::ROW, Keyword::FORMAT], p);
+                SourceSchema::parse_to(p)?
+            } else {
+                SourceSchema::Native
+            }
+        } else {
+            impl_parse_to!([Keyword::ROW, Keyword::FORMAT], p);
+            SourceSchema::parse_to(p)?
+        };
+
         Ok(Self {
             if_not_exists,
             columns,
@@ -230,8 +370,30 @@ impl ParseTo for CreateSourceStatement {
             source_name,
             with_properties,
             source_schema,
+            source_watermarks,
         })
     }
+}
+
+pub(super) fn fmt_create_items(
+    columns: &[ColumnDef],
+    constraints: &[TableConstraint],
+    watermarks: &[SourceWatermark],
+) -> std::result::Result<String, fmt::Error> {
+    let mut items = String::new();
+    let has_items = !columns.is_empty() || !constraints.is_empty() || !watermarks.is_empty();
+    has_items.then(|| write!(&mut items, "("));
+    write!(&mut items, "{}", display_comma_separated(columns))?;
+    if !columns.is_empty() && (!constraints.is_empty() || !watermarks.is_empty()) {
+        write!(&mut items, ", ")?;
+    }
+    write!(&mut items, "{}", display_comma_separated(constraints))?;
+    if !columns.is_empty() && !constraints.is_empty() && !watermarks.is_empty() {
+        write!(&mut items, ", ")?;
+    }
+    write!(&mut items, "{}", display_comma_separated(watermarks))?;
+    has_items.then(|| write!(&mut items, ")"));
+    Ok(items)
 }
 
 impl fmt::Display for CreateSourceStatement {
@@ -239,6 +401,12 @@ impl fmt::Display for CreateSourceStatement {
         let mut v: Vec<String> = vec![];
         impl_fmt_display!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], v, self);
         impl_fmt_display!(source_name, v, self);
+
+        let items = fmt_create_items(&self.columns, &self.constraints, &self.source_watermarks)?;
+        if !items.is_empty() {
+            v.push(items);
+        }
+
         impl_fmt_display!(with_properties, v, self);
         impl_fmt_display!([Keyword::ROW, Keyword::FORMAT], v);
         impl_fmt_display!(source_schema, v, self);
@@ -297,6 +465,11 @@ impl ParseTo for CreateSinkStatement {
         };
 
         impl_parse_to!(with_properties: WithProperties, p);
+        if with_properties.0.is_empty() {
+            return Err(ParserError::ParserError(
+                "sink properties not provided".to_string(),
+            ));
+        }
 
         Ok(Self {
             if_not_exists,
@@ -314,6 +487,48 @@ impl fmt::Display for CreateSinkStatement {
         impl_fmt_display!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], v, self);
         impl_fmt_display!(sink_name, v, self);
         impl_fmt_display!(sink_from, v, self);
+        impl_fmt_display!(with_properties, v, self);
+        v.iter().join(" ").fmt(f)
+    }
+}
+
+// sql_grammar!(CreateConnectionStatement {
+//     if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS],
+//     connection_name: Ident,
+//     with_properties: AstOption<WithProperties>,
+// });
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CreateConnectionStatement {
+    pub if_not_exists: bool,
+    pub connection_name: ObjectName,
+    pub with_properties: WithProperties,
+}
+
+impl ParseTo for CreateConnectionStatement {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
+        impl_parse_to!(connection_name: ObjectName, p);
+        impl_parse_to!(with_properties: WithProperties, p);
+        if with_properties.0.is_empty() {
+            return Err(ParserError::ParserError(
+                "connection properties not provided".to_string(),
+            ));
+        }
+
+        Ok(Self {
+            if_not_exists,
+            connection_name,
+            with_properties,
+        })
+    }
+}
+
+impl fmt::Display for CreateConnectionStatement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut v: Vec<String> = vec![];
+        impl_fmt_display!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], v, self);
+        impl_fmt_display!(connection_name, v, self);
         impl_fmt_display!(with_properties, v, self);
         v.iter().join(" ").fmt(f)
     }
@@ -537,7 +752,7 @@ impl ParseTo for UserOptions {
                 break;
             }
 
-            if let Token::Word(ref w) = token {
+            if let Token::Word(ref w) = token.token {
                 parser.next_token();
                 let (item_mut_ref, user_option) = match w.keyword {
                     Keyword::SUPERUSER => (&mut builder.super_user, UserOption::SuperUser),

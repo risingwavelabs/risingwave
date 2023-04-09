@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,87 +16,19 @@ pub mod utils;
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, FilterExecutor};
-use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
-use risingwave_expr::expr::build_from_prost;
-use risingwave_pb::data::data_type::TypeName;
-use risingwave_pb::data::Datum as ProstDatum;
-use risingwave_pb::expr::expr_node::RexNode;
-use risingwave_pb::expr::expr_node::Type::{
-    ConstantValue as TConstValue, Equal, InputRef, Modulus,
-};
-use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
-use tikv_jemallocator::Jemalloc;
+use risingwave_common::enable_jemalloc_on_unix;
+use risingwave_common::types::DataType;
+use risingwave_expr::expr::build_from_pretty;
 use tokio::runtime::Runtime;
 use utils::{create_input, execute_executor};
 
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
+enable_jemalloc_on_unix!();
 
 fn create_filter_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecutor {
     const CHUNK_SIZE: usize = 1024;
     let input = create_input(&[DataType::Int64], chunk_size, chunk_num);
-
-    // Expression: $1 % 2 == 0
-    let expr = {
-        let input_ref1 = ExprNode {
-            expr_type: InputRef as i32,
-            return_type: Some(risingwave_pb::data::DataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: 0 })),
-        };
-
-        let literal2 = ExprNode {
-            expr_type: TConstValue as i32,
-            return_type: Some(risingwave_pb::data::DataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::Constant(ProstDatum {
-                body: serialize_datum_to_bytes(Some(ScalarImpl::Int64(2)).as_ref()),
-            })),
-        };
-
-        // $1 % 2
-        let mod2 = ExprNode {
-            expr_type: Modulus as i32,
-            return_type: Some(risingwave_pb::data::DataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children: vec![input_ref1, literal2],
-            })),
-        };
-
-        let literal0 = ExprNode {
-            expr_type: TConstValue as i32,
-            return_type: Some(risingwave_pb::data::DataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::Constant(ProstDatum {
-                body: serialize_datum_to_bytes(Some(ScalarImpl::Int64(0)).as_ref()),
-            })),
-        };
-
-        // $1 % 2 == 0
-        ExprNode {
-            expr_type: Equal as i32,
-            return_type: Some(risingwave_pb::data::DataType {
-                type_name: TypeName::Boolean as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children: vec![mod2, literal0],
-            })),
-        }
-    };
-
     Box::new(FilterExecutor::new(
-        build_from_prost(&expr).unwrap(),
+        build_from_pretty("(equal:boolean (modulus:int8 $0:int8 2:int8) 0:int8)"),
         input,
         "FilterBenchmark".to_string(),
         CHUNK_SIZE,

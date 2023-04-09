@@ -1,5 +1,5 @@
 statement ok
-CREATE MATERIALIZED SOURCE customer (
+CREATE TABLE customer (
     c_id INTEGER,
     c_d_id INTEGER,
     c_w_id INTEGER,
@@ -20,8 +20,8 @@ CREATE MATERIALIZED SOURCE customer (
     c_ytd_payment REAL,
     c_payment_cnt INTEGER,
     c_delivery_cnt INTEGER,
-    c_data1 VARCHAR,
-    c_data2 VARCHAR,
+    c_data VARCHAR,
+    c_n_nationkey INTEGER,
     PRIMARY KEY (c_id, c_d_id, c_w_id)
 ) with (
     connector = 'kafka',
@@ -31,7 +31,7 @@ CREATE MATERIALIZED SOURCE customer (
 ) ROW FORMAT DEBEZIUM_JSON;
 
 statement ok
-CREATE MATERIALIZED SOURCE district (
+CREATE TABLE district (
     d_id INTEGER,
     d_w_id INTEGER,
     d_name VARCHAR,
@@ -51,25 +51,26 @@ CREATE MATERIALIZED SOURCE district (
     scan.startup.mode = 'earliest'
 ) ROW FORMAT DEBEZIUM_JSON;
 
-# statement ok
-# CREATE MATERIALIZED SOURCE history (
-#     h_c_id INTEGER,
-#     h_c_d_id INTEGER,
-#     h_c_w_id INTEGER,
-#     h_d_id INTEGER,
-#     h_w_id INTEGER,
-#     h_date TIMESTAMP,
-#     h_amount REAL,
-#     h_data VARCHAR
-# ) with (
-#     connector = 'kafka',
-#     topic = 'history',
-#     properties.bootstrap.server = '127.0.0.1:29092',
-#     scan.startup.mode = 'earliest'
-# ) ROW FORMAT DEBEZIUM_JSON;
+statement ok
+CREATE TABLE history (
+    h_c_id INTEGER,
+    h_c_d_id INTEGER,
+    h_c_w_id INTEGER,
+    h_d_id INTEGER,
+    h_w_id INTEGER,
+    h_date VARCHAR,
+    h_amount REAL,
+    h_data VARCHAR,
+    PRIMARY KEY(h_c_id,h_c_d_id,h_c_w_id,h_d_id,h_w_id,h_date,h_amount,h_data)
+) with (
+    connector = 'kafka',
+    topic = 'history',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    scan.startup.mode = 'earliest'
+) ROW FORMAT DEBEZIUM_JSON;
 
 statement ok
-CREATE MATERIALIZED SOURCE item (
+CREATE TABLE item (
     i_id INTEGER,
     i_im_id INTEGER,
     i_name VARCHAR,
@@ -84,7 +85,7 @@ CREATE MATERIALIZED SOURCE item (
 ) ROW FORMAT DEBEZIUM_JSON;
 
 statement ok
-CREATE MATERIALIZED SOURCE neworder (
+CREATE TABLE neworder (
     no_o_id INTEGER,
     no_d_id INTEGER,
     no_w_id INTEGER,
@@ -97,16 +98,16 @@ CREATE MATERIALIZED SOURCE neworder (
 ) ROW FORMAT DEBEZIUM_JSON;
 
 statement ok
-CREATE MATERIALIZED SOURCE orderline (
+CREATE TABLE orderline (
     ol_o_id INTEGER,
     ol_d_id INTEGER,
     ol_w_id INTEGER,
     ol_number INTEGER,
     ol_i_id INTEGER,
     ol_supply_w_id INTEGER,
-    ol_delivery_d TIMESTAMP,
+    ol_delivery_d VARCHAR,
     ol_quantity INTEGER,
-    ol_amount REAL,
+    ol_amount DECIMAL,
     ol_dist_info VARCHAR,
     PRIMARY KEY (ol_o_id, ol_d_id, ol_w_id, ol_number)
 ) with (
@@ -117,12 +118,12 @@ CREATE MATERIALIZED SOURCE orderline (
 ) ROW FORMAT DEBEZIUM_JSON;
 
 statement ok
-CREATE MATERIALIZED SOURCE orders (
+CREATE TABLE orders (
     o_id INTEGER,
     o_d_id INTEGER,
     o_w_id INTEGER,
     o_c_id INTEGER,
-    o_entry_d TIMESTAMP,
+    o_entry_d VARCHAR,
     o_carrier_id INTEGER,
     o_ol_cnt INTEGER,
     o_all_local INTEGER,
@@ -135,25 +136,26 @@ CREATE MATERIALIZED SOURCE orders (
 ) ROW FORMAT DEBEZIUM_JSON;
 
 statement ok
-CREATE MATERIALIZED SOURCE stock (
-    st_i_id INTEGER,
-    st_w_id INTEGER,
-    st_quantity INTEGER,
-    st_dist_01 VARCHAR,
-    st_dist_02 VARCHAR,
-    st_dist_03 VARCHAR,
-    st_dist_04 VARCHAR,
-    st_dist_05 VARCHAR,
-    st_dist_06 VARCHAR,
-    st_dist_07 VARCHAR,
-    st_dist_08 VARCHAR,
-    st_dist_09 VARCHAR,
-    st_dist_10 VARCHAR,
-    st_ytd INTEGER,
-    st_order_cnt INTEGER,
-    st_remote_cnt INTEGER,
-    st_data VARCHAR,
-    PRIMARY KEY (st_i_id, st_w_id)
+CREATE TABLE stock (
+    s_i_id INTEGER,
+    s_w_id INTEGER,
+    s_quantity INTEGER,
+    s_dist_01 VARCHAR,
+    s_dist_02 VARCHAR,
+    s_dist_03 VARCHAR,
+    s_dist_04 VARCHAR,
+    s_dist_05 VARCHAR,
+    s_dist_06 VARCHAR,
+    s_dist_07 VARCHAR,
+    s_dist_08 VARCHAR,
+    s_dist_09 VARCHAR,
+    s_dist_10 VARCHAR,
+    s_ytd INTEGER,
+    s_order_cnt INTEGER,
+    s_remote_cnt INTEGER,
+    s_data VARCHAR,
+    s_su_suppkey INTEGER,
+    PRIMARY KEY (s_i_id, s_w_id)
 ) with (
     connector = 'kafka',
     topic = 'stock',
@@ -162,7 +164,7 @@ CREATE MATERIALIZED SOURCE stock (
 ) ROW FORMAT DEBEZIUM_JSON;
 
 statement ok
-CREATE MATERIALIZED SOURCE warehouse (
+CREATE TABLE warehouse (
     w_id INTEGER,
     w_name VARCHAR,
     w_street_1 VARCHAR,
@@ -178,4 +180,48 @@ CREATE MATERIALIZED SOURCE warehouse (
     topic = 'warehouse',
     properties.bootstrap.server = '127.0.0.1:29092',
     scan.startup.mode = 'earliest'
+) ROW FORMAT DEBEZIUM_JSON;
+
+statement ok
+CREATE TABLE supplier (
+    SU_SUPPKEY SMALLINT,
+    SU_NAME VARCHAR,
+    SU_ADDRESS VARCHAR,
+    SU_NATIONKEY INTEGER,
+    SU_PHONE VARCHAR,
+    SU_ACCTBAL REAL,
+    SU_COMMENT VARCHAR,
+    PRIMARY KEY(SU_SUPPKEY)
+) with (
+    connector = 'kafka',
+    topic = 'supplier',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    scan.startup.mode = 'earliest'
+) ROW FORMAT DEBEZIUM_JSON;
+
+statement ok
+CREATE TABLE region (
+    R_REGIONKEY INTEGER,
+    R_NAME VARCHAR,
+    R_COMMENT VARCHAR,
+    PRIMARY KEY (R_REGIONKEY)
+) with (
+     connector = 'kafka',
+     topic = 'region',
+     properties.bootstrap.server = '127.0.0.1:29092',
+     scan.startup.mode = 'earliest'
+) ROW FORMAT DEBEZIUM_JSON;
+
+statement ok
+CREATE TABLE nation (
+    N_NATIONKEY INTEGER,
+    N_NAME VARCHAR,
+    N_REGIONKEY INTEGER,
+    N_COMMENT VARCHAR,
+    PRIMARY KEY (N_NATIONKEY)
+) with (
+     connector = 'kafka',
+     topic = 'nation',
+     properties.bootstrap.server = '127.0.0.1:29092',
+     scan.startup.mode = 'earliest'
 ) ROW FORMAT DEBEZIUM_JSON;

@@ -11,5 +11,5 @@ select
         s_comment
 from tpch_q2;
 ----
-4641.08 Supplier#000000004 MOROCCO 100 Manufacturer#3 Bk7ah4CK8SYQTepEmvMkkgMwg 25-843-787-7479 riously even requests above the exp
-1365.79 Supplier#000000006 KENYA 185 Manufacturer#4 tQxuVm7s7CnK 24-696-997-4969 final accounts. regular dolphins use against the furiously ironic decoys.
+1365.79	Supplier#000000006	KENYA	185	Manufacturer#4	tQxuVm7s7CnK	24-696-997-4969	final accounts. regular dolphins use against the furiously ironic decoys. 
+4641.08	Supplier#000000004	MOROCCO	100	Manufacturer#3	Bk7ah4CK8SYQTepEmvMkkgMwg	25-843-787-7479	riously even requests above the exp

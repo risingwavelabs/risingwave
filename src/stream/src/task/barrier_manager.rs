@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,8 +14,9 @@
 
 use std::collections::{HashMap, HashSet};
 
+use anyhow::anyhow;
 use prometheus::HistogramTimer;
-use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress as ProstCreateMviewProgress;
+use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::Receiver;
@@ -41,7 +42,7 @@ pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 /// Collect result of some barrier on current compute node. Will be reported to the meta service.
 #[derive(Debug)]
 pub struct CollectResult {
-    pub create_mview_progress: Vec<ProstCreateMviewProgress>,
+    pub create_mview_progress: Vec<PbCreateMviewProgress>,
 }
 
 enum BarrierState {
@@ -184,14 +185,18 @@ impl LocalBarrierManager {
     }
 
     /// Use `prev_epoch` to remove collect rx and return rx.
-    pub fn remove_collect_rx(&mut self, prev_epoch: u64) -> CompleteReceiver {
+    pub fn remove_collect_rx(&mut self, prev_epoch: u64) -> StreamResult<CompleteReceiver> {
+        // It's still possible that `collect_complete_receiver` does not contain the target epoch
+        // when receiving collect_barrier request. Because `collect_complete_receiver` could
+        // be cleared when CN is under recovering. We should return error rather than panic.
         self.collect_complete_receiver
             .remove(&prev_epoch)
-            .unwrap_or_else(|| {
-                panic!(
+            .ok_or_else(|| {
+                anyhow!(
                     "barrier collect complete receiver for prev epoch {} not exists",
                     prev_epoch
                 )
+                .into()
             })
     }
 

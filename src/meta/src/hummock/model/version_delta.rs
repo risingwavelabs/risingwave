@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,22 +16,19 @@ use prost::Message;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::hummock::HummockVersionDelta;
 
+use crate::hummock::model::HUMMOCK_VERSION_DELTA_CF_NAME;
 use crate::model::{MetadataModel, MetadataModelResult};
-
-/// Column family name for hummock version delta.
-/// `cf(hummock_version_delta)`: `HummockVersionId` -> `HummockVersionDelta`
-const HUMMOCK_VERSION_DELTA_CF_NAME: &str = "cf/hummock_version_delta";
 
 /// `HummockVersionDelta` tracks delta of `Sstables` in given version based on previous version.
 impl MetadataModel for HummockVersionDelta {
     type KeyType = HummockVersionId;
-    type ProstType = HummockVersionDelta;
+    type PbType = HummockVersionDelta;
 
     fn cf_name() -> String {
         String::from(HUMMOCK_VERSION_DELTA_CF_NAME)
     }
 
-    fn to_protobuf(&self) -> Self::ProstType {
+    fn to_protobuf(&self) -> Self::PbType {
         self.clone()
     }
 
@@ -39,7 +36,7 @@ impl MetadataModel for HummockVersionDelta {
         self.encode_to_vec()
     }
 
-    fn from_protobuf(prost: Self::ProstType) -> Self {
+    fn from_protobuf(prost: Self::PbType) -> Self {
         prost
     }
 

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,14 +18,14 @@ pub mod tables;
 pub use columns::*;
 use itertools::Itertools;
 use risingwave_common::error::Result;
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::ScalarImpl;
 pub use tables::*;
 
 use super::SysCatalogReaderImpl;
 
 impl SysCatalogReaderImpl {
-    pub(super) fn read_columns_info(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_columns_info(&self) -> Result<Vec<OwnedRow>> {
         let reader = self.catalog_reader.read_guard();
         let schemas = reader.iter_schemas(&self.auth_context.database)?;
 
@@ -41,7 +41,7 @@ impl SysCatalogReaderImpl {
 
                 let view_rows = schema.iter_view().flat_map(|view| {
                     view.columns.iter().enumerate().map(|(index, column)| {
-                        Row::new(vec![
+                        OwnedRow::new(vec![
                             Some(ScalarImpl::Utf8(self.auth_context.database.clone().into())),
                             Some(ScalarImpl::Utf8(schema.name().into())),
                             Some(ScalarImpl::Utf8(view.name().into())),
@@ -63,7 +63,7 @@ impl SysCatalogReaderImpl {
                             .enumerate()
                             .filter(|(_, column)| !column.is_hidden())
                             .map(|(index, column)| {
-                                Row::new(vec![
+                                OwnedRow::new(vec![
                                     Some(ScalarImpl::Utf8(
                                         self.auth_context.database.clone().into(),
                                     )),
@@ -82,14 +82,14 @@ impl SysCatalogReaderImpl {
             .collect_vec())
     }
 
-    pub(super) fn read_tables_info(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_tables_info(&self) -> Result<Vec<OwnedRow>> {
         let reader = self.catalog_reader.read_guard();
         let schemas = reader.iter_schemas(&self.auth_context.database)?;
 
         Ok(schemas
             .flat_map(|schema| {
                 let table_rows = schema.iter_table().map(|table| {
-                    Row::new(vec![
+                    OwnedRow::new(vec![
                         Some(ScalarImpl::Utf8(self.auth_context.database.clone().into())),
                         Some(ScalarImpl::Utf8(schema.name().into())),
                         Some(ScalarImpl::Utf8(table.name().into())),
@@ -98,7 +98,7 @@ impl SysCatalogReaderImpl {
                     ])
                 });
                 let sys_table_rows = schema.iter_system_tables().map(|table| {
-                    Row::new(vec![
+                    OwnedRow::new(vec![
                         Some(ScalarImpl::Utf8(self.auth_context.database.clone().into())),
                         Some(ScalarImpl::Utf8(schema.name().into())),
                         Some(ScalarImpl::Utf8(table.name().into())),
@@ -107,7 +107,7 @@ impl SysCatalogReaderImpl {
                     ])
                 });
                 let mv_rows = schema.iter_mv().map(|mv| {
-                    Row::new(vec![
+                    OwnedRow::new(vec![
                         Some(ScalarImpl::Utf8(self.auth_context.database.clone().into())),
                         Some(ScalarImpl::Utf8(schema.name().into())),
                         Some(ScalarImpl::Utf8(mv.name().into())),
@@ -116,7 +116,7 @@ impl SysCatalogReaderImpl {
                     ])
                 });
                 let view_rows = schema.iter_view().map(|view| {
-                    Row::new(vec![
+                    OwnedRow::new(vec![
                         Some(ScalarImpl::Utf8(self.auth_context.database.clone().into())),
                         Some(ScalarImpl::Utf8(schema.name().into())),
                         Some(ScalarImpl::Utf8(view.name().into())),

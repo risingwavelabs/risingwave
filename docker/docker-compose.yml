@@ -2,17 +2,17 @@
 version: "3"
 services:
   compactor-0:
-    image: "ghcr.io/risingwavelabs/risingwave:nightly-20220620"
+    image: "ghcr.io/risingwavelabs/risingwave:latest"
     command:
       - compactor-node
-      - "--host"
+      - "--listen-addr"
       - "0.0.0.0:6660"
+      - "--advertise-addr"
+      - "compactor-0:6660"
       - "--prometheus-listener-addr"
       - "0.0.0.0:1260"
       - "--metrics-level"
       - "1"
-      - "--state-store"
-      - "hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001"
       - "--meta-address"
       - "http://meta-node-0:5690"
       - "--config-path"
@@ -28,6 +28,8 @@ services:
       - "./risingwave.toml:/risingwave.toml"
     environment:
       RUST_BACKTRACE: "1"
+      # If ENABLE_TELEMETRY is not set, telemetry will start by default
+      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
     container_name: compactor-0
     healthcheck:
       test:
@@ -39,21 +41,21 @@ services:
       timeout: 5s
       retries: 5
   compute-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:nightly-20220620"
+    image: "ghcr.io/risingwavelabs/risingwave:latest"
     command:
       - compute-node
-      - "--host"
+      - "--listen-addr"
       - "0.0.0.0:5688"
+      - "--advertise-addr"
+      - "compute-node-0:5688"
       - "--prometheus-listener-addr"
       - "0.0.0.0:1222"
-      - "--client-address"
-      - "compute-node-0:5688"
       - "--metrics-level"
       - "1"
-      - "--state-store"
-      - "hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001"
       - "--meta-address"
       - "http://meta-node-0:5690"
+      - "--connector-rpc-endpoint"
+      - "connector-node:50051"
       - "--config-path"
       - /risingwave.toml
     expose:
@@ -67,6 +69,8 @@ services:
       - "./risingwave.toml:/risingwave.toml"
     environment:
       RUST_BACKTRACE: "1"
+      # If ENABLE_TELEMETRY is not set, telemetry will start by default
+      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
     container_name: compute-node-0
     healthcheck:
       test:
@@ -78,7 +82,7 @@ services:
       timeout: 5s
       retries: 5
   etcd-0:
-    image: "quay.io/coreos/etcd:latest"
+    image: "quay.io/coreos/etcd:v3.5.7"
     command:
       - /usr/local/bin/etcd
       - "--listen-client-urls"
@@ -95,6 +99,8 @@ services:
       - risedev-meta
       - "--max-txn-ops"
       - "999999"
+      - "--max-request-bytes"
+      - "10485760"
       - "--auto-compaction-mode"
       - periodic
       - "--auto-compaction-retention"
@@ -121,15 +127,21 @@ services:
       timeout: 5s
       retries: 5
   frontend-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:nightly-20220620"
+    image: "ghcr.io/risingwavelabs/risingwave:latest"
     command:
       - frontend-node
-      - "--host"
+      - "--listen-addr"
       - "0.0.0.0:4566"
       - "--meta-addr"
       - "http://meta-node-0:5690"
+      - "--advertise-addr"
+      - "frontend-node-0:4566"
       - "--config-path"
       - /risingwave.toml
+      - "--prometheus-listener-addr"
+      - "0.0.0.0:2222"
+      - "--metrics-level"
+      - "1"
     expose:
       - "4566"
     ports:
@@ -140,6 +152,8 @@ services:
       - "./risingwave.toml:/risingwave.toml"
     environment:
       RUST_BACKTRACE: "1"
+      # If ENABLE_TELEMETRY is not set, telemetry will start by default
+      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
     container_name: frontend-node-0
     healthcheck:
       test:
@@ -163,7 +177,7 @@ services:
       - "./grafana.ini:/etc/grafana/grafana.ini"
       - "./grafana-risedev-datasource.yml:/etc/grafana/provisioning/datasources/grafana-risedev-datasource.yml"
       - "./grafana-risedev-dashboard.yml:/etc/grafana/provisioning/dashboards/grafana-risedev-dashboard.yml"
-      - "./risingwave-dashboard.json:/risingwave-dashboard.json"
+      - "./dashboards:/dashboards"
     environment: {}
     container_name: grafana-0
     healthcheck:
@@ -176,13 +190,13 @@ services:
       timeout: 5s
       retries: 5
   meta-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:nightly-20220620"
+    image: "ghcr.io/risingwavelabs/risingwave:latest"
     command:
       - meta-node
       - "--listen-addr"
       - "0.0.0.0:5690"
-      - "--host"
-      - meta-node-0
+      - "--advertise-addr"
+      - "meta-node-0:5690"
       - "--dashboard-host"
       - "0.0.0.0:5691"
       - "--prometheus-host"
@@ -191,18 +205,27 @@ services:
       - etcd
       - "--etcd-endpoints"
       - "etcd-0:2388"
+      - "--connector-rpc-endpoint"
+      - "connector-node:50051"
+      - "--state-store"
+      - "hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001"
       - "--config-path"
       - /risingwave.toml
     expose:
       - "5690"
       - "1250"
       - "5691"
-    ports: []
-    depends_on: []
+    ports:
+      - "5690:5690"
+      - "5691:5691"
+    depends_on:
+      - "etcd-0"
     volumes:
       - "./risingwave.toml:/risingwave.toml"
     environment:
       RUST_BACKTRACE: "1"
+      # If ENABLE_TELEMETRY is not set, telemetry will start by default
+      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
     container_name: meta-node-0
     healthcheck:
       test:
@@ -231,7 +254,17 @@ services:
     depends_on: []
     volumes:
       - "minio-0:/data"
-    entrypoint: "\n/bin/sh -c '\nset -e\nmkdir -p \"/data/hummock001\"\n/usr/bin/docker-entrypoint.sh \"$$0\" \"$$@\"\n'"
+    entrypoint: "
+
+      /bin/sh -c '
+
+      set -e
+
+      mkdir -p \"/data/hummock001\"
+
+      /usr/bin/docker-entrypoint.sh \"$$0\" \"$$@\"
+
+      '"
     environment:
       MINIO_CI_CD: "1"
       MINIO_PROMETHEUS_AUTH_TYPE: public
@@ -276,13 +309,20 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
-  redpanda:
+  connector-node:
+    image: ghcr.io/risingwavelabs/risingwave:latest
+    entrypoint: "/risingwave/bin/connector-node/start-service.sh"
+    ports:
+      - 50051
+      - 50052
+    container_name: connector-node
+  message_queue:
     image: "docker.vectorized.io/vectorized/redpanda:latest"
     command:
       - redpanda
       - start
       - "--smp"
-      - "4"
+      - "1"
       - "--reserve-memory"
       - 0M
       - "--memory"
@@ -294,18 +334,20 @@ services:
       - "--kafka-addr"
       - "PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092"
       - "--advertise-kafka-addr"
-      - "PLAINTEXT://redpanda:29092,OUTSIDE://localhost:9092"
+      - "PLAINTEXT://message_queue:29092,OUTSIDE://localhost:9092"
     expose:
       - "29092"
       - "9092"
+      - "9644"
     ports:
+      - "29092:29092"
       - "9092:9092"
       - "9644:9644"
     depends_on: []
     volumes:
-      - "redpanda:/var/lib/redpanda/data"
+      - "message_queue:/var/lib/redpanda/data"
     environment: {}
-    container_name: redpanda
+    container_name: message_queue
     healthcheck:
       test:
         - CMD
@@ -324,6 +366,6 @@ volumes:
     external: false
   prometheus-0:
     external: false
-  redpanda:
+  message_queue:
     external: false
 name: risingwave-compose

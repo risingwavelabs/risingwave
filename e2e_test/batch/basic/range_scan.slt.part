@@ -7,11 +7,29 @@ CREATE TABLE orders (
         user_id BIGINT,
         date INTEGER);
 
-statement ok 
+statement ok
 CREATE MATERIALIZED VIEW orders_count_by_user AS
       SELECT user_id, date, count(*) AS orders_count 
       FROM orders 
       GROUP BY user_id, date;
+
+statement ok
+CREATE MATERIALIZED VIEW orders_count_by_user_1 AS
+      SELECT user_id, date, count(*) AS orders_count 
+      FROM orders 
+      GROUP BY user_id, date ORDER BY user_id desc, date desc;
+
+statement ok
+CREATE MATERIALIZED VIEW orders_count_by_user_2 AS
+      SELECT user_id, date, count(*) AS orders_count 
+      FROM orders 
+      GROUP BY user_id, date ORDER BY user_id asc, date desc;
+
+statement ok
+CREATE MATERIALIZED VIEW orders_count_by_user_3 AS
+      SELECT user_id, date, count(*) AS orders_count 
+      FROM orders 
+      GROUP BY user_id, date ORDER BY user_id desc, date asc;
 
 statement ok
 insert into orders values 
@@ -45,13 +63,71 @@ SELECT * FROM orders_count_by_user WHERE user_id < 43;
 42 3333 1
 
 query III rowsort
+SELECT * FROM orders_count_by_user_1 WHERE user_id < 43;
+----
+42 1111 1
+42 2222 2
+42 3333 1
+
+query III rowsort
+SELECT * FROM orders_count_by_user_2 WHERE user_id < 43;
+----
+42 1111 1
+42 2222 2
+42 3333 1
+
+query III rowsort
+SELECT * FROM orders_count_by_user_3 WHERE user_id < 43;
+----
+42 1111 1
+42 2222 2
+42 3333 1
+
+
+query III rowsort
 SELECT * FROM orders_count_by_user WHERE user_id > 42 AND user_id < 100;
 ----
 43 1111 1
 43 2222 1
 
 query III rowsort
+SELECT * FROM orders_count_by_user_1 WHERE user_id > 42 AND user_id < 100;
+----
+43 1111 1
+43 2222 1
+
+query III rowsort
+SELECT * FROM orders_count_by_user_2 WHERE user_id > 42 AND user_id < 100;
+----
+43 1111 1
+43 2222 1
+
+query III rowsort
+SELECT * FROM orders_count_by_user_3 WHERE user_id > 42 AND user_id < 100;
+----
+43 1111 1
+43 2222 1
+
+query III rowsort
 SELECT * FROM orders_count_by_user WHERE user_id >= 43 AND user_id < 100;
+----
+43 1111 1
+43 2222 1
+
+query III rowsort
+SELECT * FROM orders_count_by_user_1 WHERE user_id >= 43 AND user_id < 100;
+----
+43 1111 1
+43 2222 1
+
+query III rowsort
+SELECT * FROM orders_count_by_user_2 WHERE user_id >= 43 AND user_id < 100;
+----
+43 1111 1
+43 2222 1
+
+query III rowsort
+SELECT * FROM orders_count_by_user_3 WHERE user_id >= 43 AND user_id < 100;
 ----
 43 1111 1
 43 2222 1
@@ -126,7 +202,17 @@ SELECT * FROM orders_count_by_user WHERE user_id = 9999 or (user_id = 9999 and d
 statement ok
 drop materialized view orders_count_by_user;
 
-statement ok 
+statement ok
+drop materialized view orders_count_by_user_1;
+
+statement ok
+drop materialized view orders_count_by_user_2;
+
+statement ok
+drop materialized view orders_count_by_user_3;
+
+
+statement ok
 CREATE MATERIALIZED VIEW orders_count_by_user AS
       SELECT user_id, date, count(*) AS orders_count 
       FROM orders 
@@ -136,11 +222,11 @@ CREATE MATERIALIZED VIEW orders_count_by_user AS
 query III rowsort
 SELECT * FROM orders_count_by_user WHERE user_id < 100;
 ----
-42 1111 1
-42 3333 1
-43 1111 1
-43 2222 1
-42 2222 2
+42	1111	1
+42	2222	2
+42	3333	1
+43	1111	1
+43	2222	1
 
 query III
 SELECT * FROM orders_count_by_user WHERE orders_count=2 AND user_id < 100;

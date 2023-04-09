@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,22 +19,23 @@
 
 mod resolve_id;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Result};
 pub use resolve_id::*;
 use risingwave_frontend::handler::{
-    create_index, create_mv, create_source, create_table, drop_table, variable,
+    create_index, create_mv, create_schema, create_source, create_table, create_view, drop_table,
+    explain, variable, HandlerArgs,
 };
-use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use risingwave_frontend::session::SessionImpl;
 use risingwave_frontend::test_utils::{create_proto_file, get_explain_output, LocalFrontend};
 use risingwave_frontend::{
-    build_graph, explain_stream_graph, Binder, FrontendOpts, PlanRef, Planner, WithOptions,
+    build_graph, explain_stream_graph, Binder, Explain, FrontendOpts, OptimizerContext,
+    OptimizerContextRef, PlanRef, Planner, WithOptions,
 };
-use risingwave_sqlparser::ast::{ObjectName, Statement};
+use risingwave_sqlparser::ast::{ExplainOptions, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
 
@@ -67,8 +68,11 @@ pub struct TestCase {
     /// The original logical plan
     pub logical_plan: Option<String>,
 
-    /// Logical plan with optimization `.gen_optimized_logical_plan()`
-    pub optimized_logical_plan: Option<String>,
+    /// Logical plan with optimization `.gen_optimized_logical_plan_for_batch()`
+    pub optimized_logical_plan_for_batch: Option<String>,
+
+    /// Logical plan with optimization `.gen_optimized_logical_plan_for_stream()`
+    pub optimized_logical_plan_for_stream: Option<String>,
 
     /// Distributed batch plan `.gen_batch_query_plan()`
     pub batch_plan: Option<String>,
@@ -78,6 +82,10 @@ pub struct TestCase {
 
     /// Batch plan for local execution `.gen_batch_local_plan()`
     pub batch_local_plan: Option<String>,
+
+    /// Create sink plan (assumes blackhole sink)
+    /// TODO: Other sinks
+    pub sink_plan: Option<String>,
 
     /// Create MV plan `.gen_create_mv_plan()`
     pub stream_plan: Option<String>,
@@ -107,7 +115,10 @@ pub struct TestCase {
     pub stream_error: Option<String>,
 
     /// Support using file content or file location to create source.
-    pub create_source: Option<CreateSource>,
+    pub create_source: Option<CreateConnector>,
+
+    /// Support using file content or file location to create table with connector.
+    pub create_table_with_connector: Option<CreateConnector>,
 
     /// Provide config map to frontend
     pub with_config_map: Option<BTreeMap<String, String>>,
@@ -116,11 +127,11 @@ pub struct TestCase {
 #[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct CreateSource {
+pub struct CreateConnector {
     row_format: String,
     name: String,
     file: Option<String>,
-    materialized: Option<bool>,
+    is_table: Option<bool>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -130,8 +141,11 @@ pub struct TestCaseResult {
     /// The original logical plan
     pub logical_plan: Option<String>,
 
-    /// Logical plan with optimization `.gen_optimized_logical_plan()`
-    pub optimized_logical_plan: Option<String>,
+    /// Logical plan with optimization `.gen_optimized_logical_plan_for_batch()`
+    pub optimized_logical_plan_for_batch: Option<String>,
+
+    /// Logical plan with optimization `.gen_optimized_logical_plan_for_stream()`
+    pub optimized_logical_plan_for_stream: Option<String>,
 
     /// Distributed batch plan `.gen_batch_query_plan()`
     pub batch_plan: Option<String>,
@@ -141,6 +155,9 @@ pub struct TestCaseResult {
 
     /// Batch plan for local execution `.gen_batch_local_plan()`
     pub batch_local_plan: Option<String>,
+
+    /// Generate sink plan
+    pub sink_plan: Option<String>,
 
     /// Create MV plan `.gen_create_mv_plan()`
     pub stream_plan: Option<String>,
@@ -165,6 +182,9 @@ pub struct TestCaseResult {
 
     /// Error of `.gen_stream_plan()`
     pub stream_error: Option<String>,
+
+    /// Error of `.gen_sink_plan()`
+    pub sink_error: Option<String>,
 
     /// The result of an `EXPLAIN` statement.
     ///
@@ -194,10 +214,12 @@ impl TestCaseResult {
             explain_output: self.explain_output,
             before_statements: original_test_case.before_statements.clone(),
             logical_plan: self.logical_plan,
-            optimized_logical_plan: self.optimized_logical_plan,
+            optimized_logical_plan_for_batch: self.optimized_logical_plan_for_batch,
+            optimized_logical_plan_for_stream: self.optimized_logical_plan_for_stream,
             batch_plan: self.batch_plan,
             batch_local_plan: self.batch_local_plan,
             stream_plan: self.stream_plan,
+            sink_plan: self.sink_plan,
             batch_plan_proto: self.batch_plan_proto,
             planner_error: self.planner_error,
             optimizer_error: self.optimizer_error,
@@ -206,6 +228,7 @@ impl TestCaseResult {
             stream_error: self.stream_error,
             binder_error: self.binder_error,
             create_source: original_test_case.create_source.clone(),
+            create_table_with_connector: original_test_case.create_table_with_connector.clone(),
             with_config_map: original_test_case.with_config_map.clone(),
             stream_dist_plan: self.stream_dist_plan,
         };
@@ -231,6 +254,7 @@ impl TestCase {
 
         // Since temp file will be deleted when it goes out of scope, so create source in advance.
         self.create_source(session.clone()).await?;
+        self.create_table_with_connector(session.clone()).await?;
 
         let mut result: Option<TestCaseResult> = None;
         for sql in self
@@ -248,23 +272,56 @@ impl TestCase {
         Ok(result.unwrap_or_default())
     }
 
+    #[inline(always)]
+    fn create_connector_sql(
+        is_table: bool,
+        connector_name: String,
+        connector_row_format: String,
+    ) -> String {
+        let object_to_create = if is_table { "TABLE" } else { "SOURCE" };
+        format!(
+            r#"CREATE {} {}
+    WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
+    ROW FORMAT {} MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://"#,
+            object_to_create, connector_name, connector_row_format
+        )
+    }
+
+    async fn create_table_with_connector(
+        &self,
+        session: Arc<SessionImpl>,
+    ) -> Result<Option<TestCaseResult>> {
+        match self.create_table_with_connector.clone() {
+            Some(connector) => {
+                if let Some(content) = connector.file {
+                    let sql =
+                        Self::create_connector_sql(true, connector.name, connector.row_format);
+                    let temp_file = create_proto_file(content.as_str());
+                    self.run_sql(
+                        &(sql + temp_file.path().to_str().unwrap() + "'"),
+                        session.clone(),
+                        false,
+                        None,
+                    )
+                    .await
+                } else {
+                    panic!(
+                        "{:?} create table with connector must include `file` for the file content",
+                        self.id
+                    );
+                }
+            }
+            None => Ok(None),
+        }
+    }
+
     // If testcase have create source info, run sql to create source.
     // Support create source by file content or file location.
     async fn create_source(&self, session: Arc<SessionImpl>) -> Result<Option<TestCaseResult>> {
         match self.create_source.clone() {
             Some(source) => {
                 if let Some(content) = source.file {
-                    let materialized = if let Some(true) = source.materialized {
-                        "materialized".to_string()
-                    } else {
-                        "".to_string()
-                    };
-                    let sql = format!(
-                        r#"CREATE {} SOURCE {}
-    WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001')
-    ROW FORMAT {} MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://"#,
-                        materialized, source.name, source.row_format
-                    );
+                    let sql = Self::create_connector_sql(false, source.name, source.row_format);
                     let temp_file = create_proto_file(content.as_str());
                     self.run_sql(
                         &(sql + temp_file.path().to_str().unwrap() + "'"),
@@ -293,12 +350,8 @@ impl TestCase {
     ) -> Result<Option<TestCaseResult>> {
         let statements = Parser::parse_sql(sql).unwrap();
         for stmt in statements {
-            let context = OptimizerContext::new(
-                session.clone(),
-                Arc::from(sql),
-                WithOptions::try_from(&stmt)?,
-            );
-            context.explain_verbose.store(true, Ordering::Relaxed); // use explain verbose in planner tests
+            // TODO: `sql` may contain multiple statements here.
+            let handler_args = HandlerArgs::new(session.clone(), &stmt, sql)?;
             match stmt.clone() {
                 Statement::Query(_)
                 | Statement::Insert { .. }
@@ -307,6 +360,14 @@ impl TestCase {
                     if result.is_some() {
                         panic!("two queries in one test case");
                     }
+                    let explain_options = ExplainOptions {
+                        verbose: true,
+                        ..Default::default()
+                    };
+                    let context = OptimizerContext::new(
+                        HandlerArgs::new(session.clone(), &stmt, sql)?,
+                        explain_options,
+                    );
                     let ret = self.apply_query(&stmt, context.into())?;
                     if do_check_result {
                         check_result(self, &ret)?;
@@ -318,22 +379,35 @@ impl TestCase {
                     columns,
                     constraints,
                     if_not_exists,
+                    source_schema,
+                    source_watermarks,
+                    append_only,
                     ..
                 } => {
                     create_table::handle_create_table(
-                        context,
+                        handler_args,
                         name,
                         columns,
                         constraints,
                         if_not_exists,
+                        source_schema,
+                        source_watermarks,
+                        append_only,
                     )
                     .await?;
                 }
-                Statement::CreateSource {
-                    is_materialized,
-                    stmt,
-                } => {
-                    create_source::handle_create_source(context, is_materialized, stmt).await?;
+                Statement::CreateSource { stmt } => {
+                    if let Err(error) =
+                        create_source::handle_create_source(handler_args, stmt).await
+                    {
+                        let actual_result = TestCaseResult {
+                            planner_error: Some(error.to_string()),
+                            ..Default::default()
+                        };
+
+                        check_result(self, &actual_result)?;
+                        result = Some(actual_result);
+                    }
                 }
                 Statement::CreateIndex {
                     name,
@@ -346,7 +420,7 @@ impl TestCase {
                     ..
                 } => {
                     create_index::handle_create_index(
-                        context,
+                        handler_args,
                         if_not_exists,
                         name,
                         table_name,
@@ -364,11 +438,21 @@ impl TestCase {
                     columns,
                     ..
                 } => {
-                    create_mv::handle_create_mv(context, name, *query, columns).await?;
+                    create_mv::handle_create_mv(handler_args, name, *query, columns).await?;
+                }
+                Statement::CreateView {
+                    materialized: false,
+                    or_replace: false,
+                    name,
+                    query,
+                    columns,
+                    ..
+                } => {
+                    create_view::handle_create_view(handler_args, name, columns, *query).await?;
                 }
                 Statement::Drop(drop_statement) => {
                     drop_table::handle_drop_table(
-                        context,
+                        handler_args,
                         drop_statement.object_name,
                         drop_statement.if_exists,
                     )
@@ -379,13 +463,20 @@ impl TestCase {
                     variable,
                     value,
                 } => {
-                    variable::handle_set(context, variable, value).unwrap();
+                    variable::handle_set(handler_args, variable, value).unwrap();
                 }
-                Statement::Explain { .. } => {
-                    let explain_output = get_explain_output(sql, session.clone()).await;
+                Statement::Explain {
+                    analyze,
+                    statement,
+                    options,
+                } => {
                     if result.is_some() {
                         panic!("two queries in one test case");
                     }
+                    let rsp =
+                        explain::handle_explain(handler_args, *statement, options, analyze).await?;
+
+                    let explain_output = get_explain_output(rsp).await;
                     let ret = TestCaseResult {
                         explain_output: Some(explain_output),
                         ..Default::default()
@@ -394,6 +485,13 @@ impl TestCase {
                         check_result(self, &ret)?;
                     }
                     result = Some(ret);
+                }
+                Statement::CreateSchema {
+                    schema_name,
+                    if_not_exists,
+                } => {
+                    create_schema::handle_create_schema(handler_args, schema_name, if_not_exists)
+                        .await?;
                 }
                 _ => return Err(anyhow!("Unsupported statement type")),
             }
@@ -406,11 +504,11 @@ impl TestCase {
         stmt: &Statement,
         context: OptimizerContextRef,
     ) -> Result<TestCaseResult> {
-        let session = context.inner().session_ctx.clone();
+        let session = context.session_ctx().clone();
         let mut ret = TestCaseResult::default();
 
         let bound = {
-            let mut binder = Binder::new(&session);
+            let mut binder = Binder::new(&session, vec![]);
             match binder.bind(stmt.clone()) {
                 Ok(bound) => bound,
                 Err(err) => {
@@ -435,18 +533,37 @@ impl TestCase {
             }
         };
 
-        if self.optimized_logical_plan.is_some() || self.optimizer_error.is_some() {
-            let optimized_logical_plan = match logical_plan.gen_optimized_logical_plan() {
-                Ok(optimized_logical_plan) => optimized_logical_plan,
-                Err(err) => {
-                    ret.optimizer_error = Some(err.to_string());
-                    return Ok(ret);
-                }
-            };
+        if self.optimized_logical_plan_for_batch.is_some() || self.optimizer_error.is_some() {
+            let optimized_logical_plan_for_batch =
+                match logical_plan.gen_optimized_logical_plan_for_batch() {
+                    Ok(optimized_logical_plan_for_batch) => optimized_logical_plan_for_batch,
+                    Err(err) => {
+                        ret.optimizer_error = Some(err.to_string());
+                        return Ok(ret);
+                    }
+                };
 
-            // Only generate optimized_logical_plan if it is specified in test case
-            if self.optimized_logical_plan.is_some() {
-                ret.optimized_logical_plan = Some(explain_plan(&optimized_logical_plan));
+            // Only generate optimized_logical_plan_for_batch if it is specified in test case
+            if self.optimized_logical_plan_for_batch.is_some() {
+                ret.optimized_logical_plan_for_batch =
+                    Some(explain_plan(&optimized_logical_plan_for_batch));
+            }
+        }
+
+        if self.optimized_logical_plan_for_stream.is_some() || self.optimizer_error.is_some() {
+            let optimized_logical_plan_for_stream =
+                match logical_plan.gen_optimized_logical_plan_for_stream() {
+                    Ok(optimized_logical_plan_for_stream) => optimized_logical_plan_for_stream,
+                    Err(err) => {
+                        ret.optimizer_error = Some(err.to_string());
+                        return Ok(ret);
+                    }
+                };
+
+            // Only generate optimized_logical_plan_for_stream if it is specified in test case
+            if self.optimized_logical_plan_for_stream.is_some() {
+                ret.optimized_logical_plan_for_stream =
+                    Some(explain_plan(&optimized_logical_plan_for_stream));
             }
         }
 
@@ -455,8 +572,14 @@ impl TestCase {
                 || self.batch_plan_proto.is_some()
                 || self.batch_error.is_some()
             {
-                let batch_plan = match logical_plan.gen_batch_distributed_plan() {
-                    Ok(batch_plan) => batch_plan,
+                let batch_plan = match logical_plan.gen_batch_plan() {
+                    Ok(batch_plan) => match logical_plan.gen_batch_distributed_plan(batch_plan) {
+                        Ok(batch_plan) => batch_plan,
+                        Err(err) => {
+                            ret.batch_error = Some(err.to_string());
+                            break 'batch;
+                        }
+                    },
                     Err(err) => {
                         ret.batch_error = Some(err.to_string());
                         break 'batch;
@@ -479,10 +602,16 @@ impl TestCase {
 
         'local_batch: {
             if self.batch_local_plan.is_some() || self.batch_local_error.is_some() {
-                let batch_plan = match logical_plan.gen_batch_local_plan() {
-                    Ok(batch_plan) => batch_plan,
+                let batch_plan = match logical_plan.gen_batch_plan() {
+                    Ok(batch_plan) => match logical_plan.gen_batch_local_plan(batch_plan) {
+                        Ok(batch_plan) => batch_plan,
+                        Err(err) => {
+                            ret.batch_error = Some(err.to_string());
+                            break 'local_batch;
+                        }
+                    },
                     Err(err) => {
-                        ret.batch_local_error = Some(err.to_string());
+                        ret.batch_error = Some(err.to_string());
                         break 'local_batch;
                     }
                 };
@@ -527,7 +656,31 @@ impl TestCase {
                 // Only generate stream_dist_plan if it is specified in test case
                 if self.stream_dist_plan.is_some() {
                     let graph = build_graph(stream_plan);
-                    ret.stream_dist_plan = Some(explain_stream_graph(&graph, false).unwrap());
+                    ret.stream_dist_plan = Some(explain_stream_graph(&graph, false));
+                }
+            }
+        }
+
+        'sink: {
+            if self.sink_plan.is_some() {
+                let sink_name = "sink_test";
+                let mut options = HashMap::new();
+                options.insert("connector".to_string(), "blackhole".to_string());
+                options.insert("type".to_string(), "append-only".to_string());
+                let options = WithOptions::new(options);
+                match logical_plan.gen_sink_plan(
+                    sink_name.to_string(),
+                    format!("CREATE SINK {sink_name} AS {}", stmt),
+                    options,
+                ) {
+                    Ok(sink_plan) => {
+                        ret.sink_plan = Some(explain_plan(&sink_plan.into()));
+                        break 'sink;
+                    }
+                    Err(err) => {
+                        ret.sink_error = Some(err.to_string());
+                        break 'sink;
+                    }
                 }
             }
         }
@@ -556,9 +709,14 @@ fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {
     )?;
     check_option_plan_eq("logical_plan", &expected.logical_plan, &actual.logical_plan)?;
     check_option_plan_eq(
-        "optimized_logical_plan",
-        &expected.optimized_logical_plan,
-        &actual.optimized_logical_plan,
+        "optimized_logical_plan_for_batch",
+        &expected.optimized_logical_plan_for_batch,
+        &actual.optimized_logical_plan_for_batch,
+    )?;
+    check_option_plan_eq(
+        "optimized_logical_plan_for_stream",
+        &expected.optimized_logical_plan_for_stream,
+        &actual.optimized_logical_plan_for_stream,
     )?;
     check_option_plan_eq("batch_plan", &expected.batch_plan, &actual.batch_plan)?;
     check_option_plan_eq(
@@ -583,7 +741,7 @@ fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {
         &expected.explain_output,
         &actual.explain_output,
     )?;
-
+    check_option_plan_eq("sink_plan", &expected.sink_plan, &actual.sink_plan)?;
     Ok(())
 }
 

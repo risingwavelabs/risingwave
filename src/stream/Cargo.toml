@@ -8,26 +8,27 @@ license = { workspace = true }
 repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
 [dependencies]
 anyhow = "1"
 async-recursion = "1"
 async-stream = "0.3"
 async-trait = "0.1"
-async_stack_trace = { path = "../utils/async_stack_trace" }
-auto_enums = { version = "0.7", features = ["futures"] }
-byteorder = "1"
+await-tree = "0.1.1"
 bytes = "1"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-crc32fast = "1"
+derivative = "2"
 dyn-clone = "1"
 either = "1"
 enum-as-inner = "0.5"
-farmhash = "1"
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
-global_stats_alloc = { path = "../utils/global_stats_alloc" }
-hyper = "0.14"
+hytra = "0.1.2"
 iter-chunks = "0.1"
 itertools = "0.10"
 local_stats_alloc = { path = "../utils/local_stats_alloc" }
@@ -36,9 +37,9 @@ maplit = "1.0.2"
 memcomparable = "0.1"
 minitrace = "0.4"
 minstant = "0.1"
+multimap = "0.8"
 num-traits = "0.2"
 parking_lot = "0.12"
-paste = "1"
 pin-project = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = "0.11"
@@ -51,14 +52,11 @@ risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_source = { path = "../source" }
 risingwave_storage = { path = "../storage" }
-serde = { version = "1", features = ["derive"] }
-serde-value = "0.7"
 serde_json = "1"
 smallvec = "1"
 static_assertions = "1"
-stats_alloc = { version = "0.1", features = ["nightly"] }
+task_stats_alloc = { path = "../utils/task_stats_alloc" }
 thiserror = "1"
-tikv-jemalloc-ctl = "0.5"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -71,14 +69,17 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-metrics = "0.1.0"
 tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
-tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = "0.1"
-tracing-futures = "0.2"
-twox-hash = "1"
-url = "2"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"
+criterion = { version = "0.4", features = ["async_tokio", "async"] }
+risingwave_hummock_test = { path = "../storage/hummock_test", features = ["test"] }
+tracing-test = "0.2"
+
+[[bench]]
+name = "hash_agg"
+harness = false

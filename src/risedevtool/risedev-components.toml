@@ -1,7 +1,7 @@
 [tasks.configure-if-not-configured]
 condition = { env_not_set = [ "RISEDEV_CONFIGURED" ] }
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 ENV_PATH="$(pwd)/risedev-components.user.env"
 cargo run --bin risedev-config -- -f "${ENV_PATH}" default
@@ -9,7 +9,7 @@ cargo run --bin risedev-config -- -f "${ENV_PATH}" default
 
 [tasks.configure]
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 ENV_PATH="$(pwd)/risedev-components.user.env"
 cargo run --bin risedev-config -- -f "${ENV_PATH}" "$@"

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -72,6 +72,12 @@ pub mod source;
 #[cfg_attr(madsim, path = "sim/monitor_service.rs")]
 pub mod monitor_service;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/backup_service.rs")]
+pub mod backup_service;
+#[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/java_binding.rs")]
+pub mod java_binding;
+#[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/health.rs")]
 pub mod health;
 #[rustfmt::skip]
@@ -128,13 +134,18 @@ pub mod source_serde;
 #[rustfmt::skip]
 #[path = "monitor_service.serde.rs"]
 pub mod monitor_service_serde;
-
+#[rustfmt::skip]
+#[path = "backup_service.serde.rs"]
+pub mod backup_service_serde;
+#[rustfmt::skip]
+#[path = "java_binding.serde.rs"]
+pub mod java_binding_serde;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub struct ProstFieldNotFound(pub &'static str);
+pub struct PbFieldNotFound(pub &'static str);
 
-impl From<ProstFieldNotFound> for tonic::Status {
-    fn from(e: ProstFieldNotFound) -> Self {
+impl From<PbFieldNotFound> for tonic::Status {
+    fn from(e: PbFieldNotFound) -> Self {
         tonic::Status::new(tonic::Code::Internal, e.0)
     }
 }

@@ -55,3 +55,30 @@ select sum(c1) from (select v1, sum(v2) as c1 from t group by v1)
 
 statement ok
 drop table t
+
+statement ok
+create table t(d decimal);
+
+statement ok
+insert into t values (9000000000000000000000000000), 
+(9000000000000000000000000000), 
+(9000000000000000000000000000), 
+(9000000000000000000000000000), 
+(9000000000000000000000000000), 
+(9000000000000000000000000000), 
+(9000000000000000000000000000), 
+(9000000000000000000000000000);
+
+query T
+select sum(d) from t;
+----
+72000000000000000000000000000
+
+statement ok
+insert into t values (9000000000000000000000000000);
+
+statement error Expr error: Numeric out of range
+select sum(d) from t;
+
+statement ok
+drop table t;

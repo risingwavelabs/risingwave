@@ -7,75 +7,123 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
 [dependencies]
 anyhow = "1"
-async-stream = "0.3"
+arc-swap = "1"
+arrow-array = "36"
+arrow-schema = "36"
 async-trait = "0.1"
-auto_enums = "0.7"
-bitflags = "1.3.2"
+auto_enums = "0.8"
+bitflags = "2"
 byteorder = "1"
 bytes = "1"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4", default-features = false, features = [
+    "clock",
+    "std",
+] }
+chrono-tz = { version = "0.7", features = ["case-insensitive"] }
+clap = { version = "4", features = ["derive"] }
 comfy-table = "6"
 crc32fast = "1"
+derivative = "2"
+easy-ext = "1"
 either = "1"
 enum-as-inner = "0.5"
+ethnum = { version = "1", features = ["serde"] }
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 hex = "0.4.3"
 humantime = "2.1"
 itertools = "0.10"
-lru = { git = "https://github.com/risingwavelabs/lru-rs.git", branch = "evict_by_timestamp" }
+itoa = "1.0"
 memcomparable = { version = "0.1", features = ["decimal"] }
-more-asserts = "0.3"
 num-traits = "0.2"
 parking_lot = "0.12"
 parse-display = "0.6"
 paste = "1"
-pin-project = "1"
-postgres-types = { version = "0.2.4", features = ["derive","with-chrono-0_4"] }
+postgres-types = { version = "0.2.4", features = [
+    "derive",
+    "with-chrono-0_4",
+    "with-serde_json-1",
+] }
 prometheus = { version = "0.13" }
 prost = "0.11"
 rand = "0.8"
 regex = "1"
+reqwest = { version = "0.11", features = ["json"] }
 risingwave_pb = { path = "../prost" }
-rust_decimal = { version = "1", features = ["db-tokio-postgres"] }
+rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
+ryu = "1.0"
 serde = { version = "1", features = ["derive"] }
-serde_derive = "1"
+serde_default = "0.1"
 serde_json = "1"
-smallvec = "1"
-spin = "0.9"
+serde_with = "2"
+smallbitset = "0.6.1"
 static_assertions = "1"
 strum = "0.24"
 strum_macros = "0.24"
-sysinfo = "0.26"
+sysinfo = { version = "0.26", default-features = false }
 thiserror = "1"
-tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
-tokio-stream = "0.1"
-toml = "0.5"
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+] }
+toml = "0.7"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
-twox-hash = "1"
 url = "2"
+uuid = "1.2.2"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-procinfo = { git = "https://github.com/tikv/procinfo-rs", rev = "6599eb9dca74229b2c1fcc44118bef7eff127128" }
 procfs = { version = "0.12", default-features = false }
 libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
 libc = "0.2.72"
-mach = "0.3.2"
+mach2 = "0.4"
 
 [dev-dependencies]
 criterion = "0.4"
+more-asserts = "0.3"
 rand = "0.8"
+tempfile = "3"
+twox-hash = "1"
 
 [[bench]]
 name = "bench_encoding"
 harness = false
+
+[[bench]]
+name = "bench_row"
+harness = false
+
+[[bench]]
+name = "bitmap"
+harness = false
+
+[[bench]]
+name = "bench_hash_key_encoding"
+harness = false
+
+[[bench]]
+name = "bench_data_chunk_encoding"
+harness = false
+
+[[bin]]
+name = "example-config"
+path = "src/bin/default_config.rs"

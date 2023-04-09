@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,80 +12,136 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use futures::future::BoxFuture;
+use futures::future::{try_join_all, BoxFuture};
 use itertools::Itertools;
-use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::VirtualNode;
 use risingwave_pb::catalog::Table;
-use risingwave_pb::common::{ActorInfo, Buffer, WorkerType};
-use risingwave_pb::meta::table_fragments::actor_status::ActorState;
-use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
-use risingwave_pb::meta::table_fragments::ActorStatus;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{ActorMapping, Dispatcher, DispatcherType, StreamNode};
+use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
+use risingwave_pb::stream_plan::Dispatcher;
 use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
+    BroadcastActorInfoTableRequest, BuildActorsRequest, DropActorsRequest, UpdateActorsRequest,
 };
+use tokio::sync::mpsc::Sender;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use super::ScheduledLocations;
+use super::Locations;
 use crate::barrier::{BarrierScheduler, Command};
 use crate::hummock::HummockManagerRef;
-use crate::manager::{
-    ClusterManagerRef, DatabaseId, FragmentManagerRef, FragmentVNodeInfo, MetaSrvEnv, SchemaId,
-    WorkerId,
-};
-use crate::model::{ActorId, FragmentId, TableFragments};
+use crate::manager::{ClusterManagerRef, FragmentManagerRef, MetaSrvEnv};
+use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{parallel_unit_mapping_to_actor_mapping, Scheduler, SourceManagerRef};
-use crate::MetaResult;
+use crate::stream::SourceManagerRef;
+use crate::{MetaError, MetaResult};
 
 pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
 
-/// [`CreateStreamingJobContext`] carries one-time infos.
-#[derive(Default)]
+/// [`CreateStreamingJobContext`] carries one-time infos for creating a streaming job.
+///
+/// Note: for better readability, keep this struct complete and immutable once created.
+#[cfg_attr(test, derive(Default))]
 pub struct CreateStreamingJobContext {
     /// New dispatchers to add from upstream actors to downstream actors.
     pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
-    /// Upstream mview actor ids grouped by worker node id.
-    pub upstream_worker_actors: HashMap<WorkerId, HashSet<ActorId>>,
-    /// Upstream mview actor ids grouped by table id.
-    pub table_mview_map: HashMap<TableId, Vec<ActorId>>,
-    /// Dependent table ids
-    pub dependent_table_ids: HashSet<TableId>,
-    /// Table id offset get from meta id generator. Used to calculate global unique table id.
-    pub table_id_offset: u32,
-    /// Internal TableID to Table mapping
-    pub internal_table_id_map: HashMap<u32, Table>,
-    /// The upstream tables of all fragments containing chain nodes.
-    /// These fragments need to be colocated with their upstream tables.
-    ///
-    /// They are scheduled in `resolve_chain_node`.
-    pub chain_fragment_upstream_table_map: HashMap<FragmentId, TableId>,
-    /// SchemaId of streaming job
-    pub schema_id: SchemaId,
-    /// DatabaseId of streaming job
-    pub database_id: DatabaseId,
-    /// Name of streaming job, for internal table name generation.
-    pub streaming_job_name: String,
-    /// The SQL definition of this streaming job. Used for debugging only.
-    pub streaming_definition: String,
 
+    /// Upstream mview actor ids grouped by table id.
+    pub upstream_mview_actors: HashMap<TableId, Vec<ActorId>>,
+
+    /// Internal tables in the streaming job.
+    pub internal_tables: HashMap<u32, Table>,
+
+    /// The locations of the actors to build in the streaming job.
+    pub building_locations: Locations,
+
+    /// The locations of the existing actors, essentially the upstream mview actors to update.
+    pub existing_locations: Locations,
+
+    /// The properties of the streaming job.
+    // TODO: directly store `StreamingJob` here.
     pub table_properties: HashMap<String, String>,
+
+    /// DDL definition.
+    pub definition: String,
 }
 
 impl CreateStreamingJobContext {
     pub fn internal_tables(&self) -> Vec<Table> {
-        self.internal_table_id_map.values().cloned().collect()
+        self.internal_tables.values().cloned().collect()
+    }
+}
+
+pub enum CreatingState {
+    Failed { reason: MetaError },
+    Canceling,
+    Created,
+}
+
+struct StreamingJobExecution {
+    id: TableId,
+    shutdown_tx: Option<Sender<CreatingState>>,
+}
+
+impl StreamingJobExecution {
+    fn new(id: TableId, shutdown_tx: Sender<CreatingState>) -> Self {
+        Self {
+            id,
+            shutdown_tx: Some(shutdown_tx),
+        }
+    }
+}
+
+#[derive(Default)]
+struct CreatingStreamingJobInfo {
+    streaming_jobs: Mutex<HashMap<TableId, StreamingJobExecution>>,
+}
+
+impl CreatingStreamingJobInfo {
+    async fn add_job(&self, job: StreamingJobExecution) {
+        let mut jobs = self.streaming_jobs.lock().await;
+        jobs.insert(job.id, job);
     }
 
-    pub fn internal_table_ids(&self) -> Vec<u32> {
-        self.internal_table_id_map.keys().cloned().collect_vec()
+    async fn delete_job(&self, job_id: TableId) {
+        let mut jobs = self.streaming_jobs.lock().await;
+        jobs.remove(&job_id);
     }
+
+    async fn cancel_jobs(&self, job_ids: Vec<TableId>) {
+        let mut jobs = self.streaming_jobs.lock().await;
+        for job_id in job_ids {
+            if let Some(job) = jobs.get_mut(&job_id) && let Some(shutdown_tx) = job.shutdown_tx.take() {
+                let _ = shutdown_tx.send(CreatingState::Canceling).await.inspect_err(|_| {
+                    tracing::warn!("failed to send canceling state");
+                });
+            }
+        }
+    }
+}
+
+type CreatingStreamingJobInfoRef = Arc<CreatingStreamingJobInfo>;
+
+/// [`ReplaceTableContext`] carries one-time infos for replacing the plan of an existing table.
+///
+/// Note: for better readability, keep this struct complete and immutable once created.
+pub struct ReplaceTableContext {
+    /// The old table fragments to be replaced.
+    pub old_table_fragments: TableFragments,
+
+    /// The updates to be applied to the downstream chain actors. Used for schema change.
+    pub merge_updates: Vec<MergeUpdate>,
+
+    /// The locations of the actors to build in the new table to replace.
+    pub building_locations: Locations,
+
+    /// The locations of the existing actors, essentially the downstream chain actors to update.
+    pub existing_locations: Locations,
+
+    /// The properties of the streaming job.
+    // TODO: directly store `StreamingJob here.
+    pub table_properties: HashMap<String, String>,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
@@ -103,6 +159,9 @@ pub struct GlobalStreamManager<S: MetaStore> {
 
     /// Maintains streaming sources from external system like kafka
     pub(crate) source_manager: SourceManagerRef<S>,
+
+    /// Creating streaming job info.
+    creating_job_info: CreatingStreamingJobInfoRef,
 
     hummock_manager: HummockManagerRef<S>,
 }
@@ -126,486 +185,156 @@ where
             cluster_manager,
             source_manager,
             hummock_manager,
+            creating_job_info: Arc::new(CreatingStreamingJobInfo::default()),
         })
     }
 
-    async fn resolve_chain_node(
-        &self,
-        table_fragments: &mut TableFragments,
-        dependent_table_ids: &HashSet<TableId>,
-        dispatchers: &mut HashMap<ActorId, Vec<Dispatcher>>,
-        upstream_worker_actors: &mut HashMap<WorkerId, HashSet<ActorId>>,
-        locations: &mut ScheduledLocations,
-        chain_fragment_upstream_table_map: &HashMap<FragmentId, TableId>,
-    ) -> MetaResult<()> {
-        // The closure environment. Used to simulate recursive closure.
-        struct Env<'a> {
-            /// Records what's the corresponding parallel unit of each actor and mview vnode
-            /// mapping info of one table.
-            upstream_fragment_vnode_info: &'a HashMap<TableId, FragmentVNodeInfo>,
-            /// Records each upstream mview actor's vnode bitmap info.
-            upstream_vnode_bitmap_info: &'a mut HashMap<TableId, Vec<(ActorId, Option<Buffer>)>>,
-            /// Records what's the actors on each worker of one table.
-            tables_worker_actors: &'a HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
-            /// Schedule information of all actors.
-            locations: &'a mut ScheduledLocations,
-            /// New dispatchers for this mview.
-            dispatchers: &'a mut HashMap<ActorId, Vec<Dispatcher>>,
-            /// New vnode bitmaps for chain actors.
-            actor_vnode_bitmaps: &'a mut HashMap<ActorId, Option<Buffer>>,
-            /// Upstream Materialize actor ids grouped by worker id.
-            upstream_worker_actors: &'a mut HashMap<WorkerId, HashSet<ActorId>>,
-        }
-
-        impl Env<'_> {
-            fn resolve_chain_node_inner(
-                &mut self,
-                stream_node: &mut StreamNode,
-                actor_id: ActorId,
-                upstream_actor_idx: usize,
-                is_singleton: bool,
-                upstream_fragment_id: FragmentId,
-            ) -> MetaResult<()> {
-                let Some(NodeBody::Chain(ref mut chain)) = stream_node.node_body else {
-                    // If node is not chain node, recursively deal with input nodes
-                    for input in &mut stream_node.input {
-                        self.resolve_chain_node_inner(input, actor_id, upstream_actor_idx, is_singleton, upstream_fragment_id)?;
-                    }
-                    return Ok(());
-                };
-
-                // get upstream table id
-                let table_id = TableId::new(chain.table_id);
-                // 1. use table id to get upstream vnode mapping info: [(actor_id,
-                // option(vnode_bitmap))]
-                let upstream_vnode_mapping_info = &self.upstream_vnode_bitmap_info[&table_id];
-
-                let (upstream_actor_id, upstream_vnode_bitmap) = {
-                    if is_singleton {
-                        // The upstream fragment should also be singleton.
-                        upstream_vnode_mapping_info.iter().exactly_one().unwrap()
-                    } else {
-                        // Assign a upstream actor id to this chain node.
-                        &upstream_vnode_mapping_info[upstream_actor_idx]
-                    }
-                };
-
-                // Here we force schedule the chain node to the same parallel unit as its upstream,
-                // so `same_worker_node_as_upstream` is not used here. If we want to
-                // support different parallel units, we need to keep the vnode bitmap and assign a
-                // new parallel unit with some other strategies.
-                let upstream_parallel_unit = self
-                    .upstream_fragment_vnode_info
-                    .get(&table_id)
-                    .unwrap()
-                    .actor_parallel_unit_maps
-                    .get(upstream_actor_id)
-                    .unwrap()
-                    .clone();
-                self.locations
-                    .actor_locations
-                    .insert(actor_id, upstream_parallel_unit);
-                self.actor_vnode_bitmaps
-                    .insert(actor_id, upstream_vnode_bitmap.clone());
-
-                // fill upstream node-actor info for later use
-                let upstream_table_worker_actors =
-                    self.tables_worker_actors.get(&table_id).unwrap();
-
-                let chain_upstream_worker_actors = upstream_table_worker_actors
-                    .iter()
-                    .flat_map(|(worker_id, actor_ids)| {
-                        actor_ids.iter().map(|actor_id| (*worker_id, *actor_id))
-                    })
-                    .filter(|(_, actor_id)| upstream_actor_id == actor_id)
-                    .into_group_map();
-                for (worker_id, actor_ids) in chain_upstream_worker_actors {
-                    self.upstream_worker_actors
-                        .entry(worker_id)
-                        .or_default()
-                        .extend(actor_ids);
-                }
-
-                // deal with merge and batch query node, setting upstream infos.
-                let batch_stream_node = &stream_node.input[1];
-                assert!(
-                    matches!(batch_stream_node.node_body, Some(NodeBody::BatchPlan(_))),
-                    "chain's input[1] should always be batch query"
-                );
-
-                let merge_stream_node = &mut stream_node.input[0];
-                let Some(NodeBody::Merge(ref mut merge)) = merge_stream_node.node_body else {
-                    unreachable!("chain's input[0] should always be merge");
-                };
-                merge.upstream_actor_id.push(*upstream_actor_id);
-                merge.upstream_fragment_id = upstream_fragment_id;
-
-                // finally, we should also build dispatcher infos here.
-                //
-                // Note: currently we ensure that the downstream chain operator has the same
-                // parallel unit and distribution as the upstream mview, so we can simply use
-                // `NoShuffle` dispatcher here.
-                self.dispatchers
-                    .entry(*upstream_actor_id)
-                    .or_default()
-                    .push(Dispatcher {
-                        r#type: DispatcherType::NoShuffle as _,
-                        // Use chain actor id as dispatcher id to avoid collision in this
-                        // Dispatch executor.
-                        dispatcher_id: actor_id as _,
-                        downstream_actor_id: vec![actor_id],
-                        ..Default::default()
-                    });
-
-                Ok(())
-            }
-        }
-
-        let upstream_fragment_vnode_info = &self
-            .fragment_manager
-            .get_mview_fragment_vnode_info(dependent_table_ids)
-            .await?;
-
-        let upstream_vnode_bitmap_info = &mut self
-            .fragment_manager
-            .get_mview_vnode_bitmap_info(dependent_table_ids)
-            .await?;
-
-        let tables_worker_actors = &self
-            .fragment_manager
-            .get_tables_worker_actors(dependent_table_ids)
-            .await?;
-
-        let mut env = Env {
-            upstream_fragment_vnode_info,
-            upstream_vnode_bitmap_info,
-            tables_worker_actors,
-            locations,
-            dispatchers,
-            actor_vnode_bitmaps: &mut Default::default(),
-            upstream_worker_actors,
-        };
-
-        for fragment in table_fragments.fragments.values_mut() {
-            if !chain_fragment_upstream_table_map.contains_key(&fragment.fragment_id) {
-                continue;
-            }
-
-            // setup fragment vnode mapping.
-            let upstream_table_id = chain_fragment_upstream_table_map
-                .get(&fragment.fragment_id)
-                .unwrap();
-
-            let upstream_fragment_vnode_info = env
-                .upstream_fragment_vnode_info
-                .get(upstream_table_id)
-                .unwrap();
-
-            let upstream_fragment_id = upstream_fragment_vnode_info
-                .vnode_mapping
-                .as_ref()
-                .unwrap()
-                .fragment_id;
-
-            let is_singleton =
-                fragment.get_distribution_type()? == FragmentDistributionType::Single;
-
-            let upstream_actor_ids = env
-                .upstream_vnode_bitmap_info
-                .get(upstream_table_id)
-                .map(|v| v.iter().map(|(actor_id, _)| *actor_id).collect_vec())
-                .unwrap();
-
-            for (idx, actor) in &mut fragment.actors.iter_mut().enumerate() {
-                let stream_node = actor.nodes.as_mut().unwrap();
-                env.resolve_chain_node_inner(
-                    stream_node,
-                    actor.actor_id,
-                    idx,
-                    is_singleton,
-                    upstream_fragment_id,
-                )?;
-
-                // setup actor vnode bitmap.
-                actor.vnode_bitmap = env.actor_vnode_bitmaps.remove(&actor.actor_id).unwrap();
-
-                // setup upstream actor id
-                actor.upstream_actor_id.push(upstream_actor_ids[idx]);
-            }
-
-            // Note: it's possible that there're some other normal `Merge` nodes in the fragment of
-            // `Chain` and their upstreams are already filled in `upstream_fragment_ids`, so we
-            // won't check it empty here and just push the one resolved in `Chain` to the end.
-            fragment
-                .upstream_fragment_ids
-                .push(upstream_fragment_id as FragmentId);
-
-            let mut vnode_mapping = upstream_fragment_vnode_info.vnode_mapping.clone();
-            // The upstream vnode_mapping is cloned here,
-            // so the fragment id in the mapping needs to be changed to the id of this fragment
-            if let Some(mapping) = vnode_mapping.as_mut() {
-                assert_ne!(mapping.fragment_id, fragment.fragment_id);
-                mapping.fragment_id = fragment.fragment_id;
-            }
-            fragment.vnode_mapping = vnode_mapping;
-        }
-        Ok(())
-    }
-
     /// Create streaming job, it works as follows:
-    /// 1. schedule the actors to nodes in the cluster.
-    /// 2. broadcast the actor info table.
-    /// (optional) get the split information of the `StreamSource` via source manager and patch
-    /// actors .
-    /// 3. notify related nodes to update and build the actors.
-    /// 4. store related meta data.
     ///
-    /// Note the `table_fragments` is required to be sorted in topology order. (Downstream first,
-    /// then upstream.)
+    /// 1. Broadcast the actor info based on the scheduling result in the context, build the hanging
+    /// channels in upstream worker nodes.
+    /// 2. (optional) Get the split information of the `StreamSource` via source manager and patch
+    /// actors.
+    /// 3. Notify related worker nodes to update and build the actors.
+    /// 4. Store related meta data.
     pub async fn create_streaming_job(
-        &self,
+        self: &Arc<Self>,
         table_fragments: TableFragments,
-        context: &mut CreateStreamingJobContext,
+        ctx: CreateStreamingJobContext,
     ) -> MetaResult<()> {
-        let mut revert_funcs = vec![];
-        if let Err(e) = self
-            .create_streaming_job_impl(&mut revert_funcs, table_fragments, context)
-            .await
-        {
-            for revert_func in revert_funcs.into_iter().rev() {
-                revert_func.await;
+        let table_id = table_fragments.table_id();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(10);
+        let execution = StreamingJobExecution::new(table_id, sender.clone());
+        self.creating_job_info.add_job(execution).await;
+
+        let stream_manager = self.clone();
+        tokio::spawn(async move {
+            let mut revert_funcs = vec![];
+            let res = stream_manager
+                .create_streaming_job_impl(&mut revert_funcs, table_fragments, ctx)
+                .await;
+            match res {
+                Ok(_) => {
+                    let _ = sender
+                        .send(CreatingState::Created)
+                        .await
+                        .inspect_err(|_| tracing::warn!("failed to notify created: {table_id}"));
+                }
+                Err(err) => {
+                    for revert_func in revert_funcs.into_iter().rev() {
+                        revert_func.await;
+                    }
+                    let _ = sender
+                        .send(CreatingState::Failed {
+                            reason: err.clone(),
+                        })
+                        .await
+                        .inspect_err(|_| {
+                            tracing::warn!("failed to notify failed: {table_id}, err: {err}")
+                        });
+                }
             }
-            return Err(e);
-        }
-        Ok(())
+        });
+
+        let res = try {
+            while let Some(state) = receiver.recv().await {
+                match state {
+                    CreatingState::Failed { reason } => {
+                        return Err(reason);
+                    }
+                    CreatingState::Canceling => {
+                        if let Ok(table_fragments) = self
+                            .fragment_manager
+                            .select_table_fragments_by_table_id(&table_id)
+                            .await
+                        {
+                            // try to cancel buffered creating command.
+                            if self
+                                .barrier_scheduler
+                                .try_cancel_scheduled_create(table_id)
+                                .await
+                            {
+                                tracing::debug!(
+                                    "cancelling streaming job {table_id} in buffer queue."
+                                );
+                                let node_actors = table_fragments.worker_actor_ids();
+                                let cluster_info =
+                                    self.cluster_manager.get_streaming_cluster_info().await;
+                                let node_actors = node_actors
+                                    .into_iter()
+                                    .map(|(id, actor_ids)| {
+                                        (
+                                            cluster_info.worker_nodes.get(&id).cloned().unwrap(),
+                                            actor_ids,
+                                        )
+                                    })
+                                    .collect_vec();
+                                let futures = node_actors.into_iter().map(|(node, actor_ids)| {
+                                    let request_id = Uuid::new_v4().to_string();
+                                    async move {
+                                        let client =
+                                            self.env.stream_client_pool().get(&node).await?;
+                                        let request = DropActorsRequest {
+                                            request_id,
+                                            actor_ids,
+                                        };
+                                        client.drop_actors(request).await
+                                    }
+                                });
+                                try_join_all(futures).await?;
+
+                                self.fragment_manager
+                                    .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(
+                                        table_id,
+                                    )))
+                                    .await?;
+                                return Err(MetaError::cancelled("create".into()));
+                            }
+                            if !table_fragments.is_created() {
+                                tracing::debug!(
+                                    "cancelling streaming job {table_id} by issue cancel command."
+                                );
+                                self.barrier_scheduler
+                                    .run_command(Command::CancelStreamingJob(table_fragments))
+                                    .await?;
+                                return Err(MetaError::cancelled("create".into()));
+                            }
+                        }
+                    }
+                    CreatingState::Created => return Ok(()),
+                }
+            }
+        };
+
+        self.creating_job_info.delete_job(table_id).await;
+        res
     }
 
-    async fn create_streaming_job_impl(
+    async fn build_actors(
         &self,
-        revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
-        mut table_fragments: TableFragments,
-        CreateStreamingJobContext {
-            dispatchers,
-            upstream_worker_actors,
-            table_mview_map,
-            dependent_table_ids,
-            table_properties,
-            chain_fragment_upstream_table_map,
-            ..
-        }: &mut CreateStreamingJobContext,
+        table_fragments: &TableFragments,
+        building_locations: &Locations,
+        existing_locations: &Locations,
     ) -> MetaResult<()> {
-        // Schedule actors to parallel units. `locations` will record the parallel unit that an
-        // actor is scheduled to, and the worker node this parallel unit is on.
-        let mut locations = {
-            // List all running worker nodes and the parallel units.
-            //
-            // It's possible that the cluster configuration has been changed after we resolve the
-            // stream graph, so the scheduling is fallible and the client may need to retry.
-            // TODO: refactor to use a consistent snapshot of cluster configuration.
-            let workers = self
-                .cluster_manager
-                .list_worker_node(
-                    WorkerType::ComputeNode,
-                    Some(risingwave_pb::common::worker_node::State::Running),
-                )
-                .await;
-            if workers.is_empty() {
-                bail!("no available compute node in the cluster");
-            }
-            let parallel_units = self.cluster_manager.list_active_parallel_units().await;
-
-            // Create empty locations and the scheduler.
-            let mut locations = ScheduledLocations::with_workers(workers);
-            let scheduler = Scheduler::new(parallel_units);
-
-            // Schedule each fragment(actors) to nodes except chain, recorded in `locations`.
-            // Vnode mapping in fragment will be filled in as well.
-            let topological_order = table_fragments.generate_topological_order();
-            for fragment_id in topological_order {
-                let fragment = table_fragments.fragments.get_mut(&fragment_id).unwrap();
-                if !chain_fragment_upstream_table_map.contains_key(&fragment_id) {
-                    scheduler.schedule(fragment, &mut locations)?;
-                }
-            }
-
-            locations
-        };
-
-        // Resolve chain node infos, including:
-        // 1. insert upstream actor id in merge node
-        // 2. insert parallel unit id in batch query node
-        self.resolve_chain_node(
-            &mut table_fragments,
-            dependent_table_ids,
-            dispatchers,
-            upstream_worker_actors,
-            &mut locations,
-            chain_fragment_upstream_table_map,
-        )
-        .await?;
-        let dispatchers = &*dispatchers;
-        let upstream_worker_actors = &*upstream_worker_actors;
-
-        // Record vnode to parallel unit mapping for actors.
-        let actor_to_vnode_mapping = {
-            let mut mapping = HashMap::new();
-            for fragment in table_fragments.fragments.values() {
-                for actor in &fragment.actors {
-                    mapping
-                        .try_insert(actor.actor_id, fragment.vnode_mapping.clone())
-                        .unwrap();
-                }
-            }
-            mapping
-        };
-
-        // Fill hash dispatcher's mapping with scheduled locations.
-        for fragment in table_fragments.fragments.values_mut() {
-            // Filter out hash dispatchers in this fragment.
-            let dispatchers = fragment
-                .actors
-                .iter_mut()
-                .flat_map(|actor| actor.dispatcher.iter_mut())
-                .filter(|d| d.get_type().unwrap() == DispatcherType::Hash);
-
-            for dispatcher in dispatchers {
-                match dispatcher.downstream_actor_id.as_slice() {
-                    [] => panic!("hash dispatcher should have at least one downstream actor"),
-
-                    // There exists some unoptimized situation where a hash dispatcher has ONLY ONE
-                    // downstream actor, which makes it behave like a simple dispatcher. As a
-                    // workaround, we specially compute the consistent hash mapping here.
-                    // This arm could be removed after the optimizer has been fully implemented.
-                    &[single_downstream_actor] => {
-                        dispatcher.hash_mapping = Some(ActorMapping {
-                            original_indices: vec![VirtualNode::COUNT as u64 - 1],
-                            data: vec![single_downstream_actor],
-                        });
-                    }
-
-                    // For normal cases, we can simply transform the mapping from downstream actors
-                    // to current hash dispatchers.
-                    downstream_actors @ &[first_downstream_actor, ..] => {
-                        // All actors in the downstream fragment should have the same parallel unit
-                        // mapping, find it with the first downstream actor.
-                        let downstream_vnode_mapping = actor_to_vnode_mapping
-                            .get(&first_downstream_actor)
-                            .unwrap()
-                            .as_ref()
-                            .unwrap_or_else(|| {
-                                panic!("no vnode mapping for actor {}", &first_downstream_actor);
-                            });
-
-                        // Mapping from the parallel unit to downstream actors.
-                        let parallel_unit_actor_map = downstream_actors
-                            .iter()
-                            .map(|actor_id| {
-                                (
-                                    locations.actor_locations.get(actor_id).unwrap().id,
-                                    *actor_id,
-                                )
-                            })
-                            .collect::<HashMap<_, _>>();
-
-                        // Transform the mapping of parallel unit to the mapping of actor.
-                        dispatcher.hash_mapping = Some(parallel_unit_mapping_to_actor_mapping(
-                            downstream_vnode_mapping,
-                            &parallel_unit_actor_map,
-                        ));
-                    }
-                }
-            }
-        }
-
-        // Mark the actors to be built as `ActorState::Inactive`.
-        let actor_status = locations
-            .actor_locations
-            .iter()
-            .map(|(&actor_id, parallel_unit)| {
-                (
-                    actor_id,
-                    ActorStatus {
-                        parallel_unit: Some(parallel_unit.clone()),
-                        state: ActorState::Inactive as i32,
-                    },
-                )
-            })
-            .collect();
-        table_fragments.set_actor_status(actor_status);
-
-        let table_fragments = table_fragments;
         let actor_map = table_fragments.actor_map();
 
         // Actors on each stream node will need to know where their upstream lies. `actor_info`
         // includes such information. It contains:
         // 1. actors in the current create-streaming-job request.
         // 2. all upstream actors.
-        let actor_infos_to_broadcast = {
-            let current = locations.actor_infos();
-            let upstream = upstream_worker_actors
-                .iter()
-                .flat_map(|(worker_id, upstreams)| {
-                    upstreams.iter().map(|up_id| ActorInfo {
-                        actor_id: *up_id,
-                        host: locations
-                            .worker_locations
-                            .get(worker_id)
-                            .unwrap()
-                            .host
-                            .clone(),
-                    })
-                });
-            current.chain(upstream).collect_vec()
-        };
+        let actor_infos_to_broadcast = building_locations
+            .actor_infos()
+            .chain(existing_locations.actor_infos())
+            .collect_vec();
 
-        let actor_host_infos = locations.actor_info_map();
-        let worker_actors = locations.worker_actors();
-
-        // Hanging channels for each worker node.
-        let mut hanging_channels = {
-            // upstream_actor_id -> Vec<downstream_actor_info>
-            let up_id_to_down_info = dispatchers
-                .iter()
-                .map(|(&up_id, dispatchers)| {
-                    let down_infos = dispatchers
-                        .iter()
-                        .flat_map(|d| d.downstream_actor_id.iter())
-                        .map(|down_id| actor_host_infos[down_id].clone())
-                        .collect_vec();
-                    (up_id, down_infos)
-                })
-                .collect::<HashMap<_, _>>();
-
-            upstream_worker_actors
-                .iter()
-                .map(|(node_id, up_ids)| {
-                    (
-                        *node_id,
-                        up_ids
-                            .iter()
-                            .flat_map(|up_id| {
-                                up_id_to_down_info[up_id]
-                                    .iter()
-                                    .map(|down_info| HangingChannel {
-                                        upstream: Some(ActorInfo {
-                                            actor_id: *up_id,
-                                            host: None,
-                                        }),
-                                        downstream: Some(down_info.clone()),
-                                    })
-                            })
-                            .collect_vec(),
-                    )
-                })
-                .collect::<HashMap<_, _>>()
-        };
+        let building_worker_actors = building_locations.worker_actors();
 
         // We send RPC request in two stages.
         // The first stage does 2 things: broadcast actor info, and send local actor ids to
         // different WorkerNodes. Such that each WorkerNode knows the overall actor
         // allocation, but not actually builds it. We initialize all channels in this stage.
-        for (worker_id, actors) in &worker_actors {
-            let worker_node = locations.worker_locations.get(worker_id).unwrap();
+        for (worker_id, actors) in &building_worker_actors {
+            let worker_node = building_locations.worker_locations.get(worker_id).unwrap();
             let client = self.env.stream_client_pool().get(worker_node).await?;
 
             client
@@ -616,7 +345,7 @@ where
 
             let stream_actors = actors
                 .iter()
-                .map(|actor_id| actor_map.get(actor_id).cloned().unwrap())
+                .map(|actor_id| actor_map[actor_id].clone())
                 .collect::<Vec<_>>();
 
             let request_id = Uuid::new_v4().to_string();
@@ -625,42 +354,14 @@ where
                 .update_actors(UpdateActorsRequest {
                     request_id,
                     actors: stream_actors.clone(),
-                    hanging_channels: hanging_channels.remove(worker_id).unwrap_or_default(),
                 })
                 .await?;
         }
-
-        // Build remaining hanging channels on compute nodes.
-        for (worker_id, hanging_channels) in hanging_channels {
-            let worker_node = locations.worker_locations.get(&worker_id).unwrap();
-            let client = self.env.stream_client_pool().get(worker_node).await?;
-
-            let request_id = Uuid::new_v4().to_string();
-
-            client
-                .update_actors(UpdateActorsRequest {
-                    request_id,
-                    actors: vec![],
-                    hanging_channels,
-                })
-                .await?;
-        }
-
-        // Register to compaction group beforehand.
-        let hummock_manager_ref = self.hummock_manager.clone();
-        let registered_table_ids = hummock_manager_ref
-            .register_table_fragments(&table_fragments, table_properties)
-            .await?;
-        revert_funcs.push(Box::pin(async move {
-            if let Err(e) = hummock_manager_ref.unregister_table_ids(&registered_table_ids).await {
-                tracing::warn!("Failed to unregister compaction group for {:#?}.\nThey will be cleaned up on node restart.\n{:#?}", registered_table_ids, e);
-            }
-        }));
 
         // In the second stage, each [`WorkerNode`] builds local actors and connect them with
         // channels.
-        for (worker_id, actors) in worker_actors {
-            let worker_node = locations.worker_locations.get(&worker_id).unwrap();
+        for (worker_id, actors) in building_worker_actors {
+            let worker_node = building_locations.worker_locations.get(&worker_id).unwrap();
             let client = self.env.stream_client_pool().get(worker_node).await?;
 
             let request_id = Uuid::new_v4().to_string();
@@ -673,6 +374,41 @@ where
                 .await?;
         }
 
+        Ok(())
+    }
+
+    async fn create_streaming_job_impl(
+        &self,
+        revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
+        table_fragments: TableFragments,
+        CreateStreamingJobContext {
+            dispatchers,
+            upstream_mview_actors,
+            table_properties,
+            building_locations,
+            existing_locations,
+            definition,
+            ..
+        }: CreateStreamingJobContext,
+    ) -> MetaResult<()> {
+        // Register to compaction group beforehand.
+        let hummock_manager_ref = self.hummock_manager.clone();
+        let registered_table_ids = hummock_manager_ref
+            .register_table_fragments(&table_fragments, &table_properties)
+            .await?;
+        debug_assert_eq!(
+            registered_table_ids.len(),
+            table_fragments.all_table_ids().count()
+        );
+        revert_funcs.push(Box::pin(async move {
+            if let Err(e) = hummock_manager_ref.unregister_table_ids(&registered_table_ids).await {
+                tracing::warn!("Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}", registered_table_ids, e);
+            }
+        }));
+
+        self.build_actors(&table_fragments, &building_locations, &existing_locations)
+            .await?;
+
         // Add table fragments to meta store with state: `State::Initial`.
         self.fragment_manager
             .start_create_table_fragments(table_fragments.clone())
@@ -680,20 +416,60 @@ where
 
         let table_id = table_fragments.table_id();
 
-        let split_assignment = self.source_manager.pre_allocate_splits(&table_id).await?;
+        let init_split_assignment = self.source_manager.pre_allocate_splits(&table_id).await?;
 
         if let Err(err) = self
             .barrier_scheduler
             .run_command(Command::CreateStreamingJob {
                 table_fragments,
-                table_mview_map: table_mview_map.clone(),
-                dispatchers: dispatchers.clone(),
-                init_split_assignment: split_assignment,
+                upstream_mview_actors,
+                dispatchers,
+                init_split_assignment,
+                definition: definition.to_string(),
             })
             .await
         {
             self.fragment_manager
                 .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(table_id)))
+                .await?;
+            return Err(err);
+        }
+
+        Ok(())
+    }
+
+    pub async fn replace_table(
+        &self,
+        table_fragments: TableFragments,
+        ReplaceTableContext {
+            old_table_fragments,
+            merge_updates,
+            building_locations,
+            existing_locations,
+            table_properties: _,
+        }: ReplaceTableContext,
+    ) -> MetaResult<()> {
+        self.build_actors(&table_fragments, &building_locations, &existing_locations)
+            .await?;
+
+        // Add table fragments to meta store with state: `State::Initial`.
+        self.fragment_manager
+            .start_create_table_fragments(table_fragments.clone())
+            .await?;
+
+        let dummy_table_id = table_fragments.table_id();
+
+        if let Err(err) = self
+            .barrier_scheduler
+            .run_command_with_paused(Command::ReplaceTable {
+                old_table_fragments,
+                new_table_fragments: table_fragments,
+                merge_updates,
+            })
+            .await
+        {
+            self.fragment_manager
+                .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(dummy_table_id)))
                 .await?;
             return Err(err);
         }
@@ -728,21 +504,23 @@ where
             .await?;
 
         // Unregister from compaction group afterwards.
-        for table_fragments in table_fragments_vec {
-            if let Err(e) = self
-                .hummock_manager
-                .unregister_table_fragments(&table_fragments)
-                .await
-            {
-                tracing::warn!(
-                    "Failed to unregister compaction group for {}. It will be unregistered eventually.\n{:#?}",
-                    table_fragments.table_id(),
+        if let Err(e) = self
+            .hummock_manager
+            .unregister_table_fragments_vec(&table_fragments_vec)
+            .await
+        {
+            tracing::warn!(
+                    "Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}",
+                    table_fragments_vec,
                     e
                 );
-            }
         }
 
         Ok(())
+    }
+
+    pub async fn cancel_streaming_jobs(&self, table_ids: Vec<TableId>) {
+        self.creating_job_info.cancel_jobs(table_ids).await;
     }
 }
 
@@ -754,9 +532,11 @@ mod tests {
     use std::time::Duration;
 
     use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::ParallelUnitMapping;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
     use risingwave_pb::meta::table_fragments::Fragment;
+    use risingwave_pb::stream_plan::stream_node::NodeBody;
     use risingwave_pb::stream_plan::*;
     use risingwave_pb::stream_service::stream_service_server::{
         StreamService, StreamServiceServer,
@@ -777,8 +557,9 @@ mod tests {
     use crate::hummock::{CompactorManager, HummockManager};
     use crate::manager::{
         CatalogManager, CatalogManagerRef, ClusterManager, FragmentManager, MetaSrvEnv,
+        StreamingClusterInfo,
     };
-    use crate::model::ActorId;
+    use crate::model::{ActorId, FragmentId};
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
     use crate::stream::SourceManager;
@@ -879,7 +660,7 @@ mod tests {
     }
 
     struct MockServices {
-        global_stream_manager: GlobalStreamManager<MemStore>,
+        global_stream_manager: GlobalStreamManagerRef<MemStore>,
         catalog_manager: CatalogManagerRef<MemStore>,
         fragment_manager: FragmentManagerRef<MemStore>,
         state: Arc<FakeFragmentState>,
@@ -887,7 +668,7 @@ mod tests {
     }
 
     impl MockServices {
-        async fn start(host: &str, port: u16) -> MetaResult<Self> {
+        async fn start(host: &str, port: u16, enable_recovery: bool) -> MetaResult<Self> {
             let addr = SocketAddr::new(host.parse().unwrap(), port);
             let state = Arc::new(FakeFragmentState {
                 actor_streams: Mutex::new(HashMap::new()),
@@ -911,7 +692,8 @@ mod tests {
 
             sleep(Duration::from_secs(1)).await;
 
-            let env = MetaSrvEnv::for_test_opts(Arc::new(MetaOpts::test(true))).await;
+            let env = MetaSrvEnv::for_test_opts(Arc::new(MetaOpts::test(enable_recovery))).await;
+            let system_params = env.system_params_manager().get_params().await;
             let meta_metrics = Arc::new(MetaMetrics::new());
             let cluster_manager =
                 Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);
@@ -938,17 +720,23 @@ mod tests {
                 cluster_manager.clone(),
                 meta_metrics.clone(),
                 compactor_manager.clone(),
+                catalog_manager.clone(),
             )
             .await?;
 
-            let (barrier_scheduler, scheduled_barriers) =
-                BarrierScheduler::new_pair(hummock_manager.clone(), env.opts.checkpoint_frequency);
+            let (barrier_scheduler, scheduled_barriers) = BarrierScheduler::new_pair(
+                hummock_manager.clone(),
+                meta_metrics.clone(),
+                system_params.checkpoint_frequency() as usize,
+            );
 
             let source_manager = Arc::new(
                 SourceManager::new(
+                    None,
                     barrier_scheduler.clone(),
                     catalog_manager.clone(),
                     fragment_manager.clone(),
+                    meta_metrics.clone(),
                 )
                 .await?,
             );
@@ -976,7 +764,7 @@ mod tests {
             let (join_handle_2, shutdown_tx_2) = GlobalBarrierManager::start(barrier_manager).await;
 
             Ok(Self {
-                global_stream_manager: stream_manager,
+                global_stream_manager: Arc::new(stream_manager),
                 catalog_manager,
                 fragment_manager,
                 state,
@@ -989,18 +777,52 @@ mod tests {
 
         async fn create_materialized_view(
             &self,
-            table_fragments: TableFragments,
+            table_id: TableId,
+            fragments: BTreeMap<FragmentId, Fragment>,
         ) -> MetaResult<()> {
-            let mut ctx = CreateStreamingJobContext::default();
+            // Create fake locations where all actors are scheduled to the same parallel unit.
+            let locations = {
+                let StreamingClusterInfo {
+                    worker_nodes,
+                    parallel_units,
+                } = self
+                    .global_stream_manager
+                    .cluster_manager
+                    .get_streaming_cluster_info()
+                    .await;
+
+                let actor_locations = fragments
+                    .values()
+                    .flat_map(|f| &f.actors)
+                    .map(|a| (a.actor_id, parallel_units[&0].clone()))
+                    .collect();
+
+                Locations {
+                    actor_locations,
+                    worker_locations: worker_nodes,
+                }
+            };
+
             let table = Table {
-                id: table_fragments.table_id().table_id(),
+                id: table_id.table_id(),
                 ..Default::default()
             };
+            let table_fragments = TableFragments::new(
+                table_id,
+                fragments,
+                &locations.actor_locations,
+                Default::default(),
+            );
+            let ctx = CreateStreamingJobContext {
+                building_locations: locations,
+                ..Default::default()
+            };
+
             self.catalog_manager
                 .start_create_table_procedure(&table)
                 .await?;
             self.global_stream_manager
-                .create_streaming_job(table_fragments, &mut ctx)
+                .create_streaming_job(table_fragments, ctx)
                 .await?;
             self.catalog_manager
                 .finish_create_table_procedure(vec![], &table)
@@ -1048,7 +870,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_drop_materialized_view() -> MetaResult<()> {
-        let services = MockServices::start("127.0.0.1", 12334).await?;
+        let services = MockServices::start("127.0.0.1", 12334, false).await?;
 
         let table_id = TableId::new(0);
         let actors = make_mview_stream_actors(&table_id, 4);
@@ -1058,47 +880,20 @@ mod tests {
             0,
             Fragment {
                 fragment_id: 0,
-                fragment_type: FragmentType::Mview as i32,
+                fragment_type_mask: FragmentTypeFlag::Mview as u32,
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
+                state_table_ids: vec![0],
+                vnode_mapping: Some(ParallelUnitMapping::new_single(0).to_protobuf()),
                 ..Default::default()
             },
         );
-        let table_fragments = TableFragments::new(table_id, fragments);
-        services.create_materialized_view(table_fragments).await?;
+        services
+            .create_materialized_view(table_id, fragments)
+            .await?;
 
-        for actor in actors {
-            let mut scheduled_actor = services
-                .state
-                .actor_streams
-                .lock()
-                .unwrap()
-                .get(&actor.get_actor_id())
-                .cloned()
-                .unwrap();
-            scheduled_actor.vnode_bitmap.take().unwrap();
-            assert_eq!(scheduled_actor, actor);
-            assert!(services
-                .state
-                .actor_ids
-                .lock()
-                .unwrap()
-                .contains(&actor.get_actor_id()));
-            assert_eq!(
-                services
-                    .state
-                    .actor_infos
-                    .lock()
-                    .unwrap()
-                    .get(&actor.get_actor_id())
-                    .cloned()
-                    .unwrap(),
-                HostAddress {
-                    host: "127.0.0.1".to_string(),
-                    port: 12334,
-                }
-            );
-        }
+        let actor_len = services.state.actor_streams.lock().unwrap().len();
+        assert_eq!(actor_len, 4); // assert that actors are created
 
         let mview_actor_ids = services
             .fragment_manager
@@ -1133,7 +928,7 @@ mod tests {
     async fn test_failpoints_drop_mv_recovery() {
         let inject_barrier_err = "inject_barrier_err";
         let inject_barrier_err_success = "inject_barrier_err_success";
-        let services = MockServices::start("127.0.0.1", 12335).await.unwrap();
+        let services = MockServices::start("127.0.0.1", 12335, true).await.unwrap();
 
         let table_id = TableId::new(0);
         let actors = make_mview_stream_actors(&table_id, 4);
@@ -1143,51 +938,22 @@ mod tests {
             0,
             Fragment {
                 fragment_id: 0,
-                fragment_type: FragmentType::Mview as i32,
+                fragment_type_mask: FragmentTypeFlag::Mview as u32,
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
+                state_table_ids: vec![0],
+                vnode_mapping: Some(ParallelUnitMapping::new_single(0).to_protobuf()),
                 ..Default::default()
             },
         );
 
-        let table_fragments = TableFragments::new(table_id, fragments);
         services
-            .create_materialized_view(table_fragments)
+            .create_materialized_view(table_id, fragments)
             .await
             .unwrap();
 
-        for actor in actors {
-            let mut scheduled_actor = services
-                .state
-                .actor_streams
-                .lock()
-                .unwrap()
-                .get(&actor.get_actor_id())
-                .cloned()
-                .unwrap();
-            scheduled_actor.vnode_bitmap.take().unwrap();
-            assert_eq!(scheduled_actor, actor);
-            assert!(services
-                .state
-                .actor_ids
-                .lock()
-                .unwrap()
-                .contains(&actor.get_actor_id()));
-            assert_eq!(
-                services
-                    .state
-                    .actor_infos
-                    .lock()
-                    .unwrap()
-                    .get(&actor.get_actor_id())
-                    .cloned()
-                    .unwrap(),
-                HostAddress {
-                    host: "127.0.0.1".to_string(),
-                    port: 12335,
-                }
-            );
-        }
+        let actor_len = services.state.actor_streams.lock().unwrap().len();
+        assert_eq!(actor_len, 4); // assert that actors are created
 
         let mview_actor_ids = services
             .fragment_manager

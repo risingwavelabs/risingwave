@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,15 +15,16 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_pb::data::{Op as ProstOp, StreamChunk as ProstStreamChunk};
+use risingwave_pb::data::{PbOp, PbStreamChunk};
 
 use super::{ArrayResult, DataChunkTestExt};
 use crate::array::column::Column;
 use crate::array::{DataChunk, Vis};
 use crate::buffer::Bitmap;
-use crate::row::{Row, Row2};
+use crate::row::{OwnedRow, Row};
 use crate::types::to_text::ToText;
 use crate::types::DataType;
+use crate::util::iter_util::ZipEqFast;
 
 /// `Op` represents three operations in `StreamChunk`.
 ///
@@ -40,22 +41,22 @@ pub enum Op {
 }
 
 impl Op {
-    pub fn to_protobuf(self) -> ProstOp {
+    pub fn to_protobuf(self) -> PbOp {
         match self {
-            Op::Insert => ProstOp::Insert,
-            Op::Delete => ProstOp::Delete,
-            Op::UpdateInsert => ProstOp::UpdateInsert,
-            Op::UpdateDelete => ProstOp::UpdateDelete,
+            Op::Insert => PbOp::Insert,
+            Op::Delete => PbOp::Delete,
+            Op::UpdateInsert => PbOp::UpdateInsert,
+            Op::UpdateDelete => PbOp::UpdateDelete,
         }
     }
 
     pub fn from_protobuf(prost: &i32) -> ArrayResult<Op> {
-        let op = match ProstOp::from_i32(*prost) {
-            Some(ProstOp::Insert) => Op::Insert,
-            Some(ProstOp::Delete) => Op::Delete,
-            Some(ProstOp::UpdateInsert) => Op::UpdateInsert,
-            Some(ProstOp::UpdateDelete) => Op::UpdateDelete,
-            Some(ProstOp::Unspecified) => unreachable!(),
+        let op = match PbOp::from_i32(*prost) {
+            Some(PbOp::Insert) => Op::Insert,
+            Some(PbOp::Delete) => Op::Delete,
+            Some(PbOp::UpdateInsert) => Op::UpdateInsert,
+            Some(PbOp::UpdateDelete) => Op::UpdateDelete,
+            Some(PbOp::Unspecified) => unreachable!(),
             None => bail!("No such op type"),
         };
         Ok(op)
@@ -101,7 +102,7 @@ impl StreamChunk {
 
     /// Build a `StreamChunk` from rows.
     // TODO: introducing something like `StreamChunkBuilder` maybe better.
-    pub fn from_rows(rows: &[(Op, Row)], data_types: &[DataType]) -> Self {
+    pub fn from_rows(rows: &[(Op, OwnedRow)], data_types: &[DataType]) -> Self {
         let mut array_builders = data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(rows.len()))
@@ -110,7 +111,7 @@ impl StreamChunk {
 
         for (op, row) in rows {
             ops.push(*op);
-            for (datum, builder) in row.iter().zip_eq(array_builders.iter_mut()) {
+            for (datum, builder) in row.iter().zip_eq_fast(array_builders.iter_mut()) {
                 builder.append_datum(datum);
             }
         }
@@ -130,6 +131,10 @@ impl StreamChunk {
     /// `capacity` return physical length of internals ops & columns
     pub fn capacity(&self) -> usize {
         self.data.capacity()
+    }
+
+    pub fn selectivity(&self) -> f64 {
+        self.data.selectivity()
     }
 
     /// Get the reference of the underlying data chunk.
@@ -165,7 +170,7 @@ impl StreamChunk {
             })
             .collect();
         let mut new_ops = Vec::with_capacity(cardinality);
-        for (op, visible) in ops.into_iter().zip_eq(visibility.iter()) {
+        for (op, visible) in ops.into_iter().zip_eq_fast(visibility.iter()) {
             if visible {
                 new_ops.push(op);
             }
@@ -179,31 +184,24 @@ impl StreamChunk {
 
     pub fn from_parts(ops: Vec<Op>, data_chunk: DataChunk) -> Self {
         let (columns, vis) = data_chunk.into_parts();
-        let visibility = match vis {
-            Vis::Bitmap(b) => Some(b),
-            Vis::Compact(_) => None,
-        };
-        Self::new(ops, columns, visibility)
+        Self::new(ops, columns, vis.into_visibility())
     }
 
     pub fn into_inner(self) -> (Vec<Op>, Vec<Column>, Option<Bitmap>) {
         let (columns, vis) = self.data.into_parts();
-        let visibility = match vis {
-            Vis::Bitmap(b) => Some(b),
-            Vis::Compact(_) => None,
-        };
+        let visibility = vis.into_visibility();
         (self.ops, columns, visibility)
     }
 
-    pub fn to_protobuf(&self) -> ProstStreamChunk {
-        ProstStreamChunk {
+    pub fn to_protobuf(&self) -> PbStreamChunk {
+        PbStreamChunk {
             cardinality: self.cardinality() as u32,
             ops: self.ops.iter().map(|op| op.to_protobuf() as i32).collect(),
             columns: self.columns().iter().map(|col| col.to_protobuf()).collect(),
         }
     }
 
-    pub fn from_protobuf(prost: &ProstStreamChunk) -> ArrayResult<Self> {
+    pub fn from_protobuf(prost: &PbStreamChunk) -> ArrayResult<Self> {
         let cardinality = prost.get_cardinality() as usize;
         let mut ops = Vec::with_capacity(cardinality);
         for op in prost.get_ops() {
@@ -231,7 +229,7 @@ impl StreamChunk {
         let mut table = Table::new();
         table.load_preset("||--+-++|    ++++++");
         for (op, row_ref) in self.rows() {
-            let mut cells = Vec::with_capacity(row_ref.size() + 1);
+            let mut cells = Vec::with_capacity(row_ref.len() + 1);
             cells.push(
                 Cell::new(match op {
                     Op::Insert => "+",
@@ -241,12 +239,12 @@ impl StreamChunk {
                 })
                 .set_alignment(CellAlignment::Right),
             );
-            for datum in row_ref.values() {
+            for datum in row_ref.iter() {
                 let str = match datum {
                     None => "".to_owned(), // NULL
                     Some(scalar) => scalar.to_text(),
                 };
-                cells.push(Cell::new(&str));
+                cells.push(Cell::new(str));
             }
             table.add_row(cells);
         }
@@ -261,7 +259,7 @@ impl StreamChunk {
         if column_mapping
             .iter()
             .copied()
-            .eq((0..self.data.columns().len()).into_iter())
+            .eq(0..self.data.columns().len())
         {
             // no reorder is needed
             self
@@ -276,13 +274,20 @@ impl StreamChunk {
 
 impl fmt::Debug for StreamChunk {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "StreamChunk {{ cardinality = {}, capacity = {}, data = \n{} }}",
-            self.cardinality(),
-            self.capacity(),
-            self.to_pretty_string()
-        )
+        if f.alternate() {
+            write!(
+                f,
+                "StreamChunk {{ cardinality: {}, capacity: {}, data: \n{}\n }}",
+                self.cardinality(),
+                self.capacity(),
+                self.to_pretty_string()
+            )
+        } else {
+            f.debug_struct("StreamChunk")
+                .field("cardinality", &self.cardinality())
+                .field("capacity", &self.capacity())
+                .finish_non_exhaustive()
+        }
     }
 }
 
@@ -336,6 +341,7 @@ impl StreamChunkTestExt for StreamChunk {
     /// //     f: f32
     /// //     T: str
     /// //    TS: Timestamp
+    /// //   SRL: Serial
     /// // {i,f}: struct
     /// ```
     fn from_pretty(s: &str) -> Self {

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,17 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{StringWriter, WrittenGuard};
+use std::fmt::Write;
+
+use risingwave_expr_macro::function;
 
 use crate::{ExprError, Result};
 
-#[inline(always)]
+#[function("split_part(varchar, varchar, int32) -> varchar")]
 pub fn split_part(
     string_expr: &str,
     delimiter_expr: &str,
     nth_expr: i32,
-    writer: StringWriter<'_>,
-) -> Result<WrittenGuard> {
+    writer: &mut dyn Write,
+) -> Result<()> {
     if nth_expr == 0 {
         return Err(ExprError::InvalidParam {
             name: "data",
@@ -61,14 +63,12 @@ pub fn split_part(
             }
         }
     };
-
-    Ok(writer.write_ref(nth_val))
+    writer.write_str(nth_val).unwrap();
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{Array, ArrayBuilder, Utf8ArrayBuilder};
-
     use super::split_part;
 
     #[test]
@@ -101,22 +101,12 @@ mod tests {
         for (i, case @ (string_expr, delimiter_expr, nth_expr, expected)) in
             cases.iter().enumerate()
         {
-            let mut builder = Utf8ArrayBuilder::new(1);
-            let writer = builder.writer();
-            let actual = split_part(string_expr, delimiter_expr, *nth_expr, writer);
-
-            match actual {
-                Ok(_guard) => {
-                    let expected = expected.unwrap();
-                    let array = builder.finish();
-                    let actual = array.value_at(0).unwrap();
-
-                    assert_eq!(expected, actual, "\nat case {i}: {:?}\n", case)
-                }
-                Err(_err) => {
-                    assert!(expected.is_none());
-                }
+            let mut writer = String::new();
+            let actual = match split_part(string_expr, delimiter_expr, *nth_expr, &mut writer) {
+                Ok(_) => Some(writer.as_str()),
+                Err(_) => None,
             };
+            assert_eq!(&actual, expected, "\nat case {i}: {:?}\n", case);
         }
     }
 }

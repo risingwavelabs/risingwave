@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -90,9 +90,10 @@ mod tests {
             kind: risingwave_expr::expr::AggKind::Count,
             args: AggArgs::Unary(DataType::Int64, 0),
             return_type: DataType::Int64,
-            order_pairs: vec![],
+            column_orders: vec![],
             append_only: false,
             filter: None,
+            distinct: false,
         }
     }
 
@@ -106,7 +107,7 @@ mod tests {
             .apply_chunk(
                 &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
                 None,
-                &[&I64Array::from_slice(&[Some(0), Some(1), Some(2), None]).into()],
+                &[&I64Array::from_iter([Some(0), Some(1), Some(2), None]).into()],
             )
             .unwrap();
 
@@ -121,7 +122,7 @@ mod tests {
             .apply_chunk(
                 &[Op::Insert, Op::Insert, Op::Delete, Op::Insert],
                 None,
-                &[&I64Array::from_slice(&[Some(42), None, Some(2), Some(8)]).into()],
+                &[&I64Array::from_iter([Some(42), None, Some(2), Some(8)]).into()],
             )
             .unwrap();
         assert_eq!(state.get_output(), Some(ScalarImpl::Int64(4)));
@@ -132,9 +133,10 @@ mod tests {
             kind: risingwave_expr::expr::AggKind::Max,
             args: AggArgs::Unary(DataType::Int64, 0),
             return_type: DataType::Int64,
-            order_pairs: vec![],
+            column_orders: vec![],
             append_only: true,
             filter: None,
+            distinct: false,
         }
     }
 
@@ -148,7 +150,7 @@ mod tests {
             .apply_chunk(
                 &[Op::Insert, Op::Insert, Op::Insert, Op::Insert, Op::Insert],
                 None,
-                &[&I64Array::from_slice(&[Some(-1), Some(0), Some(2), Some(1), None]).into()],
+                &[&I64Array::from_iter([Some(-1), Some(0), Some(2), Some(1), None]).into()],
             )
             .unwrap();
 

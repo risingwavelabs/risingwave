@@ -1,0 +1,127 @@
+# CDC Postgres source validate test
+
+# invalid username
+statement error
+create table shipments (
+  shipment_id INTEGER,
+  order_id INTEGER,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+ PRIMARY KEY (shipment_id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'posres',
+ password = 'postgres',
+ database.name = 'cdc_test',
+ table.name = 'shipments',
+ slot.name = 'shipments'
+);
+
+
+# invalid password
+statement error
+create table shipments (
+  shipment_id INTEGER,
+  order_id INTEGER,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+ PRIMARY KEY (shipment_id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'postgres',
+ password = 'otgres',
+ database.name = 'cdc_test',
+ table.name = 'shipments',
+ slot.name = 'shipments'
+);
+
+# invalid table name
+statement error
+create table shipments (
+  shipment_id INTEGER,
+  order_id INTEGER,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+ PRIMARY KEY (shipment_id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'postgres',
+ password = 'postgres',
+ database.name = 'cdc_test',
+ table.name = 'shipment',
+ slot.name = 'shipments'
+);
+
+
+# invalid primary key
+statement error
+create table shipments (
+  shipment_id INTEGER,
+  order_id INTEGER,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+ PRIMARY KEY (order_id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'postgres',
+ password = 'postgres',
+ database.name = 'cdc_test',
+ schema.name = 'public',
+ table.name = 'shipments',
+ slot.name = 'shipments'
+);
+
+
+# column name mismatch
+statement error
+create table shipments (
+  shipment_id INTEGER,
+  orderid INTEGER,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+ PRIMARY KEY (shipment_id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'postgres',
+ password = 'postgres',
+ database.name = 'cdc_test',
+ schema.name = 'public',
+ table.name = 'shipments',
+ slot.name = 'shipments'
+);
+
+# column data type mismatch
+statement error
+create table shipments (
+  shipment_id INTEGER,
+  order_id real,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+ PRIMARY KEY (shipment_id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'postgres',
+ password = 'postgres',
+ database.name = 'cdc_test',
+ schema.name = 'public',
+ table.name = 'shipments',
+ slot.name = 'shipments'
+);

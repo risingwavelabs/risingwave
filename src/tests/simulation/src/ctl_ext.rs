@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,14 +18,13 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
-use futures::future::BoxFuture;
 use itertools::Itertools;
 use madsim::rand::thread_rng;
 use rand::seq::{IteratorRandom, SliceRandom};
 use rand::Rng;
 use risingwave_common::hash::ParallelUnitId;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
-use risingwave_pb::meta::table_fragments::Fragment as ProstFragment;
+use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_pb::stream_plan::StreamNode;
 
@@ -36,10 +35,10 @@ use crate::cluster::Cluster;
 pub mod predicate {
     use super::*;
 
-    trait Predicate = Fn(&ProstFragment) -> bool + Send + 'static;
+    trait Predicate = Fn(&PbFragment) -> bool + Send + 'static;
     pub type BoxedPredicate = Box<dyn Predicate>;
 
-    fn root(fragment: &ProstFragment) -> &StreamNode {
+    fn root(fragment: &PbFragment) -> &StreamNode {
         fragment.actors.first().unwrap().nodes.as_ref().unwrap()
     }
 
@@ -59,7 +58,7 @@ pub mod predicate {
     /// There're exactly `n` operators whose identity contains `s` in the fragment.
     pub fn identity_contains_n(n: usize, s: impl Into<String>) -> BoxedPredicate {
         let s: String = s.into();
-        let p = move |f: &ProstFragment| {
+        let p = move |f: &PbFragment| {
             count(root(f), &|n| {
                 n.identity.to_lowercase().contains(&s.to_lowercase())
             }) == n
@@ -70,7 +69,7 @@ pub mod predicate {
     /// There exists operators whose identity contains `s` in the fragment.
     pub fn identity_contains(s: impl Into<String>) -> BoxedPredicate {
         let s: String = s.into();
-        let p = move |f: &ProstFragment| {
+        let p = move |f: &PbFragment| {
             any(root(f), &|n| {
                 n.identity.to_lowercase().contains(&s.to_lowercase())
             })
@@ -81,7 +80,7 @@ pub mod predicate {
     /// There does not exist any operator whose identity contains `s` in the fragment.
     pub fn no_identity_contains(s: impl Into<String>) -> BoxedPredicate {
         let s: String = s.into();
-        let p = move |f: &ProstFragment| {
+        let p = move |f: &PbFragment| {
             all(root(f), &|n| {
                 !n.identity.to_lowercase().contains(&s.to_lowercase())
             })
@@ -91,20 +90,22 @@ pub mod predicate {
 
     /// There're `n` upstream fragments of the fragment.
     pub fn upstream_fragment_count(n: usize) -> BoxedPredicate {
-        let p = move |f: &ProstFragment| f.upstream_fragment_ids.len() == n;
+        let p = move |f: &PbFragment| f.upstream_fragment_ids.len() == n;
         Box::new(p)
     }
 
     /// The fragment is able to be rescheduled. Used for locating random fragment.
     pub fn can_reschedule() -> BoxedPredicate {
-        // The rescheduling of `Chain` must be derived from the upstream `Materialize`, not
-        // specified by the user.
-        no_identity_contains("StreamTableScan")
+        // The rescheduling of no-shuffle downstreams must be derived from the upstream
+        // `Materialize`, not specified by the user.
+        let p =
+            |f: &PbFragment| no_identity_contains("Chain")(f) && no_identity_contains("Lookup")(f);
+        Box::new(p)
     }
 
     /// The fragment with the given id.
     pub fn id(id: u32) -> BoxedPredicate {
-        let p = move |f: &ProstFragment| f.fragment_id == id;
+        let p = move |f: &PbFragment| f.fragment_id == id;
         Box::new(p)
     }
 }
@@ -146,30 +147,7 @@ impl Fragment {
     ///
     /// Consumes `self` as the actor info will be stale after rescheduling.
     pub fn random_reschedule(self) -> String {
-        let actor_to_parallel_unit: HashMap<_, _> = self
-            .r
-            .table_fragments
-            .iter()
-            .flat_map(|tf| {
-                tf.actor_status
-                    .iter()
-                    .map(|(&actor_id, status)| (actor_id, status.get_parallel_unit().unwrap().id))
-            })
-            .collect();
-
-        let all_parallel_units = self
-            .r
-            .worker_nodes
-            .iter()
-            .flat_map(|n| n.parallel_units.iter())
-            .map(|p| p.id)
-            .collect_vec();
-        let current_parallel_units: HashSet<_> = self
-            .inner
-            .actors
-            .iter()
-            .map(|a| actor_to_parallel_unit[&a.actor_id])
-            .collect();
+        let (all_parallel_units, current_parallel_units) = self.parallel_unit_usage();
 
         let rng = &mut thread_rng();
         let target_parallel_unit_count = match self.inner.distribution_type() {
@@ -193,22 +171,56 @@ impl Fragment {
 
         self.reschedule(remove, add)
     }
+
+    pub fn parallel_unit_usage(&self) -> (Vec<ParallelUnitId>, HashSet<ParallelUnitId>) {
+        let actor_to_parallel_unit: HashMap<_, _> = self
+            .r
+            .table_fragments
+            .iter()
+            .flat_map(|tf| {
+                tf.actor_status.iter().map(|(&actor_id, status)| {
+                    (
+                        actor_id,
+                        status.get_parallel_unit().unwrap().id as ParallelUnitId,
+                    )
+                })
+            })
+            .collect();
+
+        let all_parallel_units = self
+            .r
+            .worker_nodes
+            .iter()
+            .flat_map(|n| n.parallel_units.iter())
+            .map(|p| p.id as ParallelUnitId)
+            .collect_vec();
+        let current_parallel_units: HashSet<_> = self
+            .inner
+            .actors
+            .iter()
+            .map(|a| actor_to_parallel_unit[&a.actor_id] as ParallelUnitId)
+            .collect();
+
+        (all_parallel_units, current_parallel_units)
+    }
 }
 
 impl Cluster {
     /// Locate fragments that satisfy all the predicates.
-    async fn locate_fragments_inner(
+    pub async fn locate_fragments(
         &mut self,
-        predicates: Vec<BoxedPredicate>,
+        predicates: impl IntoIterator<Item = BoxedPredicate>,
     ) -> Result<Vec<Fragment>> {
         let predicates = predicates.into_iter().collect_vec();
 
         let fragments = self
             .ctl
             .spawn(async move {
-                let r: Arc<_> = risingwave_ctl::cmd_impl::meta::get_cluster_info()
-                    .await?
-                    .into();
+                let r: Arc<_> = risingwave_ctl::cmd_impl::meta::get_cluster_info(
+                    &risingwave_ctl::common::CtlContext::default(),
+                )
+                .await?
+                .into();
 
                 let mut results = vec![];
                 for tf in &r.table_fragments {
@@ -230,17 +242,10 @@ impl Cluster {
         Ok(fragments)
     }
 
-    pub fn locate_fragments(
-        &mut self,
-        predicates: Vec<BoxedPredicate>,
-    ) -> BoxFuture<'_, Result<Vec<Fragment>>> {
-        Box::pin(self.locate_fragments_inner(predicates))
-    }
-
     /// Locate exactly one fragment that satisfies all the predicates.
-    async fn locate_one_fragment_inner(
+    pub async fn locate_one_fragment(
         &mut self,
-        predicates: Vec<BoxedPredicate>,
+        predicates: impl IntoIterator<Item = BoxedPredicate>,
     ) -> Result<Fragment> {
         let [fragment]: [_; 1] = self
             .locate_fragments(predicates)
@@ -250,16 +255,9 @@ impl Cluster {
         Ok(fragment)
     }
 
-    pub fn locate_one_fragment(
-        &mut self,
-        predicates: Vec<BoxedPredicate>,
-    ) -> BoxFuture<'_, Result<Fragment>> {
-        Box::pin(self.locate_one_fragment_inner(predicates))
-    }
-
     /// Locate a random fragment that is reschedulable.
     pub async fn locate_random_fragment(&mut self) -> Result<Fragment> {
-        self.locate_fragments(vec![predicate::can_reschedule()])
+        self.locate_fragments([predicate::can_reschedule()])
             .await?
             .into_iter()
             .choose(&mut thread_rng())
@@ -268,9 +266,7 @@ impl Cluster {
 
     /// Locate some random fragments that are reschedulable.
     pub async fn locate_random_fragments(&mut self) -> Result<Vec<Fragment>> {
-        let fragments = self
-            .locate_fragments(vec![predicate::can_reschedule()])
-            .await?;
+        let fragments = self.locate_fragments([predicate::can_reschedule()]).await?;
         let len = thread_rng().gen_range(1..=fragments.len());
         let selected = fragments
             .into_iter()
@@ -280,12 +276,14 @@ impl Cluster {
 
     /// Locate a fragment with the given id.
     pub async fn locate_fragment_by_id(&mut self, id: u32) -> Result<Fragment> {
-        self.locate_one_fragment(vec![predicate::id(id)]).await
+        self.locate_one_fragment([predicate::id(id)]).await
     }
 
     /// Reschedule with the given `plan`. Check the document of
     /// [`risingwave_ctl::cmd_impl::meta::reschedule`] for more details.
-    async fn reschedule_inner(&mut self, plan: String) -> Result<()> {
+    pub async fn reschedule(&mut self, plan: impl Into<String>) -> Result<()> {
+        let plan = plan.into();
+
         self.ctl
             .spawn(async move {
                 let opts = risingwave_ctl::CliOpts::parse_from([
@@ -293,16 +291,12 @@ impl Cluster {
                     "meta",
                     "reschedule",
                     "--plan",
-                    &plan,
+                    plan.as_ref(),
                 ]);
                 risingwave_ctl::start(opts).await
             })
             .await??;
 
         Ok(())
-    }
-
-    pub fn reschedule(&mut self, plan: String) -> BoxFuture<'_, Result<()>> {
-        Box::pin(self.reschedule_inner(plan))
     }
 }

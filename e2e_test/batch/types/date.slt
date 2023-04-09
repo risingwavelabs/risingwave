@@ -43,7 +43,7 @@ INSERT INTO dates VALUES ('02-02-1992');
 statement error
 INSERT INTO dates VALUES ('1900a01a01');
 
-# this works in postgres but we don't support it for now 
+# this works in postgres but we don't support it for now
 # for reasons of performance and maintainability in datetime parsing libraries.
 # in particular, the use of speedate. see https://github.com/risingwavelabs/risingwave/pull/5367
 statement error
@@ -58,3 +58,20 @@ INSERT INTO dates VALUES ('1000000000-01-01');
 
 statement ok
 DROP TABLE dates;
+
+# Issue #7566
+# date_int_sub
+statement error out of range
+select DATE '2022-08-09' - (INT '-2147483648');
+
+# date_int_add
+statement error out of range
+select DATE '2022-08-09' + (INT '-2147483648');
+
+# date_interval_sub
+statement error out of range
+select DATE '2022-08-09' - (INTERVAL '-2147483648 days');
+
+# date_interval_add
+statement error out of range
+select DATE '2022-08-09' + (INTERVAL '-2147483648 days');

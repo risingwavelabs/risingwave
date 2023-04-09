@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,17 +14,17 @@
 
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_pb::catalog::{ColumnIndex, SourceInfo};
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
-use risingwave_pb::stream_plan::SourceNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::{PbStreamSource, SourceNode};
 
-use super::{LogicalSource, PlanBase, StreamNode};
+use super::{ExprRewritable, LogicalSource, PlanBase, StreamNode};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// [`StreamSource`] represents a table/connector source at the very beginning of the graph.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSource {
     pub base: PlanBase,
     logical: LogicalSource,
@@ -32,15 +32,32 @@ pub struct StreamSource {
 
 impl StreamSource {
     pub fn new(logical: LogicalSource) -> Self {
+        let mut watermark_columns = FixedBitSet::with_capacity(logical.schema().len());
+        if let Some(catalog) = logical.source_catalog() {
+            catalog
+                .watermark_descs
+                .iter()
+                .for_each(|desc| watermark_columns.insert(desc.watermark_idx as usize))
+        }
+
         let base = PlanBase::new_stream(
             logical.ctx(),
             logical.schema().clone(),
             logical.logical_pk().to_vec(),
             logical.functional_dependency().clone(),
             Distribution::SomeShard,
-            logical.source_catalog().append_only,
+            logical
+                .core
+                .catalog
+                .as_ref()
+                .map_or(true, |s| s.append_only),
+            watermark_columns,
         );
         Self { base, logical }
+    }
+
+    pub fn logical(&self) -> &LogicalSource {
+        &self.logical
     }
 
     pub fn column_names(&self) -> Vec<String> {
@@ -57,17 +74,19 @@ impl_plan_tree_node_for_leaf! { StreamSource }
 impl fmt::Display for StreamSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("StreamSource");
-        builder
-            .field("source", &self.logical.source_catalog().name)
-            .field("columns", &self.column_names())
-            .finish()
+        if let Some(catalog) = self.logical.source_catalog() {
+            builder
+                .field("source", &catalog.name)
+                .field("columns", &self.column_names());
+        }
+        builder.finish()
     }
 }
 
 impl StreamNode for StreamSource {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         let source_catalog = self.logical.source_catalog();
-        ProstStreamNode::Source(SourceNode {
+        let source_inner = source_catalog.map(|source_catalog| PbStreamSource {
             source_id: source_catalog.id,
             source_name: source_catalog.name.clone(),
             state_table: Some(
@@ -76,23 +95,19 @@ impl StreamNode for StreamSource {
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
-            info: Some(SourceInfo {
-                source_info: Some(source_catalog.info.clone()),
-            }),
-            row_id_index: source_catalog
-                .row_id_index
-                .map(|index| ColumnIndex { index: index as _ }),
-            columns: source_catalog
-                .columns
+            info: Some(source_catalog.info.clone()),
+            row_id_index: self.logical.core.row_id_index.map(|index| index as _),
+            columns: self
+                .logical
+                .core
+                .column_catalog
                 .iter()
                 .map(|c| c.to_protobuf())
                 .collect_vec(),
-            pk_column_ids: source_catalog
-                .pk_col_ids
-                .iter()
-                .map(Into::into)
-                .collect_vec(),
-            properties: source_catalog.properties.clone(),
-        })
+            properties: source_catalog.properties.clone().into_iter().collect(),
+        });
+        PbNodeBody::Source(SourceNode { source_inner })
     }
 }
+
+impl ExprRewritable for StreamSource {}

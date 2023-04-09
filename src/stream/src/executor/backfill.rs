@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,23 +16,27 @@ use std::cmp::Ordering;
 use std::ops::Bound;
 use std::sync::Arc;
 
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 use either::Either;
 use futures::stream::select_with_strategy;
-use futures::{pin_mut, stream, StreamExt};
+use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::array::{Op, Row, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::{Row2, RowExt};
+use risingwave_common::row::{self, OwnedRow, Row, RowExt};
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::sort_util::{compare_datum, OrderType};
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
-use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message};
-use crate::executor::PkIndices;
+use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndicesRef};
+use crate::executor::monitor::StreamingMetrics;
+use crate::executor::{PkIndices, Watermark};
 use crate::task::{ActorId, CreateMviewProgress};
 
 /// An implementation of the RFC: Use Backfill To Let Mv On Mv Stream Again.(https://github.com/risingwavelabs/rfcs/pull/13)
@@ -62,18 +66,16 @@ pub struct BackfillExecutor<S: StateStore> {
     /// Upstream with the same schema with the upstream table.
     upstream: BoxedExecutor,
 
-    /// The column indices need to be forwarded to the downstream.
-    upstream_indices: Arc<[usize]>,
-
-    /// Current position of the table storage primary key.
-    /// None means it starts from the beginning.
-    current_pos: Option<Row>,
+    /// The column indices need to be forwarded to the downstream from the upstream and table scan.
+    output_indices: Vec<usize>,
 
     progress: CreateMviewProgress,
 
     actor_id: ActorId,
 
     info: ExecutorInfo,
+
+    metrics: Arc<StreamingMetrics>,
 }
 
 const CHUNK_SIZE: usize = 1024;
@@ -85,10 +87,11 @@ where
     pub fn new(
         table: StorageTable<S>,
         upstream: BoxedExecutor,
-        upstream_indices: Vec<usize>,
+        output_indices: Vec<usize>,
         progress: CreateMviewProgress,
         schema: Schema,
         pk_indices: PkIndices,
+        metrics: Arc<StreamingMetrics>,
     ) -> Self {
         Self {
             info: ExecutorInfo {
@@ -98,18 +101,20 @@ where
             },
             table,
             upstream,
-            upstream_indices: upstream_indices.into(),
-            current_pos: None,
+            output_indices,
             actor_id: progress.actor_id(),
             progress,
+            metrics,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        // Table storage primary key.
-        let table_pk_indices = self.table.pk_indices().to_vec();
-        let upstream_indices = self.upstream_indices.to_vec();
+        // The primary key columns, in the output columns of the table scan.
+        let pk_in_output_indices = self.table.pk_in_output_indices().unwrap();
+        let pk_order = self.table.pk_serializer().get_order_types();
+
+        let table_id = self.table.table_id().table_id;
 
         let mut upstream = self.upstream.execute();
 
@@ -117,26 +122,47 @@ where
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let init_epoch = first_barrier.epoch.prev;
 
-        // If the barrier is a conf change of creating this mview, init backfill from its epoch.
-        // Otherwise, it means we've recovered and the backfill is already finished.
-        let to_backfill = first_barrier.is_add_dispatcher(self.actor_id);
+        // If the barrier is a conf change of creating this mview, we follow the procedure of
+        // backfill. Otherwise, it means we've recovered and we can forward the upstream messages
+        // directly.
+        let to_create_mv = first_barrier.is_newly_added(self.actor_id);
+        // If the snapshot is empty, we don't need to backfill.
+        let is_snapshot_empty: bool = {
+            let snapshot = Self::snapshot_read(&self.table, init_epoch, None, false);
+            pin_mut!(snapshot);
+            snapshot.try_next().await?.unwrap().is_none()
+        };
+        let to_backfill = to_create_mv && !is_snapshot_empty;
+
+        if to_create_mv && is_snapshot_empty {
+            // Directly finish the progress as the snapshot is empty.
+            self.progress.finish(first_barrier.epoch.curr);
+        }
 
         // The first barrier message should be propagated.
-        yield Message::Barrier(first_barrier.clone());
+        yield Message::Barrier(first_barrier);
 
         if !to_backfill {
             // Forward messages directly to the downstream.
-            let upstream = upstream
-                .map(move |result| result.map(|msg| Self::mapping_message(msg, &upstream_indices)));
             #[for_await]
             for message in upstream {
-                yield message?;
+                if let Some(message) = Self::mapping_message(message?, &self.output_indices) {
+                    yield message;
+                }
             }
+
             return Ok(());
         }
 
         // The epoch used to snapshot read upstream mv.
         let mut snapshot_read_epoch = init_epoch;
+
+        // Current position of the table storage primary key.
+        // `None` means it starts from the beginning.
+        let mut current_pos: Option<OwnedRow> = None;
+
+        // Keep track of rows from the snapshot.
+        let mut total_snapshot_processed_rows: u64 = 0;
 
         // Backfill Algorithm:
         //
@@ -164,19 +190,22 @@ where
         'backfill_loop: loop {
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
 
-            let mut left_upstream = (&mut upstream).map(Either::Left);
+            let left_upstream = upstream.by_ref().map(Either::Left);
 
             let right_snapshot = Box::pin(
-                Self::snapshot_read(&self.table, snapshot_read_epoch, self.current_pos.clone())
+                Self::snapshot_read(&self.table, snapshot_read_epoch, current_pos.clone(), true)
                     .map(Either::Right),
             );
 
             // Prefer to select upstream, so we can stop snapshot stream as soon as the barrier
             // comes.
             let backfill_stream =
-                select_with_strategy(&mut left_upstream, right_snapshot, |_: &mut ()| {
+                select_with_strategy(left_upstream, right_snapshot, |_: &mut ()| {
                     stream::PollNext::Left
                 });
+
+            let mut cur_barrier_snapshot_processed_rows: u64 = 0;
+            let mut cur_barrier_upstream_processed_rows: u64 = 0;
 
             #[for_await]
             for either in backfill_stream {
@@ -189,21 +218,47 @@ where
 
                                 // Consume upstream buffer chunk
                                 for chunk in upstream_chunk_buffer.drain(..) {
-                                    if let Some(current_pos) = self.current_pos.as_ref() {
+                                    cur_barrier_upstream_processed_rows +=
+                                        chunk.cardinality() as u64;
+                                    if let Some(current_pos) = &current_pos {
                                         yield Message::Chunk(Self::mapping_chunk(
-                                            Self::mark_chunk(chunk, current_pos, &table_pk_indices),
-                                            &upstream_indices,
+                                            Self::mark_chunk(
+                                                chunk,
+                                                current_pos,
+                                                &pk_in_output_indices,
+                                                pk_order,
+                                            ),
+                                            &self.output_indices,
                                         ));
                                     }
                                 }
 
+                                self.metrics
+                                    .backfill_snapshot_read_row_count
+                                    .with_label_values(&[
+                                        table_id.to_string().as_str(),
+                                        self.actor_id.to_string().as_str(),
+                                    ])
+                                    .inc_by(cur_barrier_snapshot_processed_rows);
+
+                                self.metrics
+                                    .backfill_upstream_output_row_count
+                                    .with_label_values(&[
+                                        table_id.to_string().as_str(),
+                                        self.actor_id.to_string().as_str(),
+                                    ])
+                                    .inc_by(cur_barrier_upstream_processed_rows);
+
                                 // Update snapshot read epoch.
                                 snapshot_read_epoch = barrier.epoch.prev;
 
-                                yield Message::Barrier(barrier);
+                                self.progress.update(
+                                    barrier.epoch.curr,
+                                    snapshot_read_epoch,
+                                    total_snapshot_processed_rows,
+                                );
 
-                                self.progress
-                                    .update(snapshot_read_epoch, snapshot_read_epoch);
+                                yield Message::Barrier(barrier);
                                 // Break the for loop and start a new snapshot read stream.
                                 break;
                             }
@@ -212,7 +267,7 @@ where
                                 upstream_chunk_buffer.push(chunk.compact());
                             }
                             Message::Watermark(_) => {
-                                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                                // Ignore watermark during backfill.
                             }
                         }
                     }
@@ -225,9 +280,12 @@ where
                                 // in the buffer. Here we choose to never mark the chunk.
                                 // Consume with the renaming stream buffer chunk without mark.
                                 for chunk in upstream_chunk_buffer.drain(..) {
+                                    let chunk_cardinality = chunk.cardinality() as u64;
+                                    cur_barrier_snapshot_processed_rows += chunk_cardinality;
+                                    total_snapshot_processed_rows += chunk_cardinality;
                                     yield Message::Chunk(Self::mapping_chunk(
                                         chunk,
-                                        &upstream_indices,
+                                        &self.output_indices,
                                     ));
                                 }
 
@@ -238,18 +296,21 @@ where
                                 // Raise the current position.
                                 // As snapshot read streams are ordered by pk, so we can
                                 // just use the last row to update `current_pos`.
-                                self.current_pos = Some(
+                                current_pos = Some(
                                     chunk
                                         .rows()
                                         .last()
                                         .unwrap()
                                         .1
-                                        .row_by_indices(&table_pk_indices),
+                                        .project(&pk_in_output_indices)
+                                        .into_owned_row(),
                                 );
-
+                                let chunk_cardinality = chunk.cardinality() as u64;
+                                cur_barrier_snapshot_processed_rows += chunk_cardinality;
+                                total_snapshot_processed_rows += chunk_cardinality;
                                 yield Message::Chunk(Self::mapping_chunk(
                                     chunk,
-                                    &self.upstream_indices,
+                                    &self.output_indices,
                                 ));
                             }
                         }
@@ -258,12 +319,6 @@ where
             }
         }
 
-        let mut finish_on_barrier = |msg: &Message| {
-            if let Some(barrier) = msg.as_barrier() {
-                self.progress.finish(barrier.epoch.curr);
-            }
-        };
-
         tracing::trace!(
             actor = self.actor_id,
             "Backfill has already finished and forward messages directly to the downstream"
@@ -271,22 +326,36 @@ where
 
         // Backfill has already finished.
         // Forward messages directly to the downstream.
-        let upstream = upstream
-            .map(move |result| result.map(|msg| Self::mapping_message(msg, &upstream_indices)));
         #[for_await]
         for msg in upstream {
-            let msg: Message = msg?;
-            finish_on_barrier(&msg);
-            yield msg;
+            if let Some(msg) = Self::mapping_message(msg?, &self.output_indices) {
+                if let Some(barrier) = msg.as_barrier() {
+                    self.progress.finish(barrier.epoch.curr);
+                }
+                yield msg;
+            }
         }
     }
 
-    #[expect(clippy::needless_lifetimes, reason = "code generated by try_stream")]
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
-    async fn snapshot_read(table: &StorageTable<S>, epoch: u64, current_pos: Option<Row>) {
+    async fn snapshot_read(
+        table: &StorageTable<S>,
+        epoch: u64,
+        current_pos: Option<OwnedRow>,
+        ordered: bool,
+    ) {
         // `current_pos` is None means it needs to scan from the beginning, so we use Unbounded to
         // scan. Otherwise, use Excluded.
         let range_bounds = if let Some(current_pos) = current_pos {
+            // If `current_pos` is an empty row which means upstream mv contains only one row and it
+            // has been consumed. The iter interface doesn't support
+            // `Excluded(empty_row)` range bound, so we can simply return `None`.
+            if current_pos.is_empty() {
+                assert!(table.pk_indices().is_empty());
+                yield None;
+                return Ok(());
+            }
+
             (Bound::Excluded(current_pos), Bound::Unbounded)
         } else {
             (Bound::Unbounded, Bound::Unbounded)
@@ -294,14 +363,20 @@ where
         // We use uncommitted read here, because we have already scheduled the `BackfillExecutor`
         // together with the upstream mv.
         let iter = table
-            .batch_iter_with_pk_bounds(HummockReadEpoch::NoWait(epoch), Row::empty(), range_bounds)
+            .batch_iter_with_pk_bounds(
+                HummockReadEpoch::NoWait(epoch),
+                row::empty(),
+                range_bounds,
+                ordered,
+                PrefetchOptions::new_for_exhaust_iter(),
+            )
             .await?;
 
         pin_mut!(iter);
 
         while let Some(data_chunk) = iter
             .collect_data_chunk(table.schema(), Some(CHUNK_SIZE))
-            .stack_trace("backfill_snapshot_read")
+            .instrument_await("backfill_snapshot_read")
             .await?
         {
             if data_chunk.cardinality() != 0 {
@@ -319,15 +394,22 @@ where
     /// ignore it. We implement it by changing the visibility bitmap.
     fn mark_chunk(
         chunk: StreamChunk,
-        current_pos: &Row,
-        table_pk_indices: &PkIndices,
+        current_pos: &OwnedRow,
+        pk_in_output_indices: PkIndicesRef<'_>,
+        pk_order: &[OrderType],
     ) -> StreamChunk {
         let chunk = chunk.compact();
         let (data, ops) = chunk.into_parts();
         let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
         // Use project to avoid allocation.
         for v in data.rows().map(|row| {
-            match row.project(table_pk_indices).iter().cmp(current_pos.iter()) {
+            match row
+                .project(pk_in_output_indices)
+                .iter()
+                .zip_eq_fast(pk_order.iter().copied())
+                .cmp_by(current_pos.iter(), |(x, order), y| {
+                    compare_datum(x, y, order)
+                }) {
                 Ordering::Less | Ordering::Equal => true,
                 Ordering::Greater => false,
             }
@@ -347,10 +429,19 @@ where
         StreamChunk::new(ops, mapped_columns, visibility)
     }
 
-    fn mapping_message(msg: Message, upstream_indices: &[usize]) -> Message {
+    fn mapping_watermark(watermark: Watermark, upstream_indices: &[usize]) -> Option<Watermark> {
+        watermark.transform_with_indices(upstream_indices)
+    }
+
+    fn mapping_message(msg: Message, upstream_indices: &[usize]) -> Option<Message> {
         match msg {
-            Message::Barrier(_) | Message::Watermark(_) => msg,
-            Message::Chunk(chunk) => Message::Chunk(Self::mapping_chunk(chunk, upstream_indices)),
+            Message::Barrier(_) => Some(msg),
+            Message::Watermark(watermark) => {
+                Self::mapping_watermark(watermark, upstream_indices).map(Message::Watermark)
+            }
+            Message::Chunk(chunk) => {
+                Some(Message::Chunk(Self::mapping_chunk(chunk, upstream_indices)))
+            }
         }
     }
 }

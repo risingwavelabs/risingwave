@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,7 +15,8 @@
 use std::fmt::Debug;
 use std::io::Write;
 
-use super::{OrderedF32, OrderedF64};
+use super::{F32, F64};
+use crate::array::serial_array::Serial;
 use crate::array::ArrayResult;
 
 pub trait NativeType:
@@ -42,13 +43,21 @@ impl NativeType for i64 {
     }
 }
 
-impl NativeType for OrderedF32 {
+impl NativeType for Serial {
+    fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
+        output
+            .write(&self.into_inner().to_be_bytes())
+            .map_err(Into::into)
+    }
+}
+
+impl NativeType for F32 {
     fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output.write(&self.to_be_bytes()).map_err(Into::into)
     }
 }
 
-impl NativeType for OrderedF64 {
+impl NativeType for F64 {
     fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output.write(&self.to_be_bytes()).map_err(Into::into)
     }

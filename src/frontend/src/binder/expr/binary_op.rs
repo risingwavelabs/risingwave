@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,11 +24,42 @@ impl Binder {
         &mut self,
         left: Expr,
         op: BinaryOperator,
-        right: Expr,
+        mut right: Expr,
     ) -> Result<ExprImpl> {
         let bound_left = self.bind_expr(left)?;
+
+        let mut func_types = vec![];
+
+        right = match right {
+            Expr::SomeOp(expr) => {
+                func_types.push(ExprType::Some);
+                *expr
+            }
+            Expr::AllOp(expr) => {
+                func_types.push(ExprType::All);
+                *expr
+            }
+            right => right,
+        };
+
         let bound_right = self.bind_expr(right)?;
-        let func_type = match op {
+
+        func_types.extend(Self::resolve_binary_operator(
+            op,
+            &bound_left,
+            &bound_right,
+        )?);
+
+        FunctionCall::new_binary_op_func(func_types, vec![bound_left, bound_right])
+    }
+
+    fn resolve_binary_operator(
+        op: BinaryOperator,
+        bound_left: &ExprImpl,
+        bound_right: &ExprImpl,
+    ) -> Result<Vec<ExprType>> {
+        let mut func_types = vec![];
+        let final_type = match op {
             BinaryOperator::Plus => ExprType::Add,
             BinaryOperator::Minus => ExprType::Subtract,
             BinaryOperator::Multiply => ExprType::Multiply,
@@ -43,70 +74,51 @@ impl Binder {
             BinaryOperator::And => ExprType::And,
             BinaryOperator::Or => ExprType::Or,
             BinaryOperator::Like => ExprType::Like,
-            BinaryOperator::NotLike => return self.bind_not_like(bound_left, bound_right),
+            BinaryOperator::NotLike => {
+                func_types.push(ExprType::Not);
+                ExprType::Like
+            }
             BinaryOperator::BitwiseOr => ExprType::BitwiseOr,
             BinaryOperator::BitwiseAnd => ExprType::BitwiseAnd,
+            BinaryOperator::BitwiseXor => ExprType::Pow,
             BinaryOperator::PGBitwiseXor => ExprType::BitwiseXor,
             BinaryOperator::PGBitwiseShiftLeft => ExprType::BitwiseShiftLeft,
             BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
-            BinaryOperator::Concat => return self.bind_concat_op(bound_left, bound_right),
-            BinaryOperator::PGRegexMatch => return self.bind_regex_match(bound_left, bound_right),
-            BinaryOperator::PGRegexNotMatch => {
-                return self.bind_regex_not_match(bound_left, bound_right)
+            BinaryOperator::Arrow => ExprType::JsonbAccessInner,
+            BinaryOperator::LongArrow => ExprType::JsonbAccessStr,
+            BinaryOperator::Concat => {
+                match (bound_left.return_type(), bound_right.return_type()) {
+                    // array concatenation
+                    (DataType::List { .. }, DataType::List { .. }) => ExprType::ArrayCat,
+                    (DataType::List { .. }, _) => ExprType::ArrayAppend,
+                    (_, DataType::List { .. }) => ExprType::ArrayPrepend,
+                    // string concatenation
+                    (DataType::Varchar, _) | (_, DataType::Varchar) => ExprType::ConcatOp,
+                    // invalid
+                    (left_type, right_type) => {
+                        return Err(ErrorCode::BindError(format!(
+                            "operator does not exist: {} || {}",
+                            left_type, right_type
+                        ))
+                        .into());
+                    }
+                }
             }
-
+            BinaryOperator::PGRegexMatch => {
+                func_types.push(ExprType::IsNotNull);
+                ExprType::RegexpMatch
+            }
+            BinaryOperator::PGRegexNotMatch => {
+                func_types.push(ExprType::IsNull);
+                ExprType::RegexpMatch
+            }
             _ => {
                 return Err(
                     ErrorCode::NotImplemented(format!("binary op: {:?}", op), 112.into()).into(),
                 )
             }
         };
-        Ok(FunctionCall::new(func_type, vec![bound_left, bound_right])?.into())
-    }
-
-    /// Apply a NOT on top of LIKE.
-    fn bind_not_like(&mut self, left: ExprImpl, right: ExprImpl) -> Result<ExprImpl> {
-        Ok(FunctionCall::new(
-            ExprType::Not,
-            vec![FunctionCall::new(ExprType::Like, vec![left, right])?.into()],
-        )?
-        .into())
-    }
-
-    /// Bind `||`. Based on the types of the inputs, this can be string concat or array concat.
-    fn bind_concat_op(&mut self, left: ExprImpl, right: ExprImpl) -> Result<ExprImpl> {
-        let func_type = match (left.return_type(), right.return_type()) {
-            // array concatenation
-            (DataType::List { .. }, DataType::List { .. }) => ExprType::ArrayCat,
-            (DataType::List { .. }, _) => ExprType::ArrayAppend,
-            (_, DataType::List { .. }) => ExprType::ArrayPrepend,
-            // string concatenation
-            (DataType::Varchar, _) | (_, DataType::Varchar) => ExprType::ConcatOp,
-            // invalid
-            (left_type, right_type) => {
-                return Err(ErrorCode::BindError(format!(
-                    "operator does not exist: {} || {}",
-                    left_type, right_type
-                ))
-                .into());
-            }
-        };
-        Ok(FunctionCall::new(func_type, vec![left, right])?.into())
-    }
-
-    fn bind_regex_match(&mut self, left: ExprImpl, right: ExprImpl) -> Result<ExprImpl> {
-        Ok(FunctionCall::new(
-            ExprType::IsNotNull,
-            vec![FunctionCall::new(ExprType::RegexpMatch, vec![left, right])?.into()],
-        )?
-        .into())
-    }
-
-    fn bind_regex_not_match(&mut self, left: ExprImpl, right: ExprImpl) -> Result<ExprImpl> {
-        Ok(FunctionCall::new(
-            ExprType::IsNull,
-            vec![FunctionCall::new(ExprType::RegexpMatch, vec![left, right])?.into()],
-        )?
-        .into())
+        func_types.push(final_type);
+        Ok(func_types)
     }
 }

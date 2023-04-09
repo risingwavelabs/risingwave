@@ -15,7 +15,7 @@
     LogicalProject { exprs: [t.v1, t.v2] }
     └─LogicalProject { exprs: [t.v1, t.v2] }
       └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalScan { table: t, columns: [t.v1, t.v2] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
@@ -37,7 +37,7 @@
     LogicalProject { exprs: [t.v1, 2:Int32] }
     └─LogicalProject { exprs: [t.v1, t.v2, 1:Int32] }
       └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [t.v1, 2:Int32] }
     └─LogicalScan { table: t, columns: [t.v1] }
 - sql: |
@@ -47,7 +47,7 @@
     LogicalProject { exprs: [t.v1, t.v2] }
     └─LogicalProject { exprs: [t.v1, t.v2] }
       └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalScan { table: t, columns: [t.v1, t.v2] }
 - name: joins
   sql: |
@@ -94,7 +94,7 @@
   binder_error: 'Item not found: Invalid column: x'
 - sql: |
     create table t(x int);
-    select * from t JOIN (select t.x) as t1;
+    select * from t CROSS JOIN (select t.x) as t1;
   binder_error: 'Item not found: Invalid column: x'
 - sql: |
     create table ab (a int, b int);
@@ -105,12 +105,12 @@
           select * from t where v1 = a
       ) as t0
     );
-  optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(ab.a, bc.b), output: all }
+  optimized_logical_plan_for_batch: |
+    LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(ab.a, t.v1), output: all }
     ├─LogicalScan { table: ab, columns: [ab.a, ab.b] }
     └─LogicalJoin { type: Inner, on: true, output: all }
-      ├─LogicalScan { table: bc, columns: [bc.b] }
-      └─LogicalScan { table: t, output_columns: [], required_columns: [v1], predicate: IsNotNull(t.v1) }
+      ├─LogicalScan { table: bc, columns: [] }
+      └─LogicalScan { table: t, columns: [t.v1], predicate: IsNotNull(t.v1) }
 - name: We cannot reference columns in left table if not lateral
   sql: |
     create table ab (a int, b int);
@@ -147,7 +147,7 @@
           |   └─LogicalProject { exprs: [1:Int32] }
           |     └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
           └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { aggs: [count(1:Int32)] }
     └─LogicalProject { exprs: [1:Int32] }
       └─LogicalJoin { type: Inner, on: true, output: all }
@@ -160,8 +160,7 @@
       └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
         ├─BatchSimpleAgg { aggs: [] }
         | └─BatchExchange { order: [], dist: Single }
-        |   └─BatchSimpleAgg { aggs: [] }
-        |     └─BatchScan { table: t1, columns: [], distribution: SomeShard }
+        |   └─BatchScan { table: t1, columns: [], distribution: SomeShard }
         └─BatchExchange { order: [], dist: Single }
           └─BatchScan { table: t2, columns: [], distribution: SomeShard }
 - sql: |
@@ -178,18 +177,18 @@
     AND pg_catalog.pg_table_is_visible(c.oid)
     ORDER BY 1,2;
   logical_plan: |
-    LogicalProject { exprs: [pg_namespace.nspname, pg_class.relname, Case((pg_class.relkind = 'r':Varchar), 'table':Varchar, (pg_class.relkind = 'v':Varchar), 'view':Varchar, (pg_class.relkind = 'm':Varchar), 'materialized view':Varchar, (pg_class.relkind = 'i':Varchar), 'index':Varchar, (pg_class.relkind = 'S':Varchar), 'sequence':Varchar, (pg_class.relkind = 's':Varchar), 'special':Varchar, (pg_class.relkind = 't':Varchar), 'TOAST table':Varchar, (pg_class.relkind = 'f':Varchar), 'foreign table':Varchar, (pg_class.relkind = 'p':Varchar), 'partitioned table':Varchar, (pg_class.relkind = 'I':Varchar), 'partitioned index':Varchar), pg_user.name] }
+    LogicalProject { exprs: [pg_namespace.nspname, pg_class.relname, Case((pg_class.relkind = 'r':Varchar), 'table':Varchar, (pg_class.relkind = 'v':Varchar), 'view':Varchar, (pg_class.relkind = 'm':Varchar), 'materialized view':Varchar, (pg_class.relkind = 'i':Varchar), 'index':Varchar, (pg_class.relkind = 'S':Varchar), 'sequence':Varchar, (pg_class.relkind = 's':Varchar), 'special':Varchar, (pg_class.relkind = 't':Varchar), 'TOAST table':Varchar, (pg_class.relkind = 'f':Varchar), 'foreign table':Varchar, (pg_class.relkind = 'p':Varchar), 'partitioned table':Varchar, (pg_class.relkind = 'I':Varchar), 'partitioned index':Varchar) as $expr1, pg_user.name] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
       ├─LogicalFilter { predicate: In(pg_class.relkind, 'r':Varchar, 'p':Varchar, 'v':Varchar, 'm':Varchar, 'S':Varchar, 'f':Varchar, '':Varchar) AND (pg_namespace.nspname <> 'pg_catalog':Varchar) AND IsNull(RegexpMatch(pg_namespace.nspname, '^pg_toast':Varchar)) AND (pg_namespace.nspname <> 'information_schema':Varchar) }
       | └─LogicalJoin { type: LeftOuter, on: (pg_namespace.oid = pg_class.relnamespace), output: all }
-      |   ├─LogicalScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace, pg_class.relowner, pg_class.relkind] }
+      |   ├─LogicalScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace, pg_class.relowner, pg_class.relkind, pg_class.relam, pg_class.reltablespace] }
       |   └─LogicalScan { table: pg_namespace, columns: [pg_namespace.oid, pg_namespace.nspname, pg_namespace.nspowner, pg_namespace.nspacl] }
       └─LogicalProject { exprs: [pg_user.name] }
         └─LogicalFilter { predicate: (CorrelatedInputRef { index: 3, correlated_id: 1 } = pg_user.usesysid) }
           └─LogicalScan { table: pg_user, columns: [pg_user.usesysid, pg_user.name, pg_user.usecreatedb, pg_user.usesuper, pg_user.passwd] }
   batch_plan: |
     BatchExchange { order: [pg_namespace.nspname ASC, pg_class.relname ASC], dist: Single }
-    └─BatchProject { exprs: [pg_namespace.nspname, pg_class.relname, Case((pg_class.relkind = 'r':Varchar), 'table':Varchar, (pg_class.relkind = 'v':Varchar), 'view':Varchar, (pg_class.relkind = 'm':Varchar), 'materialized view':Varchar, (pg_class.relkind = 'i':Varchar), 'index':Varchar, (pg_class.relkind = 'S':Varchar), 'sequence':Varchar, (pg_class.relkind = 's':Varchar), 'special':Varchar, (pg_class.relkind = 't':Varchar), 'TOAST table':Varchar, (pg_class.relkind = 'f':Varchar), 'foreign table':Varchar, (pg_class.relkind = 'p':Varchar), 'partitioned table':Varchar, (pg_class.relkind = 'I':Varchar), 'partitioned index':Varchar), pg_user.name] }
+    └─BatchProject { exprs: [pg_namespace.nspname, pg_class.relname, Case((pg_class.relkind = 'r':Varchar), 'table':Varchar, (pg_class.relkind = 'v':Varchar), 'view':Varchar, (pg_class.relkind = 'm':Varchar), 'materialized view':Varchar, (pg_class.relkind = 'i':Varchar), 'index':Varchar, (pg_class.relkind = 'S':Varchar), 'sequence':Varchar, (pg_class.relkind = 's':Varchar), 'special':Varchar, (pg_class.relkind = 't':Varchar), 'TOAST table':Varchar, (pg_class.relkind = 'f':Varchar), 'foreign table':Varchar, (pg_class.relkind = 'p':Varchar), 'partitioned table':Varchar, (pg_class.relkind = 'I':Varchar), 'partitioned index':Varchar) as $expr1, pg_user.name] }
       └─BatchSort { order: [pg_namespace.nspname ASC, pg_class.relname ASC] }
         └─BatchHashJoin { type: LeftOuter, predicate: pg_class.relowner = pg_user.usesysid, output: [pg_class.relname, pg_class.relkind, pg_namespace.nspname, pg_user.name] }
           ├─BatchExchange { order: [], dist: HashShard(pg_class.relowner) }
@@ -211,39 +210,48 @@
     LogicalProject { exprs: [auction.date_time, window_start, window_end] }
     └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
       ├─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
-      | └─LogicalScan { table: auction, columns: [auction.date_time, auction._row_id] }
-      └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 }] }
-        └─LogicalAgg { group_key: [CorrelatedInputRef { index: 0, correlated_id: 1 }], aggs: [] }
-          └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 }] }
+      | └─LogicalFilter { predicate: IsNotNull(auction.date_time) }
+      |   └─LogicalScan { table: auction, columns: [auction.date_time, auction._row_id] }
+      └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr2] }
+        └─LogicalAgg { group_key: [$expr1], aggs: [] }
+          └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr1] }
             └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-  optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(auction.date_time, auction.date_time), output: all }
-    ├─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
-    | └─LogicalScan { table: auction, columns: [auction.date_time] }
-    └─LogicalProject { exprs: [auction.date_time] }
-      └─LogicalAgg { group_key: [auction.date_time, auction.date_time], aggs: [] }
-        └─LogicalJoin { type: Inner, on: true, output: [auction.date_time, auction.date_time] }
-          ├─LogicalAgg { group_key: [auction.date_time], aggs: [] }
-          | └─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
-          |   └─LogicalScan { table: auction, columns: [auction.date_time] }
-          └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+  optimized_logical_plan_for_batch: |
+    LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
+    └─LogicalFilter { predicate: IsNotNull(auction.date_time) }
+      └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(auction.date_time, auction.date_time), output: all }
+        ├─LogicalScan { table: auction, columns: [auction.date_time], predicate: IsNotNull(auction.date_time) }
+        └─LogicalProject { exprs: [auction.date_time] }
+          └─LogicalProject { exprs: [auction.date_time, auction.date_time] }
+            └─LogicalAgg { group_key: [auction.date_time], aggs: [] }
+              └─LogicalJoin { type: Inner, on: true, output: all }
+                ├─LogicalAgg { group_key: [auction.date_time], aggs: [] }
+                | └─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
+                |   └─LogicalScan { table: auction, columns: [auction.date_time], predicate: IsNotNull(auction.date_time) }
+                └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
-    BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: LeftSemi, predicate: auction.date_time IS NOT DISTINCT FROM auction.date_time, output: all }
-      ├─BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
-      | └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
-      |   └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
-      └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
-        └─BatchProject { exprs: [auction.date_time] }
-          └─BatchHashAgg { group_key: [auction.date_time, auction.date_time], aggs: [] }
-            └─BatchExchange { order: [], dist: HashShard(auction.date_time, auction.date_time) }
-              └─BatchNestedLoopJoin { type: Inner, predicate: true, output: [auction.date_time, auction.date_time] }
-                ├─BatchExchange { order: [], dist: Single }
-                | └─BatchHashAgg { group_key: [auction.date_time], aggs: [] }
-                |   └─BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
-                |     └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
-                |       └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
-                └─BatchValues { rows: [[]] }
+    BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchFilter { predicate: IsNotNull(auction.date_time) }
+        └─BatchHashJoin { type: LeftSemi, predicate: auction.date_time IS NOT DISTINCT FROM auction.date_time, output: all }
+          ├─BatchExchange { order: [], dist: HashShard(auction.date_time) }
+          | └─BatchFilter { predicate: IsNotNull(auction.date_time) }
+          |   └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
+          └─BatchProject { exprs: [auction.date_time] }
+            └─BatchHashAgg { group_key: [auction.date_time], aggs: [] }
+              └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
+                └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+                  ├─BatchExchange { order: [], dist: Single }
+                  | └─BatchHashAgg { group_key: [auction.date_time], aggs: [] }
+                  |   └─BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
+                  |     └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
+                  |       └─BatchFilter { predicate: IsNotNull(auction.date_time) }
+                  |         └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
+                  └─BatchValues { rows: [[]] }
+  stream_error: |-
+    Not supported: streaming nested-loop join
+    HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
+    See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md
 - sql: |
     CREATE TABLE t (v int);
     SELECT 1 FROM t AS t_inner WHERE EXISTS ( SELECT 1 HAVING t_inner.v > 1);
@@ -256,10 +264,10 @@
           └─LogicalAgg { aggs: [] }
             └─LogicalProject { exprs: [] }
               └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [1:Int32] }
     └─LogicalJoin { type: LeftSemi, on: true, output: all }
-      ├─LogicalScan { table: t, output_columns: [], required_columns: [v], predicate: (t.v > 1:Int32) }
+      ├─LogicalScan { table: t, output_columns: [], required_columns: [t.v], predicate: (t.v > 1:Int32) }
       └─LogicalAgg { aggs: [] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
@@ -276,9 +284,9 @@
           ├─LogicalAgg { aggs: [] }
           | └─LogicalProject { exprs: [] }
           |   └─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id] }
-          └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 }] }
+          └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr1] }
             └─LogicalScan { table: c, columns: [c.c1, c.c2, c._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [1:Int32] }
     └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a.a1, a.a1), output: [] }
       ├─LogicalScan { table: a, columns: [a.a1] }
@@ -316,21 +324,62 @@
                         └─LogicalProject { exprs: [b.b1] }
                           └─LogicalFilter { predicate: (b.b1 = CorrelatedInputRef { index: 0, correlated_id: 1 }) }
                             └─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalJoin { type: Inner, on: IsNotDistinctFrom(a.a1, a.a1) AND (a.a1 = min(b.b1)), output: [a.a1, a.a2] }
     ├─LogicalScan { table: a, columns: [a.a1, a.a2] }
     └─LogicalAgg { group_key: [a.a1], aggs: [min(b.b1)] }
       └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.a1, a.a1), output: [a.a1, b.b1] }
         ├─LogicalAgg { group_key: [a.a1], aggs: [] }
         | └─LogicalScan { table: a, columns: [a.a1] }
-        └─LogicalJoin { type: Inner, on: IsNotDistinctFrom(a.a1, a.a1), output: [a.a1, b.b1] }
-          ├─LogicalJoin { type: Inner, on: (b.b2 = min(b.b1)), output: [b.b1, a.a1] }
-          | ├─LogicalScan { table: b, columns: [b.b1, b.b2] }
-          | └─LogicalAgg { group_key: [a.a1], aggs: [min(b.b1)] }
-          |   └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.a1, b.b1), output: [a.a1, b.b1] }
-          |     ├─LogicalAgg { group_key: [a.a1], aggs: [] }
-          |     | └─LogicalScan { table: a, columns: [a.a1] }
-          |     └─LogicalProject { exprs: [b.b1, b.b1] }
-          |       └─LogicalScan { table: b, output_columns: [b.b1], required_columns: [b1], predicate: IsNotNull(b.b1) }
-          └─LogicalAgg { group_key: [a.a1], aggs: [] }
-            └─LogicalScan { table: a, columns: [a.a1] }
+        └─LogicalJoin { type: Inner, on: (b.b2 = min(b.b1)), output: [a.a1, b.b1] }
+          ├─LogicalScan { table: b, columns: [b.b1, b.b2] }
+          └─LogicalAgg { group_key: [a.a1], aggs: [min(b.b1)] }
+            └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.a1, b.b1), output: [a.a1, b.b1] }
+              ├─LogicalAgg { group_key: [a.a1], aggs: [] }
+              | └─LogicalScan { table: a, columns: [a.a1] }
+              └─LogicalProject { exprs: [b.b1, b.b1] }
+                └─LogicalScan { table: b, columns: [b.b1], predicate: IsNotNull(b.b1) }
+- name: test subquery in join on condition
+  sql: |
+    create table a (v1 int, v2 int);
+    create table b (v1 int, v2 int);
+    create table c (v1 int, v2 int);
+    select * from a left outer join b on a.v1 = b.v1 and a.v2 = (select v2 from c where v1 = 1 limit 1);
+  planner_error: |-
+    Feature is not yet implemented: Subquery in join on condition is unsupported
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    create table auction (date_time date);
+    select * from auction AS hop_1
+    where EXISTS (select hop_1.date_time from auction group by hop_1.date_time );
+  stream_error: |-
+    Not supported: streaming nested-loop join
+    HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
+    See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md
+- sql: |
+    SELECT 1, (SELECT regexp_matches('barbeque barbeque', '(bar)(beque)', 'g'))
+  batch_error: 'internal error: Scalar subquery might produce more than one row.'
+- sql: |
+    create table t1 (a int, b int);
+    select a, (select count(*) from t1 where t1.a <> t.b) from t1 as t order by 1;
+  logical_plan: |
+    LogicalProject { exprs: [t1.a, count] }
+    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+      ├─LogicalScan { table: t1, columns: [t1.a, t1.b, t1._row_id] }
+      └─LogicalProject { exprs: [count] }
+        └─LogicalAgg { aggs: [count] }
+          └─LogicalProject { exprs: [] }
+            └─LogicalFilter { predicate: (t1.a <> CorrelatedInputRef { index: 1, correlated_id: 1 }) }
+              └─LogicalScan { table: t1, columns: [t1.a, t1.b, t1._row_id] }
+  optimized_logical_plan_for_batch: |
+    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t1.b, t1.b), output: [t1.a, count(1:Int32)] }
+    ├─LogicalScan { table: t1, columns: [t1.a, t1.b] }
+    └─LogicalAgg { group_key: [t1.b], aggs: [count(1:Int32)] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t1.b, t1.b), output: [t1.b, 1:Int32] }
+        ├─LogicalAgg { group_key: [t1.b], aggs: [] }
+        | └─LogicalScan { table: t1, columns: [t1.b] }
+        └─LogicalProject { exprs: [t1.b, 1:Int32] }
+          └─LogicalJoin { type: Inner, on: (t1.a <> t1.b), output: [t1.b] }
+            ├─LogicalAgg { group_key: [t1.b], aggs: [] }
+            | └─LogicalScan { table: t1, columns: [t1.b] }
+            └─LogicalScan { table: t1, columns: [t1.a] }

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -45,7 +45,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
     manager
         .send_barrier(&barrier, actor_ids.clone(), actor_ids, None)
         .unwrap();
-    let mut complete_receiver = manager.remove_collect_rx(barrier.epoch.prev);
+    let mut complete_receiver = manager.remove_collect_rx(barrier.epoch.prev)?;
     // Collect barriers from actors
     let collected_barriers = rxs
         .iter_mut()
@@ -109,7 +109,7 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
     manager
         .send_barrier(&barrier, actor_ids_to_send, actor_ids_to_collect, None)
         .unwrap();
-    let mut complete_receiver = manager.remove_collect_rx(barrier.epoch.prev);
+    let mut complete_receiver = manager.remove_collect_rx(barrier.epoch.prev)?;
 
     // Collect barriers from actors
     let collected_barriers = rxs

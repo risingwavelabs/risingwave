@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -28,6 +28,7 @@ use axum::routing::{get, get_service};
 use axum::Router;
 use hyper::Request;
 use parking_lot::Mutex;
+use risingwave_rpc_client::ComputeClientPool;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{self, CorsLayer};
@@ -43,6 +44,7 @@ pub struct DashboardService<S: MetaStore> {
     pub prometheus_client: Option<prometheus_http_query::Client>,
     pub cluster_manager: ClusterManagerRef<S>,
     pub fragment_manager: FragmentManagerRef<S>,
+    pub compute_clients: ComputeClientPool,
 
     // TODO: replace with catalog manager.
     pub meta_store: Arc<S>,
@@ -51,15 +53,19 @@ pub struct DashboardService<S: MetaStore> {
 pub type Service<S> = Arc<DashboardService<S>>;
 
 pub(super) mod handlers {
+    use anyhow::Context;
     use axum::Json;
     use itertools::Itertools;
-    use risingwave_pb::catalog::{Source, Table};
+    use risingwave_pb::catalog::table::TableType;
+    use risingwave_pb::catalog::{Sink, Source, Table};
     use risingwave_pb::common::WorkerNode;
-    use risingwave_pb::meta::{ActorLocation, TableFragments as ProstTableFragments};
+    use risingwave_pb::meta::{ActorLocation, PbTableFragments};
+    use risingwave_pb::monitor_service::StackTraceResponse;
     use risingwave_pb::stream_plan::StreamActor;
     use serde_json::json;
 
     use super::*;
+    use crate::manager::WorkerId;
     use crate::model::TableFragments;
 
     pub struct DashboardError(anyhow::Error);
@@ -88,7 +94,7 @@ pub(super) mod handlers {
         Extension(srv): Extension<Service<S>>,
     ) -> Result<Json<Vec<WorkerNode>>> {
         use risingwave_pb::common::WorkerType;
-        let result = srv
+        let mut result = srv
             .cluster_manager
             .list_worker_node(
                 WorkerType::from_i32(ty)
@@ -97,16 +103,48 @@ pub(super) mod handlers {
                 None,
             )
             .await;
+        result.sort_unstable_by_key(|n| n.id);
         Ok(result.into())
+    }
+
+    async fn list_table_catalogs_inner<S: MetaStore>(
+        meta_store: &S,
+        table_type: TableType,
+    ) -> Result<Json<Vec<Table>>> {
+        use crate::model::MetadataModel;
+
+        let results = Table::list(meta_store)
+            .await
+            .map_err(err)?
+            .into_iter()
+            .filter(|t| t.table_type() == table_type)
+            .collect();
+
+        Ok(Json(results))
     }
 
     pub async fn list_materialized_views<S: MetaStore>(
         Extension(srv): Extension<Service<S>>,
     ) -> Result<Json<Vec<Table>>> {
-        use crate::model::MetadataModel;
+        list_table_catalogs_inner(&*srv.meta_store, TableType::MaterializedView).await
+    }
 
-        let materialized_views = Table::list(&*srv.meta_store).await.map_err(err)?;
-        Ok(Json(materialized_views))
+    pub async fn list_tables<S: MetaStore>(
+        Extension(srv): Extension<Service<S>>,
+    ) -> Result<Json<Vec<Table>>> {
+        list_table_catalogs_inner(&*srv.meta_store, TableType::Table).await
+    }
+
+    pub async fn list_indexes<S: MetaStore>(
+        Extension(srv): Extension<Service<S>>,
+    ) -> Result<Json<Vec<Table>>> {
+        list_table_catalogs_inner(&*srv.meta_store, TableType::Index).await
+    }
+
+    pub async fn list_internal_tables<S: MetaStore>(
+        Extension(srv): Extension<Service<S>>,
+    ) -> Result<Json<Vec<Table>>> {
+        list_table_catalogs_inner(&*srv.meta_store, TableType::Internal).await
     }
 
     pub async fn list_sources<S: MetaStore>(
@@ -116,6 +154,15 @@ pub(super) mod handlers {
 
         let sources = Source::list(&*srv.meta_store).await.map_err(err)?;
         Ok(Json(sources))
+    }
+
+    pub async fn list_sinks<S: MetaStore>(
+        Extension(srv): Extension<Service<S>>,
+    ) -> Result<Json<Vec<Sink>>> {
+        use crate::model::MetadataModel;
+
+        let sinks = Sink::list(&*srv.meta_store).await.map_err(err)?;
+        Ok(Json(sinks))
     }
 
     pub async fn list_actors<S: MetaStore>(
@@ -156,7 +203,7 @@ pub(super) mod handlers {
 
     pub async fn list_fragments<S: MetaStore>(
         Extension(srv): Extension<Service<S>>,
-    ) -> Result<Json<Vec<ProstTableFragments>>> {
+    ) -> Result<Json<Vec<PbTableFragments>>> {
         use crate::model::MetadataModel;
 
         let table_fragments = TableFragments::list(&*srv.meta_store)
@@ -166,6 +213,25 @@ pub(super) mod handlers {
             .map(|x| x.to_protobuf())
             .collect_vec();
         Ok(Json(table_fragments))
+    }
+
+    pub async fn dump_await_tree<S: MetaStore>(
+        Path(worker_id): Path<WorkerId>,
+        Extension(srv): Extension<Service<S>>,
+    ) -> Result<Json<StackTraceResponse>> {
+        let worker_node = srv
+            .cluster_manager
+            .get_worker_by_id(worker_id)
+            .await
+            .context("worker node not found")
+            .map_err(err)?
+            .worker_node;
+
+        let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+
+        let result = client.stack_trace().await.map_err(err)?;
+
+        Ok(result.into())
     }
 }
 
@@ -187,11 +253,16 @@ where
             .route("/fragments", get(list_table_fragments::<S>))
             .route("/fragments2", get(list_fragments::<S>))
             .route("/materialized_views", get(list_materialized_views::<S>))
+            .route("/tables", get(list_tables::<S>))
+            .route("/indexes", get(list_indexes::<S>))
+            .route("/internal_tables", get(list_internal_tables::<S>))
             .route("/sources", get(list_sources::<S>))
+            .route("/sinks", get(list_sinks::<S>))
             .route(
                 "/metrics/cluster",
                 get(prometheus::list_prometheus_cluster::<S>),
             )
+            .route("/monitor/await_tree/:worker_id", get(dump_await_tree::<S>))
             .layer(
                 ServiceBuilder::new()
                     .layer(AddExtensionLayer::new(srv.clone()))
@@ -200,7 +271,7 @@ where
             .layer(cors_layer);
 
         let app = if let Some(ui_path) = ui_path {
-            let static_file_router = Router::new().nest(
+            let static_file_router = Router::new().nest_service(
                 "/",
                 get_service(ServeDir::new(ui_path)).handle_error(
                     |error: std::io::Error| async move {
@@ -212,7 +283,7 @@ where
                 ),
             );
             Router::new()
-                .fallback(static_file_router)
+                .fallback_service(static_file_router)
                 .nest("/api", api_router)
         } else {
             let cache = Arc::new(Mutex::new(HashMap::new()));
@@ -228,7 +299,9 @@ where
                     })
                 }
             });
-            Router::new().fallback(service).nest("/api", api_router)
+            Router::new()
+                .fallback_service(service)
+                .nest("/api", api_router)
         };
 
         axum::Server::bind(&srv.dashboard_addr)

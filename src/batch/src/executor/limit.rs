@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -63,6 +63,9 @@ impl BoxedExecutorBuilder for LimitExecutor {
 impl LimitExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
+        if self.limit == 0 {
+            return Ok(());
+        }
         // the number of rows have been skipped due to offset
         let mut skipped = 0;
         // the number of rows have been returned as execute result
@@ -150,12 +153,13 @@ mod tests {
     use risingwave_common::array::{Array, BoolArray, DataChunk, PrimitiveArray};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
+    use risingwave_common::util::iter_util::ZipEqDebug;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
 
     fn create_column(vec: &[Option<i32>]) -> Column {
-        PrimitiveArray::from_slice(vec).into()
+        PrimitiveArray::from_iter(vec).into()
     }
 
     async fn test_limit_all_visible(
@@ -166,7 +170,6 @@ mod tests {
     ) {
         let col = create_column(
             (0..row_num)
-                .into_iter()
                 .map(|x| Some(x as i32))
                 .collect_vec()
                 .as_slice(),
@@ -281,20 +284,12 @@ mod tests {
         assert_eq!(visible.len(), row_num);
         let col0 = create_column(
             (0..row_num)
-                .into_iter()
                 .map(|x| Some(x as i32))
                 .collect_vec()
                 .as_slice(),
         );
 
-        let visible_array = BoolArray::from_slice(
-            visible
-                .clone()
-                .into_iter()
-                .map(Some)
-                .collect_vec()
-                .as_slice(),
-        );
+        let visible_array = BoolArray::from_iter(visible.iter().cloned());
 
         let col1 = visible_array.into();
         let schema = Schema {
@@ -347,7 +342,7 @@ mod tests {
             result.cardinality()
         );
         MockLimitIter::new(row_num, limit, offset, visible)
-            .zip_eq(0..result.cardinality())
+            .zip_eq_debug(0..result.cardinality())
             .for_each(|(expect, chunk_idx)| {
                 assert_eq!(col1.array().as_bool().value_at(chunk_idx), Some(true));
                 assert_eq!(

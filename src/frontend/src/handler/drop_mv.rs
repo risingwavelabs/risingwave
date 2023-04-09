@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,26 +13,22 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::valid_table_name;
-use risingwave_common::error::ErrorCode::PermissionDenied;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::ObjectName;
 
-use super::privilege::check_super_user;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
-use crate::catalog::table_catalog::TableKind;
+use crate::catalog::table_catalog::TableType;
 use crate::catalog::CatalogError;
-use crate::handler::drop_table::check_source;
-use crate::session::OptimizerContext;
+use crate::handler::HandlerArgs;
 
 pub async fn handle_drop_mv(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     table_name: ObjectName,
     if_exists: bool,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx;
+    let session = handler_args.session;
     let db_name = session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let search_path = session.config().get_search_path();
@@ -65,38 +61,11 @@ pub async fn handle_drop_mv(
                 }
             };
 
-        let schema_catalog = reader
-            .get_schema_by_name(session.database(), schema_name)
-            .unwrap();
-        let schema_owner = schema_catalog.owner();
-        if session.user_id() != table.owner
-            && session.user_id() != schema_owner
-            && !check_super_user(&session)
-        {
-            return Err(PermissionDenied("Do not have the privilege".to_string()).into());
-        }
+        session.check_privilege_for_drop_alter(schema_name, &**table)?;
 
-        // If associated source is `Some`, then it is actually a materialized source / table v2.
-        match table.kind() {
-            TableKind::TableOrSource => {
-                check_source(&reader, db_name, schema_name, &table_name)?;
-                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                    "Use `DROP TABLE` to drop a table.".to_owned(),
-                )));
-            }
-            TableKind::Index => {
-                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                    "Use `DROP INDEX` to drop an index.".to_owned(),
-                )));
-            }
-            TableKind::MView => {}
-        }
-
-        // If the name is not valid, then it is actually an internal table.
-        if !valid_table_name(&table_name) {
-            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "Cannot drop an internal table.".to_owned(),
-            )));
+        match table.table_type() {
+            TableType::MaterializedView => {}
+            _ => return Err(table.bad_drop_error()),
         }
 
         table.id()

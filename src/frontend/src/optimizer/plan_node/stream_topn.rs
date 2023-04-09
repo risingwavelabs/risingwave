@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,54 +14,60 @@
 
 use std::fmt;
 
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use fixedbitset::FixedBitSet;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Distribution, Order};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamTopN {
     pub base: PlanBase,
-    logical: LogicalTopN,
+    logical: generic::TopN<PlanRef>,
 }
 
 impl StreamTopN {
-    pub fn new(logical: LogicalTopN) -> Self {
-        assert!(logical.group_key().is_empty());
-        assert!(logical.limit() > 0);
-        let ctx = logical.base.ctx.clone();
-        let dist = match logical.input().distribution() {
+    pub fn new(logical: generic::TopN<PlanRef>) -> Self {
+        assert!(logical.group_key.is_empty());
+        assert!(logical.limit > 0);
+        let base = PlanBase::new_logical_with_core(&logical);
+        let ctx = base.ctx;
+        let input = &logical.input;
+        let schema = base.schema;
+        let dist = match input.distribution() {
             Distribution::Single => Distribution::Single,
             _ => panic!(),
         };
+        let watermark_columns = FixedBitSet::with_capacity(schema.len());
 
         let base = PlanBase::new_stream(
             ctx,
-            logical.schema().clone(),
-            logical.input().logical_pk().to_vec(),
-            logical.functional_dependency().clone(),
+            schema,
+            input.logical_pk().to_vec(),
+            base.functional_dependency,
             dist,
             false,
+            watermark_columns,
         );
         StreamTopN { base, logical }
     }
 
     pub fn limit(&self) -> u64 {
-        self.logical.limit()
+        self.logical.limit
     }
 
     pub fn offset(&self) -> u64 {
-        self.logical.offset()
+        self.logical.offset
     }
 
     pub fn with_ties(&self) -> bool {
-        self.logical.with_ties()
+        self.logical.with_ties
     }
 
     pub fn topn_order(&self) -> &Order {
-        self.logical.topn_order()
+        &self.logical.order
     }
 }
 
@@ -77,18 +83,20 @@ impl fmt::Display for StreamTopN {
 
 impl PlanTreeNodeUnary for StreamTopN {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let mut logical = self.logical.clone();
+        logical.input = input;
+        Self::new(logical)
     }
 }
 
 impl_plan_tree_node_for_unary! { StreamTopN }
 
 impl StreamNode for StreamTopN {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
         let topn_node = TopNNode {
             limit: self.limit(),
@@ -96,16 +104,17 @@ impl StreamNode for StreamTopN {
             with_ties: self.with_ties(),
             table: Some(
                 self.logical
-                    .infer_internal_table_catalog(None)
+                    .infer_internal_table_catalog(&self.base, None)
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
-            order_by_len: self.topn_order().len() as u32,
+            order_by: self.topn_order().to_protobuf(),
         };
         if self.input().append_only() {
-            ProstStreamNode::AppendOnlyTopN(topn_node)
+            PbNodeBody::AppendOnlyTopN(topn_node)
         } else {
-            ProstStreamNode::TopN(topn_node)
+            PbNodeBody::TopN(topn_node)
         }
     }
 }
+impl ExprRewritable for StreamTopN {}

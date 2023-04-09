@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,17 +14,17 @@
 
 use std::sync::Arc;
 
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::stream_plan::TopNNode;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::executor::TopNExecutor;
 
-pub struct TopNExecutorNewBuilder;
+pub struct TopNExecutorBuilder;
 
 #[async_trait::async_trait]
-impl ExecutorBuilder for TopNExecutorNewBuilder {
+impl ExecutorBuilder for TopNExecutorBuilder {
     type Node = TopNNode;
 
     async fn new_boxed_executor(
@@ -38,15 +38,25 @@ impl ExecutorBuilder for TopNExecutorNewBuilder {
         let table = node.get_table()?;
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let state_table = StateTable::from_table_catalog(table, store, vnodes).await;
-        let order_pairs = table.get_pk().iter().map(OrderPair::from_prost).collect();
+        let storage_key = table
+            .get_pk()
+            .iter()
+            .map(ColumnOrder::from_protobuf)
+            .collect();
+        let order_by = node
+            .order_by
+            .iter()
+            .map(ColumnOrder::from_protobuf)
+            .collect();
+
+        assert_eq!(&params.pk_indices, input.pk_indices());
         if node.with_ties {
             Ok(TopNExecutor::new_with_ties(
                 input,
                 params.actor_context,
-                order_pairs,
+                storage_key,
                 (node.offset as usize, node.limit as usize),
-                node.order_by_len as usize,
-                params.pk_indices,
+                order_by,
                 params.executor_id,
                 state_table,
             )?
@@ -55,10 +65,9 @@ impl ExecutorBuilder for TopNExecutorNewBuilder {
             Ok(TopNExecutor::new_without_ties(
                 input,
                 params.actor_context,
-                order_pairs,
+                storage_key,
                 (node.offset as usize, node.limit as usize),
-                node.order_by_len as usize,
-                params.pk_indices,
+                order_by,
                 params.executor_id,
                 state_table,
             )?

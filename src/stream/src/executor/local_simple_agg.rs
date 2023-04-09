@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
+use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::aggregation::agg_impl::{create_streaming_agg_impl, StreamingAggImpl};
 use super::aggregation::{agg_call_filter_res, generate_agg_schema, AggCall};
@@ -51,7 +52,7 @@ impl Executor for LocalSimpleAggExecutor {
 }
 
 impl LocalSimpleAggExecutor {
-    fn apply_chunk(
+    async fn apply_chunk(
         ctx: &ActorContextRef,
         identity: &str,
         agg_calls: &[AggCall],
@@ -60,23 +61,23 @@ impl LocalSimpleAggExecutor {
     ) -> StreamExecutorResult<()> {
         let capacity = chunk.capacity();
         let (ops, columns, visibility) = chunk.into_inner();
-        let visibilities: Vec<_> = agg_calls
-            .iter()
-            .map(|agg_call| {
-                agg_call_filter_res(
-                    ctx,
-                    identity,
-                    agg_call,
-                    &columns,
-                    visibility.as_ref(),
-                    capacity,
-                )
-            })
-            .try_collect()?;
+        let mut visibilities = Vec::with_capacity(agg_calls.len());
+        for agg_call in agg_calls {
+            let result = agg_call_filter_res(
+                ctx,
+                identity,
+                agg_call,
+                &columns,
+                visibility.as_ref(),
+                capacity,
+            )
+            .await?;
+            visibilities.push(result)
+        }
         agg_calls
             .iter()
-            .zip_eq(visibilities)
-            .zip_eq(aggregators)
+            .zip_eq_fast(visibilities)
+            .zip_eq_fast(aggregators)
             .try_for_each(|((agg_call, visibility), state)| {
                 let col_refs = agg_call
                     .args
@@ -115,12 +116,10 @@ impl LocalSimpleAggExecutor {
         for msg in input {
             let msg = msg?;
             match msg {
-                Message::Watermark(_) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
-                }
-
+                Message::Watermark(_) => {}
                 Message::Chunk(chunk) => {
-                    Self::apply_chunk(&ctx, &info.identity, &agg_calls, &mut aggregators, chunk)?;
+                    Self::apply_chunk(&ctx, &info.identity, &agg_calls, &mut aggregators, chunk)
+                        .await?;
                     is_dirty = true;
                 }
                 m @ Message::Barrier(_) => {
@@ -130,7 +129,7 @@ impl LocalSimpleAggExecutor {
                         let mut builders = info.schema.create_array_builders(1);
                         aggregators
                             .iter_mut()
-                            .zip_eq(builders.iter_mut())
+                            .zip_eq_fast(builders.iter_mut())
                             .try_for_each(|(state, builder)| {
                                 let data = state.get_output()?;
                                 trace!("append_datum: {:?}", data);
@@ -205,9 +204,10 @@ mod tests {
             kind: AggKind::Count,
             args: AggArgs::None,
             return_type: DataType::Int64,
-            order_pairs: vec![],
+            column_orders: vec![],
             append_only: false,
             filter: None,
+            distinct: false,
         }];
 
         let simple_agg = Box::new(
@@ -263,25 +263,28 @@ mod tests {
                 kind: AggKind::Count,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only: false,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only: false,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only: false,
                 filter: None,
+                distinct: false,
             },
         ];
 

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -e
 
@@ -11,7 +11,7 @@ fi
 
 cd "$DIR/../.."
 cargo build -p risingwave_cmd_all --release --features "static-link static-log-level"
-objcopy --compress-debug-sections=zlib-gnu target/release/risingwave "$DIR/risingwave"
+cp target/release/risingwave "$DIR/risingwave"
 
 cd "$DIR"
 docker build -t "${RW_REGISTRY}:latest" .

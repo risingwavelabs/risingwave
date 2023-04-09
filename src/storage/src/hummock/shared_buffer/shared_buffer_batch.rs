@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::future::Future;
 use std::marker::PhantomData;
@@ -23,7 +24,7 @@ use std::sync::{Arc, LazyLock};
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
 
 use crate::hummock::iterator::{
     Backward, DeleteRangeIterator, DirectionEnum, Forward, HummockIterator,
@@ -31,7 +32,7 @@ use crate::hummock::iterator::{
 };
 use crate::hummock::utils::{range_overlap, MemoryTracker};
 use crate::hummock::value::HummockValue;
-use crate::hummock::{DeleteRangeTombstone, HummockEpoch, HummockResult, MemoryLimiter};
+use crate::hummock::{DeleteRangeTombstone, HummockEpoch, HummockResult};
 use crate::storage_value::StorageValue;
 
 /// The key is `table_key`, which does not contain table id or epoch.
@@ -43,6 +44,7 @@ pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferItem>,
     range_tombstone_list: Vec<DeleteRangeTombstone>,
     largest_table_key: Vec<u8>,
+    smallest_table_key: Vec<u8>,
     size: usize,
     _tracker: Option<MemoryTracker>,
     batch_id: SharedBufferBatchId,
@@ -56,6 +58,8 @@ impl SharedBufferBatchInner {
         _tracker: Option<MemoryTracker>,
     ) -> Self {
         let mut largest_table_key = vec![];
+        let mut smallest_table_key = vec![];
+        let mut smallest_empty = true;
         if !range_tombstone_list.is_empty() {
             range_tombstone_list.sort();
             let mut range_tombstones: Vec<DeleteRangeTombstone> = vec![];
@@ -66,6 +70,11 @@ impl SharedBufferBatchInner {
                 if largest_table_key.lt(&tombstone.end_user_key.table_key.0) {
                     largest_table_key.clear();
                     largest_table_key.extend_from_slice(&tombstone.end_user_key.table_key.0);
+                }
+                if smallest_empty || smallest_table_key.gt(&tombstone.start_user_key.table_key.0) {
+                    smallest_table_key.clear();
+                    smallest_table_key.extend_from_slice(&tombstone.start_user_key.table_key.0);
+                    smallest_empty = false;
                 }
                 if let Some(last) = range_tombstones.last_mut() {
                     if last.end_user_key.gt(&tombstone.start_user_key) {
@@ -86,11 +95,18 @@ impl SharedBufferBatchInner {
                 largest_table_key.extend_from_slice(item.0.as_ref());
             }
         }
+        if let Some(item) = payload.first() {
+            if smallest_empty || item.0.lt(&smallest_table_key) {
+                smallest_table_key.clear();
+                smallest_table_key.extend_from_slice(item.0.as_ref());
+            }
+        }
         SharedBufferBatchInner {
             payload,
             range_tombstone_list,
             size,
             largest_table_key,
+            smallest_table_key,
             _tracker,
             batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
         }
@@ -161,11 +177,19 @@ impl SharedBufferBatch {
         R: RangeBounds<TableKey<B>>,
         B: AsRef<[u8]>,
     {
+        let left = table_key_range
+            .start_bound()
+            .as_ref()
+            .map(|key| TableKey(key.0.as_ref()));
+        let right = table_key_range
+            .end_bound()
+            .as_ref()
+            .map(|key| TableKey(key.0.as_ref()));
         self.table_id == table_id
             && range_overlap(
-                table_key_range,
-                *self.start_table_key(),
-                *self.end_table_key(),
+                &(left, right),
+                &self.start_table_key(),
+                &self.end_table_key(),
             )
     }
 
@@ -194,6 +218,33 @@ impl SharedBufferBatch {
                 .le(table_key.as_ref())
     }
 
+    pub fn range_exists(&self, table_key_range: &TableKeyRange) -> bool {
+        self.inner
+            .binary_search_by(|m| {
+                let key = &m.0;
+                let too_left = match &table_key_range.0 {
+                    std::ops::Bound::Included(range_start) => range_start.as_ref() > key.as_ref(),
+                    std::ops::Bound::Excluded(range_start) => range_start.as_ref() >= key.as_ref(),
+                    std::ops::Bound::Unbounded => false,
+                };
+                if too_left {
+                    return Ordering::Less;
+                }
+
+                let too_right = match &table_key_range.1 {
+                    std::ops::Bound::Included(range_end) => range_end.as_ref() < key.as_ref(),
+                    std::ops::Bound::Excluded(range_end) => range_end.as_ref() <= key.as_ref(),
+                    std::ops::Bound::Unbounded => false,
+                };
+                if too_right {
+                    return Ordering::Greater;
+                }
+
+                Ordering::Equal
+            })
+            .is_ok()
+    }
+
     pub fn into_directed_iter<D: HummockIteratorDirection>(self) -> SharedBufferBatchIterator<D> {
         SharedBufferBatchIterator::<D>::new(self.inner, self.table_id, self.epoch)
     }
@@ -214,39 +265,20 @@ impl SharedBufferBatch {
         &self.inner
     }
 
+    #[inline(always)]
     pub fn start_table_key(&self) -> TableKey<&[u8]> {
-        TableKey(&self.inner.first().unwrap().0)
+        TableKey(&self.inner.smallest_table_key)
     }
 
+    #[inline(always)]
     pub fn end_table_key(&self) -> TableKey<&[u8]> {
-        TableKey(&self.inner.last().unwrap().0)
+        TableKey(&self.inner.largest_table_key)
     }
 
     /// return inclusive left endpoint, which means that all data in this batch should be larger or
     /// equal than this key.
     pub fn start_user_key(&self) -> UserKey<&[u8]> {
-        if self.has_range_tombstone()
-            && (self.inner.is_empty()
-                || self
-                    .inner
-                    .range_tombstone_list
-                    .first()
-                    .unwrap()
-                    .start_user_key
-                    .table_key
-                    .0
-                    .as_slice()
-                    .le(&self.inner.first().unwrap().0))
-        {
-            self.inner
-                .range_tombstone_list
-                .first()
-                .unwrap()
-                .start_user_key
-                .as_ref()
-        } else {
-            UserKey::new(self.table_id, self.start_table_key())
-        }
+        UserKey::new(self.table_id, self.start_table_key())
     }
 
     #[inline(always)]
@@ -257,7 +289,7 @@ impl SharedBufferBatch {
     /// return inclusive right endpoint, which means that all data in this batch should be smaller
     /// or equal than this key.
     pub fn end_user_key(&self) -> UserKey<&[u8]> {
-        UserKey::new(self.table_id, TableKey(&self.inner.largest_table_key))
+        UserKey::new(self.table_id, self.end_table_key())
     }
 
     pub fn epoch(&self) -> u64 {
@@ -281,14 +313,14 @@ impl SharedBufferBatch {
             .collect()
     }
 
-    pub async fn build_shared_buffer_batch(
+    pub fn build_shared_buffer_batch(
         epoch: HummockEpoch,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
+        sorted_items: Vec<SharedBufferItem>,
+        size: usize,
         delete_ranges: Vec<(Bytes, Bytes)>,
         table_id: TableId,
-        memory_limit: Option<&MemoryLimiter>,
+        tracker: Option<MemoryTracker>,
     ) -> Self {
-        let sorted_items = Self::build_shared_buffer_item_batches(kv_pairs);
         let delete_range_tombstones = delete_ranges
             .into_iter()
             .map(|(start_table_key, end_table_key)| {
@@ -304,12 +336,6 @@ impl SharedBufferBatch {
         {
             Self::check_tombstone_prefix(table_id, &delete_range_tombstones);
         }
-        let size = Self::measure_batch_size(&sorted_items);
-        let tracker = if let Some(limiter) = memory_limit {
-            limiter.require_memory(size as u64).await
-        } else {
-            None
-        };
         let inner =
             SharedBufferBatchInner::new(sorted_items, delete_range_tombstones, size, tracker);
         SharedBufferBatch {
@@ -504,7 +530,10 @@ impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Bound::{Excluded, Included};
+
     use itertools::Itertools;
+    use risingwave_hummock_sdk::key::map_table_key_range;
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
@@ -595,6 +624,20 @@ mod tests {
         }
         output.reverse();
         assert_eq!(output, shared_buffer_items);
+
+        let batch = SharedBufferBatch::build_shared_buffer_batch(
+            epoch,
+            vec![],
+            1,
+            vec![
+                (Bytes::from("a"), Bytes::from("c")),
+                (Bytes::from("b"), Bytes::from("d")),
+            ],
+            TableId::new(0),
+            None,
+        );
+        assert_eq!(batch.start_table_key().as_ref(), "a".as_bytes());
+        assert_eq!(batch.end_table_key().as_ref(), "d".as_bytes());
     }
 
     #[tokio::test]
@@ -740,7 +783,7 @@ mod tests {
     #[tokio::test]
     async fn test_shared_buffer_batch_delete_range() {
         let epoch = 1;
-        let shared_buffer_items = vec![
+        let delete_ranges = vec![
             (Bytes::from(b"aaa".to_vec()), Bytes::from(b"bbb".to_vec())),
             (Bytes::from(b"ccc".to_vec()), Bytes::from(b"ddd".to_vec())),
             (Bytes::from(b"ddd".to_vec()), Bytes::from(b"eee".to_vec())),
@@ -748,11 +791,11 @@ mod tests {
         let shared_buffer_batch = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
             vec![],
-            shared_buffer_items,
+            0,
+            delete_ranges,
             Default::default(),
             None,
-        )
-        .await;
+        );
         assert!(shared_buffer_batch.check_delete_by_range(TableKey(b"aaa")));
         assert!(!shared_buffer_batch.check_delete_by_range(TableKey(b"bbb")));
         assert!(shared_buffer_batch.check_delete_by_range(TableKey(b"ddd")));
@@ -769,5 +812,49 @@ mod tests {
         iter.seek(FullKey::for_test(TableId::new(1), vec![], epoch).to_ref())
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_shared_buffer_batch_range_existx() {
+        let epoch = 1;
+        let shared_buffer_items = vec![
+            (Vec::from("a_1"), HummockValue::put(Bytes::from("value1"))),
+            (Vec::from("a_3"), HummockValue::put(Bytes::from("value2"))),
+            (Vec::from("a_5"), HummockValue::put(Bytes::from("value3"))),
+            (Vec::from("b_2"), HummockValue::put(Bytes::from("value3"))),
+        ];
+        let shared_buffer_batch = SharedBufferBatch::for_test(
+            transform_shared_buffer(shared_buffer_items),
+            epoch,
+            Default::default(),
+        );
+
+        let range = (Included(Bytes::from("a")), Excluded(Bytes::from("b")));
+        assert!(shared_buffer_batch.range_exists(&map_table_key_range(range)));
+        let range = (Included(Bytes::from("a_")), Excluded(Bytes::from("b_")));
+        assert!(shared_buffer_batch.range_exists(&map_table_key_range(range)));
+        let range = (Included(Bytes::from("a_1")), Included(Bytes::from("a_1")));
+        assert!(shared_buffer_batch.range_exists(&map_table_key_range(range)));
+        let range = (Included(Bytes::from("a_1")), Included(Bytes::from("a_2")));
+        assert!(shared_buffer_batch.range_exists(&map_table_key_range(range)));
+        let range = (Included(Bytes::from("a_0x")), Included(Bytes::from("a_2x")));
+        assert!(shared_buffer_batch.range_exists(&map_table_key_range(range)));
+        let range = (Included(Bytes::from("a_")), Excluded(Bytes::from("c_")));
+        assert!(shared_buffer_batch.range_exists(&map_table_key_range(range)));
+        let range = (Included(Bytes::from("b_0x")), Included(Bytes::from("b_2x")));
+        assert!(shared_buffer_batch.range_exists(&map_table_key_range(range)));
+        let range = (Included(Bytes::from("b_2")), Excluded(Bytes::from("c_1x")));
+        assert!(shared_buffer_batch.range_exists(&map_table_key_range(range)));
+
+        let range = (Included(Bytes::from("a_0")), Excluded(Bytes::from("a_1")));
+        assert!(!shared_buffer_batch.range_exists(&map_table_key_range(range)));
+        let range = (Included(Bytes::from("a__0")), Excluded(Bytes::from("a__5")));
+        assert!(!shared_buffer_batch.range_exists(&map_table_key_range(range)));
+        let range = (Included(Bytes::from("b_1")), Excluded(Bytes::from("b_2")));
+        assert!(!shared_buffer_batch.range_exists(&map_table_key_range(range)));
+        let range = (Included(Bytes::from("b_3")), Excluded(Bytes::from("c_1")));
+        assert!(!shared_buffer_batch.range_exists(&map_table_key_range(range)));
+        let range = (Included(Bytes::from("b__x")), Excluded(Bytes::from("c__x")));
+        assert!(!shared_buffer_batch.range_exists(&map_table_key_range(range)));
     }
 }

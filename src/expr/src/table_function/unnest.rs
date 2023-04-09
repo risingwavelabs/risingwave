@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::array::{Array, ArrayRef, DataChunk, ListArray, ListRef};
+use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::*;
 
@@ -35,21 +36,22 @@ impl Unnest {
     }
 }
 
+#[async_trait::async_trait]
 impl TableFunction for Unnest {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>> {
-        let ret_list = self.list.eval_checked(input)?;
+    async fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>> {
+        let ret_list = self.list.eval_checked(input).await?;
         let arr_list: &ListArray = ret_list.as_ref().into();
 
-        let bitmap = input.get_visibility_ref();
+        let bitmap = input.visibility();
         let mut output_arrays: Vec<ArrayRef> = vec![];
 
         match bitmap {
             Some(bitmap) => {
-                for (list, visible) in arr_list.iter().zip_eq(bitmap.iter()) {
+                for (list, visible) in arr_list.iter().zip_eq_fast(bitmap.iter()) {
                     let array = if !visible {
                         empty_array(self.return_type())
                     } else if let Some(list) = list {
@@ -76,7 +78,7 @@ impl TableFunction for Unnest {
     }
 }
 
-pub fn new_unnest(prost: &TableFunctionProst, chunk_size: usize) -> Result<BoxedTableFunction> {
+pub fn new_unnest(prost: &TableFunctionPb, chunk_size: usize) -> Result<BoxedTableFunction> {
     let return_type = DataType::from(prost.get_return_type().unwrap());
     let args: Vec<_> = prost.args.iter().map(expr_build_from_prost).try_collect()?;
     let [list]: [_; 1] = args.try_into().unwrap();

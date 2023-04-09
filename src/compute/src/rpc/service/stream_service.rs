@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 use itertools::Itertools;
 use risingwave_common::error::tonic_err;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
@@ -26,7 +26,7 @@ use risingwave_storage::dispatch_state_store;
 use risingwave_stream::error::StreamError;
 use risingwave_stream::executor::Barrier;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
-use tonic::{Request, Response, Status};
+use tonic::{Code, Request, Response, Status};
 
 #[derive(Clone)]
 pub struct StreamServiceImpl {
@@ -48,10 +48,7 @@ impl StreamService for StreamServiceImpl {
         request: Request<UpdateActorsRequest>,
     ) -> std::result::Result<Response<UpdateActorsResponse>, Status> {
         let req = request.into_inner();
-        let res = self
-            .mgr
-            .update_actors(&req.actors, &req.hanging_channels)
-            .await;
+        let res = self.mgr.update_actors(&req.actors).await;
         match res {
             Err(e) => {
                 error!("failed to update stream actor {}", e);
@@ -111,7 +108,7 @@ impl StreamService for StreamServiceImpl {
     ) -> std::result::Result<Response<DropActorsResponse>, Status> {
         let req = request.into_inner();
         let actors = req.actor_ids;
-        self.mgr.drop_actor(&actors).await?;
+        self.mgr.drop_actors(&actors).await?;
         Ok(Response::new(DropActorsResponse {
             request_id: req.request_id,
             status: None,
@@ -125,7 +122,7 @@ impl StreamService for StreamServiceImpl {
     ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
         let req = request.into_inner();
         self.mgr.stop_all_actors().await?;
-        self.env.source_manager().clear_sources();
+        self.env.dml_manager_ref().clear();
         Ok(Response::new(ForceStopActorsResponse {
             request_id: req.request_id,
             status: None,
@@ -140,6 +137,28 @@ impl StreamService for StreamServiceImpl {
         let req = request.into_inner();
         let barrier =
             Barrier::from_protobuf(req.get_barrier().unwrap()).map_err(StreamError::from)?;
+
+        // The barrier might be outdated and been injected after recovery in some certain extreme
+        // scenarios. So some newly creating actors in the barrier are possibly not rebuilt during
+        // recovery. Check it here and return an error here if some actors are not found to
+        // avoid collection hang. We need some refine in meta side to remove this workaround since
+        // it will cause another round of unnecessary recovery.
+        let actor_ids = self.mgr.all_actor_ids().await;
+        let missing_actor_ids = req
+            .actor_ids_to_collect
+            .iter()
+            .filter(|id| !actor_ids.contains(id))
+            .collect_vec();
+        if !missing_actor_ids.is_empty() {
+            tracing::warn!(
+                "to collect actors not found, they should be cleaned when recovering: {:?}",
+                missing_actor_ids
+            );
+            return Err(Status::new(
+                Code::InvalidArgument,
+                "to collect actors not found",
+            ));
+        }
 
         self.mgr
             .send_barrier(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)?;
@@ -159,14 +178,15 @@ impl StreamService for StreamServiceImpl {
         let (collect_result, checkpoint) = self
             .mgr
             .collect_barrier(req.prev_epoch)
-            .stack_trace(format!("collect_barrier (epoch {})", req.prev_epoch))
-            .await?;
+            .instrument_await(format!("collect_barrier (epoch {})", req.prev_epoch))
+            .await
+            .inspect_err(|err| tracing::error!("failed to collect barrier: {}", err))?;
         // Must finish syncing data written in the epoch before respond back to ensure persistence
         // of the state.
         let synced_sstables = if checkpoint {
             self.mgr
                 .sync_epoch(req.prev_epoch)
-                .stack_trace(format!("sync_epoch (epoch {})", req.prev_epoch))
+                .instrument_await(format!("sync_epoch (epoch {})", req.prev_epoch))
                 .await?
         } else {
             vec![]
@@ -207,7 +227,7 @@ impl StreamService for StreamServiceImpl {
 
             store
                 .try_wait_epoch(HummockReadEpoch::Committed(epoch))
-                .stack_trace(format!("wait_epoch_commit (epoch {})", epoch))
+                .instrument_await(format!("wait_epoch_commit (epoch {})", epoch))
                 .await
                 .map_err(tonic_err)?;
         });

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,6 +23,8 @@ use crate::error::RwError;
 #[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
 pub enum QueryMode {
     #[default]
+    Auto,
+
     Local,
 
     Distributed,
@@ -51,6 +53,8 @@ impl TryFrom<&[&str]> for QueryMode {
             Ok(Self::Local)
         } else if s.eq_ignore_ascii_case("distributed") {
             Ok(Self::Distributed)
+        } else if s.eq_ignore_ascii_case("auto") {
+            Ok(Self::Auto)
         } else {
             Err(InvalidConfigValue {
                 config_entry: Self::entry_name().to_string(),
@@ -63,6 +67,7 @@ impl TryFrom<&[&str]> for QueryMode {
 impl std::fmt::Display for QueryMode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Auto => write!(f, "auto"),
             Self::Local => write!(f, "local"),
             Self::Distributed => write!(f, "distributed"),
         }
@@ -75,6 +80,14 @@ mod tests {
 
     #[test]
     fn parse_query_mode() {
+        assert_eq!(
+            QueryMode::try_from(["auto"].as_slice()).unwrap(),
+            QueryMode::Auto
+        );
+        assert_eq!(
+            QueryMode::try_from(["Auto"].as_slice()).unwrap(),
+            QueryMode::Auto
+        );
         assert_eq!(
             QueryMode::try_from(["local"].as_slice()).unwrap(),
             QueryMode::Local

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,6 +20,7 @@ use risingwave_common::array::{ArrayBuilder, DataChunk, I64ArrayBuilder};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::table_function::ProjectSetSelectItem;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -72,11 +73,12 @@ impl ProjectSetExecutor {
                 .map(|ty| ty.create_array_builder(self.chunk_size))
                 .collect_vec();
 
-            let results: Vec<_> = self
-                .select_list
-                .iter()
-                .map(|select_item| select_item.eval(&data_chunk))
-                .try_collect()?;
+            let mut results = Vec::with_capacity(self.select_list.len());
+
+            for select_item in &self.select_list {
+                let result = select_item.eval(&data_chunk).await?;
+                results.push(result);
+            }
 
             let mut lens = results
                 .iter()
@@ -108,7 +110,7 @@ impl ProjectSetExecutor {
                     projected_row_id_builder.append(Some(i as i64));
                 }
 
-                for (item, builder) in items.into_iter().zip_eq(builders.iter_mut()) {
+                for (item, builder) in items.into_iter().zip_eq_fast(builders.iter_mut()) {
                     match item {
                         Either::Left(array_ref) => {
                             builder.append_array(&array_ref);
@@ -158,7 +160,7 @@ impl BoxedExecutorBuilder for ProjectSetExecutor {
             .map(|proto| {
                 ProjectSetSelectItem::from_prost(
                     proto,
-                    source.context.get_config().developer.batch_chunk_size,
+                    source.context.get_config().developer.chunk_size,
                 )
             })
             .try_collect()?;
@@ -175,7 +177,7 @@ impl BoxedExecutorBuilder for ProjectSetExecutor {
             child,
             schema: Schema { fields },
             identity: source.plan_node().get_identity().clone(),
-            chunk_size: source.context.get_config().developer.batch_chunk_size,
+            chunk_size: source.context.get_config().developer.chunk_size,
         }))
     }
 }

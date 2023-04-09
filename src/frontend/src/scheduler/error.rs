@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::session_config::QueryMode;
 use risingwave_rpc_client::error::RpcError;
 use thiserror::Error;
 use tonic::{Code, Status};
@@ -33,9 +34,15 @@ pub enum SchedulerError {
     #[error("{0}")]
     TaskExecutionError(String),
 
+    #[error("Task got killed because compute node running out of memory")]
+    TaskRunningOutOfMemory,
+
     /// Used when receive cancel request (ctrl-c) from user.
     #[error("Canceled by user")]
     QueryCancelError,
+
+    #[error("Reject query: the {0} query number reaches the limit: {1}")]
+    QueryReachLimit(QueryMode, u64),
 
     #[error(transparent)]
     Internal(#[from] anyhow::Error),

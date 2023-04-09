@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -88,11 +88,7 @@ impl<'a, S: StateStoreWrite> WriteBatch<'a, S> {
     }
 
     /// Preprocesses the batch to make it sorted. It returns `false` if duplicate keys are found.
-    pub fn preprocess(&mut self) -> StorageResult<()> {
-        if self.is_empty() {
-            return Ok(());
-        }
-
+    fn preprocess(&mut self) -> StorageResult<()> {
         let original_length = self.batch.len();
         self.batch.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
         self.batch.dedup_by(|(k1, _), (k2, _)| k1 == k2);
@@ -106,15 +102,17 @@ impl<'a, S: StateStoreWrite> WriteBatch<'a, S> {
 
     /// Returns `true` if the batch contains no key-value pairs.
     pub fn is_empty(&self) -> bool {
-        self.batch.is_empty()
+        self.batch.is_empty() && self.delete_ranges.is_empty()
     }
 
     /// Ingests this batch into the associated state store.
     pub async fn ingest(mut self) -> StorageResult<()> {
-        self.preprocess()?;
-        self.store
-            .ingest_batch(self.batch, self.delete_ranges, self.write_options)
-            .await?;
+        if !self.is_empty() {
+            self.preprocess()?;
+            self.store
+                .ingest_batch(self.batch, self.delete_ranges, self.write_options)
+                .await?;
+        }
         Ok(())
     }
 

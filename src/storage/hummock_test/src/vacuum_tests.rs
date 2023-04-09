@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -32,12 +32,12 @@ use risingwave_storage::hummock::vacuum::Vacuum;
 async fn test_vacuum() {
     let sstable_store = mock_sstable_store();
     // Put some SSTs to object store
-    let sst_ids = (1..10).collect_vec();
+    let object_ids = (1..10).collect_vec();
     let mut sstables = vec![];
-    for sstable_id in &sst_ids {
+    for sstable_object_id in &object_ids {
         let sstable = gen_default_test_sstable(
             default_builder_opt_for_test(),
-            *sstable_id,
+            *sstable_object_id,
             sstable_store.clone(),
         )
         .await;
@@ -48,7 +48,7 @@ async fn test_vacuum() {
     // OK.
     let nonexistent_id = 11u64;
     let vacuum_task = VacuumTask {
-        sstable_ids: sst_ids
+        sstable_object_ids: object_ids
             .into_iter()
             .chain(iter::once(nonexistent_id))
             .collect_vec(),

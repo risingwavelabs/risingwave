@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -25,15 +25,14 @@ mod key_cmp;
 extern crate num_derive;
 
 use std::cmp::Ordering;
-use std::ops::Deref;
 
 pub use key_cmp::*;
+use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::SstableInfo;
 
 use crate::compaction_group::StaticCompactionGroupId;
-use crate::key::user_key;
 use crate::key_range::KeyRangeCommon;
-use crate::table_stats::{to_prost_table_stats_map, ProstTableStatsMap, TableStatsMap};
+use crate::table_stats::{to_prost_table_stats_map, PbTableStatsMap, TableStatsMap};
 
 pub mod compact;
 pub mod compaction_group;
@@ -43,6 +42,7 @@ pub mod key_range;
 pub mod prost_key_range;
 pub mod table_stats;
 
+pub type HummockSstableObjectId = u64;
 pub type HummockSstableId = u64;
 pub type HummockRefCount = u64;
 pub type HummockVersionId = u64;
@@ -52,9 +52,35 @@ pub type HummockCompactionTaskId = u64;
 pub type CompactionGroupId = u64;
 pub const INVALID_VERSION_ID: HummockVersionId = 0;
 pub const FIRST_VERSION_ID: HummockVersionId = 1;
+pub const SPLIT_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 1u64 << 56;
+pub const SINGLE_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 2u64 << 56;
+pub const OBJECT_SUFFIX: &str = "data";
 
-pub const LOCAL_SST_ID_MASK: HummockSstableId = 1 << (HummockSstableId::BITS - 1);
-pub const REMOTE_SST_ID_MASK: HummockSstableId = !LOCAL_SST_ID_MASK;
+#[macro_export]
+/// This is wrapper for `info` log.
+///
+/// In our CI tests, we frequently create and drop tables, and checkpoint in all barriers, which may
+/// cause many events. However, these events are not expected to be frequent in production usage, so
+/// we print an info log for every these events. But these events are frequent in CI, and produce
+/// many logs in CI, and we may want to downgrade the log level of these event log to debug.
+/// Therefore, we provide this macro to wrap the `info` log, which will produce `info` log when
+/// `debug_assertions` is not enabled, and `debug` log when `debug_assertions` is enabled.
+macro_rules! info_in_release {
+    ($($arg:tt)*) => {
+        {
+            #[cfg(debug_assertions)]
+            {
+                use tracing::debug;
+                debug!($($arg)*);
+            }
+            #[cfg(not(debug_assertions))]
+            {
+                use tracing::info;
+                info!($($arg)*);
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct LocalSstableInfo {
@@ -108,14 +134,14 @@ impl LocalSstableInfo {
 pub struct ExtendedSstableInfo {
     pub compaction_group_id: CompactionGroupId,
     pub sst_info: SstableInfo,
-    pub table_stats: ProstTableStatsMap,
+    pub table_stats: PbTableStatsMap,
 }
 
 impl ExtendedSstableInfo {
     pub fn new(
         compaction_group_id: CompactionGroupId,
         sst_info: SstableInfo,
-        table_stats: ProstTableStatsMap,
+        table_stats: PbTableStatsMap,
     ) -> Self {
         Self {
             compaction_group_id,
@@ -128,7 +154,7 @@ impl ExtendedSstableInfo {
         compaction_group_id: CompactionGroupId,
         sst_info: SstableInfo,
     ) -> Self {
-        Self::new(compaction_group_id, sst_info, ProstTableStatsMap::default())
+        Self::new(compaction_group_id, sst_info, PbTableStatsMap::default())
     }
 }
 
@@ -148,20 +174,8 @@ impl PartialEq for LocalSstableInfo {
     }
 }
 
-pub fn get_remote_sst_id(id: HummockSstableId) -> HummockSstableId {
-    id & REMOTE_SST_ID_MASK
-}
-
-pub fn get_local_sst_id(id: HummockSstableId) -> HummockSstableId {
-    id | LOCAL_SST_ID_MASK
-}
-
-pub fn is_remote_sst_id(id: HummockSstableId) -> bool {
-    id & LOCAL_SST_ID_MASK == 0
-}
-
 /// Package read epoch of hummock, it be used for `wait_epoch`
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum HummockReadEpoch {
     /// We need to wait the `max_committed_epoch`
     Committed(HummockEpoch),
@@ -169,6 +183,24 @@ pub enum HummockReadEpoch {
     Current(HummockEpoch),
     /// We don't need to wait epoch, we usually do stream reading with it.
     NoWait(HummockEpoch),
+    /// We don't need to wait epoch.
+    Backup(HummockEpoch),
+}
+
+impl From<BatchQueryEpoch> for HummockReadEpoch {
+    fn from(e: BatchQueryEpoch) -> Self {
+        match e.epoch.unwrap() {
+            batch_query_epoch::Epoch::Committed(epoch) => HummockReadEpoch::Committed(epoch),
+            batch_query_epoch::Epoch::Current(epoch) => HummockReadEpoch::Current(epoch),
+            batch_query_epoch::Epoch::Backup(epoch) => HummockReadEpoch::Backup(epoch),
+        }
+    }
+}
+
+pub fn to_committed_batch_query_epoch(epoch: u64) -> BatchQueryEpoch {
+    BatchQueryEpoch {
+        epoch: Some(batch_query_epoch::Epoch::Committed(epoch)),
+    }
 }
 
 impl HummockReadEpoch {
@@ -177,22 +209,23 @@ impl HummockReadEpoch {
             HummockReadEpoch::Committed(epoch) => epoch,
             HummockReadEpoch::Current(epoch) => epoch,
             HummockReadEpoch::NoWait(epoch) => epoch,
+            HummockReadEpoch::Backup(epoch) => epoch,
         }
     }
 }
-pub struct SstIdRange {
+pub struct SstObjectIdRange {
     // inclusive
-    pub start_id: HummockSstableId,
+    pub start_id: HummockSstableObjectId,
     // exclusive
-    pub end_id: HummockSstableId,
+    pub end_id: HummockSstableObjectId,
 }
 
-impl SstIdRange {
-    pub fn new(start_id: HummockSstableId, end_id: HummockSstableId) -> Self {
+impl SstObjectIdRange {
+    pub fn new(start_id: HummockSstableObjectId, end_id: HummockSstableObjectId) -> Self {
         Self { start_id, end_id }
     }
 
-    pub fn peek_next_sst_id(&self) -> Option<HummockSstableId> {
+    pub fn peek_next_sst_object_id(&self) -> Option<HummockSstableObjectId> {
         if self.start_id < self.end_id {
             return Some(self.start_id);
         }
@@ -200,14 +233,14 @@ impl SstIdRange {
     }
 
     /// Pops and returns next SST id.
-    pub fn get_next_sst_id(&mut self) -> Option<HummockSstableId> {
-        let next_id = self.peek_next_sst_id();
+    pub fn get_next_sst_object_id(&mut self) -> Option<HummockSstableObjectId> {
+        let next_id = self.peek_next_sst_object_id();
         self.start_id += 1;
         next_id
     }
 }
 
-pub fn can_concat(ssts: &[impl Deref<Target = SstableInfo>]) -> bool {
+pub fn can_concat(ssts: &[SstableInfo]) -> bool {
     let len = ssts.len();
     for i in 0..len - 1 {
         if ssts[i]
@@ -221,4 +254,15 @@ pub fn can_concat(ssts: &[impl Deref<Target = SstableInfo>]) -> bool {
         }
     }
     true
+}
+
+const CHECKPOINT_DIR: &str = "checkpoint";
+const CHECKPOINT_NAME: &str = "0";
+
+pub fn version_checkpoint_path(root_dir: &str) -> String {
+    format!("{}/{}/{}", root_dir, CHECKPOINT_DIR, CHECKPOINT_NAME)
+}
+
+pub fn version_checkpoint_dir(checkpoint_path: &str) -> String {
+    checkpoint_path.trim_end_matches(|c| c != '/').to_string()
 }

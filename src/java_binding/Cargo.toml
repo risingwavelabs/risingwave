@@ -1,0 +1,42 @@
+[package]
+name = "risingwave_java_binding"
+version = "0.1.0"
+edition = "2021"
+
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
+[dependencies]
+bytes = "1"
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
+itertools = "0.10"
+jni = "0.20.0"
+once_cell = "1"
+prost = "0.11"
+risingwave_common = { path = "../common" }
+risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
+risingwave_object_store = { path = "../object_store" }
+risingwave_pb = { path = "../prost" }
+risingwave_storage = { path = "../storage" }
+thiserror = "1"
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "fs",
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+] }
+tracing = "0.1"
+
+[lib]
+crate_type = ["cdylib"]
+
+[[bin]]
+name = "data-chunk-payload-generator"
+test = false
+bench = false

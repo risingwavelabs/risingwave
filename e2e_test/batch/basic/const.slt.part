@@ -36,4 +36,3 @@ select 42 having 2 > 1;
 query I
 select 42 having 2 < 1;
 ----
-

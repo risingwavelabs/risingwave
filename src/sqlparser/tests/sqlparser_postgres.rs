@@ -2,7 +2,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -48,7 +48,7 @@ fn parse_create_table_with_defaults() {
                 vec![
                     ColumnDef::new(
                         "customer_id".into(),
-                        DataType::Int(None),
+                        DataType::Int,
                         None,
                         vec![ColumnOptionDef {
                             name: None,
@@ -59,7 +59,7 @@ fn parse_create_table_with_defaults() {
                     ),
                     ColumnDef::new(
                         "store_id".into(),
-                        DataType::SmallInt(None),
+                        DataType::SmallInt,
                         None,
                         vec![ColumnOptionDef {
                             name: None,
@@ -78,7 +78,7 @@ fn parse_create_table_with_defaults() {
                     ColumnDef::new(
                         "last_name".into(),
                         DataType::Varchar,
-                        Some(ObjectName(vec![Ident::with_quote('"', "es_ES")])),
+                        Some(ObjectName(vec![Ident::with_quote_unchecked('"', "es_ES")])),
                         vec![ColumnOptionDef {
                             name: None,
                             option: ColumnOption::NotNull,
@@ -87,7 +87,7 @@ fn parse_create_table_with_defaults() {
                     ColumnDef::new("email".into(), DataType::Varchar, None, vec![],),
                     ColumnDef::new(
                         "address_id".into(),
-                        DataType::SmallInt(None),
+                        DataType::SmallInt,
                         None,
                         vec![ColumnOptionDef {
                             name: None,
@@ -141,7 +141,7 @@ fn parse_create_table_with_defaults() {
                     ),
                     ColumnDef::new(
                         "active".into(),
-                        DataType::Int(None),
+                        DataType::Int,
                         None,
                         vec![ColumnOptionDef {
                             name: None,
@@ -307,29 +307,27 @@ fn parse_create_table_if_not_exists() {
 
 #[test]
 fn parse_bad_if_not_exists() {
-    let res = parse_sql_statements("CREATE TABLE NOT EXISTS uk_cities ()");
-    assert_eq!(
-        ParserError::ParserError("Expected end of statement, found: EXISTS".to_string()),
-        res.unwrap_err()
-    );
-
-    let res = parse_sql_statements("CREATE TABLE IF EXISTS uk_cities ()");
-    assert_eq!(
-        ParserError::ParserError("Expected end of statement, found: EXISTS".to_string()),
-        res.unwrap_err()
-    );
-
-    let res = parse_sql_statements("CREATE TABLE IF uk_cities ()");
-    assert_eq!(
-        ParserError::ParserError("Expected end of statement, found: uk_cities".to_string()),
-        res.unwrap_err()
-    );
-
-    let res = parse_sql_statements("CREATE TABLE IF NOT uk_cities ()");
-    assert_eq!(
-        ParserError::ParserError("Expected end of statement, found: NOT".to_string()),
-        res.unwrap_err()
-    );
+    for (sql, err_msg) in [
+        (
+            "CREATE TABLE NOT EXISTS uk_cities ()",
+            "Expected end of statement, found: EXISTS",
+        ),
+        (
+            "CREATE TABLE IF EXISTS uk_cities ()",
+            "Expected end of statement, found: EXISTS",
+        ),
+        (
+            "CREATE TABLE IF uk_cities ()",
+            "Expected end of statement, found: uk_cities",
+        ),
+        (
+            "CREATE TABLE IF NOT uk_cities ()",
+            "Expected end of statement, found: NOT",
+        ),
+    ] {
+        let res = parse_sql_statements(sql);
+        assert!(format!("{}", res.unwrap_err()).contains(err_msg));
+    }
 }
 
 #[test]
@@ -422,7 +420,7 @@ fn parse_set() {
         Statement::SetVariable {
             local: false,
             variable: "a".into(),
-            value: vec![SetVariableValue::Ident("DEFAULT".into())],
+            value: vec![SetVariableValue::Default],
         }
     );
 
@@ -438,27 +436,14 @@ fn parse_set() {
 
     one_statement_parses_to("SET a TO b", "SET a = b");
     one_statement_parses_to("SET SESSION a = b", "SET a = b");
-
-    assert_eq!(
-        parse_sql_statements("SET"),
-        Err(ParserError::ParserError(
-            "Expected identifier, found: EOF".to_string()
-        )),
-    );
-
-    assert_eq!(
-        parse_sql_statements("SET a b"),
-        Err(ParserError::ParserError(
-            "Expected equals sign or TO, found: b".to_string()
-        )),
-    );
-
-    assert_eq!(
-        parse_sql_statements("SET a ="),
-        Err(ParserError::ParserError(
-            "Expected variable value, found: EOF".to_string()
-        )),
-    );
+    for (sql, err_msg) in [
+        ("SET", "Expected identifier, found: EOF"),
+        ("SET a b", "Expected equals sign or TO, found: b"),
+        ("SET a =", "Expected variable value, found: EOF"),
+    ] {
+        let res = parse_sql_statements(sql);
+        assert!(format!("{}", res.unwrap_err()).contains(err_msg));
+    }
 }
 
 #[test]
@@ -593,7 +578,7 @@ fn parse_prepare() {
             ..
         } => {
             assert_eq!(name, "a".into());
-            assert_eq!(data_types, vec![DataType::Int(None), DataType::Text]);
+            assert_eq!(data_types, vec![DataType::Int, DataType::Text]);
 
             statement
         }
@@ -619,9 +604,9 @@ fn parse_pg_bitwise_binary_ops() {
         let select = verified_only_select(&format!("SELECT a {} b", &str_op));
         assert_eq!(
             SelectItem::UnnamedExpr(Expr::BinaryOp {
-                left: Box::new(Expr::Identifier(Ident::new("a"))),
+                left: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
                 op: op.clone(),
-                right: Box::new(Expr::Identifier(Ident::new("b"))),
+                right: Box::new(Expr::Identifier(Ident::new_unchecked("b"))),
             }),
             select.projection[0]
         );
@@ -643,7 +628,7 @@ fn parse_pg_unary_ops() {
         assert_eq!(
             SelectItem::UnnamedExpr(Expr::UnaryOp {
                 op: op.clone(),
-                expr: Box::new(Expr::Identifier(Ident::new("a"))),
+                expr: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
             }),
             select.projection[0]
         );
@@ -659,7 +644,7 @@ fn parse_pg_postfix_factorial() {
         assert_eq!(
             SelectItem::UnnamedExpr(Expr::UnaryOp {
                 op: op.clone(),
-                expr: Box::new(Expr::Identifier(Ident::new("a"))),
+                expr: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
             }),
             select.projection[0]
         );
@@ -758,22 +743,26 @@ fn parse_comments() {
 #[test]
 fn parse_create_function() {
     let sql =
-        "CREATE FUNCTION add(INT, INT) RETURNS INT AS 'select $1 + $2;' LANGUAGE SQL IMMUTABLE";
+        "CREATE FUNCTION add(INT, INT) RETURNS INT LANGUAGE SQL IMMUTABLE AS 'select $1 + $2;'";
     assert_eq!(
         verified_stmt(sql),
         Statement::CreateFunction {
             or_replace: false,
-            name: ObjectName(vec![Ident::new("add")]),
+            temporary: false,
+            name: ObjectName(vec![Ident::new_unchecked("add")]),
             args: Some(vec![
-                CreateFunctionArg::unnamed(DataType::Int(None)),
-                CreateFunctionArg::unnamed(DataType::Int(None)),
+                OperateFunctionArg::unnamed(DataType::Int),
+                OperateFunctionArg::unnamed(DataType::Int),
             ]),
-            return_type: Some(DataType::Int(None)),
-            bodies: vec![
-                CreateFunctionBody::As("select $1 + $2;".into()),
-                CreateFunctionBody::Language("SQL".into()),
-                CreateFunctionBody::Behavior(FunctionBehavior::Immutable),
-            ],
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
+            params: CreateFunctionBody {
+                language: Some("SQL".into()),
+                behavior: Some(FunctionBehavior::Immutable),
+                as_: Some(FunctionDefinition::SingleQuotedDef(
+                    "select $1 + $2;".into()
+                )),
+                ..Default::default()
+            },
         }
     );
 
@@ -782,26 +771,432 @@ fn parse_create_function() {
         verified_stmt(sql),
         Statement::CreateFunction {
             or_replace: true,
-            name: ObjectName(vec![Ident::new("add")]),
+            temporary: false,
+            name: ObjectName(vec![Ident::new_unchecked("add")]),
             args: Some(vec![
-                CreateFunctionArg::with_name("a", DataType::Int(None)),
-                CreateFunctionArg {
+                OperateFunctionArg::with_name("a", DataType::Int),
+                OperateFunctionArg {
                     mode: Some(ArgMode::In),
                     name: Some("b".into()),
-                    data_type: DataType::Int(None),
+                    data_type: DataType::Int,
                     default_expr: Some(Expr::Value(Value::Number("1".into()))),
                 }
             ]),
-            return_type: Some(DataType::Int(None)),
-            bodies: vec![
-                CreateFunctionBody::Language("SQL".into()),
-                CreateFunctionBody::Behavior(FunctionBehavior::Immutable),
-                CreateFunctionBody::Return(Expr::BinaryOp {
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
+            params: CreateFunctionBody {
+                language: Some("SQL".into()),
+                behavior: Some(FunctionBehavior::Immutable),
+                return_: Some(Expr::BinaryOp {
                     left: Box::new(Expr::Identifier("a".into())),
                     op: BinaryOperator::Plus,
                     right: Box::new(Expr::Identifier("b".into())),
                 }),
-            ],
+                ..Default::default()
+            },
         }
     );
+
+    let sql = "CREATE FUNCTION unnest(a INT[]) RETURNS TABLE (x INT) LANGUAGE SQL RETURN a";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::CreateFunction {
+            or_replace: false,
+            temporary: false,
+            name: ObjectName(vec![Ident::new_unchecked("unnest")]),
+            args: Some(vec![OperateFunctionArg::with_name(
+                "a",
+                DataType::Array(Box::new(DataType::Int))
+            ),]),
+            returns: Some(CreateFunctionReturns::Table(vec![TableColumnDef {
+                name: Ident::new_unchecked("x"),
+                data_type: DataType::Int,
+            }])),
+            params: CreateFunctionBody {
+                language: Some("SQL".into()),
+                return_: Some(Expr::Identifier("a".into())),
+                ..Default::default()
+            },
+        }
+    );
+}
+
+#[test]
+fn parse_drop_function() {
+    let sql = "DROP FUNCTION IF EXISTS test_func";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::DropFunction {
+            if_exists: true,
+            func_desc: vec![DropFunctionDesc {
+                name: ObjectName(vec![Ident::new_unchecked("test_func")]),
+                args: None
+            }],
+            option: None
+        }
+    );
+
+    let sql = "DROP FUNCTION IF EXISTS test_func(a INT, IN b INT = 1)";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::DropFunction {
+            if_exists: true,
+            func_desc: vec![DropFunctionDesc {
+                name: ObjectName(vec![Ident::new_unchecked("test_func")]),
+                args: Some(vec![
+                    OperateFunctionArg::with_name("a", DataType::Int),
+                    OperateFunctionArg {
+                        mode: Some(ArgMode::In),
+                        name: Some("b".into()),
+                        data_type: DataType::Int,
+                        default_expr: Some(Expr::Value(Value::Number("1".into()))),
+                    }
+                ]),
+            }],
+            option: None
+        }
+    );
+
+    let sql = "DROP FUNCTION IF EXISTS test_func1(a INT, IN b INT = 1), test_func2(a CHARACTER VARYING, IN b INT = 1)";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::DropFunction {
+            if_exists: true,
+            func_desc: vec![
+                DropFunctionDesc {
+                    name: ObjectName(vec![Ident::new_unchecked("test_func1")]),
+                    args: Some(vec![
+                        OperateFunctionArg::with_name("a", DataType::Int),
+                        OperateFunctionArg {
+                            mode: Some(ArgMode::In),
+                            name: Some("b".into()),
+                            data_type: DataType::Int,
+                            default_expr: Some(Expr::Value(Value::Number("1".into()))),
+                        }
+                    ]),
+                },
+                DropFunctionDesc {
+                    name: ObjectName(vec![Ident::new_unchecked("test_func2")]),
+                    args: Some(vec![
+                        OperateFunctionArg::with_name("a", DataType::Varchar),
+                        OperateFunctionArg {
+                            mode: Some(ArgMode::In),
+                            name: Some("b".into()),
+                            data_type: DataType::Int,
+                            default_expr: Some(Expr::Value(Value::Number("1".into()))),
+                        }
+                    ]),
+                }
+            ],
+            option: None
+        }
+    );
+}
+
+#[test]
+fn parse_array() {
+    let sql = "SELECT ARRAY[ARRAY[1, 2], ARRAY[3, 4]]";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::Query(Box::new(Query {
+            with: None,
+            body: SetExpr::Select(Box::new(Select {
+                distinct: Distinct::All,
+                projection: vec![SelectItem::UnnamedExpr(Expr::Array(Array {
+                    elem: vec![
+                        Expr::Array(Array {
+                            elem: vec![
+                                Expr::Value(Value::Number(String::from("1"))),
+                                Expr::Value(Value::Number(String::from("2")))
+                            ],
+                            named: true
+                        }),
+                        Expr::Array(Array {
+                            elem: vec![
+                                Expr::Value(Value::Number(String::from("3"))),
+                                Expr::Value(Value::Number(String::from("4"))),
+                            ],
+                            named: true
+                        }),
+                    ],
+                    named: true
+                }))],
+                from: vec![],
+                lateral_views: vec![],
+                selection: None,
+                group_by: vec![],
+                having: None
+            })),
+            order_by: vec![],
+            limit: None,
+            offset: None,
+            fetch: None
+        }))
+    );
+
+    let sql = "SELECT ARRAY[[1, 2], [3, 4]]";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::Query(Box::new(Query {
+            with: None,
+            body: SetExpr::Select(Box::new(Select {
+                distinct: Distinct::All,
+                projection: vec![SelectItem::UnnamedExpr(Expr::Array(Array {
+                    elem: vec![
+                        Expr::Array(Array {
+                            elem: vec![
+                                Expr::Value(Value::Number(String::from("1"))),
+                                Expr::Value(Value::Number(String::from("2")))
+                            ],
+                            named: false
+                        }),
+                        Expr::Array(Array {
+                            elem: vec![
+                                Expr::Value(Value::Number(String::from("3"))),
+                                Expr::Value(Value::Number(String::from("4"))),
+                            ],
+                            named: false
+                        }),
+                    ],
+                    named: true
+                }))],
+                from: vec![],
+                lateral_views: vec![],
+                selection: None,
+                group_by: vec![],
+                having: None
+            })),
+            order_by: vec![],
+            limit: None,
+            offset: None,
+            fetch: None
+        }))
+    );
+
+    let sql = "SELECT ARRAY[ARRAY[ARRAY[1, 2]], ARRAY[[3, 4]]]";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::Query(Box::new(Query {
+            with: None,
+            body: SetExpr::Select(Box::new(Select {
+                distinct: Distinct::All,
+                projection: vec![SelectItem::UnnamedExpr(Expr::Array(Array {
+                    elem: vec![
+                        Expr::Array(Array {
+                            elem: vec![Expr::Array(Array {
+                                elem: vec![
+                                    Expr::Value(Value::Number(String::from("1"))),
+                                    Expr::Value(Value::Number(String::from("2")))
+                                ],
+                                named: true
+                            })],
+                            named: true
+                        }),
+                        Expr::Array(Array {
+                            elem: vec![Expr::Array(Array {
+                                elem: vec![
+                                    Expr::Value(Value::Number(String::from("3"))),
+                                    Expr::Value(Value::Number(String::from("4")))
+                                ],
+                                named: false
+                            })],
+                            named: true
+                        }),
+                    ],
+                    named: true
+                }))],
+                from: vec![],
+                lateral_views: vec![],
+                selection: None,
+                group_by: vec![],
+                having: None
+            })),
+            order_by: vec![],
+            limit: None,
+            offset: None,
+            fetch: None
+        }))
+    );
+
+    let sql = "SELECT ARRAY[ARRAY[1, 2], [3, 4]]";
+    assert_eq!(
+        parse_sql_statements(sql),
+        Err(ParserError::ParserError(
+            "syntax error at or near '[ at line:1, column:28'".to_string()
+        ))
+    );
+
+    let sql = "SELECT ARRAY[ARRAY[], []]";
+    assert_eq!(
+        parse_sql_statements(sql),
+        Err(ParserError::ParserError(
+            "syntax error at or near '[ at line:1, column:24'".to_string()
+        ))
+    );
+
+    let sql = "SELECT ARRAY[[1, 2], ARRAY[3, 4]]";
+    assert_eq!(
+        parse_sql_statements(sql),
+        Err(ParserError::ParserError(
+            "syntax error at or near 'ARRAY at line:1, column:27'".to_string()
+        ))
+    );
+
+    let sql = "SELECT ARRAY[[], ARRAY[]]";
+    assert_eq!(
+        parse_sql_statements(sql),
+        Err(ParserError::ParserError(
+            "syntax error at or near 'ARRAY at line:1, column:23'".to_string()
+        ))
+    );
+
+    let sql = "SELECT [[1, 2], [3, 4]]";
+    let res = parse_sql_statements(sql);
+    let err_msg = "Expected an expression:, found: [";
+    assert!(format!("{}", res.unwrap_err()).contains(err_msg));
+}
+
+#[test]
+fn parse_param_symbol() {
+    let select = verified_only_select("SELECT $1");
+    assert_eq!(
+        SelectItem::UnnamedExpr(Expr::Parameter { index: 1 }),
+        select.projection[0]
+    );
+
+    let select = verified_only_select("SELECT *, $2 FROM t WHERE a = $1");
+    assert_eq!(
+        Expr::BinaryOp {
+            left: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
+            op: BinaryOperator::Eq,
+            right: Box::new(Expr::Parameter { index: 1 })
+        },
+        select.selection.unwrap()
+    );
+    assert_eq!(
+        SelectItem::UnnamedExpr(Expr::Parameter { index: 2 }),
+        select.projection[1]
+    );
+
+    let select = verified_only_select("SELECT CAST($4096 AS INT)");
+    assert_eq!(
+        SelectItem::UnnamedExpr(Expr::Cast {
+            expr: Box::new(Expr::Parameter { index: 4096 }),
+            data_type: DataType::Int
+        }),
+        select.projection[0]
+    );
+
+    let select = verified_only_select("SELECT * FROM t WHERE a = CAST($1024 AS BIGINT)");
+    assert_eq!(
+        Expr::BinaryOp {
+            left: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
+            op: BinaryOperator::Eq,
+            right: Box::new(Expr::Cast {
+                expr: Box::new(Expr::Parameter { index: 1024 }),
+                data_type: DataType::BigInt
+            })
+        },
+        select.selection.unwrap()
+    );
+
+    let query = verified_query("VALUES ($1)");
+    if let SetExpr::Values(values) = query.body {
+        assert_eq!(values.0[0][0], Expr::Parameter { index: 1 });
+    }
+}
+
+#[test]
+fn parse_dollar_quoted_string() {
+    let sql = "SELECT $$hello$$, $tag_name$world$tag_name$, $$Foo$Bar$$, $$Foo$Bar$$col_name, $$$$, $tag_name$$tag_name$";
+
+    let stmt = parse_sql_statements(sql).unwrap();
+
+    let projection = match stmt.get(0).unwrap() {
+        Statement::Query(query) => match &query.body {
+            SetExpr::Select(select) => &select.projection,
+            _ => unreachable!(),
+        },
+        _ => unreachable!(),
+    };
+
+    assert_eq!(
+        &Expr::Value(Value::DollarQuotedString(DollarQuotedString {
+            tag: None,
+            value: "hello".into()
+        })),
+        expr_from_projection(&projection[0])
+    );
+
+    assert_eq!(
+        &Expr::Value(Value::DollarQuotedString(DollarQuotedString {
+            tag: Some("tag_name".into()),
+            value: "world".into()
+        })),
+        expr_from_projection(&projection[1])
+    );
+
+    assert_eq!(
+        &Expr::Value(Value::DollarQuotedString(DollarQuotedString {
+            tag: None,
+            value: "Foo$Bar".into()
+        })),
+        expr_from_projection(&projection[2])
+    );
+
+    assert_eq!(
+        projection[3],
+        SelectItem::ExprWithAlias {
+            expr: Expr::Value(Value::DollarQuotedString(DollarQuotedString {
+                tag: None,
+                value: "Foo$Bar".into(),
+            })),
+            alias: Ident::new_unchecked("col_name"),
+        }
+    );
+
+    assert_eq!(
+        expr_from_projection(&projection[4]),
+        &Expr::Value(Value::DollarQuotedString(DollarQuotedString {
+            tag: None,
+            value: "".into()
+        })),
+    );
+
+    assert_eq!(
+        expr_from_projection(&projection[5]),
+        &Expr::Value(Value::DollarQuotedString(DollarQuotedString {
+            tag: Some("tag_name".into()),
+            value: "".into()
+        })),
+    );
+}
+
+#[test]
+fn parse_incorrect_dollar_quoted_string() {
+    let sql = "SELECT $x$hello$$";
+    assert!(parse_sql_statements(sql).is_err());
+
+    let sql = "SELECT $hello$$";
+    assert!(parse_sql_statements(sql).is_err());
+
+    let sql = "SELECT $$$";
+    assert!(parse_sql_statements(sql).is_err());
+}
+
+#[test]
+fn parse_incorrect_single_quoted_string_as_alias() {
+    let sql = "SELECT x FROM t 't1'";
+    assert!(parse_sql_statements(sql).is_err());
+
+    let sql = "SELECT x 'x1‘ FROM t";
+    assert!(parse_sql_statements(sql).is_err());
+}
+
+#[test]
+fn parse_double_quoted_string_as_alias() {
+    let sql = "SELECT x FROM t \"t1\"";
+    assert!(parse_sql_statements(sql).is_ok());
+
+    let sql = "SELECT x \"x1\" FROM t";
+    assert!(parse_sql_statements(sql).is_ok());
 }

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -41,7 +41,6 @@
 //! Wrappers for total order on Floats.  See the [`OrderedFloat`] docs for details.
 
 use core::cmp::Ordering;
-use core::convert::TryFrom;
 use core::fmt;
 use core::hash::{Hash, Hasher};
 use core::iter::{Product, Sum};
@@ -55,7 +54,7 @@ use core::str::FromStr;
 pub use num_traits::Float;
 use num_traits::{
     AsPrimitive, Bounded, CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub,
-    FromPrimitive, Num, NumCast, One, Signed, ToPrimitive, Zero,
+    FromPrimitive, Num, NumCast, One, Pow, Signed, ToPrimitive, Zero,
 };
 
 // masks for the parts of the IEEE 754 float
@@ -389,6 +388,17 @@ impl_ordered_float_binop! {Sub, sub, SubAssign, sub_assign}
 impl_ordered_float_binop! {Mul, mul, MulAssign, mul_assign}
 impl_ordered_float_binop! {Div, div, DivAssign, div_assign}
 impl_ordered_float_binop! {Rem, rem, RemAssign, rem_assign}
+
+impl<T> Pow<OrderedFloat<T>> for OrderedFloat<T>
+where
+    T: Float,
+{
+    type Output = OrderedFloat<T>;
+
+    fn pow(self, rhs: Self) -> Self::Output {
+        OrderedFloat(self.0.powf(rhs.0))
+    }
+}
 
 impl<T> CheckedAdd for OrderedFloat<T>
 where
@@ -1062,24 +1072,6 @@ mod impl_as_primitive {
 
 mod impl_from {
     use super::*;
-
-    macro_rules! impl_try_from_for {
-        ($ty:ty) => {
-            impl<F> TryFrom<OrderedFloat<F>> for $ty
-            where
-                F: 'static + Float,
-                Self: TryFrom<F>,
-            {
-                type Error = <Self as TryFrom<F>>::Error;
-
-                fn try_from(value: OrderedFloat<F>) -> Result<Self, Self::Error> {
-                    TryFrom::try_from(value.0)
-                }
-            }
-        };
-    }
-
-    impl_try_from_for!(crate::types::Decimal);
 
     macro_rules! impl_from_for {
         ($ty:ty) => {

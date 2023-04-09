@@ -1,0 +1,31 @@
+# This is a test on error propagation of local mode. If we can not correctly handle the error report, it will hang up (#7324).
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+SET CREATE_COMPACTION_GROUP_FOR_MV TO true;
+
+statement ok
+CREATE TABLE INT2_TBL(f1 int2);
+
+statement ok
+INSERT INTO INT2_TBL(f1) VALUES ('0   ');
+
+statement ok
+INSERT INTO INT2_TBL(f1) VALUES ('  1234 ');
+
+statement ok
+INSERT INTO INT2_TBL(f1) VALUES ('    -1234');
+
+statement ok
+INSERT INTO INT2_TBL(f1) VALUES ('32767');
+
+statement ok
+INSERT INTO INT2_TBL(f1) VALUES ('-32767');
+
+statement error Numeric out of range
+SELECT i.f1, i.f1 * smallint '2' AS x FROM INT2_TBL i;
+
+statement ok
+drop table INT2_TBL;

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,11 +13,9 @@
 // limitations under the License.
 
 #![allow(rustdoc::private_intra_doc_links)]
-#![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(is_sorted)]
-#![feature(fn_traits)]
 #![feature(type_alias_impl_trait)]
 #![feature(test)]
 #![feature(trusted_len)]
@@ -29,7 +27,15 @@
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
 #![feature(let_chains)]
+#![feature(return_position_impl_trait_in_trait)]
+#![feature(portable_simd)]
+#![feature(array_chunks)]
+#![feature(inline_const_pat)]
+#![allow(incomplete_features)]
+#![feature(const_option_ext)]
 
+#[macro_use]
+pub mod jemalloc;
 #[macro_use]
 pub mod error;
 #[macro_use]
@@ -41,12 +47,15 @@ pub mod cache;
 pub mod catalog;
 pub mod collection;
 pub mod config;
+pub mod constants;
 pub mod field_generator;
 pub mod hash;
 pub mod monitor;
 pub mod row;
 pub mod session_config;
-#[cfg(test)]
+pub mod system_param;
+pub mod telemetry;
+
 pub mod test_utils;
 pub mod types;
 
@@ -54,3 +63,7 @@ pub mod test_prelude {
     pub use super::array::{DataChunkTestExt, StreamChunkTestExt};
     pub use super::catalog::test_utils::ColumnDescTestExt;
 }
+
+pub const RW_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub const GIT_SHA: &str = option_env!("GIT_SHA").unwrap_or("unknown");

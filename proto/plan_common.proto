@@ -2,8 +2,11 @@ syntax = "proto3";
 
 package plan_common;
 
+import "common.proto";
 import "data.proto";
+import "expr.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 // Field is a column in the streaming or batch plan.
@@ -24,6 +27,8 @@ message ColumnDesc {
   // For example, when the type is created from a protobuf schema file,
   // this field will store the message name.
   string type_name = 5;
+  // Optional description for the generated column.
+  GeneratedColumnDesc generated_column = 6;
 }
 
 message ColumnCatalog {
@@ -31,14 +36,22 @@ message ColumnCatalog {
   bool is_hidden = 2;
 }
 
+message GeneratedColumnDesc {
+  expr.ExprNode expr = 1;
+}
+
 message StorageTableDesc {
   uint32 table_id = 1;
   repeated ColumnDesc columns = 2;
   // TODO: may refactor primary key representations
-  repeated ColumnOrder pk = 3;
-  repeated uint32 dist_key_indices = 4;
+  repeated common.ColumnOrder pk = 3;
+  repeated uint32 dist_key_in_pk_indices = 4;
   uint32 retention_seconds = 5;
   repeated uint32 value_indices = 6;
+  uint32 read_prefix_len_hint = 7;
+  // Whether the table is versioned. If `true`, column-aware row encoding will be used
+  // to be compatible with schema changes.
+  bool versioned = 8;
 }
 
 enum JoinType {
@@ -55,18 +68,6 @@ enum JoinType {
   RIGHT_ANTI = 8;
 }
 
-enum OrderType {
-  ORDER_UNSPECIFIED = 0;
-  ASCENDING = 1;
-  DESCENDING = 2;
-}
-
-message ColumnOrder {
-  // maybe other name
-  OrderType order_type = 1;
-  uint32 index = 2;
-}
-
 enum RowFormatType {
   ROW_UNSPECIFIED = 0;
   JSON = 1;
@@ -75,4 +76,9 @@ enum RowFormatType {
   AVRO = 4;
   MAXWELL = 5;
   CANAL_JSON = 6;
+  CSV = 7;
+  NATIVE = 8;
+  DEBEZIUM_AVRO = 9;
+  UPSERT_JSON = 10;
+  UPSERT_AVRO = 11;
 }

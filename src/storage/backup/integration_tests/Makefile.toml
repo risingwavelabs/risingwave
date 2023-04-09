@@ -1,0 +1,18 @@
+[tasks.meta-backup-restore-test]
+category = "RiseDev - Test"
+dependencies = ["pre-start-dev"]
+description = "Run meta backup/restore test"
+condition = { env_set = [ "PREFIX_BIN", "PREFIX_DATA" ] }
+script = """
+#!/usr/bin/env bash
+set -e
+BUILD_BIN="$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}"
+test_root="src/storage/backup/integration_tests"
+BACKUP_TEST_BACKUP_RESTORE="${BUILD_BIN}/backup-restore" \
+BACKUP_TEST_MCLI="${PREFIX_BIN}/mcli" \
+BACKUP_TEST_MCLI_CONFIG="${PREFIX_CONFIG}/mcli" \
+BACKUP_TEST_RW_ALL_IN_ONE="${BUILD_BIN}/risingwave" \
+RW_HUMMOCK_URL="hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001" \
+RW_META_ADDR="http://127.0.0.1:5690" \
+bash "${test_root}/run_all.sh"
+"""

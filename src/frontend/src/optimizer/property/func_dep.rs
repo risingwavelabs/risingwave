@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -123,7 +123,7 @@ impl FunctionalDependency {
 /// [`FunctionalDependencySet`] contains the functional dependencies.
 ///
 /// It is used in optimizer to track the dependencies between columns.
-#[derive(Debug, PartialEq, Clone, Default)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Default)]
 pub struct FunctionalDependencySet {
     /// the number of columns
     column_count: usize,
@@ -297,7 +297,7 @@ impl FunctionalDependencySet {
         assert!(
             self.is_key_inner(&key),
             "{:?} is not a key!",
-            key.ones().into_iter().collect_vec()
+            key.ones().collect_vec()
         );
         let mut new_key = key.clone();
         for i in key.ones() {

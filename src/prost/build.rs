@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,25 +20,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed={}", proto_dir);
 
     let proto_files = vec![
+        "backup_service",
+        "batch_plan",
         "catalog",
         "common",
+        "compactor",
         "compute",
+        "connector_service",
         "data",
         "ddl_service",
         "expr",
-        "plan_common",
+        "health",
+        "hummock",
+        "java_binding",
         "meta",
-        "batch_plan",
-        "task_service",
-        "connector_service",
+        "monitor_service",
+        "plan_common",
+        "source",
         "stream_plan",
         "stream_service",
-        "compactor",
-        "hummock",
+        "task_service",
         "user",
-        "source",
-        "monitor_service",
-        "health",
     ];
     let protos: Vec<String> = proto_files
         .iter()
@@ -51,7 +53,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_build::configure()
         .file_descriptor_set_path(file_descriptor_set_path.as_path())
         .compile_well_known_types(true)
+        .protoc_arg("--experimental_allow_proto3_optional")
         .type_attribute(".", "#[derive(prost_helpers::AnyPB)]")
+        .type_attribute("node_body", "#[derive(::enum_as_inner::EnumAsInner)]")
+        .type_attribute("catalog.WatermarkDesc", "#[derive(Eq, Hash)]")
+        .type_attribute("expr.ExprNode", "#[derive(Eq, Hash)]")
+        .type_attribute("data.DataType", "#[derive(Eq, Hash)]")
+        .type_attribute("expr.ExprNode.rex_node", "#[derive(Eq, Hash)]")
+        .type_attribute("expr.InputRef", "#[derive(Eq, Hash)]")
+        .type_attribute("data.Datum", "#[derive(Eq, Hash)]")
+        .type_attribute("expr.FunctionCall", "#[derive(Eq, Hash)]")
+        .type_attribute("expr.UserDefinedFunction", "#[derive(Eq, Hash)]")
+        .type_attribute("catalog.StreamSourceInfo", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.GeneratedColumnDesc", "#[derive(Eq, Hash)]")
         .out_dir(out_dir.as_path())
         .compile(&protos, &[proto_dir.to_string()])
         .expect("Failed to compile grpc!");

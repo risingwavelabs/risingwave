@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
@@ -52,13 +53,17 @@ where
     async fn execute_inner(self, epoch: u64) {
         let iter = self
             .table
-            .batch_iter(HummockReadEpoch::Committed(epoch))
+            .batch_iter(
+                HummockReadEpoch::Committed(epoch),
+                false,
+                PrefetchOptions::new_for_exhaust_iter(),
+            )
             .await?;
         pin_mut!(iter);
 
         while let Some(data_chunk) = iter
             .collect_data_chunk(self.schema(), Some(self.batch_size))
-            .stack_trace("batch_query_executor_collect_chunk")
+            .instrument_await("batch_query_executor_collect_chunk")
             .await?
         {
             let ops = vec![Op::Insert; data_chunk.capacity()];

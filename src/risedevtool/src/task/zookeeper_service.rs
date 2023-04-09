@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -59,15 +59,15 @@ impl Task for ZooKeeperService {
             Path::new(&env::var("PREFIX_DATA")?).join(self.id())
         } else {
             let path = Path::new("/tmp/risedev").join(self.id());
-            std::fs::remove_dir_all(&path).ok();
+            fs_err::remove_dir_all(&path).ok();
             path
         };
-        std::fs::create_dir_all(&path)?;
+        fs_err::create_dir_all(&path)?;
 
         let config_path = Path::new(&prefix_config).join(format!("{}.properties", self.id()));
-        std::fs::write(
+        fs_err::write(
             &config_path,
-            &ZooKeeperGen.gen_server_properties(&self.config, &path.to_string_lossy()),
+            ZooKeeperGen.gen_server_properties(&self.config, &path.to_string_lossy()),
         )?;
 
         let mut cmd = self.zookeeper()?;

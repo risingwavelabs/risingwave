@@ -25,21 +25,21 @@ flush;
 query II rowsort
 select v1, v2 from t1;
 ----
-2 1
-1 2
-1 1
+1	1
+1	2
+2	1
 
 query II rowsort
 select v1, v2 from m1;
 ----
-1 2
-1 1
+1	1
+1	2
 
 query II rowsort
 select v1, v2 from m2;
 ----
-2 1
-1 1
+1	1
+2	1
 
 query II rowsort
 select sum_m1_v1, sum_m1_v2 from m3;
@@ -49,8 +49,8 @@ select sum_m1_v1, sum_m1_v2 from m3;
 query IIII rowsort
 select m1v1, m1v2, m2v1, m2v2 from m4;
 ----
-1 2 1 1
-1 1 1 1
+1	1	1	1
+1	2	1	1
 
 statement ok
 create materialized view m5 as select m1.v1 as m1v1, m1.v2 as m1v2, m2.v1 as m2v1, m2.v2 as m2v2 from m1 join m2 on m1.v1 = m2.v1;
@@ -58,8 +58,8 @@ create materialized view m5 as select m1.v1 as m1v1, m1.v2 as m1v2, m2.v1 as m2v
 query IIII rowsort
 select m1v1, m1v2, m2v1, m2v2 from m5;
 ----
-1 2 1 1
-1 1 1 1
+1	1	1	1
+1	2	1	1
 
 statement ok
 insert into t1 values (3,1),(1,3);
@@ -70,9 +70,9 @@ flush;
 query IIII rowsort
 select m1v1, m1v2, m2v1, m2v2 from m5;
 ----
-1 2 1 1
-1 1 1 1
-1 3 1 1
+1	1	1	1
+1	2	1	1
+1	3	1	1
 
 statement ok
 create materialized view m6 as select v2, v3, v1 from t2;
@@ -99,9 +99,9 @@ select v1, v2, v3 from t2;
 query III rowsort
 select v2, v3, v1 from m6;
 ----
-2 3 1
-5 6 1
-2 6 3
+2	3	1
+2	6	3
+5	6	1
 
 query II rowsort
 select sum_v1, avg_v3 from m7;
@@ -112,8 +112,8 @@ select sum_v1, avg_v3 from m7;
 query I rowsort
 select sum_v1 from m8;
 ----
-4
 1
+4
 
 statement ok
 create materialized view m9 as select * from t2;
@@ -131,8 +131,8 @@ select v1, v2, v3 from m9;
 query II rowsort
 select sum_v1, sum_v3 from m10;
 ----
-4 9
-1 6
+1	6
+4	9
 
 statement ok
 create table t3(v1 int, v2 int, v3 int);

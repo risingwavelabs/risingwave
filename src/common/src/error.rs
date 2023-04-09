@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,12 +13,14 @@
 // limitations under the License.
 
 use std::backtrace::Backtrace;
+use std::collections::HashSet;
 use std::convert::Infallible;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Error as IoError;
+use std::time::{Duration, SystemTime};
 
 use memcomparable::Error as MemComparableError;
-use risingwave_pb::ProstFieldNotFound;
+use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
 use tokio::task::JoinError;
 use tonic::Code;
@@ -28,6 +30,8 @@ use crate::util::value_encoding::error::ValueEncodingError;
 
 /// Header used to store serialized [`RwError`] in grpc status.
 pub const RW_ERROR_GRPC_HEADER: &str = "risingwave-error-bin";
+
+const ERROR_SUPPRESSOR_RESET_DURATION: Duration = Duration::from_millis(60 * 60 * 1000); // 1h
 
 pub trait Error = std::error::Error + Send + Sync + 'static;
 pub type BoxedError = Box<dyn Error>;
@@ -76,6 +80,9 @@ pub enum ErrorCode {
     ConnectorError(BoxedError),
     #[error("Feature is not yet implemented: {0}\n{1}")]
     NotImplemented(String, TrackingIssue),
+    // Tips: Use this only if it's intended to reject the query
+    #[error("Not supported: {0}\nHINT: {1}")]
+    NotSupported(String, String),
     #[error(transparent)]
     IoError(IoError),
     #[error("Storage error: {0}")]
@@ -125,16 +132,10 @@ pub enum ErrorCode {
     InvalidParameterValue(String),
     #[error("Sink error: {0}")]
     SinkError(BoxedError),
-
     #[error("Permission denied: {0}")]
     PermissionDenied(String),
-
     #[error("unrecognized configuration parameter \"{0}\"")]
     UnrecognizedConfigurationParameter(String),
-}
-
-pub fn internal_err(msg: impl Into<anyhow::Error>) -> RwError {
-    ErrorCode::InternalError(msg.into().to_string()).into()
 }
 
 pub fn internal_error(msg: impl Into<String>) -> RwError {
@@ -243,16 +244,14 @@ impl PartialEq for RwError {
 impl PartialEq for ErrorCode {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (&ErrorCode::InternalError(ref msg), &ErrorCode::InternalError(ref msg2)) => {
-                msg == msg2
-            }
+            (ErrorCode::InternalError(msg), ErrorCode::InternalError(msg2)) => msg == msg2,
             (_, _) => false,
         }
     }
 }
 
-impl From<ProstFieldNotFound> for RwError {
-    fn from(err: ProstFieldNotFound) -> Self {
+impl From<PbFieldNotFound> for RwError {
+    fn from(err: PbFieldNotFound) -> Self {
         ErrorCode::InternalError(format!(
             "Failed to decode prost: field not found `{}`",
             err.0
@@ -271,6 +270,7 @@ impl From<tonic::Status> for RwError {
                 ErrorCode::CatalogError(err.message().to_string().into()).into()
             }
             Code::PermissionDenied => ErrorCode::PermissionDenied(err.message().to_string()).into(),
+            Code::Cancelled => ErrorCode::SchedulerError(err.message().to_string().into()).into(),
             _ => ErrorCode::InternalError(err.message().to_string()).into(),
         }
     }
@@ -424,6 +424,46 @@ macro_rules! bail {
     ($fmt:expr, $($arg:tt)*) => {
         return Err($crate::error::anyhow_error!($fmt, $($arg)*).into())
     };
+}
+
+#[derive(Debug)]
+pub struct ErrorSuppressor {
+    max_unique: usize,
+    unique: HashSet<String>,
+    last_reset_time: SystemTime,
+}
+
+impl ErrorSuppressor {
+    pub fn new(max_unique: usize) -> Self {
+        Self {
+            max_unique,
+            last_reset_time: SystemTime::now(),
+            unique: Default::default(),
+        }
+    }
+
+    pub fn suppress_error(&mut self, error: &str) -> bool {
+        self.try_reset();
+        if self.unique.contains(error) {
+            false
+        } else if self.unique.len() < self.max_unique {
+            self.unique.insert(error.to_string());
+            false
+        } else {
+            // We have exceeded the capacity.
+            true
+        }
+    }
+
+    pub fn max(&self) -> usize {
+        self.max_unique
+    }
+
+    fn try_reset(&mut self) {
+        if self.last_reset_time.elapsed().unwrap() >= ERROR_SUPPRESSOR_RESET_DURATION {
+            *self = Self::new(self.max_unique)
+        }
+    }
 }
 
 #[cfg(test)]

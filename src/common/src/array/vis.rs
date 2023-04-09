@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,17 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::iter;
-
 use auto_enums::auto_enum;
+use itertools::repeat_n;
 
 use crate::buffer::{Bitmap, BitmapBuilder};
 
-/// `Vis` is a visibility bitmap of rows. When all rows are visible, it is considered compact and
-/// is represented by a single cardinality number rather than that many of ones.
+/// `Vis` is a visibility bitmap of rows.
 #[derive(Clone, PartialEq, Debug)]
 pub enum Vis {
+    /// Non-compact variant.
+    /// Certain rows are hidden using this bitmap.
     Bitmap(Bitmap),
+
+    /// Compact variant which just stores cardinality of rows.
+    /// This can be used when all rows are visible.
     Compact(usize), // equivalent to all ones of this size
 }
 
@@ -53,12 +56,12 @@ impl Vis {
         self.as_ref().is_set(idx)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = bool> + '_ {
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = bool> + '_ {
         self.as_ref().iter()
     }
 
-    pub fn ones(&self) -> impl Iterator<Item = usize> + '_ {
-        self.as_ref().ones()
+    pub fn iter_ones(&self) -> impl Iterator<Item = usize> + '_ {
+        self.as_ref().iter_ones()
     }
 
     #[inline(always)]
@@ -66,6 +69,30 @@ impl Vis {
         match self {
             Vis::Bitmap(b) => VisRef::Bitmap(b),
             Vis::Compact(c) => VisRef::Compact(*c),
+        }
+    }
+
+    /// Returns a bitmap of this `Vis`.
+    pub fn to_bitmap(&self) -> Bitmap {
+        match self {
+            Vis::Bitmap(b) => b.clone(),
+            Vis::Compact(c) => Bitmap::ones(*c),
+        }
+    }
+
+    /// Consumes this `Vis` and returns the inner `Bitmap` if not compact.
+    pub fn into_visibility(self) -> Option<Bitmap> {
+        match self {
+            Vis::Bitmap(b) => Some(b),
+            Vis::Compact(_) => None,
+        }
+    }
+
+    /// Returns a reference to the inner `Bitmap` if not compact.
+    pub fn as_visibility(&self) -> Option<&Bitmap> {
+        match self {
+            Vis::Bitmap(b) => Some(b),
+            Vis::Compact(_) => None,
         }
     }
 }
@@ -136,18 +163,18 @@ impl<'a> VisRef<'a> {
         }
     }
 
-    #[auto_enum(Iterator)]
-    pub fn iter(self) -> impl Iterator<Item = bool> + 'a {
+    #[auto_enum(ExactSizeIterator)]
+    pub fn iter(self) -> impl ExactSizeIterator<Item = bool> + 'a {
         match self {
             VisRef::Bitmap(b) => b.iter(),
-            VisRef::Compact(c) => iter::repeat(true).take(c),
+            VisRef::Compact(c) => repeat_n(true, c),
         }
     }
 
     #[auto_enum(Iterator)]
-    pub fn ones(self) -> impl Iterator<Item = usize> + 'a {
+    pub fn iter_ones(self) -> impl Iterator<Item = usize> + 'a {
         match self {
-            VisRef::Bitmap(b) => b.ones(),
+            VisRef::Bitmap(b) => b.iter_ones(),
             VisRef::Compact(c) => 0..c,
         }
     }

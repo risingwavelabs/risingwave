@@ -7,54 +7,25 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
 [dependencies]
 anyhow = "1"
-apache-avro = { git = "https://github.com/risingwavelabs/avro", branch = "master", features = ["snappy", "zstandard", "bzip", "xz"] }
-async-stream = "0.3"
-async-trait = "0.1"
-aws-config = { workspace = true }
-aws-sdk-s3 = { workspace = true }
-byteorder = "1"
-bytes = "1"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-crc32fast = "1"
-enum-as-inner = "0.5"
-farmhash = "1"
+easy-ext = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 itertools = "0.10"
-maplit = "1"
-moka = { version = "0.9", features = ["future"] }
-num-traits = "0.2"
 parking_lot = "0.12"
-paste = "1"
-prometheus = { version = "0.13", features = ["process"] }
-prost = { version = "0.11.0", features = ["no-recursion-limit"] }
-prost-reflect = "0.9.2"
-protobuf-native = "0.2.1"
 rand = "0.8"
-reqwest = { version = "0.11", features = ["json"] }
 risingwave_common = { path = "../common" }
 risingwave_connector = { path = "../connector" }
-risingwave_expr = { path = "../expr" }
 risingwave_pb = { path = "../prost" }
-risingwave_storage = { path = "../storage" }
-serde = { version = "1", features = ["derive"] }
-serde-value = "0.7"
-serde_derive = "1"
-serde_json = "1"
-simd-json = { version = "0.7", features = ["allow-non-simd"] }
-simd-json-derive = "0.7"
-smallvec = "1"
-static_assertions = "1"
-tempfile = "3"
-thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
-tokio-stream = "0.1"
-tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = { version = "0.1" }
-twox-hash = "1"
-url = "2"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

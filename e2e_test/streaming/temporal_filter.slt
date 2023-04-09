@@ -1,0 +1,56 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t1 (v1 timestamp);
+
+
+# This statement should be correct for the next ~1000 years
+# We cannot have a variable interval for now, so we use 2000 year's worth of days as the upper bound.
+statement ok
+create materialized view mv1 as select v1 from t1 where v1 between now() and now() + interval '1 day' * 365 * 2000;
+
+statement ok
+insert into t1 values ('3031-01-01 19:00:00'), ('3031-01-01 20:00:00'), ('3031-01-01 21:00:00'), ('5031-01-01 21:00:00'), ('0001-01-01 21:00:00');
+
+# Below lower bound and above upper bound are not shown
+query I
+select * from mv1 order by v1;
+----
+3031-01-01 19:00:00
+3031-01-01 20:00:00
+3031-01-01 21:00:00
+
+# Deleting visible and filtered values
+statement ok
+delete from t1 where v1 = '3031-01-01 19:00:00' or v1 = '5031-01-01 21:00:00';
+
+# Updating visible and filtered values
+query I rowsort
+update t1 set v1 = v1 + interval '1 hour' where v1 = '3031-01-01 20:00:00' or v1 = '0001-01-01 21:00:00' returning v1;
+----
+0001-01-01 22:00:00
+3031-01-01 21:00:00
+
+ 
+query I
+select * from mv1 order by v1;
+----
+3031-01-01 21:00:00
+3031-01-01 21:00:00
+
+# Interaction with batch `now()`: both values should fall outside of the range
+statement ok
+insert into t1 values (now() - interval '1 minute'), ((now() + interval '1 day' * 365 * 3000));
+
+query I
+select * from mv1 order by v1;
+----
+3031-01-01 21:00:00
+3031-01-01 21:00:00
+
+statement ok
+drop materialized view mv1;
+
+statement ok
+drop table t1;

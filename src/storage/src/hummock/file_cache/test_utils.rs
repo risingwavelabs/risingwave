@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::{Buf, BufMut};
+use risingwave_common::util::env_var::is_ci;
 use tokio::sync::{mpsc, Mutex};
 
 use super::cache::FlushBufferHook;
@@ -201,4 +202,25 @@ pub fn datasize(path: impl AsRef<Path>) -> Result<usize> {
     }
 
     Ok(size)
+}
+
+/// Returns a temporary directory that can be used for storing files created by RW during unit
+/// tests.
+///
+/// If the environment variable `RISINGWAVE_CI` is set to `true` then this will create a temp
+/// directory under `/risingwave`. Otherwise, if the environment variable `RISINGWAVE_TEST_DIR`
+/// exists, then this will create a temp directory under the path given in the variable. Otherwise,
+/// this will create the temp directory under `/tmp`
+pub fn tempdir() -> tempfile::TempDir {
+    if is_ci() {
+        tempfile::Builder::new().tempdir_in("/risingwave").unwrap()
+    } else {
+        match std::env::var("RISINGWAVE_TEST_DIR") {
+            Ok(test_dir) => {
+                println!("Using {test_dir} for temporary data files.");
+                tempfile::Builder::new().tempdir_in(test_dir).unwrap()
+            }
+            _ => tempfile::tempdir().unwrap(),
+        }
+    }
 }
