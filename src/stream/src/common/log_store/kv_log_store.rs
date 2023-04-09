@@ -50,9 +50,6 @@ const CHECKPOINT_BARRIER_OP_CODE: RowOpCodeType = 6;
 
 #[derive(Clone)]
 struct LogStoreRowSerde {
-    /// Id for this table.
-    table_id: TableId,
-
     /// Used for serializing and deserializing the primary key.
     pk_serde: OrderedRowSerde,
 
@@ -78,7 +75,6 @@ struct LogStoreRowSerde {
 
 impl LogStoreRowSerde {
     fn new(table_catalog: &Table, vnodes: Option<Arc<Bitmap>>) -> Self {
-        let table_id = TableId::new(table_catalog.id);
         let table_columns: Vec<ColumnDesc> = table_catalog
             .columns
             .iter()
@@ -124,7 +120,6 @@ impl LogStoreRowSerde {
         );
 
         Self {
-            table_id,
             pk_serde,
             row_serde,
             dist_key_indices,
@@ -236,8 +231,126 @@ impl LogStoreRowSerde {
     }
 }
 
+pub struct KvLogStoreReader<S: StateStore> {
+    table_id: TableId,
+
+    state_store: S,
+
+    serde: LogStoreRowSerde,
+}
+
+impl<S: StateStore> LogReader for KvLogStoreReader<S> {
+    type InitFuture<'a> = impl Future<Output = LogStoreResult<u64>>;
+    type NextItemFuture<'a> = impl Future<Output = LogStoreResult<LogStoreReadItem>>;
+    type TruncateFuture<'a> = impl Future<Output = LogStoreResult<()>>;
+
+    fn init(&mut self) -> Self::InitFuture<'_> {
+        async move { todo!() }
+    }
+
+    fn next_item(&mut self) -> Self::NextItemFuture<'_> {
+        async move { todo!() }
+    }
+
+    fn truncate(&mut self) -> Self::TruncateFuture<'_> {
+        async move { todo!() }
+    }
+}
+
+pub struct KvLogStoreWriter<LS: LocalStateStore> {
+    table_id: TableId,
+
+    state_store: LS,
+
+    serde: LogStoreRowSerde,
+}
+
+impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
+    type FlushCurrentEpoch<'a> = impl Future<Output = LogStoreResult<()>>;
+    type InitFuture<'a> = impl Future<Output = LogStoreResult<()>>;
+    type WriteChunkFuture<'a> = impl Future<Output = LogStoreResult<()>>;
+
+    fn init(&mut self, epoch: u64) -> Self::InitFuture<'_> {
+        async move { todo!() }
+    }
+
+    fn write_chunk(&mut self, chunk: StreamChunk) -> Self::WriteChunkFuture<'_> {
+        async move { todo!() }
+    }
+
+    fn flush_current_epoch(
+        &mut self,
+        next_epoch: u64,
+        is_checkpoint: bool,
+    ) -> Self::FlushCurrentEpoch<'_> {
+        async move { todo!() }
+    }
+
+    fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) {
+        todo!()
+    }
+}
+
+pub struct KvLogStoreFactory<S: StateStore> {
+    state_store: S,
+
+    table_catalog: Table,
+
+    vnodes: Option<Arc<Bitmap>>,
+}
+
+impl<S: StateStore> KvLogStoreFactory<S> {
+    pub fn new(state_store: S, table_catalog: Table, vnodes: Option<Arc<Bitmap>>) -> Self {
+        Self {
+            state_store,
+            table_catalog,
+            vnodes,
+        }
+    }
+}
+
+impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
+    type Reader = KvLogStoreReader<S>;
+    type Writer = KvLogStoreWriter<S::Local>;
+
+    type BuildFuture = impl Future<Output = (Self::Reader, Self::Writer)>;
+
+    fn build(self) -> Self::BuildFuture {
+        async move {
+            let table_id = TableId::new(self.table_catalog.id);
+            let serde = LogStoreRowSerde::new(&self.table_catalog, self.vnodes);
+            let local_state_store = self
+                .state_store
+                .new_local(NewLocalOptions {
+                    table_id: TableId {
+                        table_id: self.table_catalog.id,
+                    },
+                    is_consistent_op: false,
+                    table_option: TableOption {
+                        retention_seconds: None,
+                    },
+                })
+                .await;
+
+            let reader = KvLogStoreReader {
+                table_id,
+                state_store: self.state_store,
+                serde: serde.clone(),
+            };
+
+            let writer = KvLogStoreWriter {
+                table_id,
+                state_store: local_state_store,
+                serde,
+            };
+
+            (reader, writer)
+        }
+    }
+}
+
 #[cfg(test)]
-mod log_store_row_serde_tests {
+mod tests {
     use risingwave_common::array::{Op, StreamChunk};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::hash::VirtualNode;
@@ -309,7 +422,7 @@ mod log_store_row_serde_tests {
             seq_id += 1;
         }
 
-        for (i, (op, row)) in stream_chunk.rows().enumerate() {
+        for (i, _) in stream_chunk.rows().enumerate() {
             let row_op = serde.deserialize(serialized_bytes[i].1.clone());
             match row_op {
                 LogStoreRowOp::Row { op, row } => {
@@ -336,117 +449,6 @@ mod log_store_row_serde_tests {
             LogStoreRowOp::Barrier { is_checkpoint } => {
                 assert!(is_checkpoint);
             }
-        }
-    }
-}
-
-pub struct KvLogStoreReader<S: StateStore> {
-    state_store: S,
-
-    serde: LogStoreRowSerde,
-}
-
-impl<S: StateStore> LogReader for KvLogStoreReader<S> {
-    type InitFuture<'a> = impl Future<Output = LogStoreResult<u64>>;
-    type NextItemFuture<'a> = impl Future<Output = LogStoreResult<LogStoreReadItem>>;
-    type TruncateFuture<'a> = impl Future<Output = LogStoreResult<()>>;
-
-    fn init(&mut self) -> Self::InitFuture<'_> {
-        async move { todo!() }
-    }
-
-    fn next_item(&mut self) -> Self::NextItemFuture<'_> {
-        async move { todo!() }
-    }
-
-    fn truncate(&mut self) -> Self::TruncateFuture<'_> {
-        async move { todo!() }
-    }
-}
-
-pub struct KvLogStoreWriter<LS: LocalStateStore> {
-    state_store: LS,
-
-    serde: LogStoreRowSerde,
-}
-
-impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
-    type FlushCurrentEpoch<'a> = impl Future<Output = LogStoreResult<()>>;
-    type InitFuture<'a> = impl Future<Output = LogStoreResult<()>>;
-    type WriteChunkFuture<'a> = impl Future<Output = LogStoreResult<()>>;
-
-    fn init(&mut self, epoch: u64) -> Self::InitFuture<'_> {
-        async move { todo!() }
-    }
-
-    fn write_chunk(&mut self, chunk: StreamChunk) -> Self::WriteChunkFuture<'_> {
-        async move { todo!() }
-    }
-
-    fn flush_current_epoch(
-        &mut self,
-        next_epoch: u64,
-        is_checkpoint: bool,
-    ) -> Self::FlushCurrentEpoch<'_> {
-        async move { todo!() }
-    }
-
-    fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) {
-        todo!()
-    }
-}
-
-pub struct KvLogStoreFactory<S: StateStore> {
-    state_store: S,
-
-    table_catalog: Table,
-
-    vnodes: Option<Arc<Bitmap>>,
-}
-
-impl<S: StateStore> KvLogStoreFactory<S> {
-    pub fn new(state_store: S, table_catalog: Table, vnodes: Option<Arc<Bitmap>>) -> Self {
-        Self {
-            state_store,
-            table_catalog,
-            vnodes,
-        }
-    }
-}
-
-impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
-    type Reader = KvLogStoreReader<S>;
-    type Writer = KvLogStoreWriter<S::Local>;
-
-    type BuildFuture = impl Future<Output = (Self::Reader, Self::Writer)>;
-
-    fn build(self) -> Self::BuildFuture {
-        async move {
-            let serde = LogStoreRowSerde::new(&self.table_catalog, self.vnodes);
-            let local_state_store = self
-                .state_store
-                .new_local(NewLocalOptions {
-                    table_id: TableId {
-                        table_id: self.table_catalog.id,
-                    },
-                    is_consistent_op: false,
-                    table_option: TableOption {
-                        retention_seconds: None,
-                    },
-                })
-                .await;
-
-            let reader = KvLogStoreReader {
-                state_store: self.state_store,
-                serde: serde.clone(),
-            };
-
-            let writer = KvLogStoreWriter {
-                state_store: local_state_store,
-                serde,
-            };
-
-            (reader, writer)
         }
     }
 }
