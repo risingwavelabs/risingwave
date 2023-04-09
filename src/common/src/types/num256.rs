@@ -23,8 +23,8 @@ use std::str::FromStr;
 use bytes::{BufMut, Bytes};
 use ethnum::i256;
 use num_traits::{
-    CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, FromPrimitive, One,
-    Signed, ToPrimitive, Zero,
+    CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, FromPrimitive, Num,
+    One, Signed, ToPrimitive, Zero,
 };
 use risingwave_pb::data::ArrayType;
 use serde::de::{Error, Visitor};
@@ -37,6 +37,7 @@ use crate::types::{to_text, Buf, DataType, Scalar, ScalarRef};
 
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
 pub struct Int256(Box<i256>);
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
 pub struct Int256Ref<'a>(pub &'a i256);
 

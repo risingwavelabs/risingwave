@@ -481,7 +481,7 @@ impl From<&ListArray> for arrow_array::ListArray {
                 Decimal256Builder::with_capacity(a.len()).with_data_type(
                     arrow_schema::DataType::Decimal256(DECIMAL256_MAX_PRECISION, 0),
                 ),
-                |b, v| b.append_option(v.map(|d| d.into_arrow())),
+                |b, v| b.append_option(v.map(Into::into)),
             ),
             ArrayImpl::Bool(a) => {
                 build(array, a, BooleanBuilder::with_capacity(a.len()), |b, v| {
