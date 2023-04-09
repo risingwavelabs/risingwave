@@ -46,6 +46,7 @@ use risingwave_pb::stream_plan::StreamNode as StreamPlanPb;
 use serde::Serialize;
 use smallvec::SmallVec;
 
+use self::batch::BatchPlanRef;
 use self::generic::GenericPlanRef;
 use self::stream::StreamPlanRef;
 use super::property::{Distribution, FunctionalDependencySet, Order};
@@ -385,6 +386,12 @@ impl StreamPlanRef for PlanRef {
     }
 }
 
+impl BatchPlanRef for PlanRef {
+    fn order(&self) -> &Order {
+        &self.plan_base().order
+    }
+}
+
 impl GenericPlanRef for PlanRef {
     fn schema(&self) -> &Schema {
         &self.plan_base().schema
@@ -594,6 +601,7 @@ pub use predicate_pushdown::*;
 mod merge_eq_nodes;
 pub use merge_eq_nodes::*;
 
+pub mod batch;
 pub mod generic;
 pub mod stream;
 pub mod stream_derive;

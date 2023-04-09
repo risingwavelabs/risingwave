@@ -475,7 +475,7 @@ pub(super) fn bind_source_watermark(
     source_watermarks: Vec<SourceWatermark>,
     column_catalogs: &[ColumnCatalog],
 ) -> Result<Vec<WatermarkDesc>> {
-    let mut binder = Binder::new(session);
+    let mut binder = Binder::new(session, vec![]);
     binder.bind_columns_to_context(name.clone(), column_catalogs.to_vec())?;
 
     let watermark_descs = source_watermarks
@@ -693,10 +693,10 @@ pub async fn handle_create_source(
 
     bind_sql_column_constraints(&session, name.clone(), &mut columns, stmt.columns)?;
 
-    if columns.iter().any(|c| c.is_generated()) {
-        // TODO(yuhao): allow generated columns on source
+    if row_id_index.is_none() && columns.iter().any(|c| c.is_generated()) {
+        // TODO(yuhao): allow delete from a non append only source
         return Err(RwError::from(ErrorCode::BindError(
-            "Generated columns on source has not been implemented.".to_string(),
+            "Generated columns are only allowed in an append only source.".to_string(),
         )));
     }
 

@@ -28,3 +28,6 @@ cargo doc --document-private-items --no-deps
 
 echo "--- Run doctest"
 cargo test --doc
+
+echo "--- Run audit check"
+cargo audit

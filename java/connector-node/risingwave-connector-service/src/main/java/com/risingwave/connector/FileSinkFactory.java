@@ -14,8 +14,8 @@
 
 package com.risingwave.connector;
 
-import static io.grpc.Status.*;
-
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkFactory;
@@ -23,21 +23,18 @@ import com.risingwave.proto.Catalog.SinkType;
 import java.util.Map;
 
 public class FileSinkFactory implements SinkFactory {
-    public static final String OUTPUT_PATH_PROP = "output.path";
-
     @Override
     public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
-        String sinkPath = tableProperties.get(OUTPUT_PATH_PROP);
-        return new FileSink(sinkPath, tableSchema);
+        ObjectMapper mapper = new ObjectMapper();
+        FileSinkConfig config = mapper.convertValue(tableProperties, FileSinkConfig.class);
+        return new FileSink(config, tableSchema);
     }
 
     @Override
     public void validate(
             TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType) {
-        if (!tableProperties.containsKey(OUTPUT_PATH_PROP)) {
-            throw INVALID_ARGUMENT
-                    .withDescription(String.format("%s is not specified", OUTPUT_PATH_PROP))
-                    .asRuntimeException();
-        }
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
+        mapper.convertValue(tableProperties, FileSinkConfig.class);
     }
 }

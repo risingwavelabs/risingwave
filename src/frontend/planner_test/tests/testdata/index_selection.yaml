@@ -671,3 +671,11 @@
       └─BatchLookupJoin { type: Inner, predicate: t2.d1 = idx_t1.c2, output: all }
         └─BatchExchange { order: [], dist: UpstreamHashShard(t2.d1) }
           └─BatchScan { table: t2, columns: [t2.d1, t2.d2], distribution: SomeShard }
+- sql: |
+    create table t (j jsonb);
+    explain create index idx on t(j->'k');
+  explain_output: |
+    StreamMaterialize { columns: [JSONB_ACCESS_INNER, j, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [JSONB_ACCESS_INNER, t._row_id], pk_conflict: "NoCheck" }
+    └─StreamExchange { dist: HashShard($expr1) }
+      └─StreamProject { exprs: [JsonbAccessInner(t.j, 'k':Varchar) as $expr1, t.j, t._row_id] }
+        └─StreamTableScan { table: t, columns: [j, _row_id] }

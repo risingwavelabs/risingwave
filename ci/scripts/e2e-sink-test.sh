@@ -32,7 +32,7 @@ mv target/debug/librisingwave_java_binding.so-"$profile" target/debug/librisingw
 
 export RW_JAVA_BINDING_LIB_PATH=${PWD}/target/debug
 # TODO: Switch to stream_chunk encoding once it's completed, and then remove json encoding as well as this env var.
-export RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT=json
+export RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT=stream_chunk
 
 echo "--- Download connector node package"
 buildkite-agent artifact download risingwave-connector.tar.gz ./
@@ -66,6 +66,7 @@ export PGPASSWORD=postgres
 psql -h db -U postgres -c "CREATE ROLE test LOGIN SUPERUSER PASSWORD 'connector';"
 createdb -h db -U postgres test
 psql -h db -U postgres -d test -c "CREATE TABLE t4 (v1 int PRIMARY KEY, v2 int);"
+psql -h db -U postgres -d test -c "create table t5 (v1 smallint primary key, v2 int, v3 bigint, v4 float4, v5 float8, v6 decimal, v7 varchar, v8 timestamp, v9 boolean);"
 psql -h db -U postgres -d test < ./e2e_test/sink/remote/pg_create_table.sql
 
 node_port=50051
@@ -98,6 +99,7 @@ echo "--- testing sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/append_only_sink.slt'
 sqllogictest -p 4566 -d dev './e2e_test/sink/create_sink_as.slt'
 sqllogictest -p 4566 -d dev './e2e_test/sink/blackhole_sink.slt'
+sqllogictest -p 4566 -d dev './e2e_test/sink/remote/types.slt'
 sleep 1
 
 # check sink destination postgres
@@ -117,5 +119,5 @@ else
 fi
 
 echo "--- Kill cluster"
-pkill -f connector-node
 cargo make ci-kill
+pkill -f connector-node

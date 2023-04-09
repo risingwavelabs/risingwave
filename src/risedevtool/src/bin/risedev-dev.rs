@@ -14,13 +14,13 @@
 
 use std::env;
 use std::fmt::Write;
-use std::fs::OpenOptions;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use console::style;
+use fs_err::OpenOptions;
 use indicatif::ProgressBar;
 use risedev::util::{complete_spin, fail_spin};
 use risedev::{
@@ -376,14 +376,14 @@ fn main() -> Result<()> {
 
     if let Some(config_path) = &config_path {
         let target = Path::new(&env::var("PREFIX_CONFIG")?).join("risingwave.toml");
-        std::fs::copy(config_path, target).context("config file not found")?;
+        fs_err::copy(config_path, target).context("config file not found")?;
     }
 
     {
         let mut out_str = String::new();
         let mut emitter = YamlEmitter::new(&mut out_str);
         emitter.dump(&risedev_config)?;
-        std::fs::write(
+        fs_err::write(
             Path::new(&env::var("PREFIX_CONFIG")?).join("risedev-expanded.yml"),
             &out_str,
         )?;
@@ -434,7 +434,7 @@ fn main() -> Result<()> {
                 Err(_) => "".into(),
             };
 
-            std::fs::write(
+            fs_err::write(
                 Path::new(&env::var("PREFIX_CONFIG")?).join("risectl-env"),
                 risectl_env,
             )?;

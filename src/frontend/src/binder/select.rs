@@ -16,7 +16,9 @@ use std::fmt::Debug;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME};
+use risingwave_common::error::ErrorCode::BindError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::hash::MAX_GROUP_KEYS;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{DataType as AstDataType, Distinct, Expr, Select, SelectItem};
@@ -178,6 +180,14 @@ impl Binder {
 
         // Bind GROUP BY clause.
         self.context.clause = Some(Clause::GroupBy);
+        let number_of_group_keys = select.group_by.len();
+        if number_of_group_keys > MAX_GROUP_KEYS {
+            return Err(BindError(format!(
+                "Number of Group Keys: {}, exceeded maximum: {}",
+                number_of_group_keys, MAX_GROUP_KEYS,
+            ))
+            .into());
+        }
         let group_by = select
             .group_by
             .into_iter()
