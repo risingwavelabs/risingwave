@@ -59,7 +59,7 @@ impl SplitReader for DatagenSplitReader {
         let mut events_so_far = u64::default();
         tracing::debug!("Splits for datagen found! {:?}", splits);
 
-        assert!(splits.len() == 1);
+        debug_assert!(splits.len() == 1);
         let split = splits.into_iter().next().unwrap();
         // TODO: currently, assume there's only on split in one reader
         let split_id = split.id();
@@ -114,6 +114,7 @@ impl SplitReader for DatagenSplitReader {
                     &column.name,
                     split_index,
                     split_num,
+                    events_so_far,
                 )?)
             } else {
                 FieldDesc::Invisible
@@ -150,8 +151,22 @@ impl SplitReader for DatagenSplitReader {
         // spawn_data_generation_stream(self.generator.into_native_stream(), BUFFER_SIZE).boxed()
         match self.parser_config.specific {
             SpecificParserConfig::Native => {
-                spawn_data_generation_stream(self.generator.into_native_stream(), BUFFER_SIZE)
-                    .boxed()
+                let actor_id = self.source_ctx.source_info.actor_id.to_string();
+                let source_id = self.source_ctx.source_info.source_id.to_string();
+                let split_id = self.split_id.to_string();
+                let metrics = self.source_ctx.metrics.clone();
+                spawn_data_generation_stream(
+                    self.generator
+                        .into_native_stream()
+                        .inspect_ok(move |chunk_with_states| {
+                            metrics
+                                .partition_input_count
+                                .with_label_values(&[&actor_id, &source_id, &split_id])
+                                .inc_by(chunk_with_states.chunk.cardinality() as u64);
+                        }),
+                    BUFFER_SIZE,
+                )
+                .boxed()
             }
             _ => self.into_chunk_stream(),
         }
@@ -172,6 +187,7 @@ fn generator_from_data_type(
     name: &String,
     split_index: u64,
     split_num: u64,
+    offset: u64,
 ) -> Result<FieldGeneratorImpl> {
     let random_seed_key = format!("fields.{}.seed", name);
     let random_seed: u64 = match fields_option_map
@@ -236,6 +252,7 @@ fn generator_from_data_type(
                             &format!("{}.{}", name, field_name),
                             split_index,
                             split_num,
+                            offset,
                         )?;
                         Ok((field_name, gen))
                     })
@@ -251,6 +268,7 @@ fn generator_from_data_type(
                 &format!("{}._", name),
                 split_index,
                 split_num,
+                offset,
             )?;
             FieldGeneratorImpl::with_list(generator, length_value)
         }
@@ -267,7 +285,8 @@ fn generator_from_data_type(
                     start_value,
                     end_value,
                     split_index,
-                    split_num
+                    split_num,
+                    offset,
                 )
             } else {
                 let min_key = format!("fields.{}.min", name);

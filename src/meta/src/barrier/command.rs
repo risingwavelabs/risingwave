@@ -58,6 +58,9 @@ pub struct Reschedule {
     /// The upstream fragments of this fragment, and the dispatchers that should be updated.
     pub upstream_fragment_dispatcher_ids: Vec<(FragmentId, DispatcherId)>,
     /// New hash mapping of the upstream dispatcher to be updated.
+    ///
+    /// This field exists only when there's upstream fragment and the current fragment is
+    /// hash-sharded.
     pub upstream_dispatcher_mapping: Option<ActorMapping>,
 
     /// The downstream fragments of this fragment.
@@ -274,6 +277,7 @@ where
             }
 
             Command::CreateStreamingJob {
+                table_fragments,
                 dispatchers,
                 init_split_assignment: split_assignment,
                 ..
@@ -289,12 +293,14 @@ where
                         )
                     })
                     .collect();
+                let added_actors = table_fragments.actor_ids();
                 let actor_splits = split_assignment
                     .values()
                     .flat_map(build_actor_connector_splits)
                     .collect();
                 Some(Mutation::Add(AddMutation {
                     actor_dispatchers,
+                    added_actors,
                     actor_splits,
                 }))
             }
@@ -440,7 +446,7 @@ where
                     dropped_actors,
                     actor_splits,
                 });
-                tracing::trace!("update mutation: {mutation:#?}");
+                tracing::debug!("update mutation: {mutation:#?}");
                 Some(mutation)
             }
         };
@@ -452,10 +458,15 @@ where
     /// returns an empty set.
     pub fn actors_to_track(&self) -> HashSet<ActorId> {
         match &self.command {
-            Command::CreateStreamingJob { dispatchers, .. } => dispatchers
+            Command::CreateStreamingJob {
+                dispatchers,
+                table_fragments,
+                ..
+            } => dispatchers
                 .values()
                 .flatten()
                 .flat_map(|dispatcher| dispatcher.downstream_actor_id.iter().copied())
+                .chain(table_fragments.values_actor_ids().into_iter())
                 .collect(),
 
             _ => Default::default(),

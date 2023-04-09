@@ -202,10 +202,6 @@ impl LogicalScan {
         ids
     }
 
-    pub fn output_column_indices(&self) -> &[usize] {
-        &self.core.output_col_idx
-    }
-
     /// Get all indexes on this table
     pub fn indexes(&self) -> &[Rc<IndexCatalog>] {
         &self.core.indexes
@@ -621,7 +617,7 @@ impl LogicalScan {
 
             let mut plan: PlanRef = BatchSeqScan::new(scan, scan_ranges).into();
             if !predicate.always_true() {
-                plan = BatchFilter::new(LogicalFilter::new(plan, predicate)).into();
+                plan = BatchFilter::new(generic::Filter::new(predicate, plan)).into();
             }
             if let Some(exprs) = project_expr {
                 plan = BatchProject::new(LogicalProject::new(plan, exprs)).into()

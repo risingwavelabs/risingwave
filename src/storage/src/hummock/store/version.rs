@@ -18,7 +18,6 @@ use std::iter::once;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::{stream, StreamExt};
 use itertools::Itertools;
 use minitrace::future::FutureExt;
 use minitrace::Span;
@@ -583,7 +582,7 @@ impl HummockVersionReader {
             staging_iters.push(HummockIteratorUnion::Second(SstableIterator::new(
                 table_holder,
                 self.sstable_store.clone(),
-                Arc::new(SstableIteratorReadOptions::default()),
+                Arc::new(SstableIteratorReadOptions::from(&read_options)),
             )));
         }
         local_stats.staging_sst_iter_count = staging_sst_iter_count;
@@ -637,6 +636,7 @@ impl HummockVersionReader {
             for sstable_info in fetch_meta_req {
                 let inner_req_count = req_count;
                 let capture_ref = async {
+                    // We would fill block to high priority cache for level-0
                     self.sstable_store
                         .sstable_syncable(sstable_info, &local_stats)
                         .in_span(Span::enter_with_local_parent("get_sstable"))
@@ -654,15 +654,13 @@ impl HummockVersionReader {
             .with_label_values(&[table_id_label])
             .start_timer();
         let mut flatten_resps = vec![None; req_count];
-        let mut buffered = stream::iter(flatten_reqs).buffer_unordered(10);
-        while let Some(result) = buffered.next().await {
-            let (req_index, resp) = result?;
+        for flatten_req in flatten_reqs {
+            let (req_index, resp) = flatten_req.await?;
             flatten_resps[req_count - req_index - 1] = Some(resp);
         }
-        drop(buffered);
         timer.observe_duration();
 
-        let mut sst_read_options = SstableIteratorReadOptions::default();
+        let mut sst_read_options = SstableIteratorReadOptions::from(&read_options);
         if read_options.prefetch_options.exhaust_iter {
             sst_read_options.must_iterated_end_user_key =
                 Some(user_key_range.1.map(|key| key.cloned()));

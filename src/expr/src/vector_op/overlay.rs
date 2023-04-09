@@ -14,15 +14,17 @@
 
 use std::fmt::Write;
 
+use risingwave_expr_macro::function;
+
 use crate::{ExprError, Result};
 
-#[inline(always)]
+#[function("overlay(varchar, varchar, int32) -> varchar")]
 pub fn overlay(s: &str, new_sub_str: &str, start: i32, writer: &mut dyn Write) -> Result<()> {
     // If count is omitted, it defaults to the length of new_sub_str.
     overlay_for(s, new_sub_str, start, new_sub_str.len() as i32, writer)
 }
 
-#[inline(always)]
+#[function("overlay(varchar, varchar, int32, int32) -> varchar")]
 pub fn overlay_for(
     s: &str,
     new_sub_str: &str,

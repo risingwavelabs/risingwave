@@ -24,7 +24,7 @@ type MysqlSink struct {
 func OpenMysqlSink(cfg MysqlConfig) (*MysqlSink, error) {
 	fmt.Printf("Opening MySQL sink: %+v\n", cfg)
 
-	db, err := sql.Open("mysql", fmt.Sprintf("%s:%s@tcp(%s:%d)/%s",
+	db, err := sql.Open("mysql", fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?multiStatements=true",
 		cfg.DbUser, cfg.DbPassword, cfg.DbHost, cfg.DbPort, cfg.Database))
 	if err != nil {
 		return nil, err

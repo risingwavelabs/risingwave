@@ -247,6 +247,13 @@ struct SealedData {
 }
 
 impl SealedData {
+    fn clear(&mut self) {
+        self.epochs.clear();
+
+        self.spilled_data.clear();
+        self.imms.clear();
+    }
+
     /// Add the data of a newly sealed epoch.
     ///
     /// Note: it may happen that, for example, currently we hold `imms` and `spilled_data` of epoch
@@ -615,8 +622,7 @@ impl HummockUploader {
         self.max_sealed_epoch = max_committed_epoch;
         self.synced_data.clear();
         self.syncing_data.clear();
-        self.sealed_data.spilled_data.clear();
-        self.sealed_data.imms.clear();
+        self.sealed_data.clear();
         self.unsealed_data.clear();
 
         // TODO: call `abort` on the uploading task join handle

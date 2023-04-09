@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
+use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::hummock::CompactionFilterFlag;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
@@ -34,7 +35,7 @@ use risingwave_meta::storage::MemStore;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::compactor::{Compactor, CompactorContext};
-use risingwave_storage::hummock::SstableObjectIdManager;
+use risingwave_storage::hummock::{CachePolicy, SstableObjectIdManager};
 use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions};
 use risingwave_storage::StateStore;
 use serial_test::serial;
@@ -278,7 +279,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     ));
 
     let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-    compactor_manager.add_compactor(worker_node.id, u64::MAX);
+    compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
 
     let mut local = storage
         .new_local(NewLocalOptions::for_test(existing_table_id.into()))
@@ -387,6 +388,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         retention_seconds: None,
         read_version_from_backup: false,
         prefetch_options: Default::default(),
+        cache_policy: CachePolicy::Fill(CachePriority::High),
     };
     let get_result = storage
         .get(Bytes::from("hhh"), 120, read_options.clone())

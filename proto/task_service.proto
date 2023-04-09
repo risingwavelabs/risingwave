@@ -26,6 +26,7 @@ message TaskInfoResponse {
     FINISHED = 6;
     FAILED = 7;
     ABORTED = 8;
+    CANCELLED = 9;
   }
   batch_plan.TaskId task_id = 1;
   TaskStatus task_status = 2;
@@ -39,11 +40,11 @@ message CreateTaskRequest {
   common.BatchQueryEpoch epoch = 3;
 }
 
-message AbortTaskRequest {
+message CancelTaskRequest {
   batch_plan.TaskId task_id = 1;
 }
 
-message AbortTaskResponse {
+message CancelTaskResponse {
   common.Status status = 1;
 }
 
@@ -63,8 +64,8 @@ message ExecuteRequest {
 
 service TaskService {
   rpc CreateTask(CreateTaskRequest) returns (stream TaskInfoResponse);
-  // Abort an already-died (self execution-failure, previous aborted, completed) task will still succeed.
-  rpc AbortTask(AbortTaskRequest) returns (AbortTaskResponse);
+  // Cancel an already-died (self execution-failure, previous aborted, completed) task will still succeed.
+  rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
   rpc Execute(ExecuteRequest) returns (stream GetDataResponse);
 }
 

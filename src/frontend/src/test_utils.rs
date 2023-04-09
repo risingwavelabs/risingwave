@@ -20,7 +20,7 @@ use std::sync::Arc;
 use futures_async_stream::for_await;
 use parking_lot::RwLock;
 use pgwire::pg_response::StatementType;
-use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
+use pgwire::pg_server::{BoxedError, SessionId, SessionManager, UserAuthenticator};
 use pgwire::types::Row;
 use risingwave_common::catalog::{
     FunctionId, IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
@@ -34,7 +34,7 @@ use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
 };
-use risingwave_pb::ddl_service::DdlProgress;
+use risingwave_pb::ddl_service::{create_connection_request, DdlProgress};
 use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{CreatingJobInfo, SystemParams};
@@ -47,6 +47,7 @@ use tempfile::{Builder, NamedTempFile};
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{DatabaseId, SchemaId};
+use crate::handler::extended_handle::{Portal, PrepareStatement};
 use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
 use crate::session::{AuthContext, FrontendEnv, SessionImpl};
@@ -61,7 +62,7 @@ pub struct LocalFrontend {
     env: FrontendEnv,
 }
 
-impl SessionManager<PgResponseStream> for LocalFrontend {
+impl SessionManager<PgResponseStream, PrepareStatement, Portal> for LocalFrontend {
     type Session = SessionImpl;
 
     fn connect(
@@ -73,15 +74,15 @@ impl SessionManager<PgResponseStream> for LocalFrontend {
     }
 
     fn cancel_queries_in_session(&self, _session_id: SessionId) {
-        todo!()
+        unreachable!()
     }
 
     fn cancel_creating_jobs_in_session(&self, _session_id: SessionId) {
-        todo!()
+        unreachable!()
     }
 
     fn end_session(&self, _session: &Self::Session) {
-        todo!()
+        unreachable!()
     }
 }
 
@@ -294,7 +295,15 @@ impl CatalogWriter for MockCatalogWriter {
     }
 
     async fn create_function(&self, _function: PbFunction) -> Result<()> {
-        todo!()
+        unreachable!()
+    }
+
+    async fn create_connection(
+        &self,
+        _connection_name: String,
+        _connection: create_connection_request::Payload,
+    ) -> Result<()> {
+        unreachable!()
     }
 
     async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()> {
@@ -321,7 +330,7 @@ impl CatalogWriter for MockCatalogWriter {
     }
 
     async fn drop_view(&self, _view_id: u32) -> Result<()> {
-        todo!()
+        unreachable!()
     }
 
     async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
@@ -383,7 +392,11 @@ impl CatalogWriter for MockCatalogWriter {
     }
 
     async fn drop_function(&self, _function_id: FunctionId) -> Result<()> {
-        todo!()
+        unreachable!()
+    }
+
+    async fn drop_connection(&self, _connection_name: &str) -> Result<()> {
+        unreachable!()
     }
 
     async fn drop_database(&self, database_id: u32) -> Result<()> {
@@ -395,6 +408,29 @@ impl CatalogWriter for MockCatalogWriter {
         let database_id = self.drop_schema_id(schema_id);
         self.catalog.write().drop_schema(database_id, schema_id);
         Ok(())
+    }
+
+    async fn alter_table_name(&self, table_id: u32, table_name: &str) -> Result<()> {
+        self.catalog
+            .write()
+            .alter_table_name_by_id(&table_id.into(), table_name);
+        Ok(())
+    }
+
+    async fn alter_view_name(&self, _view_id: u32, _view_name: &str) -> Result<()> {
+        unreachable!()
+    }
+
+    async fn alter_index_name(&self, _index_id: u32, _index_name: &str) -> Result<()> {
+        unreachable!()
+    }
+
+    async fn alter_sink_name(&self, _sink_id: u32, _sink_name: &str) -> Result<()> {
+        unreachable!()
+    }
+
+    async fn alter_source_name(&self, _source_id: u32, _source_name: &str) -> Result<()> {
+        unreachable!()
     }
 }
 

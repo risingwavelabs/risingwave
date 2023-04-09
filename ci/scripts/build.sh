@@ -43,10 +43,11 @@ cargo build \
     -p risingwave_compaction_test \
     -p risingwave_backup_cmd \
     -p risingwave_java_binding \
+    -p risingwave_e2e_extended_mode_test \
     --features "static-link static-log-level" --profile "$profile"
 
 # the file name suffix of artifact for risingwave_java_binding is so only for linux. It is dylib for MacOS
-artifacts=(risingwave sqlsmith compaction-test backup-restore risingwave_regress_test risedev-dev delete-range-test librisingwave_java_binding.so)
+artifacts=(risingwave sqlsmith compaction-test backup-restore risingwave_regress_test risingwave_e2e_extended_mode_test risedev-dev delete-range-test librisingwave_java_binding.so)
 
 echo "--- Show link info"
 ldd target/"$target"/risingwave

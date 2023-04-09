@@ -76,4 +76,10 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"
+criterion = { version = "0.4", features = ["async_tokio", "async"] }
 risingwave_hummock_test = { path = "../storage/hummock_test", features = ["test"] }
+tracing-test = "0.2"
+
+[[bench]]
+name = "hash_agg"
+harness = false

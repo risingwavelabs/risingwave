@@ -15,14 +15,13 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use derivative::Derivative;
-use risingwave_common::catalog::{ColumnDesc, Field, Schema};
+use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 
 use super::super::utils::TableCatalogBuilder;
 use super::GenericPlanNode;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::ColumnId;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::{TableCatalog, WithOptions};
@@ -35,8 +34,7 @@ pub struct Source {
     pub catalog: Option<Rc<SourceCatalog>>,
     /// NOTE(Yuanxin): Here we store column descriptions, pk column ids, and row id index for plan
     /// generating, even if there is no external stream source.
-    pub column_descs: Vec<ColumnDesc>,
-    pub pk_col_ids: Vec<ColumnId>,
+    pub column_catalog: Vec<ColumnCatalog>,
     pub row_id_index: Option<usize>,
     /// Whether the "SourceNode" should generate the row id column for append only source
     pub gen_row_id: bool,
@@ -49,19 +47,16 @@ pub struct Source {
 
 impl GenericPlanNode for Source {
     fn schema(&self) -> Schema {
-        let fields = self.column_descs.iter().map(Into::into).collect();
+        let fields = self
+            .column_catalog
+            .iter()
+            .map(|c| (&c.column_desc).into())
+            .collect();
         Schema { fields }
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
-        let mut id_to_idx = HashMap::new();
-        self.column_descs.iter().enumerate().for_each(|(idx, c)| {
-            id_to_idx.insert(c.column_id, idx);
-        });
-        self.pk_col_ids
-            .iter()
-            .map(|c| id_to_idx.get(c).copied())
-            .collect::<Option<Vec<_>>>()
+        self.row_id_index.map(|idx| vec![idx])
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -72,9 +67,9 @@ impl GenericPlanNode for Source {
         let pk_indices = self.logical_pk();
         match pk_indices {
             Some(pk_indices) => {
-                FunctionalDependencySet::with_key(self.column_descs.len(), &pk_indices)
+                FunctionalDependencySet::with_key(self.column_catalog.len(), &pk_indices)
             }
-            None => FunctionalDependencySet::new(self.column_descs.len()),
+            None => FunctionalDependencySet::new(self.column_catalog.len()),
         }
     }
 }

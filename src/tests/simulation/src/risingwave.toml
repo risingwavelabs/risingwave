@@ -1,7 +1,0 @@
-# The configuration for scaling simulation test.
-#
-# Note: this file is embedded in the binary and cannot be changed without recompiling.
-
-[system]
-barrier_interval_ms = 250
-checkpoint_frequency = 4

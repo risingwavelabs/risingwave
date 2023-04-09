@@ -55,7 +55,7 @@ pub async fn handle_create_as(
 
     // Generate catalog descs from query
     let mut column_descs: Vec<_> = {
-        let mut binder = Binder::new(&session);
+        let mut binder = Binder::new(&session, vec![]);
         let bound = binder.bind(Statement::Query(query.clone()))?;
         if let BoundStatement::Query(query) = bound {
             // Create ColumnCatelog by Field
@@ -97,7 +97,7 @@ pub async fn handle_create_as(
             context,
             table_name.clone(),
             column_descs,
-            None,
+            vec![],
             vec![],
             properties,
             "".to_owned(), // TODO: support `SHOW CREATE TABLE` for `CREATE TABLE AS`

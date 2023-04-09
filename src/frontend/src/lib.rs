@@ -31,6 +31,7 @@
 #![feature(slice_internals)]
 #![feature(min_specialization)]
 #![feature(is_some_and)]
+#![feature(extend_one)]
 #![recursion_limit = "256"]
 
 #[macro_use]
@@ -46,7 +47,6 @@ mod optimizer;
 pub use optimizer::{Explain, OptimizerContext, OptimizerContextRef, PlanRef};
 mod planner;
 pub use planner::Planner;
-#[expect(dead_code)]
 mod scheduler;
 pub mod session;
 mod stream_fragmenter;
@@ -60,6 +60,8 @@ mod user;
 
 pub mod health_service;
 mod monitor;
+
+mod telemetry;
 
 use std::ffi::OsString;
 use std::iter;

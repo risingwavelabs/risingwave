@@ -74,9 +74,11 @@ impl ChainExecutor {
         // If the barrier is a conf change of creating this mview, init snapshot from its epoch
         // and begin to consume the snapshot.
         // Otherwise, it means we've recovered and the snapshot is already consumed.
-        let to_consume_snapshot = barrier.is_add_dispatcher(self.actor_id) && !self.upstream_only;
+        let to_consume_snapshot = barrier.is_newly_added(self.actor_id) && !self.upstream_only;
 
-        if self.upstream_only {
+        // If the barrier is a conf change of creating this mview, and the snapshot is not to be
+        // consumed, we can finish the progress immediately.
+        if barrier.is_newly_added(self.actor_id) && self.upstream_only {
             self.progress.finish(barrier.epoch.curr);
         }
 
@@ -100,7 +102,7 @@ impl ChainExecutor {
         #[for_await]
         for msg in upstream {
             let msg = msg?;
-            if let Message::Barrier(barrier) = &msg {
+            if to_consume_snapshot && let Message::Barrier(barrier) = &msg {
                 self.progress.finish(barrier.epoch.curr);
             }
             yield msg;
@@ -174,6 +176,7 @@ mod test {
                             ..Default::default()
                         }],
                     },
+                    added_actors: maplit::hashset! { actor_id },
                     splits: Default::default(),
                 })),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 3")),

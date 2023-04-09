@@ -56,6 +56,10 @@ impl StreamSource {
         Self { base, logical }
     }
 
+    pub fn logical(&self) -> &LogicalSource {
+        &self.logical
+    }
+
     pub fn column_names(&self) -> Vec<String> {
         self.schema()
             .fields()
@@ -92,16 +96,13 @@ impl StreamNode for StreamSource {
                     .to_internal_table_prost(),
             ),
             info: Some(source_catalog.info.clone()),
-            row_id_index: source_catalog.row_id_index.map(|index| index as _),
-            columns: source_catalog
-                .columns
+            row_id_index: self.logical.core.row_id_index.map(|index| index as _),
+            columns: self
+                .logical
+                .core
+                .column_catalog
                 .iter()
                 .map(|c| c.to_protobuf())
-                .collect_vec(),
-            pk_column_ids: source_catalog
-                .pk_col_ids
-                .iter()
-                .map(Into::into)
                 .collect_vec(),
             properties: source_catalog.properties.clone().into_iter().collect(),
         });
