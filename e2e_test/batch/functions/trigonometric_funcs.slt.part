@@ -207,3 +207,23 @@ query R
 SELECT abs(cosd(90) - 0.0) < 0.000000000000001;
 ----
 t 
+
+query R
+SELECT cosd(('Inf'))
+----
+NaN
+
+query R
+SELECT cosd(('-Inf'))
+----
+NaN
+
+query R
+SELECT cosd('NaN')
+----
+NaN
+
+query R
+SELECT cosd('-NaN')
+----
+NaN

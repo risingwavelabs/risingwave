@@ -62,14 +62,16 @@ static RADIANS_PER_DEGREE: f64 = 0.017_453_292_519_943_295;
 static SIN_30: f64 = 0.499_999_999_999_999_94;
 static ONE_MINUS_COS_60: f64 = 0.499_999_999_999_999_9;
 
-// returns the cosine of an angle that lies between 0 and 60 degrees. This will return exactly 1 when xi s 0, and exactly 0.5 when x is 60 degrees.
+// returns the cosine of an angle that lies between 0 and 60 degrees. This will return exactly 1
+// when xi s 0, and exactly 0.5 when x is 60 degrees.
 fn cosd_0_to_60(x: f64) -> f64 {
     // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c
     let one_minus_cos_x: f64 = 1.0 - f64::cos(x * RADIANS_PER_DEGREE);
     1.0 - (one_minus_cos_x / ONE_MINUS_COS_60) / 2.0
 }
 
-// returns the sine of an angle that lies between 0 and 30 degrees. This will return exactly 0 when x is 0, and exactly 0.5 when x is 30 degrees.
+// returns the sine of an angle that lies between 0 and 30 degrees. This will return exactly 0 when
+// x is 0, and exactly 0.5 when x is 30 degrees.
 fn sind_0_to_30(x: f64) -> f64 {
     // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c
     let sin_x = f64::sin(x * RADIANS_PER_DEGREE);
@@ -94,12 +96,12 @@ fn cosd_q1(x: f64) -> f64 {
 pub fn cosd_f64(input: F64) -> F64 {
     // See PSQL implementation: https://github.com/postgres/postgres/blob/78ec02d612a9b69039ec2610740f738968fe144d/src/backend/utils/adt/float.c
     let arg1 = input.0;
-    
-    // Return NaN if input is NaN or Infinte. Slightly different from PSQL implementation
+
+    // Return NaN if input is NaN or Infinite. Slightly different from PSQL implementation
     if input.0.is_nan() || input.0.is_infinite() {
         return F64::from(f64::NAN);
     }
-    
+
     // Reduce the range of the input to [0,90] degrees
     let sign = 1.0;
     let arg1 = arg1 % 360.0;
