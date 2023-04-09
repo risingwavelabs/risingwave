@@ -161,6 +161,7 @@ mod tests {
 
         // exact matches
         assert_eq!(cosd_f64(F64::from(0)).0, 1.0);
+        assert_eq!(cosd_f64(F64::from(90)).0, 0.0);
     }
 
     #[test]
