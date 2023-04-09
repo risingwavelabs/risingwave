@@ -113,14 +113,7 @@ message ExprNode {
     ACOS = 250;
     ATAN = 251;
     ATAN2 = 252;
-    SIND = 253;
-    COSD = 254;
-    TAND = 255;
-    COTD = 256;
-    ASIND = 257;
-    ACOSD = 258;
-    ATAND = 259;
-    ATAN2D = 260;
+    COSD = 253;
 
     // Boolean comparison
     IS_TRUE = 301;
