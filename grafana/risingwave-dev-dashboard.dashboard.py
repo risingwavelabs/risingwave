@@ -996,15 +996,15 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])",
-                            "cache miss {{actor_id}} {{side}}",
+                            "cache miss table - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}} ",
                         ),
                         panels.target(
                             f"rate({metric('stream_join_lookup_total_count')}[$__rate_interval])",
-                            "total lookups {{actor_id}} {{side}}",
+                            "total lookups {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
                         ),
                         panels.target(
                             f"rate({metric('stream_join_insert_cache_miss_count')}[$__rate_interval])",
-                            "cache miss when insert{{actor_id}} {{side}}",
+                            "cache miss when insert {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
                         ),
                     ],
                 ),
@@ -1080,11 +1080,11 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])",
-                            "cache miss {{actor_id}}",
+                            "cache miss - table {{table_id}} actor {{actor_id}}",
                         ),
                         panels.target(
                             f"rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])",
-                            "total lookups {{actor_id}}",
+                            "total lookups - table {{table_id}} actor {{actor_id}}",
                         ),
                     ],
                 ),
@@ -1094,11 +1094,11 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('stream_agg_chunk_lookup_miss_count')}[$__rate_interval])",
-                            "chunk-level cache miss {{actor_id}}",
+                            "chunk-level cache miss  - table {{table_id}} actor {{actor_id}}}",
                         ),
                         panels.target(
                             f"rate({metric('stream_agg_chunk_lookup_total_count')}[$__rate_interval])",
-                            "chunk-level total lookups {{actor_id}}",
+                            "chunk-level total lookups  - table {{table_id}} actor {{actor_id}}",
                         ),
                     ],
                 ),
@@ -1107,7 +1107,7 @@ def section_streaming_actors(outer_panels):
                     "The number of keys cached in each hash aggregation executor's executor cache.",
                     [
                         panels.target(f"{metric('stream_agg_cached_keys')}",
-                                      "{{actor_id}}"),
+                                      "table {{table_id}} actor {{actor_id}}"),
                     ],
                 ),
             ],

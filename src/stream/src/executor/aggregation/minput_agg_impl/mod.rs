@@ -12,11 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use builder::*;
-pub use column_mapping::*;
+use risingwave_common::types::{Datum, DatumRef};
+use smallvec::SmallVec;
 
-mod builder;
-pub mod cache;
-mod column_mapping;
-pub mod log_store;
-pub mod table;
+pub mod array_agg;
+pub mod extreme;
+pub mod string_agg;
+
+/// Trait that defines aggregators that aggregate over an iterator of cached values.
+pub trait MInputAggregator {
+    /// The cache value type.
+    type Value;
+
+    /// Convert cache value into compact representation.
+    fn convert_cache_value(&self, value: SmallVec<[DatumRef<'_>; 2]>) -> Self::Value;
+
+    /// Aggregate cached values.
+    fn aggregate<'a>(&'a self, values: impl Iterator<Item = &'a Self::Value>) -> Datum;
+}

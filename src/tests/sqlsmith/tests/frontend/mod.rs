@@ -179,7 +179,7 @@ fn run_batch_query(
     context: OptimizerContextRef,
     stmt: Statement,
 ) -> Result<()> {
-    let mut binder = Binder::new(&session);
+    let mut binder = Binder::new(&session, vec![]);
     let bound = binder
         .bind(stmt)
         .map_err(|e| Failed::from(format!("Failed to bind:\nReason:\n{}", e)))?;
