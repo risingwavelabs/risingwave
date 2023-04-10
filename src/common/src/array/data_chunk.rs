@@ -439,9 +439,8 @@ impl DataChunk {
         let buffers = match &self.vis2 {
             Vis::Bitmap(vis) => {
                 let rows_num = vis.len();
-                let mut buffers: Vec<Vec<u8>> = vec![Vec::new(); rows_num];
+                let mut buffers: Vec<Vec<u8>> = vec![];
                 let mut col_variable: Vec<&Column> = vec![];
-                col_variable.reserve(self.columns().len());
                 let mut row_len_fixed: usize = 0;
                 for c in &self.columns {
                     if let Some(field_len) = try_get_exact_serialize_datum_size(&c.array()) {
@@ -450,11 +449,11 @@ impl DataChunk {
                         col_variable.push(c);
                     }
                 }
-                for (i, buffer) in buffers.iter_mut().enumerate() {
+                for i in 0..rows_num {
                     // SAFETY(value_at_unchecked): the idx is always in bound.
                     unsafe {
                         if vis.is_set_unchecked(i) {
-                            buffer.reserve(
+                            buffers.push(Vec::with_capacity(
                                 row_len_fixed
                                     + col_variable
                                         .iter()
@@ -463,8 +462,9 @@ impl DataChunk {
                                                 col.array_ref().value_at_unchecked(i),
                                             )
                                         })
-                                        .sum::<usize>(),
-                            );
+                                        .sum::<usize>()
+                                    + 1,
+                            ));
                         }
                     }
                 }
@@ -483,9 +483,8 @@ impl DataChunk {
                 buffers
             }
             Vis::Compact(rows_num) => {
-                let mut buffers: Vec<Vec<u8>> = vec![Vec::new(); *rows_num];
+                let mut buffers: Vec<Vec<u8>> = vec![];
                 let mut col_variable: Vec<&Column> = vec![];
-                col_variable.reserve(self.columns().len());
                 let mut row_len_fixed: usize = 0;
                 for c in &self.columns {
                     if let Some(field_len) = try_get_exact_serialize_datum_size(&c.array()) {
@@ -494,10 +493,9 @@ impl DataChunk {
                         col_variable.push(c);
                     }
                 }
-                for (i, buffer) in buffers.iter_mut().enumerate() {
-                    // SAFETY(value_at_unchecked): the idx is always in bound.
+                for i in 0..*rows_num {
                     unsafe {
-                        buffer.reserve(
+                        buffers.push(Vec::with_capacity(
                             row_len_fixed
                                 + col_variable
                                     .iter()
@@ -506,8 +504,9 @@ impl DataChunk {
                                             col.array_ref().value_at_unchecked(i),
                                         )
                                     })
-                                    .sum::<usize>(),
-                        );
+                                    .sum::<usize>()
+                                + 1,
+                        ));
                     }
                 }
                 for c in &self.columns {
