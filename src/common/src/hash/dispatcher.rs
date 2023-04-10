@@ -66,7 +66,7 @@ pub trait HashKeyDispatcher: Sized {
     fn data_types(&self) -> &[DataType];
 
     fn dispatch(self) -> Self::Output {
-        if self.data_types().len() > MAX_GROUP_KEYS_ON_STACK {
+        if self.data_types().len() <= MAX_GROUP_KEYS_ON_STACK {
             self.dispatch_by_key_size::<StackNullBitmap>()
         } else {
             self.dispatch_by_key_size::<HeapNullBitmap>()
