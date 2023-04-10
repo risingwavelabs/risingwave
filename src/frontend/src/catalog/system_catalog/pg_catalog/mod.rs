@@ -248,7 +248,7 @@ impl SysCatalogReaderImpl {
         let catalog = self.catalog_reader.read_guard();
         let table_stats = catalog.table_stats();
         let mut rows = vec![];
-        for (id, stats) in table_stats.table_stats.iter() {
+        for (id, stats) in &table_stats.table_stats {
             rows.push(OwnedRow::new(vec![
                 Some(ScalarImpl::Int32(*id as i32)),
                 Some(ScalarImpl::Int64(stats.total_key_count)),

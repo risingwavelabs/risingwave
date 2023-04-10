@@ -537,7 +537,7 @@ impl Binder {
                     }
                 ))),
                 ("pg_relation_size",raw(|binder, inputs|{
-                        if inputs.len() >= 1 && inputs.len() <= 2{
+                        if !inputs.is_empty() && inputs.len() <= 2{
                             Err(ErrorCode::ExprError("pg_relation_size takes 1 or 2 arguments".into()))?
                         }
                         let input = &inputs[0];

@@ -388,9 +388,7 @@ impl Binder {
     /// This returns the size of all the indexes that are on the specified table.
     pub fn bind_get_indexes_size_select(&mut self, table: &ExprImpl) -> Result<BoundSelect> {
         let arg = table.as_literal().ok_or_else(|| {
-            ErrorCode::BindError(format!(
-                "pg_indexes_size only supports literals as arguments"
-            ))
+            ErrorCode::BindError("pg_indexes_size only supports literals as arguments".to_string())
         })?;
         // Get list of indexes on this table
         let indexes = self.get_indexes_on_table_by_literal(arg)?;
@@ -591,11 +589,8 @@ impl Binder {
             .map(|table| table.table_indexes.iter().map(|idx| idx.id).collect())
     }
 
-    /// Uses a literal value to look up the ID of an Object (e.g. a table). If the literal is an
-    /// integer (int16, int32, or int64) this will just return that number as an ObjectID value.
-    /// If the literal is a varchar, this will look in the Catalog for an object with a name that
-    /// matches the varchar and return its Object ID value; of no match is found then an error is
-    /// returned.
+    /// Uses a [`Literal`] value to attempt to find a [`Table`](BoundBaseTable). Will return an
+    /// error if no table is found which matches the given [`Literal`].
     fn get_table_by_literal(&mut self, arg: &Literal) -> Result<BoundBaseTable> {
         match arg
             .get_data()
@@ -606,18 +601,16 @@ impl Binder {
             ScalarImpl::Int32(id) => self.get_table_by_id(&TableId::new(*id as u32)),
             ScalarImpl::Int64(id) => self.get_table_by_id(&TableId::new(*id as u32)),
             ScalarImpl::Utf8(name) => {
-                let object_name = Self::parse_object_name(&name)?;
+                let object_name = Self::parse_object_name(name)?;
                 let (schema_name, table_name) =
                     Self::resolve_schema_qualified_name(&self.db_name, object_name)?;
 
                 self.get_table_by_name(schema_name.as_deref(), &table_name)
             }
-            _ => {
-                return Err(ErrorCode::BindError(
-                    "This only supports Object Names (varchar) literals.".to_string(),
-                )
-                .into())
-            }
+            _ => Err(ErrorCode::BindError(
+                "This only supports Object Names (varchar) literals.".to_string(),
+            )
+            .into()),
         }
     }
 
