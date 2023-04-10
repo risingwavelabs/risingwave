@@ -49,6 +49,10 @@ pub struct IndexCatalog {
     pub secondary_to_primary_mapping: BTreeMap<usize, usize>,
 
     /// Map function call from the primary table to the index table.
+    /// Use `HashMap` instead of `BTreeMap`, because `FunctionCall` can't be used as the key for
+    /// `BTreeMap`. BTW, the trait `std::hash::Hash` is not implemented for
+    /// `HashMap<function_call::FunctionCall, usize>`, so we need to ignore it. It will not
+    /// affect the correctness, since it can be derived by `index_item`.
     #[derivative(PartialEq = "ignore")]
     #[derivative(Hash = "ignore")]
     pub function_mapping: HashMap<FunctionCall, usize>,
