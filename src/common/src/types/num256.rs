@@ -326,6 +326,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::unnecessary_cast)]
     fn basic_test() {
         check_convert!(u8, [0, 1, u8::MAX]);
         check_convert!(i8, [0, -1, 1, i8::MAX]);
