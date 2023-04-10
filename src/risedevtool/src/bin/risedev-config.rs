@@ -198,7 +198,6 @@ USE_HM_TRACE=true
             "ENABLE_ALL_IN_ONE" => Some(Self::AllInOne),
             "ENABLE_SANITIZER" => Some(Self::Sanitizer),
             "ENABLE_REDIS" => Some(Self::Redis),
-            "ENABLE_RW_CONNECTOR" => Some(Self::ConnectorNode),
             "ENABLE_HM_TRACE" => Some(Self::HummockTracing),
             "ENABLE_BUILD_RW_CONNECTOR" => Some(Self::BuildConnectorNode),
             _ => None,
@@ -220,7 +219,6 @@ USE_HM_TRACE=true
             Self::Release => "ENABLE_RELEASE_PROFILE",
             Self::AllInOne => "ENABLE_ALL_IN_ONE",
             Self::Sanitizer => "ENABLE_SANITIZER",
-            Self::ConnectorNode => "ENABLE_RW_CONNECTOR",
             Self::HummockTracing => "ENABLE_HM_TRACE",
             Self::BuildConnectorNode => "ENABLE_BUILD_RW_CONNECTOR",
         }
