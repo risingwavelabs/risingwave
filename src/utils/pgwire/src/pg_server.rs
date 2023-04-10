@@ -18,7 +18,7 @@ use std::result::Result;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::Stream;
+use futures::{Stream, TryFutureExt};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Statement;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -144,11 +144,7 @@ where
                 stream.set_nodelay(true)?;
                 let ssl_config = ssl_config.clone();
                 let fut = handle_connection(stream, session_mgr, ssl_config);
-                tokio::spawn(async {
-                    if let Err(e) = fut.await {
-                        debug!("error handling connection : {}", e);
-                    }
-                });
+                tokio::spawn(fut.inspect_err(|e| debug!("error handling connection: {e}")));
             }
 
             Err(e) => {

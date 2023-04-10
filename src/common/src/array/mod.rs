@@ -67,13 +67,12 @@ pub use utf8_array::*;
 pub use vis::{Vis, VisRef};
 
 pub use self::error::ArrayError;
-pub use crate::array::num256_array::{
-    Int256Array, Int256ArrayBuilder, Uint256Array, Uint256ArrayBuilder,
-};
+pub use crate::array::num256_array::{Int256Array, Int256ArrayBuilder};
 use crate::buffer::Bitmap;
+use crate::collection::estimate_size::EstimateSize;
 use crate::types::*;
 use crate::util::iter_util::ZipEqFast;
-pub type ArrayResult<T> = std::result::Result<T, ArrayError>;
+pub type ArrayResult<T> = Result<T, ArrayError>;
 
 pub type I64Array = PrimitiveArray<i64>;
 pub type I32Array = PrimitiveArray<i32>;
@@ -162,7 +161,9 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
 /// In some cases, we will need to store owned data. For example, when aggregating min
 /// and max, we need to store current maximum in the aggregator. In this case, we
 /// could use `A::OwnedItem` in aggregator struct.
-pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImpl> {
+pub trait Array:
+    std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImpl> + EstimateSize
+{
     /// A reference to item in array, as well as return type of `value_at`, which is
     /// reciprocal to `Self::OwnedItem`.
     type RefItem<'a>: ScalarRef<'a, ScalarType = Self::OwnedItem>
@@ -343,7 +344,6 @@ macro_rules! for_all_variants {
             { Int32, int32, I32Array, I32ArrayBuilder },
             { Int64, int64, I64Array, I64ArrayBuilder },
             { Int256, int256, Int256Array, Int256ArrayBuilder },
-            { Uint256, uint256, Uint256Array, Uint256ArrayBuilder },
             { Float32, float32, F32Array, F32ArrayBuilder },
             { Float64, float64, F64Array, F64ArrayBuilder },
             { Utf8, utf8, Utf8Array, Utf8ArrayBuilder },
@@ -384,12 +384,6 @@ impl<T: PrimitiveArrayItemType> From<PrimitiveArray<T>> for ArrayImpl {
 impl From<Int256Array> for ArrayImpl {
     fn from(arr: Int256Array) -> Self {
         Self::Int256(arr)
-    }
-}
-
-impl From<Uint256Array> for ArrayImpl {
-    fn from(arr: Uint256Array) -> Self {
-        Self::Uint256(arr)
     }
 }
 
@@ -676,6 +670,20 @@ macro_rules! impl_array {
 
 for_all_variants! { impl_array }
 
+macro_rules! impl_array_estimate_size {
+    ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        impl EstimateSize for ArrayImpl {
+            fn estimated_heap_size(&self) -> usize {
+                match self {
+                    $( Self::$variant_name(inner) => inner.estimated_heap_size(), )*
+                }
+            }
+        }
+    }
+}
+
+for_all_variants! { impl_array_estimate_size }
+
 impl ArrayImpl {
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = DatumRef<'_>> + ExactSizeIterator {
         (0..self.len()).map(|i| self.value_at(i))
@@ -714,7 +722,6 @@ impl ArrayImpl {
                 read_string_array::<BytesArrayBuilder, BytesValueReader>(array, cardinality)?
             }
             PbArrayType::Int256 => Int256Array::from_protobuf(array, cardinality)?,
-            PbArrayType::Uint256 => Uint256Array::from_protobuf(array, cardinality)?,
         };
         Ok(array)
     }

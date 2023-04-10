@@ -26,7 +26,8 @@ use super::super::utils::IndicesDisplay;
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::plan_node::batch::BatchPlanRef;
+use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::utils::ColIndexMappingRewriteExt;
 
 /// [`HopWindow`] implements Hop Table Function.
@@ -118,7 +119,24 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for HopWindow<PlanRef> {
     }
 }
 
+impl<PlanRef: BatchPlanRef> HopWindow<PlanRef> {
+    pub fn get_out_column_index_order(&self) -> Order {
+        self.i2o_col_mapping()
+            .rewrite_provided_order(self.input.order())
+    }
+}
+
 impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
+    pub fn output_window_start_col_idx(&self) -> Option<usize> {
+        self.internal2output_col_mapping()
+            .try_map(self.internal_window_start_col_idx())
+    }
+
+    pub fn output_window_end_col_idx(&self) -> Option<usize> {
+        self.internal2output_col_mapping()
+            .try_map(self.internal_window_end_col_idx())
+    }
+
     pub fn into_parts(self) -> (PlanRef, InputRef, Interval, Interval, Interval, Vec<usize>) {
         (
             self.input,
