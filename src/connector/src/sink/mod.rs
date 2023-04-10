@@ -274,7 +274,7 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
 
     tracing::debug!("datum_to_json_object: {:?}, {:?}", data_type, scalar_ref);
 
-    let value = match (data_type.clone(), scalar_ref) {
+    let value = match (data_type, scalar_ref) {
         (DataType::Boolean, ScalarRefImpl::Bool(v)) => {
             json!(v)
         }
@@ -344,7 +344,7 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
         _ => {
             return Err(ArrayError::internal(format!(
                 "datum_to_json_object: unsupported data type {:?}, {:?}",
-                data_type, scalar_ref,
+                field.data_type, scalar_ref,
             )));
         }
     };
