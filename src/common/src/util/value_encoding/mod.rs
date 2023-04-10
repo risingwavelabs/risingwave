@@ -464,13 +464,24 @@ fn deserialize_decimal(data: &mut impl Buf) -> Result<Decimal> {
 #[cfg(test)]
 mod tests {
     use crate::array::serial_array::Serial;
-    use crate::array::{ListValue, StructValue};
-    use crate::types::{Date, Datum, Decimal, Interval, ScalarImpl, Time, Timestamp};
-    use crate::util::value_encoding::{estimate_serialize_datum_size, serialize_datum};
+    use crate::array::{ArrayImpl, ListValue, StructValue};
+    use crate::test_utils::rand_chunk;
+    use crate::types::{DataType, Date, Datum, Decimal, Interval, ScalarImpl, Time, Timestamp};
+    use crate::util::value_encoding::{
+        estimate_serialize_datum_size, serialize_datum, try_get_exact_serialize_datum_size,
+    };
 
     fn test_estimate_serialize_scalar_size(s: ScalarImpl) {
         let d = Datum::from(s);
         assert_eq!(estimate_serialize_datum_size(&d), serialize_datum(&d).len());
+    }
+
+    fn test_try_get_exact_serialize_datum_size(s: &ArrayImpl) {
+        let d = s.to_datum();
+        let try_ret = try_get_exact_serialize_datum_size(s);
+        if let Some(ret) = try_ret {
+            assert_eq!(ret, serialize_datum(&d).len());
+        }
     }
 
     #[test]
@@ -512,5 +523,31 @@ mod tests {
             ScalarImpl::Int64(233).into(),
             ScalarImpl::Int64(2333).into(),
         ])));
+    }
+
+    #[test]
+    fn test_try_estimate_size() {
+        let chunk = rand_chunk::gen_chunk(
+            &vec![
+                DataType::Int16,
+                DataType::Int32,
+                DataType::Int64,
+                DataType::Serial,
+                DataType::Float32,
+                DataType::Float64,
+                DataType::Boolean,
+                DataType::Decimal,
+                DataType::Interval,
+                DataType::Time,
+                DataType::Timestamp,
+                DataType::Date,
+            ],
+            1,
+            0,
+            0.0,
+        );
+        for column in chunk.columns() {
+            test_try_get_exact_serialize_datum_size(&column.array());
+        }
     }
 }
