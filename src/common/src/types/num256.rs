@@ -20,13 +20,13 @@ use std::num::ParseIntError;
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 use std::str::FromStr;
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes};
 use ethnum::{i256, I256};
 use num_traits::{
     CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, FromPrimitive,
     ToPrimitive, Zero,
 };
-use postgres_types::{ToSql, Type};
+
 use risingwave_pb::data::ArrayType;
 use serde::{Deserialize, Serialize, Serializer};
 use to_text::ToText;
@@ -173,12 +173,17 @@ macro_rules! impl_common_for_num256 {
         impl ToBinary for $scalar_ref<'_> {
             fn to_binary_with_type(&self, _ty: &DataType) -> crate::error::Result<Option<Bytes>> {
                 let mut output = bytes::BytesMut::new();
-                self.0
-                    .to_be_bytes()
-                    .as_ref()
-                    .to_sql(&Type::ANY, &mut output)
-                    .unwrap();
+                let buffer = self.to_be_bytes();
+                output.put_slice(&buffer);
                 Ok(Some(output.freeze()))
+            }
+        }
+
+        impl $scalar {
+            pub fn from_binary(mut input: &[u8]) -> ArrayResult<Self> {
+                let mut buf = [0; Self::size()];
+                input.read_exact(&mut buf)?;
+                Ok(Self::from_be_bytes(buf))
             }
         }
     };

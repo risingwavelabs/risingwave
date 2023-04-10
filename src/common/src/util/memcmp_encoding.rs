@@ -21,6 +21,7 @@ use crate::array::serial_array::Serial;
 use crate::array::{ArrayImpl, DataChunk};
 use crate::row::Row;
 use crate::types::{DataType, Date, Datum, ScalarImpl, Time, Timestamp, ToDatumRef, F32, F64};
+use crate::types::num256::Int256;
 use crate::util::sort_util::{ColumnOrder, OrderType};
 
 // NULL > any non-NULL value by default
@@ -132,7 +133,6 @@ fn calculate_encoded_size_inner(
             DataType::Int16 => size_of::<i16>(),
             DataType::Int32 => size_of::<i32>(),
             DataType::Int64 => size_of::<i64>(),
-            DataType::Int256 => todo!(),
             DataType::Serial => size_of::<Serial>(),
             DataType::Float32 => size_of::<F32>(),
             DataType::Float64 => size_of::<F64>(),
@@ -166,6 +166,7 @@ fn calculate_encoded_size_inner(
             DataType::Jsonb => deserializer.skip_bytes()?,
             DataType::Varchar => deserializer.skip_bytes()?,
             DataType::Bytea => deserializer.skip_bytes()?,
+            DataType::Int256 => Int256::size(),
         };
 
         // consume offset of fixed_type

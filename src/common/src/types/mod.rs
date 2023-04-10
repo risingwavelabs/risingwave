@@ -833,7 +833,11 @@ impl ScalarImpl {
                     ErrorCode::InvalidInputSyntax("Invalid value of Jsonb".to_string())
                 })?)
             }
-            DataType::Int256 => todo!(),
+            DataType::Int256 => Self::Int256(
+                Int256::from_binary(bytes)
+                    .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?
+                    .into(),
+            ),
             DataType::Struct(_) | DataType::List { .. } => {
                 return Err(ErrorCode::NotSupported(
                     format!("param type: {}", data_type),
