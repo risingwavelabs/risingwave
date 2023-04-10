@@ -26,13 +26,15 @@ use std::default::Default;
 use std::fmt::Debug;
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::io::{Cursor, Read};
+use std::mem::size_of;
 use std::ops::Deref;
+
 use bytes::buf::UninitSlice;
 use bytes::{Buf, BufMut};
-
 use chrono::{Datelike, Timelike};
 use smallbitset::Set64;
 use smallvec::SmallVec;
+use static_assertions::const_assert_eq;
 
 use crate::array::serial_array::Serial;
 use crate::array::{
@@ -221,8 +223,30 @@ pub struct FixedSizeKey<const N: usize> {
 #[repr(transparent)]
 #[derive(Clone, Debug, PartialEq)]
 struct SerializedKeyBuffer {
-    inner: SmallVec<[u8; 32]>,
+    inner: SmallVec<[u8; 16]>,
 }
+
+// Ref(SmallVec): https://github.com/servo/rust-smallvec/blob/b960b3ad3134e80921ca8d62105575fc91061eb1/src/lib.rs#L555-L561
+// Ref(SmallVecData): https://github.com/servo/rust-smallvec/blob/b960b3ad3134e80921ca8d62105575fc91061eb1/src/lib.rs#L413-L417
+// capacity: usize
+// data = max(data_on_stack, data_on_heap) (SmallVecData is a `union` type, so values share the same
+// memory).
+// data_on_stack: 16 bytes
+// data_on_heap: usize (ptr) + usize (point to len)
+const_assert_eq!(size_of::<SerializedKeyBuffer>(), 24);
+const_assert_eq!(size_of::<SerializedKeyBuffer>(), {
+    let data_on_stack = 16;
+    let data_on_heap = size_of::<usize>() * 2;
+    // workaround for const-max
+    let data = if data_on_stack > data_on_heap {
+        data_on_stack
+    } else {
+        data_on_heap
+    };
+
+    let capacity = size_of::<usize>();
+    data + capacity
+});
 
 impl SerializedKeyBuffer {
     fn with_capacity(capacity: usize) -> Self {
@@ -233,7 +257,8 @@ impl SerializedKeyBuffer {
 }
 
 impl Deref for SerializedKeyBuffer {
-    type Target = SmallVec<[u8; 32]>;
+    type Target = SmallVec<[u8; 16]>;
+
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
@@ -277,8 +302,8 @@ unsafe impl BufMut for SerializedKeyBuffer {
     // Specialize these methods so they can skip checking `remaining_mut`
     // and `advance_mut`.
     fn put<T: Buf>(&mut self, mut src: T)
-        where
-            Self: Sized,
+    where
+        Self: Sized,
     {
         // In case the src isn't contiguous, reserve upfront
         self.inner.reserve(src.remaining());
