@@ -60,7 +60,11 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
             .map(ColumnOrder::from_protobuf)
             .collect();
 
-        assert_eq!(&params.pk_indices, input.pk_indices());
+        if node.limit != 1 {
+            // When limit is 1, `params.pk_indices` is the group key instead of the input's stream
+            // key.
+            assert_eq!(&params.pk_indices, input.pk_indices());
+        }
         let args = GroupTopNExecutorDispatcherArgs {
             input,
             ctx: params.actor_context,

@@ -583,9 +583,15 @@ pub fn to_stream_prost_body(
             })
         }
         Node::GroupTopN(me) => {
+            let input = &me.core.input.0;
             let table = me
                 .core
-                .infer_internal_table_catalog(base, me.vnode_col_idx)
+                .infer_internal_table_catalog(
+                    input.schema(),
+                    input.ctx(),
+                    input.logical_pk(),
+                    me.vnode_col_idx,
+                )
                 .with_id(state.gen_table_id_wrapped());
             let group_topn_node = GroupTopNNode {
                 limit: me.core.limit,
@@ -723,15 +729,21 @@ pub fn to_stream_prost_body(
             PbNodeBody::Source(SourceNode { source_inner })
         }
         Node::TopN(me) => {
+            let input = &me.core.input.0;
             let me = &me.core;
             let topn_node = TopNNode {
                 limit: me.limit,
                 offset: me.offset,
                 with_ties: me.with_ties,
                 table: Some(
-                    me.infer_internal_table_catalog(base, None)
-                        .with_id(state.gen_table_id_wrapped())
-                        .to_internal_table_prost(),
+                    me.infer_internal_table_catalog(
+                        input.schema(),
+                        input.ctx(),
+                        input.logical_pk(),
+                        None,
+                    )
+                    .with_id(state.gen_table_id_wrapped())
+                    .to_internal_table_prost(),
                 ),
                 order_by: me.order.to_protobuf(),
             };
