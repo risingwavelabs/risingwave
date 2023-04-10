@@ -19,7 +19,6 @@ use risingwave_batch::executor::hash_join::HashJoinExecutor;
 use risingwave_batch::executor::test_utils::{gen_projected_data, MockExecutor};
 use risingwave_batch::executor::{BoxedExecutor, JoinType};
 use risingwave_common::catalog::schema_test_utils::field_n;
-use risingwave_common::hash::StackNullBitmap;
 use risingwave_common::types::DataType;
 use risingwave_common::{enable_jemalloc_on_unix, hash};
 use risingwave_expr::expr::build_from_pretty;
@@ -62,7 +61,7 @@ fn create_hash_join_executor(
 
     let cond = with_cond.then(|| build_from_pretty("(greater_than:int8 $0:int8 100:int8)"));
 
-    Box::new(HashJoinExecutor::<hash::Key64<StackNullBitmap>>::new(
+    Box::new(HashJoinExecutor::<hash::Key64>::new(
         join_type,
         output_indices,
         left_child,

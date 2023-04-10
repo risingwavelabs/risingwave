@@ -1790,7 +1790,7 @@ mod tests {
     use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::error::Result;
-    use risingwave_common::hash::{Key32, StackNullBitmap};
+    use risingwave_common::hash::Key32;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::iter_util::ZipEqDebug;
@@ -2602,7 +2602,7 @@ mod tests {
             found_matched: false,
         };
         assert!(is_data_chunk_eq(
-            &HashJoinExecutor::<Key32<StackNullBitmap>>::process_left_outer_join_non_equi_condition(
+            &HashJoinExecutor::<Key32>::process_left_outer_join_non_equi_condition(
                 chunk,
                 cond.as_ref(),
                 &mut state
@@ -2632,7 +2632,7 @@ mod tests {
         state.first_output_row_id = vec![2, 3];
         state.has_more_output_rows = false;
         assert!(is_data_chunk_eq(
-            &HashJoinExecutor::<Key32<StackNullBitmap>>::process_left_outer_join_non_equi_condition(
+            &HashJoinExecutor::<Key32>::process_left_outer_join_non_equi_condition(
                 chunk,
                 cond.as_ref(),
                 &mut state
@@ -2662,7 +2662,7 @@ mod tests {
         state.first_output_row_id = vec![2, 3];
         state.has_more_output_rows = false;
         assert!(is_data_chunk_eq(
-            &HashJoinExecutor::<Key32<StackNullBitmap>>::process_left_outer_join_non_equi_condition(
+            &HashJoinExecutor::<Key32>::process_left_outer_join_non_equi_condition(
                 chunk,
                 cond.as_ref(),
                 &mut state
@@ -2702,7 +2702,7 @@ mod tests {
             ..Default::default()
         };
         assert!(is_data_chunk_eq(
-            &HashJoinExecutor::<Key32<StackNullBitmap>>::process_left_semi_anti_join_non_equi_condition::<false>(
+            &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<false>(
                 chunk,
                 cond.as_ref(),
                 &mut state
@@ -2729,7 +2729,7 @@ mod tests {
         );
         state.first_output_row_id = vec![2, 3];
         assert!(is_data_chunk_eq(
-            &HashJoinExecutor::<Key32<StackNullBitmap>>::process_left_semi_anti_join_non_equi_condition::<false>(
+            &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<false>(
                 chunk,
                 cond.as_ref(),
                 &mut state
@@ -2756,7 +2756,7 @@ mod tests {
         );
         state.first_output_row_id = vec![2, 3];
         assert!(is_data_chunk_eq(
-            &HashJoinExecutor::<Key32<StackNullBitmap>>::process_left_semi_anti_join_non_equi_condition::<false>(
+            &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<false>(
                 chunk,
                 cond.as_ref(),
                 &mut state
@@ -2798,7 +2798,7 @@ mod tests {
             found_matched: false,
         };
         assert!(is_data_chunk_eq(
-            &HashJoinExecutor::<Key32<StackNullBitmap>>::process_left_semi_anti_join_non_equi_condition::<true>(
+            &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<true>(
                 chunk,
                 cond.as_ref(),
                 &mut state
@@ -2827,7 +2827,7 @@ mod tests {
         state.first_output_row_id = vec![2, 3];
         state.has_more_output_rows = false;
         assert!(is_data_chunk_eq(
-            &HashJoinExecutor::<Key32<StackNullBitmap>>::process_left_semi_anti_join_non_equi_condition::<true>(
+            &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<true>(
                 chunk,
                 cond.as_ref(),
                 &mut state
@@ -2856,7 +2856,7 @@ mod tests {
         state.first_output_row_id = vec![2, 3];
         state.has_more_output_rows = false;
         assert!(is_data_chunk_eq(
-            &HashJoinExecutor::<Key32<StackNullBitmap>>::process_left_semi_anti_join_non_equi_condition::<true>(
+            &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<true>(
                 chunk,
                 cond.as_ref(),
                 &mut state
@@ -2920,7 +2920,7 @@ mod tests {
             build_row_matched,
         };
         assert!(is_data_chunk_eq(
-            &HashJoinExecutor::<Key32<StackNullBitmap>>::process_right_outer_join_non_equi_condition(
+            &HashJoinExecutor::<Key32>::process_right_outer_join_non_equi_condition(
                 chunk,
                 cond.as_ref(),
                 &mut state
@@ -2961,7 +2961,7 @@ mod tests {
             RowId::new(0, 13),
         ];
         assert!(is_data_chunk_eq(
-            &HashJoinExecutor::<Key32<StackNullBitmap>>::process_right_outer_join_non_equi_condition(
+            &HashJoinExecutor::<Key32>::process_right_outer_join_non_equi_condition(
                 chunk,
                 cond.as_ref(),
                 &mut state
@@ -3014,7 +3014,7 @@ mod tests {
         };
 
         assert!(
-            HashJoinExecutor::<Key32<StackNullBitmap>>::process_right_semi_anti_join_non_equi_condition(
+            HashJoinExecutor::<Key32>::process_right_semi_anti_join_non_equi_condition(
                 chunk,
                 cond.as_ref(),
                 &mut state
@@ -3049,7 +3049,7 @@ mod tests {
             RowId::new(0, 13),
         ];
         assert!(
-            HashJoinExecutor::<Key32<StackNullBitmap>>::process_right_semi_anti_join_non_equi_condition(
+            HashJoinExecutor::<Key32>::process_right_semi_anti_join_non_equi_condition(
                 chunk,
                 cond.as_ref(),
                 &mut state
@@ -3110,7 +3110,7 @@ mod tests {
             build_row_matched: ChunkedData::with_chunk_sizes([14].into_iter()).unwrap(),
         };
         assert!(is_data_chunk_eq(
-            &HashJoinExecutor::<Key32<StackNullBitmap>>::process_full_outer_join_non_equi_condition(
+            &HashJoinExecutor::<Key32>::process_full_outer_join_non_equi_condition(
                 chunk,
                 cond.as_ref(),
                 &mut left_state,
@@ -3158,7 +3158,7 @@ mod tests {
             RowId::new(0, 13),
         ];
         assert!(is_data_chunk_eq(
-            &HashJoinExecutor::<Key32<StackNullBitmap>>::process_full_outer_join_non_equi_condition(
+            &HashJoinExecutor::<Key32>::process_full_outer_join_non_equi_condition(
                 chunk,
                 cond.as_ref(),
                 &mut left_state,

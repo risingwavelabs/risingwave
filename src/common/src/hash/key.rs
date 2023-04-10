@@ -298,7 +298,7 @@ pub trait HashKey:
 ///
 /// See [`crate::hash::calc_hash_key_kind`]
 #[derive(Clone, Debug)]
-pub struct FixedSizeKey<const N: usize, B: NullBitmap> {
+pub struct FixedSizeKey<const N: usize, B = StackNullBitmap> {
     key: [u8; N],
     hash_code: u64,
     null_bitmap: B,
@@ -308,7 +308,7 @@ pub struct FixedSizeKey<const N: usize, B: NullBitmap> {
 ///
 /// See [`crate::hash::calc_hash_key_kind`]
 #[derive(Clone, Debug)]
-pub struct SerializedKey<B: NullBitmap> {
+pub struct SerializedKey<B = StackNullBitmap> {
     // Key encoding.
     key: Vec<u8>,
     hash_code: u64,
@@ -1062,39 +1062,39 @@ mod tests {
 
     #[test]
     fn test_two_bytes_hash_key() {
-        do_test::<Key16<StackNullBitmap>, _>(vec![1], generate_random_data_chunk);
+        do_test::<Key16, _>(vec![1], generate_random_data_chunk);
     }
 
     #[test]
     fn test_four_bytes_hash_key() {
-        do_test::<Key32<StackNullBitmap>, _>(vec![0, 1], generate_random_data_chunk);
-        do_test::<Key32<StackNullBitmap>, _>(vec![2], generate_random_data_chunk);
-        do_test::<Key32<StackNullBitmap>, _>(vec![4], generate_random_data_chunk);
+        do_test::<Key32, _>(vec![0, 1], generate_random_data_chunk);
+        do_test::<Key32, _>(vec![2], generate_random_data_chunk);
+        do_test::<Key32, _>(vec![4], generate_random_data_chunk);
     }
 
     #[test]
     fn test_eight_bytes_hash_key() {
-        do_test::<Key64<StackNullBitmap>, _>(vec![1, 2], generate_random_data_chunk);
-        do_test::<Key64<StackNullBitmap>, _>(vec![0, 1, 2], generate_random_data_chunk);
-        do_test::<Key64<StackNullBitmap>, _>(vec![3], generate_random_data_chunk);
-        do_test::<Key64<StackNullBitmap>, _>(vec![5], generate_random_data_chunk);
+        do_test::<Key64, _>(vec![1, 2], generate_random_data_chunk);
+        do_test::<Key64, _>(vec![0, 1, 2], generate_random_data_chunk);
+        do_test::<Key64, _>(vec![3], generate_random_data_chunk);
+        do_test::<Key64, _>(vec![5], generate_random_data_chunk);
     }
 
     #[test]
     fn test_128_bits_hash_key() {
-        do_test::<Key128<StackNullBitmap>, _>(vec![3, 5], generate_random_data_chunk);
-        do_test::<Key128<StackNullBitmap>, _>(vec![6], generate_random_data_chunk);
+        do_test::<Key128, _>(vec![3, 5], generate_random_data_chunk);
+        do_test::<Key128, _>(vec![6], generate_random_data_chunk);
     }
 
     #[test]
     fn test_256_bits_hash_key() {
-        do_test::<Key256<StackNullBitmap>, _>(vec![3, 5, 6], generate_random_data_chunk);
-        do_test::<Key256<StackNullBitmap>, _>(vec![3, 6], generate_random_data_chunk);
+        do_test::<Key256, _>(vec![3, 5, 6], generate_random_data_chunk);
+        do_test::<Key256, _>(vec![3, 6], generate_random_data_chunk);
     }
 
     #[test]
     fn test_var_length_hash_key() {
-        do_test::<KeySerialized<StackNullBitmap>, _>(vec![0, 7], generate_random_data_chunk);
+        do_test::<KeySerialized, _>(vec![0, 7], generate_random_data_chunk);
     }
 
     fn generate_decimal_test_data() -> (DataChunk, Vec<DataType>) {
@@ -1113,14 +1113,14 @@ mod tests {
 
     #[test]
     fn test_decimal_hash_key_serialization() {
-        do_test::<Key128<StackNullBitmap>, _>(vec![0], generate_decimal_test_data);
+        do_test::<Key128, _>(vec![0], generate_decimal_test_data);
     }
 
     // Simple test to ensure a row <None, Some(2)> will be serialized and restored
     // losslessly.
     #[test]
     fn test_simple_hash_key_nullable_serde() {
-        let keys = Key64::<StackNullBitmap>::build(
+        let keys = Key64::build(
             &[0, 1],
             &DataChunk::from_pretty(
                 "i i
@@ -1135,7 +1135,7 @@ mod tests {
             .map(|_| ArrayBuilderImpl::Int32(I32ArrayBuilder::new(2)))
             .collect::<Vec<_>>();
 
-        keys.into_iter().for_each(|k| {
+        keys.into_iter().for_each(|k: Key64| {
             k.deserialize_to_builders(&mut array_builders[..], &[DataType::Int32, DataType::Int32])
                 .unwrap()
         });

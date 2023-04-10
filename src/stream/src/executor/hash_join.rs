@@ -1229,7 +1229,7 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::*;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
-    use risingwave_common::hash::{Key128, Key64, StackNullBitmap};
+    use risingwave_common::hash::{Key128, Key64};
     use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::expr::build_from_pretty;
@@ -1336,7 +1336,7 @@ mod tests {
             _ => source_l.schema().len() + source_r.schema().len(),
         };
 
-        let executor = HashJoinExecutor::<Key64<StackNullBitmap>, MemoryStateStore, T>::new(
+        let executor = HashJoinExecutor::<Key64, MemoryStateStore, T>::new(
             ActorContext::create(123),
             Box::new(source_l),
             Box::new(source_r),
@@ -1418,7 +1418,7 @@ mod tests {
             _ => source_l.schema().len() + source_r.schema().len(),
         };
 
-        let executor = HashJoinExecutor::<Key128<StackNullBitmap>, MemoryStateStore, T>::new(
+        let executor = HashJoinExecutor::<Key128, MemoryStateStore, T>::new(
             ActorContext::create(123),
             Box::new(source_l),
             Box::new(source_r),

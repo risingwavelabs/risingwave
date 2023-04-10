@@ -17,7 +17,6 @@ use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criteri
 use itertools::Itertools;
 use risingwave_batch::executor::{BoxedExecutor, HashAggExecutor};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::hash::StackNullBitmap;
 use risingwave_common::types::DataType;
 use risingwave_common::{enable_jemalloc_on_unix, hash};
 use risingwave_expr::expr::AggKind;
@@ -92,7 +91,7 @@ fn create_hash_agg_executor(
         .collect_vec();
     let schema = Schema { fields };
 
-    Box::new(HashAggExecutor::<hash::Key64<StackNullBitmap>>::new(
+    Box::new(HashAggExecutor::<hash::Key64>::new(
         agg_factories,
         group_key_columns,
         group_key_types,
