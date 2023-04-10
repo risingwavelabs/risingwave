@@ -251,10 +251,7 @@ macro_rules! gen_expr_bytes {
                 F: Fn($($arg::RefItem<'_>, )* &mut dyn std::fmt::Write) -> $crate::Result<()> + Sync + Send,
             > Expression for $ty_name<$($arg, )* F>
             where
-                $(
-                    for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,
-                    for<'a> ValueRef<'a, $arg>: std::convert::From<&'a ValueImpl>,
-                )*
+                $(for<'a> ValueRef<'a, $arg>: std::convert::From<&'a ValueImpl>,)*
             {
                 fn return_type(&self) -> DataType {
                     self.return_type.clone()
