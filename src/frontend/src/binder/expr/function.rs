@@ -522,7 +522,7 @@ impl Binder {
                 ))),
                 ("pg_table_size", guard_by_len(1, raw(|binder, inputs|{
                         let input = &inputs[0];
-                        let bound_query = binder.bind_get_object_size_select("pg_table_size", input)?;
+                        let bound_query = binder.bind_get_table_size_select("pg_table_size", input)?;
                         Ok(ExprImpl::Subquery(Box::new(Subquery::new(
                             BoundQuery {
                                 body: BoundSetExpr::Select(Box::new(bound_query)),
@@ -547,7 +547,7 @@ impl Binder {
                         // such data so this is currently implemented as an alias for `pg_table_size`.
                         //
                         // See: https://stackoverflow.com/a/41991566 and https://pgpedia.info/p/pg_relation_size.html
-                        let bound_query = binder.bind_get_object_size_select("pg_relation_size", input)?;
+                        let bound_query = binder.bind_get_table_size_select("pg_relation_size", input)?;
                         Ok(ExprImpl::Subquery(Box::new(Subquery::new(
                             BoundQuery {
                                 body: BoundSetExpr::Select(Box::new(bound_query)),

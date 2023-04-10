@@ -458,7 +458,7 @@ impl Binder {
         })
     }
 
-    pub fn bind_get_object_size_select(
+    pub fn bind_get_table_size_select(
         &mut self,
         output_name: &str,
         table: &ExprImpl,
