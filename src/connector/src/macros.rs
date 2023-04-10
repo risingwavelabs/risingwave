@@ -270,7 +270,7 @@ macro_rules! impl_common_split_reader_logic {
                 let data_stream = self.into_data_stream();
 
                 let data_stream = data_stream
-                    .map_ok(move |data_batch| {
+                    .inspect_ok(move |data_batch| {
                         metrics
                             .partition_input_count
                             .with_label_values(&[&actor_id, &source_id, &split_id])
@@ -286,7 +286,6 @@ macro_rules! impl_common_split_reader_logic {
                             .partition_input_bytes
                             .with_label_values(&[&actor_id, &source_id, &split_id])
                             .inc_by(sum_bytes);
-                        data_batch
                     })
                     .boxed();
                 let parser =

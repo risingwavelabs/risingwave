@@ -134,7 +134,6 @@ impl FrontendEnv {
         let compute_client_pool = Arc::new(ComputeClientPool::default());
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
-            hummock_snapshot_manager.clone(),
             compute_client_pool,
             catalog_reader.clone(),
             Arc::new(DistributedQueryMetrics::for_test()),
@@ -191,6 +190,7 @@ impl FrontendEnv {
             WorkerType::Frontend,
             &frontend_address,
             0,
+            &config.meta,
         )
         .await?;
 
@@ -223,7 +223,6 @@ impl FrontendEnv {
             Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
-            hummock_snapshot_manager.clone(),
             compute_client_pool,
             catalog_reader.clone(),
             Arc::new(DistributedQueryMetrics::new(registry.clone())),
@@ -857,9 +856,9 @@ impl Session<PgResponseStream, PrepareStatement, Portal> for SessionImpl {
     ) -> std::result::Result<(Vec<DataType>, Vec<PgFieldDescriptor>), BoxedError> {
         Ok(match prepare_statement {
             PrepareStatement::Prepared(prepare_statement) => (
-                prepare_statement.param_types,
+                prepare_statement.bound_result.param_types,
                 infer(
-                    Some(prepare_statement.bound_statement),
+                    Some(prepare_statement.bound_result.bound),
                     prepare_statement.statement,
                 )?,
             ),
@@ -872,7 +871,7 @@ impl Session<PgResponseStream, PrepareStatement, Portal> for SessionImpl {
         portal: Portal,
     ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
         match portal {
-            Portal::Portal(portal) => Ok(infer(Some(portal.bound_statement), portal.statement)?),
+            Portal::Portal(portal) => Ok(infer(Some(portal.bound_result.bound), portal.statement)?),
             Portal::PureStatement(statement) => Ok(infer(None, statement)?),
         }
     }

@@ -26,7 +26,9 @@ use clap::Parser;
 use futures::TryStreamExt;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{extract_storage_memory_config, load_config, NO_OVERRIDE};
+use risingwave_common::config::{
+    extract_storage_memory_config, load_config, MetaConfig, NO_OVERRIDE,
+};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
@@ -230,13 +232,14 @@ async fn init_metadata_for_replay(
     // filter key manager will fail to acquire a key extractor.
     tokio::time::sleep(Duration::from_secs(2)).await;
 
+    let meta_config = MetaConfig::default();
     let meta_client: MetaClient;
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("Ctrl+C received, now exiting");
             std::process::exit(0);
         },
-        ret = MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, advertise_addr, 0) => {
+        ret = MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, advertise_addr, 0, &meta_config) => {
             (meta_client, _) = ret.unwrap();
         },
     }
@@ -246,8 +249,14 @@ async fn init_metadata_for_replay(
 
     let tables = meta_client.risectl_list_state_tables().await?;
 
-    let (new_meta_client, _) =
-        MetaClient::register_new(new_meta_endpoint, WorkerType::RiseCtl, advertise_addr, 0).await?;
+    let (new_meta_client, _) = MetaClient::register_new(
+        new_meta_endpoint,
+        WorkerType::RiseCtl,
+        advertise_addr,
+        0,
+        &meta_config,
+    )
+    .await?;
     new_meta_client.activate(advertise_addr).await.unwrap();
     if ci_mode {
         let table_to_check = tables.iter().find(|t| t.name == "nexmark_q7").unwrap();
@@ -277,6 +286,7 @@ async fn pull_version_deltas(
         WorkerType::RiseCtl,
         advertise_addr,
         0,
+        &MetaConfig::default(),
     )
     .await?;
     let worker_id = meta_client.worker_id();
@@ -325,9 +335,14 @@ async fn start_replay(
 
     // Register to the cluster.
     // We reuse the RiseCtl worker type here
-    let (meta_client, system_params) =
-        MetaClient::register_new(&opts.meta_address, WorkerType::RiseCtl, &advertise_addr, 0)
-            .await?;
+    let (meta_client, system_params) = MetaClient::register_new(
+        &opts.meta_address,
+        WorkerType::RiseCtl,
+        &advertise_addr,
+        0,
+        &config.meta,
+    )
+    .await?;
     let worker_id = meta_client.worker_id();
     tracing::info!("Assigned replay worker id {}", worker_id);
     meta_client.activate(&advertise_addr).await.unwrap();
