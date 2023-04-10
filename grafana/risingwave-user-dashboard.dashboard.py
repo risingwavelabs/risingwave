@@ -57,7 +57,48 @@ def section_overview(panels):
             ],
         ),
         panels.timeseries_count(
-            "Errors by Type",
+            "Alerts",
+            """Alerts in the system group by type:
+            - Too Many Barriers: there are too many uncommitted barriers generated. This means the streaming graph is stuck or under heavy load. Check 'Barrier Latency' panel.
+            - Recovery Triggered: cluster recovery is triggered. Check 'Errors by Type' / 'Node Count' panels.
+            - Lagging Version: the checkpointed or pinned version id is lagging behind the current version id. Check 'Hummock Manager' section in dev dashboard.
+            - Lagging Epoch: the pinned or safe epoch is lagging behind the current max committed epoch. Check 'Hummock Manager' section in dev dashboard.
+            - Lagging Compaction: there are too many files in L0. This can be caused by compactor failure or lag of compactor resource. Check 'Compaction' section in dev dashboard.
+            - Lagging Vacuum: there are too many stale files waiting to be cleaned. This can be caused by compactor failure or lag of compactor resource. Check 'Compaction' section in dev dashboard.
+            """,
+            [
+                panels.target(
+                    f"{metric('all_barrier_nums')} >= bool 200",
+                    "Too Many Barriers",
+                ),
+                panels.target(
+                    f"sum(rate({metric('recovery_latency_count')}[$__rate_interval])) > bool 0 + sum({metric('recovery_failure_cnt')}) > bool 0",
+                    "Recovery Triggered",
+                ),
+                panels.target(
+                    f"(({metric('storage_current_version_id')} - {metric('storage_checkpoint_version_id')}) >= bool 100) + " + 
+                    f"(({metric('storage_current_version_id')} - {metric('storage_min_pinned_version_id')}) >= bool 100)",
+                    "Lagging Version",
+                ),
+                panels.target(
+                    f"(({metric('storage_max_committed_epoch')} - {metric('storage_min_pinned_epoch')}) >= bool 6553600000 unless + {metric('storage_min_pinned_epoch')} == 0) + " + 
+                    f"(({metric('storage_max_committed_epoch')} - {metric('storage_safe_epoch')}) >= bool 6553600000 unless + {metric('storage_safe_epoch')} == 0)",
+                    "Lagging Epoch",
+                ),
+                panels.target(
+                    f"sum(label_replace({metric('storage_level_sst_num')}, 'L0', 'L0', 'level_index', '.*_L0') unless " + 
+                    f"{metric('storage_level_sst_num')}) by (L0) >= bool 200",
+                    "Lagging Compaction",
+                ),
+                panels.target(
+                    f"{metric('storage_stale_object_count')} >= bool 200",
+                    "Lagging Vacuum",
+                ),
+            ],
+            ["last"],
+        ),
+        panels.timeseries_count(
+            "Errors",
             "Errors in the system group by type",
             [
                 panels.target(
@@ -66,7 +107,11 @@ def section_overview(panels):
                 ),
                 panels.target(
                     f"sum({metric('user_source_error_count')}) by (error_type, error_msg, fragment_id, table_id, executor_name)",
-                    "source error {{error_type}}: {{error_msg}} ({{executor_name}}: table_id={{table_id}}, fragment_id={{fragment_id}})",
+                    "parse error {{error_type}}: {{error_msg}} ({{executor_name}}: table_id={{table_id}}, fragment_id={{fragment_id}})",
+                ),
+                panels.target(
+                     f"{metric('source_status_is_up')} == 0",
+                    "source error: source_id={{source_id}}, source_name={{source_name}} @ {{instance}}",
                 ),
                 panels.target(
                     f"sum(rate({metric('object_store_failure_count')}[$__rate_interval])) by (instance, job, type)",
@@ -195,20 +240,50 @@ def section_memory(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])",
-                            "Join - cache miss {{actor_id}} {{side}}",
+                            "Join - cache miss - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
                         ),
                         panels.target(
                             f"rate({metric('stream_join_lookup_total_count')}[$__rate_interval])",
-                            "Join - total lookups {{actor_id}} {{side}}",
+                            "Join - total lookups - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
                         ),
                         panels.target(
                             f"rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])",
-                            "Agg - cache miss {{actor_id}}",
+                            "Agg - cache miss - table {{table_id}} actor {{actor_id}}",
                         ),
                         panels.target(
                             f"rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])",
-                            "Agg - total lookups {{actor_id}}",
+                            "Agg - total lookups - table {{table_id}} actor {{actor_id}}",
                         ),
+                        panels.target(
+                             f"rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])",
+                            "Materialize - cache hit count - table {{table_id}} - actor {{actor_id}}  {{instance}}",
+                            ),
+                        panels.target(
+                             f"rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])",
+                            "Materialize - total cache count - table {{table_id}} - actor {{actor_id}}  {{instance}}",
+                            ),
+                    ],
+                ),
+
+                panels.timeseries_percentage(
+                    "Executor Cache Miss Ratio",
+                    "",
+                    [
+                        panels.target(
+                         f"(sum(rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id) ) / (sum(rate({metric('stream_join_lookup_total_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id))",
+                            "join executor cache miss ratio - - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
+                            ),
+
+                        panels.target(
+                         f"(sum(rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "Agg cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                            ),
+
+                        panels.target(
+                         f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "materialize executor cache miss ratio - table {{table_id}} - actor {{actor_id}}  {{instance}}",
+                            ),
+
                     ],
                 ),
                 panels.timeseries_ops(

@@ -14,6 +14,7 @@ normal = ["workspace-hack"]
 arrow-array = "36"
 arrow-flight = "36"
 arrow-schema = "36"
+arrow-select = "36"
 futures-util = "0.3.25"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "macros"] }

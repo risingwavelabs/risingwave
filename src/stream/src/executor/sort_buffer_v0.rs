@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #![cfg_attr(not(test), expect(dead_code))]
+#![allow(deprecated)]
 
 use std::collections::BTreeMap;
 use std::ops::Bound;

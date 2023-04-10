@@ -20,9 +20,9 @@ use prometheus::core::{AtomicF64, GenericGaugeVec};
 use prometheus::{
     exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
     register_histogram_vec_with_registry, register_histogram_with_registry,
-    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry,
-    register_int_gauge_with_registry, Histogram, HistogramVec, IntCounterVec, IntGauge,
-    IntGaugeVec, Registry,
+    register_int_counter_vec_with_registry, register_int_counter_with_registry,
+    register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
+    HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::common::WorkerType;
@@ -36,14 +36,22 @@ use crate::storage::MetaStore;
 pub struct MetaMetrics {
     pub registry: Registry,
 
+    /// ********************************** Meta ************************************
+    /// The number of workers in the cluster.
+    pub worker_num: IntGaugeVec,
+    /// The roles of all meta nodes in the cluster.
+    pub meta_type: IntGaugeVec,
+
+    /// ********************************** gRPC ************************************
     /// gRPC latency of meta services
     pub grpc_latency: HistogramVec,
+
+    /// ********************************** Barrier ************************************
     /// The duration from barrier injection to commit
     /// It is the sum of inflight-latency, sync-latency and wait-commit-latency
     pub barrier_latency: Histogram,
     /// The duration from barrier complete to commit
     pub barrier_wait_commit_latency: Histogram,
-
     /// Latency between each barrier send
     pub barrier_send_latency: Histogram,
     /// The number of all barriers. It is the sum of barriers that are in-flight or completed but
@@ -52,6 +60,11 @@ pub struct MetaMetrics {
     /// The number of in-flight barriers
     pub in_flight_barrier_nums: IntGauge,
 
+    /// ********************************** Recovery ************************************
+    pub recovery_failure_cnt: IntCounter,
+    pub recovery_latency: Histogram,
+
+    /// ********************************** Hummock ************************************
     /// Max committed epoch
     pub max_committed_epoch: IntGauge,
     /// The smallest epoch that has not been GCed.
@@ -64,7 +77,7 @@ pub struct MetaMetrics {
     pub level_compact_cnt: IntGaugeVec,
     /// The number of compact tasks
     pub compact_frequency: IntCounterVec,
-
+    /// Size of each level
     pub level_file_size: IntGaugeVec,
     /// Hummock version size
     pub version_size: IntGauge,
@@ -94,31 +107,28 @@ pub struct MetaMetrics {
     pub delta_log_count: IntGauge,
     /// latency of version checkpoint
     pub version_checkpoint_latency: Histogram,
-
     /// Latency for hummock manager to acquire lock
     pub hummock_manager_lock_time: HistogramVec,
-
     /// Latency for hummock manager to really process a request after acquire the lock
     pub hummock_manager_real_process_time: HistogramVec,
-
-    pub time_after_last_observation: AtomicU64,
-
-    /// The number of workers in the cluster.
-    pub worker_num: IntGaugeVec,
+    /// The number of compactions from one level to another level that have been skipped
     pub compact_skip_frequency: IntCounterVec,
-
-    /// The roles of all meta nodes in the cluster.
-    pub meta_type: IntGaugeVec,
-
-    /// compaction
+    /// Bytes of lsm tree needed to reach balance
     pub compact_pending_bytes: IntGaugeVec,
+    /// Per level compression ratio
     pub compact_level_compression_ratio: GenericGaugeVec<AtomicF64>,
-
     /// The number of compactor CPU need to be scale.
     pub scale_compactor_core_num: IntGauge,
-
+    /// Per level number of running compaction task
     pub level_compact_task_cnt: IntGaugeVec,
+    pub time_after_last_observation: AtomicU64,
+
+    /// ********************************** Object Store ************************************
+    // Object store related metrics (for backup/restore and version checkpoint)
     pub object_store_metric: Arc<ObjectStoreMetrics>,
+
+    /// supervisor for which source is still up.
+    pub source_is_up: IntGaugeVec,
 }
 
 impl MetaMetrics {
@@ -383,15 +393,37 @@ impl MetaMetrics {
         .unwrap();
         let object_store_metric = Arc::new(ObjectStoreMetrics::new(registry.clone()));
 
+        let recovery_failure_cnt = register_int_counter_with_registry!(
+            "recovery_failure_cnt",
+            "Number of failed recovery attempts",
+            registry
+        )
+        .unwrap();
+        let opts = histogram_opts!(
+            "recovery_latency",
+            "Latency of the recovery process",
+            exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
+        );
+        let recovery_latency = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let source_is_up = register_int_gauge_vec_with_registry!(
+            "source_status_is_up",
+            "source is up or not",
+            &["source_id", "source_name"],
+            registry
+        )
+        .unwrap();
+
         Self {
             registry,
-
             grpc_latency,
             barrier_latency,
             barrier_wait_commit_latency,
             barrier_send_latency,
             all_barrier_nums,
             in_flight_barrier_nums,
+            recovery_failure_cnt,
+            recovery_latency,
 
             max_committed_epoch,
             safe_epoch,
@@ -425,6 +457,7 @@ impl MetaMetrics {
             scale_compactor_core_num,
             level_compact_task_cnt,
             object_store_metric,
+            source_is_up,
         }
     }
 
