@@ -29,15 +29,8 @@ use crate::source::kinesis::config::AwsConfigInfo;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AwsPrivateLinkItem {
-    pub service_name: String,
-    pub availability_zone: String,
+    pub az: String,
     pub port: u16,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AwsPrivateLinks {
-    pub provider: String,
-    pub infos: Vec<AwsPrivateLinkItem>,
 }
 
 #[serde_as]
