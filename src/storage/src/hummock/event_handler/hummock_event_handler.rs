@@ -27,7 +27,7 @@ use risingwave_hummock_sdk::{info_in_release, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::version_update_payload::Payload;
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::hummock::compactor::{compact, CompactorContext};
@@ -454,13 +454,19 @@ impl HummockEventHandler {
                         // update read version for corresponding table shards
                         let read_guard = self.read_version_mapping.read();
                         read_guard.get(&merge_output.table_id).map_or((), |shards| {
-                            shards
-                                .get(&merge_output.instance_id)
-                                .map_or((), |read_version| {
+                            shards.get(&merge_output.instance_id).map_or_else(
+                                || {
+                                    warn!(
+                                        "handle ImmMerged: table instance not found. table {}, instance {}",
+                                        &merge_output.table_id, &merge_output.instance_id
+                                    )
+                                },
+                                |read_version| {
                                     read_version.write().update(VersionUpdate::Staging(
                                         StagingData::MergedImmMem(merge_output.merged_imm),
                                     ));
-                                })
+                                },
+                            )
                         });
                     }
                 },
