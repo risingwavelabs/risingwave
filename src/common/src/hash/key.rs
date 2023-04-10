@@ -411,13 +411,13 @@ impl BuildHasher for PrecomputedBuildHasher {
     }
 }
 
-pub type Key8<B> = FixedSizeKey<1, B>;
-pub type Key16<B> = FixedSizeKey<2, B>;
-pub type Key32<B> = FixedSizeKey<4, B>;
-pub type Key64<B> = FixedSizeKey<8, B>;
-pub type Key128<B> = FixedSizeKey<16, B>;
-pub type Key256<B> = FixedSizeKey<32, B>;
-pub type KeySerialized<B> = SerializedKey<B>;
+pub type Key8<B = StackNullBitmap> = FixedSizeKey<1, B>;
+pub type Key16<B = StackNullBitmap> = FixedSizeKey<2, B>;
+pub type Key32<B = StackNullBitmap> = FixedSizeKey<4, B>;
+pub type Key64<B = StackNullBitmap> = FixedSizeKey<8, B>;
+pub type Key128<B = StackNullBitmap> = FixedSizeKey<16, B>;
+pub type Key256<B = StackNullBitmap> = FixedSizeKey<32, B>;
+pub type KeySerialized<B = StackNullBitmap> = SerializedKey<B>;
 
 impl HashKeySerDe<'_> for bool {
     type S = [u8; 1];

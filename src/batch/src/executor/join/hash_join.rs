@@ -2005,7 +2005,7 @@ mod tests {
                 None
             };
 
-            Box::new(HashJoinExecutor::<Key32<StackNullBitmap>>::new(
+            Box::new(HashJoinExecutor::<Key32>::new(
                 join_type,
                 output_indices,
                 left_child,
