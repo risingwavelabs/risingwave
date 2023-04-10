@@ -676,9 +676,9 @@ where
         properties: &mut HashMap<String, String>,
     ) -> MetaResult<()> {
         let mut broker_rewrite_map = HashMap::new();
-        const UPSTREAM_SOURCE_PRIVATE_LINK_KEY: &str = "privatelink.targets";
-        const PRIVATE_LINK_NAME: &str = "privatelink.name";
-        if let Some(prop) = properties.get(UPSTREAM_SOURCE_PRIVATE_LINK_KEY) {
+        const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
+        const PRIVATE_LINK_NAME_KEY: &str = "privatelink.name";
+        if let Some(link_target_value) = properties.get(PRIVATE_LINK_TARGETS_KEY) {
             if !is_kafka_connector(properties) {
                 return Err(MetaError::from(anyhow!(
                     "Private link is only supported for Kafka connector",
@@ -694,17 +694,17 @@ where
 
             let private_link_name =
                 properties
-                    .get(PRIVATE_LINK_NAME)
+                    .get(PRIVATE_LINK_NAME_KEY)
                     .cloned()
                     .ok_or(MetaError::from(anyhow!(
-                        "Must specify \"{PRIVATE_LINK_NAME}\" property in WITH clause",
+                        "Must specify \"{PRIVATE_LINK_NAME_KEY}\" property in WITH clause",
                     )))?;
 
             let broker_addrs = servers.split(',').collect_vec();
-            let link_info: Vec<AwsPrivateLinkItem> =
-                serde_json::from_str(prop).map_err(|e| anyhow!(e))?;
+            let link_targets: Vec<AwsPrivateLinkItem> =
+                serde_json::from_str(link_target_value).map_err(|e| anyhow!(e))?;
             // construct the rewrite mapping for brokers
-            for (link, broker) in link_info.iter().zip_eq_fast(broker_addrs.into_iter()) {
+            for (link, broker) in link_targets.iter().zip_eq_fast(broker_addrs.into_iter()) {
                 let conn = self
                     .catalog_manager
                     .get_connection_by_name(&private_link_name)

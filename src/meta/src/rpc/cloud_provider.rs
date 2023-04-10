@@ -18,6 +18,7 @@ use aws_config::retry::RetryConfig;
 use aws_sdk_ec2::model::{Filter, VpcEndpointType};
 use itertools::Itertools;
 use risingwave_pb::catalog::connection::PrivateLinkService;
+use tracing::info;
 
 use crate::MetaResult;
 
@@ -143,6 +144,13 @@ impl AwsEc2Client {
 
         let endpoint = output.vpc_endpoint().unwrap();
         let mut dns_names = Vec::new();
+
+        if let Some(dns_entries) = endpoint.dns_entries() {
+            dns_entries.iter().for_each(|e| {
+                info!("endpoint dns name {}", e.dns_name().unwrap_or_default());
+            });
+        }
+
         if let Some(dns_entries) = endpoint.dns_entries() {
             dns_entries.iter().for_each(|e| {
                 if let Some(dns_name) = e.dns_name() {
