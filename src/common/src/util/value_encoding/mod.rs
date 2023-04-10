@@ -167,7 +167,7 @@ impl ValueRowSerde for BasicSerde {
 }
 
 pub fn try_get_exact_serialize_datum_size(arr: &ArrayImpl) -> Option<usize> {
-    let raw_size: Option<usize> = match arr {
+    match arr {
         ArrayImpl::Int16(_) => Some(2),
         ArrayImpl::Int32(_) => Some(4),
         ArrayImpl::Int64(_) => Some(8),
@@ -182,12 +182,8 @@ pub fn try_get_exact_serialize_datum_size(arr: &ArrayImpl) -> Option<usize> {
         ArrayImpl::Timestamp(_) => Some(estimate_serialize_timestamp_size()),
         ArrayImpl::Time(_) => Some(estimate_serialize_time_size()),
         _ => None,
-    };
-    if let Some(size) = raw_size {
-        Some(size + 1)
-    } else {
-        None
     }
+    .map(|x| x + 1)
 }
 
 /// Serialize a datum into bytes and return (Not order guarantee, used in value encoding).
