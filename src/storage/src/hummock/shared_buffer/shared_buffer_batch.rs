@@ -585,15 +585,8 @@ impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
             0
         }
     }
-}
 
-/// trait provided to the `MergedIterator` to avoid memory copy
-pub trait SharedBufferBatchIterCurrent {
-    fn current_item(&self) -> (&Bytes, &(HummockEpoch, HummockValue<Bytes>));
-}
-
-impl<D: HummockIteratorDirection> SharedBufferBatchIterCurrent for SharedBufferBatchIterator<D> {
-    fn current_item(&self) -> (&Bytes, &(HummockEpoch, HummockValue<Bytes>)) {
+    pub(crate) fn current_item(&self) -> (&Bytes, &(HummockEpoch, HummockValue<Bytes>)) {
         assert!(self.is_valid(), "iterator is not valid");
         let (idx, version_idx) = match D::direction() {
             DirectionEnum::Forward => (self.current_idx, self.current_version_idx),

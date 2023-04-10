@@ -21,8 +21,8 @@ use bytes::Bytes;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
 
-use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
-use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterCurrent;
+use crate::hummock::iterator::{DirectionEnum, Forward, HummockIterator, HummockIteratorDirection};
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
@@ -135,7 +135,8 @@ impl<I: HummockIterator> OrderedMergeIteratorInner<I> {
     }
 }
 
-impl<I: SharedBufferBatchIterCurrent + HummockIterator> OrderedMergeIteratorInner<I> {
+impl OrderedMergeIteratorInner<SharedBufferBatchIterator<Forward>> {
+    /// Used in `merge_imms_in_memory` to merge immutable memtables.
     pub fn current_item(&self) -> (Bytes, (HummockEpoch, HummockValue<Bytes>)) {
         let item = self
             .heap
