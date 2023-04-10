@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
+use std::fmt::{Display, Formatter, Write};
 use std::hash::Hasher;
 use std::io::Read;
 use std::mem;
@@ -39,6 +39,12 @@ use crate::types::{to_text, DataType, Scalar, ScalarRef};
 pub struct Int256(Box<I256>);
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
 pub struct Int256Ref<'a>(pub &'a I256);
+
+impl Display for Int256 {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0.to_string())
+    }
+}
 
 macro_rules! impl_common_for_num256 {
     ($scalar:ident, $scalar_ref:ident < $gen:tt > , $inner:ty, $array_type:ident) => {
@@ -189,6 +195,16 @@ impl FromPrimitive for Int256 {
     fn from_u64(n: u64) -> Option<Self> {
         Some(I256::from(n).into())
     }
+
+    // Special handling for 128 bits, the default action of `FromPrimitive` is to convert `n` to
+    // 64 bits before conversion, which will result in loss of precision.
+    fn from_i128(n: i128) -> Option<Self> {
+        Some(I256::from(n).into())
+    }
+
+    fn from_u128(n: u128) -> Option<Self> {
+        Some(I256::from(n).into())
+    }
 }
 
 impl ToPrimitive for Int256 {
@@ -198,6 +214,16 @@ impl ToPrimitive for Int256 {
 
     fn to_u64(&self) -> Option<u64> {
         (*self.0 <= i256::from(u64::MAX)).then_some(self.0.as_u64())
+    }
+
+    // Special handling for 128 bits, the default action of `ToPrimitive` is to convert self to
+    // 64 bits before conversion, which will result in loss of precision.
+    fn to_i128(&self) -> Option<i128> {
+        (*self.0 <= i256::from(i128::MAX)).then_some(self.0.as_i128())
+    }
+
+    fn to_u128(&self) -> Option<u128> {
+        (*self.0 <= i256::from(u128::MAX)).then_some(self.0.as_u128())
     }
 }
 
@@ -217,11 +243,13 @@ impl_from_type!(i8, FromPrimitive::from_i8, Int256);
 impl_from_type!(i16, FromPrimitive::from_i16, Int256);
 impl_from_type!(i32, FromPrimitive::from_i32, Int256);
 impl_from_type!(i64, FromPrimitive::from_i64, Int256);
+impl_from_type!(i128, FromPrimitive::from_i128, Int256);
 impl_from_type!(usize, FromPrimitive::from_usize, Int256);
 impl_from_type!(u8, FromPrimitive::from_u8, Int256);
 impl_from_type!(u16, FromPrimitive::from_u16, Int256);
 impl_from_type!(u32, FromPrimitive::from_u32, Int256);
 impl_from_type!(u64, FromPrimitive::from_u64, Int256);
+impl_from_type!(u128, FromPrimitive::from_u128, Int256);
 
 impl From<Int256Ref<'_>> for Int256 {
     fn from(value: Int256Ref<'_>) -> Self {
@@ -282,5 +310,50 @@ impl Zero for Int256 {
 
     fn is_zero(&self) -> bool {
         !self.0.is_negative() && !self.0.is_positive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    macro_rules! check_convert {
+        ($to_type:ident, [$($number:expr),+]) => {
+            paste::item! {
+                $(assert_eq!(Int256::from($number).[<to_ $to_type>]().unwrap(), $number as $to_type);)+
+            }
+        };
+    }
+
+    #[test]
+    fn basic_test() {
+        check_convert!(u8, [0, 1, u8::MAX]);
+        check_convert!(i8, [0, -1, 1, i8::MAX]);
+
+        check_convert!(u16, [0, 1, u16::MAX]);
+        check_convert!(i16, [0, -1, 1, i16::MAX]);
+
+        check_convert!(u32, [0, 1, u32::MAX]);
+        check_convert!(i32, [0, -1, 1, i32::MAX]);
+
+        check_convert!(u64, [0, 1, u64::MAX]);
+        check_convert!(i64, [0, -1, 1, i64::MAX]);
+
+        check_convert!(u128, [0, 1, u128::MAX]);
+        check_convert!(i128, [0, -1, 1, i128::MAX]);
+    }
+
+    #[test]
+    fn more_than_i128() {
+        let i = Int256::from(i256::from(i128::MAX) + i256::from(i128::MAX));
+        assert_eq!(i.to_u128(), Some(u128::MAX - 1));
+    }
+
+    #[test]
+    fn test_op() {
+        assert_eq!(
+            Int256::from(i256::from(i128::MAX) + i256::from(i128::MAX)),
+            Int256::from(i128::MAX) + Int256::from(i128::MAX),
+        );
     }
 }
