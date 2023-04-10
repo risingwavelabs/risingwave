@@ -299,8 +299,10 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
         (DataType::Decimal, ScalarRefImpl::Decimal(v)) => {
             json!(v.to_text())
         }
-        (DataType::Timestamptz, ScalarRefImpl::Timestamp(v)) => {
-            json!(v.0.and_local_timezone(chrono::Utc).unwrap().to_rfc3339())
+        (DataType::Timestamptz, ScalarRefImpl::Int64(v)) => {
+            // risingwave's timestamp with timezone is stored in UTC and does not maintain the
+            // timezone info and the time is in microsecond.
+            json!(v)
         }
         (DataType::Time, ScalarRefImpl::Time(v)) => {
             // todo: just ignore the nanos part to avoid leap second complex
