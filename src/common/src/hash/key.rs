@@ -240,8 +240,9 @@ pub trait HashKeySerDe<'a>: ScalarRef<'a> {
 /// group by implementation, but not join. In pg's join implementation, `null != null`, and the join
 /// executor should take care of this.
 pub trait HashKey:
-    EstimateSize + Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static + GetBitmap
+    EstimateSize + Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static
 {
+    type Bitmap: NullBitmap;
     type S: HashKeySerializer<K = Self>;
 
     fn build(column_idxes: &[usize], data_chunk: &DataChunk) -> ArrayResult<Vec<Self>> {
@@ -286,29 +287,10 @@ pub trait HashKey:
         data_types: &[DataType],
     ) -> ArrayResult<()>;
 
+    fn null_bitmap(&self) -> &Self::Bitmap;
+
     fn has_null(&self) -> bool {
         !self.null_bitmap().is_empty()
-    }
-}
-
-pub trait GetBitmap {
-    type Bitmap: NullBitmap;
-    fn null_bitmap(&self) -> &Self::Bitmap;
-}
-
-impl<const N: usize, B: NullBitmap> GetBitmap for FixedSizeKey<N, B> {
-    type Bitmap = B;
-
-    fn null_bitmap(&self) -> &B {
-        &self.null_bitmap
-    }
-}
-
-impl<B: NullBitmap> GetBitmap for SerializedKey<B> {
-    type Bitmap = B;
-
-    fn null_bitmap(&self) -> &B {
-        &self.null_bitmap
     }
 }
 
@@ -856,6 +838,7 @@ impl ArrayBuilderImpl {
 }
 
 impl<const N: usize, B: NullBitmap> HashKey for FixedSizeKey<N, B> {
+    type Bitmap = B;
     type S = FixedSizeKeySerializer<N, B>;
 
     fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<OwnedRow> {
@@ -885,9 +868,14 @@ impl<const N: usize, B: NullBitmap> HashKey for FixedSizeKey<N, B> {
         }
         Ok(())
     }
+
+    fn null_bitmap(&self) -> &Self::Bitmap {
+        &self.null_bitmap
+    }
 }
 
 impl<B: NullBitmap> HashKey for SerializedKey<B> {
+    type Bitmap = B;
     type S = SerializedKeySerializer<B>;
 
     fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<OwnedRow> {
@@ -910,6 +898,10 @@ impl<B: NullBitmap> HashKey for SerializedKey<B> {
             array_builder.append_datum(&datum_result.map_err(ArrayError::internal)?);
         }
         Ok(())
+    }
+
+    fn null_bitmap(&self) -> &Self::Bitmap {
+        &self.null_bitmap
     }
 }
 
