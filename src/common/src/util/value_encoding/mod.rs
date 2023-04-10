@@ -478,8 +478,7 @@ mod tests {
 
     fn test_try_get_exact_serialize_datum_size(s: &ArrayImpl) {
         let d = s.to_datum();
-        let try_ret = try_get_exact_serialize_datum_size(s);
-        if let Some(ret) = try_ret {
+        if let Some(ret) = try_get_exact_serialize_datum_size(s) {
             assert_eq!(ret, serialize_datum(&d).len());
         }
     }
