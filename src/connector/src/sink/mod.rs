@@ -357,6 +357,7 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
 mod tests {
 
     use risingwave_common::types::{Interval, ScalarImpl, Time, Timestamp};
+    use risingwave_expr::vector_op::cast::str_with_time_zone_to_timestamptz;
 
     use super::*;
     #[test]
@@ -402,23 +403,18 @@ mod tests {
 
         // https://github.com/debezium/debezium/blob/main/debezium-core/src/main/java/io/debezium/time/ZonedTimestamp.java
         let tstz_str = "2018-01-26T18:30:09.453Z";
-        let tstz_value = datum_to_json_object(
+        let tstz_inner = str_with_time_zone_to_timestamptz(tstz_str).unwrap();
+        datum_to_json_object(
             &Field {
                 data_type: DataType::Timestamptz,
                 ..mock_field.clone()
             },
             Some(
-                ScalarImpl::Timestamp(
-                    chrono::DateTime::parse_from_rfc3339(tstz_str)
-                        .unwrap()
-                        .naive_utc()
-                        .into(),
-                )
-                .as_scalar_ref_impl(),
+                ScalarImpl::Int64(tstz_inner)
+                    .as_scalar_ref_impl(),
             ),
         )
         .unwrap();
-        chrono::DateTime::parse_from_rfc3339(tstz_value.as_str().unwrap_or_default()).unwrap();
 
         let ts_value = datum_to_json_object(
             &Field {
