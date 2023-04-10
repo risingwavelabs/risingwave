@@ -137,6 +137,7 @@ pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Option<Data
             DataType::Int16 => DataType::Int64,
             DataType::Int32 => DataType::Int64,
             DataType::Int64 => DataType::Decimal,
+            DataType::Int256 => DataType::Int256,
             DataType::Decimal => DataType::Decimal,
             DataType::Float32 => DataType::Float32,
             DataType::Float64 => DataType::Float64,
