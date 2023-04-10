@@ -409,7 +409,7 @@ impl HummockVersionReader {
     }
 }
 
-const SLOW_ITER_FETCH_META_DURATION: f64 = 5.0;
+const SLOW_ITER_FETCH_META_DURATION_SECOND: f64 = 5.0;
 
 impl HummockVersionReader {
     pub async fn get(
@@ -667,7 +667,8 @@ impl HummockVersionReader {
             .iter_fetch_meta_cache_unhits
             .with_label_values(&[table_id_label])
             .observe(local_cache_meta_block_unhit as f64);
-        if fetch_meta_duration_sec > SLOW_ITER_FETCH_META_DURATION {
+        if fetch_meta_duration_sec > SLOW_ITER_FETCH_META_DURATION_SECOND {
+            tracing::warn!("Fetching meta while creating an iter to read table_id {:?} at epoch {:?} is slow: duration = {:?}s.", table_id_string, epoch, fetch_meta_duration_sec);
             self.state_store_metrics
                 .iter_slow_fetch_meta_cache_unhits
                 .with_label_values(&[table_id_label])
