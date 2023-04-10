@@ -342,9 +342,10 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
             json!(map)
         }
         _ => {
-            return Err(ArrayError::internal(
-                "datum_to_json_object: unsupported data type".to_string(),
-            ));
+            return Err(ArrayError::internal(format!(
+                "datum_to_json_object: unsupported data type {:?}, {:?}",
+                field.data_type, scalar_ref,
+            )));
         }
     };
 
