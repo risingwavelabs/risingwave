@@ -29,6 +29,7 @@ use std::io::{Cursor, Read};
 
 use chrono::{Datelike, Timelike};
 use smallbitset::Set64;
+use smallvec::SmallVec;
 
 use crate::array::serial_array::Serial;
 use crate::array::{
@@ -213,13 +214,22 @@ pub struct FixedSizeKey<const N: usize> {
     null_bitmap: NullBitmap,
 }
 
+/// Able to store ~8 i64s as group keys.
+type SerializedKeyBuffer = SmallVec<[u8; 32]>;
+
+impl EstimateSize for SerializedKeyBuffer {
+    fn estimated_heap_size(&self) -> usize {
+        self.capacity()
+    }
+}
+
 /// Designed for hash keys which can't be represented by [`FixedSizeKey`].
 ///
 /// See [`crate::hash::calc_hash_key_kind`]
 #[derive(Clone, Debug)]
 pub struct SerializedKey {
     // Key encoding.
-    key: Vec<u8>,
+    key: SerializedKeyBuffer,
     hash_code: u64,
     null_bitmap: NullBitmap,
 }
@@ -653,7 +663,7 @@ impl<const N: usize> HashKeyDeserializer for FixedSizeKeyDeserializer<N> {
 }
 
 pub struct SerializedKeySerializer {
-    buffer: Vec<u8>,
+    buffer: SerializedKeyBuffer,
     hash_code: u64,
     null_bitmap: NullBitmap,
     null_bitmap_idx: usize,
@@ -664,7 +674,7 @@ impl HashKeySerializer for SerializedKeySerializer {
 
     fn from_hash_code(hash_code: HashCode, estimated_value_encoding_size: usize) -> Self {
         Self {
-            buffer: Vec::with_capacity(estimated_value_encoding_size),
+            buffer: SmallVec::with_capacity(estimated_value_encoding_size),
             hash_code: hash_code.0,
             null_bitmap: NullBitmap::empty(),
             null_bitmap_idx: 0,
@@ -674,10 +684,10 @@ impl HashKeySerializer for SerializedKeySerializer {
     fn append<'a, D: HashKeySerDe<'a>>(&mut self, data: Option<D>) {
         match data {
             Some(v) => {
-                serialize_datum_into(&Some(v.to_owned_scalar().into()), &mut self.buffer);
+                serialize_datum_into(&Some(v.to_owned_scalar().into()), &mut self.buffer[..]);
             }
             None => {
-                serialize_datum_into(&None, &mut self.buffer);
+                serialize_datum_into(&None, &mut self.buffer[..]);
                 self.null_bitmap.set_true(self.null_bitmap_idx);
             }
         }

@@ -5904,6 +5904,7 @@ dependencies = [
  "serde_json",
  "serde_with 2.3.1",
  "smallbitset",
+ "smallvec",
  "static_assertions",
  "strum",
  "strum_macros",
