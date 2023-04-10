@@ -16,6 +16,7 @@ use auto_enums::auto_enum;
 use itertools::repeat_n;
 
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::collection::estimate_size::EstimateSize;
 
 /// `Vis` is a visibility bitmap of rows.
 #[derive(Clone, PartialEq, Debug)]
@@ -93,6 +94,15 @@ impl Vis {
         match self {
             Vis::Bitmap(b) => Some(b),
             Vis::Compact(_) => None,
+        }
+    }
+}
+
+impl EstimateSize for Vis {
+    fn estimated_heap_size(&self) -> usize {
+        match self {
+            Vis::Bitmap(bitmap) => bitmap.estimated_heap_size(),
+            Vis::Compact(_) => 0,
         }
     }
 }

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 pub mod catalog;
-pub mod console;
 pub mod kafka;
 pub mod redis;
 pub mod remote;
@@ -38,7 +37,6 @@ use thiserror::Error;
 pub use tracing;
 
 use self::catalog::{SinkCatalog, SinkType};
-use crate::sink::console::{ConsoleConfig, ConsoleSink, CONSOLE_SINK};
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink};
 use crate::sink::remote::{RemoteConfig, RemoteSink};
@@ -72,7 +70,6 @@ pub enum SinkConfig {
     Redis(RedisConfig),
     Kafka(Box<KafkaConfig>),
     Remote(RemoteConfig),
-    Console(ConsoleConfig),
     BlackHole,
 }
 
@@ -80,7 +77,6 @@ pub enum SinkConfig {
 pub enum SinkState {
     Kafka,
     Redis,
-    Console,
     Remote,
     Blackhole,
 }
@@ -97,9 +93,6 @@ impl SinkConfig {
             KAFKA_SINK => Ok(SinkConfig::Kafka(Box::new(KafkaConfig::from_hashmap(
                 properties,
             )?))),
-            CONSOLE_SINK => Ok(SinkConfig::Console(ConsoleConfig::from_hashmap(
-                properties,
-            )?)),
             BLACKHOLE_SINK => Ok(SinkConfig::BlackHole),
             _ => Ok(SinkConfig::Remote(RemoteConfig::from_hashmap(properties)?)),
         }
@@ -110,7 +103,6 @@ impl SinkConfig {
             SinkConfig::Kafka(_) => "kafka",
             SinkConfig::Redis(_) => "redis",
             SinkConfig::Remote(_) => "remote",
-            SinkConfig::Console(_) => "console",
             SinkConfig::BlackHole => "blackhole",
         }
     }
@@ -123,7 +115,6 @@ pub enum SinkImpl {
     UpsertKafka(Box<KafkaSink<false>>),
     Remote(Box<RemoteSink<true>>),
     UpsertRemote(Box<RemoteSink<false>>),
-    Console(Box<ConsoleSink>),
     Blackhole,
 }
 
@@ -150,7 +141,6 @@ impl SinkImpl {
                     ))
                 }
             }
-            SinkConfig::Console(cfg) => SinkImpl::Console(Box::new(ConsoleSink::new(cfg, schema)?)),
             SinkConfig::Remote(cfg) => {
                 if sink_type.is_append_only() {
                     // Append-only remote sink
@@ -189,7 +179,6 @@ impl SinkImpl {
                     RemoteSink::<false>::validate(cfg, sink_catalog, connector_rpc_endpoint).await
                 }
             }
-            SinkConfig::Console(_) => Ok(()),
             SinkConfig::BlackHole => Ok(()),
         }
     }
@@ -235,8 +224,7 @@ impl_sink! {
     Kafka,
     UpsertKafka,
     Remote,
-    UpsertRemote,
-    Console
+    UpsertRemote
 }
 
 pub type Result<T> = std::result::Result<T, SinkError>;
@@ -311,8 +299,10 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
         (DataType::Decimal, ScalarRefImpl::Decimal(v)) => {
             json!(v.to_text())
         }
-        (DataType::Timestamptz, ScalarRefImpl::Timestamp(v)) => {
-            json!(v.0.and_local_timezone(chrono::Utc).unwrap().to_rfc3339())
+        (DataType::Timestamptz, ScalarRefImpl::Int64(v)) => {
+            // risingwave's timestamp with timezone is stored in UTC and does not maintain the
+            // timezone info and the time is in microsecond.
+            json!(v)
         }
         (DataType::Time, ScalarRefImpl::Time(v)) => {
             // todo: just ignore the nanos part to avoid leap second complex
@@ -353,9 +343,9 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
             }
             json!(map)
         }
-        _ => {
+        (data_type, scalar_ref) => {
             return Err(ArrayError::internal(
-                "datum_to_json_object: unsupported data type".to_string(),
+                format!("datum_to_json_object: unsupported data type: field name: {:?}, logical type: {:?}, physical type: {:?}", field.name, data_type, scalar_ref),
             ));
         }
     };
@@ -367,6 +357,7 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
 mod tests {
 
     use risingwave_common::types::{Interval, ScalarImpl, Time, Timestamp};
+    use risingwave_expr::vector_op::cast::str_with_time_zone_to_timestamptz;
 
     use super::*;
     #[test]
@@ -412,23 +403,15 @@ mod tests {
 
         // https://github.com/debezium/debezium/blob/main/debezium-core/src/main/java/io/debezium/time/ZonedTimestamp.java
         let tstz_str = "2018-01-26T18:30:09.453Z";
-        let tstz_value = datum_to_json_object(
+        let tstz_inner = str_with_time_zone_to_timestamptz(tstz_str).unwrap();
+        datum_to_json_object(
             &Field {
                 data_type: DataType::Timestamptz,
                 ..mock_field.clone()
             },
-            Some(
-                ScalarImpl::Timestamp(
-                    chrono::DateTime::parse_from_rfc3339(tstz_str)
-                        .unwrap()
-                        .naive_utc()
-                        .into(),
-                )
-                .as_scalar_ref_impl(),
-            ),
+            Some(ScalarImpl::Int64(tstz_inner).as_scalar_ref_impl()),
         )
         .unwrap();
-        chrono::DateTime::parse_from_rfc3339(tstz_value.as_str().unwrap_or_default()).unwrap();
 
         let ts_value = datum_to_json_object(
             &Field {

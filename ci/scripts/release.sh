@@ -20,7 +20,7 @@ mvn -v
 echo "--- Install rust"
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain $(cat ./rust-toolchain) -y
 source "$HOME/.cargo/env"
-source ci/scripts/common.env.sh
+source ci/scripts/common.sh
 
 echo "--- Install protoc3"
 curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v3.15.8/protoc-3.15.8-linux-x86_64.zip
@@ -38,7 +38,9 @@ curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip
 unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
 
 echo "--- Update risingwave release version"
-toml set --toml-path Cargo.toml workspace.package.version ${BUILDKITE_TAG#*v}
+if [[ -n "${BUILDKITE_TAG+x}" ]]; then
+  toml set --toml-path Cargo.toml workspace.package.version ${BUILDKITE_TAG#*v}
+fi
 
 echo "--- Build risingwave release binary"
 cargo build -p risingwave_cmd_all --features "static-link static-log-level" --profile release

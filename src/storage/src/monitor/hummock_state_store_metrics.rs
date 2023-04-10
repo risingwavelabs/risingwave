@@ -17,7 +17,8 @@ use std::sync::Arc;
 use prometheus::core::{AtomicU64, Collector, Desc, GenericCounterVec};
 use prometheus::{
     exponential_buckets, histogram_opts, proto, register_histogram_vec_with_registry,
-    register_int_counter_vec_with_registry, HistogramVec, IntGauge, Opts, Registry,
+    register_int_counter_vec_with_registry, register_int_gauge_with_registry, HistogramVec,
+    IntGauge, Opts, Registry,
 };
 
 /// [`HummockStateStoreMetrics`] stores the performance and IO metrics of `XXXStore` such as
@@ -35,6 +36,8 @@ pub struct HummockStateStoreMetrics {
     pub get_shared_buffer_hit_counts: GenericCounterVec<AtomicU64>,
     pub remote_read_time: HistogramVec,
     pub iter_fetch_meta_duration: HistogramVec,
+    pub iter_fetch_meta_cache_unhits: IntGauge,
+    pub iter_slow_fetch_meta_cache_unhits: IntGauge,
 
     pub read_req_bloom_filter_positive_counts: GenericCounterVec<AtomicU64>,
     pub read_req_positive_but_non_exist_counts: GenericCounterVec<AtomicU64>,
@@ -113,6 +116,20 @@ impl HummockStateStoreMetrics {
         let iter_fetch_meta_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
 
+        let iter_fetch_meta_cache_unhits = register_int_gauge_with_registry!(
+            "state_store_iter_fetch_meta_cache_unhits",
+            "Number of SST meta cache unhit during one iterator meta fetch",
+            registry
+        )
+        .unwrap();
+
+        let iter_slow_fetch_meta_cache_unhits = register_int_gauge_with_registry!(
+            "state_store_iter_slow_fetch_meta_cache_unhits",
+            "Number of SST meta cache unhit during a iterator meta fetch which is slow (costs >5 seconds)",
+            registry
+        )
+        .unwrap();
+
         // ----- write_batch -----
         let write_batch_tuple_counts = register_int_counter_vec_with_registry!(
             "state_store_write_batch_tuple_counts",
@@ -171,6 +188,8 @@ impl HummockStateStoreMetrics {
             get_shared_buffer_hit_counts,
             remote_read_time,
             iter_fetch_meta_duration,
+            iter_fetch_meta_cache_unhits,
+            iter_slow_fetch_meta_cache_unhits,
             read_req_bloom_filter_positive_counts,
             read_req_positive_but_non_exist_counts,
             read_req_check_bloom_filter_counts,

@@ -28,7 +28,6 @@ postgres-types = { version = "0.2.4", features = ["derive","with-chrono-0_4"] }
 regex = "1.5"
 risingwave_common = { path = "../../common" }
 risingwave_sqlparser = { path = "../../sqlparser" }
-rust_decimal = { version = "1", features = ["db-tokio-postgres"] }
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "macros"] }
 tokio-openssl = "0.6.3"

@@ -61,6 +61,19 @@ impl ConnectorParams {
     }
 }
 
+pub(crate) fn deserialize_u32_from_string<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let s: String = de::Deserialize::deserialize(deserializer)?;
+    s.parse().map_err(|_| {
+        de::Error::invalid_value(
+            de::Unexpected::Str(&s),
+            &"integer greater than or equal to 0",
+        )
+    })
+}
+
 pub(crate) fn deserialize_bool_from_string<'de, D>(deserializer: D) -> Result<bool, D::Error>
 where
     D: de::Deserializer<'de>,

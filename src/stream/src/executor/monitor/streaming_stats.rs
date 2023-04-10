@@ -90,6 +90,10 @@ pub struct StreamingMetrics {
 
     /// User compute error reporting
     pub user_compute_error_count: GenericCounterVec<AtomicU64>,
+
+    // Materialize
+    pub materialize_cache_hit_count: GenericCounterVec<AtomicU64>,
+    pub materialize_cache_total_count: GenericCounterVec<AtomicU64>,
 }
 
 impl StreamingMetrics {
@@ -279,7 +283,7 @@ impl StreamingMetrics {
         let join_lookup_miss_count = register_int_counter_vec_with_registry!(
             "stream_join_lookup_miss_count",
             "Join executor lookup miss duration",
-            &["actor_id", "side"],
+            &["side", "join_table_id", "degree_table_id", "actor_id"],
             registry
         )
         .unwrap();
@@ -287,7 +291,7 @@ impl StreamingMetrics {
         let join_total_lookup_count = register_int_counter_vec_with_registry!(
             "stream_join_lookup_total_count",
             "Join executor lookup total operation",
-            &["actor_id", "side"],
+            &["side", "join_table_id", "degree_table_id", "actor_id"],
             registry
         )
         .unwrap();
@@ -295,7 +299,7 @@ impl StreamingMetrics {
         let join_insert_cache_miss_count = register_int_counter_vec_with_registry!(
             "stream_join_insert_cache_miss_count",
             "Join executor cache miss when insert operation",
-            &["actor_id", "side"],
+            &["side", "join_table_id", "degree_table_id", "actor_id"],
             registry
         )
         .unwrap();
@@ -352,7 +356,7 @@ impl StreamingMetrics {
         let agg_lookup_miss_count = register_int_counter_vec_with_registry!(
             "stream_agg_lookup_miss_count",
             "Aggregation executor lookup miss duration",
-            &["actor_id"],
+            &["table_id", "actor_id"],
             registry
         )
         .unwrap();
@@ -360,7 +364,7 @@ impl StreamingMetrics {
         let agg_total_lookup_count = register_int_counter_vec_with_registry!(
             "stream_agg_lookup_total_count",
             "Aggregation executor lookup total operation",
-            &["actor_id"],
+            &["table_id", "actor_id"],
             registry
         )
         .unwrap();
@@ -368,7 +372,7 @@ impl StreamingMetrics {
         let agg_cached_keys = register_int_gauge_vec_with_registry!(
             "stream_agg_cached_keys",
             "Number of cached keys in streaming aggregation operators",
-            &["actor_id"],
+            &["table_id", "actor_id"],
             registry
         )
         .unwrap();
@@ -376,7 +380,7 @@ impl StreamingMetrics {
         let agg_chunk_lookup_miss_count = register_int_counter_vec_with_registry!(
             "stream_agg_chunk_lookup_miss_count",
             "Aggregation executor chunk-level lookup miss duration",
-            &["actor_id"],
+            &["table_id", "actor_id"],
             registry
         )
         .unwrap();
@@ -384,7 +388,7 @@ impl StreamingMetrics {
         let agg_chunk_total_lookup_count = register_int_counter_vec_with_registry!(
             "stream_agg_chunk_lookup_total_count",
             "Aggregation executor chunk-level lookup total operation",
-            &["actor_id"],
+            &["table_id", "actor_id"],
             registry
         )
         .unwrap();
@@ -469,6 +473,21 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let materialize_cache_hit_count = register_int_counter_vec_with_registry!(
+            "stream_materialize_cache_hit_count",
+            "Materialize executor cache hit count",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let materialize_cache_total_count = register_int_counter_vec_with_registry!(
+            "stream_materialize_cache_total_count",
+            "Materialize executor cache total operation",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
         Self {
             registry,
             executor_row_count,
@@ -519,6 +538,8 @@ impl StreamingMetrics {
             lru_watermark_step,
             jemalloc_allocated_bytes,
             user_compute_error_count,
+            materialize_cache_hit_count,
+            materialize_cache_total_count,
         }
     }
 

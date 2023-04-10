@@ -432,8 +432,8 @@ where
         }
     }
 
-    fn table_id(&self) -> TableId {
-        self.table_id
+    pub fn table_id(&self) -> u32 {
+        self.table_id.table_id
     }
 
     /// Returns whether the table is a singleton table.

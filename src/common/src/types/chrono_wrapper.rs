@@ -525,13 +525,13 @@ impl CheckedAdd<Interval> for Timestamp {
 
     fn checked_add(self, rhs: Interval) -> Option<Timestamp> {
         let mut date = self.0.date();
-        if rhs.get_months() != 0 {
+        if rhs.months() != 0 {
             // NaiveDate don't support add months. We need calculate manually
             let mut day = date.day() as i32;
             let mut month = date.month() as i32;
             let mut year = date.year();
             // Calculate the number of year in this interval
-            let interval_months = rhs.get_months();
+            let interval_months = rhs.months();
             let year_diff = interval_months / 12;
             year += year_diff;
 
@@ -556,8 +556,8 @@ impl CheckedAdd<Interval> for Timestamp {
             date = NaiveDate::from_ymd_opt(year, month as u32, day as u32)?;
         }
         let mut datetime = NaiveDateTime::new(date, self.0.time());
-        datetime = datetime.checked_add_signed(Duration::days(rhs.get_days().into()))?;
-        datetime = datetime.checked_add_signed(Duration::microseconds(rhs.get_usecs()))?;
+        datetime = datetime.checked_add_signed(Duration::days(rhs.days().into()))?;
+        datetime = datetime.checked_add_signed(Duration::microseconds(rhs.usecs()))?;
 
         Some(Timestamp::new(datetime))
     }

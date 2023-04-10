@@ -1,495 +1,18 @@
 from grafanalib.core import Dashboard, TimeSeries, Target, GridPos, RowPanel, Time, Templating
 import logging
 import os
+import sys
+p = os.path.dirname(__file__)
+sys.path.append(p)
+from common import *
 
-# We use DASHBOARD_NAMESPACE_ENABLED env variable to indicate whether to add
-# a filter for the namespace field in the prometheus metric.
-NAMESPACE_FILTER_ENABLED = "DASHBOARD_NAMESPACE_FILTER_ENABLED"
-# We use RISINGWAVE_NAME_FILTER_ENABLED env variable to indicate whether to add
-# a filter for the namespace_filter field in the prometheus metric.
-RISINGWAVE_NAME_FILTER_ENABLED = "DASHBOARD_RISINGWAVE_NAME_FILTER_ENABLED"
-# We use DASHBOARD_SOURCE_UID env variable to pass custom source uid
-SOURCE_UID = "DASHBOARD_SOURCE_UID"
-# We use DASHBOARD_UID env variable to pass custom dashboard uid
-DASHBOARD_UID = "DASHBOARD_UID"
-# We use DASHBOARD_VERSION env variable to pass custom version
-DASHBOARD_VERSION = "DASHBOARD_VERSION"
-
-namespace_filter_enabled = os.environ.get(
-    NAMESPACE_FILTER_ENABLED, "") == "true"
-if namespace_filter_enabled:
-    print("Enable filter for namespace field in the generated prometheus query")
-risingwave_name_filter_enabled = os.environ.get(
-    RISINGWAVE_NAME_FILTER_ENABLED, "") == "true"
-if risingwave_name_filter_enabled:
-    print("Enable filter for namespace_filter field in the generated prometheus query")
 source_uid = os.environ.get(SOURCE_UID, "risedev-prometheus")
 dashboard_uid = os.environ.get(DASHBOARD_UID, "Ecy3uV1nz")
 dashboard_version = int(os.environ.get(DASHBOARD_VERSION, "0"))
-
-
 datasource = {"type": "prometheus", "uid": f"{source_uid}"}
 
-
-class Layout:
-
-    def __init__(self):
-        self.x = 0
-        self.y = 0
-        self.w = 0
-        self.h = 0
-
-    def next_row(self):
-        self.y += self.h
-        self.x = 0
-        self.w = 24
-        self.h = 1
-        (x, y) = (self.x, self.y)
-        return GridPos(h=1, w=24, x=x, y=y)
-
-    def next_half_width_graph(self):
-        if self.x + self.w > 24 - 12:
-            self.y += self.h
-            self.x = 0
-        else:
-            self.x += self.w
-        (x, y) = (self.x, self.y)
-        self.h = 8
-        self.w = 12
-        return GridPos(h=8, w=12, x=x, y=y)
-
-    def next_one_third_width_graph(self):
-        if self.x + self.w > 24 - 8:
-            self.y += self.h
-            self.x = 0
-        else:
-            self.x += self.w
-        (x, y) = (self.x, self.y)
-        self.h = 8
-        self.w = 8
-        return GridPos(h=8, w=8, x=x, y=y)
-
-
-class Panels:
-
-    def __init__(self, datasource):
-        self.layout = Layout()
-        self.datasource = datasource
-
-    def row(
-        self,
-        title,
-    ):
-        gridPos = self.layout.next_row()
-        return RowPanel(title=title, gridPos=gridPos)
-
-    def row_collapsed(self, title, panels):
-        gridPos = self.layout.next_row()
-        return RowPanel(title=title,
-                        gridPos=gridPos,
-                        collapsed=True,
-                        panels=panels)
-
-    def target(self, expr, legendFormat, hide=False):
-        return Target(expr=expr,
-                      legendFormat=legendFormat,
-                      datasource=self.datasource,
-                      hide=hide)
-
-    def timeseries(self, title, description, targets):
-        gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(
-            title=title,
-            description=description,
-            targets=targets,
-            gridPos=gridPos,
-            fillOpacity=10,
-        )
-
-    def timeseries_count(self,
-                         title,
-                         description,
-                         targets,
-                         legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(
-            title=title,
-            description=description,
-            targets=targets,
-            gridPos=gridPos,
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
-            legendCalcs=legendCols,
-        )
-
-    def timeseries_percentage(self,
-                              title,
-                              description,
-                              targets,
-                              legendCols=["mean"]):
-        # Percentage should fall into 0.0-1.0
-        gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(
-            title=title,
-            description=description,
-            targets=targets,
-            gridPos=gridPos,
-            unit="percentunit",
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
-            legendCalcs=legendCols,
-        )
-
-    def timeseries_latency(self,
-                           title,
-                           description,
-                           targets,
-                           legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(
-            title=title,
-            description=description,
-            targets=targets,
-            gridPos=gridPos,
-            unit="s",
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
-            legendCalcs=legendCols,
-        )
-
-    def timeseries_actor_latency(self,
-                                 title,
-                                 description,
-                                 targets,
-                                 legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(
-            title=title,
-            description=description,
-            targets=targets,
-            gridPos=gridPos,
-            unit="s",
-            fillOpacity=0,
-            legendDisplayMode="table",
-            legendPlacement="right",
-            legendCalcs=legendCols,
-        )
-
-    def timeseries_actor_latency_small(self,
-                                       title,
-                                       description,
-                                       targets,
-                                       legendCols=["mean"]):
-        gridPos = self.layout.next_one_third_width_graph()
-        return TimeSeries(
-            title=title,
-            description=description,
-            targets=targets,
-            gridPos=gridPos,
-            unit="s",
-            fillOpacity=0,
-            legendDisplayMode="table",
-            legendPlacement="right",
-            legendCalcs=legendCols,
-        )
-
-    def timeseries_query_per_sec(self,
-                                 title,
-                                 description,
-                                 targets,
-                                 legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(
-            title=title,
-            description=description,
-            targets=targets,
-            gridPos=gridPos,
-            unit="Qps",
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
-            legendCalcs=legendCols,
-        )
-
-    def timeseries_bytes_per_sec(self,
-                                 title,
-                                 description,
-                                 targets,
-                                 legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(
-            title=title,
-            description=description,
-            targets=targets,
-            gridPos=gridPos,
-            unit="Bps",
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
-            legendCalcs=legendCols,
-        )
-
-    def timeseries_bytes(self,
-                         title,
-                         description,
-                         targets,
-                         legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(
-            title=title,
-            description=description,
-            targets=targets,
-            gridPos=gridPos,
-            unit="bytes",
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
-            legendCalcs=legendCols,
-        )
-
-    def timeseries_row(self, title, description, targets, legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(
-            title=title,
-            description=description,
-            targets=targets,
-            gridPos=gridPos,
-            unit="row",
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
-            legendCalcs=legendCols,
-        )
-
-    def timeseries_ms(self, title, description, targets, legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(
-            title=title,
-            description=description,
-            targets=targets,
-            gridPos=gridPos,
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
-            legendCalcs=legendCols,
-        )
-
-    def timeseries_kilobytes(self,
-                             title,
-                             description,
-                             targets,
-                             legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(
-            title=title,
-            description=description,
-            targets=targets,
-            gridPos=gridPos,
-            unit="kbytes",
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
-            legendCalcs=legendCols,
-        )
-
-    def timeseries_dollar(self,
-                          title,
-                          description,
-                          targets,
-                          legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(
-            title=title,
-            description=description,
-            targets=targets,
-            gridPos=gridPos,
-            unit="$",
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
-            legendCalcs=legendCols,
-        )
-
-    def timeseries_ops(self, title, description, targets, legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(
-            title=title,
-            description=description,
-            targets=targets,
-            gridPos=gridPos,
-            unit="ops",
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
-            legendCalcs=legendCols,
-        )
-
-    def timeseries_actor_ops(self,
-                             title,
-                             description,
-                             targets,
-                             legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(
-            title=title,
-            description=description,
-            targets=targets,
-            gridPos=gridPos,
-            unit="ops",
-            fillOpacity=0,
-            legendDisplayMode="table",
-            legendPlacement="right",
-            legendCalcs=legendCols,
-        )
-
-    def timeseries_actor_ops_small(self,
-                                   title,
-                                   description,
-                                   targets,
-                                   legendCols=["mean"]):
-        gridPos = self.layout.next_one_third_width_graph()
-        return TimeSeries(
-            title=title,
-            description=description,
-            targets=targets,
-            gridPos=gridPos,
-            unit="ops",
-            fillOpacity=0,
-            legendDisplayMode="table",
-            legendPlacement="right",
-            legendCalcs=legendCols,
-        )
-
-    def timeseries_rowsps(self,
-                          title,
-                          description,
-                          targets,
-                          legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(
-            title=title,
-            description=description,
-            targets=targets,
-            gridPos=gridPos,
-            unit="rows/s",
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
-            legendCalcs=legendCols,
-        )
-
-    def timeseries_bytesps(self,
-                          title,
-                          description,
-                          targets,
-                          legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(
-            title=title,
-            description=description,
-            targets=targets,
-            gridPos=gridPos,
-            unit="MB/s",
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
-            legendCalcs=legendCols,
-        )
-
-    def timeseries_actor_rowsps(self, title, description, targets):
-        gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(
-            title=title,
-            description=description,
-            targets=targets,
-            gridPos=gridPos,
-            unit="rows/s",
-            fillOpacity=0,
-            legendDisplayMode="table",
-            legendPlacement="right",
-        )
-
-    def timeseries_memory(self, title, description, targets):
-        gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(
-            title=title,
-            description=description,
-            targets=targets,
-            gridPos=gridPos,
-            unit="bytes",
-            fillOpacity=10,
-        )
-
-    def timeseries_cpu(self, title, description, targets):
-        gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(
-            title=title,
-            description=description,
-            targets=targets,
-            gridPos=gridPos,
-            unit="percentunit",
-            fillOpacity=10,
-        )
-
-    def timeseries_latency_small(self, title, description, targets):
-        gridPos = self.layout.next_one_third_width_graph()
-        return TimeSeries(
-            title=title,
-            description=description,
-            targets=targets,
-            gridPos=gridPos,
-            unit="s",
-            fillOpacity=10,
-        )
-
-    def timeseries_id(self, title, description, targets):
-        gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(
-            title=title,
-            description=description,
-            targets=targets,
-            gridPos=gridPos,
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
-        )
-
-    def sub_panel(self):
-        return Panels(self.datasource)
-
-
 panels = Panels(datasource)
-
 logging.basicConfig(level=logging.WARN)
-
-
-def metric(name, filter=None):
-    filters = [filter] if filter else []
-    if namespace_filter_enabled:
-        filters.append("namespace=~\"$namespace\"")
-    if risingwave_name_filter_enabled:
-        filters.append("risingwave_name=~\"$instance\"")
-    if filters:
-        return f"{name}{{{','.join(filters)}}}"
-    else:
-        return name
-
-
-def quantile(f, percentiles):
-    quantile_map = {
-        "60": ["0.6", "60"],
-        "50": ["0.5", "50"],
-        "90": ["0.9", "90"],
-        "99": ["0.99", "99"],
-        "999": ["0.999", "999"],
-        "max": ["1.0", "max"],
-    }
-    return list(
-        map(lambda p: f(quantile_map[str(p)][0], quantile_map[str(p)][1]),
-            percentiles))
 
 
 def section_cluster_node(panels):
@@ -540,6 +63,49 @@ def section_cluster_node(panels):
             ],
             ["last"],
         ),
+    ]
+
+
+def section_recovery_node(panels):
+    return [
+        panels.row("Recovery"),
+        panels.timeseries_ops(
+            "Recovery Successful Rate",
+            "The rate of successful recovery attempts",
+            [
+                panels.target(f"sum(rate({metric('recovery_latency_count')}[$__rate_interval])) by (instance)",
+                              "{{instance}}")
+            ],
+            ["last"],
+        ),
+        panels.timeseries_count(
+            "Failed recovery attempts",
+            "Total number of failed reocovery attempts",
+            [
+                panels.target(f"sum({metric('recovery_failure_cnt')}) by (instance)",
+                              "{{instance}}")
+            ],
+            ["last"],
+        ),
+        panels.timeseries_latency(
+            "Recovery latency",
+            "Time spent in a successful recovery attempt",
+            [
+                *quantile(
+                    lambda quantile, legend: panels.target(
+                        f"histogram_quantile({quantile}, sum(rate({metric('recovery_latency_bucket')}[$__rate_interval])) by (le, instance))",
+                        f"recovery latency p{legend}" +
+                        " - {{instance}}",
+                    ),
+                    [50, 90, 99, "max"],
+                ),
+                panels.target(
+                    f"sum by (le) (rate({metric('recovery_latency_sum')}[$__rate_interval])) / sum by (le) (rate({metric('recovery_latency_count')}[$__rate_interval]))",
+                    "recovery latency avg",
+                ),
+            ],
+            ["last"],
+        )
     ]
 
 
@@ -808,7 +374,7 @@ def section_compaction(outer_panels):
                     ],
                 ),
 
-                 panels.timeseries_count(
+                panels.timeseries_count(
                     "Hummock Sstable Stat",
                     "Avg count gotten from sstable_distinct_epoch_count, for observing sstable_distinct_epoch_count",
                     [
@@ -822,7 +388,7 @@ def section_compaction(outer_panels):
                 panels.timeseries_latency(
                     "Hummock Remote Read Duration",
                     "Total time of operations which read from remote storage when enable prefetch",
-                    [                       
+                    [
                         *quantile(
                             lambda quantile, legend: panels.target(
                                 f"histogram_quantile({quantile}, sum(rate({metric('state_store_remote_read_time_per_task_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
@@ -979,7 +545,7 @@ def section_object_storage(outer_panels):
                     "Estimated S3 Cost (Monthly)",
                     "This metric uses the total size of data in S3 at this second to derive the cost of storing data "
                     "for a whole month. The price is 0.023 USD per GB. Please checkout AWS's pricing model for more "
-                    "accurate calculation.", 
+                    "accurate calculation.",
                     [
                         panels.target(
                             f"sum({metric('storage_level_total_file_size')}) by (instance) * 0.023 / 1000 / 1000",
@@ -1046,6 +612,16 @@ def section_streaming(panels):
                 panels.target(
                     f"rate({metric('stream_source_rows_per_barrier_counts')}[$__rate_interval])",
                     "actor={{actor_id}} source={{source_id}} @ {{instance}}"
+                )
+            ]
+        ),
+        panels.timeseries_count(
+            "Source Upstream Status",
+            "Monitor each source upstream, 0 means the upstream is not normal, 1 means the source is ready.",
+            [
+                panels.target(
+                    f"{metric('source_status_is_up')}",
+                    "source_id={{source_id}}, source_name={{source_name}} @ {{instance}}"
                 )
             ]
         ),
@@ -1420,16 +996,51 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])",
-                            "cache miss {{actor_id}} {{side}}",
+                            "cache miss - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}} ",
                         ),
                         panels.target(
                             f"rate({metric('stream_join_lookup_total_count')}[$__rate_interval])",
-                            "total lookups {{actor_id}} {{side}}",
+                            "total lookups {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
                         ),
                         panels.target(
                             f"rate({metric('stream_join_insert_cache_miss_count')}[$__rate_interval])",
-                            "cache miss when insert{{actor_id}} {{side}}",
+                            "cache miss when insert {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
                         ),
+                    ],
+                ),
+                panels.timeseries_actor_ops(
+                    "Materialize Executor Cache",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])",
+                            "cache hit count - table {{table_id}} - actor {{actor_id}}   {{instance}}",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])",
+                            "total cached count - table {{table_id}} - actor {{actor_id}}   {{instance}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Executor Cache Miss Ratio",
+                    "",
+                    [
+                        panels.target(
+                         f"(sum(rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id) ) / (sum(rate({metric('stream_join_lookup_total_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id))",
+                            "join executor cache miss ratio - - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
+                            ),
+
+                        panels.target(
+                         f"(sum(rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "Agg cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                            ),
+
+                        panels.target(
+                         f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "materialize executor cache miss ratio - table {{table_id}} actor {{actor_id}}  {{instance}}",
+                            ),
+
                     ],
                 ),
                 panels.timeseries_actor_latency(
@@ -1504,11 +1115,11 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])",
-                            "cache miss {{actor_id}}",
+                            "cache miss - table {{table_id}} actor {{actor_id}}",
                         ),
                         panels.target(
                             f"rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])",
-                            "total lookups {{actor_id}}",
+                            "total lookups - table {{table_id}} actor {{actor_id}}",
                         ),
                     ],
                 ),
@@ -1518,11 +1129,11 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('stream_agg_chunk_lookup_miss_count')}[$__rate_interval])",
-                            "chunk-level cache miss {{actor_id}}",
+                            "chunk-level cache miss  - table {{table_id}} actor {{actor_id}}}",
                         ),
                         panels.target(
                             f"rate({metric('stream_agg_chunk_lookup_total_count')}[$__rate_interval])",
-                            "chunk-level total lookups {{actor_id}}",
+                            "chunk-level total lookups  - table {{table_id}} actor {{actor_id}}",
                         ),
                     ],
                 ),
@@ -1531,7 +1142,7 @@ def section_streaming_actors(outer_panels):
                     "The number of keys cached in each hash aggregation executor's executor cache.",
                     [
                         panels.target(f"{metric('stream_agg_cached_keys')}",
-                                      "{{actor_id}}"),
+                                      "table {{table_id}} actor {{actor_id}}"),
                     ],
                 ),
             ],
@@ -1631,6 +1242,7 @@ def section_batch_exchange(outer_panels):
         ),
     ]
 
+
 def section_frontend(outer_panels):
     panels = outer_panels.sub_panel()
     return [
@@ -1662,7 +1274,7 @@ def section_frontend(outer_panels):
                     "",
                     [
                         panels.target(f"{metric('distributed_running_query_num')}",
-                            "The number of running query in distributed execution mode"),
+                                      "The number of running query in distributed execution mode"),
                     ],
                     ["last"],
                 ),
@@ -1671,7 +1283,7 @@ def section_frontend(outer_panels):
                     "",
                     [
                         panels.target(f"{metric('distributed_rejected_query_counter')}",
-                            "The number of rejected query in distributed execution mode"),
+                                      "The number of rejected query in distributed execution mode"),
                     ],
                     ["last"],
                 ),
@@ -1680,7 +1292,7 @@ def section_frontend(outer_panels):
                     "",
                     [
                         panels.target(f"{metric('distributed_completed_query_counter')}",
-                            "The number of completed query in distributed execution mode"),
+                                      "The number of completed query in distributed execution mode"),
                     ],
                     ["last"],
                 ),
@@ -1726,7 +1338,7 @@ def section_frontend(outer_panels):
 
 
 def section_hummock(panels):
-    mete_miss_filter = "type='meta_miss'"
+    meta_miss_filter = "type='meta_miss'"
     meta_total_filter = "type='meta_total'"
     data_miss_filter = "type='data_miss'"
     data_total_filter = "type='data_total'"
@@ -1956,7 +1568,7 @@ def section_hummock(panels):
                     "bloom filter miss rate - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"(sum(rate({metric('state_store_sst_store_block_request_counts', mete_miss_filter)}[$__rate_interval])) by (job,instance,table_id)) / (sum(rate({metric('state_store_sst_store_block_request_counts', meta_total_filter)}[$__rate_interval])) by (job,instance,table_id))",
+                    f"(sum(rate({metric('state_store_sst_store_block_request_counts', meta_miss_filter)}[$__rate_interval])) by (job,instance,table_id)) / (sum(rate({metric('state_store_sst_store_block_request_counts', meta_total_filter)}[$__rate_interval])) by (job,instance,table_id))",
                     "meta cache miss rate - {{table_id}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
@@ -2138,6 +1750,28 @@ def section_hummock(panels):
                 ),
             ],
         ),
+
+        panels.timeseries_count(
+            "Fetch Meta Unhits",
+            "",
+            [
+                panels.target(
+                    f"{metric('state_store_iter_fetch_meta_cache_unhits')}",
+                    "",
+                ),
+            ],
+        ),
+
+        panels.timeseries_count(
+            "Slow Fetch Meta Unhits",
+            "",
+            [
+                panels.target(
+                    f"{metric('state_store_iter_slow_fetch_meta_cache_unhits')}",
+                    "",
+                ),
+            ],
+        ),
     ]
 
 
@@ -2222,6 +1856,7 @@ def section_hummock_tiered_cache(outer_panels):
             ],
         )
     ]
+
 
 def section_hummock_manager(outer_panels):
     panels = outer_panels.sub_panel()
@@ -2313,11 +1948,32 @@ def section_hummock_manager(outer_panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "Stale SST Total Number",
-                    "total number of SSTs that is no longer referenced by versions but is not yet deleted from storage",
+                    "Object Total Number",
+                    """
+Objects are classified into 3 groups:
+- not referenced by versions: these object are being deleted from object store.
+- referenced by non-current versions: these objects are stale (not in the latest version), but those old versions may still be in use (e.g. long-running pinning). Thus those objects cannot be deleted at the moment.
+- referenced by current version: these objects are in the latest version.
+                    """,
                     [
-                        panels.target(f"{metric('storage_stale_ssts_count')}",
-                                      "stale SST total number"),
+                        panels.target(f"{metric('storage_stale_object_count')}",
+                                      "not referenced by versions"),
+                        panels.target(f"{metric('storage_old_version_object_count')}",
+                                      "referenced by non-current versions"),
+                        panels.target(f"{metric('storage_current_version_object_count')}",
+                                      "referenced by current version"),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Object Total Size",
+                    "Refer to `Object Total Number` panel for classification of objects.",
+                    [
+                        panels.target(f"{metric('storage_stale_object_size')}",
+                                      "not referenced by versions"),
+                        panels.target(f"{metric('storage_old_version_object_size')}",
+                                      "referenced by non-current versions"),
+                        panels.target(f"{metric('storage_current_version_object_size')}",
+                                      "referenced by current version"),
                     ],
                 ),
                 panels.timeseries_count(
@@ -2348,6 +2004,7 @@ def section_hummock_manager(outer_panels):
         )
     ]
 
+
 def section_backup_manager(outer_panels):
     panels = outer_panels.sub_panel()
     return [
@@ -2373,7 +2030,7 @@ def section_backup_manager(outer_panels):
                                 f"histogram_quantile({quantile}, sum(rate({metric('backup_job_latency_bucket')}[$__rate_interval])) by (le, state))",
                                 f"Job Process Time p{legend}" +
                                 " - {{state}}",
-                                ),
+                            ),
                             [50, 99, 999, "max"],
                         ),
                     ],
@@ -2381,6 +2038,7 @@ def section_backup_manager(outer_panels):
             ],
         )
     ]
+
 
 def grpc_metrics_target(panels, name, filter):
     return panels.timeseries_latency_small(
@@ -2623,6 +2281,7 @@ def section_grpc_hummock_meta_client(outer_panels):
         ),
     ]
 
+
 def section_memory_manager(outer_panels):
     panels = outer_panels.sub_panel()
     return [
@@ -2693,6 +2352,7 @@ def section_memory_manager(outer_panels):
         ),
     ]
 
+
 def section_connector_node(outer_panels):
     panels = outer_panels.sub_panel()
     return [
@@ -2712,6 +2372,7 @@ def section_connector_node(outer_panels):
             ],
         )
     ]
+
 
 templating = Templating()
 if namespace_filter_enabled:
@@ -2740,8 +2401,8 @@ if namespace_filter_enabled:
     )
 
 dashboard = Dashboard(
-    title="risingwave_dashboard",
-    description="RisingWave Dashboard",
+    title="risingwave_dev_dashboard",
+    description="RisingWave Dev Dashboard",
     tags=["risingwave"],
     timezone="browser",
     editable=True,
@@ -2752,6 +2413,7 @@ dashboard = Dashboard(
     version=dashboard_version,
     panels=[
         *section_cluster_node(panels),
+        *section_recovery_node(panels),
         *section_streaming(panels),
         *section_streaming_actors(panels),
         *section_streaming_exchange(panels),
