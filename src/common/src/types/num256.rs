@@ -23,7 +23,8 @@ use std::str::FromStr;
 use bytes::{BufMut, Bytes};
 use ethnum::i256;
 use num_traits::{
-    CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Signed, Zero,
+    CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, FromPrimitive,
+    ToPrimitive, Zero,
 };
 use risingwave_pb::data::ArrayType;
 use serde::de::{Error, Visitor};
