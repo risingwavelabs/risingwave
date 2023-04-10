@@ -26,6 +26,9 @@ use std::default::Default;
 use std::fmt::Debug;
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::io::{Cursor, Read};
+use std::ops::Deref;
+use bytes::buf::UninitSlice;
+use bytes::{Buf, BufMut};
 
 use chrono::{Datelike, Timelike};
 use smallbitset::Set64;
@@ -215,7 +218,95 @@ pub struct FixedSizeKey<const N: usize> {
 }
 
 /// Able to store ~8 i64s as group keys.
-type SerializedKeyBuffer = SmallVec<[u8; 32]>;
+#[repr(transparent)]
+#[derive(Clone, Debug, PartialEq)]
+struct SerializedKeyBuffer {
+    inner: SmallVec<[u8; 32]>,
+}
+
+impl SerializedKeyBuffer {
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            inner: SmallVec::with_capacity(capacity),
+        }
+    }
+}
+
+impl Deref for SerializedKeyBuffer {
+    type Target = SmallVec<[u8; 32]>;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+unsafe impl BufMut for SerializedKeyBuffer {
+    #[inline]
+    fn remaining_mut(&self) -> usize {
+        // A vector can never have more than isize::MAX bytes
+        core::isize::MAX as usize - self.inner.len()
+    }
+
+    #[inline]
+    unsafe fn advance_mut(&mut self, cnt: usize) {
+        let len = self.inner.len();
+        let remaining = self.inner.capacity() - len;
+
+        assert!(
+            cnt <= remaining,
+            "cannot advance past `remaining_mut`: {:?} <= {:?}",
+            cnt,
+            remaining
+        );
+
+        self.inner.set_len(len + cnt);
+    }
+
+    #[inline]
+    fn chunk_mut(&mut self) -> &mut UninitSlice {
+        if self.inner.capacity() == self.inner.len() {
+            self.inner.reserve(64); // Grow the vec
+        }
+
+        let cap = self.inner.capacity();
+        let len = self.inner.len();
+
+        let ptr = self.inner.as_mut_ptr();
+        unsafe { &mut UninitSlice::from_raw_parts_mut(ptr, cap)[len..] }
+    }
+
+    // Specialize these methods so they can skip checking `remaining_mut`
+    // and `advance_mut`.
+    fn put<T: Buf>(&mut self, mut src: T)
+        where
+            Self: Sized,
+    {
+        // In case the src isn't contiguous, reserve upfront
+        self.inner.reserve(src.remaining());
+
+        while src.has_remaining() {
+            let l;
+
+            // a block to contain the src.bytes() borrow
+            {
+                let s = src.chunk();
+                l = s.len();
+                self.inner.extend_from_slice(s);
+            }
+
+            src.advance(l);
+        }
+    }
+
+    #[inline]
+    fn put_slice(&mut self, src: &[u8]) {
+        self.inner.extend_from_slice(src);
+    }
+
+    fn put_bytes(&mut self, val: u8, cnt: usize) {
+        let new_len = self.inner.len().checked_add(cnt).unwrap();
+        self.inner.resize(new_len, val);
+    }
+}
 
 impl EstimateSize for SerializedKeyBuffer {
     fn estimated_heap_size(&self) -> usize {
@@ -674,7 +765,7 @@ impl HashKeySerializer for SerializedKeySerializer {
 
     fn from_hash_code(hash_code: HashCode, estimated_value_encoding_size: usize) -> Self {
         Self {
-            buffer: SmallVec::with_capacity(estimated_value_encoding_size),
+            buffer: SerializedKeyBuffer::with_capacity(estimated_value_encoding_size),
             hash_code: hash_code.0,
             null_bitmap: NullBitmap::empty(),
             null_bitmap_idx: 0,
@@ -684,10 +775,10 @@ impl HashKeySerializer for SerializedKeySerializer {
     fn append<'a, D: HashKeySerDe<'a>>(&mut self, data: Option<D>) {
         match data {
             Some(v) => {
-                serialize_datum_into(&Some(v.to_owned_scalar().into()), &mut &mut self.buffer[..]);
+                serialize_datum_into(&Some(v.to_owned_scalar().into()), &mut self.buffer);
             }
             None => {
-                serialize_datum_into(&None, &mut &mut self.buffer[..]);
+                serialize_datum_into(&None, &mut self.buffer);
                 self.null_bitmap.set_true(self.null_bitmap_idx);
             }
         }
