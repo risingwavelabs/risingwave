@@ -19,7 +19,7 @@ use multimap::MultiMap;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_expr::expr::{BoxedExpression, EvalExt, ExprContext};
+use risingwave_expr::expr::{BoxedExpression, ExprContext, CONTEXT};
 
 use super::*;
 
@@ -126,12 +126,15 @@ impl Inner {
         let mut projected_columns = Vec::new();
 
         for expr in &self.exprs {
-            let evaluated_expr = expr
-                .eval_infallible(&data_chunk, |err| {
-                    self.ctx.on_compute_error(err, &self.info.identity)
-                })
-                .eval_with_context(context.clone())
+            let evaluated_expr = CONTEXT
+                .scope(
+                    context.clone(),
+                    expr.eval_infallible(&data_chunk, |err| {
+                        self.ctx.on_compute_error(err, &self.info.identity)
+                    }),
+                )
                 .await;
+
             let new_column = Column::new(evaluated_expr);
             projected_columns.push(new_column);
         }

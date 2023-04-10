@@ -68,13 +68,11 @@ pub mod test_utils;
 
 use std::sync::Arc;
 
-use futures_util::Future;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::epoch::Epoch;
 use static_assertions::const_assert;
-use tokio::task::futures::TaskLocalFuture;
 
 pub use self::agg::AggKind;
 pub use self::build::*;
@@ -190,13 +188,5 @@ impl ExprContext {
 }
 
 tokio::task_local! {
-    static CONTEXT: ExprContext;
+    pub static CONTEXT: ExprContext;
 }
-
-pub trait EvalExt: Future + Sized {
-    fn eval_with_context(self, context: ExprContext) -> TaskLocalFuture<ExprContext, Self> {
-        CONTEXT.scope(context, self)
-    }
-}
-
-impl<F> EvalExt for F where F: Future {}
