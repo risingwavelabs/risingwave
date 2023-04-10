@@ -84,13 +84,9 @@ impl DatabaseCatalog {
     }
 
     pub fn find_schema_containing_table_id(&self, table_id: &TableId) -> Option<&SchemaCatalog> {
-        for schema in self.schema_by_name.values() {
-            if schema.get_table_by_id(table_id).is_some() {
-                return Some(schema);
-            }
-        }
-
-        None
+        self.schema_by_name
+            .values()
+            .find(|schema| schema.get_table_by_id(table_id).is_some())
     }
 
     pub fn is_empty(&self) -> bool {
