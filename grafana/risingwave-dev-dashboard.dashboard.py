@@ -1750,6 +1750,28 @@ def section_hummock(panels):
                 ),
             ],
         ),
+
+        panels.timeseries_count(
+            "Fetch Meta Unhits",
+            "",
+            [
+                panels.target(
+                    f"{metric('state_store_iter_fetch_meta_cache_unhits')}",
+                    "",
+                ),
+            ],
+        ),
+
+        panels.timeseries_count(
+            "Slow Fetch Meta Unhits",
+            "",
+            [
+                panels.target(
+                    f"{metric('state_store_iter_slow_fetch_meta_cache_unhits')}",
+                    "",
+                ),
+            ],
+        ),
     ]
 
 

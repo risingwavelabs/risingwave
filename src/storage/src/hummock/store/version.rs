@@ -665,14 +665,12 @@ impl HummockVersionReader {
         let fetch_meta_duration_sec = timer.stop_and_record();
         self.state_store_metrics
             .iter_fetch_meta_cache_unhits
-            .with_label_values(&[table_id_label])
-            .observe(local_cache_meta_block_unhit as f64);
+            .set(local_cache_meta_block_unhit as i64);
         if fetch_meta_duration_sec > SLOW_ITER_FETCH_META_DURATION_SECOND {
-            tracing::warn!("Fetching meta while creating an iter to read table_id {:?} at epoch {:?} is slow: duration = {:?}s.", table_id_string, epoch, fetch_meta_duration_sec);
+            tracing::warn!("Fetching meta while creating an iter to read table_id {:?} at epoch {:?} is slow: duration = {:?}s, cache unhits = {:?}.", table_id_string, epoch, fetch_meta_duration_sec, local_cache_meta_block_unhit);
             self.state_store_metrics
                 .iter_slow_fetch_meta_cache_unhits
-                .with_label_values(&[table_id_label])
-                .observe(local_cache_meta_block_unhit as f64);
+                .set(local_cache_meta_block_unhit as i64);
         }
 
         let mut sst_read_options = SstableIteratorReadOptions::from(&read_options);
