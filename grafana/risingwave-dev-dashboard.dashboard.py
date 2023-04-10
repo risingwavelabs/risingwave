@@ -996,16 +996,51 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])",
-                            "cache miss {{actor_id}} {{side}}",
+                            "cache miss - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}} ",
                         ),
                         panels.target(
                             f"rate({metric('stream_join_lookup_total_count')}[$__rate_interval])",
-                            "total lookups {{actor_id}} {{side}}",
+                            "total lookups {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
                         ),
                         panels.target(
                             f"rate({metric('stream_join_insert_cache_miss_count')}[$__rate_interval])",
-                            "cache miss when insert{{actor_id}} {{side}}",
+                            "cache miss when insert {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
                         ),
+                    ],
+                ),
+                panels.timeseries_actor_ops(
+                    "Materialize Executor Cache",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])",
+                            "cache hit count - table {{table_id}} - actor {{actor_id}}   {{instance}}",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])",
+                            "total cached count - table {{table_id}} - actor {{actor_id}}   {{instance}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Executor Cache Miss Ratio",
+                    "",
+                    [
+                        panels.target(
+                         f"(sum(rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id) ) / (sum(rate({metric('stream_join_lookup_total_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id))",
+                            "join executor cache miss ratio - - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
+                            ),
+
+                        panels.target(
+                         f"(sum(rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "Agg cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                            ),
+
+                        panels.target(
+                         f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "materialize executor cache miss ratio - table {{table_id}} actor {{actor_id}}  {{instance}}",
+                            ),
+
                     ],
                 ),
                 panels.timeseries_actor_latency(
@@ -1080,11 +1115,11 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])",
-                            "cache miss {{actor_id}}",
+                            "cache miss - table {{table_id}} actor {{actor_id}}",
                         ),
                         panels.target(
                             f"rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])",
-                            "total lookups {{actor_id}}",
+                            "total lookups - table {{table_id}} actor {{actor_id}}",
                         ),
                     ],
                 ),
@@ -1094,11 +1129,11 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('stream_agg_chunk_lookup_miss_count')}[$__rate_interval])",
-                            "chunk-level cache miss {{actor_id}}",
+                            "chunk-level cache miss  - table {{table_id}} actor {{actor_id}}}",
                         ),
                         panels.target(
                             f"rate({metric('stream_agg_chunk_lookup_total_count')}[$__rate_interval])",
-                            "chunk-level total lookups {{actor_id}}",
+                            "chunk-level total lookups  - table {{table_id}} actor {{actor_id}}",
                         ),
                     ],
                 ),
@@ -1107,7 +1142,7 @@ def section_streaming_actors(outer_panels):
                     "The number of keys cached in each hash aggregation executor's executor cache.",
                     [
                         panels.target(f"{metric('stream_agg_cached_keys')}",
-                                      "{{actor_id}}"),
+                                      "table {{table_id}} actor {{actor_id}}"),
                     ],
                 ),
             ],
@@ -1303,7 +1338,7 @@ def section_frontend(outer_panels):
 
 
 def section_hummock(panels):
-    mete_miss_filter = "type='meta_miss'"
+    meta_miss_filter = "type='meta_miss'"
     meta_total_filter = "type='meta_total'"
     data_miss_filter = "type='data_miss'"
     data_total_filter = "type='data_total'"
@@ -1533,7 +1568,7 @@ def section_hummock(panels):
                     "bloom filter miss rate - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"(sum(rate({metric('state_store_sst_store_block_request_counts', mete_miss_filter)}[$__rate_interval])) by (job,instance,table_id)) / (sum(rate({metric('state_store_sst_store_block_request_counts', meta_total_filter)}[$__rate_interval])) by (job,instance,table_id))",
+                    f"(sum(rate({metric('state_store_sst_store_block_request_counts', meta_miss_filter)}[$__rate_interval])) by (job,instance,table_id)) / (sum(rate({metric('state_store_sst_store_block_request_counts', meta_total_filter)}[$__rate_interval])) by (job,instance,table_id))",
                     "meta cache miss rate - {{table_id}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
@@ -1712,6 +1747,28 @@ def section_hummock(panels):
                 panels.target(
                     f"sum by(le, job, instance, table_id) (rate({metric('state_store_iter_fetch_meta_duration_sum')}[$__rate_interval])) / sum by(le, job, instance, table_id) (rate({metric('state_store_iter_fetch_meta_duration_count')}[$__rate_interval]))",
                     "fetch_meta_duration avg - {{table_id}} @ {{job}} @ {{instance}}",
+                ),
+            ],
+        ),
+
+        panels.timeseries_count(
+            "Fetch Meta Unhits",
+            "",
+            [
+                panels.target(
+                    f"{metric('state_store_iter_fetch_meta_cache_unhits')}",
+                    "",
+                ),
+            ],
+        ),
+
+        panels.timeseries_count(
+            "Slow Fetch Meta Unhits",
+            "",
+            [
+                panels.target(
+                    f"{metric('state_store_iter_slow_fetch_meta_cache_unhits')}",
+                    "",
                 ),
             ],
         ),

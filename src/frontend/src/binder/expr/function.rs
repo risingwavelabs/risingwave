@@ -355,6 +355,7 @@ impl Binder {
                 ("acos", raw_call(ExprType::Acos)), 
                 ("atan", raw_call(ExprType::Atan)), 
                 ("atan2", raw_call(ExprType::Atan2)),
+                ("sqrt", raw_call(ExprType::Sqrt)),
                 ("degrees", raw_call(ExprType::Degrees)),
                 ("radians", raw_call(ExprType::Radians)),
 
@@ -578,10 +579,7 @@ impl Binder {
         });
 
         match HANDLES.get(function_name) {
-            Some(handle) => {
-                tracing::info!("get function handle successfully");
-                handle(self, inputs)
-            }
+            Some(handle) => handle(self, inputs),
             None => Err({
                 let allowed_distance = if function_name.len() > 3 { 2 } else { 1 };
 

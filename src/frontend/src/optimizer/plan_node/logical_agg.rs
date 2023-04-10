@@ -617,12 +617,13 @@ impl LogicalAggBuilder {
             // use pow(x, 0.5) to simulate
             AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp => {
                 let input = inputs.iter().exactly_one().unwrap();
+                let pre_proj_input = self.input_proj_builder.get_expr(input.index).unwrap();
 
                 // first, we compute sum of squared as sum_sq
                 let squared_input_expr = ExprImpl::from(
                     FunctionCall::new(
                         ExprType::Multiply,
-                        vec![ExprImpl::from(input.clone()), ExprImpl::from(input.clone())],
+                        vec![pre_proj_input.clone(), pre_proj_input.clone()],
                     )
                     .unwrap(),
                 );

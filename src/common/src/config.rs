@@ -300,6 +300,10 @@ pub struct StorageConfig {
     #[serde(default)]
     pub shared_buffer_capacity_mb: Option<usize>,
 
+    /// The threshold for the number of immutable memtables to merge to a new imm.
+    #[serde(default = "default::storage::imm_merge_threshold")]
+    pub imm_merge_threshold: usize,
+
     /// Whether to enable write conflict detection
     #[serde(default = "default::storage::write_conflict_detection_enabled")]
     pub write_conflict_detection_enabled: bool,
@@ -598,6 +602,10 @@ mod default {
 
         pub fn shared_buffer_capacity_mb() -> usize {
             1024
+        }
+
+        pub fn imm_merge_threshold() -> usize {
+            4
         }
 
         pub fn write_conflict_detection_enabled() -> bool {

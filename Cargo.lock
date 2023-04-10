@@ -6182,6 +6182,7 @@ dependencies = [
  "risingwave_expr_macro",
  "risingwave_pb",
  "risingwave_udf",
+ "rust_decimal",
  "serde_json",
  "speedate",
  "static_assertions",

@@ -90,11 +90,12 @@ macro_rules! commit_meta {
 }
 pub(crate) use commit_meta;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::{CreatingJobInfo, Relation, RelationGroup};
 
-use crate::manager::catalog::utils::{alter_relation_rename, alter_relation_rename_refs};
+use crate::manager::catalog::utils::{
+    alter_relation_rename, alter_relation_rename_refs, ReplaceTableExprRewriter,
+};
 
 pub type CatalogManagerRef<S> = Arc<CatalogManager<S>>;
 
@@ -1945,28 +1946,16 @@ where
 
         let mut updated_indexes = vec![];
 
+        let expr_rewriter = ReplaceTableExprRewriter {
+            table_col_index_mapping: table_col_index_mapping.clone(),
+        };
+
         for index_id in &index_ids {
             let mut index = indexes.get_mut(*index_id).unwrap();
             index
                 .index_item
                 .iter_mut()
-                .for_each(|x| match x.rex_node.as_mut().unwrap() {
-                    RexNode::InputRef(input_col_idx) => {
-                        *input_col_idx =
-                            table_col_index_mapping.map(*input_col_idx as usize) as u32;
-                        assert_eq!(
-                            x.return_type,
-                            table.columns[*input_col_idx as usize]
-                                .column_desc
-                                .clone()
-                                .unwrap()
-                                .column_type
-                        );
-                    }
-                    RexNode::FuncCall(_) => unimplemented!(),
-                    _ => unreachable!(),
-                });
-
+                .for_each(|x| expr_rewriter.rewrite_expr(x));
             updated_indexes.push(indexes.get(index_id).cloned().unwrap());
         }
 
