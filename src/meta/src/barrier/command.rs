@@ -591,7 +591,7 @@ where
                 // For mview creation, the snapshot ingestion may last for several epochs. By
                 // pinning a snapshot in `post_collect` which is called sequentially, we can ensure
                 // that the pinned snapshot is the just committed one.
-                self.snapshot_manager.pin(self.prev_epoch).await?;
+                // self.snapshot_manager.pin(self.prev_epoch).await?;
 
                 // Extract the fragments that include source operators.
                 let source_fragments = table_fragments.stream_source_fragments();
@@ -697,7 +697,7 @@ where
                 // Since the compute node reports that the chain actors have caught up with the
                 // upstream and finished the creation, we can unpin the snapshot.
                 // TODO: we can unpin the snapshot earlier, when the snapshot ingestion is done.
-                self.snapshot_manager.unpin(self.prev_epoch).await?;
+                // self.snapshot_manager.unpin(self.prev_epoch).await?;
             }
 
             _ => {}
