@@ -572,7 +572,6 @@ impl IndexSelectionRule {
         predicate: Condition,
         ctx: OptimizerContextRef,
     ) -> Option<PlanRef> {
-
         let mut rewriter = IndexPredicateRewriter::new(
             index.primary_to_secondary_mapping(),
             index.function_mapping(),
