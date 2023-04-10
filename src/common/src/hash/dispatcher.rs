@@ -15,7 +15,7 @@
 use super::HashKey;
 use crate::array::serial_array::Serial;
 use crate::hash;
-use crate::hash::{HeapNullBitmap, NullBitmap, StackNullBitmap};
+use crate::hash::{HeapNullBitmap, NullBitmap, StackNullBitmap, MAX_GROUP_KEYS_ON_STACK};
 use crate::types::DataType;
 
 /// An enum to help to dynamically dispatch [`HashKey`] template.
@@ -66,7 +66,7 @@ pub trait HashKeyDispatcher: Sized {
     fn data_types(&self) -> &[DataType];
 
     fn dispatch(self) -> Self::Output {
-        if self.data_types().len() > 64 {
+        if self.data_types().len() > MAX_GROUP_KEYS_ON_STACK {
             self.dispatch_by_key_size::<StackNullBitmap>()
         } else {
             self.dispatch_by_key_size::<HeapNullBitmap>()
@@ -124,7 +124,7 @@ const MAX_FIXED_SIZE_KEY_ELEMENTS: usize = 8;
 /// 2. Number of columns exceeds [`MAX_FIXED_SIZE_KEY_ELEMENTS`]
 /// 3. Sizes of data types exceed `256` bytes.
 /// 4. Any column's serialized format can't be used for equality check.
-/// 5. Calculate what sort of bitmap to use.
+/// 5. Calculate what sort of bitmap to use (stack or heap based)
 ///
 /// Otherwise we choose smallest [`crate::hash::FixedSizeKey`] whose size can hold all data types.
 pub fn calc_hash_key_kind(data_types: &[DataType]) -> HashKeyKind {

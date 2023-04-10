@@ -45,12 +45,11 @@ use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::iter_util::ZipEqFast;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum_into};
 
-/// FIXME(noel): -> ...`ON_STACK`
-pub static MAX_GROUP_KEYS: usize = 64;
+pub static MAX_GROUP_KEYS_ON_STACK: usize = 64;
 
 /// Null bitmap on heap.
-/// For group key sizes larger than 64, we use this.
-/// This is because group key null bits cannot fit into a u64
+/// For the **edge case** where group key sizes are larger than 64, we use this.
+/// This is because group key null bits cannot fit into a u64 on the stack
 /// if they exceed 64 bits.
 /// NOTE(kwannoel): This is not really optimized as it is an edge case.
 #[repr(transparent)]
@@ -68,7 +67,7 @@ impl HeapNullBitmap {
 }
 
 /// Null Bitmap on stack.
-/// This is specialized for few group keys (<= 64).
+/// This is specialized for the common case where group keys (<= 64).
 #[repr(transparent)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct StackNullBitmap {
