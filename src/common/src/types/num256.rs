@@ -21,9 +21,7 @@ use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 use std::str::FromStr;
 
 use bytes::Bytes;
-
-use ethnum::{i256, I256, U256};
-
+use ethnum::{i256, I256};
 use num_traits::{
     CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, FromPrimitive,
     ToPrimitive, Zero,
@@ -179,7 +177,6 @@ macro_rules! impl_common_for_num256 {
         }
     };
 }
-
 
 // only for int256
 impl_common_for_num256!(Int256, Int256Ref<'a>, I256, Int256);
