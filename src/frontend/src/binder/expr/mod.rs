@@ -224,6 +224,7 @@ impl Binder {
             UnaryOperator::Plus => {
                 return self.rewrite_positive(expr);
             }
+            UnaryOperator::PGSquareRoot => ExprType::Sqrt,
             _ => {
                 return Err(ErrorCode::NotImplemented(
                     format!("unsupported unary expression: {:?}", op),
