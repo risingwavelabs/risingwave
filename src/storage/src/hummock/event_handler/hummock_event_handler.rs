@@ -27,7 +27,7 @@ use risingwave_hummock_sdk::{info_in_release, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::version_update_payload::Payload;
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::hummock::compactor::{compact, CompactorContext};
@@ -145,12 +145,19 @@ impl HummockEventHandler {
         let write_conflict_detector =
             ConflictDetector::new_from_config(&compactor_context.storage_opts);
         let sstable_object_id_manager = compactor_context.sstable_object_id_manager.clone();
+        let upload_compactor_context = compactor_context.clone();
         let uploader = HummockUploader::new(
             pinned_version.clone(),
             Arc::new(move |payload, task_info| {
-                spawn(flush_imms(payload, task_info, compactor_context.clone()))
+                spawn(flush_imms(
+                    payload,
+                    task_info,
+                    upload_compactor_context.clone(),
+                ))
             }),
             buffer_tracker,
+            &compactor_context.storage_opts,
+            compactor_context.compaction_executor.clone(),
         );
 
         Self {
@@ -266,6 +273,7 @@ impl HummockEventHandler {
     fn handle_data_spilled(&mut self, staging_sstable_info: StagingSstableInfo) {
         // todo: do some prune for version update
         Self::for_each_read_version(&self.read_version_mapping, |read_version| {
+            info!("data_spilled. SST size {}", staging_sstable_info.imm_size());
             read_version.update(VersionUpdate::Staging(StagingData::Sst(
                 staging_sstable_info.clone(),
             )))
@@ -441,6 +449,26 @@ impl HummockEventHandler {
                     UploaderEvent::DataSpilled(staging_sstable_info) => {
                         self.handle_data_spilled(staging_sstable_info);
                     }
+
+                    UploaderEvent::ImmMerged(merge_output) => {
+                        // update read version for corresponding table shards
+                        let read_guard = self.read_version_mapping.read();
+                        read_guard.get(&merge_output.table_id).map_or((), |shards| {
+                            shards.get(&merge_output.instance_id).map_or_else(
+                                || {
+                                    warn!(
+                                        "handle ImmMerged: table instance not found. table {}, instance {}",
+                                        &merge_output.table_id, &merge_output.instance_id
+                                    )
+                                },
+                                |read_version| {
+                                    read_version.write().update(VersionUpdate::Staging(
+                                        StagingData::MergedImmMem(merge_output.merged_imm),
+                                    ));
+                                },
+                            )
+                        });
+                    }
                 },
                 Either::Right(event) => {
                     match event {
@@ -475,8 +503,12 @@ impl HummockEventHandler {
                             is_checkpoint,
                         } => {
                             self.uploader.seal_epoch(epoch);
+
                             if is_checkpoint {
                                 self.uploader.start_sync_epoch(epoch);
+                            } else {
+                                // start merging task on non-checkpoint epochs sealed
+                                self.uploader.start_merge_imms(epoch);
                             }
                         }
                         #[cfg(any(test, feature = "test"))]
