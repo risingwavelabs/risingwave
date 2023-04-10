@@ -14,13 +14,14 @@
 
 use std::collections::HashMap;
 
+use anyhow::anyhow;
 use aws_config::retry::RetryConfig;
 use aws_sdk_ec2::model::{Filter, VpcEndpointType};
 use itertools::Itertools;
 use risingwave_pb::catalog::connection::PrivateLinkService;
 use tracing::info;
 
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 const CLOUD_PROVIDER_AWS: &str = "aws";
 
@@ -73,6 +74,13 @@ impl AwsEc2Client {
         // The number of returned DNS names may not equal to the input AZs,
         // because some AZs may not have a subnet in the RW VPC
         let mut azid_to_dns_map = HashMap::new();
+        if endpoint_dns_names.first().is_none() {
+            return Err(MetaError::from(anyhow!(
+                "No DNS name returned for the endpoint"
+            )));
+        }
+
+        let endpoint_dns_name = endpoint_dns_names.first().unwrap().clone();
         for dns_name in &endpoint_dns_names {
             for az in az_to_azid_map.keys() {
                 if dns_name.contains(az) {
@@ -88,6 +96,7 @@ impl AwsEc2Client {
             service_name: service_name.to_string(),
             endpoint_id,
             dns_entries: azid_to_dns_map,
+            endpoint_dns_name,
         })
     }
 

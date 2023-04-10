@@ -677,7 +677,7 @@ where
     ) -> MetaResult<()> {
         let mut broker_rewrite_map = HashMap::new();
         const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
-        const PRIVATE_LINK_NAME_KEY: &str = "privatelink.name";
+        const PRIVATE_LINK_NAME_KEY: &str = "connection.name";
         if let Some(link_target_value) = properties.get(PRIVATE_LINK_TARGETS_KEY) {
             if !is_kafka_connector(properties) {
                 return Err(MetaError::from(anyhow!(
@@ -719,22 +719,13 @@ where
                                     broker
                                 )));
                             }
-                            let default_dns = svc.dns_entries.values().next().unwrap();
-                            let target_dns = svc.dns_entries.get(&link.az);
-                            match target_dns {
-                                None => {
-                                    broker_rewrite_map.insert(
-                                        broker.to_string(),
-                                        format!("{}:{}", default_dns, link.port),
-                                    );
-                                }
-                                Some(dns_name) => {
-                                    broker_rewrite_map.insert(
-                                        broker.to_string(),
-                                        format!("{}:{}", dns_name, link.port),
-                                    );
-                                }
-                            }
+                            // rewrite the broker address to the dns name w/o az
+                            // requires the NLB has enabled the cross-zone load balancing
+                            let target_dns = svc.endpoint_dns_name;
+                            broker_rewrite_map.insert(
+                                broker.to_string(),
+                                format!("{}:{}", target_dns, link.port),
+                            );
                         }
                     }
                 }

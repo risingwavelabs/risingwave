@@ -96,6 +96,7 @@ message Connection {
     string service_name = 2;
     string endpoint_id = 3;
     map<string, string> dns_entries = 4;
+    string endpoint_dns_name = 5;
   }
 
   uint32 id = 1;
