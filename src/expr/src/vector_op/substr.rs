@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::min;
 use std::fmt::Write;
 
 use risingwave_expr_macro::function;
@@ -50,7 +49,7 @@ pub fn substr_start_for(s: &str, start: i32, count: i32, writer: &mut dyn Write)
     let take = if start >= 1 {
         count as usize
     } else {
-        count.saturating_add(start.saturating_sub(1)) as usize
+        count.saturating_add(start.saturating_sub(1)).max(0) as usize
     };
 
     let substr = s.chars().skip(skip).take(take);
@@ -76,6 +75,10 @@ mod tests {
             (s, Some(4), Some(-2), "[unused result]"),
             (s, Some(4), Some(2), "cg"),
             (s, Some(-1), Some(-5), "[unused result]"),
+            (s, Some(-1), Some(0), ""),
+            (s, Some(-1), Some(1), ""),
+            (s, Some(-1), Some(2), ""),
+            (s, Some(-1), Some(3), "c"),
             (s, Some(-1), Some(5), "cxs"),
             // Unicode test
             (us, Some(1), Some(3), "上海自"),
