@@ -409,6 +409,8 @@ impl HummockVersionReader {
     }
 }
 
+const SLOW_ITER_FETCH_META_DURATION: f64 = 5.0;
+
 impl HummockVersionReader {
     pub async fn get(
         &self,
@@ -653,12 +655,24 @@ impl HummockVersionReader {
             .iter_fetch_meta_duration
             .with_label_values(&[table_id_label])
             .start_timer();
+        let mut local_cache_meta_block_unhit = 0;
         let mut flatten_resps = vec![None; req_count];
         for flatten_req in flatten_reqs {
             let (req_index, resp) = flatten_req.await?;
+            local_cache_meta_block_unhit += resp.2;
             flatten_resps[req_count - req_index - 1] = Some(resp);
         }
-        timer.observe_duration();
+        let fetch_meta_duration_sec = timer.stop_and_record();
+        self.state_store_metrics
+            .iter_fetch_meta_cache_unhits
+            .with_label_values(&[table_id_label])
+            .observe(local_cache_meta_block_unhit as f64);
+        if fetch_meta_duration_sec > SLOW_ITER_FETCH_META_DURATION {
+            self.state_store_metrics
+                .iter_slow_fetch_meta_cache_unhits
+                .with_label_values(&[table_id_label])
+                .observe(local_cache_meta_block_unhit as f64);
+        }
 
         let mut sst_read_options = SstableIteratorReadOptions::from(&read_options);
         if read_options.prefetch_options.exhaust_iter {
@@ -671,7 +685,7 @@ impl HummockVersionReader {
             if level_type == LevelType::Nonoverlapping as i32 {
                 let mut sstables = vec![];
                 for sstable_info in fetch_meta_req {
-                    let (sstable, local_cache_meta_block_miss) =
+                    let (sstable, local_cache_meta_block_miss, ..) =
                         flatten_resps.pop().unwrap().unwrap();
                     assert_eq!(sstable_info.get_object_id(), sstable.value().id);
                     local_stats.apply_meta_fetch(local_cache_meta_block_miss);
@@ -697,7 +711,7 @@ impl HummockVersionReader {
             } else {
                 let mut iters = Vec::new();
                 for sstable_info in fetch_meta_req {
-                    let (sstable, local_cache_meta_block_miss) =
+                    let (sstable, local_cache_meta_block_miss, ..) =
                         flatten_resps.pop().unwrap().unwrap();
                     assert_eq!(sstable_info.get_object_id(), sstable.value().id);
                     local_stats.apply_meta_fetch(local_cache_meta_block_miss);
