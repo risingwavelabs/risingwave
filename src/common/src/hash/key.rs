@@ -684,10 +684,10 @@ impl HashKeySerializer for SerializedKeySerializer {
     fn append<'a, D: HashKeySerDe<'a>>(&mut self, data: Option<D>) {
         match data {
             Some(v) => {
-                serialize_datum_into(&Some(v.to_owned_scalar().into()), &mut self.buffer[..]);
+                serialize_datum_into(&Some(v.to_owned_scalar().into()), &mut &mut self.buffer[..]);
             }
             None => {
-                serialize_datum_into(&None, &mut self.buffer[..]);
+                serialize_datum_into(&None, &mut &mut self.buffer[..]);
                 self.null_bitmap.set_true(self.null_bitmap_idx);
             }
         }
