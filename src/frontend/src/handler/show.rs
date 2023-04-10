@@ -19,7 +19,10 @@ use pgwire::types::Row;
 use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
+use risingwave_pb::catalog::connection;
 use risingwave_sqlparser::ast::{Ident, ObjectName, ShowCreateType, ShowObject};
+use serde_json;
 
 use super::RwPgResponse;
 use crate::binder::{Binder, Relation};
@@ -111,6 +114,58 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
                     ),
                     PgFieldDescriptor::new(
                         "Type".to_owned(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
+                    ),
+                ],
+            ));
+        }
+        ShowObject::Connection => {
+            let connections = catalog_reader.get_all_connections();
+            let rows = connections
+                .into_iter()
+                .map(|c| {
+                    let name = c.name;
+                    let conn_type = match c.info {
+                        connection::Info::PrivateLinkService(_) => {
+                            PRIVATELINK_CONNECTION.to_string()
+                        }
+                    };
+                    let properties = match c.info {
+                        connection::Info::PrivateLinkService(i) => {
+                            format!(
+                                "provider: {}\nservice_name: {}\nendpoint_id: {}\navailability_zones: {}",
+                                i.provider,
+                                i.service_name,
+                                i.endpoint_id,
+                                serde_json::to_string(&i.dns_entries.keys().collect_vec()).unwrap()
+                            )
+                        }
+                    };
+                    Row::new(vec![
+                        Some(name.into()),
+                        Some(conn_type.into()),
+                        Some(properties.into()),
+                    ])
+                })
+                .collect_vec();
+            return Ok(PgResponse::new_for_stream(
+                StatementType::SHOW_COMMAND,
+                None,
+                rows.into(),
+                vec![
+                    PgFieldDescriptor::new(
+                        "Name".to_owned(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
+                    ),
+                    PgFieldDescriptor::new(
+                        "Type".to_owned(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
+                    ),
+                    PgFieldDescriptor::new(
+                        "Properties".to_owned(),
                         DataType::Varchar.to_oid(),
                         DataType::Varchar.type_len(),
                     ),

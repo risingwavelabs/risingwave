@@ -50,7 +50,7 @@ use risingwave_pb::hummock::{
     CompactTask, CompactTaskProgress, CompactorWorkload, SubscribeCompactTasksResponse,
 };
 use risingwave_rpc_client::HummockMetaClient;
-pub use shared_buffer_compact::compact;
+pub use shared_buffer_compact::{compact, merge_imms_in_memory};
 use sysinfo::{CpuRefreshKind, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;

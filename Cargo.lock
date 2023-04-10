@@ -134,9 +134,9 @@ checksum = "8da52d66c7071e2e3fa2a1e5c6d088fec47b593032b254f5e980de8ea54454d6"
 
 [[package]]
 name = "arrow-array"
-version = "34.0.0"
+version = "36.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d35d5475e65c57cffba06d0022e3006b677515f99b54af33a7cd54f6cdd4a5b5"
+checksum = "e10849b60c17dbabb334be1f4ef7550701aa58082b71335ce1ed586601b2f423"
 dependencies = [
  "ahash 0.8.3",
  "arrow-buffer",
@@ -150,9 +150,9 @@ dependencies = [
 
 [[package]]
 name = "arrow-buffer"
-version = "34.0.0"
+version = "36.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68b4ec72eda7c0207727df96cf200f539749d736b21f3e782ece113e18c1a0a7"
+checksum = "b0746ae991b186be39933147117f8339eb1c4bbbea1c8ad37e7bf5851a1a06ba"
 dependencies = [
  "half 2.2.1",
  "num",
@@ -160,9 +160,9 @@ dependencies = [
 
 [[package]]
 name = "arrow-cast"
-version = "34.0.0"
+version = "36.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a7285272c9897321dfdba59de29f5b05aeafd3cdedf104a941256d155f6d304"
+checksum = "b88897802515d7b193e38b27ddd9d9e43923d410a9e46307582d756959ee9595"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -176,9 +176,9 @@ dependencies = [
 
 [[package]]
 name = "arrow-data"
-version = "34.0.0"
+version = "36.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27cc673ee6989ea6e4b4e8c7d461f7e06026a096c8f0b1a7288885ff71ae1e56"
+checksum = "533f937efa1aaad9dc86f6a0e382c2fa736a4943e2090c946138079bdf060cef"
 dependencies = [
  "arrow-buffer",
  "arrow-schema",
@@ -188,9 +188,9 @@ dependencies = [
 
 [[package]]
 name = "arrow-flight"
-version = "34.0.0"
+version = "36.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd16945f8f3be0f6170b8ced60d414e56239d91a16a3f8800bc1504bc58b2592"
+checksum = "cd1362a6a02e31734c67eb2e9a30dca1689d306cfe2fc00bc6430512091480ce"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -200,20 +200,17 @@ dependencies = [
  "base64 0.21.0",
  "bytes",
  "futures",
- "proc-macro2",
  "prost 0.11.8",
- "prost-build",
  "prost-derive 0.11.8",
  "tokio",
  "tonic",
- "tonic-build",
 ]
 
 [[package]]
 name = "arrow-ipc"
-version = "34.0.0"
+version = "36.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e37b8b69d9e59116b6b538e8514e0ec63a30f08b617ce800d31cb44e3ef64c1a"
+checksum = "18b75296ff01833f602552dff26a423fc213db8e5049b540ca4a00b1c957e41c"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -225,15 +222,15 @@ dependencies = [
 
 [[package]]
 name = "arrow-schema"
-version = "34.0.0"
+version = "36.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64951898473bfb8e22293e83a44f02874d2257514d49cd95f9aa4afcff183fbc"
+checksum = "d04f17f7b86ded0b5baf98fe6123391c4343e031acc3ccc5fa604cc180bff220"
 
 [[package]]
 name = "arrow-select"
-version = "34.0.0"
+version = "36.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a513d89c2e1ac22b28380900036cf1f3992c6443efc5e079de631dcf83c6888"
+checksum = "163e35de698098ff5f5f672ada9dc1f82533f10407c7a11e2cd09f3bcf31d18a"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -401,9 +398,9 @@ dependencies = [
 
 [[package]]
 name = "async-task"
-version = "4.3.0"
+version = "4.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a40729d2133846d9ed0ea60a8b9541bccddab49cd30f0715a1da672fe9a2524"
+checksum = "ecc7ab41815b3c653ccd2978ec3255c81349336702dfdf62ee6f7069b12a3aae"
 
 [[package]]
 name = "async-trait"
@@ -2293,6 +2290,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ethnum"
+version = "1.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0198b9d0078e0f30dedc7acbb21c974e838fc8fae3ee170128658a98cb2c1c04"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "event-listener"
 version = "2.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3583,9 +3589,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.18"
+version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c846a15d407458f1ac5da7da965810277229be9c96ed8082a3eaf2787ef81c23"
+checksum = "baac280a8f0a7760cfbf788dc523f8784a26550582b07e05ea92b62093c9a72b"
 dependencies = [
  "ahash 0.7.6",
  "async-channel",
@@ -3662,7 +3668,7 @@ dependencies = [
 [[package]]
 name = "madsim-rdkafka"
 version = "0.2.14-alpha"
-source = "git+https://github.com/madsim-rs/madsim.git?rev=43e025d#43e025db997df923cf6b891cfb874fe6dabba994"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=52adb98#52adb98d33939dc841dd6d0c616238edc4fb6db3"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -3684,11 +3690,12 @@ dependencies = [
 
 [[package]]
 name = "madsim-tokio"
-version = "0.2.15"
+version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ebc35d85610c81cdefc44f71aad0781b0093fa2d956360e418466cb1d5b1adf2"
+checksum = "8c1b74bc405410c47019265f21edee52c7bf08c90d6e984387e26db7ff8ce23e"
 dependencies = [
  "madsim",
+ "spin 0.9.8",
  "tokio",
 ]
 
@@ -4696,7 +4703,6 @@ dependencies = [
  "regex",
  "risingwave_common",
  "risingwave_sqlparser",
- "rust_decimal",
  "thiserror",
  "tokio-openssl",
  "tokio-postgres",
@@ -5119,9 +5125,9 @@ dependencies = [
 
 [[package]]
 name = "prost-build"
-version = "0.11.7"
+version = "0.11.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a24be1d23b4552a012093e1b93697b73d644ae9590e3253d878d0e77d411b614"
+checksum = "2c828f93f5ca4826f97fedcbd3f9a536c16b12cff3dbbb4a007f932bbad95b12"
 dependencies = [
  "bytes",
  "heck 0.4.1",
@@ -5865,6 +5871,7 @@ dependencies = [
  "easy-ext",
  "either",
  "enum-as-inner",
+ "ethnum",
  "fixedbitset",
  "futures",
  "futures-async-stream",
@@ -5896,6 +5903,7 @@ dependencies = [
  "serde_default",
  "serde_json",
  "serde_with 2.3.1",
+ "smallbitset",
  "static_assertions",
  "strum",
  "strum_macros",
@@ -6174,6 +6182,7 @@ dependencies = [
  "risingwave_expr_macro",
  "risingwave_pb",
  "risingwave_udf",
+ "rust_decimal",
  "serde_json",
  "speedate",
  "static_assertions",
@@ -6517,7 +6526,7 @@ dependencies = [
  "futures",
  "glob",
  "itertools",
- "lru 0.10.0",
+ "lru 0.7.6",
  "madsim",
  "madsim-aws-sdk-s3",
  "madsim-etcd-client",
@@ -6787,6 +6796,7 @@ dependencies = [
  "arrow-array",
  "arrow-flight",
  "arrow-schema",
+ "arrow-select",
  "futures-util",
  "madsim-tokio",
  "madsim-tonic",
@@ -6872,7 +6882,6 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_json",
- "tokio-postgres",
 ]
 
 [[package]]
@@ -7438,6 +7447,16 @@ dependencies = [
  "async-channel",
  "futures-core",
  "futures-io",
+]
+
+[[package]]
+name = "smallbitset"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d93fb6dc506bf9247d497b1cd9748015f444b9b16da6da79484f54b20df49a7c"
+dependencies = [
+ "num",
+ "paste",
 ]
 
 [[package]]
@@ -8901,6 +8920,7 @@ dependencies = [
  "memchr",
  "miniz_oxide",
  "multimap",
+ "num",
  "num-bigint",
  "num-integer",
  "num-traits",
@@ -8937,7 +8957,6 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tonic",
- "tonic-build",
  "tower",
  "tracing",
  "tracing-core",

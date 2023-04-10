@@ -81,8 +81,8 @@ SELECT f.f1, f.f1 - '-10' AS x
 --@    FROM FLOAT8_TBL f where f.f1 = '1004.3';
 
 -- absolute value
---@ SELECT f.f1, @f.f1 AS abs_f1
---@    FROM FLOAT8_TBL f;
+SELECT f.f1, @f.f1 AS abs_f1
+   FROM FLOAT8_TBL f;
 
 -- truncate
 --@ SELECT f.f1, trunc(f.f1) AS trunc_f1
@@ -94,7 +94,7 @@ SELECT f.f1, round(f.f1) AS round_f1
 
 -- ceil / ceiling
 select ceil(f1) as ceil_f1 from float8_tbl f;
---@ select ceiling(f1) as ceiling_f1 from float8_tbl f;
+select ceiling(f1) as ceiling_f1 from float8_tbl f;
 
 -- floor
 select floor(f1) as floor_f1 from float8_tbl f;
@@ -106,9 +106,9 @@ select floor(f1) as floor_f1 from float8_tbl f;
 SET extra_float_digits = 0;
 
 -- square root
---@ SELECT sqrt(double precision '64') AS eight;
+SELECT sqrt(double precision '64') AS eight;
 
---@ SELECT |/ double precision '64' AS eight;
+SELECT |/ double precision '64' AS eight;
 
 --@ SELECT f.f1, |/f.f1 AS sqrt_f1
 --@    FROM FLOAT8_TBL f

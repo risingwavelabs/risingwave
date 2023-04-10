@@ -352,6 +352,7 @@ impl Binder {
                 // "power" is the function name used in PG.
                 ("power", raw_call(ExprType::Pow)),
                 ("ceil", raw_call(ExprType::Ceil)),
+                ("ceiling", raw_call(ExprType::Ceil)),
                 ("floor", raw_call(ExprType::Floor)),
                 ("abs", raw_call(ExprType::Abs)),
                 ("exp", raw_call(ExprType::Exp)),
@@ -363,7 +364,8 @@ impl Binder {
                 ("asin", raw_call(ExprType::Asin)), 
                 ("acos", raw_call(ExprType::Acos)), 
                 ("atan", raw_call(ExprType::Atan)), 
-                ("atan2", raw_call(ExprType::Atan2)),      
+                ("atan2", raw_call(ExprType::Atan2)), 
+                ("sqrt", raw_call(ExprType::Sqrt)),     
 
                 (
                     "to_timestamp",
@@ -382,7 +384,7 @@ impl Binder {
                 ("trim", raw_call(ExprType::Trim)),
                 ("replace", raw_call(ExprType::Replace)),
                 ("overlay", raw_call(ExprType::Overlay)),
-                ("position", raw_call(ExprType::Position)),
+                ("btrim", raw_call(ExprType::Trim)),
                 ("ltrim", raw_call(ExprType::Ltrim)),
                 ("rtrim", raw_call(ExprType::Rtrim)),
                 ("md5", raw_call(ExprType::Md5)),
@@ -392,6 +394,7 @@ impl Binder {
                     rewrite(ExprType::ConcatWs, Binder::rewrite_concat_to_concat_ws),
                 ),
                 ("concat_ws", raw_call(ExprType::ConcatWs)),
+                ("translate", raw_call(ExprType::Translate)),
                 ("split_part", raw_call(ExprType::SplitPart)),
                 ("char_length", raw_call(ExprType::CharLength)),
                 ("character_length", raw_call(ExprType::CharLength)),
@@ -406,7 +409,7 @@ impl Binder {
                 ("lpad", raw_call(ExprType::Lpad)),
                 ("rpad", raw_call(ExprType::Rpad)),
                 ("reverse", raw_call(ExprType::Reverse)),
-                ("strpos", raw_call(ExprType::Strpos)),
+                ("strpos", raw_call(ExprType::Position)),
                 ("to_ascii", raw_call(ExprType::ToAscii)),
                 ("to_hex", raw_call(ExprType::ToHex)),
                 ("quote_ident", raw_call(ExprType::QuoteIdent)),
