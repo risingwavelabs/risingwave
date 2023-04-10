@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use num_traits::Float;
 use risingwave_common::types::F64;
 use risingwave_expr_macro::function;
 
@@ -54,6 +55,16 @@ pub fn atan_f64(input: F64) -> F64 {
 #[function("atan2(float64, float64) -> float64")]
 pub fn atan2_f64(input_x: F64, input_y: F64) -> F64 {
     input_x.0.atan2(input_y.0).into()
+}
+
+#[function("degrees(float64) -> float64")]
+pub fn degrees(input: F64) -> F64 {
+    input.to_degrees()
+}
+
+#[function("radians(float64) -> float64")]
+pub fn radians(input: F64) -> F64 {
+    input.to_radians()
 }
 
 #[cfg(test)]
