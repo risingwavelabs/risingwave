@@ -275,16 +275,20 @@ impl StreamHashJoin {
         assert_eq!(dk_indices_in_jk.len(), left_dk_indices.len());
         dk_indices_in_jk
     }
+
+    pub fn inequality_pairs(&self) -> &Vec<(bool, InequalityInputPair)> {
+        &self.inequality_pairs
+    }
 }
 
 impl fmt::Display for StreamHashJoin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = if self.is_append_only {
-            f.debug_struct("StreamAppendOnlyHashJoin")
-        } else if self.clean_left_state_conjunction_idx.is_some()
+        let mut builder = if self.clean_left_state_conjunction_idx.is_some()
             && self.clean_right_state_conjunction_idx.is_some()
         {
             f.debug_struct("StreamIntervalJoin")
+        } else if self.is_append_only {
+            f.debug_struct("StreamAppendOnlyHashJoin")
         } else {
             f.debug_struct("StreamHashJoin")
         };
