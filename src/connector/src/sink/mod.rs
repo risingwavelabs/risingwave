@@ -17,9 +17,7 @@ pub mod kafka;
 pub mod redis;
 pub mod remote;
 
-use std::any::Any;
 use std::collections::HashMap;
-use std::fmt::Display;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
