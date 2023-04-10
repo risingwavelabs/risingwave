@@ -50,6 +50,7 @@ mod expr_jsonb_access;
 mod expr_literal;
 mod expr_nested_construct;
 mod expr_now;
+mod expr_proc_time;
 pub mod expr_regexp;
 mod expr_some_all;
 mod expr_to_char_const_tmpl;
@@ -67,10 +68,13 @@ pub mod test_utils;
 
 use std::sync::Arc;
 
+use futures_util::Future;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
+use risingwave_common::util::epoch::Epoch;
 use static_assertions::const_assert;
+use tokio::task::futures::TaskLocalFuture;
 
 pub use self::agg::AggKind;
 pub use self::build::*;
@@ -167,3 +171,32 @@ pub type ExpressionRef = Arc<dyn Expression>;
 /// See also <https://github.com/risingwavelabs/risingwave/issues/4625>.
 #[allow(dead_code)]
 const STRICT_MODE: bool = false;
+
+/// The context used by expressions.
+#[derive(Clone)]
+pub struct ExprContext {
+    /// The epoch that an executor currently in.
+    curr_epoch: Epoch,
+}
+
+impl ExprContext {
+    pub fn new(curr_epoch: Epoch) -> Self {
+        Self { curr_epoch }
+    }
+
+    pub fn get_physical_time(&self) -> u64 {
+        self.curr_epoch.physical_time()
+    }
+}
+
+tokio::task_local! {
+    static CONTEXT: ExprContext;
+}
+
+pub trait EvalExt: Future + Sized {
+    fn eval_with_context(self, context: ExprContext) -> TaskLocalFuture<ExprContext, Self> {
+        CONTEXT.scope(context, self)
+    }
+}
+
+impl<F> EvalExt for F where F: Future {}

@@ -300,10 +300,12 @@ impl Binder {
         fn raw_literal(literal: ExprImpl) -> Handle {
             Box::new(move |_binder, _inputs| Ok(literal.clone()))
         }
+
         fn now() -> Handle {
             Box::new(move |binder, mut inputs| {
                 binder.ensure_now_function_allowed()?;
-                if !binder.in_streaming {
+                // `now()` in batch query will be convert to the binder time.
+                if binder.is_for_batch() {
                     inputs.push(ExprImpl::from(Literal::new(
                         Some(ScalarImpl::Int64((binder.bind_timestamp_ms * 1000) as i64)),
                         DataType::Timestamptz,
@@ -312,8 +314,16 @@ impl Binder {
                 raw_call(ExprType::Now)(binder, inputs)
             })
         }
+
         fn pi() -> Handle {
             raw_literal(ExprImpl::literal_f64(std::f64::consts::PI))
+        }
+
+        fn proc_time() -> Handle {
+            Box::new(move |binder, inputs| {
+                binder.ensure_proc_time_function_allowed()?;
+                raw_call(ExprType::ProcTime)(binder, inputs)
+            })
         }
 
         static HANDLES: LazyLock<HashMap<&'static str, Handle>> = LazyLock::new(|| {
@@ -556,7 +566,8 @@ impl Binder {
                 )))),
                 // non-deterministic
                 ("now", now()),
-                ("current_timestamp", now())
+                ("current_timestamp", now()),
+                ("proc_time", proc_time())
             ]
             .into_iter()
             .collect()
@@ -662,7 +673,7 @@ impl Binder {
     }
 
     fn ensure_now_function_allowed(&self) -> Result<()> {
-        if self.in_streaming
+        if self.is_for_stream()
             && !matches!(
                 self.context.clause,
                 Some(Clause::Where) | Some(Clause::Having)
@@ -672,6 +683,16 @@ impl Binder {
                 "For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: {:?}",
                 self.context.clause
             ))
+            .into());
+        }
+        Ok(())
+    }
+
+    fn ensure_proc_time_function_allowed(&self) -> Result<()> {
+        if !self.is_for_ddl() {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "Function `PROC_TIME()` is only allowed in CREATE TABLE/SOURCE. Is `NOW()` what you want?".to_string(),
+            )
             .into());
         }
         Ok(())

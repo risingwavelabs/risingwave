@@ -160,6 +160,7 @@ message ExprNode {
     VNODE = 1101;
     // Non-deterministic functions
     NOW = 2022;
+    PROC_TIME = 2023;
     // User defined functions
     UDF = 3000;
   }

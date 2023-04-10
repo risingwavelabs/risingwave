@@ -838,7 +838,7 @@
     FROM (SELECT *, PROCTIME() as p_time FROM bid) B
     GROUP BY B.bidder, TUMBLE(B.p_time, INTERVAL '10' SECOND);
   binder_error: |-
-    Feature is not yet implemented: unsupported function: "proctime"
+    Feature is not yet implemented: unsupported function "proctime", do you mean "proc_time"?
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
 - id: nexmark_q13
   before:
