@@ -21,6 +21,7 @@ use risingwave_pb::hummock::{
 };
 
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
+use crate::hummock::compaction::picker::min_overlap_compaction_picker::NonOverlapSubLevelPicker;
 use crate::hummock::compaction::{
     CompactionInput, CompactionPicker, LocalPickerStatistic, MinOverlappingPicker,
 };
@@ -61,20 +62,16 @@ impl TierCompactionPicker {
                 continue;
             }
 
-            let min_overlap_picker = MinOverlappingPicker::new(
-                0,
+            let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
                 0,
                 self.config.max_compaction_bytes,
-                false,
+                1,
+                self.config.level0_max_compact_file_number,
                 self.overlap_strategy.clone(),
             );
 
-            let l0_select_tables_vec = min_overlap_picker.pick_l0_multi_non_overlap_level(
-                &l0.sub_levels[idx..],
-                level_handler,
-                1,
-                0, // not limit
-            );
+            let l0_select_tables_vec = non_overlap_sub_level_picker
+                .pick_l0_multi_non_overlap_level(&l0.sub_levels[idx..], level_handler);
 
             if l0_select_tables_vec.is_empty() {
                 continue;

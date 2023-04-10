@@ -23,7 +23,7 @@ use risingwave_pb::hummock::{
     CompactionConfig, InputLevel, Level, LevelType, OverlappingLevel, SstableInfo,
 };
 
-use super::MinOverlappingPicker;
+use super::min_overlap_compaction_picker::NonOverlapSubLevelPicker;
 use crate::hummock::compaction::{
     create_overlap_strategy, CompactionInput, CompactionPicker, LocalPickerStatistic,
 };
@@ -124,20 +124,16 @@ impl LevelCompactionPicker {
         }
 
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
-        let min_overlap_picker = MinOverlappingPicker::new(
-            0,
-            target_level.level_idx as usize,
+        let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
+            self.config.sub_level_max_compaction_bytes,
             self.config.max_compaction_bytes,
-            false,
+            1,
+            self.config.level0_max_compact_file_number,
             overlap_strategy.clone(),
         );
 
-        let l0_select_tables_vec = min_overlap_picker.pick_l0_multi_non_overlap_level(
-            &l0.sub_levels,
-            &level_handlers[0],
-            1,
-            0, // TODO: use config
-        );
+        let l0_select_tables_vec = non_overlap_sub_level_picker
+            .pick_l0_multi_non_overlap_level(&l0.sub_levels, &level_handlers[0]);
         if l0_select_tables_vec.is_empty() {
             return None;
         }
@@ -344,6 +340,7 @@ pub mod tests {
         let config = Arc::new(
             CompactionConfigBuilder::new()
                 .level0_tier_compact_file_number(2)
+                .sub_level_max_compaction_bytes(0)
                 .build(),
         );
         LevelCompactionPicker::new(1, config)
@@ -382,7 +379,6 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        // println!("ret input {:?}", ret.input_levels);
         // assert_eq!(ret.input_levels[0].table_infos.len(), 2);
         // assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 5);
         // assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 3);
@@ -452,6 +448,7 @@ pub mod tests {
         let config = Arc::new(
             CompactionConfigBuilder::new()
                 .level0_tier_compact_file_number(2)
+                .sub_level_max_compaction_bytes(0)
                 .compaction_mode(CompactionMode::Range as i32)
                 .build(),
         );
@@ -606,6 +603,8 @@ pub mod tests {
         let config = CompactionConfigBuilder::new()
             .level0_tier_compact_file_number(2)
             .max_compaction_bytes(1000)
+            .sub_level_max_compaction_bytes(0)
+            .max_bytes_for_level_multiplier(3)
             .build();
         let mut picker = LevelCompactionPicker::new(1, Arc::new(config));
 
@@ -659,8 +658,14 @@ pub mod tests {
         assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 4);
         assert_eq!(ret.input_levels[2].table_infos[0].get_sst_id(), 1);
 
-        levels.levels[0].table_infos[0].file_size += 1600 - levels.levels[0].total_file_size;
-        levels.levels[0].total_file_size = 1600;
+        // levels.levels[0].table_infos[0].file_size += 1600 - levels.levels[0].total_file_size;
+        // levels.levels[0].total_file_size = 1600;
+        {
+            levels.levels[0].table_infos[0].file_size = 3000;
+            levels.levels[0].table_infos[1].file_size = 3000;
+            levels.levels[0].table_infos[2].file_size = 3000;
+        }
+
         let sub_level = &mut levels.l0.as_mut().unwrap().sub_levels[0];
         sub_level.table_infos[0].file_size += 1000 - sub_level.total_file_size;
         sub_level.total_file_size = 1000;
@@ -671,7 +676,14 @@ pub mod tests {
 
     #[test]
     fn test_skip_compact_write_amplification_limit() {
-        let mut picker = create_compaction_picker_for_test();
+        let config = CompactionConfigBuilder::new()
+            .level0_tier_compact_file_number(2)
+            .max_compaction_bytes(1000)
+            .sub_level_max_compaction_bytes(150)
+            .max_bytes_for_level_multiplier(2)
+            .build();
+        let mut picker = LevelCompactionPicker::new(1, Arc::new(config));
+
         let mut levels = Levels {
             levels: vec![Level {
                 level_idx: 1,
@@ -730,6 +742,7 @@ pub mod tests {
         let config = Arc::new(
             CompactionConfigBuilder::new()
                 .max_compaction_bytes(500000)
+                .sub_level_max_compaction_bytes(0)
                 .build(),
         );
         // Only include sub-level 0 results will violate MAX_WRITE_AMPLIFICATION.
@@ -756,6 +769,7 @@ pub mod tests {
         let config = Arc::new(
             CompactionConfigBuilder::new()
                 .max_compaction_bytes(50000)
+                .sub_level_max_compaction_bytes(0)
                 .build(),
         );
         let mut picker = LevelCompactionPicker::new(1, config);
@@ -820,6 +834,7 @@ pub mod tests {
         let config = Arc::new(
             CompactionConfigBuilder::new()
                 .max_compaction_bytes(500000)
+                .sub_level_max_compaction_bytes(0)
                 .build(),
         );
 
