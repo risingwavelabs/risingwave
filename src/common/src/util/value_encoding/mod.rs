@@ -176,6 +176,11 @@ pub fn try_get_exact_serialize_datum_size(arr: &ArrayImpl) -> Option<usize> {
         ArrayImpl::Float64(_) => Some(8),
         ArrayImpl::Bool(_) => Some(1),
         ArrayImpl::Jsonb(_) => Some(8),
+        ArrayImpl::Decimal(_) => Some(estimate_serialize_decimal_size()),
+        ArrayImpl::Interval(_) => Some(estimate_serialize_interval_size()),
+        ArrayImpl::Date(_) => Some(estimate_serialize_date_size()),
+        ArrayImpl::Timestamp(_) => Some(estimate_serialize_timestamp_size()),
+        ArrayImpl::Time(_) => Some(estimate_serialize_time_size()),
         _ => None,
     };
     if let Some(size) = raw_size {
