@@ -20,8 +20,8 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{CreateSink, Query, Statement};
 
+use super::query::BoundResult;
 use super::{handle, query, HandlerArgs, RwPgResponse};
-use crate::binder::BoundStatement;
 use crate::session::SessionImpl;
 
 /// Except for Query,Insert,Delete,Update statement, we store other statement as `PureStatement`.
@@ -40,8 +40,7 @@ pub enum PrepareStatement {
 #[derive(Clone)]
 pub struct PreparedResult {
     pub statement: Statement,
-    pub bound_statement: BoundStatement,
-    pub param_types: Vec<DataType>,
+    pub bound_result: BoundResult,
 }
 
 #[derive(Clone)]
@@ -53,7 +52,7 @@ pub enum Portal {
 #[derive(Clone)]
 pub struct PortalResult {
     pub statement: Statement,
-    pub bound_statement: BoundStatement,
+    pub bound_result: BoundResult,
     pub result_formats: Vec<Format>,
 }
 
@@ -119,15 +118,29 @@ pub fn handle_bind(
     match prepare_statement {
         PrepareStatement::Prepared(prepared_result) => {
             let PreparedResult {
+                bound_result,
                 statement,
-                bound_statement,
-                ..
             } = prepared_result;
-            let bound_statement = bound_statement.bind_parameter(params, param_formats)?;
+            let BoundResult {
+                stmt_type,
+                must_dist,
+                bound,
+                param_types,
+                dependent_relations,
+            } = bound_result;
+
+            let new_bound = bound.bind_parameter(params, param_formats)?;
+            let new_bound_result = BoundResult {
+                stmt_type,
+                must_dist,
+                param_types,
+                dependent_relations,
+                bound: new_bound,
+            };
             Ok(Portal::Portal(PortalResult {
-                statement,
-                bound_statement,
+                bound_result: new_bound_result,
                 result_formats,
+                statement,
             }))
         }
         PrepareStatement::PureStatement(stmt) => {

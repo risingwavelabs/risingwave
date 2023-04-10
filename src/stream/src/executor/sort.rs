@@ -112,6 +112,9 @@ impl<S: StateStore> SortExecutor<S> {
             buffer_changed: false,
         };
 
+        // Populate the sort buffer cache on initialization.
+        vars.buffer.refill_cache(None, &this.buffer_table).await?;
+
         #[for_await]
         for msg in input {
             match msg? {
@@ -158,7 +161,7 @@ impl<S: StateStore> SortExecutor<S> {
 
                         // Manipulate the cache if necessary.
                         if cache_may_stale {
-                            vars.buffer.clear_cache();
+                            vars.buffer.refill_cache(None, &this.buffer_table).await?;
                         }
                     }
 
