@@ -30,12 +30,6 @@ pub fn substr_start(s: &str, start: i32, writer: &mut dyn Write) -> Result<()> {
     Ok(())
 }
 
-// #[function("substr(varchar, 1, int32) -> varchar")]
-// TODO: when is this function called?
-pub fn substr_for(s: &str, count: i32, writer: &mut dyn Write) -> Result<()> {
-    substr_start_for(s, 1, count, writer)
-}
-
 #[function("substr(varchar, int32, int32) -> varchar")]
 pub fn substr_start_for(s: &str, start: i32, count: i32, writer: &mut dyn Write) -> Result<()> {
     if count < 0 {
@@ -70,30 +64,28 @@ mod tests {
         let us = "上海自来水来自海上";
 
         let cases = [
-            (s, Some(4), None, "cgccdd"),
-            (s, None, Some(3), "cxs"),
-            (s, Some(4), Some(-2), "[unused result]"),
-            (s, Some(4), Some(2), "cg"),
-            (s, Some(-1), Some(-5), "[unused result]"),
-            (s, Some(-1), Some(0), ""),
-            (s, Some(-1), Some(1), ""),
-            (s, Some(-1), Some(2), ""),
-            (s, Some(-1), Some(3), "c"),
-            (s, Some(-1), Some(5), "cxs"),
+            (s, 4, None, "cgccdd"),
+            (s, 4, Some(-2), "[unused result]"),
+            (s, 4, Some(2), "cg"),
+            (s, -1, Some(-5), "[unused result]"),
+            (s, -1, Some(0), ""),
+            (s, -1, Some(1), ""),
+            (s, -1, Some(2), ""),
+            (s, -1, Some(3), "c"),
+            (s, -1, Some(5), "cxs"),
             // Unicode test
-            (us, Some(1), Some(3), "上海自"),
-            (us, Some(3), Some(3), "自来水"),
-            (us, None, Some(5), "上海自来水"),
-            (us, Some(6), Some(2), "来自"),
-            (us, Some(6), Some(100), "来自海上"),
-            (us, Some(6), None, "来自海上"),
-            ("Mér", Some(1), Some(2), "Mé"),
+            (us, 1, Some(3), "上海自"),
+            (us, 3, Some(3), "自来水"),
+            (us, 6, Some(2), "来自"),
+            (us, 6, Some(100), "来自海上"),
+            (us, 6, None, "来自海上"),
+            ("Mér", 1, Some(2), "Mé"),
         ];
 
         for (s, off, len, expected) in cases {
             let mut writer = String::new();
-            match (off, len) {
-                (Some(off), Some(len)) => {
+            match len {
+                Some(len) => {
                     let result = substr_start_for(s, off, len, &mut writer);
                     if len < 0 {
                         assert!(result.is_err());
@@ -102,9 +94,7 @@ mod tests {
                         result?
                     }
                 }
-                (Some(off), None) => substr_start(s, off, &mut writer)?,
-                (None, Some(len)) => substr_for(s, len, &mut writer)?,
-                _ => unreachable!(),
+                None => substr_start(s, off, &mut writer)?,
             }
             assert_eq!(writer, expected);
         }
