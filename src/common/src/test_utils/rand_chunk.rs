@@ -16,7 +16,7 @@ use crate::array::column::Column;
 use crate::array::serial_array::SerialArray;
 use crate::array::{
     BoolArray, DataChunk, DateArray, DecimalArray, F32Array, F64Array, I16Array, I32Array,
-    I64Array, IntervalArray, TimeArray, TimestampArray, Utf8Array,
+    I64Array, Int256Array, IntervalArray, TimeArray, TimestampArray, Utf8Array,
 };
 use crate::test_utils::rand_array::seed_rand_array_ref;
 use crate::types::DataType;
@@ -41,13 +41,13 @@ pub fn gen_chunk(data_types: &[DataType], size: usize, seed: u64, null_ratio: f6
             DataType::Timestamp => seed_rand_array_ref::<TimestampArray>(size, seed, null_ratio),
             DataType::Timestamptz => seed_rand_array_ref::<I64Array>(size, seed, null_ratio),
             DataType::Interval => seed_rand_array_ref::<IntervalArray>(size, seed, null_ratio),
+            DataType::Int256 => seed_rand_array_ref::<Int256Array>(size, seed, null_ratio),
             DataType::Struct(_) | DataType::Bytea | DataType::Jsonb => {
                 todo!()
             }
             DataType::List { datatype: _ } => {
                 todo!()
             }
-            DataType::Int256 => todo!(),
         }));
     }
     schema_check::schema_check(data_types, &columns).unwrap();

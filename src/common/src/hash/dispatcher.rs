@@ -107,7 +107,6 @@ fn hash_key_size(data_type: &DataType) -> HashKeySize {
         DataType::Int16 => HashKeySize::Fixed(size_of::<i16>()),
         DataType::Int32 => HashKeySize::Fixed(size_of::<i32>()),
         DataType::Int64 => HashKeySize::Fixed(size_of::<i64>()),
-        DataType::Int256 => HashKeySize::Fixed(Int256::size()),
         DataType::Serial => HashKeySize::Fixed(size_of::<Serial>()),
         DataType::Float32 => HashKeySize::Fixed(size_of::<F32>()),
         DataType::Float64 => HashKeySize::Fixed(size_of::<F64>()),
@@ -117,6 +116,7 @@ fn hash_key_size(data_type: &DataType) -> HashKeySize {
         DataType::Timestamp => HashKeySize::Fixed(size_of::<Timestamp>()),
         DataType::Timestamptz => HashKeySize::Fixed(size_of::<i64>()),
         DataType::Interval => HashKeySize::Fixed(size_of::<Interval>()),
+        DataType::Int256 => HashKeySize::Fixed(Int256::size()),
 
         DataType::Varchar => HashKeySize::Variable,
         DataType::Bytea => HashKeySize::Variable,
