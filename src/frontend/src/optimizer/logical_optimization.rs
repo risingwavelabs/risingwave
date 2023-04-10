@@ -261,7 +261,7 @@ lazy_static! {
         vec![LimitPushDownRule::create()],
         ApplyOrder::TopDown,
     );
-    
+
     static ref PULL_UP_HOP: OptimizationStage = OptimizationStage::new(
         "Pull up hop",
         vec![PullUpHopRule::create()],
