@@ -835,8 +835,7 @@ impl ScalarImpl {
             }
             DataType::Int256 => Self::Int256(
                 Int256::from_binary(bytes)
-                    .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?
-                    .into(),
+                    .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?,
             ),
             DataType::Struct(_) | DataType::List { .. } => {
                 return Err(ErrorCode::NotSupported(

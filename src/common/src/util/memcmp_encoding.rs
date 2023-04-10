@@ -20,8 +20,8 @@ use super::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::array::serial_array::Serial;
 use crate::array::{ArrayImpl, DataChunk};
 use crate::row::Row;
-use crate::types::{DataType, Date, Datum, ScalarImpl, Time, Timestamp, ToDatumRef, F32, F64};
 use crate::types::num256::Int256;
+use crate::types::{DataType, Date, Datum, ScalarImpl, Time, Timestamp, ToDatumRef, F32, F64};
 use crate::util::sort_util::{ColumnOrder, OrderType};
 
 // NULL > any non-NULL value by default

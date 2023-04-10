@@ -26,7 +26,6 @@ use num_traits::{
     CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, FromPrimitive,
     ToPrimitive, Zero,
 };
-
 use risingwave_pb::data::ArrayType;
 use serde::{Deserialize, Serialize, Serializer};
 use to_text::ToText;
