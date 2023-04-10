@@ -17,8 +17,11 @@ use std::iter::repeat;
 use anyhow::Context;
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
+use risingwave_common::array::column::Column;
 use risingwave_common::array::serial_array::SerialArray;
-use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk};
+use risingwave_common::array::{
+    ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk, Vis,
+};
 use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
@@ -105,8 +108,7 @@ impl InsertExecutor {
 
         let mut notifiers = Vec::new();
 
-        // Transform the data chunk to a stream chunk, then write to the source.
-        let write_chunk = |chunk: DataChunk| async {
+        let reorder_column = |chunk: DataChunk| {
             let cap = chunk.capacity();
             let (mut columns, vis) = chunk.into_parts();
 
@@ -118,35 +120,53 @@ impl InsertExecutor {
                 }
                 columns = ordered_cols
             }
+            return (cap, vis, columns);
+        };
 
-            // If the user does not specify the primary key, then we need to add a column as the
-            // primary key.
-            if let Some(row_id_index) = self.row_id_index {
-                let row_id_col = SerialArray::from_iter(repeat(None).take(cap));
-                columns.insert(row_id_index, row_id_col.into())
+        // Transform the data chunk to a stream chunk, then write to the source.
+        let write_chunk = |combined_columns: (usize, Vis, Vec<Column>)| {
+            let row_id_index = self.row_id_index;
+            let table_id = self.table_id;
+            let table_version_id = self.table_version_id;
+            let dml_manager = self.dml_manager.clone();
+            async move {
+                let (cap, vis, mut columns) = combined_columns;
+                // If the user does not specify the primary key, then we need to add a column as the
+                // primary key.
+                if let Some(row_id_index) = row_id_index {
+                    let row_id_col = SerialArray::from_iter(repeat(None).take(cap));
+                    columns.insert(row_id_index, row_id_col.into())
+                }
+
+                let stream_chunk = StreamChunk::new(
+                    vec![Op::Insert; cap],
+                    columns.clone(),
+                    vis.clone().into_visibility(),
+                );
+
+                dml_manager
+                    .write_chunk(table_id, table_version_id, stream_chunk)
+                    .await
             }
-
-            let stream_chunk =
-                StreamChunk::new(vec![Op::Insert; cap], columns, vis.into_visibility());
-
-            self.dml_manager
-                .write_chunk(self.table_id, self.table_version_id, stream_chunk)
-                .await
         };
 
         #[for_await]
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?;
-            if self.returning {
-                yield data_chunk.clone();
-            }
+            // if self.returning {
+            //     yield data_chunk.clone();
+            // }
             for chunk in builder.append_chunk(data_chunk) {
-                notifiers.push(write_chunk(chunk).await?);
+                let (cap, vis, columns) = reorder_column(chunk);
+                if self.returning {
+                    yield DataChunk::new(columns.clone(), vis.clone());
+                }
+                notifiers.push(write_chunk((cap, vis, columns)).await?);
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
-            notifiers.push(write_chunk(chunk).await?);
+            notifiers.push(write_chunk(reorder_column(chunk)).await?);
         }
 
         // Wait for all chunks to be taken / written.
