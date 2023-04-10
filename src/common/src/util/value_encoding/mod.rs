@@ -167,7 +167,7 @@ impl ValueRowSerde for BasicSerde {
 }
 
 pub fn try_get_exact_serialize_datum_size(arr: &ArrayImpl) -> Option<usize> {
-    match arr {
+    let raw_size: Option<usize> = match arr {
         ArrayImpl::Int16(_) => Some(2),
         ArrayImpl::Int32(_) => Some(4),
         ArrayImpl::Int64(_) => Some(8),
@@ -177,6 +177,11 @@ pub fn try_get_exact_serialize_datum_size(arr: &ArrayImpl) -> Option<usize> {
         ArrayImpl::Bool(_) => Some(1),
         ArrayImpl::Jsonb(_) => Some(8),
         _ => None,
+    };
+    if let Some(size) = raw_size {
+        Some(size + 1)
+    } else {
+        None
     }
 }
 

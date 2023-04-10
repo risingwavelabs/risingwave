@@ -463,8 +463,7 @@ impl DataChunk {
                                                 col.array_ref().value_at_unchecked(i),
                                             )
                                         })
-                                        .sum::<usize>()
-                                    + 1,
+                                        .sum::<usize>(),
                             ));
                         }
                     }
@@ -505,8 +504,7 @@ impl DataChunk {
                                             col.array_ref().value_at_unchecked(i),
                                         )
                                     })
-                                    .sum::<usize>()
-                                + 1,
+                                    .sum::<usize>(),
                         ));
                     }
                 }
