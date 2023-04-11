@@ -1,7 +1,11 @@
 # Create a connection.
 statement ok
-CREATE CONNECTION conn WITH (type = 'mock');
+CREATE CONNECTION conn0 WITH (type = 'mock');
 
 # Create another user with duplicate name.
 statement error
-CREATE CONNECTION conn WITH (type = 'mock');
+CREATE CONNECTION conn0 WITH (type = 'mock');
+
+# Test quoting.
+statement ok
+CREATE CONNECTION "conn1" WITH (type = 'mock');
