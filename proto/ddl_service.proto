@@ -139,6 +139,22 @@ message CreateTableResponse {
   uint64 version = 3;
 }
 
+message AlterRelationNameRequest {
+  oneof relation {
+    uint32 table_id = 1;
+    uint32 view_id = 2;
+    uint32 index_id = 3;
+    uint32 sink_id = 4;
+    uint32 source_id = 5;
+  }
+  string new_name = 20;
+}
+
+message AlterRelationNameResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
 message CreateFunctionRequest {
   catalog.Function function = 1;
 }
@@ -243,9 +259,9 @@ message CreateConnectionRequest {
     string service_name = 2;
     repeated string availability_zones = 3;
   }
-
+  string name = 1;
   oneof payload {
-    PrivateLink private_link = 1;
+    PrivateLink private_link = 2;
   }
 }
 
@@ -265,7 +281,10 @@ message DropConnectionRequest {
   string connection_name = 1;
 }
 
-message DropConnectionResponse {}
+message DropConnectionResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
 
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
@@ -279,6 +298,7 @@ service DdlService {
   rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
   rpc CreateTable(CreateTableRequest) returns (CreateTableResponse);
+  rpc AlterRelationName(AlterRelationNameRequest) returns (AlterRelationNameResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
   rpc CreateView(CreateViewRequest) returns (CreateViewResponse);

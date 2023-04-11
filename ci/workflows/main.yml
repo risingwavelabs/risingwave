@@ -12,13 +12,6 @@ cargo-cache: &cargo-cache
     - ".cargo/registry/cache"
     - ".cargo/git/db"
 
-auto-retry: &auto-retry
-  automatic:
-    - exit_status: -1 # Agent was lost
-      limit: 2
-    - exit_status: 255 # Forced agent shutdown
-      limit: 2
-
 steps:
   - label: "build (dev mode)"
     command: "ci/scripts/build.sh -t ci-dev -p ci-dev"
@@ -30,7 +23,6 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 15
-    retry: *auto-retry
 
   - label: "build (release mode)"
     command: "ci/scripts/build.sh -t ci-release -p ci-release"
@@ -44,7 +36,6 @@ steps:
           env:
             - BUILDKITE_COMMIT
     timeout_in_minutes: 20
-    retry: *auto-retry
 
   - label: "build other components"
     command: "ci/scripts/build-other.sh"
@@ -60,7 +51,6 @@ steps:
           environment:
             - GITHUB_TOKEN
     timeout_in_minutes: 10
-    retry: *auto-retry
 
   - label: "build (deterministic simulation)"
     command: "ci/scripts/build-simulation.sh"
@@ -72,7 +62,6 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 15
-    retry: *auto-retry
 
   - label: "docslt"
     command: "ci/scripts/docslt.sh"
@@ -84,7 +73,6 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 10
-    retry: *auto-retry
 
   - label: "end-to-end test (dev mode)"
     command: "ci/scripts/e2e-test.sh -p ci-dev"
@@ -104,8 +92,7 @@ steps:
           files: "*-junit.xml"
           format: "junit"
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
-    retry: *auto-retry
+    timeout_in_minutes: 10
 
   - label: "end-to-end test (release mode)"
     command: "ci/scripts/e2e-test.sh -p ci-release"
@@ -126,7 +113,6 @@ steps:
           format: "junit"
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
-    retry: *auto-retry
 
   - label: "end-to-end test (parallel) (dev mode)"
     command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
@@ -147,7 +133,6 @@ steps:
           format: "junit"
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
-    retry: *auto-retry
 
   - label: "end-to-end test (parallel) (release mode)"
     command: "ci/scripts/e2e-test-parallel.sh -p ci-release"
@@ -168,7 +153,6 @@ steps:
           format: "junit"
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
-    retry: *auto-retry
 
   - label: "end-to-end test (parallel, in-memory) (release mode)"
     command: "ci/scripts/e2e-test-parallel-in-memory.sh -p ci-release"
@@ -183,7 +167,6 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
-    retry: *auto-retry
 
   - label: "end-to-end source test (release mode)"
     command: "ci/scripts/e2e-source-test.sh -p ci-release"
@@ -198,7 +181,6 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
-    retry: *auto-retry
 
   - label: "unit test"
     command: "ci/scripts/pr-unit-test.sh"
@@ -214,10 +196,9 @@ steps:
           environment:
             - CODECOV_TOKEN
     timeout_in_minutes: 12
-    retry: *auto-retry
 
   - label: "unit test (deterministic simulation)"
-    command: "MADSIM_TEST_NUM=50 timeout 10m ci/scripts/deterministic-unit-test.sh"
+    command: "MADSIM_TEST_NUM=50 ci/scripts/deterministic-unit-test.sh"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
@@ -225,10 +206,9 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 15
-    retry: *auto-retry
 
   - label: "scaling test (deterministic simulation)"
-    command: "TEST_NUM=30 timeout 40m ci/scripts/deterministic-scale-test.sh"
+    command: "TEST_NUM=30 ci/scripts/deterministic-scale-test.sh"
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -237,10 +217,9 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 40 # TODO: split into multiple jobs
-    retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"
-    command: "TEST_NUM=32 timeout 25m ci/scripts/deterministic-e2e-test.sh"
+    command: "TEST_NUM=32 ci/scripts/deterministic-e2e-test.sh"
     depends_on: "build-simulation"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
@@ -255,10 +234,9 @@ steps:
             - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 30
-    retry: *auto-retry
 
   - label: "recovery test (deterministic simulation)"
-    command: "TEST_NUM=16 KILL_RATE=0.5 timeout 25m ci/scripts/deterministic-recovery-test.sh"
+    command: "TEST_NUM=16 KILL_RATE=0.5 ci/scripts/deterministic-recovery-test.sh"
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -274,7 +252,6 @@ steps:
       #     format: "junit"
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 30
-    retry: *auto-retry
 
   - label: "end-to-end sink test (release mode)"
     command: "ci/scripts/e2e-sink-test.sh -p ci-release"
@@ -289,7 +266,6 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 5
-    retry: *auto-retry
 
   - label: "end-to-end iceberg sink test (release mode)"
     command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-release"
@@ -304,7 +280,6 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 5
-    retry: *auto-retry
 
   - label: "e2e java-binding test (at release)"
     command: "ci/scripts/java-binding-test.sh -p ci-release"
@@ -317,7 +292,6 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 5
-    retry: *auto-retry
 
   - label: "release"
     command: "ci/scripts/release.sh"
@@ -336,7 +310,6 @@ steps:
             - BUILDKITE_TAG
             - BUILDKITE_SOURCE
     timeout_in_minutes: 60
-    retry: *auto-retry
 
   - label: "release docker image: amd64"
     command: "ci/scripts/docker.sh"
@@ -352,7 +325,6 @@ steps:
             DOCKER_TOKEN: docker-token
             GITHUB_TOKEN: github-token
     timeout_in_minutes: 60
-    retry: *auto-retry
 
   - label: "docker-build-push: aarch64"
     command: "ci/scripts/docker.sh"
@@ -368,7 +340,6 @@ steps:
             DOCKER_TOKEN: docker-token
             GITHUB_TOKEN: github-token
     timeout_in_minutes: 60
-    retry: *auto-retry
     agents:
       queue: "linux-arm64"
 
@@ -385,4 +356,3 @@ steps:
             GHCR_TOKEN: ghcr-token
             DOCKER_TOKEN: docker-token
     timeout_in_minutes: 10
-    retry: *auto-retry

@@ -107,6 +107,13 @@ impl InputRef {
         self.index = (self.index as isize + offset) as usize;
     }
 
+    pub fn clone_with_offset(&self, offset: isize) -> Self {
+        Self {
+            index: (self.index as isize + offset) as usize,
+            data_type: self.data_type.clone(),
+        }
+    }
+
     /// Convert to protobuf.
     pub fn to_proto(&self) -> PbInputRef {
         PbInputRef {

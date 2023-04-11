@@ -37,7 +37,6 @@ pub struct SourceDesc {
     pub format: SourceFormat,
     pub columns: Vec<SourceColumnDesc>,
     pub metrics: Arc<SourceMetrics>,
-    pub pk_column_ids: Vec<i32>,
 }
 
 /// `FsSourceDesc` describes a stream source.
@@ -47,14 +46,12 @@ pub struct FsSourceDesc {
     pub format: SourceFormat,
     pub columns: Vec<SourceColumnDesc>,
     pub metrics: Arc<SourceMetrics>,
-    pub pk_column_ids: Vec<i32>,
 }
 
 #[derive(Clone)]
 pub struct SourceDescBuilder {
     columns: Vec<PbColumnCatalog>,
     metrics: Arc<SourceMetrics>,
-    pk_column_ids: Vec<i32>,
     row_id_index: Option<usize>,
     properties: HashMap<String, String>,
     source_info: PbStreamSourceInfo,
@@ -67,7 +64,6 @@ impl SourceDescBuilder {
     pub fn new(
         columns: Vec<PbColumnCatalog>,
         metrics: Arc<SourceMetrics>,
-        pk_column_ids: Vec<i32>,
         row_id_index: Option<usize>,
         properties: HashMap<String, String>,
         source_info: PbStreamSourceInfo,
@@ -77,13 +73,24 @@ impl SourceDescBuilder {
         Self {
             columns,
             metrics,
-            pk_column_ids,
             row_id_index,
             properties,
             source_info,
             connector_params,
             connector_message_buffer_size,
         }
+    }
+
+    fn column_catalogs_to_source_column_descs(&self) -> Vec<SourceColumnDesc> {
+        let mut columns: Vec<_> = self
+            .columns
+            .iter()
+            .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
+            .collect();
+        if let Some(row_id_index) = self.row_id_index {
+            columns[row_id_index].is_row_id = true;
+        }
+        columns
     }
 
     pub async fn build(self) -> Result<SourceDesc> {
@@ -105,18 +112,7 @@ impl SourceDescBuilder {
             return Err(ProtocolError("protobuf file location not provided".to_string()).into());
         }
 
-        let mut columns: Vec<_> = self
-            .columns
-            .iter()
-            .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
-            .collect();
-        if let Some(row_id_index) = self.row_id_index {
-            columns[row_id_index].is_row_id = true;
-        }
-        assert!(
-            !self.pk_column_ids.is_empty(),
-            "source should have at least one pk column"
-        );
+        let columns = self.column_catalogs_to_source_column_descs();
 
         let psrser_config =
             SpecificParserConfig::new(format, &self.source_info, &self.properties).await?;
@@ -134,7 +130,6 @@ impl SourceDescBuilder {
             format,
             columns,
             metrics: self.metrics,
-            pk_column_ids: self.pk_column_ids,
         })
     }
 
@@ -149,20 +144,7 @@ impl SourceDescBuilder {
             _ => unreachable!(),
         };
 
-        let mut columns: Vec<_> = self
-            .columns
-            .iter()
-            .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
-            .collect();
-
-        if let Some(row_id_index) = self.row_id_index {
-            columns[row_id_index].is_row_id = true;
-        }
-
-        assert!(
-            !self.pk_column_ids.is_empty(),
-            "source should have at least one pk column"
-        );
+        let columns = self.column_catalogs_to_source_column_descs();
 
         let parser_config =
             SpecificParserConfig::new(format, &self.source_info, &self.properties).await?;
@@ -179,7 +161,6 @@ impl SourceDescBuilder {
             format,
             columns,
             metrics: self.metrics.clone(),
-            pk_column_ids: self.pk_column_ids.clone(),
         })
     }
 }
@@ -195,7 +176,6 @@ pub mod test_utils {
 
     pub fn create_source_desc_builder(
         schema: &Schema,
-        pk_column_ids: Vec<i32>,
         row_id_index: Option<usize>,
         source_info: StreamSourceInfo,
         properties: HashMap<String, String>,
@@ -212,6 +192,7 @@ pub mod test_utils {
                         name: f.name.clone(),
                         field_descs: vec![],
                         type_name: "".to_string(),
+                        generated_column: None,
                     }
                     .to_protobuf(),
                 ),
@@ -221,7 +202,6 @@ pub mod test_utils {
         SourceDescBuilder {
             columns,
             metrics: Default::default(),
-            pk_column_ids,
             row_id_index,
             properties,
             source_info,

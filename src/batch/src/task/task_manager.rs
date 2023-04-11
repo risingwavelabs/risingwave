@@ -21,10 +21,10 @@ use parking_lot::Mutex;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::error::ErrorCode::{self, TaskNotFound};
 use risingwave_common::error::Result;
+use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
-use tokio::runtime::Runtime;
 use tokio::sync::mpsc::Sender;
 use tonic::Status;
 
@@ -41,7 +41,7 @@ pub struct BatchManager {
     tasks: Arc<Mutex<HashMap<TaskId, Arc<BatchTaskExecution<ComputeNodeContext>>>>>,
 
     /// Runtime for the batch manager.
-    runtime: &'static Runtime,
+    runtime: Arc<BackgroundShutdownRuntime>,
 
     /// Batch configuration
     config: BatchConfig,
@@ -70,10 +70,7 @@ impl BatchManager {
         };
         BatchManager {
             tasks: Arc::new(Mutex::new(HashMap::new())),
-            // Leak the runtime to avoid runtime shutting-down in the main async context.
-            // TODO: may manually shutdown the runtime after we implement graceful shutdown for
-            // stream manager.
-            runtime: Box::leak(Box::new(runtime)),
+            runtime: Arc::new(runtime.into()),
             config,
             total_mem_val: TrAdder::new().into(),
             metrics,
@@ -89,7 +86,7 @@ impl BatchManager {
         state_reporter: StateReporter,
     ) -> Result<()> {
         trace!("Received task id: {:?}, plan: {:?}", tid, plan);
-        let task = BatchTaskExecution::new(tid, plan, context, epoch, self.runtime)?;
+        let task = BatchTaskExecution::new(tid, plan, context, epoch, self.runtime())?;
         let task_id = task.get_task_id().clone();
         let task = Arc::new(task);
         // Here the task id insert into self.tasks is put in front of `.async_execute`, cuz when
@@ -145,12 +142,14 @@ impl BatchManager {
             .get_task_output(output_id)
     }
 
-    pub fn abort_task(&self, sid: &PbTaskId, msg: String) {
+    pub fn cancel_task(&self, sid: &PbTaskId) {
         let sid = TaskId::from(sid);
         match self.tasks.lock().remove(&sid) {
             Some(task) => {
                 tracing::trace!("Removed task: {:?}", task.get_task_id());
-                task.abort_task(msg);
+                // Use `cancel` rather than `abort` here since this is not an error which should be
+                // propagated to upstream.
+                task.cancel();
                 self.metrics.task_num.dec()
             }
             None => {
@@ -201,8 +200,8 @@ impl BatchManager {
         self.tasks.lock().get(task_id).unwrap().state_receiver()
     }
 
-    pub fn runtime(&self) -> &'static Runtime {
-        self.runtime
+    pub fn runtime(&self) -> Arc<BackgroundShutdownRuntime> {
+        self.runtime.clone()
     }
 
     pub fn config(&self) -> &BatchConfig {
@@ -232,7 +231,7 @@ impl BatchManager {
             let t = guard.get(&id).unwrap();
             // FIXME: `Abort` will not report error but truncated results to user. We should
             // consider throw error.
-            t.abort_task(reason);
+            t.abort(reason);
         }
     }
 
@@ -386,7 +385,7 @@ mod tests {
             )
             .await
             .unwrap();
-        manager.abort_task(&task_id, "".to_string());
+        manager.cancel_task(&task_id);
         let task_id = TaskId::from(&task_id);
         assert!(!manager.tasks.lock().contains_key(&task_id));
     }

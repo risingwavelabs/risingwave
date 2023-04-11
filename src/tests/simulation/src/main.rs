@@ -140,7 +140,7 @@ async fn main() {
     use std::sync::Arc;
 
     use risingwave_simulation::client::RisingWave;
-    use risingwave_simulation::cluster::{Cluster, Configuration, KillOpts};
+    use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration, KillOpts};
     use risingwave_simulation::slt::*;
     use tracing_subscriber::EnvFilter;
 
@@ -153,13 +153,12 @@ async fn main() {
 
     let args = Args::parse();
     let config = Configuration {
-        config_path: args.config_path.unwrap_or_default(),
+        config_path: ConfigPath::Regular(args.config_path.unwrap_or_default()),
         frontend_nodes: args.frontend_nodes,
         compute_nodes: args.compute_nodes,
         compactor_nodes: args.compactor_nodes,
         compute_node_cores: args.compute_node_cores,
         meta_nodes: args.meta_nodes,
-        meta_node_extra_args: vec![],
         etcd_timeout_rate: args.etcd_timeout_rate,
         etcd_data_path: args.etcd_data,
     };

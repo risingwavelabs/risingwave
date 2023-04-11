@@ -16,6 +16,7 @@ use std::fmt;
 
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::DataType;
 
 use super::{
     ColPrunable, ExprRewritable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown, ToBatch,
@@ -40,11 +41,15 @@ pub struct LogicalTableFunction {
 impl LogicalTableFunction {
     /// Create a [`LogicalTableFunction`] node. Used internally by optimizer.
     pub fn new(table_function: TableFunction, ctx: OptimizerContextRef) -> Self {
-        let schema = Schema {
-            fields: vec![Field::with_name(
-                table_function.return_type(),
-                table_function.function_type.name(),
-            )],
+        let schema = if let DataType::Struct(s) = table_function.return_type() {
+            Schema::from(&*s)
+        } else {
+            Schema {
+                fields: vec![Field::with_name(
+                    table_function.return_type(),
+                    table_function.name(),
+                )],
+            }
         };
         let functional_dependency = FunctionalDependencySet::new(schema.len());
         let base = PlanBase::new_logical(ctx, schema, vec![], functional_dependency);

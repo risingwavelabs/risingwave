@@ -18,7 +18,6 @@ use std::alloc::Global;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-use fixedbitset::FixedBitSet;
 use futures::future::try_join;
 use futures::StreamExt;
 use futures_async_stream::for_await;
@@ -26,7 +25,7 @@ pub(super) use join_entry_state::JoinEntryState;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::collection::estimate_size::EstimateSize;
-use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
+use risingwave_common::hash::{HashKey, NullBitmap, PrecomputedBuildHasher};
 use risingwave_common::row;
 use risingwave_common::row::{CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
@@ -36,7 +35,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
-use crate::cache::{cache_may_stale, new_with_hasher_in, ExecutorCache};
+use crate::cache::{new_with_hasher_in, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
@@ -155,49 +154,67 @@ pub struct JoinHashMapMetrics {
     metrics: Arc<StreamingMetrics>,
     /// Basic information
     actor_id: String,
+    join_table_id: String,
+    degree_table_id: String,
     side: &'static str,
     /// How many times have we hit the cache of join executor
     lookup_miss_count: usize,
     total_lookup_count: usize,
     /// How many times have we miss the cache when insert row
     insert_cache_miss_count: usize,
-    may_exist_true_count: usize,
 }
 
 impl JoinHashMapMetrics {
-    pub fn new(metrics: Arc<StreamingMetrics>, actor_id: ActorId, side: &'static str) -> Self {
+    pub fn new(
+        metrics: Arc<StreamingMetrics>,
+        actor_id: ActorId,
+        side: &'static str,
+        join_table_id: u32,
+        degree_table_id: u32,
+    ) -> Self {
         Self {
             metrics,
             actor_id: actor_id.to_string(),
+            join_table_id: join_table_id.to_string(),
+            degree_table_id: degree_table_id.to_string(),
             side,
             lookup_miss_count: 0,
             total_lookup_count: 0,
             insert_cache_miss_count: 0,
-            may_exist_true_count: 0,
         }
     }
 
     pub fn flush(&mut self) {
         self.metrics
             .join_lookup_miss_count
-            .with_label_values(&[&self.actor_id, self.side])
+            .with_label_values(&[
+                (self.side),
+                &self.join_table_id,
+                &self.degree_table_id,
+                &self.actor_id,
+            ])
             .inc_by(self.lookup_miss_count as u64);
         self.metrics
             .join_total_lookup_count
-            .with_label_values(&[&self.actor_id, self.side])
+            .with_label_values(&[
+                (self.side),
+                &self.join_table_id,
+                &self.degree_table_id,
+                &self.actor_id,
+            ])
             .inc_by(self.total_lookup_count as u64);
         self.metrics
             .join_insert_cache_miss_count
-            .with_label_values(&[&self.actor_id, self.side])
+            .with_label_values(&[
+                (self.side),
+                &self.join_table_id,
+                &self.degree_table_id,
+                &self.actor_id,
+            ])
             .inc_by(self.insert_cache_miss_count as u64);
-        self.metrics
-            .join_may_exist_true_count
-            .with_label_values(&[&self.actor_id, self.side])
-            .inc_by(self.may_exist_true_count as u64);
         self.total_lookup_count = 0;
         self.lookup_miss_count = 0;
         self.insert_cache_miss_count = 0;
-        self.may_exist_true_count = 0;
     }
 }
 
@@ -207,7 +224,7 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// Data types of the join key columns
     join_key_data_types: Vec<DataType>,
     /// Null safe bitmap for each join pair
-    null_matched: FixedBitSet,
+    null_matched: NullBitmap,
     /// The memcomparable serializer of primary key.
     pk_serializer: OrderedRowSerde,
     /// State table. Contains the data from upstream.
@@ -255,7 +272,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         degree_all_data_types: Vec<DataType>,
         degree_table: StateTable<S>,
         degree_pk_indices: Vec<usize>,
-        null_matched: FixedBitSet,
+        null_matched: NullBitmap,
         need_degree_table: bool,
         pk_contained_in_jk: bool,
         metrics: Arc<StreamingMetrics>,
@@ -273,6 +290,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             vec![OrderType::ascending(); state_pk_indices.len()],
         );
 
+        let join_table_id = state_table.table_id();
+        let degree_table_id = degree_table.table_id();
         let state = TableInner {
             pk_indices: state_pk_indices,
             order_key_indices: state_table.pk_indices().to_vec(),
@@ -302,7 +321,13 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             degree_state,
             need_degree_table,
             pk_contained_in_jk,
-            metrics: JoinHashMapMetrics::new(metrics, actor_id, side),
+            metrics: JoinHashMapMetrics::new(
+                metrics,
+                actor_id,
+                side,
+                join_table_id,
+                degree_table_id,
+            ),
         }
     }
 
@@ -318,22 +343,22 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Update the vnode bitmap and manipulate the cache if necessary.
-    pub fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
-        let previous_vnode_bitmap = self.state.table.update_vnode_bitmap(vnode_bitmap.clone());
-        let _ = self
-            .degree_state
-            .table
-            .update_vnode_bitmap(vnode_bitmap.clone());
+    pub fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) -> bool {
+        let (_previous_vnode_bitmap, cache_may_stale) =
+            self.state.table.update_vnode_bitmap(vnode_bitmap.clone());
+        let _ = self.degree_state.table.update_vnode_bitmap(vnode_bitmap);
 
-        if cache_may_stale(&previous_vnode_bitmap, &vnode_bitmap) {
+        if cache_may_stale {
             self.inner.clear();
         }
+
+        cache_may_stale
     }
 
     pub fn update_watermark(&mut self, watermark: ScalarImpl) {
         // TODO: remove data in cache.
-        self.state.table.update_watermark(watermark.clone());
-        self.degree_state.table.update_watermark(watermark);
+        self.state.table.update_watermark(watermark.clone(), false);
+        self.degree_state.table.update_watermark(watermark, false);
     }
 
     /// Take the state for the given `key` out of the hash table and return it. One **MUST** call
@@ -435,22 +460,11 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             // Update cache
             entry.insert(pk, value.encode());
         } else if self.pk_contained_in_jk {
-            // Refill cache when the join key contains primary key.
+            // Refill cache when the join key exist in neither cache or storage.
             self.metrics.insert_cache_miss_count += 1;
             let mut state = JoinEntryState::default();
             state.insert(pk, value.encode());
             self.update_state(key, state.into());
-        } else {
-            let prefix = key.deserialize(&self.join_key_data_types)?;
-            self.metrics.insert_cache_miss_count += 1;
-            // Refill cache when the join key exists in neither cache or storage.
-            if !self.state.table.may_exist(&prefix).await? {
-                let mut state = JoinEntryState::default();
-                state.insert(pk, value.encode());
-                self.update_state(key, state.into());
-            } else {
-                self.metrics.may_exist_true_count += 1;
-            }
         }
 
         // Update the flush buffer.
@@ -462,6 +476,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Insert a row.
     /// Used when the side does not need to update degree.
+    #[allow(clippy::unused_async)]
     pub async fn insert_row(&mut self, key: &K, value: impl Row) -> StreamExecutorResult<()> {
         let join_row = JoinRow::new(&value, 0);
         let pk = (&value)
@@ -471,22 +486,11 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             // Update cache
             entry.insert(pk, join_row.encode());
         } else if self.pk_contained_in_jk {
-            // Refill cache when the join key contains primary key.
+            // Refill cache when the join key exist in neither cache or storage.
             self.metrics.insert_cache_miss_count += 1;
             let mut state = JoinEntryState::default();
             state.insert(pk, join_row.encode());
             self.update_state(key, state.into());
-        } else {
-            let prefix = key.deserialize(&self.join_key_data_types)?;
-            self.metrics.insert_cache_miss_count += 1;
-            // Refill cache when the join key exists in neither cache or storage.
-            if !self.state.table.may_exist(&prefix).await? {
-                let mut state = JoinEntryState::default();
-                state.insert(pk, join_row.encode());
-                self.update_state(key, state.into());
-            } else {
-                self.metrics.may_exist_true_count += 1;
-            }
         }
 
         // Update the flush buffer.
@@ -590,7 +594,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.inner.len()
     }
 
-    pub fn null_matched(&self) -> &FixedBitSet {
+    pub fn null_matched(&self) -> &NullBitmap {
         &self.null_matched
     }
 }

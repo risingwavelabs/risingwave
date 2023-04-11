@@ -29,7 +29,7 @@ use crate::optimizer::plan_node::{
     BatchFilter, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
     StreamFilter, ToStreamContext,
 };
-use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
+use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalFilter` iterates over its input and returns elements for which `predicate` evaluates to
 /// true, filtering out the others.
@@ -94,20 +94,6 @@ impl LogicalFilter {
     pub fn predicate(&self) -> &Condition {
         &self.core.predicate
     }
-
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let input = self.input();
-        let input_schema = input.schema();
-        write!(
-            f,
-            "{} {{ predicate: {} }}",
-            name,
-            ConditionDisplay {
-                condition: self.predicate(),
-                input_schema
-            }
-        )
-    }
 }
 
 impl PlanTreeNodeUnary for LogicalFilter {
@@ -134,7 +120,7 @@ impl_plan_tree_node_for_unary! {LogicalFilter}
 
 impl fmt::Display for LogicalFilter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalFilter")
+        self.core.fmt_with_name(f, "LogicalFilter")
     }
 }
 
@@ -210,7 +196,8 @@ impl PredicatePushdown for LogicalFilter {
 impl ToBatch for LogicalFilter {
     fn to_batch(&self) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
-        let new_logical = self.clone_with_input(new_input);
+        let mut new_logical = self.core.clone();
+        new_logical.input = new_input;
         Ok(BatchFilter::new(new_logical).into())
     }
 }
@@ -240,7 +227,8 @@ impl ToStream for LogicalFilter {
                 "All `now()` exprs were valid, but the condition must have at least one now expr as a lower bound."
             );
         }
-        let new_logical = self.clone_with_input(new_input);
+        let mut new_logical = self.core.clone();
+        new_logical.input = new_input;
         Ok(StreamFilter::new(new_logical).into())
     }
 
@@ -256,7 +244,6 @@ impl ToStream for LogicalFilter {
 
 #[cfg(test)]
 mod tests {
-
     use std::collections::HashSet;
 
     use risingwave_common::catalog::{Field, Schema};

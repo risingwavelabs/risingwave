@@ -15,6 +15,7 @@
 use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::{Connection, Database, Function, Schema, Source, Table, View};
+use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 
@@ -62,9 +63,10 @@ pub enum DdlCommand {
     DropFunction(FunctionId),
     CreateView(View),
     DropView(ViewId),
-    CreatingStreamingJob(StreamingJob, StreamFragmentGraphProto),
+    CreateStreamingJob(StreamingJob, StreamFragmentGraphProto),
     DropStreamingJob(StreamingJobId),
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
+    AlterRelationName(Relation, String),
     CreateConnection(Connection),
     DropConnection(String),
 }
@@ -135,13 +137,16 @@ where
                 DdlCommand::DropFunction(function_id) => ctrl.drop_function(function_id).await,
                 DdlCommand::CreateView(view) => ctrl.create_view(view).await,
                 DdlCommand::DropView(view_id) => ctrl.drop_view(view_id).await,
-                DdlCommand::CreatingStreamingJob(stream_job, fragment_graph) => {
+                DdlCommand::CreateStreamingJob(stream_job, fragment_graph) => {
                     ctrl.create_streaming_job(stream_job, fragment_graph).await
                 }
                 DdlCommand::DropStreamingJob(job_id) => ctrl.drop_streaming_job(job_id).await,
                 DdlCommand::ReplaceTable(stream_job, fragment_graph, table_col_index_mapping) => {
                     ctrl.replace_table(stream_job, fragment_graph, table_col_index_mapping)
                         .await
+                }
+                DdlCommand::AlterRelationName(relation, name) => {
+                    ctrl.alter_relation_name(relation, &name).await
                 }
                 DdlCommand::CreateConnection(connection) => {
                     ctrl.create_connection(connection).await
@@ -329,8 +334,6 @@ where
 
         // 2. Set the graph-related fields and freeze the `stream_job`.
         stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
-        let dependent_relations = fragment_graph.dependent_relations().clone();
-        stream_job.set_dependent_relations(dependent_relations);
         let stream_job = &*stream_job;
 
         // 3. Mark current relation as "creating" and add reference count to dependent relations.
@@ -356,8 +359,8 @@ where
         // contains all information needed for building the actor graph.
         let upstream_mview_fragments = self
             .fragment_manager
-            .get_upstream_mview_fragments(fragment_graph.dependent_relations())
-            .await;
+            .get_upstream_mview_fragments(fragment_graph.dependent_table_ids())
+            .await?;
         let upstream_mview_actors = upstream_mview_fragments
             .iter()
             .map(|(&table_id, fragment)| {
@@ -529,7 +532,6 @@ where
                 .await;
             Ok((version, delete_jobs))
         } else {
-            assert!(internal_table_ids.is_empty());
             self.catalog_manager
                 .drop_table(table_id, internal_table_ids)
                 .await
@@ -550,7 +552,12 @@ where
 
         let result = try {
             let (ctx, table_fragments) = self
-                .build_replace_table(env, &stream_job, fragment_graph, table_col_index_mapping)
+                .build_replace_table(
+                    env,
+                    &stream_job,
+                    fragment_graph,
+                    table_col_index_mapping.clone(),
+                )
                 .await?;
 
             self.stream_manager
@@ -559,7 +566,10 @@ where
         };
 
         match result {
-            Ok(_) => self.finish_replace_table(&stream_job).await,
+            Ok(_) => {
+                self.finish_replace_table(&stream_job, table_col_index_mapping)
+                    .await
+            }
             Err(err) => {
                 self.cancel_replace_table(&stream_job).await?;
                 Err(err)
@@ -580,7 +590,7 @@ where
             StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), &*stream_job)
                 .await?;
         assert!(fragment_graph.internal_tables().is_empty());
-        assert!(fragment_graph.dependent_relations().is_empty());
+        assert!(fragment_graph.dependent_table_ids().is_empty());
 
         // 2. Set the graph-related fields and freeze the `stream_job`.
         stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
@@ -687,13 +697,14 @@ where
     async fn finish_replace_table(
         &self,
         stream_job: &StreamingJob,
+        table_col_index_mapping: ColIndexMapping,
     ) -> MetaResult<NotificationVersion> {
         let StreamingJob::Table(None, table) = stream_job else {
             unreachable!("unexpected job: {stream_job:?}")
         };
 
         self.catalog_manager
-            .finish_replace_table_procedure(table)
+            .finish_replace_table_procedure(table, table_col_index_mapping)
             .await
     }
 
@@ -705,5 +716,39 @@ where
         self.catalog_manager
             .cancel_replace_table_procedure(table)
             .await
+    }
+
+    async fn alter_relation_name(
+        &self,
+        relation: Relation,
+        new_name: &str,
+    ) -> MetaResult<NotificationVersion> {
+        match relation {
+            Relation::TableId(table_id) => {
+                self.catalog_manager
+                    .alter_table_name(table_id, new_name)
+                    .await
+            }
+            Relation::ViewId(view_id) => {
+                self.catalog_manager
+                    .alter_view_name(view_id, new_name)
+                    .await
+            }
+            Relation::IndexId(index_id) => {
+                self.catalog_manager
+                    .alter_index_name(index_id, new_name)
+                    .await
+            }
+            Relation::SinkId(sink_id) => {
+                self.catalog_manager
+                    .alter_sink_name(sink_id, new_name)
+                    .await
+            }
+            Relation::SourceId(source_id) => {
+                self.catalog_manager
+                    .alter_source_name(source_id, new_name)
+                    .await
+            }
+        }
     }
 }

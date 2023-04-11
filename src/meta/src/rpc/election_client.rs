@@ -352,7 +352,7 @@ mod tests {
         let handle = tokio::spawn(async move {
             let addr = "0.0.0.0:2388".parse().unwrap();
             let mut builder = etcd_client::SimServer::builder();
-            builder.serve(addr).await;
+            builder.serve(addr).await.unwrap();
         });
 
         let mut clients: Vec<(watch::Sender<()>, Arc<dyn ElectionClient>)> = vec![];

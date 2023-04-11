@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
+use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
@@ -50,6 +51,7 @@ pub fn mock_sstable_store() -> SstableStoreRef {
         path,
         64 << 20,
         128 << 20,
+        0,
         TieredCache::none(),
     ))
 }
@@ -58,7 +60,7 @@ pub fn default_writer_opts() -> SstableWriterOptions {
     SstableWriterOptions {
         capacity_hint: None,
         tracker: None,
-        policy: CachePolicy::Fill,
+        policy: CachePolicy::Fill(CachePriority::High),
     }
 }
 
@@ -90,7 +92,7 @@ async fn build_table(
         SstableWriterOptions {
             capacity_hint: None,
             tracker: None,
-            policy: CachePolicy::Fill,
+            policy: CachePolicy::Fill(CachePriority::High),
         },
     );
     let mut builder = SstableBuilder::for_test(sstable_object_id, writer, opt);
@@ -214,7 +216,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
         .block_on(async { build_table(sstable_store.clone(), 4, 0..test_key_size, 2).await });
     let level2 = vec![info1, info2];
     let read_options = Arc::new(SstableIteratorReadOptions {
-        prefetch: true,
+        cache_policy: CachePolicy::Fill(CachePriority::High),
         must_iterated_end_user_key: None,
     });
     c.bench_function("bench_union_merge_iterator", |b| {
@@ -231,8 +233,18 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     c.bench_function("bench_merge_iterator", |b| {
         b.to_async(&runtime).iter(|| {
             let sub_iters = vec![
-                ConcatSstableIterator::new(level1.clone(), KeyRange::inf(), sstable_store.clone()),
-                ConcatSstableIterator::new(level2.clone(), KeyRange::inf(), sstable_store.clone()),
+                ConcatSstableIterator::new(
+                    vec![0],
+                    level1.clone(),
+                    KeyRange::inf(),
+                    sstable_store.clone(),
+                ),
+                ConcatSstableIterator::new(
+                    vec![0],
+                    level2.clone(),
+                    KeyRange::inf(),
+                    sstable_store.clone(),
+                ),
             ];
             let iter = UnorderedMergeIteratorInner::for_compactor(sub_iters);
             let sstable_store1 = sstable_store.clone();

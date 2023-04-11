@@ -12,11 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use nexmark::event::{Auction, Bid, Event, EventType, Person};
+use itertools::Itertools;
+pub use nexmark::event::EventType;
+use nexmark::event::{Auction, Bid, Event, Person};
 use risingwave_common::array::StructValue;
+use risingwave_common::catalog::row_id_column_name;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::struct_type::StructType;
-use risingwave_common::types::{DataType, Datum, NaiveDateTimeWrapper, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, ScalarImpl, Timestamp};
+use risingwave_common::util::iter_util::ZipEqFast;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
@@ -66,6 +70,62 @@ pub fn new_combined_event(event: Event) -> CombinedEvent {
     }
 }
 
+pub fn get_event_data_types_with_names(
+    event_type: Option<EventType>,
+    row_id_index: Option<usize>,
+) -> Vec<(String, DataType)> {
+    let mut fields = match event_type {
+        None => {
+            vec![
+                ("event_type".to_owned(), DataType::Int64),
+                (
+                    "person".to_owned(),
+                    DataType::Struct(get_person_struct_type().into()),
+                ),
+                (
+                    "auction".to_owned(),
+                    DataType::Struct(get_auction_struct_type().into()),
+                ),
+                (
+                    "bid".to_owned(),
+                    DataType::Struct(get_bid_struct_type().into()),
+                ),
+            ]
+        }
+        Some(EventType::Person) => {
+            let struct_type = get_person_struct_type();
+            struct_type
+                .field_names
+                .into_iter()
+                .zip_eq_fast(struct_type.fields)
+                .collect_vec()
+        }
+        Some(EventType::Auction) => {
+            let struct_type = get_auction_struct_type();
+            struct_type
+                .field_names
+                .into_iter()
+                .zip_eq_fast(struct_type.fields)
+                .collect_vec()
+        }
+        Some(EventType::Bid) => {
+            let struct_type = get_bid_struct_type();
+            struct_type
+                .field_names
+                .into_iter()
+                .zip_eq_fast(struct_type.fields)
+                .collect_vec()
+        }
+    };
+
+    if let Some(row_id_index) = row_id_index {
+        // _row_id
+        fields.insert(row_id_index, (row_id_column_name(), DataType::Serial));
+    }
+
+    fields
+}
+
 pub(crate) fn get_event_data_types(
     event_type: Option<EventType>,
     row_id_index: Option<usize>,
@@ -86,7 +146,7 @@ pub(crate) fn get_event_data_types(
 
     if let Some(row_id_index) = row_id_index {
         // _row_id
-        fields.insert(row_id_index, DataType::Int64);
+        fields.insert(row_id_index, DataType::Serial);
     }
 
     fields
@@ -229,8 +289,8 @@ fn person_to_datum(p: Person) -> Vec<Datum> {
         Some(ScalarImpl::Utf8(p.credit_card.into())),
         Some(ScalarImpl::Utf8(p.city.into())),
         Some(ScalarImpl::Utf8(p.state.into())),
-        Some(ScalarImpl::NaiveDateTime(
-            NaiveDateTimeWrapper::with_secs_nsecs(
+        Some(ScalarImpl::Timestamp(
+            Timestamp::with_secs_nsecs(
                 (p.date_time / 1_000) as i64,
                 (p.date_time % 1_000) as u32 * 1_000_000,
             )
@@ -248,15 +308,15 @@ fn auction_to_datum(a: Auction) -> Vec<Datum> {
         Some(ScalarImpl::Utf8(a.description.into())),
         Some(ScalarImpl::Int64(a.initial_bid as i64)),
         Some(ScalarImpl::Int64(a.reserve as i64)),
-        Some(ScalarImpl::NaiveDateTime(
-            NaiveDateTimeWrapper::with_secs_nsecs(
+        Some(ScalarImpl::Timestamp(
+            Timestamp::with_secs_nsecs(
                 (a.date_time / 1_000) as i64,
                 (a.date_time % 1_000) as u32 * 1_000_000,
             )
             .unwrap(),
         )),
-        Some(ScalarImpl::NaiveDateTime(
-            NaiveDateTimeWrapper::with_secs_nsecs(
+        Some(ScalarImpl::Timestamp(
+            Timestamp::with_secs_nsecs(
                 (a.expires / 1_000) as i64,
                 (a.expires % 1_000) as u32 * 1_000_000,
             )
@@ -277,8 +337,8 @@ fn bid_to_datum(b: Bid) -> Vec<Datum> {
         Some(ScalarImpl::Int64(b.price as i64)),
         Some(ScalarImpl::Utf8(b.channel.into())),
         Some(ScalarImpl::Utf8(b.url.into())),
-        Some(ScalarImpl::NaiveDateTime(
-            NaiveDateTimeWrapper::with_secs_nsecs(
+        Some(ScalarImpl::Timestamp(
+            Timestamp::with_secs_nsecs(
                 (b.date_time / 1_000) as i64,
                 (b.date_time % 1_000) as u32 * 1_000_000,
             )

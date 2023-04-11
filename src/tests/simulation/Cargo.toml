@@ -16,13 +16,14 @@ async-trait = "0.1"
 aws-sdk-s3 = { version = "0.2.17", package = "madsim-aws-sdk-s3" }
 clap = { version = "4", features = ["derive"] }
 console = "0.15"
-etcd-client = { version = "0.2.17", package = "madsim-etcd-client" }
+etcd-client = { version = "0.2.18", package = "madsim-etcd-client" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 glob = "0.3"
 itertools = "0.10"
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", branch = "evict_by_timestamp" }
-madsim = "0.2.17"
+madsim = "0.2.19"
 paste = "1"
+pin-project = "1.0"
 pretty_assertions = "1"
 rand = "0.8"
 rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = ["cmake-build"] }
@@ -40,7 +41,7 @@ serde_derive = "1.0.152"
 serde_json = "1.0.91"
 sqllogictest = "0.11.1"
 tempfile = "3"
-tokio = { version = "0.2.15", package = "madsim-tokio" }
+tokio = { version = "0.2.19", package = "madsim-tokio" }
 tokio-postgres = "0.7.7"
 tracing = "0.1"
 tracing-subscriber = "0.3"

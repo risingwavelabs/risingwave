@@ -14,12 +14,11 @@
 
 use std::fmt::Write;
 
-use crate::Result;
+use risingwave_expr_macro::function;
 
-#[inline(always)]
-pub fn md5(s: &str, writer: &mut dyn Write) -> Result<()> {
+#[function("md5(varchar) -> varchar")]
+pub fn md5(s: &str, writer: &mut dyn Write) {
     write!(writer, "{:x}", ::md5::compute(s)).unwrap();
-    Ok(())
 }
 
 #[cfg(test)]
@@ -27,7 +26,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_md5() -> Result<()> {
+    fn test_md5() {
         let cases = [
             ("hello world", "5eb63bbbe01eeed093cb22bb8f5acdc3"),
             ("hello RUST", "917b821a0a5f23ab0cfdb36056d2eb9d"),
@@ -39,9 +38,8 @@ mod tests {
 
         for (s, expected) in cases {
             let mut writer = String::new();
-            md5(s, &mut writer)?;
+            md5(s, &mut writer);
             assert_eq!(writer, expected);
         }
-        Ok(())
     }
 }

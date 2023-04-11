@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{Schema, TableVersionId};
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::{Expr, ObjectName, SelectItem};
 
 use super::statement::RewriteExprsRecursive;
@@ -22,7 +22,7 @@ use crate::catalog::TableId;
 use crate::expr::ExprImpl;
 use crate::user::UserId;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundDelete {
     /// Id of the table to perform deleting.
     pub table_id: TableId,
@@ -76,6 +76,13 @@ impl Binder {
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");
+
+        // TODO(yuhao): delete from table with generated columns
+        if table_catalog.has_generated_column() {
+            return Err(RwError::from(ErrorCode::BindError(
+                "Delete from a table with generated column has not been implemented.".to_string(),
+            )));
+        }
 
         let table = self.bind_table(schema_name, &table_name, None)?;
         let (returning_list, fields) = self.bind_returning_list(returning_items)?;

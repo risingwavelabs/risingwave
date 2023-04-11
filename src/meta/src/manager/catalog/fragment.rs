@@ -18,8 +18,9 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::ParallelUnitId;
+use risingwave_common::hash::{ActorMapping, ParallelUnitMapping};
 use risingwave_common::{bail, try_match_expand};
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::common::{ParallelUnit, WorkerNode};
@@ -278,6 +279,7 @@ where
         // FIXME: we use a dummy table ID for new table fragments, so we can drop the old fragments
         // with the real table ID, then replace the dummy table ID with the real table ID. This is a
         // workaround for not having the version info in the fragment manager.
+        #[allow(unused_variables)]
         let old_table_fragment = table_fragments
             .remove(table_id)
             .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
@@ -343,8 +345,10 @@ where
         // Commit changes and notify about the changes.
         commit_meta!(self, table_fragments)?;
 
-        self.notify_fragment_mapping(&old_table_fragment, Operation::Delete)
-            .await;
+        // FIXME: Do not notify frontend currently, because frontend nodes might refer to old table
+        // catalog and need to access the old fragment. Let frontend nodes delete the old fragment
+        // when they receive table catalog change. self.notify_fragment_mapping(&
+        // old_table_fragment, Operation::Delete)     .await;
         self.notify_fragment_mapping(&table_fragment, Operation::Add)
             .await;
 
@@ -736,6 +740,10 @@ where
                 let actor_status = table_fragment.actor_status.clone();
                 let fragment = table_fragment.fragments.get_mut(&fragment_id).unwrap();
 
+                fragment
+                    .actors
+                    .retain(|a| !removed_actor_ids.contains(&a.actor_id));
+
                 // update vnode mapping for actors.
                 for actor in &mut fragment.actors {
                     if let Some(bitmap) = vnode_bitmap_updates.get(&actor.actor_id) {
@@ -743,37 +751,43 @@ where
                     }
                 }
 
-                fragment
-                    .actors
-                    .retain(|a| !removed_actor_ids.contains(&a.actor_id));
-
                 // update fragment's vnode mapping
-                if let Some(vnode_mapping) = fragment.vnode_mapping.as_mut() {
-                    let mut actor_to_parallel_unit = HashMap::with_capacity(fragment.actors.len());
-                    for actor in &fragment.actors {
-                        if let Some(actor_status) = actor_status.get(&actor.actor_id) {
-                            if let Some(parallel_unit) = actor_status.parallel_unit.as_ref() {
-                                actor_to_parallel_unit.insert(
-                                    actor.actor_id as ActorId,
-                                    parallel_unit.id as ParallelUnitId,
-                                );
-                            }
-                        }
-                    }
+                let mut actor_to_parallel_unit = HashMap::with_capacity(fragment.actors.len());
+                let mut actor_to_vnode_bitmap = HashMap::with_capacity(fragment.actors.len());
+                for actor in &fragment.actors {
+                    let actor_status = &actor_status[&actor.actor_id];
+                    let parallel_unit_id = actor_status.parallel_unit.as_ref().unwrap().id;
+                    actor_to_parallel_unit.insert(actor.actor_id, parallel_unit_id);
 
-                    if let Some(actor_mapping) = upstream_dispatcher_mapping.as_ref() {
-                        *vnode_mapping = actor_mapping
-                            .to_parallel_unit(&actor_to_parallel_unit)
-                            .to_protobuf();
+                    if let Some(vnode_bitmap) = &actor.vnode_bitmap {
+                        let bitmap = Bitmap::from(vnode_bitmap);
+                        actor_to_vnode_bitmap.insert(actor.actor_id, bitmap);
                     }
+                }
 
-                    if !fragment.state_table_ids.is_empty() {
-                        let fragment_mapping = FragmentParallelUnitMapping {
-                            fragment_id: fragment_id as FragmentId,
-                            mapping: Some(vnode_mapping.clone()),
-                        };
-                        fragment_mapping_to_notify.push(fragment_mapping);
-                    }
+                let vnode_mapping = if actor_to_vnode_bitmap.is_empty() {
+                    // If there's no `vnode_bitmap`, then the fragment must be a singleton fragment.
+                    // We directly use the single parallel unit to construct the mapping.
+                    // TODO: also fill `vnode_bitmap` for the actor of singleton fragment so that we
+                    // don't need this branch.
+                    let parallel_unit = *actor_to_parallel_unit.values().exactly_one().unwrap();
+                    ParallelUnitMapping::new_single(parallel_unit)
+                } else {
+                    // Generate the parallel unit mapping from the fragment's actor bitmaps.
+                    assert_eq!(actor_to_vnode_bitmap.len(), actor_to_parallel_unit.len());
+                    ActorMapping::from_bitmaps(&actor_to_vnode_bitmap)
+                        .to_parallel_unit(&actor_to_parallel_unit)
+                }
+                .to_protobuf();
+
+                *fragment.vnode_mapping.as_mut().unwrap() = vnode_mapping.clone();
+
+                if !fragment.state_table_ids.is_empty() {
+                    let fragment_mapping = FragmentParallelUnitMapping {
+                        fragment_id: fragment_id as FragmentId,
+                        mapping: Some(vnode_mapping),
+                    };
+                    fragment_mapping_to_notify.push(fragment_mapping);
                 }
 
                 // Second step, update upstream fragments
@@ -906,18 +920,21 @@ where
     /// Get and filter the upstream `Materialize` fragments of the specified relations.
     pub async fn get_upstream_mview_fragments(
         &self,
-        dependent_relation_ids: &HashSet<TableId>,
-    ) -> HashMap<TableId, Fragment> {
+        upstream_table_ids: &HashSet<TableId>,
+    ) -> MetaResult<HashMap<TableId, Fragment>> {
         let map = &self.core.read().await.table_fragments;
         let mut fragments = HashMap::new();
 
-        for &table_id in dependent_relation_ids {
-            if let Some(table_fragments) = map.get(&table_id) && let Some(fragment) = table_fragments.mview_fragment() {
+        for &table_id in upstream_table_ids {
+            let table_fragments = map
+                .get(&table_id)
+                .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
+            if let Some(fragment) = table_fragments.mview_fragment() {
                 fragments.insert(table_id, fragment);
             }
         }
 
-        fragments
+        Ok(fragments)
     }
 
     /// Get the downstream `Chain` fragments of the specified table.

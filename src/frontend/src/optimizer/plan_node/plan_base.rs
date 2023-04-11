@@ -79,6 +79,11 @@ impl stream::StreamPlanRef for PlanBase {
         self.append_only
     }
 }
+impl batch::BatchPlanRef for PlanBase {
+    fn order(&self) -> &Order {
+        &self.order
+    }
+}
 impl PlanBase {
     pub fn new_logical(
         ctx: OptimizerContextRef,

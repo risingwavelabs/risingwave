@@ -59,6 +59,7 @@ pub mod aggregation;
 mod barrier_recv;
 mod batch_query;
 mod chain;
+mod dedup;
 mod dispatch;
 pub mod dml;
 mod dynamic_filter;
@@ -84,12 +85,15 @@ pub mod row_id_gen;
 mod sink;
 mod sort;
 mod sort_buffer;
+mod sort_buffer_v0;
+mod sort_v0;
 pub mod source;
 mod stream_reader;
 pub mod subtask;
 mod temporal_join;
 mod top_n;
 mod union;
+mod values;
 mod watermark;
 mod watermark_filter;
 mod wrapper;
@@ -97,8 +101,7 @@ mod wrapper;
 mod backfill;
 #[cfg(test)]
 mod integration_tests;
-#[cfg(test)]
-mod test_utils;
+pub mod test_utils;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
@@ -106,6 +109,7 @@ pub use backfill::*;
 pub use barrier_recv::BarrierRecvExecutor;
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
+pub use dedup::AppendOnlyDedupExecutor;
 pub use dispatch::{DispatchExecutor, DispatcherImpl};
 pub use dynamic_filter::DynamicFilterExecutor;
 pub use error::{StreamExecutorError, StreamExecutorResult};
@@ -127,13 +131,14 @@ pub use rearranged_chain::RearrangedChainExecutor;
 pub use receiver::ReceiverExecutor;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 pub use sink::SinkExecutor;
-pub use sort::SortExecutor;
+pub use sort::*;
 pub use source::*;
 pub use temporal_join::*;
 pub use top_n::{
     AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,
 };
 pub use union::UnionExecutor;
+pub use values::ValuesExecutor;
 pub use watermark_filter::WatermarkFilterExecutor;
 pub use wrapper::WrapperExecutor;
 
@@ -207,7 +212,7 @@ pub const INVALID_EPOCH: u64 = 0;
 
 type UpstreamFragmentId = FragmentId;
 
-/// See [`risingwave_pb::stream_plan::barrier::Mutation`] for the semantics of each mutation.
+/// See [`PbMutation`] for the semantics of each mutation.
 #[derive(Debug, Clone, PartialEq, EnumAsInner)]
 pub enum Mutation {
     Stop(HashSet<ActorId>),
@@ -220,6 +225,7 @@ pub enum Mutation {
     },
     Add {
         adds: HashMap<ActorId, Vec<PbDispatcher>>,
+        added_actors: HashSet<ActorId>,
         // TODO: remove this and use `SourceChangesSplit` after we support multiple mutations.
         splits: HashMap<ActorId, Vec<SplitImpl>>,
     },
@@ -277,7 +283,7 @@ impl Barrier {
     }
 
     /// Whether this barrier is to stop the actor with `actor_id`.
-    pub fn is_stop_or_update_drop_actor(&self, actor_id: ActorId) -> bool {
+    pub fn is_stop(&self, actor_id: ActorId) -> bool {
         self.all_stop_actors()
             .map_or(false, |actors| actors.contains(&actor_id))
     }
@@ -291,15 +297,16 @@ impl Barrier {
         }
     }
 
-    /// Whether this barrier is to add new dispatchers for the actor with `actor_id`.
-    pub fn is_add_dispatcher(&self, actor_id: ActorId) -> bool {
-        matches!(
-            self.mutation.as_deref(),
-            Some(Mutation::Add {adds, ..}) if adds
-                .values()
-                .flatten()
-                .any(|dispatcher| dispatcher.downstream_actor_id.contains(&actor_id))
-        )
+    /// Whether this barrier is to newly add the actor with `actor_id`. This is used for `Chain` and
+    /// `Values` to decide whether to output the existing (historical) data.
+    ///
+    /// By "newly", we mean the actor belongs to a subgraph of a new streaming job. That is, actors
+    /// added for scaling are not included.
+    pub fn is_newly_added(&self, actor_id: ActorId) -> bool {
+        match self.mutation.as_deref() {
+            Some(Mutation::Add { added_actors, .. }) => added_actors.contains(&actor_id),
+            _ => false,
+        }
     }
 
     /// Whether this barrier is for pause.
@@ -364,6 +371,20 @@ impl Mutation {
     }
 
     fn to_protobuf(&self) -> PbMutation {
+        let actor_splits_to_protobuf = |actor_splits: &HashMap<ActorId, Vec<SplitImpl>>| {
+            actor_splits
+                .iter()
+                .map(|(&actor_id, splits)| {
+                    (
+                        actor_id,
+                        ConnectorSplits {
+                            splits: splits.clone().iter().map(ConnectorSplit::from).collect(),
+                        },
+                    )
+                })
+                .collect::<HashMap<_, _>>()
+        };
+
         match self {
             Mutation::Stop(actors) => PbMutation::Stop(StopMutation {
                 actors: actors.iter().copied().collect::<Vec<_>>(),
@@ -382,19 +403,13 @@ impl Mutation {
                     .map(|(&actor_id, bitmap)| (actor_id, bitmap.to_protobuf()))
                     .collect(),
                 dropped_actors: dropped_actors.iter().cloned().collect(),
-                actor_splits: actor_splits
-                    .iter()
-                    .map(|(&actor_id, splits)| {
-                        (
-                            actor_id,
-                            ConnectorSplits {
-                                splits: splits.clone().iter().map(ConnectorSplit::from).collect(),
-                            },
-                        )
-                    })
-                    .collect(),
+                actor_splits: actor_splits_to_protobuf(actor_splits),
             }),
-            Mutation::Add { adds, .. } => PbMutation::Add(AddMutation {
+            Mutation::Add {
+                adds,
+                added_actors,
+                splits,
+            } => PbMutation::Add(AddMutation {
                 actor_dispatchers: adds
                     .iter()
                     .map(|(&actor_id, dispatchers)| {
@@ -406,7 +421,8 @@ impl Mutation {
                         )
                     })
                     .collect(),
-                ..Default::default()
+                added_actors: added_actors.iter().copied().collect(),
+                actor_splits: actor_splits_to_protobuf(splits),
             }),
             Mutation::SourceChangeSplit(changes) => PbMutation::Splits(SourceChangeSplitMutation {
                 actor_splits: changes
@@ -469,6 +485,7 @@ impl Mutation {
                     .iter()
                     .map(|(&actor_id, dispatchers)| (actor_id, dispatchers.dispatchers.clone()))
                     .collect(),
+                added_actors: add.added_actors.iter().copied().collect(),
                 // TODO: remove this and use `SourceChangesSplit` after we support multiple
                 // mutations.
                 splits: add

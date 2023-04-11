@@ -101,30 +101,31 @@ pub fn add_storage_backend(
             if opendal.engine == "hdfs"{
                 cmd.arg("--state-store")
                 .arg(format!("hummock+hdfs://{}@{}", opendal.namenode, opendal.root));
-                true
             }
             else if opendal.engine == "gcs"{
                 cmd.arg("--state-store")
                 .arg(format!("hummock+gcs://{}@{}", opendal.bucket, opendal.root));
-            true}
+            }
             else if opendal.engine == "oss"{
                 cmd.arg("--state-store")
                 .arg(format!("hummock+oss://{}@{}", opendal.bucket, opendal.root));
-                true
             }
             else if opendal.engine == "webhdfs"{
                 cmd.arg("--state-store")
                 .arg(format!("hummock+webhdfs://{}@{}", opendal.namenode, opendal.root));
-                true
+            }
+            else if opendal.engine == "azblob"{
+                cmd.arg("--state-store")
+                .arg(format!("hummock+azblob://{}@{}", opendal.bucket, opendal.root));
             }
             else if opendal.engine == "fs"{
                 cmd.arg("--state-store")
                 .arg(format!("hummock+fs://{}@{}", opendal.namenode, opendal.root));
-                true
             }
             else{
                 unimplemented!()
             }
+            true
         }
 
         (other_minio, other_s3, _) => {

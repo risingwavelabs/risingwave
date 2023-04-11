@@ -64,7 +64,7 @@ fn is_numeric_overflow_error(db_error: &str) -> bool {
 
 /// Negative substr error
 fn is_neg_substr_error(db_error: &str) -> bool {
-    db_error.contains("length in substr should be non-negative")
+    db_error.contains("negative substring length not allowed")
 }
 
 /// Certain errors are permitted to occur. This is because:

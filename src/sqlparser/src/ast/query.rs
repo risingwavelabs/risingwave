@@ -43,6 +43,23 @@ pub struct Query {
     pub fetch: Option<Fetch>,
 }
 
+impl Query {
+    /// Simple `VALUES` without other clauses.
+    pub fn as_simple_values(&self) -> Option<&Values> {
+        match &self {
+            Query {
+                with: None,
+                body: SetExpr::Values(values),
+                order_by,
+                limit: None,
+                offset: None,
+                fetch: None,
+            } if order_by.is_empty() => Some(values),
+            _ => None,
+        }
+    }
+}
+
 impl fmt::Display for Query {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(ref with) = self.with {

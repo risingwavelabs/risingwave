@@ -46,6 +46,7 @@ use risingwave_pb::stream_plan::StreamNode as StreamPlanPb;
 use serde::Serialize;
 use smallvec::SmallVec;
 
+use self::batch::BatchPlanRef;
 use self::generic::GenericPlanRef;
 use self::stream::StreamPlanRef;
 use super::property::{Distribution, FunctionalDependencySet, Order};
@@ -385,6 +386,12 @@ impl StreamPlanRef for PlanRef {
     }
 }
 
+impl BatchPlanRef for PlanRef {
+    fn order(&self) -> &Order {
+        &self.plan_base().order
+    }
+}
+
 impl GenericPlanRef for PlanRef {
     fn schema(&self) -> &Schema {
         &self.plan_base().schema
@@ -594,6 +601,7 @@ pub use predicate_pushdown::*;
 mod merge_eq_nodes;
 pub use merge_eq_nodes::*;
 
+pub mod batch;
 pub mod generic;
 pub mod stream;
 pub mod stream_derive;
@@ -667,6 +675,7 @@ mod stream_sink;
 mod stream_source;
 mod stream_table_scan;
 mod stream_topn;
+mod stream_values;
 mod stream_watermark_filter;
 
 mod derive;
@@ -745,6 +754,7 @@ pub use stream_table_scan::StreamTableScan;
 pub use stream_temporal_join::StreamTemporalJoin;
 pub use stream_topn::StreamTopN;
 pub use stream_union::StreamUnion;
+pub use stream_values::StreamValues;
 pub use stream_watermark_filter::StreamWatermarkFilter;
 
 use crate::expr::{ExprImpl, ExprRewriter, InputRef, Literal};
@@ -841,6 +851,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Share }
             , { Stream, WatermarkFilter }
             , { Stream, TemporalJoin }
+            , { Stream, Values }
         }
     };
 }
@@ -941,6 +952,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Share }
             , { Stream, WatermarkFilter }
             , { Stream, TemporalJoin }
+            , { Stream, Values }
         }
     };
 }

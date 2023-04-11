@@ -16,7 +16,7 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
+use risingwave_common::types::{DataType, Interval, ScalarImpl};
 
 use crate::binder::{
     BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
@@ -77,25 +77,7 @@ impl Planner {
     }
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
-        let column_descs = source
-            .catalog
-            .columns
-            .iter()
-            .map(|column| column.column_desc.clone())
-            .collect_vec();
-        let pk_col_ids = source.catalog.pk_col_ids.clone();
-        let row_id_index = source.catalog.row_id_index;
-        let gen_row_id = source.catalog.append_only;
-        Ok(LogicalSource::new(
-            Some(Rc::new(source.catalog)),
-            column_descs,
-            pk_col_ids,
-            row_id_index,
-            gen_row_id,
-            false,
-            self.ctx(),
-        )
-        .into())
+        Ok(LogicalSource::with_catalog(Rc::new(source.catalog), false, self.ctx()).into())
     }
 
     pub(super) fn plan_join(&mut self, join: BoundJoin) -> Result<PlanRef> {
@@ -276,7 +258,7 @@ impl Planner {
                 Some(ScalarImpl::Interval(window_offset)) => window_offset,
                 _ => return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into()),
             },
-            (None, None) => IntervalUnit::from_month_day_usec(0, 0, 0),
+            (None, None) => Interval::from_month_day_usec(0, 0, 0),
             _ => return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into()),
         };
 

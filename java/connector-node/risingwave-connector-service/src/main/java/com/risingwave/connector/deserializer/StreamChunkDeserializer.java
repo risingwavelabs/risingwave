@@ -107,6 +107,24 @@ public class StreamChunkDeserializer implements Deserializer {
                                 return row.getString(index);
                             };
                     break;
+                case TIMESTAMP:
+                    ret[i] =
+                            row -> {
+                                if (row.isNull(index)) {
+                                    return null;
+                                }
+                                return row.getTimestamp(index);
+                            };
+                    break;
+                case DECIMAL:
+                    ret[i] =
+                            row -> {
+                                if (row.isNull(index)) {
+                                    return null;
+                                }
+                                return row.getDecimal(index);
+                            };
+                    break;
                 default:
                     throw io.grpc.Status.INVALID_ARGUMENT
                             .withDescription("unsupported type " + typeName)

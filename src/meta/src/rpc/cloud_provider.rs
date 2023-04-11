@@ -84,6 +84,7 @@ impl AwsEc2Client {
 
         Ok(PrivateLinkService {
             provider: CLOUD_PROVIDER_AWS.to_string(),
+            service_name: service_name.to_string(),
             endpoint_id,
             dns_entries: azid_to_dns_map,
         })

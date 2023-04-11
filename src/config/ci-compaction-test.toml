@@ -3,9 +3,7 @@ enable_compaction_deterministic = true
 max_heartbeat_interval_secs = 600
 
 [streaming]
-barrier_interval_ms = 250
 in_flight_barrier_nums = 40
-checkpoint_frequency = 10
 
 [storage]
 shared_buffer_capacity_mb = 4096
@@ -19,3 +17,11 @@ total_buffer_capacity_mb = 128
 cache_file_fallocate_unit_mb = 512
 cache_meta_fallocate_unit_mb = 16
 cache_file_max_write_size_mb = 4
+
+[system]
+sstable_size_mb = 256
+block_size_kb = 1024
+bloom_false_positive = 0.001
+data_directory = "hummock_001"
+checkpoint_frequency = 10
+barrier_interval_ms = 250

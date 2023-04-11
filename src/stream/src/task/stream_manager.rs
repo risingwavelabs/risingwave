@@ -29,6 +29,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan;
@@ -57,7 +58,7 @@ pub type AtomicU64Ref = Arc<AtomicU64>;
 
 pub struct LocalStreamManagerCore {
     /// Runtime for the streaming actors.
-    runtime: &'static tokio::runtime::Runtime,
+    runtime: BackgroundShutdownRuntime,
 
     /// Each processor runs in a future. Upon receiving a `Terminate` message, they will exit.
     /// `handles` store join handles of these futures, and therefore we could wait their
@@ -310,18 +311,19 @@ impl LocalStreamManager {
         Ok(())
     }
 
-    pub async fn drop_actor(&self, actors: &[ActorId]) -> StreamResult<()> {
+    /// Drop the resources of the given actors.
+    pub async fn drop_actors(&self, actors: &[ActorId]) -> StreamResult<()> {
         let mut core = self.core.lock().await;
-        for id in actors {
-            core.drop_actor(*id);
+        for &id in actors {
+            core.drop_actor(id);
         }
         tracing::debug!(actors = ?actors, "drop actors");
         Ok(())
     }
 
-    /// Force stop all actors on this worker.
+    /// Force stop all actors on this worker, and then drop their resources.
     pub async fn stop_all_actors(&self) -> StreamResult<()> {
-        self.core.lock().await.drop_all_actors().await;
+        self.core.lock().await.stop_all_actors().await;
         // Clear shared buffer in storage to release memory
         self.clear_storage_buffer().await;
         self.clear_all_senders_and_collect_rx();
@@ -399,21 +401,20 @@ impl LocalStreamManagerCore {
         config: StreamingConfig,
         await_tree_config: Option<await_tree::Config>,
     ) -> Self {
-        let mut builder = tokio::runtime::Builder::new_multi_thread();
-        if let Some(worker_threads_num) = config.actor_runtime_worker_threads_num {
-            builder.worker_threads(worker_threads_num);
-        }
-        let runtime = builder
-            .thread_name("risingwave-streaming-actor")
-            .enable_all()
-            .build()
-            .unwrap();
+        let runtime = {
+            let mut builder = tokio::runtime::Builder::new_multi_thread();
+            if let Some(worker_threads_num) = config.actor_runtime_worker_threads_num {
+                builder.worker_threads(worker_threads_num);
+            }
+            builder
+                .thread_name("risingwave-streaming-actor")
+                .enable_all()
+                .build()
+                .unwrap()
+        };
 
         Self {
-            // Leak the runtime to avoid runtime shutting-down in the main async context.
-            // TODO: may manually shutdown the runtime after we implement graceful shutdown for
-            // stream manager.
-            runtime: Box::leak(Box::new(runtime)),
+            runtime: runtime.into(),
             handles: HashMap::new(),
             context: Arc::new(context),
             actors: HashMap::new(),
@@ -551,13 +552,13 @@ impl LocalStreamManagerCore {
             actor_context.id,
             executor_id,
             self.streaming_metrics.clone(),
-            self.config.developer.stream_enable_executor_row_count,
+            self.config.developer.enable_executor_row_count,
         )
         .boxed();
 
         // If there're multiple stateful executors in this actor, we will wrap it into a subtask.
         let executor = if has_stateful && is_stateful {
-            let (subtask, executor) = subtask::wrap(executor);
+            let (subtask, executor) = subtask::wrap(executor, actor_context.id);
             subtasks.push(subtask);
             executor.boxed()
         } else {
@@ -781,14 +782,16 @@ impl LocalStreamManagerCore {
             .inspect(|handle| handle.abort());
         self.context.actor_infos.write().remove(&actor_id);
         self.actors.remove(&actor_id);
-        // Task should have already stopped when this method is invoked.
-        self.handles
-            .remove(&actor_id)
-            .inspect(|handle| handle.abort());
+
+        // Task should have already stopped when this method is invoked. There might be some
+        // clean-up work left (like dropping in-memory data structures), but we don't have to wait
+        // for them to finish, in order to make this request non-blocking.
+        self.handles.remove(&actor_id);
     }
 
-    /// `drop_all_actors` is invoked by meta node via RPC for recovery purpose.
-    async fn drop_all_actors(&mut self) {
+    /// `stop_all_actors` is invoked by meta node via RPC for recovery purpose. Different from the
+    /// `drop_actor`, the execution of the actors will be aborted.
+    async fn stop_all_actors(&mut self) {
         for (actor_id, handle) in &self.handles {
             tracing::debug!("force stopping actor {}", actor_id);
             handle.abort();

@@ -13,29 +13,33 @@
 // limitations under the License.
 
 use std::cmp;
-use std::collections::{BTreeMap, HashMap};
-use std::ops::RangeBounds;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use function_name::named;
 use itertools::Itertools;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ids;
+use risingwave_common::util::epoch::INVALID_EPOCH;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
+    build_initial_compaction_group_levels, get_compaction_group_ids, BranchedSstInfo,
+    HummockVersionExt,
+};
+use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockSstableId, HummockSstableObjectId, HummockVersionId,
+    CompactionGroupId, HummockContextId, HummockSstableObjectId, HummockVersionId, FIRST_VERSION_ID,
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion, HummockVersionDelta,
-    HummockVersionStats,
+    HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion, HummockVersionCheckpoint,
+    HummockVersionDelta, HummockVersionStats,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
+use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
 use crate::hummock::manager::{read_lock, write_lock};
-use crate::hummock::metrics_utils::{trigger_safepoint_stat, trigger_stale_ssts_stat};
+use crate::hummock::metrics_utils::trigger_safepoint_stat;
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::HummockManager;
-use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 
 /// `HummockVersionSafePoint` prevents hummock versions GE than it from being GC.
@@ -68,38 +72,27 @@ pub struct Versioning {
     pub disable_commit_epochs: bool,
     /// Latest hummock version
     pub current_version: HummockVersion,
-    /// These SST objects should be deleted from object store.
-    /// Mapping from a SST object to the version that has marked it stale. See
-    /// `ack_deleted_objects`.
-    pub objects_to_delete: BTreeMap<HummockSstableObjectId, HummockVersionId>,
-    /// These deltas should be deleted from meta store.
-    /// A delta can be deleted if
-    /// - Its version id <= checkpoint version id. Currently we only make checkpoint for version id
-    ///   <= min_pinned_version_id.
-    /// - AND It either contains no SST to delete, or all these SSTs has been deleted. See
-    ///   `extend_objects_to_delete_from_deltas`.
-    pub deltas_to_delete: Vec<HummockVersionId>,
+    /// Objects that waits to be deleted from object store. It comes from either compaction, or
+    /// full GC (listing object store).
+    pub objects_to_delete: HashSet<HummockSstableObjectId>,
     /// SST whose `object_id` != `sst_id`
     pub branched_ssts: BTreeMap<
         // SST object id
         HummockSstableObjectId,
-        BTreeMap<CompactionGroupId, /* SST ids */ Vec<HummockSstableId>>,
+        BranchedSstInfo,
     >,
     /// `version_safe_points` is similar to `pinned_versions` expect for being a transient state.
-    /// Hummock versions GE than min(safe_point) should not be GCed.
     pub version_safe_points: Vec<HummockVersionId>,
     /// Tables that write limit is trigger for.
     pub write_limit: HashMap<CompactionGroupId, WriteLimit>,
 
     // Persistent states below
-    /// Mapping from id of each hummock version which succeeds checkpoint to its
-    /// `HummockVersionDelta`
     pub hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
     pub pinned_versions: BTreeMap<HummockContextId, HummockPinnedVersion>,
     pub pinned_snapshots: BTreeMap<HummockContextId, HummockPinnedSnapshot>,
-    pub checkpoint_version: HummockVersion,
     /// Stats for latest hummock version.
     pub version_stats: HummockVersionStats,
+    pub checkpoint: HummockVersionCheckpoint,
 }
 
 impl Versioning {
@@ -116,38 +109,56 @@ impl Versioning {
         min_pinned_version_id
     }
 
-    pub fn extend_objects_to_delete_from_deltas(
-        &mut self,
-        delta_range: impl RangeBounds<HummockVersionId>,
-        metric: &MetaMetrics,
-    ) {
-        self.extend_objects_to_delete_from_deltas_impl(delta_range);
-        trigger_stale_ssts_stat(metric, self.objects_to_delete.len());
+    /// Marks all objects <= `min_pinned_version_id` for deletion.
+    pub(super) fn mark_objects_for_deletion(&mut self) {
+        let min_pinned_version_id = self.min_pinned_version_id();
+        self.objects_to_delete.extend(
+            self.checkpoint
+                .stale_objects
+                .iter()
+                .filter(|(version_id, _)| **version_id <= min_pinned_version_id)
+                .flat_map(|(_, stale_objects)| stale_objects.id.clone()),
+        );
     }
 
-    /// Extends `objects_to_delete` according to given deltas.
-    /// Possibly extends `deltas_to_delete`.
-    fn extend_objects_to_delete_from_deltas_impl(
-        &mut self,
-        delta_range: impl RangeBounds<HummockVersionId>,
-    ) {
-        for (_, delta) in self.hummock_version_deltas.range(delta_range) {
-            if delta.trivial_move {
-                self.deltas_to_delete.push(delta.id);
-                continue;
+    /// If there is some sst in the target group which is just split but we have not compact it, we
+    ///  can not split or move state-table to those group, because it may cause data overlap.
+    pub fn check_branched_sst_in_target_group(
+        &self,
+        table_ids: &[StateTableId],
+        source_group_id: &CompactionGroupId,
+        target_group_id: &CompactionGroupId,
+    ) -> bool {
+        for groups in self.branched_ssts.values() {
+            if groups.contains_key(target_group_id) && groups.contains_key(source_group_id) {
+                return false;
             }
-            let removed_object_ids = delta.get_gc_object_ids().clone();
-            for object_id in &removed_object_ids {
-                let duplicate_insert = self.objects_to_delete.insert(*object_id, delta.id);
-                debug_assert!(duplicate_insert.is_none());
-            }
-            // If no_sst_to_delete, the delta is qualified for deletion now.
-            if removed_object_ids.is_empty() {
-                self.deltas_to_delete.push(delta.id);
-            }
-            // Otherwise, the delta is qualified for deletion after all its sst_to_delete is
-            // deleted.
         }
+        let mut found_sstable_repeated = false;
+        let moving_table_ids: HashSet<&u32> = HashSet::from_iter(table_ids);
+        if let Some(group) = self.current_version.levels.get(target_group_id) {
+            let target_member_table_ids: HashSet<u32> =
+                HashSet::from_iter(group.member_table_ids.clone());
+            self.current_version.level_iter(*source_group_id, |level| {
+                for sst in &level.table_infos {
+                    if sst
+                        .table_ids
+                        .iter()
+                        .all(|table_id| !moving_table_ids.contains(table_id))
+                    {
+                        continue;
+                    }
+                    for table_id in &sst.table_ids {
+                        if target_member_table_ids.contains(table_id) {
+                            found_sstable_repeated = true;
+                            return false;
+                        }
+                    }
+                }
+                true
+            });
+        }
+        !found_sstable_repeated
     }
 }
 
@@ -298,6 +309,27 @@ pub(super) fn calc_new_write_limits(
     new_write_limits
 }
 
+pub(super) fn create_init_version() -> HummockVersion {
+    let mut init_version = HummockVersion {
+        id: FIRST_VERSION_ID,
+        levels: Default::default(),
+        max_committed_epoch: INVALID_EPOCH,
+        safe_epoch: INVALID_EPOCH,
+    };
+    // Initialize independent levels via corresponding compaction groups' config.
+    let default_compaction_config = CompactionConfigBuilder::new().build();
+    for group_id in [
+        StaticCompactionGroupId::StateDefault as CompactionGroupId,
+        StaticCompactionGroupId::MaterializedView as CompactionGroupId,
+    ] {
+        init_version.levels.insert(
+            group_id,
+            build_initial_compaction_group_levels(group_id, &default_compaction_config),
+        );
+    }
+    init_version
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -306,31 +338,11 @@ mod tests {
     use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId};
     use risingwave_pb::hummock::hummock_version::Levels;
     use risingwave_pb::hummock::write_limits::WriteLimit;
-    use risingwave_pb::hummock::{
-        HummockPinnedVersion, HummockVersion, HummockVersionDelta, Level, OverlappingLevel,
-    };
+    use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersion, Level, OverlappingLevel};
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::manager::versioning::{calc_new_write_limits, Versioning};
     use crate::hummock::model::CompactionGroup;
-
-    #[tokio::test]
-    async fn test_extend_objects_to_delete_from_deltas_trivial_move() {
-        let mut versioning = Versioning::default();
-        // trivial_move
-        versioning.hummock_version_deltas.insert(
-            2,
-            HummockVersionDelta {
-                id: 2,
-                prev_id: 1,
-                trivial_move: false,
-                ..Default::default()
-            },
-        );
-        assert_eq!(versioning.deltas_to_delete.len(), 0);
-        versioning.extend_objects_to_delete_from_deltas_impl(1..=2);
-        assert_eq!(versioning.deltas_to_delete.len(), 1);
-    }
 
     #[test]
     fn test_min_pinned_version_id() {

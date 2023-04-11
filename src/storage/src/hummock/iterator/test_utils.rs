@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
+use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
@@ -68,6 +69,7 @@ pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableSto
         path,
         64 << 20,
         64 << 20,
+        0,
         TieredCache::none(),
     ))
 }
@@ -116,6 +118,15 @@ pub fn iterator_test_bytes_key_of_epoch(idx: usize, epoch: HummockEpoch) -> Full
 /// The value of an index, like `value_test_00002` without value meta
 pub fn iterator_test_value_of(idx: usize) -> Vec<u8> {
     format!("value_test_{:05}", idx).as_bytes().to_vec()
+}
+
+pub fn transform_shared_buffer(
+    batches: Vec<(Vec<u8>, HummockValue<Bytes>)>,
+) -> Vec<(Bytes, HummockValue<Bytes>)> {
+    batches
+        .into_iter()
+        .map(|(k, v)| (k.into(), v))
+        .collect_vec()
 }
 
 /// Generates a test table used in almost all table-related tests. Developers may verify the
@@ -205,7 +216,7 @@ pub async fn gen_merge_iterator_interleave_test_sstable_iters(
             key_count,
         )
         .await;
-        let handle = cache.insert(table.id, table.id, 1, Box::new(table));
+        let handle = cache.insert(table.id, table.id, 1, Box::new(table), CachePriority::High);
         result.push(SstableIterator::create(
             handle,
             sstable_store.clone(),
