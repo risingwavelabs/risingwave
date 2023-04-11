@@ -59,12 +59,13 @@ rand = "0.8"
 regex = "1"
 reqwest = { version = "0.11", features = ["json"] }
 risingwave_pb = { path = "../prost" }
-rust_decimal = { version = "1", features = ["db-tokio-postgres"] }
+rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 ryu = "1.0"
 serde = { version = "1", features = ["derive"] }
 serde_default = "0.1"
 serde_json = "1"
 serde_with = "2"
+smallbitset = "0.6.1"
 static_assertions = "1"
 strum = "0.24"
 strum_macros = "0.24"
@@ -117,6 +118,10 @@ harness = false
 
 [[bench]]
 name = "bench_hash_key_encoding"
+harness = false
+
+[[bench]]
+name = "bench_data_chunk_encoding"
 harness = false
 
 [[bin]]

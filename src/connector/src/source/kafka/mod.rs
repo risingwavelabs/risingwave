@@ -69,3 +69,4 @@ pub struct KafkaProperties {
 }
 
 const KAFKA_SYNC_CALL_TIMEOUT: Duration = Duration::from_secs(1);
+const KAFKA_ISOLATION_LEVEL: &str = "read_committed";

@@ -19,49 +19,72 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use itertools::multizip;
+use itertools::{multizip, Itertools};
 use paste::paste;
-use risingwave_common::array::{Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, Utf8Array};
+use risingwave_common::array::{Array, ArrayBuilder, DataChunk, Utf8Array};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{option_as_scalar_ref, DataType, Datum, Scalar};
 use risingwave_common::util::iter_util::ZipEqDebug;
 
-use crate::expr::{BoxedExpression, Expression};
+use crate::expr::{BoxedExpression, Expression, ValueImpl, ValueRef};
 
 macro_rules! gen_eval {
     { ($macro:ident, $macro_row:ident), $ty_name:ident, $OA:ty, $($arg:ident,)* } => {
-        fn eval<'a, 'b, 'async_trait>(&'a self, data_chunk: &'b DataChunk)
-            -> Pin<Box<dyn Future<Output = $crate::Result<ArrayRef>> + Send + 'async_trait>>
+        fn eval_v2<'a, 'b, 'async_trait>(&'a self, data_chunk: &'b DataChunk)
+            -> Pin<Box<dyn Future<Output = $crate::Result<ValueImpl>> + Send + 'async_trait>>
         where
             'a: 'async_trait,
             'b: 'async_trait,
         {
             Box::pin(async move { paste! {
                 $(
-                    let [<ret_ $arg:lower>] = self.[<expr_ $arg:lower>].eval_checked(data_chunk).await?;
-                    let [<arr_ $arg:lower>]: &$arg = [<ret_ $arg:lower>].as_ref().into();
+                    let [<ret_ $arg:lower>] = self.[<expr_ $arg:lower>].eval_v2(data_chunk).await?;
+                    let [<val_ $arg:lower>]: ValueRef<'_, $arg> = (&[<ret_ $arg:lower>]).into();
                 )*
 
-                let bitmap = data_chunk.visibility();
-                let mut output_array = <$OA as Array>::Builder::with_meta(data_chunk.capacity(), (&self.return_type).into());
-                Ok(Arc::new(match bitmap {
-                    Some(bitmap) => {
-                        for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<arr_ $arg:lower>].iter(), )*)).zip_eq_debug(bitmap.iter()) {
-                            if !visible {
-                                output_array.append_null();
-                                continue;
+                Ok(match ($([<val_ $arg:lower>], )*) {
+                    // If all arguments are scalar, we can directly compute the result.
+                    ($(ValueRef::Scalar { value: [<scalar_ref_ $arg:lower>], capacity: [<cap_ $arg:lower>] }, )*) => {
+                        let output_scalar = $macro_row!(self, $([<scalar_ref_ $arg:lower>],)*);
+                        let output_datum = output_scalar.map(|s| s.to_scalar_value());
+                        let capacity = data_chunk.capacity();
+
+                        if cfg!(debug_assertions) {
+                            let all_capacities = [capacity, $([<cap_ $arg:lower>], )*];
+                            assert!(all_capacities.into_iter().all_equal(), "capacities mismatched: {:?}", all_capacities);
+                        }
+
+                        ValueImpl::Scalar { value: output_datum, capacity }
+                    }
+
+                    // Otherwise, fallback to array computation.
+                    ($([<val_ $arg:lower>], )*) => {
+                        let bitmap = data_chunk.visibility();
+                        let mut output_array = <$OA as Array>::Builder::with_meta(data_chunk.capacity(), (&self.return_type).into());
+                        let array = match bitmap {
+                            Some(bitmap) => {
+                                // TODO: use `izip` here.
+                                for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<val_ $arg:lower>].iter(), )*)).zip_eq_debug(bitmap.iter()) {
+                                    if !visible {
+                                        output_array.append_null();
+                                        continue;
+                                    }
+                                    $macro!(self, output_array, $([<v_ $arg:lower>],)*)
+                                }
+                                output_array.finish().into()
                             }
-                            $macro!(self, output_array, $([<v_ $arg:lower>],)*)
-                        }
-                        output_array.finish().into()
+                            None => {
+                                // TODO: use `izip` here.
+                                for ($([<v_ $arg:lower>], )*) in multizip(($([<val_ $arg:lower>].iter(), )*)) {
+                                    $macro!(self, output_array, $([<v_ $arg:lower>],)*)
+                                }
+                                output_array.finish().into()
+                            }
+                        };
+
+                        ValueImpl::Array(Arc::new(array))
                     }
-                    None => {
-                        for ($([<v_ $arg:lower>], )*) in multizip(($([<arr_ $arg:lower>].iter(), )*)) {
-                            $macro!(self, output_array, $([<v_ $arg:lower>],)*)
-                        }
-                        output_array.finish().into()
-                    }
-                }))
+                })
             }})
         }
 
@@ -141,8 +164,8 @@ macro_rules! gen_expr_normal {
                 F: Fn($($arg::RefItem<'_>, )*) -> $crate::Result<OA::OwnedItem> + Sync + Send,
             > Expression for $ty_name<$($arg, )* OA, F>
             where
-                $(for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,)*
-                for<'a> &'a OA: std::convert::From<&'a ArrayImpl>,
+                $(for<'a> ValueRef<'a, $arg>: std::convert::From<&'a ValueImpl>,)*
+                for<'a> ValueRef<'a, OA>: std::convert::From<&'a ValueImpl>,
             {
                 fn return_type(&self) -> DataType {
                     self.return_type.clone()
@@ -227,7 +250,7 @@ macro_rules! gen_expr_bytes {
                 F: Fn($($arg::RefItem<'_>, )* &mut dyn std::fmt::Write) -> $crate::Result<()> + Sync + Send,
             > Expression for $ty_name<$($arg, )* F>
             where
-                $(for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,)*
+                $(for<'a> ValueRef<'a, $arg>: std::convert::From<&'a ValueImpl>,)*
             {
                 fn return_type(&self) -> DataType {
                     self.return_type.clone()
@@ -303,8 +326,8 @@ macro_rules! gen_expr_nullable {
                 F: Fn($(Option<$arg::RefItem<'_>>, )*) -> $crate::Result<Option<OA::OwnedItem>> + Sync + Send,
             > Expression for $ty_name<$($arg, )* OA, F>
             where
-                $(for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,)*
-                for<'a> &'a OA: std::convert::From<&'a ArrayImpl>,
+                $(for<'a> ValueRef<'a, $arg>: std::convert::From<&'a ValueImpl>,)*
+                for<'a> ValueRef<'a, OA>: std::convert::From<&'a ValueImpl>,
             {
                 fn return_type(&self) -> DataType {
                     self.return_type.clone()

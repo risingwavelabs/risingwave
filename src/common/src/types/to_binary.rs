@@ -84,7 +84,6 @@ impl ToBinary for ScalarRefImpl<'_> {
             ScalarRefImpl::Int32(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Int64(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Int256(v) => v.to_binary_with_type(ty),
-            ScalarRefImpl::Uint256(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Serial(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Float32(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Float64(v) => v.to_binary_with_type(ty),

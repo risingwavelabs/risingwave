@@ -312,6 +312,18 @@ impl DatabaseManager {
         }
     }
 
+    pub fn has_creation_in_database(&self, database_id: DatabaseId) -> bool {
+        self.in_progress_creation_tracker
+            .iter()
+            .any(|relation_key| relation_key.0 == database_id)
+    }
+
+    pub fn has_creation_in_schema(&self, schema_id: SchemaId) -> bool {
+        self.in_progress_creation_tracker
+            .iter()
+            .any(|relation_key| relation_key.1 == schema_id)
+    }
+
     pub fn has_in_progress_creation(&self, relation: &RelationKey) -> bool {
         self.in_progress_creation_tracker
             .contains(&relation.clone())
