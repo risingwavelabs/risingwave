@@ -355,7 +355,9 @@ impl Binder {
                 ("acos", raw_call(ExprType::Acos)), 
                 ("atan", raw_call(ExprType::Atan)), 
                 ("atan2", raw_call(ExprType::Atan2)),   
+                ("sqrt", raw_call(ExprType::Sqrt)),     
                 ("cosd", raw_call(ExprType::Cosd)), 
+
                 (
                     "to_timestamp",
                     dispatch_by_len(vec![

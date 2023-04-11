@@ -61,6 +61,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
                     table,
                     stream.get_watermark_epoch(),
                     conflict_behavior,
+                    stream.streaming_metrics.clone(),
                 )
                 .await
                 .boxed()
@@ -115,6 +116,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             table,
             stream.get_watermark_epoch(),
             conflict_behavior,
+            stream.streaming_metrics.clone(),
         )
         .await;
 

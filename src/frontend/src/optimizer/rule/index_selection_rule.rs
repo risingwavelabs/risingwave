@@ -143,8 +143,30 @@ impl Rule for IndexSelectionRule {
 
 struct IndexPredicateRewriter<'a> {
     p2s_mapping: &'a BTreeMap<usize, usize>,
+    function_mapping: &'a HashMap<FunctionCall, usize>,
     offset: usize,
+    covered_by_index: bool,
 }
+
+impl<'a> IndexPredicateRewriter<'a> {
+    fn new(
+        p2s_mapping: &'a BTreeMap<usize, usize>,
+        function_mapping: &'a HashMap<FunctionCall, usize>,
+        offset: usize,
+    ) -> Self {
+        Self {
+            p2s_mapping,
+            function_mapping,
+            offset,
+            covered_by_index: true,
+        }
+    }
+
+    fn covered_by_index(&self) -> bool {
+        self.covered_by_index
+    }
+}
+
 impl ExprRewriter for IndexPredicateRewriter<'_> {
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
         // transform primary predicate to index predicate if it can
@@ -155,8 +177,22 @@ impl ExprRewriter for IndexPredicateRewriter<'_> {
             )
             .into()
         } else {
+            self.covered_by_index = false;
             InputRef::new(input_ref.index() + self.offset, input_ref.return_type()).into()
         }
+    }
+
+    fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
+        if let Some(index) = self.function_mapping.get(&func_call) {
+            return InputRef::new(*index, func_call.return_type()).into();
+        }
+
+        let (func_type, inputs, ret) = func_call.decompose();
+        let inputs = inputs
+            .into_iter()
+            .map(|expr| self.rewrite_expr(expr))
+            .collect();
+        FunctionCall::new_unchecked(func_type, inputs, ret).into()
     }
 }
 
@@ -171,10 +207,11 @@ impl IndexSelectionRule {
         //                index_scan   primary_table_scan
         let predicate = logical_scan.predicate().clone();
         let offset = index.index_item.len();
-        let mut rewriter = IndexPredicateRewriter {
-            p2s_mapping: index.primary_to_secondary_mapping(),
+        let mut rewriter = IndexPredicateRewriter::new(
+            index.primary_to_secondary_mapping(),
+            index.function_mapping(),
             offset,
-        };
+        );
         let new_predicate = predicate.rewrite_expr(&mut rewriter);
 
         let index_scan = LogicalScan::create(
@@ -535,24 +572,17 @@ impl IndexSelectionRule {
         predicate: Condition,
         ctx: OptimizerContextRef,
     ) -> Option<PlanRef> {
-        // check condition is covered by index.
-        let mut input_ref_finder = ExprInputRefFinder::default();
-        predicate.visit_expr(&mut input_ref_finder);
+        let mut rewriter = IndexPredicateRewriter::new(
+            index.primary_to_secondary_mapping(),
+            index.function_mapping(),
+            0,
+        );
+        let new_predicate = predicate.rewrite_expr(&mut rewriter);
 
-        let p2s_mapping = index.primary_to_secondary_mapping();
-        if !input_ref_finder
-            .input_ref_index_set
-            .iter()
-            .all(|x| p2s_mapping.contains_key(x))
-        {
+        // check condition is covered by index.
+        if !rewriter.covered_by_index() {
             return None;
         }
-
-        let mut rewriter = IndexPredicateRewriter {
-            p2s_mapping,
-            offset: 0,
-        };
-        let new_predicate = predicate.rewrite_expr(&mut rewriter);
 
         Some(
             LogicalScan::new(

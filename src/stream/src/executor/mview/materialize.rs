@@ -39,6 +39,7 @@ use risingwave_storage::StateStore;
 use crate::cache::{new_unbounded, ExecutorCache};
 use crate::common::table::state_table::StateTableInner;
 use crate::executor::error::StreamExecutorError;
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, ActorContext, ActorContextRef, BoxedExecutor, BoxedMessageStream,
     Executor, ExecutorInfo, Message, PkIndicesRef, StreamExecutorResult,
@@ -59,6 +60,7 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     info: ExecutorInfo,
 
     materialize_cache: MaterializeCache<SD>,
+
     conflict_behavior: ConflictBehavior,
 }
 
@@ -77,6 +79,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         table_catalog: &Table,
         watermark_epoch: AtomicU64Ref,
         conflict_behavior: ConflictBehavior,
+        metrics: Arc<StreamingMetrics>,
     ) -> Self {
         let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_index).collect();
 
@@ -89,7 +92,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         // decoded row.
         let state_table =
             StateTableInner::from_table_catalog_inconsistent_op(table_catalog, store, vnodes).await;
-
+        let actor_id = actor_context.id;
+        let table_id = table_catalog.id;
         Self {
             input,
             state_table,
@@ -100,7 +104,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 pk_indices: arrange_columns,
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
-            materialize_cache: MaterializeCache::new(watermark_epoch),
+            materialize_cache: MaterializeCache::new(watermark_epoch, metrics, actor_id, table_id),
             conflict_behavior,
         }
     }
@@ -224,7 +228,12 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
                 pk_indices: arrange_columns,
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
-            materialize_cache: MaterializeCache::new(watermark_epoch),
+            materialize_cache: MaterializeCache::new(
+                watermark_epoch,
+                Arc::new(StreamingMetrics::unused()),
+                0,
+                0,
+            ),
             conflict_behavior,
         }
     }
@@ -421,6 +430,9 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S
 pub struct MaterializeCache<SD> {
     data: ExecutorCache<Vec<u8>, CacheValue>,
     _serde: PhantomData<SD>,
+    metrics: Arc<StreamingMetrics>,
+    actor_id: String,
+    table_id: String,
 }
 
 #[derive(EnumAsInner)]
@@ -432,11 +444,19 @@ pub enum CacheValue {
 type EmptyValue = ();
 
 impl<SD: ValueRowSerde> MaterializeCache<SD> {
-    pub fn new(watermark_epoch: AtomicU64Ref) -> Self {
+    pub fn new(
+        watermark_epoch: AtomicU64Ref,
+        metrics: Arc<StreamingMetrics>,
+        actor_id: u32,
+        table_id: u32,
+    ) -> Self {
         let cache = ExecutorCache::new(new_unbounded(watermark_epoch));
         Self {
             data: cache,
             _serde: PhantomData,
+            metrics,
+            actor_id: actor_id.to_string(),
+            table_id: table_id.to_string(),
         }
     }
 
@@ -577,10 +597,17 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
     ) -> StreamExecutorResult<()> {
         let mut futures = vec![];
         for key in keys {
+            self.metrics
+                .materialize_cache_total_count
+                .with_label_values(&[&self.table_id, &self.actor_id])
+                .inc();
             if self.data.contains(key) {
+                self.metrics
+                    .materialize_cache_hit_count
+                    .with_label_values(&[&self.table_id, &self.actor_id])
+                    .inc();
                 continue;
             }
-
             futures.push(async {
                 let key_row = table.pk_serde().deserialize(key).unwrap();
                 (key.to_vec(), table.get_compacted_row(&key_row).await)

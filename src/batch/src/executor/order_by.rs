@@ -91,7 +91,7 @@ impl SortExecutor {
         }
 
         for chunk in &chunks {
-            let encoded_chunk = encode_chunk(chunk, &self.column_orders);
+            let encoded_chunk = encode_chunk(chunk, &self.column_orders)?;
             encoded_rows.extend(
                 encoded_chunk
                     .into_iter()
