@@ -29,7 +29,7 @@ use crate::optimizer::property::{Distribution, Order, RequiredDist};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchDelete {
     pub base: PlanBase,
-    logical: LogicalDelete,
+    pub logical: LogicalDelete,
 }
 
 impl BatchDelete {
