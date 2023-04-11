@@ -1,0 +1,7 @@
+# Create a connection.
+statement ok
+CREATE CONNECTION conn WITH (type = 'mock');
+
+# Create another user with duplicate name.
+statement error
+CREATE CONNECTION conn WITH (type = 'mock');
