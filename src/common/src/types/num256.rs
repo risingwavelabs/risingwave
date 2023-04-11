@@ -39,9 +39,9 @@ pub struct Int256(Box<I256>);
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
 pub struct Int256Ref<'a>(pub &'a I256);
 
-impl Display for Int256 {
+impl<'a> Display for Int256Ref<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0.to_string())
+        self.write(f)
     }
 }
 

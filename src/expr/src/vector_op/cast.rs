@@ -259,6 +259,7 @@ pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
 }
 
 #[function("cast(varchar) -> *number")]
+#[function("cast(varchar) -> int256")]
 #[function("cast(varchar) -> interval")]
 #[function("cast(varchar) -> jsonb")]
 pub fn str_parse<T>(elem: &str) -> Result<T>
@@ -461,6 +462,7 @@ pub fn int32_to_bool(input: i32) -> Result<bool> {
 // For most of the types, cast them to varchar is similar to return their text format.
 // So we use this function to cast type to varchar.
 #[function("cast(*number) -> varchar")]
+#[function("cast(int256) -> varchar")]
 #[function("cast(time) -> varchar")]
 #[function("cast(date) -> varchar")]
 #[function("cast(interval) -> varchar")]
