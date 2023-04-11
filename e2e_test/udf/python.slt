@@ -46,6 +46,9 @@ create function array_access(varchar[], int) returns varchar language python as 
 statement ok
 create function jsonb_access(jsonb, int) returns jsonb language python as jsonb_access using link 'http://localhost:8815';
 
+statement ok
+create function jsonb_concat(jsonb[]) returns jsonb language python as jsonb_concat using link 'http://localhost:8815';
+
 query I
 select int_42();
 ----
@@ -78,6 +81,11 @@ select jsonb_access(a::jsonb, 1) from
 "b"
 NULL
 false
+
+query T
+select jsonb_concat(ARRAY['null'::jsonb, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb]);
+----
+[null, 1, "str", {}]
 
 query I
 select series(5);

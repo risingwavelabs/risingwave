@@ -38,8 +38,7 @@ class ScalarFunction(UserDefinedFunction):
         # parse value from json string for jsonb columns
         inputs = [[v.as_py() for v in array] for array in batch]
         inputs = [
-            [(json.loads(v) if v is not None else None)
-             for v in array] if type == pa.large_string() else array
+            _process_input_array(array, type)
             for array, type in zip(inputs, self._input_schema.types)]
 
         # evaluate the function for each row
@@ -52,6 +51,17 @@ class ScalarFunction(UserDefinedFunction):
                       for v in column]
         array = pa.array(column, type=self._result_schema.types[0])
         return pa.RecordBatch.from_arrays([array], schema=self._result_schema)
+
+
+def _process_input_array(array: list, type: pa.DataType) -> list:
+    if pa.types.is_list(type):
+        return [(_process_input_array(v, type.value_type)
+                if v is not None else None)
+                for v in array]
+    if pa.types.is_large_string(type):
+        return [(json.loads(v) if v is not None else None)
+                for v in array]
+    return array
 
 
 class TableFunction(UserDefinedFunction):

@@ -70,10 +70,17 @@ def array_access(list: List[str], idx: int) -> Optional[str]:
 
 
 @udf(input_types=['JSONB', 'INT'], result_type='JSONB')
-def jsonb_access(json: list, i: int) -> Any:
+def jsonb_access(json: Any, i: int) -> Any:
     if not json:
         return None
     return json[i]
+
+
+@udf(input_types=['JSONB[]'], result_type='JSONB')
+def jsonb_concat(list: List[Any]) -> Any:
+    if not list:
+        return None
+    return list
 
 
 if __name__ == '__main__':
@@ -87,4 +94,5 @@ if __name__ == '__main__':
     server.add_function(hex_to_dec)
     server.add_function(array_access)
     server.add_function(jsonb_access)
+    server.add_function(jsonb_concat)
     server.serve()
