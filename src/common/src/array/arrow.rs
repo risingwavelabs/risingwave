@@ -95,7 +95,8 @@ converts_generic! {
     { arrow_array::Time64NanosecondArray, Time64(Nanosecond), ArrayImpl::Time },
     { arrow_array::StructArray, Struct(_), ArrayImpl::Struct },
     { arrow_array::ListArray, List(_), ArrayImpl::List },
-    { arrow_array::BinaryArray, Binary, ArrayImpl::Bytea }
+    { arrow_array::BinaryArray, Binary, ArrayImpl::Bytea },
+    { arrow_array::LargeStringArray, LargeUtf8, ArrayImpl::Jsonb }    // we use LargeUtf8 to represent Jsonb in arrow
 }
 
 // Arrow Datatype -> Risingwave Datatype
@@ -115,6 +116,7 @@ impl From<&arrow_schema::DataType> for DataType {
             Interval(_) => Self::Interval, // TODO: check time unit
             Binary => Self::Bytea,
             Utf8 => Self::Varchar,
+            LargeUtf8 => Self::Jsonb,
             Struct(field) => Self::Struct(Arc::new(struct_type::StructType {
                 fields: field.iter().map(|f| f.data_type().into()).collect(),
                 field_names: field.iter().map(|f| f.name().clone()).collect(),
@@ -148,6 +150,7 @@ impl From<&DataType> for arrow_schema::DataType {
             DataType::Time => Self::Time64(arrow_schema::TimeUnit::Millisecond),
             DataType::Interval => Self::Interval(arrow_schema::IntervalUnit::DayTime),
             DataType::Varchar => Self::Utf8,
+            DataType::Jsonb => Self::LargeUtf8,
             DataType::Bytea => Self::Binary,
             DataType::Decimal => Self::Decimal128(28, 0), // arrow precision can not be 0
             DataType::Struct(struct_type) => {
@@ -405,6 +408,26 @@ impl From<&arrow_array::Decimal128Array> for DecimalArray {
     }
 }
 
+impl From<&JsonbArray> for arrow_array::LargeStringArray {
+    fn from(array: &JsonbArray) -> Self {
+        let mut builder =
+            arrow_array::builder::LargeStringBuilder::with_capacity(array.len(), array.len() * 16);
+        for value in array.iter() {
+            builder.append_option(value.map(|j| j.to_string()));
+        }
+        builder.finish()
+    }
+}
+
+impl From<&arrow_array::LargeStringArray> for JsonbArray {
+    fn from(array: &arrow_array::LargeStringArray) -> Self {
+        array
+            .iter()
+            .map(|o| o.map(|s| s.parse().unwrap()))
+            .collect()
+    }
+}
+
 impl From<&ListArray> for arrow_array::ListArray {
     fn from(array: &ListArray) -> Self {
         use arrow_array::builder::*;
@@ -496,7 +519,12 @@ impl From<&ListArray> for arrow_array::ListArray {
                 Time64NanosecondBuilder::with_capacity(a.len()),
                 |b, v| b.append_option(v.map(|d| d.into_arrow())),
             ),
-            ArrayImpl::Jsonb(_) => todo!("list of jsonb"),
+            ArrayImpl::Jsonb(a) => build(
+                array,
+                a,
+                LargeStringBuilder::with_capacity(a.len(), a.len() * 16),
+                |b, v| b.append_option(v.map(|j| j.to_string())),
+            ),
             ArrayImpl::Serial(_) => todo!("list of serial"),
             ArrayImpl::Struct(_) => todo!("list of struct"),
             ArrayImpl::List(_) => todo!("list of list"),

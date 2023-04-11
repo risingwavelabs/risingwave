@@ -14,6 +14,7 @@
 
 use std::mem::size_of;
 
+use parse_display::Display;
 use postgres_types::{FromSql as _, ToSql as _, Type};
 use serde_json::Value;
 
@@ -23,10 +24,10 @@ use crate::collection::estimate_size::EstimateSize;
 use crate::types::{Scalar, ScalarRef};
 use crate::util::iter_util::ZipEqFast;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
 pub struct JsonbVal(Box<Value>); // The `Box` is just to keep `size_of::<ScalarImpl>` smaller.
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Display)]
 pub struct JsonbRef<'a>(&'a Value);
 
 impl Scalar for JsonbVal {
