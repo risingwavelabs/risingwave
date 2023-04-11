@@ -171,6 +171,11 @@ impl SinkCatalog {
         }
     }
 
+    /// Returns the SQL statement that can be used to create this sink.
+    pub fn create_sql(&self) -> String {
+        self.definition.clone()
+    }
+
     pub fn schema(&self) -> Schema {
         let fields = self
             .columns

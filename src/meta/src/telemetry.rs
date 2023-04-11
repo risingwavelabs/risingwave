@@ -29,6 +29,11 @@ use crate::storage::{MetaStore, Snapshot};
 pub const TELEMETRY_CF: &str = "cf/telemetry";
 /// `telemetry` in bytes
 pub const TELEMETRY_KEY: &[u8] = &[74, 65, 0x6c, 65, 0x6d, 65, 74, 72, 79];
+
+pub type TelemetryError = String;
+
+pub type Result<T> = core::result::Result<T, TelemetryError>;
+
 #[derive(Clone, Debug)]
 pub(crate) struct TrackingId(String);
 
@@ -41,11 +46,12 @@ impl TrackingId {
         Ok(Self(String::from_utf8(bytes)?))
     }
 
-    pub(crate) async fn from_meta_store(meta_store: &Arc<impl MetaStore>) -> anyhow::Result<Self> {
+    pub(crate) async fn from_meta_store(meta_store: &Arc<impl MetaStore>) -> Result<Self> {
         match meta_store.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await {
-            Ok(bytes) => Self::from_bytes(bytes)
-                .map_err(|e| anyhow::format_err!("failed to parse tracking_id {}", e)),
-            Err(e) => Err(anyhow::format_err!("tracking_id not exist, {}", e)),
+            Ok(bytes) => {
+                Self::from_bytes(bytes).map_err(|e| format!("failed to parse tracking_id {}", e))
+            }
+            Err(e) => Err(format!("tracking_id not exist, {}", e)),
         }
     }
 
@@ -57,7 +63,7 @@ impl TrackingId {
     /// fetch or create a `tracking_id` from etcd
     pub(crate) async fn get_or_create_meta_store(
         meta_store: &Arc<impl MetaStore>,
-    ) -> Result<Self, anyhow::Error> {
+    ) -> anyhow::Result<Self, anyhow::Error> {
         match Self::from_meta_store(meta_store).await {
             Ok(id) => Ok(id),
             Err(_) => {
@@ -139,7 +145,9 @@ impl<S: MetaStore> MetaTelemetryInfoFetcher<S> {
 #[async_trait::async_trait]
 impl<S: MetaStore> TelemetryInfoFetcher for MetaTelemetryInfoFetcher<S> {
     async fn fetch_telemetry_info(&self) -> anyhow::Result<Option<String>> {
-        let tracking_id = TrackingId::from_meta_store(&self.meta_store).await?;
+        let tracking_id = TrackingId::from_meta_store(&self.meta_store)
+            .await
+            .map_err(|e| anyhow!(e))?;
 
         Ok(Some(tracking_id.into()))
     }

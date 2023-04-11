@@ -32,6 +32,7 @@ use tracing::{error, info, warn};
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::hummock::compactor::{compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
+use crate::hummock::event_handler::cache_refill_policy::CacheRefillPolicy;
 use crate::hummock::event_handler::uploader::{
     HummockUploader, UploadTaskInfo, UploadTaskPayload, UploaderEvent,
 };
@@ -108,6 +109,7 @@ pub struct HummockEventHandler {
 
     last_instance_id: LocalInstanceId,
 
+    cache_fill_policy: Arc<CacheRefillPolicy>,
     sstable_object_id_manager: SstableObjectIdManagerRef,
 }
 
@@ -142,8 +144,11 @@ impl HummockEventHandler {
         let version_update_notifier_tx = Arc::new(version_update_notifier_tx);
         let read_version_mapping = Arc::new(RwLock::new(HashMap::default()));
         let buffer_tracker = BufferTracker::from_storage_opts(&compactor_context.storage_opts);
+        let max_preload_wait_time_mill = compactor_context.storage_opts.max_preload_wait_time_mill;
         let write_conflict_detector =
             ConflictDetector::new_from_config(&compactor_context.storage_opts);
+        let sstable_store = compactor_context.sstable_store.clone();
+        let metrics = compactor_context.compactor_metrics.clone();
         let sstable_object_id_manager = compactor_context.sstable_object_id_manager.clone();
         let upload_compactor_context = compactor_context.clone();
         let uploader = HummockUploader::new(
@@ -159,6 +164,11 @@ impl HummockEventHandler {
             &compactor_context.storage_opts,
             compactor_context.compaction_executor.clone(),
         );
+        let cache_fill_policy = Arc::new(CacheRefillPolicy::new(
+            sstable_store,
+            metrics,
+            max_preload_wait_time_mill,
+        ));
 
         Self {
             hummock_event_tx,
@@ -170,6 +180,7 @@ impl HummockEventHandler {
             read_version_mapping,
             uploader,
             last_instance_id: 0,
+            cache_fill_policy,
             sstable_object_id_manager,
         }
     }
@@ -378,15 +389,26 @@ impl HummockEventHandler {
         });
     }
 
-    fn handle_version_update(&mut self, version_payload: Payload) {
-        let pinned_version = self.pinned_version.load();
+    async fn handle_version_update(&mut self, version_payload: Payload) {
+        let pinned_version = self.pinned_version.load().clone();
 
         let prev_max_committed_epoch = pinned_version.max_committed_epoch();
         let newly_pinned_version = match version_payload {
             Payload::VersionDeltas(version_deltas) => {
                 let mut version_to_apply = pinned_version.version();
+                let max_level = version_to_apply
+                    .levels
+                    .values()
+                    .map(|levels| levels.levels.last().unwrap().level_idx)
+                    .max()
+                    .unwrap();
                 for version_delta in &version_deltas.version_deltas {
                     assert_eq!(version_to_apply.id, version_delta.prev_id);
+                    if version_to_apply.max_committed_epoch == version_delta.max_committed_epoch {
+                        self.cache_fill_policy
+                            .execute(version_delta.clone(), max_level)
+                            .await;
+                    }
                     version_to_apply.apply_version_delta(version_delta);
                 }
                 version_to_apply
@@ -490,7 +512,7 @@ impl HummockEventHandler {
                         }
 
                         HummockEvent::VersionUpdate(version_payload) => {
-                            self.handle_version_update(version_payload);
+                            self.handle_version_update(version_payload).await;
                         }
 
                         HummockEvent::ImmToUploader(imm) => {
