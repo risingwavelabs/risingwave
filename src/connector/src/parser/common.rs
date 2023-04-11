@@ -60,7 +60,7 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
         DataType::Int16 => ensure_i16!(v, i16).into(),
         DataType::Int32 => ensure_i32!(v, i32).into(),
         DataType::Int64 => ensure_i64!(v, i64).into(),
-        DataType::Int256 => Int256::from_str(ensure_str!(v, "varchar"))?.into(),
+        DataType::Int256 => Int256::from_str(ensure_str!(v, "quoted int256"))?.into(),
         DataType::Serial => anyhow::bail!("serial should not be parsed"),
         // when f32 overflows, the value is converted to `inf` which is inappropriate
         DataType::Float32 => {

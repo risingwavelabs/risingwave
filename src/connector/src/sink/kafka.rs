@@ -439,7 +439,7 @@ fn fields_to_json(fields: &[Field]) -> Value {
             risingwave_common::types::DataType::Int16 => "int16",
             risingwave_common::types::DataType::Int32 => "int32",
             risingwave_common::types::DataType::Int64 => "int64",
-            risingwave_common::types::DataType::Int256 => "int256",
+            risingwave_common::types::DataType::Int256 => "string",
             risingwave_common::types::DataType::Float32 => "float32",
             risingwave_common::types::DataType::Float64 => "float64",
             // currently, we only support handling decimal as string.

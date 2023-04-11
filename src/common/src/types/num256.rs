@@ -96,6 +96,16 @@ macro_rules! impl_common_for_num256 {
 
         impl $scalar {
             #[inline]
+            pub fn min() -> Self {
+                Self::from(<$inner>::MIN)
+            }
+
+            #[inline]
+            pub fn max() -> Self {
+                Self::from(<$inner>::MAX)
+            }
+
+            #[inline]
             pub fn into_inner(self) -> $inner {
                 *self.0
             }
