@@ -35,16 +35,16 @@ impl From<&DataChunk> for arrow_array::RecordBatch {
     }
 }
 
-impl From<&arrow_array::RecordBatch> for DataChunk {
-    fn from(batch: &arrow_array::RecordBatch) -> Self {
-        DataChunk::new(
-            batch
-                .columns()
-                .iter()
-                .map(|array| Column::new(Arc::new(array.into())))
-                .collect(),
-            batch.num_rows(),
-        )
+impl TryFrom<&arrow_array::RecordBatch> for DataChunk {
+    type Error = ArrayError;
+
+    fn try_from(batch: &arrow_array::RecordBatch) -> Result<Self, Self::Error> {
+        let mut columns = Vec::with_capacity(batch.num_columns());
+        for array in batch.columns() {
+            let column = Column::new(Arc::new(array.try_into()?));
+            columns.push(column);
+        }
+        Ok(DataChunk::new(columns, batch.num_rows()))
     }
 }
 
@@ -61,20 +61,21 @@ macro_rules! converts_generic {
             }
         }
         // Arrow array -> RisingWave array
-        impl From<&arrow_array::ArrayRef> for ArrayImpl {
-            fn from(array: &arrow_array::ArrayRef) -> Self {
+        impl TryFrom<&arrow_array::ArrayRef> for ArrayImpl {
+            type Error = ArrayError;
+            fn try_from(array: &arrow_array::ArrayRef) -> Result<Self, Self::Error> {
                 use arrow_schema::DataType::*;
                 use arrow_schema::IntervalUnit::*;
                 use arrow_schema::TimeUnit::*;
                 match array.data_type() {
-                    $($ArrowPattern => $ArrayImplPattern(
+                    $($ArrowPattern => Ok($ArrayImplPattern(
                         array
                             .as_any()
                             .downcast_ref::<$ArrowType>()
                             .unwrap()
-                            .into(),
-                    ),)*
-                    t => todo!("Unsupported arrow data type: {t:?}"),
+                            .try_into()?,
+                    )),)*
+                    t => Err(ArrayError::FromArrow(format!("unsupported data type: {t:?}"))),
                 }
             }
         }
@@ -419,12 +420,20 @@ impl From<&JsonbArray> for arrow_array::LargeStringArray {
     }
 }
 
-impl From<&arrow_array::LargeStringArray> for JsonbArray {
-    fn from(array: &arrow_array::LargeStringArray) -> Self {
+impl TryFrom<&arrow_array::LargeStringArray> for JsonbArray {
+    type Error = ArrayError;
+
+    fn try_from(array: &arrow_array::LargeStringArray) -> Result<Self, Self::Error> {
         array
             .iter()
-            .map(|o| o.map(|s| s.parse().unwrap()))
-            .collect()
+            .map(|o| {
+                o.map(|s| {
+                    s.parse()
+                        .map_err(|_| ArrayError::FromArrow(format!("invalid json: {s}")))
+                })
+                .transpose()
+            })
+            .try_collect()
     }
 }
 
@@ -538,10 +547,15 @@ impl From<&ListArray> for arrow_array::ListArray {
     }
 }
 
-impl From<&arrow_array::ListArray> for ListArray {
-    fn from(array: &arrow_array::ListArray) -> Self {
-        let iter = array.iter().map(|o| o.map(|a| ArrayImpl::from(&a)));
-        ListArray::from_iter(iter, (&array.value_type()).into())
+impl TryFrom<&arrow_array::ListArray> for ListArray {
+    type Error = ArrayError;
+
+    fn try_from(array: &arrow_array::ListArray) -> Result<Self, Self::Error> {
+        let iter: Vec<_> = array
+            .iter()
+            .map(|o| o.map(|a| ArrayImpl::try_from(&a)).transpose())
+            .try_collect()?;
+        Ok(ListArray::from_iter(iter, (&array.value_type()).into()))
     }
 }
 
@@ -568,16 +582,22 @@ impl From<&StructArray> for arrow_array::StructArray {
     }
 }
 
-impl From<&arrow_array::StructArray> for StructArray {
-    fn from(array: &arrow_array::StructArray) -> Self {
+impl TryFrom<&arrow_array::StructArray> for StructArray {
+    type Error = ArrayError;
+
+    fn try_from(array: &arrow_array::StructArray) -> Result<Self, Self::Error> {
         let mut null_bitmap = Vec::new();
         for i in 0..arrow_array::Array::len(&array) {
             null_bitmap.push(!arrow_array::Array::is_null(&array, i))
         }
-        match arrow_array::Array::data_type(&array) {
+        Ok(match arrow_array::Array::data_type(&array) {
             arrow_schema::DataType::Struct(fields) => StructArray::from_slices_with_field_names(
                 &(null_bitmap),
-                array.columns().iter().map(ArrayImpl::from).collect(),
+                array
+                    .columns()
+                    .iter()
+                    .map(ArrayImpl::try_from)
+                    .try_collect()?,
                 fields
                     .iter()
                     .map(|f| DataType::from(f.data_type()))
@@ -585,7 +605,7 @@ impl From<&arrow_array::StructArray> for StructArray {
                 array.column_names().into_iter().map(String::from).collect(),
             ),
             _ => panic!("nested field types cannot be determined."),
-        }
+        })
     }
 }
 
