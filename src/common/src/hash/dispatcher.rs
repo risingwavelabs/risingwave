@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use num256::Int256;
+
 use super::HashKey;
 use crate::array::serial_array::Serial;
 use crate::hash;
 use crate::hash::{HeapNullBitmap, NullBitmap, StackNullBitmap, MAX_GROUP_KEYS_ON_STACK};
 use crate::types::{num256, DataType};
-
 
 /// An enum to help to dynamically dispatch [`HashKey`] template.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
