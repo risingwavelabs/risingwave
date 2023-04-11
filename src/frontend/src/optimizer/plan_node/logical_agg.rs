@@ -18,7 +18,7 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
-use risingwave_common::types::{DataType, Datum, ScalarImpl, F64};
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::expr::AggKind;
 
@@ -732,19 +732,7 @@ impl LogicalAggBuilder {
                 // stddev = sqrt(variance)
                 if matches!(agg_kind, AggKind::StddevPop | AggKind::StddevSamp) {
                     target_expr = ExprImpl::from(
-                        FunctionCall::new(
-                            ExprType::Pow,
-                            vec![
-                                target_expr.clone(),
-                                // TODO: The decimal implementation now still relies on float64, so
-                                // float64 is still used here
-                                ExprImpl::from(Literal::new(
-                                    Datum::from(ScalarImpl::Float64(F64::from(0.5))),
-                                    DataType::Float64,
-                                )),
-                            ],
-                        )
-                        .unwrap(),
+                        FunctionCall::new(ExprType::Sqrt, vec![target_expr]).unwrap(),
                     );
                 }
 

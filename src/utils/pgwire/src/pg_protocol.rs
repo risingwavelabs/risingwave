@@ -324,6 +324,7 @@ where
 
     fn process_cancel_msg(&mut self, m: FeCancelMessage) -> PsqlResult<()> {
         let session_id = (m.target_process_id, m.target_secret_key);
+        tracing::trace!("cancel query in session: {:?}", session_id);
         self.session_mgr.cancel_queries_in_session(session_id);
         self.session_mgr.cancel_creating_jobs_in_session(session_id);
         self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;

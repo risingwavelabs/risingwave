@@ -212,6 +212,10 @@ def section_compaction(outer_panels):
                             [90, "max"],
                         ),
                         panels.target(
+                            f"histogram_quantile(0.99, sum(rate({metric('compute_refill_cache_duration_bucket')}[$__rate_interval])) by (le, instance))",
+                            "compute_apply_version_duration_p99 - {{instance}}",
+                        ),
+                        panels.target(
                             f"sum by(le)(rate({metric('compactor_compact_task_duration_sum')}[$__rate_interval])) / sum by(le)(rate({metric('compactor_compact_task_duration_count')}[$__rate_interval]))",
                             "compact-task avg",
                         ),
@@ -1377,6 +1381,10 @@ def section_hummock(panels):
                 panels.target(
                     f"sum(rate({metric('file_cache_miss')}[$__rate_interval])) by (instance)",
                     "file cache miss @ {{instance}}",
+                ),
+                panels.target(
+                    f"sum(rate({metric('sstable_preload_io_count')}[$__rate_interval])) ",
+                    "preload iops",
                 ),
             ],
         ),

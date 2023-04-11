@@ -355,6 +355,7 @@ impl<S: StateStoreIterItemStream> MonitoredStateStoreIter<S> {
             stats.total_size += key.encoded_len() + value.len();
             yield (key, value);
         }
+        drop(stats);
     }
 
     fn into_stream(self) -> impl StateStoreIterItemStream {
