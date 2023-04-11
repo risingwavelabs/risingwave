@@ -299,9 +299,7 @@ where
             }
 
             None => {
-                option.key_range = KeyRange {
-                    ..Default::default()
-                }
+                option.key_range = KeyRange::default();
             }
         }
 
