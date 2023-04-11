@@ -884,14 +884,25 @@ where
                 compaction_group_id,
             );
 
-            tracing::info!(
-                "For compaction group {}: pick up {} tables in level {} to compact.  cost time: {:?}",
-                compaction_group_id,
-                compact_task.input_ssts[0].table_infos.len(),
-                compact_task.input_ssts[0].level_idx,
-                start_time.elapsed()
-            );
             drop(compaction_guard);
+
+            if compact_task.input_ssts[0].level_idx == 0 {
+                tracing::info!(
+                    "For compaction group {}: pick up {} sub_level in level {} to compact. cost time: {:?}",
+                    compaction_group_id,
+                    compact_task.input_ssts.len(),
+                    compact_task.input_ssts[0].level_idx,
+                    start_time.elapsed()
+                );
+            } else {
+                tracing::info!(
+                    "For compaction group {}: pick up {} tables in level {} to compact.  cost time: {:?}",
+                    compaction_group_id,
+                    compact_task.input_ssts[0].table_infos.len(),
+                    compact_task.input_ssts[0].level_idx,
+                    start_time.elapsed()
+                );
+            }
         }
         #[cfg(test)]
         {

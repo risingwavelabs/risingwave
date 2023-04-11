@@ -79,7 +79,16 @@ impl TierCompactionPicker {
 
             let mut skip_by_write_amp = false;
             let mut level_select_tables: Vec<Vec<SstableInfo>> = vec![];
-            for (compaction_bytes, all_file_count, level_select_sst) in l0_select_tables_vec {
+            for (plan_index, (compaction_bytes, all_file_count, level_select_sst)) in
+                l0_select_tables_vec.into_iter().enumerate()
+            {
+                if plan_index == 0
+                    && level_select_sst.len() < self.config.level0_tier_compact_file_number as usize
+                {
+                    // first plan level count smaller than limit
+                    break;
+                }
+
                 let mut max_level_size = 0;
                 for level_select_table in &level_select_sst {
                     let level_select_size = level_select_table
