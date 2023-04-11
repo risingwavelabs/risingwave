@@ -137,7 +137,7 @@ pub enum DataType {
     #[from_str(regex = "(?i)^serial$")]
     Serial,
     #[display("int256")]
-    #[from_str(regex = "(?i)^int256$")]
+    #[from_str(regex = "(?i)^rw_int256$")]
     Int256,
 }
 
