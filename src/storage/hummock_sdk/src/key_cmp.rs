@@ -30,6 +30,11 @@ impl KeyComparator {
         l_p.cmp(r_p).then_with(|| r_s.cmp(l_s))
     }
 
+    #[inline]
+    pub fn encoded_full_key_less_than(lhs: &[u8], rhs: &[u8]) -> bool {
+        Self::compare_encoded_full_key(lhs, rhs) == cmp::Ordering::Less
+    }
+
     /// Used to compare [`UserKey`] and its encoded format.
     pub fn compare_user_key_cross_format(
         encoded: impl AsRef<[u8]>,
