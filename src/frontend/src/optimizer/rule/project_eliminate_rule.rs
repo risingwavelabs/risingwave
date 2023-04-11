@@ -20,7 +20,18 @@ pub struct ProjectEliminateRule {}
 impl Rule for ProjectEliminateRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let project = plan.as_logical_project()?;
-        if project.is_identity() {
+        let dml = |input: PlanRef| {
+            if let Some(_) = input.as_logical_insert() {
+                true
+            } else if let Some(_) = input.as_logical_delete() {
+                true
+            } else if let Some(_) = input.as_logical_update() {
+                true
+            } else {
+                false
+            }
+        };
+        if project.is_identity() && !dml(project.input()) {
             Some(project.input())
         } else {
             None

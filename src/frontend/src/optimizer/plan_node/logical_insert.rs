@@ -174,9 +174,13 @@ impl fmt::Display for LogicalInsert {
 
 impl ColPrunable for LogicalInsert {
     fn prune_col(&self, _required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
-        let required_cols: Vec<_> = (0..self.input.schema().len()).collect();
-        self.clone_with_input(self.input.prune_col(&required_cols, ctx))
-            .into()
+        if self.has_returning() {
+            self.clone().into()
+        } else {
+            let required_cols: Vec<_> = (0..self.input.schema().len()).collect();
+            self.clone_with_input(self.input.prune_col(&required_cols, ctx))
+                .into()
+        }
     }
 }
 

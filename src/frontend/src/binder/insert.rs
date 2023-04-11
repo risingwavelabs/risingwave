@@ -135,11 +135,11 @@ impl Binder {
         let (returning_list, fields) = self.bind_returning_list(returning_items)?;
         let has_returning = !returning_list.is_empty();
 
-        if has_returning && has_generated_columns {
-            return Err(RwError::from(ErrorCode::BindError(
-                "returning is temporarily banned when inserting to a table with generated columns".to_string(),
-            )));
-        }
+        // if has_returning && has_generated_columns {
+        //     return Err(RwError::from(ErrorCode::BindError(
+        //         "returning is temporarily banned when inserting to a table with generated columns".to_string(),
+        //     )));
+        // }
 
         let col_indices_to_insert = get_col_indices_to_insert(
             &cols_to_insert_in_table,
