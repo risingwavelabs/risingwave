@@ -12,15 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
-use risingwave_common::array::{ArrayRef, DataChunk};
+use risingwave_common::array::DataChunk;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
-use super::{Expression, CONTEXT};
+use super::{Expression, ValueImpl, CONTEXT};
 use crate::{bail, ensure, ExprError, Result};
 
 #[derive(Debug)]
@@ -53,17 +51,16 @@ impl Expression for ProcTimeExpression {
         DataType::Timestamptz
     }
 
-    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let capacity = input.capacity();
-        let mut array_builder = self.return_type().create_array_builder(capacity);
-
+    async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
         let proc_time = CONTEXT
             .try_with(|context| context.get_physical_time())
             .map_err(|_| ExprError::Context)?;
         let datum = Some(ScalarImpl::Int64(proc_time as i64));
 
-        array_builder.append_datum_n(capacity, datum);
-        Ok(Arc::new(array_builder.finish()))
+        Ok(ValueImpl::Scalar {
+            value: datum,
+            capacity: input.capacity(),
+        })
     }
 
     async fn eval_row(&self, _input: &OwnedRow) -> Result<Datum> {
@@ -73,5 +70,34 @@ impl Expression for ProcTimeExpression {
         let datum = Some(ScalarImpl::Int64(proc_time as i64));
 
         Ok(datum)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::DataChunk;
+    use risingwave_common::types::ScalarRefImpl;
+    use risingwave_common::util::epoch::Epoch;
+
+    use super::*;
+    use crate::expr::{ExprContext, CONTEXT};
+
+    #[tokio::test]
+    async fn test_expr_proc_time() {
+        let proc_time_expr = ProcTimeExpression::new();
+        let epoch = Epoch::now();
+        let time = epoch.physical_time();
+        let time_datum = Some(ScalarRefImpl::Int64(time as i64));
+        let context = ExprContext::new(epoch);
+        let chunk = DataChunk::new_dummy(3);
+
+        let array = CONTEXT
+            .scope(context, proc_time_expr.eval(&chunk))
+            .await
+            .unwrap();
+
+        for datum_ref in array.iter() {
+            assert_eq!(datum_ref, time_datum)
+        }
     }
 }
