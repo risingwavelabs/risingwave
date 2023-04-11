@@ -354,10 +354,6 @@ impl SstableStore {
         self.meta_cache.clear();
     }
 
-    pub fn lookup_sstable(&self, sst_id: u64) -> Option<TableHolder> {
-        self.meta_cache.lookup(sst_id, &sst_id)
-    }
-
     /// Returns `table_holder`, `local_cache_meta_block_miss` (1 if cache miss) and
     /// `local_cache_meta_block_unhit` (1 if not cache hit).
     pub async fn sstable_syncable(
