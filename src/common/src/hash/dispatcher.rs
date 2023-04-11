@@ -77,6 +77,9 @@ pub trait HashKeyDispatcher: Sized {
         }
     }
 
+    /// All data types will be stored in a single `HashKey`.
+    /// We use `Key<N>` for fixed size keys,
+    /// `KeySerialized` for variable length keys.
     fn dispatch_by_key_size<T: NullBitmap>(self) -> Self::Output {
         match calc_hash_key_kind(self.data_types()) {
             HashKeyKind::Key8 => self.dispatch_impl::<hash::Key8<T>>(),

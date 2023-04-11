@@ -45,10 +45,12 @@ use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::iter_util::ZipEqFast;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum_into};
 
+/// This is determined by the stack based data structure we use,
+/// `StackNullBitmap`, which can store 64 bits at most.
 pub static MAX_GROUP_KEYS_ON_STACK: usize = 64;
 
 /// Null bitmap on heap.
-/// For the **edge case** where group key sizes are larger than 64, we use this.
+/// We use this for the **edge case** where group key sizes are larger than 64.
 /// This is because group key null bits cannot fit into a u64 on the stack
 /// if they exceed 64 bits.
 /// NOTE(kwannoel): This is not really optimized as it is an edge case.
@@ -79,6 +81,26 @@ const_assert_eq!(
     std::mem::size_of::<u64>()
 );
 
+const_assert_eq!(
+    std::mem::size_of::<HeapNullBitmap>(),
+    std::mem::size_of::<usize>() * 4,
+);
+
+/// We use a trait for `NullBitmap` so we can parameterize structs on it.
+/// This is because `NullBitmap` is used often, and we want it to occupy
+/// the minimal stack space.
+///
+/// ### Example
+/// ```rust
+/// use risingwave_common::hash::{NullBitmap, StackNullBitmap};
+/// struct A<B: NullBitmap> {
+///     null_bitmap: B,
+/// }
+/// ```
+///
+/// Then `A<StackNullBitmap>` occupies 64 bytes,
+/// and in cases which require it,
+/// `A<HeapNullBitmap>` will occupy 4 * usize bytes (on 64 bit arch that would be 256 bytes).
 pub trait NullBitmap: EstimateSize + Clone + PartialEq + Debug + Send + Sync + 'static {
     fn empty() -> Self;
 
