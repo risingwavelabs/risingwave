@@ -114,6 +114,7 @@ message ExprNode {
     ACOS = 250;
     ATAN = 251;
     ATAN2 = 252;
+    SQRT = 253;
 
     // Boolean comparison
     IS_TRUE = 301;

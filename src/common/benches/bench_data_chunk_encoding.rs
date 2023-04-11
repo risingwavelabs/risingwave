@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use criterion::{criterion_group, criterion_main, Criterion};
+use itertools::Itertools;
+use risingwave_common::row::Row;
 use risingwave_common::test_utils::rand_chunk;
 use risingwave_common::types::DataType;
 
@@ -39,16 +41,33 @@ fn bench_data_chunk_encoding(c: &mut Criterion) {
         DataChunkBenchCase::new("Int16", vec![DataType::Int16]),
         DataChunkBenchCase::new("String", vec![DataType::Varchar]),
         DataChunkBenchCase::new("Int16 and String", vec![DataType::Int16, DataType::Varchar]),
+        DataChunkBenchCase::new(
+            "Int16, Int32, Int64 and String",
+            vec![
+                DataType::Int16,
+                DataType::Int32,
+                DataType::Int64,
+                DataType::Varchar,
+            ],
+        ),
     ];
     for case in test_cases {
         for null_ratio in NULL_RATIOS {
             for chunk_size in CHUNK_SIZES {
-                let id = format!(
+                let chunk = rand_chunk::gen_chunk(&case.data_types, *chunk_size, SEED, *null_ratio);
+                let mut group = c.benchmark_group(&format!(
                     "data chunk encoding: {}, {} rows, Pr[null]={}",
                     case.name, chunk_size, null_ratio
-                );
-                let chunk = rand_chunk::gen_chunk(&case.data_types, *chunk_size, SEED, *null_ratio);
-                c.bench_function(&id, |b| b.iter(|| chunk.serialize()));
+                ));
+                group.bench_function("chunk serialize", |b| b.iter(|| chunk.serialize()));
+                group.bench_function("row serialize", |b| {
+                    b.iter(|| {
+                        chunk
+                            .rows()
+                            .map(|x| x.value_serialize_bytes())
+                            .collect_vec()
+                    })
+                });
             }
         }
     }

@@ -456,7 +456,6 @@ impl From<&ListArray> for arrow_array::ListArray {
                 |b, v| b.append_option(v),
             ),
             ArrayImpl::Int256(_a) => todo!(),
-            ArrayImpl::Uint256(_a) => todo!(),
             ArrayImpl::Bool(a) => {
                 build(array, a, BooleanBuilder::with_capacity(a.len()), |b, v| {
                     b.append_option(v)

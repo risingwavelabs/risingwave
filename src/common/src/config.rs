@@ -300,6 +300,10 @@ pub struct StorageConfig {
     #[serde(default)]
     pub shared_buffer_capacity_mb: Option<usize>,
 
+    /// The threshold for the number of immutable memtables to merge to a new imm.
+    #[serde(default = "default::storage::imm_merge_threshold")]
+    pub imm_merge_threshold: usize,
+
     /// Whether to enable write conflict detection
     #[serde(default = "default::storage::write_conflict_detection_enabled")]
     pub write_conflict_detection_enabled: bool,
@@ -350,6 +354,9 @@ pub struct StorageConfig {
 
     #[serde(default = "default::storage::max_concurrent_compaction_task_number")]
     pub max_concurrent_compaction_task_number: u64,
+
+    #[serde(default = "default::storage::max_preload_wait_time_mill")]
+    pub max_preload_wait_time_mill: u64,
 
     #[serde(default, flatten)]
     pub unrecognized: HashMap<String, Value>,
@@ -600,6 +607,10 @@ mod default {
             1024
         }
 
+        pub fn imm_merge_threshold() -> usize {
+            4
+        }
+
         pub fn write_conflict_detection_enabled() -> bool {
             cfg!(debug_assertions)
         }
@@ -651,6 +662,10 @@ mod default {
 
         pub fn max_concurrent_compaction_task_number() -> u64 {
             16
+        }
+
+        pub fn max_preload_wait_time_mill() -> u64 {
+            10
         }
     }
 
