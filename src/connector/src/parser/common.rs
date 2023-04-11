@@ -35,9 +35,8 @@ pub(crate) fn json_object_smart_get_value<'a, 'b>(
     if obj.contains_key(key.as_ref()) {
         return obj.get(key.as_ref());
     }
-    let lower_key = key.to_ascii_lowercase();
     for (k, v) in obj {
-        if k.to_ascii_lowercase() == lower_key {
+        if k.eq_ignore_ascii_case(key.as_ref()) {
             return Some(v);
         }
     }

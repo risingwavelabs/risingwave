@@ -158,8 +158,8 @@ CREATE TABLE s12(
     code string, 
     timestamp bigint, 
     xfas struct<device_model_id int, device_make_id int, ip string>[],
-    contacts struct<emails string[], phones string[]>),
-    jsonb jsonb
+    contacts struct<emails string[], phones string[]>,
+    jsonb jsonb)
 WITH (
     connector = 'kafka',
     topic = 'json_c',
