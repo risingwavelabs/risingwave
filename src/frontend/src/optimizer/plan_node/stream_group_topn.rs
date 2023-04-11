@@ -53,9 +53,9 @@ impl StreamGroupTopN {
             watermark_columns
         };
 
-        // We can use the group key as the stream key when limit is 1, since there is only one
-        // record for each value of group key.
-        let logical_pk = if logical.limit == 1 {
+        // We can use the group key as the stream key when there is at most one record for each
+        // value of the group key.
+        let logical_pk = if logical.limit_attr.max_one_row() {
             logical.group_key.clone()
         } else {
             input.logical_pk().to_vec()

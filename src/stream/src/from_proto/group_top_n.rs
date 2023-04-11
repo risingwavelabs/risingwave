@@ -60,9 +60,9 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
             .map(ColumnOrder::from_protobuf)
             .collect();
 
-        if node.limit == 1 {
-            // When limit is 1, `params.pk_indices` is the group key instead of the input's stream
-            // key.
+        if node.limit == 1 && !node.with_ties {
+            // When there is at most one record for each value of the group key, `params.pk_indices`
+            // is the group key instead of the input's stream key.
             assert_eq!(
                 &params.pk_indices,
                 &node.group_key.iter().map(|idx| *idx as usize).collect_vec()
