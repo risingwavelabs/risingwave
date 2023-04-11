@@ -22,7 +22,9 @@ use rdkafka::{Offset, TopicPartitionList};
 
 use crate::source::base::SplitEnumerator;
 use crate::source::kafka::split::KafkaSplit;
-use crate::source::kafka::{KafkaProperties, PrivateLinkConsumerContext, KAFKA_SYNC_CALL_TIMEOUT};
+use crate::source::kafka::{
+    KafkaProperties, PrivateLinkConsumerContext, KAFKA_ISOLATION_LEVEL, KAFKA_SYNC_CALL_TIMEOUT,
+};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum KafkaEnumeratorOffset {
@@ -57,7 +59,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         let broker_rewrite_map = common_props.broker_rewrite_map.clone();
         let topic = common_props.topic.clone();
         config.set("bootstrap.servers", &broker_address);
-        config.set("isolation.level", "read_committed");
+        config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
         common_props.set_security_properties(&mut config);
         let mut scan_start_offset = match properties
             .scan_startup_mode
