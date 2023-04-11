@@ -465,6 +465,8 @@ impl DataChunk {
                                         })
                                         .sum::<usize>(),
                             ));
+                        } else {
+                            buffers.push(vec![]);
                         }
                     }
                 }
