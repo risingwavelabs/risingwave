@@ -172,12 +172,12 @@ impl LogicalTopN {
         );
         let vnode_col_idx = exprs.len() - 1;
         let project = StreamProject::new(LogicalProject::new(stream_input, exprs.clone()));
-        let limit = Limit::new(
+        let limit_attr = Limit::new(
             self.limit_attr().limit() + self.offset(),
             self.limit_attr().with_ties(),
         );
         let mut logical_top_n =
-            generic::TopN::without_group(project.into(), limit, 0, self.topn_order().clone());
+            generic::TopN::without_group(project.into(), limit_attr, 0, self.topn_order().clone());
         logical_top_n.group_key = vec![vnode_col_idx];
         let local_top_n = StreamGroupTopN::new(logical_top_n, Some(vnode_col_idx));
         let exchange =

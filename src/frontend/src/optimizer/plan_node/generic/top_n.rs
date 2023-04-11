@@ -194,7 +194,9 @@ impl Limit {
         }
     }
 
-    pub fn one_record_per_value(&self) -> bool {
+    /// Whether this [`Limit`] returns at most one record for each value. Only `LIMIT 1` without
+    /// `WITH TIES` satisfies this condition.
+    pub fn max_one_row(&self) -> bool {
         match self {
             Limit::Simple(limit) => *limit == 1,
             Limit::WithTies(_) => false,

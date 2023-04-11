@@ -84,10 +84,6 @@ impl StreamGroupTopN {
     pub fn group_key(&self) -> &[usize] {
         &self.logical.group_key
     }
-
-    pub fn with_ties(&self) -> bool {
-        self.logical.limit_attr.with_ties()
-    }
 }
 
 impl StreamNode for StreamGroupTopN {
