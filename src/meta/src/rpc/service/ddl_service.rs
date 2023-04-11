@@ -713,6 +713,15 @@ where
                 if let Some(info) = conn.info {
                     match info {
                         connection::Info::PrivateLinkService(svc) => {
+                            // check whether the VPC endpoint is ready
+                            let cli = self.aws_client.as_ref().unwrap();
+                            if !cli.is_vpc_endpoint_ready(&svc.endpoint_id).await? {
+                                return Err(MetaError::from(anyhow!(
+                                    "Private link endpoint {} is not ready",
+                                    svc.endpoint_id
+                                )));
+                            }
+
                             if svc.dns_entries.is_empty() {
                                 return Err(MetaError::from(anyhow!(
                                     "No available private link endpoints for Kafka broker {}",

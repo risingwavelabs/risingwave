@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 use aws_config::retry::RetryConfig;
-use aws_sdk_ec2::model::{Filter, VpcEndpointType};
+use aws_sdk_ec2::model::{Filter, State, VpcEndpointType};
 use itertools::Itertools;
 use risingwave_pb::catalog::connection::PrivateLinkService;
 use tracing::info;
@@ -49,12 +49,15 @@ impl AwsEc2Client {
     }
 
     /// `service_name`: The name of the endpoint service we want to access
+    /// `az_ids`: The AZs in which the service is available (deprecated)
     pub async fn create_aws_private_link(
         &self,
         service_name: &str,
-        az_ids: &[String],
+        _az_ids: &[String],
     ) -> MetaResult<PrivateLinkService> {
-        let subnet_and_azs = self.describe_subnets(&self.vpc_id, az_ids).await?;
+        // fetch the AZs of the endpoint service
+        let service_azs = self.get_endpoint_service_az_names(service_name).await?;
+        let subnet_and_azs = self.describe_subnets(&self.vpc_id, &service_azs).await?;
 
         let subnet_ids: Vec<String> = subnet_and_azs.iter().map(|(id, _, _)| id.clone()).collect();
         let az_to_azid_map: HashMap<String, String> = subnet_and_azs
@@ -80,6 +83,7 @@ impl AwsEc2Client {
             )));
         }
 
+        // The first dns name doesn't has AZ info
         let endpoint_dns_name = endpoint_dns_names.first().unwrap().clone();
         for dns_name in &endpoint_dns_names {
             for az in az_to_azid_map.keys() {
@@ -100,15 +104,79 @@ impl AwsEc2Client {
         })
     }
 
+    pub async fn is_vpc_endpoint_ready(&self, vpc_endpoint_id: &str) -> MetaResult<bool> {
+        let mut available = false;
+        let filter = Filter::builder()
+            .name("vpc-endpoint-id")
+            .values(vpc_endpoint_id)
+            .build();
+        let output = self
+            .client
+            .describe_vpc_endpoints()
+            .set_filters(Some(vec![filter]))
+            .send()
+            .await?;
+
+        match output.vpc_endpoints {
+            Some(endpoints) => {
+                let endpoint = endpoints.into_iter().exactly_one().map_err(|_| {
+                    MetaError::from(anyhow!("More than one VPC endpoint found with the same ID"))
+                })?;
+                if let Some(state) = endpoint.state {
+                    if state == State::Available {
+                        available = true;
+                    }
+                }
+            }
+            None => {
+                return Err(MetaError::from(anyhow!(
+                    "No VPC endpoint found with the ID {}",
+                    vpc_endpoint_id
+                )));
+            }
+        }
+        Ok(available)
+    }
+
+    async fn get_endpoint_service_az_names(&self, service_name: &str) -> MetaResult<Vec<String>> {
+        let mut service_azs = Vec::new();
+        let output = self
+            .client
+            .describe_vpc_endpoint_services()
+            .set_service_names(Some(vec![service_name.to_string()]))
+            .send()
+            .await?;
+
+        match output.service_details {
+            Some(details) => {
+                let detail = details.into_iter().exactly_one().map_err(|_| {
+                    MetaError::from(anyhow!(
+                        "More than one VPC endpoint service found with the same name"
+                    ))
+                })?;
+                if let Some(azs) = detail.availability_zones {
+                    service_azs.extend(azs.into_iter());
+                }
+            }
+            None => {
+                return Err(MetaError::from(anyhow!(
+                    "No VPC endpoint service found with the name {}",
+                    service_name
+                )));
+            }
+        }
+        Ok(service_azs)
+    }
+
     async fn describe_subnets(
         &self,
         vpc_id: &str,
-        az_ids: &[String],
+        az_names: &[String],
     ) -> MetaResult<Vec<(String, String, String)>> {
         let vpc_filter = Filter::builder().name("vpc-id").values(vpc_id).build();
         let az_filter = Filter::builder()
-            .name("availability-zone-id")
-            .set_values(Some(Vec::from(az_ids)))
+            .name("availability-zone")
+            .set_values(Some(Vec::from(az_names)))
             .build();
         let output = self
             .client
