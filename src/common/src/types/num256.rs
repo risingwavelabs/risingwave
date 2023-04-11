@@ -214,6 +214,8 @@ impl<'de> Visitor<'de> for FormattedInt256Visitor {
 }
 
 impl Int256 {
+    pub const MEMCMP_ENCODED_SIZE: usize = 32;
+
     pub fn memcmp_deserialize(
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
