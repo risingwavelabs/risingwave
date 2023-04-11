@@ -284,18 +284,6 @@ impl Binder {
         table_name: &str,
         alias: Option<TableAlias>,
     ) -> Result<BoundBaseTable> {
-        // let db_name = &self.db_name;
-        // let schema_path = match schema_name {
-        // Some(schema_name) => SchemaPath::Name(schema_name),
-        // None => SchemaPath::Path(&self.search_path, &self.auth_context.user_name),
-        // };
-        // let (table_catalog, schema_name) =
-        // self.catalog
-        // .get_table_by_name(db_name, schema_path, table_name)?;
-        // let table_catalog = table_catalog.deref().clone();
-        //
-        // let table_id = table_catalog.id();
-        // let table_indexes = self.resolve_table_indexes(schema_name, table_id)?;
         let table = self.get_table_by_name(schema_name, table_name)?;
 
         let columns = table.table_catalog.columns.clone();
