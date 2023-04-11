@@ -34,7 +34,7 @@ impl<'a> TryFrom<&'a ExprNode> for ProcTimeExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type().unwrap() == Type::ProcTime);
+        ensure!(prost.get_expr_type().unwrap() == Type::Proctime);
         ensure!(DataType::from(prost.get_return_type().unwrap()) == DataType::Timestamptz);
         let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
             bail!("Expected RexNode::FuncCall");
@@ -52,10 +52,10 @@ impl Expression for ProcTimeExpression {
     }
 
     async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
-        let proc_time = CONTEXT
+        let proctime = CONTEXT
             .try_with(|context| context.get_physical_time())
             .map_err(|_| ExprError::Context)?;
-        let datum = Some(ScalarImpl::Int64(proc_time as i64));
+        let datum = Some(ScalarImpl::Int64(proctime as i64));
 
         Ok(ValueImpl::Scalar {
             value: datum,
@@ -64,10 +64,10 @@ impl Expression for ProcTimeExpression {
     }
 
     async fn eval_row(&self, _input: &OwnedRow) -> Result<Datum> {
-        let proc_time = CONTEXT
+        let proctime = CONTEXT
             .try_with(|context| context.get_physical_time())
             .map_err(|_| ExprError::Context)?;
-        let datum = Some(ScalarImpl::Int64(proc_time as i64));
+        let datum = Some(ScalarImpl::Int64(proctime as i64));
 
         Ok(datum)
     }
@@ -83,8 +83,8 @@ mod tests {
     use crate::expr::{ExprContext, CONTEXT};
 
     #[tokio::test]
-    async fn test_expr_proc_time() {
-        let proc_time_expr = ProcTimeExpression::new();
+    async fn test_expr_proctime() {
+        let proctime_expr = ProcTimeExpression::new();
         let epoch = Epoch::now();
         let time = epoch.physical_time();
         let time_datum = Some(ScalarRefImpl::Int64(time as i64));
@@ -92,7 +92,7 @@ mod tests {
         let chunk = DataChunk::new_dummy(3);
 
         let array = CONTEXT
-            .scope(context, proc_time_expr.eval(&chunk))
+            .scope(context, proctime_expr.eval(&chunk))
             .await
             .unwrap();
 

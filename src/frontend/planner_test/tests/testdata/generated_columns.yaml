@@ -17,7 +17,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [(v2 + 1:Int32) as $expr1] }
       └─BatchSource { source: "s1", columns: ["v2", "_row_id"], filter: (None, None) }
-- name: select proc_time()
+- name: select proctime()
   sql: |
-    select proc_time();
-  binder_error: 'Invalid input syntax: Function `PROC_TIME()` is only allowed in CREATE TABLE/SOURCE. Is `NOW()` what you want?'
+    select proctime();
+  binder_error: 'Invalid input syntax: Function `PROCTIME()` is only allowed in CREATE TABLE/SOURCE. Is `NOW()` what you want?'

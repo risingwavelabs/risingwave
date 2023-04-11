@@ -50,7 +50,7 @@ mod expr_jsonb_access;
 mod expr_literal;
 mod expr_nested_construct;
 mod expr_now;
-mod expr_proc_time;
+mod expr_proctime;
 pub mod expr_regexp;
 mod expr_some_all;
 mod expr_to_char_const_tmpl;

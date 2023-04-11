@@ -319,10 +319,10 @@ impl Binder {
             raw_literal(ExprImpl::literal_f64(std::f64::consts::PI))
         }
 
-        fn proc_time() -> Handle {
+        fn proctime() -> Handle {
             Box::new(move |binder, inputs| {
-                binder.ensure_proc_time_function_allowed()?;
-                raw_call(ExprType::ProcTime)(binder, inputs)
+                binder.ensure_proctime_function_allowed()?;
+                raw_call(ExprType::Proctime)(binder, inputs)
             })
         }
 
@@ -570,7 +570,7 @@ impl Binder {
                 // non-deterministic
                 ("now", now()),
                 ("current_timestamp", now()),
-                ("proc_time", proc_time())
+                ("proctime", proctime())
             ]
             .into_iter()
             .collect()
@@ -691,10 +691,10 @@ impl Binder {
         Ok(())
     }
 
-    fn ensure_proc_time_function_allowed(&self) -> Result<()> {
+    fn ensure_proctime_function_allowed(&self) -> Result<()> {
         if !self.is_for_ddl() {
             return Err(ErrorCode::InvalidInputSyntax(
-                "Function `PROC_TIME()` is only allowed in CREATE TABLE/SOURCE. Is `NOW()` what you want?".to_string(),
+                "Function `PROCTIME()` is only allowed in CREATE TABLE/SOURCE. Is `NOW()` what you want?".to_string(),
             )
             .into());
         }
