@@ -86,9 +86,9 @@ use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::{HummockEvent, HummockEventHandler};
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
 use crate::hummock::observer_manager::HummockObserverNode;
-use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
+use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::store::version::HummockVersionReader;
 use crate::hummock::write_limiter::{WriteLimiter, WriteLimiterRef};
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
@@ -430,16 +430,14 @@ pub fn hit_sstable_bloom_filter(
     may_exist
 }
 
-/// Get `user_value` from `SharedBufferBatch`
+/// Get `user_value` from `ImmutableMemtable`
 pub fn get_from_batch(
-    batch: &SharedBufferBatch,
+    imm: &ImmutableMemtable,
     table_key: TableKey<&[u8]>,
+    read_epoch: HummockEpoch,
     local_stats: &mut StoreLocalStatistic,
 ) -> Option<HummockValue<Bytes>> {
-    if batch.check_delete_by_range(table_key) {
-        return Some(HummockValue::Delete);
-    }
-    batch.get(table_key).map(|v| {
+    imm.get(table_key, read_epoch).map(|v| {
         local_stats.get_shared_buffer_hit_counts += 1;
         v
     })

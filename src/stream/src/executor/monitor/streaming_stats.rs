@@ -90,6 +90,10 @@ pub struct StreamingMetrics {
 
     /// User compute error reporting
     pub user_compute_error_count: GenericCounterVec<AtomicU64>,
+
+    // Materialize
+    pub materialize_cache_hit_count: GenericCounterVec<AtomicU64>,
+    pub materialize_cache_total_count: GenericCounterVec<AtomicU64>,
 }
 
 impl StreamingMetrics {
@@ -469,6 +473,21 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let materialize_cache_hit_count = register_int_counter_vec_with_registry!(
+            "stream_materialize_cache_hit_count",
+            "Materialize executor cache hit count",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let materialize_cache_total_count = register_int_counter_vec_with_registry!(
+            "stream_materialize_cache_total_count",
+            "Materialize executor cache total operation",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
         Self {
             registry,
             executor_row_count,
@@ -519,6 +538,8 @@ impl StreamingMetrics {
             lru_watermark_step,
             jemalloc_allocated_bytes,
             user_compute_error_count,
+            materialize_cache_hit_count,
+            materialize_cache_total_count,
         }
     }
 

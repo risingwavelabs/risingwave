@@ -650,12 +650,7 @@ pub async fn handle_create_source(
         )));
     }
 
-    let mut with_properties = handler_args
-        .with_options
-        .inner()
-        .clone()
-        .into_iter()
-        .collect();
+    let mut with_properties = handler_args.with_options.into_inner().into_iter().collect();
 
     let mut col_id_gen = ColumnIdGenerator::new_initial();
 
@@ -705,6 +700,8 @@ pub async fn handle_create_source(
 
     let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
 
+    let definition = handler_args.normalized_sql;
+
     let source = PbSource {
         id: TableId::placeholder().table_id,
         schema_id,
@@ -717,6 +714,7 @@ pub async fn handle_create_source(
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs,
+        definition,
         optional_associated_table_id: None,
     };
 

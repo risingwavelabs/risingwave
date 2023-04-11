@@ -6182,6 +6182,7 @@ dependencies = [
  "risingwave_expr_macro",
  "risingwave_pb",
  "risingwave_udf",
+ "rust_decimal",
  "serde_json",
  "speedate",
  "static_assertions",
@@ -7351,7 +7352,8 @@ dependencies = [
 [[package]]
 name = "simd-json"
 version = "0.7.0"
-source = "git+https://github.com/tabVersion/simd-json.git?branch=main#b52fef754645ecf07c059b42d1b995f3c9f96063"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e3375b6c3d8c048ba09c8b4b6c3f1d3f35e06b71db07d231c323943a949e1b8"
 dependencies = [
  "halfbrown",
  "lexical-core",

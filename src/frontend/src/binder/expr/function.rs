@@ -356,6 +356,7 @@ impl Binder {
                 ("atan", raw_call(ExprType::Atan)), 
                 ("atan2", raw_call(ExprType::Atan2)),   
                 ("sind", raw_call(ExprType::Sind)),     
+                ("sqrt", raw_call(ExprType::Sqrt)),     
 
                 (
                     "to_timestamp",

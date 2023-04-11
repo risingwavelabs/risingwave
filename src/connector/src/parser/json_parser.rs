@@ -20,7 +20,7 @@ use simd_json::{BorrowedValue, ValueAccess};
 
 use crate::common::UpsertMessage;
 use crate::impl_common_parser_logic;
-use crate::parser::common::simd_json_parse_value;
+use crate::parser::common::{json_object_smart_get_value, simd_json_parse_value};
 use crate::parser::util::at_least_one_ok;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{SourceColumnDesc, SourceContextRef};
@@ -114,7 +114,7 @@ impl JsonParser {
             let fill_fn = |desc: &SourceColumnDesc| {
                 simd_json_parse_value(
                     &desc.data_type,
-                    value.get(desc.name_in_lower_case.as_str()),
+                    json_object_smart_get_value(&value,desc.name.as_str().into())
                 )
                 .map_err(|e| {
                     tracing::error!(
