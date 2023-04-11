@@ -84,11 +84,11 @@ impl ToBatchPb for BatchGroupTopN {
     fn to_batch_prost_body(&self) -> NodeBody {
         let column_orders = self.logical.order.to_protobuf();
         NodeBody::GroupTopN(GroupTopNNode {
-            limit: self.logical.limit,
+            limit: self.logical.limit_attr.limit(),
             offset: self.logical.offset,
             column_orders,
             group_key: self.group_key().iter().map(|c| *c as u32).collect(),
-            with_ties: self.logical.with_ties,
+            with_ties: self.logical.limit_attr.with_ties(),
         })
     }
 }

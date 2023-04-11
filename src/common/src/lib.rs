@@ -23,7 +23,7 @@
 #![feature(lint_reasons)]
 #![feature(generators)]
 #![feature(map_try_insert)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
 #![feature(let_chains)]
