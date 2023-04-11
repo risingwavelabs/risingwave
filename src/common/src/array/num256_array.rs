@@ -158,31 +158,6 @@ macro_rules! impl_array_for_num256 {
             }
         }
 
-        impl FromIterator<Option<$scalar>> for $array {
-            fn from_iter<T: IntoIterator<Item = Option<$scalar>>>(iter: T) -> Self {
-                let iter = iter.into_iter();
-                let mut bitmap_builder = BitmapBuilder::with_capacity(iter.size_hint().0);
-                let mut data = Vec::with_capacity(iter.size_hint().0);
-
-                for v in iter {
-                    match v {
-                        Some(x) => {
-                            bitmap_builder.append(true);
-                            data.push(x.into());
-                        }
-                        None => {
-                            bitmap_builder.append(false);
-                            data.push(Default::default());
-                        }
-                    }
-                }
-
-                let bitmap = bitmap_builder.finish();
-
-                Self { bitmap, data }
-            }
-        }
-
         impl $array {
             pub fn from_protobuf(array: &PbArray, cardinality: usize) -> ArrayResult<ArrayImpl> {
                 ensure!(

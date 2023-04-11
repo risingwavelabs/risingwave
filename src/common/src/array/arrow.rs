@@ -16,6 +16,7 @@
 
 use arrow_schema::{Field, DECIMAL256_MAX_PRECISION};
 use chrono::{NaiveDateTime, NaiveTime};
+use itertools::Itertools;
 
 use super::column::Column;
 use super::*;
@@ -421,7 +422,12 @@ impl From<&Int256Array> for arrow_array::Decimal256Array {
 
 impl From<&arrow_array::Decimal256Array> for Int256Array {
     fn from(array: &arrow_array::Decimal256Array) -> Self {
-        array.iter().map(|o| o.map(Int256::from)).collect()
+        let values = array.iter().map(|o| o.map(Int256::from)).collect_vec();
+
+        values
+            .iter()
+            .map(|i| i.as_ref().map(|v| v.as_scalar_ref()))
+            .collect()
     }
 }
 
@@ -682,7 +688,7 @@ mod tests {
 
     #[test]
     fn int256() {
-        let array = Int256Array::from_iter([
+        let values = vec![
             None,
             Some(Int256::from(1)),
             Some(Int256::from(i64::MAX)),
@@ -694,7 +700,10 @@ mod tests {
                     * Int256::from(i64::MAX)
                     * Int256::from(i64::MAX),
             ),
-        ]);
+        ];
+
+        let array =
+            Int256Array::from_iter(values.iter().map(|r| r.as_ref().map(|x| x.as_scalar_ref())));
         let arrow = arrow_array::Decimal256Array::from(&array);
         assert_eq!(Int256Array::from(&arrow), array);
     }
