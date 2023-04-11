@@ -22,13 +22,14 @@ pub async fn list_connections(context: &CtlContext) -> anyhow::Result<()> {
 
     for conn in connections {
         println!(
-            "Connection#{}, service_name: {}, {}",
+            "Connection#{}, connection_name: {}, {}",
             conn.id,
             conn.name,
             match conn.info {
+                Some(Info::MockConnection(_)) => "MockConnection: no info available".to_string(),
                 Some(Info::PrivateLinkService(svc)) => format!(
-                    "PrivateLink: endpoint_id: {}, dns_entries: {:?}",
-                    svc.endpoint_id, svc.dns_entries,
+                    "PrivateLink: service_name: {}, endpoint_id: {}, dns_entries: {:?}",
+                    svc.service_name, svc.endpoint_id, svc.dns_entries,
                 ),
                 None => "None".to_string(),
             }

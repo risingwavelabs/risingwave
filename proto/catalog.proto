@@ -91,6 +91,8 @@ message Sink {
 }
 
 message Connection {
+  message MockConnection {}
+
   message PrivateLinkService {
     string provider = 1;
     string service_name = 2;
@@ -103,7 +105,8 @@ message Connection {
   uint32 database_id = 3;
   string name = 4;
   oneof info {
-    PrivateLinkService private_link_service = 5;
+    MockConnection mock_connection = 5;
+    PrivateLinkService private_link_service = 6;
   }
 }
 

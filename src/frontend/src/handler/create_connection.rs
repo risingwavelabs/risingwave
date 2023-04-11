@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
+use risingwave_connector::source::kafka::{MOCK_CONNECTION, PRIVATELINK_CONNECTION};
 use risingwave_pb::ddl_service::create_connection_request;
 use risingwave_sqlparser::ast::CreateConnectionStatement;
 use serde_json;
@@ -71,6 +71,9 @@ fn resolve_create_connection_payload(
 ) -> Result<create_connection_request::Payload> {
     let connection_type = get_connection_property_required(with_properties, CONNECTION_TYPE_PROP)?;
     let create_connection_payload = match connection_type.as_str() {
+        MOCK_CONNECTION => create_connection_request::Payload::MockConnection(
+            create_connection_request::MockConnection {},
+        ),
         PRIVATELINK_CONNECTION => create_connection_request::Payload::PrivateLink(
             resolve_private_link_properties(with_properties)?,
         ),

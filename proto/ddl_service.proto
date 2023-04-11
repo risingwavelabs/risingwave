@@ -254,6 +254,7 @@ message GetDdlProgressResponse {
 }
 
 message CreateConnectionRequest {
+  message MockConnection {}
   message PrivateLink {
     string provider = 1;
     string service_name = 2;
@@ -263,7 +264,8 @@ message CreateConnectionRequest {
   uint32 database_id = 2;
   uint32 schema_id = 3;
   oneof payload {
-    PrivateLink private_link = 4;
+    MockConnection mock_connection = 4;
+    PrivateLink private_link = 5;
   }
 }
 

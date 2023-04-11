@@ -610,6 +610,26 @@ where
         }
 
         match req.payload.unwrap() {
+            create_connection_request::Payload::MockConnection(_) => {
+                let id = self.gen_unique_id::<{ IdCategory::Connection }>().await?;
+                let connection = Connection {
+                    id,
+                    schema_id: req.schema_id,
+                    database_id: req.database_id,
+                    name: req.name,
+                    info: Some(connection::Info::MockConnection(
+                        connection::MockConnection {},
+                    )),
+                };
+                let version = self
+                    .ddl_controller
+                    .run_command(DdlCommand::CreateConnection(connection))
+                    .await?;
+                Ok(Response::new(CreateConnectionResponse {
+                    connection_id: id,
+                    version,
+                }))
+            }
             create_connection_request::Payload::PrivateLink(link) => {
                 let cli = self.aws_client.as_ref().unwrap();
                 let private_link_svc = cli
@@ -626,13 +646,14 @@ where
                 };
 
                 // save private link info to catalog
-                self.ddl_controller
+                let version = self
+                    .ddl_controller
                     .run_command(DdlCommand::CreateConnection(connection))
                     .await?;
 
                 Ok(Response::new(CreateConnectionResponse {
                     connection_id: id,
-                    version: 0,
+                    version,
                 }))
             }
         }
@@ -705,31 +726,25 @@ where
                     .get_connection_by_id(connection_id)
                     .await?;
 
-                if let Some(info) = conn.info {
-                    match info {
-                        connection::Info::PrivateLinkService(svc) => {
-                            if svc.dns_entries.is_empty() {
-                                return Err(MetaError::from(anyhow!(
-                                    "No available private link endpoints for Kafka broker {}",
-                                    broker
-                                )));
-                            }
-                            let default_dns = svc.dns_entries.values().next().unwrap();
-                            let target_dns = svc.dns_entries.get(&link.availability_zone);
-                            match target_dns {
-                                None => {
-                                    broker_rewrite_map.insert(
-                                        broker.to_string(),
-                                        format!("{}:{}", default_dns, link.port),
-                                    );
-                                }
-                                Some(dns_name) => {
-                                    broker_rewrite_map.insert(
-                                        broker.to_string(),
-                                        format!("{}:{}", dns_name, link.port),
-                                    );
-                                }
-                            }
+                if let Some(connection::Info::PrivateLinkService(svc)) = conn.info {
+                    if svc.dns_entries.is_empty() {
+                        return Err(MetaError::from(anyhow!(
+                            "No available private link endpoints for Kafka broker {}",
+                            broker
+                        )));
+                    }
+                    let default_dns = svc.dns_entries.values().next().unwrap();
+                    let target_dns = svc.dns_entries.get(&link.availability_zone);
+                    match target_dns {
+                        None => {
+                            broker_rewrite_map.insert(
+                                broker.to_string(),
+                                format!("{}:{}", default_dns, link.port),
+                            );
+                        }
+                        Some(dns_name) => {
+                            broker_rewrite_map
+                                .insert(broker.to_string(), format!("{}:{}", dns_name, link.port));
                         }
                     }
                 }
