@@ -1364,8 +1364,8 @@ mod tests {
         assert_eq!(DataType::from_str("INT8").unwrap(), DataType::Int64);
         assert_eq!(DataType::from_str("BIGINT").unwrap(), DataType::Int64);
 
-        assert_eq!(DataType::from_str("int256").unwrap(), DataType::Int256);
-        assert_eq!(DataType::from_str("INT256").unwrap(), DataType::Int256);
+        assert_eq!(DataType::from_str("rw_int256").unwrap(), DataType::Int256);
+        assert_eq!(DataType::from_str("RW_INT256").unwrap(), DataType::Int256);
 
         assert_eq!(DataType::from_str("float4").unwrap(), DataType::Float32);
         assert_eq!(DataType::from_str("real").unwrap(), DataType::Float32);
