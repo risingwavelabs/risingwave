@@ -97,6 +97,7 @@ impl Binder {
         self.bind_table(schema_name.as_deref(), &table_name, None)?;
 
         let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, true)?;
+        // let table_schema = table_catalog.
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");

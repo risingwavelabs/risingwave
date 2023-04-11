@@ -55,10 +55,11 @@ impl LogicalInsert {
         column_indices: Vec<usize>,
         row_id_index: Option<usize>,
         returning: bool,
+        returning_schema: Option<Schema>,
     ) -> Self {
         let ctx = input.ctx();
         let schema = if returning {
-            input.schema().clone()
+            returning_schema.expect("returning schema should be set with returning")
         } else {
             Schema::new(vec![Field::unnamed(DataType::Int64)])
         };
@@ -85,6 +86,7 @@ impl LogicalInsert {
         column_indices: Vec<usize>,
         row_id_index: Option<usize>,
         returning: bool,
+        returning_schema: Option<Schema>,
     ) -> Result<Self> {
         Ok(Self::new(
             input,
@@ -94,6 +96,7 @@ impl LogicalInsert {
             column_indices,
             row_id_index,
             returning,
+            returning_schema,
         ))
     }
 
@@ -150,6 +153,11 @@ impl PlanTreeNodeUnary for LogicalInsert {
             self.column_indices.clone(),
             self.row_id_index,
             self.returning,
+            if self.returning {
+                Some(self.schema().clone())
+            } else {
+                None
+            },
         )
     }
 }
@@ -164,9 +172,13 @@ impl fmt::Display for LogicalInsert {
 
 impl ColPrunable for LogicalInsert {
     fn prune_col(&self, _required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
-        let required_cols: Vec<_> = (0..self.input.schema().len()).collect();
-        self.clone_with_input(self.input.prune_col(&required_cols, ctx))
-            .into()
+        if self.has_returning() {
+            self.clone().into()
+        } else {
+            let required_cols: Vec<_> = (0..self.input.schema().len()).collect();
+            self.clone_with_input(self.input.prune_col(&required_cols, ctx))
+                .into()
+        }
     }
 }
 

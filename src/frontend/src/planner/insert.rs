@@ -36,6 +36,7 @@ impl Planner {
             insert.column_indices,
             insert.row_id_index,
             returning,
+            insert.returning_schema.clone(),
         )?
         .into();
         // If containing RETURNING, add one logicalproject node
@@ -47,7 +48,7 @@ impl Planner {
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..);
         let out_names = if returning {
-            insert.returning_schema.expect("If returning list is not empty, should provide returning schema in BoundInsert.").names()
+            insert.returning_schema.unwrap().names()
         } else {
             plan.schema().names()
         };

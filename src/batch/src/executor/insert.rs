@@ -123,9 +123,8 @@ impl InsertExecutor {
             return (cap, vis, columns);
         };
 
-        // Transform the data chunk to a stream chunk, then write to the source.
-        let write_chunk = |combined_columns: (usize, Vis, Vec<Column>)| async {
-            let (cap, vis, mut columns) = combined_columns;
+        let rewrite_stream_chunk = |decomposed_data_chunk: (usize, Vis, Vec<Column>)| -> StreamChunk {
+            let (cap, vis, mut columns) = decomposed_data_chunk;
             // If the user does not specify the primary key, then we need to add a column as the
             // primary key.
             if let Some(row_id_index) = self.row_id_index {
@@ -133,16 +132,20 @@ impl InsertExecutor {
                 columns.insert(row_id_index, row_id_col.into())
             }
 
-            let stream_chunk = StreamChunk::new(
+            StreamChunk::new(
                 vec![Op::Insert; cap],
                 columns.clone(),
                 vis.clone().into_visibility(),
-            );
+            )
+        };
 
+        let write_chunk = |stream_chunk: StreamChunk| async {
             self.dml_manager
                 .write_chunk(self.table_id, self.table_version_id, stream_chunk)
                 .await
         };
+
+        // Transform the data chunk to a stream chunk, then write to the source.
 
         #[for_await]
         for data_chunk in self.child.execute() {
@@ -152,7 +155,7 @@ impl InsertExecutor {
                 if self.returning {
                     yield DataChunk::new(columns.clone(), vis.clone());
                 }
-                notifiers.push(write_chunk((cap, vis, columns)).await?);
+                notifiers.push(write_chunk(rewrite_stream_chunk((cap, vis, columns))).await?);
             }
         }
 
@@ -161,7 +164,7 @@ impl InsertExecutor {
             if self.returning {
                 yield DataChunk::new(columns.clone(), vis.clone());
             }
-            notifiers.push(write_chunk((cap, vis, columns)).await?);
+            notifiers.push(write_chunk(rewrite_stream_chunk((cap, vis, columns))).await?);
         }
 
         // Wait for all chunks to be taken / written.
