@@ -475,7 +475,7 @@ pub(super) fn bind_source_watermark(
     source_watermarks: Vec<SourceWatermark>,
     column_catalogs: &[ColumnCatalog],
 ) -> Result<Vec<WatermarkDesc>> {
-    let mut binder = Binder::new(session);
+    let mut binder = Binder::new(session, vec![]);
     binder.bind_columns_to_context(name.clone(), column_catalogs.to_vec())?;
 
     let watermark_descs = source_watermarks
@@ -650,12 +650,7 @@ pub async fn handle_create_source(
         )));
     }
 
-    let mut with_properties = handler_args
-        .with_options
-        .inner()
-        .clone()
-        .into_iter()
-        .collect();
+    let mut with_properties = handler_args.with_options.into_inner().into_iter().collect();
 
     let mut col_id_gen = ColumnIdGenerator::new_initial();
 
@@ -705,6 +700,8 @@ pub async fn handle_create_source(
 
     let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
 
+    let definition = handler_args.normalized_sql;
+
     let source = PbSource {
         id: TableId::placeholder().table_id,
         schema_id,
@@ -717,6 +714,7 @@ pub async fn handle_create_source(
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs,
+        definition,
         optional_associated_table_id: None,
     };
 

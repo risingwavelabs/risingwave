@@ -398,9 +398,9 @@ dependencies = [
 
 [[package]]
 name = "async-task"
-version = "4.3.0"
+version = "4.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a40729d2133846d9ed0ea60a8b9541bccddab49cd30f0715a1da672fe9a2524"
+checksum = "ecc7ab41815b3c653ccd2978ec3255c81349336702dfdf62ee6f7069b12a3aae"
 
 [[package]]
 name = "async-trait"
@@ -3589,9 +3589,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.18"
+version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c846a15d407458f1ac5da7da965810277229be9c96ed8082a3eaf2787ef81c23"
+checksum = "baac280a8f0a7760cfbf788dc523f8784a26550582b07e05ea92b62093c9a72b"
 dependencies = [
  "ahash 0.7.6",
  "async-channel",
@@ -3668,7 +3668,7 @@ dependencies = [
 [[package]]
 name = "madsim-rdkafka"
 version = "0.2.14-alpha"
-source = "git+https://github.com/madsim-rs/madsim.git?rev=43e025d#43e025db997df923cf6b891cfb874fe6dabba994"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=52adb98#52adb98d33939dc841dd6d0c616238edc4fb6db3"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -3690,11 +3690,12 @@ dependencies = [
 
 [[package]]
 name = "madsim-tokio"
-version = "0.2.15"
+version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ebc35d85610c81cdefc44f71aad0781b0093fa2d956360e418466cb1d5b1adf2"
+checksum = "8c1b74bc405410c47019265f21edee52c7bf08c90d6e984387e26db7ff8ce23e"
 dependencies = [
  "madsim",
+ "spin 0.9.8",
  "tokio",
 ]
 
@@ -4702,7 +4703,6 @@ dependencies = [
  "regex",
  "risingwave_common",
  "risingwave_sqlparser",
- "rust_decimal",
  "thiserror",
  "tokio-openssl",
  "tokio-postgres",
@@ -5903,6 +5903,7 @@ dependencies = [
  "serde_default",
  "serde_json",
  "serde_with 2.3.1",
+ "smallbitset",
  "static_assertions",
  "strum",
  "strum_macros",
@@ -6181,6 +6182,7 @@ dependencies = [
  "risingwave_expr_macro",
  "risingwave_pb",
  "risingwave_udf",
+ "rust_decimal",
  "serde_json",
  "speedate",
  "static_assertions",
@@ -6794,6 +6796,7 @@ dependencies = [
  "arrow-array",
  "arrow-flight",
  "arrow-schema",
+ "arrow-select",
  "futures-util",
  "madsim-tokio",
  "madsim-tonic",
@@ -6879,7 +6882,6 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_json",
- "tokio-postgres",
 ]
 
 [[package]]
@@ -7350,7 +7352,8 @@ dependencies = [
 [[package]]
 name = "simd-json"
 version = "0.7.0"
-source = "git+https://github.com/tabVersion/simd-json.git?branch=main#b52fef754645ecf07c059b42d1b995f3c9f96063"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e3375b6c3d8c048ba09c8b4b6c3f1d3f35e06b71db07d231c323943a949e1b8"
 dependencies = [
  "halfbrown",
  "lexical-core",
@@ -7445,6 +7448,16 @@ dependencies = [
  "async-channel",
  "futures-core",
  "futures-io",
+]
+
+[[package]]
+name = "smallbitset"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d93fb6dc506bf9247d497b1cd9748015f444b9b16da6da79484f54b20df49a7c"
+dependencies = [
+ "num",
+ "paste",
 ]
 
 [[package]]
@@ -8908,6 +8921,7 @@ dependencies = [
  "memchr",
  "miniz_oxide",
  "multimap",
+ "num",
  "num-bigint",
  "num-integer",
  "num-traits",

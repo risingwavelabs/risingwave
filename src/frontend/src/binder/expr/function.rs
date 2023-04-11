@@ -354,7 +354,8 @@ impl Binder {
                 ("asin", raw_call(ExprType::Asin)), 
                 ("acos", raw_call(ExprType::Acos)), 
                 ("atan", raw_call(ExprType::Atan)), 
-                ("atan2", raw_call(ExprType::Atan2)),      
+                ("atan2", raw_call(ExprType::Atan2)), 
+                ("sqrt", raw_call(ExprType::Sqrt)),     
 
                 (
                     "to_timestamp",
@@ -373,6 +374,7 @@ impl Binder {
                 ("trim", raw_call(ExprType::Trim)),
                 ("replace", raw_call(ExprType::Replace)),
                 ("overlay", raw_call(ExprType::Overlay)),
+                ("btrim", raw_call(ExprType::Trim)),
                 ("ltrim", raw_call(ExprType::Ltrim)),
                 ("rtrim", raw_call(ExprType::Rtrim)),
                 ("md5", raw_call(ExprType::Md5)),

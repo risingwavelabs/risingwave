@@ -14,14 +14,13 @@
 
 use std::marker::PhantomData;
 
-use fixedbitset::FixedBitSet;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::RwError;
-use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
+use risingwave_common::hash::{HashKey, NullBitmap, PrecomputedBuildHasher};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -67,13 +66,7 @@ impl<K: HashKey> LookupJoinBase<K> {
     pub async fn do_execute(mut self: Box<Self>) {
         let outer_side_schema = self.outer_side_input.schema().clone();
 
-        let null_matched = {
-            let mut null_matched = FixedBitSet::with_capacity(self.null_safe.len());
-            for (idx, col_null_matched) in self.null_safe.iter().copied().enumerate() {
-                null_matched.set(idx, col_null_matched);
-            }
-            null_matched
-        };
+        let null_matched = K::Bitmap::from_bool_vec(self.null_safe);
 
         let mut outer_side_batch_read_stream: BoxedDataChunkListStream =
             utils::batch_read(self.outer_side_input.execute(), AT_LEAST_OUTER_SIDE_ROWS);

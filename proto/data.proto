@@ -99,6 +99,7 @@ enum ArrayType {
   BYTEA = 15;
   JSONB = 16;
   SERIAL = 17;
+  INT256 = 18;
 }
 
 message Array {

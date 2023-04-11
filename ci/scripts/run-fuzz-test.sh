@@ -20,25 +20,11 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     done
     shift $((OPTIND -1))
 
+    download_and_prepare_rw "$profile" common
+
     echo "--- Download artifacts"
-    mkdir -p target/debug
-    buildkite-agent artifact download risingwave-"$profile" target/debug/
-    buildkite-agent artifact download risedev-dev-"$profile" target/debug/
-    mv target/debug/risingwave-"$profile" target/debug/risingwave
-    mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
     buildkite-agent artifact download risingwave_simulation .
     chmod +x ./risingwave_simulation
-
-    echo "--- Adjust permission"
-    chmod +x ./target/debug/risingwave
-    chmod +x ./target/debug/risedev-dev
-
-    echo "--- Generate RiseDev CI config"
-    cp ci/risedev-components.ci.env risedev-components.user.env
-
-    echo "--- Prepare RiseDev dev cluster"
-    cargo make pre-start-dev
-    cargo make link-all-in-one-binaries
 
     echo "--- Run sqlsmith tests"
     NEXTEST_PROFILE=ci cargo nextest run run_sqlsmith_on_frontend --features "failpoints sync_point enable_sqlsmith_unit_test" 2> >(tee);

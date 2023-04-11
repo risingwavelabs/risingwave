@@ -106,9 +106,9 @@ select floor(f1) as floor_f1 from float8_tbl f;
 SET extra_float_digits = 0;
 
 -- square root
---@ SELECT sqrt(double precision '64') AS eight;
+SELECT sqrt(double precision '64') AS eight;
 
---@ SELECT |/ double precision '64' AS eight;
+SELECT |/ double precision '64' AS eight;
 
 --@ SELECT f.f1, |/f.f1 AS sqrt_f1
 --@    FROM FLOAT8_TBL f
