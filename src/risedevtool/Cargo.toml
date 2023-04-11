@@ -14,12 +14,13 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
-anyhow = "1"
+anyhow = { version = "1", features = ["backtrace"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4", features = ["derive"] }
 console = "0.15"
 dialoguer = "0.10"
 enum-iterator = "1"
+fs-err = "2.9.0"
 google-cloud-pubsub = "0.7.0"
 indicatif = "0.17"
 isahc = { version = "1", default-features = false, features = ["text-decoding"] }

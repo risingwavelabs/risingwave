@@ -24,7 +24,7 @@ use either::{for_both, Either};
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 
-use crate::array::{serial_array, JsonbVal, ListRef, ListValue, StructRef, StructValue};
+use crate::array::{serial_array, ArrayImpl, JsonbVal, ListRef, ListValue, StructRef, StructValue};
 use crate::catalog::ColumnId;
 use crate::row::{Row, RowDeserializer as BasicDeserializer};
 use crate::types::struct_type::StructType;
@@ -166,6 +166,26 @@ impl ValueRowSerde for BasicSerde {
     }
 }
 
+pub fn try_get_exact_serialize_datum_size(arr: &ArrayImpl) -> Option<usize> {
+    match arr {
+        ArrayImpl::Int16(_) => Some(2),
+        ArrayImpl::Int32(_) => Some(4),
+        ArrayImpl::Int64(_) => Some(8),
+        ArrayImpl::Serial(_) => Some(8),
+        ArrayImpl::Float32(_) => Some(4),
+        ArrayImpl::Float64(_) => Some(8),
+        ArrayImpl::Bool(_) => Some(1),
+        ArrayImpl::Jsonb(_) => Some(8),
+        ArrayImpl::Decimal(_) => Some(estimate_serialize_decimal_size()),
+        ArrayImpl::Interval(_) => Some(estimate_serialize_interval_size()),
+        ArrayImpl::Date(_) => Some(estimate_serialize_date_size()),
+        ArrayImpl::Timestamp(_) => Some(estimate_serialize_timestamp_size()),
+        ArrayImpl::Time(_) => Some(estimate_serialize_time_size()),
+        _ => None,
+    }
+    .map(|x| x + 1)
+}
+
 /// Serialize a datum into bytes and return (Not order guarantee, used in value encoding).
 pub fn serialize_datum(cell: impl ToDatumRef) -> Vec<u8> {
     let mut buf: Vec<u8> = vec![];
@@ -212,6 +232,7 @@ fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
         ScalarRefImpl::Int16(v) => buf.put_i16_le(v),
         ScalarRefImpl::Int32(v) => buf.put_i32_le(v),
         ScalarRefImpl::Int64(v) => buf.put_i64_le(v),
+        ScalarRefImpl::Int256(v) => buf.put_slice(&v.to_le_bytes()),
         ScalarRefImpl::Serial(v) => buf.put_i64_le(v.into_inner()),
         ScalarRefImpl::Float32(v) => buf.put_f32_le(v.into_inner()),
         ScalarRefImpl::Float64(v) => buf.put_f64_le(v.into_inner()),
@@ -238,6 +259,7 @@ fn estimate_serialize_scalar_size(value: ScalarRefImpl<'_>) -> usize {
         ScalarRefImpl::Int16(_) => 2,
         ScalarRefImpl::Int32(_) => 4,
         ScalarRefImpl::Int64(_) => 8,
+        ScalarRefImpl::Int256(_) => 32,
         ScalarRefImpl::Serial(_) => 8,
         ScalarRefImpl::Float32(_) => 4,
         ScalarRefImpl::Float64(_) => 8,
@@ -293,9 +315,9 @@ fn estimate_serialize_str_size(bytes: &[u8]) -> usize {
 }
 
 fn serialize_interval(interval: &Interval, buf: &mut impl BufMut) {
-    buf.put_i32_le(interval.get_months());
-    buf.put_i32_le(interval.get_days());
-    buf.put_i64_le(interval.get_usecs());
+    buf.put_i32_le(interval.months());
+    buf.put_i32_le(interval.days());
+    buf.put_i64_le(interval.usecs());
 }
 
 fn estimate_serialize_interval_size() -> usize {
@@ -442,13 +464,23 @@ fn deserialize_decimal(data: &mut impl Buf) -> Result<Decimal> {
 #[cfg(test)]
 mod tests {
     use crate::array::serial_array::Serial;
-    use crate::array::{ListValue, StructValue};
-    use crate::types::{Date, Datum, Decimal, Interval, ScalarImpl, Time, Timestamp};
-    use crate::util::value_encoding::{estimate_serialize_datum_size, serialize_datum};
+    use crate::array::{ArrayImpl, ListValue, StructValue};
+    use crate::test_utils::rand_chunk;
+    use crate::types::{DataType, Date, Datum, Decimal, Interval, ScalarImpl, Time, Timestamp};
+    use crate::util::value_encoding::{
+        estimate_serialize_datum_size, serialize_datum, try_get_exact_serialize_datum_size,
+    };
 
     fn test_estimate_serialize_scalar_size(s: ScalarImpl) {
         let d = Datum::from(s);
         assert_eq!(estimate_serialize_datum_size(&d), serialize_datum(&d).len());
+    }
+
+    fn test_try_get_exact_serialize_datum_size(s: &ArrayImpl) {
+        let d = s.to_datum();
+        if let Some(ret) = try_get_exact_serialize_datum_size(s) {
+            assert_eq!(ret, serialize_datum(&d).len());
+        }
     }
 
     #[test]
@@ -490,5 +522,31 @@ mod tests {
             ScalarImpl::Int64(233).into(),
             ScalarImpl::Int64(2333).into(),
         ])));
+    }
+
+    #[test]
+    fn test_try_estimate_size() {
+        let chunk = rand_chunk::gen_chunk(
+            &[
+                DataType::Int16,
+                DataType::Int32,
+                DataType::Int64,
+                DataType::Serial,
+                DataType::Float32,
+                DataType::Float64,
+                DataType::Boolean,
+                DataType::Decimal,
+                DataType::Interval,
+                DataType::Time,
+                DataType::Timestamp,
+                DataType::Date,
+            ],
+            1,
+            0,
+            0.0,
+        );
+        for column in chunk.columns() {
+            test_try_get_exact_serialize_datum_size(&column.array());
+        }
     }
 }

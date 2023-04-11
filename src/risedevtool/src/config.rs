@@ -41,7 +41,7 @@ impl ConfigExpander {
     /// Load a single document YAML file.
     fn load_yaml(path: impl AsRef<Path>) -> Result<Yaml> {
         let path = path.as_ref();
-        let content = std::fs::read_to_string(path)?;
+        let content = fs_err::read_to_string(path)?;
         let [config]: [_; 1] = YamlLoader::load_from_str(&content)?
             .try_into()
             .map_err(|_| anyhow!("expect `{}` to have only one section", path.display()))?;

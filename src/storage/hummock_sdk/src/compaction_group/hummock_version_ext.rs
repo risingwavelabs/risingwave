@@ -827,6 +827,25 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: Vec<SstableInfo>) 
     debug_assert!(can_concat(&operand.table_infos));
 }
 
+pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockSstableObjectId, u64> {
+    version
+        .levels
+        .values()
+        .flat_map(|cg| {
+            cg.get_level0()
+                .get_sub_levels()
+                .iter()
+                .chain(cg.get_levels().iter())
+                .flat_map(|level| {
+                    level
+                        .get_table_infos()
+                        .iter()
+                        .map(|t| (t.object_id, t.file_size))
+                })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;

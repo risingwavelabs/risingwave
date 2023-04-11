@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
@@ -28,6 +29,21 @@ use simd_json::{BorrowedValue, ValueAccess};
 
 use crate::source::SourceFormat;
 use crate::{ensure_i16, ensure_i32, ensure_i64, ensure_str, simd_json_ensure_float};
+pub(crate) fn json_object_smart_get_value<'a, 'b>(
+    v: &'b simd_json::BorrowedValue<'a>,
+    key: Cow<'b, str>,
+) -> Option<&'b BorrowedValue<'a>> {
+    let obj = v.as_object()?;
+    if obj.contains_key(key.as_ref()) {
+        return obj.get(key.as_ref());
+    }
+    for (k, v) in obj {
+        if k.eq_ignore_ascii_case(key.as_ref()) {
+            return Some(v);
+        }
+    }
+    None
+}
 
 fn do_parse_simd_json_value(
     format: &SourceFormat,
@@ -116,7 +132,7 @@ fn do_parse_simd_json_value(
                     simd_json_parse_value(
                         format,
                         field.1,
-                        v.get(field.0.to_ascii_lowercase().as_str()),
+                        json_object_smart_get_value(v, field.0.into()),
                     )
                 })
                 .collect::<Result<Vec<Datum>>>()?;

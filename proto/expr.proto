@@ -45,6 +45,7 @@ message ExprNode {
     BITWISE_SHIFT_RIGHT = 36;
     // date functions
     EXTRACT = 101;
+    DATE_PART = 102;
     TUMBLE_START = 103;
     // From f64 to timestamp.
     // e.g. `select to_timestamp(1672044740.0)`
@@ -101,7 +102,7 @@ message ExprNode {
     LPAD = 238;
     RPAD = 239;
     REVERSE = 240;
-    STRPOS = 241;
+    STRPOS = 241 [deprecated = true]; // duplicated with POSITION
     TO_ASCII = 242;
     TO_HEX = 243;
     QUOTE_IDENT = 244;
@@ -113,6 +114,7 @@ message ExprNode {
     ACOS = 250;
     ATAN = 251;
     ATAN2 = 252;
+    SQRT = 253;
 
     // Boolean comparison
     IS_TRUE = 301;

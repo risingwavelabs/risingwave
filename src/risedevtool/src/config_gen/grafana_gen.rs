@@ -87,14 +87,18 @@ datasources:
             ));
         };
 
-        let filename = "risingwave-dashboard.json";
+        let filenames = [
+            "risingwave-user-dashboard.json",
+            "risingwave-dev-dashboard.json",
+        ];
         let generate_path = generate_path.as_ref();
-        let dashboard_path = Path::new(generate_path).join(filename);
-        std::fs::copy("grafana/risingwave-dashboard.json", dashboard_path)?;
-
+        for filename in filenames {
+            let from = Path::new("grafana").join(filename);
+            let to = Path::new(generate_path).join(filename);
+            std::fs::copy(from, to)?;
+        }
         let grafana_read_path = grafana_read_path.as_ref();
-        let dashboard_path = Path::new(grafana_read_path).join(filename);
-        let dashboard_path_str = dashboard_path
+        let dashboard_path_str = grafana_read_path
             .to_str()
             .ok_or_else(|| anyhow!("invalid string"))?;
 
