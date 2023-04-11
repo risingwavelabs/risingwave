@@ -18,7 +18,7 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector::common::AwsPrivateLinks;
+use risingwave_connector::common::AwsPrivateLinkItem;
 use risingwave_connector::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
@@ -702,7 +702,7 @@ where
         properties: &mut HashMap<String, String>,
     ) -> MetaResult<()> {
         let mut broker_rewrite_map = HashMap::new();
-        const UPSTREAM_SOURCE_PRIVATE_LINK_KEY: &str = "private.links";
+        const UPSTREAM_SOURCE_PRIVATE_LINK_KEY: &str = "privatelink.targets";
         if let Some(prop) = properties.get(UPSTREAM_SOURCE_PRIVATE_LINK_KEY) {
             if !is_kafka_connector(properties) {
                 return Err(MetaError::from(anyhow!(
@@ -714,13 +714,14 @@ where
                 .get(kafka_props_broker_key(properties))
                 .cloned()
                 .ok_or(MetaError::from(anyhow!(
-                    "Must specify brokers in WITH clause",
+                    "Must specify brokers property in WITH clause",
                 )))?;
 
             let broker_addrs = servers.split(',').collect_vec();
-            let link_info: AwsPrivateLinks = serde_json::from_str(prop).map_err(|e| anyhow!(e))?;
+            let link_info: Vec<AwsPrivateLinkItem> =
+                serde_json::from_str(prop).map_err(|e| anyhow!(e))?;
             // construct the rewrite mapping for brokers
-            for (link, broker) in link_info.infos.iter().zip_eq_fast(broker_addrs.into_iter()) {
+            for (link, broker) in link_info.iter().zip_eq_fast(broker_addrs.into_iter()) {
                 let conn = self
                     .catalog_manager
                     .get_connection_by_id(connection_id)
@@ -734,7 +735,7 @@ where
                         )));
                     }
                     let default_dns = svc.dns_entries.values().next().unwrap();
-                    let target_dns = svc.dns_entries.get(&link.availability_zone);
+                    let target_dns = svc.dns_entries.get(&link.az);
                     match target_dns {
                         None => {
                             broker_rewrite_map.insert(
