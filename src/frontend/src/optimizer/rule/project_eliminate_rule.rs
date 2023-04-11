@@ -21,15 +21,9 @@ impl Rule for ProjectEliminateRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let project = plan.as_logical_project()?;
         let dml = |input: PlanRef| {
-            if let Some(_) = input.as_logical_insert() {
-                true
-            } else if let Some(_) = input.as_logical_delete() {
-                true
-            } else if let Some(_) = input.as_logical_update() {
-                true
-            } else {
-                false
-            }
+            input.as_logical_insert().is_some()
+                || input.as_logical_delete().is_some()
+                || input.as_logical_update().is_some()
         };
         if project.is_identity() && !dml(project.input()) {
             Some(project.input())

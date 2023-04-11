@@ -97,7 +97,6 @@ impl Binder {
         self.bind_table(schema_name.as_deref(), &table_name, None)?;
 
         let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, true)?;
-        // let table_schema = table_catalog.
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");
@@ -135,11 +134,12 @@ impl Binder {
         let (returning_list, fields) = self.bind_returning_list(returning_items)?;
         let has_returning = !returning_list.is_empty();
 
-        // if has_returning && has_generated_columns {
-        //     return Err(RwError::from(ErrorCode::BindError(
-        //         "returning is temporarily banned when inserting to a table with generated columns".to_string(),
-        //     )));
-        // }
+        if has_returning && has_generated_columns {
+            return Err(RwError::from(ErrorCode::BindError(
+                "returning is temporarily banned when inserting to a table with generated columns"
+                    .to_string(),
+            )));
+        }
 
         let col_indices_to_insert = get_col_indices_to_insert(
             &cols_to_insert_in_table,
