@@ -21,23 +21,21 @@ use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 use std::str::FromStr;
 
 use bytes::{BufMut, Bytes};
-use ethnum::{i256, I256};
-use num_traits::{
-    CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, FromPrimitive,
-    ToPrimitive, Zero,
-};
+use ethnum::i256;
+use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
 use risingwave_pb::data::ArrayType;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::de::{Error, Visitor};
+use serde::{Deserializer, Serializer};
 use to_text::ToText;
 
 use crate::array::ArrayResult;
 use crate::types::to_binary::ToBinary;
-use crate::types::{to_text, DataType, Scalar, ScalarRef};
+use crate::types::{to_text, Buf, DataType, Scalar, ScalarRef};
 
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
-pub struct Int256(Box<I256>);
+pub struct Int256(Box<i256>);
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
-pub struct Int256Ref<'a>(pub &'a I256);
+pub struct Int256Ref<'a>(pub &'a i256);
 
 impl<'a> Display for Int256Ref<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -65,24 +63,6 @@ macro_rules! impl_common_for_num256 {
             fn hash_scalar<H: Hasher>(&self, state: &mut H) {
                 use std::hash::Hash as _;
                 self.0.hash(state)
-            }
-        }
-
-        impl Serialize for $scalar_ref<'_> {
-            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-            where
-                S: Serializer,
-            {
-                self.0.serialize(serializer)
-            }
-        }
-
-        impl<'de> Deserialize<'de> for $scalar {
-            fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-            where
-                D: serde::Deserializer<'de>,
-            {
-                <$inner>::deserialize(deserializer).map(Into::into)
             }
         }
 
@@ -198,76 +178,69 @@ macro_rules! impl_common_for_num256 {
     };
 }
 
-// only for int256
-impl_common_for_num256!(Int256, Int256Ref<'a>, I256, Int256);
+impl_common_for_num256!(Int256, Int256Ref<'a>, i256, Int256);
 
-impl FromPrimitive for Int256 {
-    fn from_i64(n: i64) -> Option<Self> {
-        Some(I256::from(n).into())
-    }
-
-    fn from_u64(n: u64) -> Option<Self> {
-        Some(I256::from(n).into())
-    }
-
-    // Special handling for 128 bits, the default action of `FromPrimitive` is to convert `n` to
-    // 64 bits before conversion, which will result in loss of precision.
-    fn from_i128(n: i128) -> Option<Self> {
-        Some(I256::from(n).into())
-    }
-
-    fn from_u128(n: u128) -> Option<Self> {
-        Some(I256::from(n).into())
+impl<'a> Int256Ref<'a> {
+    pub fn memcmp_serialize(
+        &self,
+        serializer: &mut memcomparable::Serializer<impl bytes::BufMut>,
+    ) -> memcomparable::Result<()> {
+        let unsigned: i256 = self.0 ^ (i256::from(1) << (i256::BITS - 1));
+        serializer.serialize_bytes(&unsigned.to_be_bytes())
     }
 }
 
-impl ToPrimitive for Int256 {
-    fn to_i64(&self) -> Option<i64> {
-        (*self.0 <= i256::from(i64::MAX)).then_some(self.0.as_i64())
+struct FormattedInt256Visitor;
+
+impl<'de> Visitor<'de> for FormattedInt256Visitor {
+    type Value = [u8; 32];
+
+    fn expecting(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a formatted 256-bit integer")
     }
 
-    fn to_u64(&self) -> Option<u64> {
-        (*self.0 <= i256::from(u64::MAX)).then_some(self.0.as_u64())
-    }
+    fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+    where
+        E: Error,
+    {
+        if v.len() != 32 {
+            return Err(Error::invalid_length(v.len(), &self));
+        }
 
-    // Special handling for 128 bits, the default action of `ToPrimitive` is to convert self to
-    // 64 bits before conversion, which will result in loss of precision.
-    fn to_i128(&self) -> Option<i128> {
-        (*self.0 <= i256::from(i128::MAX)).then_some(self.0.as_i128())
-    }
-
-    fn to_u128(&self) -> Option<u128> {
-        (*self.0 <= i256::from(u128::MAX)).then_some(self.0.as_u128())
+        let mut buf = [0u8; 32];
+        buf.copy_from_slice(v);
+        Ok(buf)
     }
 }
 
-macro_rules! impl_from_type {
-    ($source:ty, $call:path, $target:ty) => {
-        impl core::convert::From<$source> for $target {
+impl Int256 {
+    pub fn memcmp_deserialize(
+        deserializer: &mut memcomparable::Deserializer<impl Buf>,
+    ) -> memcomparable::Result<Self> {
+        let buf = deserializer.deserialize_bytes(FormattedInt256Visitor)?;
+        let unsigned = i256::from_be_bytes(buf);
+        let signed = unsigned ^ (i256::from(1) << (i256::BITS - 1));
+        Ok(Int256::from(signed))
+    }
+}
+
+macro_rules! impl_convert_from {
+    ($($t:ty),* $(,)?) => {$(
+        impl From<$t> for Int256 {
             #[inline]
-            fn from(t: $source) -> Self {
-                $call(t).unwrap()
+            fn from(value: $t) -> Self {
+                Self(Box::new(i256::from(value)))
             }
         }
-    };
+    )*};
 }
 
-impl_from_type!(isize, FromPrimitive::from_isize, Int256);
-impl_from_type!(i8, FromPrimitive::from_i8, Int256);
-impl_from_type!(i16, FromPrimitive::from_i16, Int256);
-impl_from_type!(i32, FromPrimitive::from_i32, Int256);
-impl_from_type!(i64, FromPrimitive::from_i64, Int256);
-impl_from_type!(i128, FromPrimitive::from_i128, Int256);
-impl_from_type!(usize, FromPrimitive::from_usize, Int256);
-impl_from_type!(u8, FromPrimitive::from_u8, Int256);
-impl_from_type!(u16, FromPrimitive::from_u16, Int256);
-impl_from_type!(u32, FromPrimitive::from_u32, Int256);
-impl_from_type!(u64, FromPrimitive::from_u64, Int256);
-impl_from_type!(u128, FromPrimitive::from_u128, Int256);
+impl_convert_from!(i16, i32, i64);
 
+// Conversions for mathematical operations.
 impl From<Int256Ref<'_>> for Int256 {
     fn from(value: Int256Ref<'_>) -> Self {
-        Self(Box::new(*value.0))
+        value.to_owned_scalar()
     }
 }
 
@@ -331,44 +304,72 @@ impl Zero for Int256 {
 mod tests {
     use super::*;
 
-    macro_rules! check_convert {
-        ($to_type:ident, [$($number:expr),+]) => {
-            paste::item! {
-                $(assert_eq!(Int256::from($number).[<to_ $to_type>]().unwrap(), $number as $to_type);)+
-            }
+    macro_rules! check_op {
+        ($t:ty, $lhs:expr, $rhs:expr, [$($op:tt),+]) => {
+            $(assert_eq!(
+                Int256::from($lhs as $t) $op Int256::from($rhs as $t),
+                Int256::from(($lhs as $t) $op ($rhs as $t))
+            );)+
         };
     }
 
-    #[test]
-    #[allow(clippy::unnecessary_cast)]
-    fn basic_test() {
-        check_convert!(u8, [0, 1, u8::MAX]);
-        check_convert!(i8, [0, -1, 1, i8::MAX]);
+    macro_rules! check_checked_op {
+        ($t:ty, $lhs:expr, $rhs:expr, [$($f:ident),+]) => {
+            $(assert_eq!(
+                Int256::from($lhs as $t).$f(&Int256::from($rhs as $t)),
+                ($lhs as $t).$f(($rhs as $t)).map(Int256::from)
+            );)+
+        };
+    }
 
-        check_convert!(u16, [0, 1, u16::MAX]);
-        check_convert!(i16, [0, -1, 1, i16::MAX]);
+    macro_rules! generate_op_test {
+        ($($t:ty),* $(,)?) => {$(
+            check_op!($t, 1, 1, [+, -, *, /, %]);
+            check_op!($t, -1, 1, [+, -, *, /, %]);
+            check_op!($t, 0, 1, [+, -, *, /, %]);
+            check_op!($t, -12, 34, [+, -, *, /, %]);
+            check_op!($t, 12, -34, [+, -, *, /, %]);
+            check_op!($t, -12, -34, [+, -, *, /, %]);
+            check_op!($t, 12, 34, [+, -, *, /, %]);
+        )*};
+    }
 
-        check_convert!(u32, [0, 1, u32::MAX]);
-        check_convert!(i32, [0, -1, 1, i32::MAX]);
-
-        check_convert!(u64, [0, 1, u64::MAX]);
-        check_convert!(i64, [0, -1, 1, i64::MAX]);
-
-        check_convert!(u128, [0, 1, u128::MAX]);
-        check_convert!(i128, [0, -1, 1, i128::MAX]);
+    macro_rules! generate_checked_op_test {
+        ($($t:ty),* $(,)?) => {$(
+            check_checked_op!($t, 1, 1, [checked_add, checked_sub, checked_mul, checked_div, checked_rem]);
+            check_checked_op!($t, 1, 0, [checked_add, checked_sub, checked_mul, checked_div, checked_rem]);
+            check_checked_op!($t, -1, 1, [checked_add, checked_sub, checked_mul, checked_div, checked_rem]);
+            check_checked_op!($t, -1, 0, [checked_add, checked_sub, checked_mul, checked_div, checked_rem]);
+            check_checked_op!($t, 0, 1, [checked_add, checked_sub, checked_mul, checked_div, checked_rem]);
+            check_checked_op!($t, -12, 34, [checked_add, checked_sub, checked_mul, checked_div, checked_rem]);
+            check_checked_op!($t, 12, -34, [checked_add, checked_sub, checked_mul, checked_div, checked_rem]);
+            check_checked_op!($t, -12, -34, [checked_add, checked_sub, checked_mul, checked_div, checked_rem]);
+            check_checked_op!($t, 12, 34, [checked_add, checked_sub, checked_mul, checked_div, checked_rem]);
+        )*};
     }
 
     #[test]
-    fn more_than_i128() {
-        let i = Int256::from(i256::from(i128::MAX) + i256::from(i128::MAX));
-        assert_eq!(i.to_u128(), Some(u128::MAX - 1));
+    fn test_checked_op() {
+        generate_checked_op_test!(i16, i32, i64);
     }
 
     #[test]
     fn test_op() {
-        assert_eq!(
-            Int256::from(i256::from(i128::MAX) + i256::from(i128::MAX)),
-            Int256::from(i128::MAX) + Int256::from(i128::MAX),
-        );
+        generate_op_test!(i16, i32, i64);
+    }
+
+    #[test]
+    fn test_zero() {
+        let zero = Int256::zero();
+        assert_eq!(zero, Int256::from(0));
+        assert!(zero.is_zero());
+    }
+
+    #[test]
+    fn test_neg() {
+        assert_eq!(Int256::from(1).neg(), Int256::from(-1));
+        assert_eq!(-Int256::from(1), Int256::from(-1));
+        assert_eq!(Int256::from(0).neg(), Int256::from(0));
+        assert_eq!(-Int256::from(0), Int256::from(0));
     }
 }
