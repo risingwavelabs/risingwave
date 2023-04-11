@@ -42,6 +42,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 hex = "0.4.3"
 humantime = "2.1"
+hytra = { workspace = true }
 itertools = "0.10"
 itoa = "1.0"
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
