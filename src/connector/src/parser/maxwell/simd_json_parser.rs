@@ -68,11 +68,8 @@ impl MaxwellParser {
                     ))
                 })?;
                 writer.insert(|column| {
-                    simd_json_parse_value(
-                        &column.data_type,
-                        after.get(column.name_in_lower_case.as_str()),
-                    )
-                    .map_err(Into::into)
+                    simd_json_parse_value(&column.data_type, after.get(column.name.as_str()))
+                        .map_err(Into::into)
                 })
             }
             MAXWELL_UPDATE_OP => {
@@ -89,7 +86,7 @@ impl MaxwellParser {
 
                 writer.update(|column| {
                     // old only contains the changed columns but data contains all columns.
-                    let col_name_lc = column.name_in_lower_case.as_str();
+                    let col_name_lc = column.name.as_str();
                     let before_value = before.get(col_name_lc).or_else(|| after.get(col_name_lc));
                     let before = simd_json_parse_value(&column.data_type, before_value)?;
                     let after = simd_json_parse_value(&column.data_type, after.get(col_name_lc))?;
@@ -101,11 +98,8 @@ impl MaxwellParser {
                     RwError::from(ProtocolError("old is missing for delete event".to_string()))
                 })?;
                 writer.delete(|column| {
-                    simd_json_parse_value(
-                        &column.data_type,
-                        before.get(column.name_in_lower_case.as_str()),
-                    )
-                    .map_err(Into::into)
+                    simd_json_parse_value(&column.data_type, before.get(column.name.as_str()))
+                        .map_err(Into::into)
                 })
             }
             other => Err(RwError::from(ProtocolError(format!(
