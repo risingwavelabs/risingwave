@@ -700,6 +700,21 @@ mod tests {
         let arrow = arrow_array::Decimal128Array::from(&array);
         assert_eq!(DecimalArray::from(&arrow), array);
     }
+
+    #[test]
+    fn jsonb() {
+        let array = JsonbArray::from_iter([
+            None,
+            Some("null".parse().unwrap()),
+            Some("false".parse().unwrap()),
+            Some("1".parse().unwrap()),
+            Some("[1, 2, 3]".parse().unwrap()),
+            Some(r#"{ "a": 1, "b": null }"#.parse().unwrap()),
+        ]);
+        let arrow = arrow_array::LargeStringArray::from(&array);
+        assert_eq!(JsonbArray::try_from(&arrow).unwrap(), array);
+    }
+
     #[test]
     fn struct_array() {
         use arrow_array::Array as _;
@@ -710,7 +725,7 @@ mod tests {
 
         // Empty array - arrow to risingwave conversion.
         let test_arr_2 = arrow_array::StructArray::from(vec![]);
-        assert_eq!(StructArray::from(&test_arr_2).len(), 0);
+        assert_eq!(StructArray::try_from(&test_arr_2).unwrap().len(), 0);
 
         // Struct array with primitive types. arrow to risingwave conversion.
         let test_arrow_struct_array = arrow_array::StructArray::try_from(vec![
@@ -734,7 +749,8 @@ mod tests {
             ),
         ])
         .unwrap();
-        let actual_risingwave_struct_array = StructArray::from(&test_arrow_struct_array);
+        let actual_risingwave_struct_array =
+            StructArray::try_from(&test_arrow_struct_array).unwrap();
         let expected_risingwave_struct_array = StructArray::from_slices_with_field_names(
             &[true, true, true, false],
             vec![
@@ -762,6 +778,6 @@ mod tests {
             DataType::Int32,
         );
         let arrow = arrow_array::ListArray::from(&array);
-        assert_eq!(ListArray::from(&arrow), array);
+        assert_eq!(ListArray::try_from(&arrow).unwrap(), array);
     }
 }

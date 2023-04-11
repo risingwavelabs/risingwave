@@ -304,7 +304,7 @@ pub struct JsonbArrayBuilder {
     data: Vec<Value>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsonbArray {
     bitmap: Bitmap,
     data: Vec<Value>,
