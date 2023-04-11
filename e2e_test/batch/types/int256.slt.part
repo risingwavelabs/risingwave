@@ -47,7 +47,7 @@ select '10000000000000000'::rw_int256 % '-2'::rw_int256;
 0
 
 statement ok
-create table t (v1 rw_int256)
+create table t (v rw_int256)
 
 statement ok
 insert into t values (1), (100), (10000), (100000000), (10000000000000000), ('100000000000000000000000000000000');
