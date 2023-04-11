@@ -120,24 +120,25 @@ impl InsertExecutor {
                 }
                 columns = ordered_cols
             }
-            return (cap, vis, columns);
+            (cap, vis, columns)
         };
 
-        let rewrite_stream_chunk = |decomposed_data_chunk: (usize, Vis, Vec<Column>)| -> StreamChunk {
-            let (cap, vis, mut columns) = decomposed_data_chunk;
-            // If the user does not specify the primary key, then we need to add a column as the
-            // primary key.
-            if let Some(row_id_index) = self.row_id_index {
-                let row_id_col = SerialArray::from_iter(repeat(None).take(cap));
-                columns.insert(row_id_index, row_id_col.into())
-            }
+        let rewrite_stream_chunk =
+            |decomposed_data_chunk: (usize, Vis, Vec<Column>)| -> StreamChunk {
+                let (cap, vis, mut columns) = decomposed_data_chunk;
+                // If the user does not specify the primary key, then we need to add a column as the
+                // primary key.
+                if let Some(row_id_index) = self.row_id_index {
+                    let row_id_col = SerialArray::from_iter(repeat(None).take(cap));
+                    columns.insert(row_id_index, row_id_col.into())
+                }
 
-            StreamChunk::new(
-                vec![Op::Insert; cap],
-                columns.clone(),
-                vis.clone().into_visibility(),
-            )
-        };
+                StreamChunk::new(
+                    vec![Op::Insert; cap],
+                    columns.clone(),
+                    vis.into_visibility(),
+                )
+            };
 
         let write_chunk = |stream_chunk: StreamChunk| async {
             self.dml_manager

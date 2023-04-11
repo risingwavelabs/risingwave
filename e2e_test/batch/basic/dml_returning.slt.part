@@ -44,3 +44,19 @@ select * from t;
 
 statement ok
 drop table t;
+
+statement ok
+create tn (v1 int, v2 int);
+
+query II 
+insert into tn (v2) values (1) returning *;
+----
+NULL  1
+
+query II
+insert into tn (v2) values (1) returning v2+1. v1;
+----
+2 NULL
+
+statement ok
+drop table tn;

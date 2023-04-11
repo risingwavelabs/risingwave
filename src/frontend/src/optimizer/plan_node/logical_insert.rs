@@ -47,6 +47,7 @@ pub struct LogicalInsert {
 
 impl LogicalInsert {
     /// Create a [`LogicalInsert`] node. Used internally by optimizer.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         input: PlanRef,
         table_name: String,
@@ -78,6 +79,7 @@ impl LogicalInsert {
     }
 
     /// Create a [`LogicalInsert`] node. Used by planner.
+    #[allow(clippy::too_many_arguments)]
     pub fn create(
         input: PlanRef,
         table_name: String,
@@ -172,13 +174,9 @@ impl fmt::Display for LogicalInsert {
 
 impl ColPrunable for LogicalInsert {
     fn prune_col(&self, _required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
-        if self.has_returning() {
-            self.clone().into()
-        } else {
-            let required_cols: Vec<_> = (0..self.input.schema().len()).collect();
-            self.clone_with_input(self.input.prune_col(&required_cols, ctx))
-                .into()
-        }
+        let required_cols: Vec<_> = (0..self.input.schema().len()).collect();
+        self.clone_with_input(self.input.prune_col(&required_cols, ctx))
+            .into()
     }
 }
 

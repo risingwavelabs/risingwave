@@ -104,6 +104,7 @@ impl Binder {
         let cols_to_insert_in_table = table_catalog.columns_to_insert().cloned().collect_vec();
 
         let generated_column_names: HashSet<_> = table_catalog.generated_column_names().collect();
+        let has_generated_columns = !generated_column_names.is_empty();
         for col in &cols_to_insert_by_user {
             let query_col_name = col.real_value();
             if generated_column_names.contains(query_col_name.as_str()) {
@@ -132,7 +133,13 @@ impl Binder {
         };
 
         let (returning_list, fields) = self.bind_returning_list(returning_items)?;
-        let is_returning = !returning_list.is_empty();
+        let has_returning = !returning_list.is_empty();
+
+        if has_returning && has_generated_columns {
+            return Err(RwError::from(ErrorCode::BindError(
+                "returning is temporarily banned when inserting to a table with generated columns".to_string(),
+            )));
+        }
 
         let col_indices_to_insert = get_col_indices_to_insert(
             &cols_to_insert_in_table,
@@ -239,7 +246,7 @@ impl Binder {
             source: bound_query,
             cast_exprs,
             returning_list,
-            returning_schema: if is_returning {
+            returning_schema: if has_returning {
                 Some(Schema { fields })
             } else {
                 None

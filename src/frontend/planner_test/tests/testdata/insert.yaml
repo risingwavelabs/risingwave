@@ -203,12 +203,12 @@
     create table t (a int, b int);
     insert into t values (0,1), (1,2) returning *, a, a+b;
   logical_plan: |
-    LogicalProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, *VALUES*_0.column_0, (*VALUES*_0.column_0 + *VALUES*_0.column_1) as $expr1] }
+    LogicalProject { exprs: [a, b, a, (a + b) as $expr1] }
     └─LogicalInsert { table: t, returning: true }
       └─LogicalValues { rows: [[0:Int32, 1:Int32], [1:Int32, 2:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32] } }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, *VALUES*_0.column_0, (*VALUES*_0.column_0 + *VALUES*_0.column_1) as $expr1] }
+    └─BatchProject { exprs: [a, b, a, (a + b) as $expr1] }
       └─BatchInsert { table: t, returning: true }
         └─BatchValues { rows: [[0:Int32, 1:Int32], [1:Int32, 2:Int32]] }
 - name: insert with select and returning
@@ -216,14 +216,14 @@
     create table t (a int, b int);
     insert into t select distinct * from t returning *, a, a+b;
   logical_plan: |
-    LogicalProject { exprs: [t.a, t.b, t.a, (t.a + t.b) as $expr1] }
+    LogicalProject { exprs: [a, b, a, (a + b) as $expr1] }
     └─LogicalInsert { table: t, returning: true }
       └─LogicalAgg { group_key: [t.a, t.b], aggs: [] }
         └─LogicalProject { exprs: [t.a, t.b] }
           └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [t.a, t.b, t.a, (t.a + t.b) as $expr1] }
+    └─BatchProject { exprs: [a, b, a, (a + b) as $expr1] }
       └─BatchInsert { table: t, returning: true }
         └─BatchExchange { order: [], dist: Single }
           └─BatchHashAgg { group_key: [t.a, t.b], aggs: [] }
@@ -234,3 +234,8 @@
     create table t (a int, b int);
     insert into t values (0,1), (1,2) returning sum(a);
   binder_error: 'Bind error: should not have agg/window in the `RETURNING` list'
+- name: insert with returning to a table with generated columns, banned for known bug
+  sql: |
+    create table t (a int as b+1, b int);
+    insert into t (b) values (1) returning *;
+  binder_error: 'Bind error: returning is temporarily banned when inserting to a table with generated columns'
