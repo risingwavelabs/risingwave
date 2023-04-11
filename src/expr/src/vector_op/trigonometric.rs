@@ -76,7 +76,7 @@ mod tests {
 
     /// numbers are equal within a rounding error
     fn assert_similar(lhs: F64, rhs: F64) {
-        let x = F64::from(lhs.abs() - rhs.abs()).abs() <= 0.000000000000001;
+        let x = (lhs.abs() - rhs.abs()).abs().0 <= 0.000000000000001;
         assert!(x);
     }
 
@@ -112,7 +112,29 @@ mod tests {
         // https://en.wikipedia.org/wiki/Inverse_trigonometric_functions#Two-argument_variant_of_arctangent
         assert_similar(
             atan2_f64(y, x),
-            two * atan_f64(y / (F64::from(F64::from(x.powi(2) + y.powi(2)).sqrt()) + x)),
+            two * atan_f64(y / ((x.powi(2) + y.powi(2)).sqrt() + x)),
         )
+    }
+
+    #[test]
+    fn test_degrees_and_radians() {
+        let full_angle = F64::from(360);
+        let tau = F64::from(std::f64::consts::TAU);
+        assert_similar(degrees(tau), full_angle);
+        assert_similar(radians(full_angle), tau);
+
+        let straight_angle = F64::from(180);
+        let pi = F64::from(std::f64::consts::PI);
+        assert_similar(degrees(pi), straight_angle);
+        assert_similar(radians(straight_angle), pi);
+
+        let right_angle = F64::from(90);
+        let half_pi = F64::from(std::f64::consts::PI / 2.);
+        assert_similar(degrees(half_pi), right_angle);
+        assert_similar(radians(right_angle), half_pi);
+
+        let zero = F64::from(0);
+        assert_similar(degrees(zero), zero);
+        assert_similar(radians(zero), zero);
     }
 }
