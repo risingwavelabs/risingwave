@@ -64,7 +64,8 @@ static RADIANS_PER_DEGREE: f64 = 0.017_453_292_519_943_295;
 static SIN_30: f64 = 0.499_999_999_999_999_94;
 static ONE_MINUS_COS_60: f64 = 0.499_999_999_999_999_9;
 
-// returns the cosine of an angle that lies between 0 and 60 degrees. This will return exactly 1 when xi s 0, and exactly 0.5 when x is 60 degrees.
+// returns the cosine of an angle that lies between 0 and 60 degrees. This will return exactly 1
+// when xi s 0, and exactly 0.5 when x is 60 degrees.
 fn cosd_0_to_60(x: f64) -> f64 {
     // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c
     let one_minus_cos_x: f64 = 1.0 - f64::cos(x * RADIANS_PER_DEGREE);
