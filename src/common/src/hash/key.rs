@@ -37,7 +37,7 @@ use crate::array::{
 };
 use crate::collection::estimate_size::EstimateSize;
 use crate::row::{OwnedRow, RowDeserializer};
-use crate::types::num256::{Int256Ref, Uint256Ref};
+use crate::types::num256::Int256Ref;
 use crate::types::{DataType, Date, Decimal, ScalarRef, Time, Timestamp, F32, F64};
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::iter_util::ZipEqFast;
@@ -420,18 +420,6 @@ impl<'a> HashKeySerDe<'a> for &'a str {
 }
 
 impl<'a> HashKeySerDe<'a> for Int256Ref<'a> {
-    type S = [u8; 32];
-
-    fn serialize(self) -> Self::S {
-        unimplemented!("HashKeySerDe cannot be implemented for non-primitive types")
-    }
-
-    fn deserialize<R: Read>(_source: &mut R) -> Self {
-        unimplemented!("HashKeySerDe cannot be implemented for non-primitive types")
-    }
-}
-
-impl<'a> HashKeySerDe<'a> for Uint256Ref<'a> {
     type S = [u8; 32];
 
     fn serialize(self) -> Self::S {

@@ -25,6 +25,7 @@ use risingwave_pb::data::{PbArray, PbArrayType, StructArrayData};
 use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayMeta, ArrayResult};
 use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::collection::estimate_size::EstimateSize;
 use crate::types::to_text::ToText;
 use crate::types::{hash_datum, DataType, Datum, DatumRef, Scalar, ScalarRefImpl, ToDatumRef};
 use crate::util::iter_util::ZipEqFast;
@@ -128,13 +129,13 @@ impl ArrayBuilder for StructArrayBuilder {
             .into_iter()
             .map(|b| Arc::new(b.finish()))
             .collect::<Vec<ArrayRef>>();
-        StructArray {
-            bitmap: self.bitmap.finish(),
+        StructArray::new(
+            self.bitmap.finish(),
             children,
-            children_type: self.children_type,
-            children_names: self.children_names,
-            len: self.len,
-        }
+            self.children_type,
+            self.children_names,
+            self.len,
+        )
     }
 }
 
@@ -145,6 +146,8 @@ pub struct StructArray {
     children_type: Arc<[DataType]>,
     children_names: Arc<[String]>,
     len: usize,
+
+    heap_size: usize,
 }
 
 impl StructArrayBuilder {
@@ -219,6 +222,29 @@ impl Array for StructArray {
 }
 
 impl StructArray {
+    fn new(
+        bitmap: Bitmap,
+        children: Vec<ArrayRef>,
+        children_type: Arc<[DataType]>,
+        children_names: Arc<[String]>,
+        len: usize,
+    ) -> Self {
+        let heap_size = bitmap.estimated_heap_size()
+            + children
+                .iter()
+                .map(|c| c.estimated_heap_size())
+                .sum::<usize>();
+
+        Self {
+            bitmap,
+            children,
+            children_type,
+            children_names,
+            len,
+            heap_size,
+        }
+    }
+
     pub fn from_protobuf(array: &PbArray) -> ArrayResult<ArrayImpl> {
         ensure!(
             array.values.is_empty(),
@@ -238,13 +264,7 @@ impl StructArray {
             .map(DataType::from)
             .collect::<Vec<DataType>>()
             .into();
-        let arr = StructArray {
-            bitmap,
-            children,
-            children_type,
-            children_names: vec![].into(),
-            len: cardinality,
-        };
+        let arr = Self::new(bitmap, children, children_type, vec![].into(), cardinality);
         Ok(arr.into())
     }
 
@@ -273,13 +293,13 @@ impl StructArray {
         let cardinality = null_bitmap.len();
         let bitmap = Bitmap::from_iter(null_bitmap.to_vec());
         let children = children.into_iter().map(Arc::new).collect_vec();
-        StructArray {
+        Self::new(
             bitmap,
-            children_type: children_type.into(),
-            children_names: vec![].into(),
-            len: cardinality,
             children,
-        }
+            children_type.into(),
+            vec![].into(),
+            cardinality,
+        )
     }
 
     pub fn from_slices_with_field_names(
@@ -291,13 +311,13 @@ impl StructArray {
         let cardinality = null_bitmap.len();
         let bitmap = Bitmap::from_iter(null_bitmap.to_vec());
         let children = children.into_iter().map(Arc::new).collect_vec();
-        StructArray {
+        Self::new(
             bitmap,
-            children_type: children_type.into(),
-            children_names: children_name.into(),
-            len: cardinality,
             children,
-        }
+            children_type.into(),
+            children_name.into(),
+            cardinality,
+        )
     }
 
     #[cfg(test)]
@@ -307,6 +327,12 @@ impl StructArray {
         self.iter()
             .map(|v| v.map(|s| s.to_owned_scalar()))
             .collect_vec()
+    }
+}
+
+impl EstimateSize for StructArray {
+    fn estimated_heap_size(&self) -> usize {
+        self.heap_size
     }
 }
 

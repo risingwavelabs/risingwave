@@ -25,6 +25,7 @@ use crate::array::column::Column;
 use crate::array::data_chunk_iter::RowRef;
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::collection::estimate_size::EstimateSize;
 use crate::hash::HashCode;
 use crate::row::Row;
 use crate::types::struct_type::StructType;
@@ -524,6 +525,16 @@ impl From<StructArray> for DataChunk {
             columns,
             vis2: Vis::Compact(array.len()),
         }
+    }
+}
+
+impl EstimateSize for DataChunk {
+    fn estimated_heap_size(&self) -> usize {
+        self.columns
+            .iter()
+            .map(Column::estimated_heap_size)
+            .sum::<usize>()
+            + self.vis2.estimated_heap_size()
     }
 }
 

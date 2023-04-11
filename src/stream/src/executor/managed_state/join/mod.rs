@@ -154,6 +154,8 @@ pub struct JoinHashMapMetrics {
     metrics: Arc<StreamingMetrics>,
     /// Basic information
     actor_id: String,
+    join_table_id: String,
+    degree_table_id: String,
     side: &'static str,
     /// How many times have we hit the cache of join executor
     lookup_miss_count: usize,
@@ -163,10 +165,18 @@ pub struct JoinHashMapMetrics {
 }
 
 impl JoinHashMapMetrics {
-    pub fn new(metrics: Arc<StreamingMetrics>, actor_id: ActorId, side: &'static str) -> Self {
+    pub fn new(
+        metrics: Arc<StreamingMetrics>,
+        actor_id: ActorId,
+        side: &'static str,
+        join_table_id: u32,
+        degree_table_id: u32,
+    ) -> Self {
         Self {
             metrics,
             actor_id: actor_id.to_string(),
+            join_table_id: join_table_id.to_string(),
+            degree_table_id: degree_table_id.to_string(),
             side,
             lookup_miss_count: 0,
             total_lookup_count: 0,
@@ -177,15 +187,30 @@ impl JoinHashMapMetrics {
     pub fn flush(&mut self) {
         self.metrics
             .join_lookup_miss_count
-            .with_label_values(&[&self.actor_id, self.side])
+            .with_label_values(&[
+                (self.side),
+                &self.join_table_id,
+                &self.degree_table_id,
+                &self.actor_id,
+            ])
             .inc_by(self.lookup_miss_count as u64);
         self.metrics
             .join_total_lookup_count
-            .with_label_values(&[&self.actor_id, self.side])
+            .with_label_values(&[
+                (self.side),
+                &self.join_table_id,
+                &self.degree_table_id,
+                &self.actor_id,
+            ])
             .inc_by(self.total_lookup_count as u64);
         self.metrics
             .join_insert_cache_miss_count
-            .with_label_values(&[&self.actor_id, self.side])
+            .with_label_values(&[
+                (self.side),
+                &self.join_table_id,
+                &self.degree_table_id,
+                &self.actor_id,
+            ])
             .inc_by(self.insert_cache_miss_count as u64);
         self.total_lookup_count = 0;
         self.lookup_miss_count = 0;
@@ -265,6 +290,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             vec![OrderType::ascending(); state_pk_indices.len()],
         );
 
+        let join_table_id = state_table.table_id();
+        let degree_table_id = degree_table.table_id();
         let state = TableInner {
             pk_indices: state_pk_indices,
             order_key_indices: state_table.pk_indices().to_vec(),
@@ -294,7 +321,13 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             degree_state,
             need_degree_table,
             pk_contained_in_jk,
-            metrics: JoinHashMapMetrics::new(metrics, actor_id, side),
+            metrics: JoinHashMapMetrics::new(
+                metrics,
+                actor_id,
+                side,
+                join_table_id,
+                degree_table_id,
+            ),
         }
     }
 
