@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
-
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::error::ErrorCode::ProtocolError;
