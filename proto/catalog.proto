@@ -62,6 +62,7 @@ message Source {
   oneof optional_associated_table_id {
     uint32 associated_table_id = 12;
   }
+  string definition = 13;
 }
 
 enum SinkType {

@@ -1015,26 +1015,26 @@
     create table t (v1 int);
     select stddev_samp(v1), stddev_pop(v1) from t;
   logical_plan: |
-    LogicalProject { exprs: [Case((count(t.v1) <= 1:Int64), null:Decimal::Float64, Pow(((sum($expr1)::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1))) / (count(t.v1) - 1:Int64))::Float64, 0.5:Float64)) as $expr2, Pow(((sum($expr1)::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1))) / count(t.v1))::Float64, 0.5:Float64) as $expr3] }
+    LogicalProject { exprs: [Case((count(t.v1) <= 1:Int64), null:Decimal, Sqrt(((sum($expr1)::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1))) / (count(t.v1) - 1:Int64)))) as $expr2, Sqrt(((sum($expr1)::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1))) / count(t.v1))) as $expr3] }
     └─LogicalAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
       └─LogicalProject { exprs: [t.v1, (t.v1 * t.v1) as $expr1] }
         └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   batch_plan: |
-    BatchProject { exprs: [Case((sum0(count(t.v1)) <= 1:Int64), null:Float64, Pow(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1)))) / (sum0(count(t.v1)) - 1:Int64))::Float64, 0.5:Float64)) as $expr2, Pow(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1)))) / sum0(count(t.v1)))::Float64, 0.5:Float64) as $expr3] }
+    BatchProject { exprs: [Case((sum0(count(t.v1)) <= 1:Int64), null:Decimal, Sqrt(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1)))) / (sum0(count(t.v1)) - 1:Int64)))) as $expr2, Sqrt(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1)))) / sum0(count(t.v1)))) as $expr3] }
     └─BatchSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1))] }
       └─BatchExchange { order: [], dist: Single }
         └─BatchSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
           └─BatchProject { exprs: [t.v1, (t.v1 * t.v1) as $expr1] }
             └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   batch_local_plan: |
-    BatchProject { exprs: [Case((count(t.v1) <= 1:Int64), null:Float64, Pow(((sum($expr1)::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1))) / (count(t.v1) - 1:Int64))::Float64, 0.5:Float64)) as $expr2, Pow(((sum($expr1)::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1))) / count(t.v1))::Float64, 0.5:Float64) as $expr3] }
+    BatchProject { exprs: [Case((count(t.v1) <= 1:Int64), null:Decimal, Sqrt(((sum($expr1)::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1))) / (count(t.v1) - 1:Int64)))) as $expr2, Sqrt(((sum($expr1)::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1))) / count(t.v1))) as $expr3] }
     └─BatchSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
       └─BatchExchange { order: [], dist: Single }
         └─BatchProject { exprs: [t.v1, (t.v1 * t.v1) as $expr1] }
           └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [stddev_samp, stddev_pop], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
-    └─StreamProject { exprs: [Case((sum0(count(t.v1)) <= 1:Int64), null:Float64, Pow(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1)))) / (sum0(count(t.v1)) - 1:Int64))::Float64, 0.5:Float64)) as $expr2, Pow(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1)))) / sum0(count(t.v1)))::Float64, 0.5:Float64) as $expr3] }
+    └─StreamProject { exprs: [Case((sum0(count(t.v1)) <= 1:Int64), null:Decimal, Sqrt(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1)))) / (sum0(count(t.v1)) - 1:Int64)))) as $expr2, Sqrt(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1)))) / sum0(count(t.v1)))) as $expr3] }
       └─StreamGlobalSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1)), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
@@ -1044,7 +1044,7 @@
   sql: |
     select count(''), stddev_samp(1);
   logical_plan: |
-    LogicalProject { exprs: [count('':Varchar), Case((count(1:Int32) <= 1:Int64), null:Decimal::Float64, Pow(((sum($expr1)::Decimal - ((sum(1:Int32)::Decimal * sum(1:Int32)::Decimal) / count(1:Int32))) / (count(1:Int32) - 1:Int64))::Float64, 0.5:Float64)) as $expr2] }
+    LogicalProject { exprs: [count('':Varchar), Case((count(1:Int32) <= 1:Int64), null:Decimal, Sqrt(((sum($expr1)::Decimal - ((sum(1:Int32)::Decimal * sum(1:Int32)::Decimal) / count(1:Int32))) / (count(1:Int32) - 1:Int64)))) as $expr2] }
     └─LogicalAgg { aggs: [count('':Varchar), sum($expr1), sum(1:Int32), count(1:Int32)] }
       └─LogicalProject { exprs: ['':Varchar, 1:Int32, (1:Int32 * 1:Int32) as $expr1] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
@@ -1053,7 +1053,7 @@
     create table t(v int, w float);
     select stddev_samp(v) from t group by w;
   logical_plan: |
-    LogicalProject { exprs: [Case((count(t.v) <= 1:Int64), null:Decimal::Float64, Pow(((sum($expr1)::Decimal - ((sum(t.v)::Decimal * sum(t.v)::Decimal) / count(t.v))) / (count(t.v) - 1:Int64))::Float64, 0.5:Float64)) as $expr2] }
+    LogicalProject { exprs: [Case((count(t.v) <= 1:Int64), null:Decimal, Sqrt(((sum($expr1)::Decimal - ((sum(t.v)::Decimal * sum(t.v)::Decimal) / count(t.v))) / (count(t.v) - 1:Int64)))) as $expr2] }
     └─LogicalAgg { group_key: [t.w], aggs: [sum($expr1), sum(t.v), count(t.v)] }
       └─LogicalProject { exprs: [t.w, t.v, (t.v * t.v) as $expr1] }
         └─LogicalScan { table: t, columns: [t.v, t.w, t._row_id] }
@@ -1264,8 +1264,3 @@
     BatchExchange { order: [idx_desc.a DESC], dist: Single }
     └─BatchSortAgg { group_key: [idx_desc.a], aggs: [count] }
       └─BatchScan { table: idx_desc, columns: [idx_desc.a], distribution: UpstreamHashShard(idx_desc.a) }
-- name: max group keys exceed 64
-  sql: |
-    create table t(v1 int, v2 int, v3 int, v4 int, v5 int, v6 int, v7 int, v8 int, v9 int, v10 int, v11 int, v12 int, v13 int, v14 int, v15 int, v16 int, v17 int, v18 int, v19 int, v20 int, v21 int, v22 int, v23 int, v24 int, v25 int, v26 int, v27 int, v28 int, v29 int, v30 int, v31 int, v32 int, v33 int, v34 int, v35 int, v36 int, v37 int, v38 int, v39 int, v40 int, v41 int, v42 int, v43 int, v44 int, v45 int, v46 int, v47 int, v48 int, v49 int, v50 int, v51 int, v52 int, v53 int, v54 int, v55 int, v56 int, v57 int, v58 int, v59 int, v60 int, v61 int, v62 int, v63 int, v64 int, v65 int);
-    select * from t group by v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, v41, v42, v43, v44, v45, v46, v47, v48, v49, v50, v51, v52, v53, v54, v55, v56, v57, v58, v59, v60, v61, v62, v63, v64, v65;
-  binder_error: 'Bind error: Number of Group Keys: 65, exceeded maximum: 64'

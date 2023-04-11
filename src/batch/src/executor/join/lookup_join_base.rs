@@ -66,7 +66,7 @@ impl<K: HashKey> LookupJoinBase<K> {
     pub async fn do_execute(mut self: Box<Self>) {
         let outer_side_schema = self.outer_side_input.schema().clone();
 
-        let null_matched: NullBitmap = self.null_safe.into();
+        let null_matched = K::Bitmap::from_bool_vec(self.null_safe);
 
         let mut outer_side_batch_read_stream: BoxedDataChunkListStream =
             utils::batch_read(self.outer_side_input.execute(), AT_LEAST_OUTER_SIDE_ROWS);

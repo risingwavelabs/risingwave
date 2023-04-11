@@ -223,6 +223,19 @@ pub fn handle_show_create_object(
                 .ok_or_else(|| CatalogError::NotFound("table", name.to_string()))?;
             table.create_sql()
         }
+        ShowCreateType::Sink => {
+            let sink = schema
+                .get_sink_by_name(&object_name)
+                .ok_or_else(|| CatalogError::NotFound("sink", name.to_string()))?;
+            sink.create_sql()
+        }
+        ShowCreateType::Source => {
+            let source = schema
+                .get_source_by_name(&object_name)
+                .filter(|s| s.associated_table_id.is_none())
+                .ok_or_else(|| CatalogError::NotFound("source", name.to_string()))?;
+            source.create_sql()
+        }
         _ => {
             return Err(ErrorCode::NotImplemented(
                 format!("show create on: {}", show_create_type),

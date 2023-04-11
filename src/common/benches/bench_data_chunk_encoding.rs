@@ -39,6 +39,15 @@ fn bench_data_chunk_encoding(c: &mut Criterion) {
         DataChunkBenchCase::new("Int16", vec![DataType::Int16]),
         DataChunkBenchCase::new("String", vec![DataType::Varchar]),
         DataChunkBenchCase::new("Int16 and String", vec![DataType::Int16, DataType::Varchar]),
+        DataChunkBenchCase::new(
+            "Int16, Int32, Int64 and String",
+            vec![
+                DataType::Int16,
+                DataType::Int32,
+                DataType::Int64,
+                DataType::Varchar,
+            ],
+        ),
     ];
     for case in test_cases {
         for null_ratio in NULL_RATIOS {
