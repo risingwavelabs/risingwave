@@ -527,7 +527,7 @@ mod tests {
     #[test]
     fn test_try_estimate_size() {
         let chunk = rand_chunk::gen_chunk(
-            &vec![
+            &[
                 DataType::Int16,
                 DataType::Int32,
                 DataType::Int64,
