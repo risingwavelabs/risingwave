@@ -94,10 +94,6 @@ impl fmt::Display for LogicalJoin {
     }
 }
 
-pub(crate) fn has_repeated_element(slice: &[usize]) -> bool {
-    (1..slice.len()).any(|i| slice[i..].contains(&slice[i - 1]))
-}
-
 impl LogicalJoin {
     pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
         let core = generic::Join::with_full_output(left, right, join_type, on);
@@ -111,15 +107,7 @@ impl LogicalJoin {
         on: Condition,
         output_indices: Vec<usize>,
     ) -> Self {
-        // We cannot deal with repeated output indices in join
-        debug_assert!(!has_repeated_element(&output_indices));
-        let core = generic::Join {
-            left,
-            right,
-            on,
-            join_type,
-            output_indices,
-        };
+        let core = generic::Join::new(left, right, on, join_type, output_indices);
         Self::with_core(core)
     }
 
@@ -141,31 +129,39 @@ impl LogicalJoin {
         self.core.internal_column_num()
     }
 
-    /// Get the Mapping of columnIndex from left column index to internal column index.
-    pub fn l2i_col_mapping(&self) -> ColIndexMapping {
-        self.core.l2i_col_mapping()
+    pub fn i2l_col_mapping_ignore_join_type(&self) -> ColIndexMapping {
+        self.core.i2l_col_mapping_ignore_join_type()
     }
 
-    /// Get the Mapping of columnIndex from right column index to internal column index.
-    pub fn r2i_col_mapping(&self) -> ColIndexMapping {
-        self.core.r2i_col_mapping()
-    }
-
-    /// get the Mapping of columnIndex from internal column index to output column index
-    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        ColIndexMapping::with_remaining_columns(self.output_indices(), self.internal_column_num())
-    }
-
-    /// get the Mapping of columnIndex from output column index to internal column index
-    pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        // If output_indices = [0, 0, 1], we should use it as `o2i_col_mapping` directly.
-        // If we use `self.i2o_col_mapping().inverse()`, we will lose the first 0.
-        ColIndexMapping::new(self.output_indices().iter().map(|x| Some(*x)).collect())
+    pub fn i2r_col_mapping_ignore_join_type(&self) -> ColIndexMapping {
+        self.core.i2r_col_mapping_ignore_join_type()
     }
 
     /// Get a reference to the logical join's on.
     pub fn on(&self) -> &Condition {
         &self.core.on
+    }
+
+    /// Collect all input ref in the on condition. And separate them into left and right.
+    pub fn input_idx_on_condition(&self) -> (Vec<usize>, Vec<usize>) {
+        let input_refs = self
+            .core
+            .on
+            .collect_input_refs(self.core.left.schema().len() + self.core.right.schema().len());
+        let index_group = input_refs
+            .ones()
+            .group_by(|i| *i < self.core.left.schema().len());
+        let left_index = index_group
+            .into_iter()
+            .next()
+            .map_or(vec![], |group| group.1.collect_vec());
+        let right_index = index_group.into_iter().next().map_or(vec![], |group| {
+            group
+                .1
+                .map(|i| i - self.core.left.schema().len())
+                .collect_vec()
+        });
+        (left_index, right_index)
     }
 
     /// Get the join type of the logical join.
@@ -180,24 +176,18 @@ impl LogicalJoin {
 
     /// Clone with new output indices
     pub fn clone_with_output_indices(&self, output_indices: Vec<usize>) -> Self {
-        Self::with_output_indices(
-            self.left(),
-            self.right(),
-            self.join_type(),
-            self.on().clone(),
+        Self::with_core(generic::Join {
             output_indices,
-        )
+            ..self.core.clone()
+        })
     }
 
     /// Clone with new `on` condition
-    pub fn clone_with_cond(&self, cond: Condition) -> Self {
-        Self::with_output_indices(
-            self.left(),
-            self.right(),
-            self.join_type(),
-            cond,
-            self.output_indices().clone(),
-        )
+    pub fn clone_with_cond(&self, on: Condition) -> Self {
+        Self::with_core(generic::Join {
+            on,
+            ..self.core.clone()
+        })
     }
 
     pub fn is_left_join(&self) -> bool {
@@ -206,6 +196,10 @@ impl LogicalJoin {
 
     pub fn is_right_join(&self) -> bool {
         matches!(self.join_type(), JoinType::RightSemi | JoinType::RightAnti)
+    }
+
+    pub fn is_full_out(&self) -> bool {
+        self.core.is_full_out()
     }
 
     /// Try to split and pushdown `predicate` into a join's left/right child or the on clause.
@@ -309,9 +303,9 @@ impl LogicalJoin {
     fn to_batch_lookup_join_with_index_selection(
         &self,
         predicate: EqJoinPredicate,
-        logical_join: LogicalJoin,
+        logical_join: generic::Join<PlanRef>,
     ) -> Option<BatchLookupJoin> {
-        match logical_join.join_type() {
+        match logical_join.join_type {
             JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti => {}
             _ => return None,
         };
@@ -334,10 +328,8 @@ impl LogicalJoin {
             if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
                 let index_scan: PlanRef = index_scan.into();
                 let that = self.clone_with_left_right(self.left(), index_scan.clone());
-                let new_logical_join = logical_join.clone_with_left_right(
-                    logical_join.left(),
-                    index_scan.to_batch().expect("index scan failed to batch"),
-                );
+                let mut new_logical_join = logical_join.clone();
+                new_logical_join.right = index_scan.to_batch().expect("index scan failed to batch");
 
                 // Lookup covered index.
                 if let Some(lookup_join) =
@@ -365,9 +357,9 @@ impl LogicalJoin {
     fn to_batch_lookup_join(
         &self,
         predicate: EqJoinPredicate,
-        logical_join: LogicalJoin,
+        logical_join: generic::Join<PlanRef>,
     ) -> Option<BatchLookupJoin> {
-        match logical_join.join_type() {
+        match logical_join.join_type {
             JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti => {}
             _ => return None,
         };
@@ -391,7 +383,7 @@ impl LogicalJoin {
                     max_pos,
                     order_key
                         .iter()
-                        .position(|x| *x == d)
+                        .position(|&x| x == d)
                         .expect("dist_key must in order_key"),
                 );
             }
@@ -399,7 +391,7 @@ impl LogicalJoin {
         };
 
         // Reorder the join equal predicate to match the order key.
-        let mut reorder_idx = vec![];
+        let mut reorder_idx = Vec::with_capacity(at_least_prefix_len);
         for order_col_id in order_col_ids {
             for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
                 if order_col_id == output_column_ids[eq_idx] {
@@ -425,7 +417,7 @@ impl LogicalJoin {
         } else {
             (0..logical_scan.output_col_idx().len()).collect_vec()
         };
-        let left_schema_len = logical_join.left().schema().len();
+        let left_schema_len = logical_join.left.schema().len();
 
         let mut join_predicate_rewriter = LookupJoinPredicateRewriter {
             offset: left_schema_len,
@@ -462,10 +454,9 @@ impl LogicalJoin {
         // Rewrite the join output indices and all output indices referred to the old scan need to
         // rewrite.
         let new_join_output_indices = logical_join
-            .output_indices()
-            .clone()
-            .into_iter()
-            .map(|x| {
+            .output_indices
+            .iter()
+            .map(|&x| {
                 if x < left_schema_len {
                     x
                 } else {
@@ -477,11 +468,11 @@ impl LogicalJoin {
         let new_scan_output_column_ids = new_scan.output_column_ids();
 
         // Construct a new logical join, because we have change its RHS.
-        let new_logical_join = LogicalJoin::with_output_indices(
-            logical_join.left(),
+        let new_logical_join = generic::Join::new(
+            logical_join.left,
             new_scan.into(),
-            logical_join.join_type(),
             new_join_on,
+            logical_join.join_type,
             new_join_output_indices,
         );
 
@@ -510,13 +501,11 @@ impl PlanTreeNodeBinary for LogicalJoin {
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::with_output_indices(
+        Self::with_core(generic::Join {
             left,
             right,
-            self.join_type(),
-            self.on().clone(),
-            self.output_indices().clone(),
-        )
+            ..self.core.clone()
+        })
     }
 
     #[must_use]
@@ -558,7 +547,7 @@ impl PlanTreeNodeBinary for LogicalJoin {
             join.internal_column_num(),
         );
 
-        let old_o2i = self.o2i_col_mapping();
+        let old_o2i = self.core.o2i_col_mapping();
 
         let old_o2l = old_o2i
             .composite(&self.core.i2l_col_mapping())
@@ -800,7 +789,7 @@ impl PredicatePushdown for LogicalJoin {
         let join_type = LogicalJoin::simplify_outer(&predicate, left_col_num, self.join_type());
 
         // rewrite output col referencing indices as internal cols
-        let mut mapping = self.o2i_col_mapping();
+        let mut mapping = self.core.o2i_col_mapping();
 
         predicate = predicate.rewrite_expr(&mut mapping);
 
@@ -871,7 +860,7 @@ impl PredicatePushdown for LogicalJoin {
             self.output_indices().clone(),
         );
 
-        let mut mapping = self.i2o_col_mapping();
+        let mut mapping = self.core.i2o_col_mapping();
         predicate = predicate.rewrite_expr(&mut mapping);
         LogicalFilter::create(new_join.into(), predicate)
     }
@@ -934,7 +923,11 @@ impl LogicalJoin {
         // For inner joins, pull non-equal conditions to a filter operator on top of it
         // We do so as the filter operator can apply the non-equal condition batch-wise (vectorized)
         // as opposed to the HashJoin, which applies the condition row-wise.
-        let pull_filter = self.join_type() == JoinType::Inner && predicate.has_non_eq();
+
+        let stream_hash_join = StreamHashJoin::new(logical_join.core.clone(), predicate.clone());
+        let pull_filter = self.join_type() == JoinType::Inner
+            && stream_hash_join.eq_join_predicate().has_non_eq()
+            && stream_hash_join.inequality_pairs().is_empty();
         if pull_filter {
             let default_indices = (0..self.internal_column_num()).collect::<Vec<_>>();
 
@@ -944,10 +937,11 @@ impl LogicalJoin {
                 Condition::true_cond(),
                 predicate.eq_keys().to_vec(),
                 self.left().schema().len(),
+                self.right().schema().len(),
             );
             let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
-            let hash_join = StreamHashJoin::new(logical_join, eq_cond).into();
-            let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
+            let hash_join = StreamHashJoin::new(logical_join.core, eq_cond).into();
+            let logical_filter = generic::Filter::new(predicate.non_eq_cond(), hash_join);
             let plan = StreamFilter::new(logical_filter).into();
             if self.output_indices() != &default_indices {
                 let logical_project = LogicalProject::with_mapping(
@@ -962,7 +956,7 @@ impl LogicalJoin {
                 Ok(plan)
             }
         } else {
-            Ok(StreamHashJoin::new(logical_join, predicate).into())
+            Ok(stream_hash_join.into())
         }
     }
 
@@ -1083,9 +1077,8 @@ impl LogicalJoin {
         // rewrite.
         let new_join_output_indices = self
             .output_indices()
-            .clone()
-            .into_iter()
-            .map(|x| {
+            .iter()
+            .map(|&x| {
                 if x < left_schema_len {
                     x
                 } else {
@@ -1099,11 +1092,11 @@ impl LogicalJoin {
         let right = RequiredDist::no_shuffle(new_stream_table_scan.into());
 
         // Construct a new logical join, because we have change its RHS.
-        let new_logical_join = LogicalJoin::with_output_indices(
+        let new_logical_join = generic::Join::new(
             left,
             right,
-            self.join_type(),
             new_join_on,
+            self.join_type(),
             new_join_output_indices,
         );
 
@@ -1201,15 +1194,6 @@ impl LogicalJoin {
         }
     }
 
-    fn to_batch_hash_join(
-        &self,
-        predicate: EqJoinPredicate,
-        logical_join: LogicalJoin,
-    ) -> Result<PlanRef> {
-        assert!(predicate.has_eq());
-        Ok(BatchHashJoin::new(logical_join, predicate).into())
-    }
-
     pub fn index_lookup_join_to_batch_lookup_join(&self) -> Result<PlanRef> {
         let predicate = EqJoinPredicate::create(
             self.left().schema().len(),
@@ -1218,23 +1202,14 @@ impl LogicalJoin {
         );
         assert!(predicate.has_eq());
 
-        let left = self.left().to_batch()?;
-        let right = self.right().to_batch()?;
-        let logical_join = self.clone_with_left_right(left, right);
+        let mut logical_join = self.core.clone();
+        logical_join.left = logical_join.left.to_batch()?;
+        logical_join.right = logical_join.right.to_batch()?;
 
         Ok(self
             .to_batch_lookup_join(predicate, logical_join)
             .expect("Fail to convert to lookup join")
             .into())
-    }
-
-    fn to_batch_nested_loop_join(
-        &self,
-        predicate: EqJoinPredicate,
-        logical_join: LogicalJoin,
-    ) -> Result<PlanRef> {
-        assert!(!predicate.has_eq());
-        Ok(BatchNestedLoopJoin::new(logical_join).into())
     }
 }
 
@@ -1246,9 +1221,9 @@ impl ToBatch for LogicalJoin {
             self.on().clone(),
         );
 
-        let left = self.left().to_batch()?;
-        let right = self.right().to_batch()?;
-        let logical_join = self.clone_with_left_right(left, right);
+        let mut logical_join = self.core.clone();
+        logical_join.left = logical_join.left.to_batch()?;
+        logical_join.right = logical_join.right.to_batch()?;
 
         let config = self.base.ctx.session_ctx().config();
 
@@ -1268,10 +1243,10 @@ impl ToBatch for LogicalJoin {
                 }
             }
 
-            self.to_batch_hash_join(predicate, logical_join)
+            Ok(BatchHashJoin::new(logical_join, predicate).into())
         } else {
             // Convert to Nested-loop Join for non-equal joins
-            self.to_batch_nested_loop_join(predicate, logical_join)
+            Ok(BatchNestedLoopJoin::new(logical_join).into())
         }
     }
 }
@@ -1345,9 +1320,8 @@ impl ToStream for LogicalJoin {
         let mut right_to_add = right
             .logical_pk()
             .iter()
-            .cloned()
-            .filter(|i| r2o.try_map(*i).is_none())
-            .map(|i| i + left_len)
+            .filter(|&&i| r2o.try_map(i).is_none())
+            .map(|&i| i + left_len)
             .collect_vec();
 
         // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
@@ -1397,11 +1371,13 @@ impl ToStream for LogicalJoin {
             // ignore the all NULL to maintain the stream key's uniqueness, see https://github.com/risingwavelabs/risingwave/issues/8084 for more information
 
             let l2o = join_with_pk
+                .core
                 .l2i_col_mapping()
-                .composite(&join_with_pk.i2o_col_mapping());
+                .composite(&join_with_pk.core.i2o_col_mapping());
             let r2o = join_with_pk
+                .core
                 .r2i_col_mapping()
-                .composite(&join_with_pk.i2o_col_mapping());
+                .composite(&join_with_pk.core.i2o_col_mapping());
             let left_right_stream_keys = join_with_pk
                 .left()
                 .logical_pk()

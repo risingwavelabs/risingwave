@@ -25,6 +25,7 @@ use alloc::{
     vec::Vec,
 };
 use core::fmt;
+use core::fmt::Debug;
 use core::iter::Peekable;
 use core::str::Chars;
 
@@ -237,6 +238,10 @@ impl Token {
             },
         })
     }
+
+    pub fn with_location(self, location: Location) -> TokenWithLocation {
+        TokenWithLocation::new(self, location.line, location.column)
+    }
 }
 
 /// A keyword (like SELECT) or an optionally quoted SQL identifier
@@ -300,6 +305,61 @@ impl fmt::Display for Whitespace {
     }
 }
 
+/// Location in input string
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct Location {
+    /// Line number, starting from 1
+    pub line: u64,
+    /// Line column, starting from 1
+    pub column: u64,
+}
+
+/// A [Token] with [Location] attached to it
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct TokenWithLocation {
+    pub token: Token,
+    pub location: Location,
+}
+
+impl TokenWithLocation {
+    pub fn new(token: Token, line: u64, column: u64) -> TokenWithLocation {
+        TokenWithLocation {
+            token,
+            location: Location { line, column },
+        }
+    }
+
+    pub fn wrap(token: Token) -> TokenWithLocation {
+        TokenWithLocation::new(token, 0, 0)
+    }
+}
+
+impl PartialEq<Token> for TokenWithLocation {
+    fn eq(&self, other: &Token) -> bool {
+        &self.token == other
+    }
+}
+
+impl PartialEq<TokenWithLocation> for Token {
+    fn eq(&self, other: &TokenWithLocation) -> bool {
+        self == &other.token
+    }
+}
+
+impl fmt::Display for TokenWithLocation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.token == Token::EOF {
+            write!(f, "EOF at the end")
+        } else {
+            write!(
+                f,
+                "{} at line:{}, column:{}",
+                self.token, self.location.line, self.location.column
+            )
+        }
+    }
+}
+
 /// Tokenizer error
 #[derive(Debug, PartialEq)]
 pub struct TokenizerError {
@@ -338,11 +398,11 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    /// Tokenize the statement and produce a vector of tokens
-    pub fn tokenize(&mut self) -> Result<Vec<Token>, TokenizerError> {
+    /// Tokenize the statement and produce a vector of tokens with locations.
+    pub fn tokenize_with_location(&mut self) -> Result<Vec<TokenWithLocation>, TokenizerError> {
         let mut peekable = self.query.chars().peekable();
 
-        let mut tokens: Vec<Token> = vec![];
+        let mut tokens: Vec<TokenWithLocation> = vec![];
 
         while let Some(token) = self.next_token(&mut peekable)? {
             match &token {
@@ -359,9 +419,18 @@ impl<'a> Tokenizer<'a> {
                 _ => self.col += 1,
             }
 
-            tokens.push(token);
+            let token_with_location = TokenWithLocation::new(token, self.line, self.col);
+
+            tokens.push(token_with_location);
         }
         Ok(tokens)
+    }
+
+    /// Tokenize the statement and produce a vector of tokens without locations.
+    #[allow(dead_code)]
+    fn tokenize(&mut self) -> Result<Vec<Token>, TokenizerError> {
+        self.tokenize_with_location()
+            .map(|v| v.into_iter().map(|t| t.token).collect())
     }
 
     /// Get the next token or return None

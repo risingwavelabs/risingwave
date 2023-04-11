@@ -28,6 +28,8 @@ mod impl_;
 
 pub use impl_::LookupExecutorParams;
 
+use super::ActorContextRef;
+
 #[cfg(test)]
 mod tests;
 
@@ -38,6 +40,8 @@ mod tests;
 /// The output schema is `| stream columns | arrangement columns |`.
 /// The input is required to be first stream and then arrangement.
 pub struct LookupExecutor<S: StateStore> {
+    ctx: ActorContextRef,
+
     /// the data types of the produced data chunk inside lookup (before reordering)
     chunk_data_types: Vec<DataType>,
 

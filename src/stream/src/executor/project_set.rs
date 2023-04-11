@@ -210,11 +210,9 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::{
-        new_binary_expr, Expression, InputRefExpression, LiteralExpression,
-    };
+    use risingwave_expr::expr::{build, Expression, InputRefExpression, LiteralExpression};
     use risingwave_expr::table_function::repeat_tf;
-    use risingwave_pb::expr::expr_node::Type;
+    use risingwave_pb::expr::expr_node::PbType;
 
     use super::super::test_utils::MockSource;
     use super::super::*;
@@ -243,15 +241,16 @@ mod tests {
         };
         let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);
 
-        let left_expr = InputRefExpression::new(DataType::Int64, 0);
-        let right_expr = InputRefExpression::new(DataType::Int64, 1);
-        let test_expr = new_binary_expr(
-            Type::Add,
+        let test_expr = build(
+            PbType::Add,
             DataType::Int64,
-            Box::new(left_expr),
-            Box::new(right_expr),
+            vec![
+                Box::new(InputRefExpression::new(DataType::Int64, 0)),
+                Box::new(InputRefExpression::new(DataType::Int64, 1)),
+            ],
         )
         .unwrap();
+
         let tf1 = repeat_tf(
             LiteralExpression::new(DataType::Int32, Some(1_i32.into())).boxed(),
             1,

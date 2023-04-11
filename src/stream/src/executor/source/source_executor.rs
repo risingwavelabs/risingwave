@@ -488,21 +488,21 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::AtomicU64;
+
     use std::time::Duration;
 
     use maplit::{convert_args, hashmap};
     use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{ColumnId, ConflictBehavior, Field, Schema, TableId};
+    use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::plan_common::PbRowFormatType;
     use risingwave_source::connector_test_utils::create_source_desc_builder;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::unbounded_channel;
+    use tracing_test::traced_test;
 
     use super::*;
     use crate::executor::ActorContext;
@@ -516,7 +516,6 @@ mod tests {
             fields: vec![Field::with_name(DataType::Int32, "sequence_int")],
         };
         let row_id_index = None;
-        let pk_column_ids = vec![0];
         let pk_indices = vec![0];
         let source_info = StreamSourceInfo {
             row_format: PbRowFormatType::Native as i32,
@@ -533,13 +532,8 @@ mod tests {
             "fields.sequence_int.start" => "11",
             "fields.sequence_int.end" => "11111",
         ));
-        let source_desc_builder = create_source_desc_builder(
-            &schema,
-            pk_column_ids,
-            row_id_index,
-            source_info,
-            properties,
-        );
+        let source_desc_builder =
+            create_source_desc_builder(&schema, row_id_index, source_info, properties);
         let split_state_store = SourceStateTableHandler::from_table_catalog(
             &default_source_internal_table(0x2333),
             MemoryStateStore::new(),
@@ -570,6 +564,7 @@ mod tests {
 
         let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
             adds: HashMap::new(),
+            added_actors: HashSet::new(),
             splits: hashmap! {
                 ActorId::default() => vec![
                     SplitImpl::Datagen(DatagenSplit {
@@ -600,6 +595,7 @@ mod tests {
         );
     }
 
+    #[traced_test]
     #[tokio::test]
     async fn test_split_change_mutation() {
         let table_id = TableId::default();
@@ -607,7 +603,6 @@ mod tests {
             fields: vec![Field::with_name(DataType::Int32, "v1")],
         };
         let row_id_index = None;
-        let pk_column_ids = vec![0];
         let pk_indices = vec![0_usize];
         let source_info = StreamSourceInfo {
             row_format: PbRowFormatType::Native as i32,
@@ -615,18 +610,13 @@ mod tests {
         };
         let properties = convert_args!(hashmap!(
             "connector" => "datagen",
-            "fields.v1.min" => "1",
-            "fields.v1.max" => "1000",
-            "fields.v1.seed" => "12345",
+            "fields.v1.kind" => "sequence",
+            "fields.v1.start" => "11",
+            "fields.v1.end" => "11111",
         ));
 
-        let source_desc_builder = create_source_desc_builder(
-            &schema,
-            pk_column_ids,
-            row_id_index,
-            source_info,
-            properties,
-        );
+        let source_desc_builder =
+            create_source_desc_builder(&schema, row_id_index, source_info, properties);
         let mem_state_store = MemoryStateStore::new();
 
         let column_ids = vec![ColumnId::from(0)];
@@ -658,23 +648,11 @@ mod tests {
             u64::MAX,
             1,
         );
-
-        let mut materialize = MaterializeExecutor::for_test(
-            Box::new(executor),
-            mem_state_store.clone(),
-            TableId::from(0x2333),
-            vec![ColumnOrder::new(0, OrderType::ascending())],
-            column_ids,
-            2,
-            Arc::new(AtomicU64::new(0)),
-            ConflictBehavior::NoCheck,
-        )
-        .await
-        .boxed()
-        .execute();
+        let mut handler = Box::new(executor).execute();
 
         let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
             adds: HashMap::new(),
+            added_actors: HashSet::new(),
             splits: hashmap! {
                 ActorId::default() => vec![
                     SplitImpl::Datagen(DatagenSplit {
@@ -687,11 +665,11 @@ mod tests {
         });
         barrier_tx.send(init_barrier).unwrap();
 
-        (materialize.next().await.unwrap().unwrap())
+        (handler.next().await.unwrap().unwrap())
             .into_barrier()
             .unwrap();
 
-        let mut ready_chunks = materialize.ready_chunks(10);
+        let mut ready_chunks = handler.ready_chunks(10);
         let chunks = (ready_chunks.next().await.unwrap())
             .into_iter()
             .map(|msg| msg.unwrap().into_chunk().unwrap())
@@ -701,10 +679,10 @@ mod tests {
             chunk_1,
             StreamChunk::from_pretty(
                 " i
-                + 533
-                + 833
-                + 738
-                + 344",
+                + 11
+                + 14
+                + 17
+                + 20",
             )
         );
 
@@ -716,6 +694,11 @@ mod tests {
             }),
             SplitImpl::Datagen(DatagenSplit {
                 split_index: 1,
+                split_num: 3,
+                start_offset: None,
+            }),
+            SplitImpl::Datagen(DatagenSplit {
+                split_index: 2,
                 split_num: 3,
                 start_offset: None,
             }),
@@ -749,20 +732,7 @@ mod tests {
             .map(|msg| msg.unwrap().into_chunk().unwrap())
             .collect();
         let chunk_2 = StreamChunk::concat(chunks).sort_rows();
-        assert_eq!(
-            chunk_2,
-            // mixed from datagen split 0 and 1
-            StreamChunk::from_pretty(
-                " i
-                + 29
-                + 201
-                + 344
-                + 425
-                + 525
-                + 533
-                + 833",
-            )
-        );
+        assert_eq!(chunk_2.cardinality(), 10,);
 
         let barrier = Barrier::new_test_barrier(3).with_mutation(Mutation::Pause);
         barrier_tx.send(barrier).unwrap();

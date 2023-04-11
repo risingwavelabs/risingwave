@@ -97,8 +97,10 @@ impl ToBatchPb for BatchSource {
         NodeBody::Source(SourceNode {
             source_id: source_catalog.id,
             info: Some(source_catalog.info.clone()),
-            columns: source_catalog
-                .columns
+            columns: self
+                .logical
+                .core
+                .column_catalog
                 .iter()
                 .map(|c| c.to_protobuf())
                 .collect_vec(),

@@ -16,15 +16,11 @@ use bytes::{Buf, BufMut};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
-use super::iter_util::ZipEqFast;
+use super::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::array::serial_array::Serial;
 use crate::array::{ArrayImpl, DataChunk};
-use crate::error::Result;
 use crate::row::Row;
-use crate::types::{
-    DataType, Datum, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, OrderedF32,
-    OrderedF64, ScalarImpl, ToDatumRef,
-};
+use crate::types::{DataType, Date, Datum, ScalarImpl, Time, Timestamp, ToDatumRef, F32, F64};
 use crate::util::sort_util::{ColumnOrder, OrderType};
 
 // NULL > any non-NULL value by default
@@ -137,14 +133,14 @@ fn calculate_encoded_size_inner(
             DataType::Int32 => size_of::<i32>(),
             DataType::Int64 => size_of::<i64>(),
             DataType::Serial => size_of::<Serial>(),
-            DataType::Float32 => size_of::<OrderedF32>(),
-            DataType::Float64 => size_of::<OrderedF64>(),
-            DataType::Date => size_of::<NaiveDateWrapper>(),
-            DataType::Time => size_of::<NaiveTimeWrapper>(),
-            DataType::Timestamp => size_of::<NaiveDateTimeWrapper>(),
+            DataType::Float32 => size_of::<F32>(),
+            DataType::Float64 => size_of::<F64>(),
+            DataType::Date => size_of::<Date>(),
+            DataType::Time => size_of::<Time>(),
+            DataType::Timestamp => size_of::<Timestamp>(),
             DataType::Timestamptz => size_of::<i64>(),
             DataType::Boolean => size_of::<u8>(),
-            // IntervalUnit is serialized as (i32, i32, i64)
+            // Interval is serialized as (i32, i32, i64)
             DataType::Interval => size_of::<(i32, i32, i64)>(),
             DataType::Decimal => {
                 deserializer.deserialize_decimal()?;
@@ -183,18 +179,22 @@ fn calculate_encoded_size_inner(
     Ok(deserializer.position() - base_position)
 }
 
-pub fn encode_value(value: impl ToDatumRef, order: OrderType) -> Result<Vec<u8>> {
+pub fn encode_value(value: impl ToDatumRef, order: OrderType) -> memcomparable::Result<Vec<u8>> {
     let mut serializer = memcomparable::Serializer::new(vec![]);
     serialize_datum(value, order, &mut serializer)?;
     Ok(serializer.into_inner())
 }
 
-pub fn decode_value(ty: &DataType, encoded_value: &[u8], order: OrderType) -> Result<Datum> {
+pub fn decode_value(
+    ty: &DataType,
+    encoded_value: &[u8],
+    order: OrderType,
+) -> memcomparable::Result<Datum> {
     let mut deserializer = memcomparable::Deserializer::new(encoded_value);
-    Ok(deserialize_datum(ty, order, &mut deserializer)?)
+    deserialize_datum(ty, order, &mut deserializer)
 }
 
-pub fn encode_array(array: &ArrayImpl, order: OrderType) -> Result<Vec<Vec<u8>>> {
+pub fn encode_array(array: &ArrayImpl, order: OrderType) -> memcomparable::Result<Vec<Vec<u8>>> {
     let mut data = Vec::with_capacity(array.len());
     for datum in array.iter() {
         data.push(encode_value(datum, order)?);
@@ -205,11 +205,14 @@ pub fn encode_array(array: &ArrayImpl, order: OrderType) -> Result<Vec<Vec<u8>>>
 /// This function is used to accelerate the comparison of tuples. It takes datachunk and
 /// user-defined order as input, yield encoded binary string with order preserved for each tuple in
 /// the datachunk.
-pub fn encode_chunk(chunk: &DataChunk, column_orders: &[ColumnOrder]) -> Vec<Vec<u8>> {
-    let encoded_columns = column_orders
+pub fn encode_chunk(
+    chunk: &DataChunk,
+    column_orders: &[ColumnOrder],
+) -> memcomparable::Result<Vec<Vec<u8>>> {
+    let encoded_columns: Vec<_> = column_orders
         .iter()
-        .map(|o| encode_array(chunk.column_at(o.column_index).array_ref(), o.order_type).unwrap())
-        .collect_vec();
+        .map(|o| encode_array(chunk.column_at(o.column_index).array_ref(), o.order_type))
+        .try_collect()?;
 
     let mut encoded_chunk = vec![vec![]; chunk.capacity()];
     for encoded_column in encoded_columns {
@@ -218,16 +221,16 @@ pub fn encode_chunk(chunk: &DataChunk, column_orders: &[ColumnOrder]) -> Vec<Vec
         }
     }
 
-    encoded_chunk
+    Ok(encoded_chunk)
 }
 
 /// Encode a row into memcomparable format.
-pub fn encode_row(row: impl Row, column_orders: &[ColumnOrder]) -> Vec<u8> {
-    let mut encoded_row = vec![];
-    column_orders.iter().for_each(|o| {
-        encoded_row.extend(encode_value(row.datum_at(o.column_index), o.order_type).unwrap());
-    });
-    encoded_row
+pub fn encode_row(row: impl Row, order_types: &[OrderType]) -> memcomparable::Result<Vec<u8>> {
+    let mut serializer = memcomparable::Serializer::new(vec![]);
+    row.iter()
+        .zip_eq_debug(order_types)
+        .try_for_each(|(datum, order)| serialize_datum(datum, *order, &mut serializer))?;
+    Ok(serializer.into_inner())
 }
 
 #[cfg(test)]
@@ -239,8 +242,8 @@ mod tests {
 
     use super::*;
     use crate::array::{DataChunk, ListValue, StructValue};
-    use crate::row::OwnedRow;
-    use crate::types::{DataType, OrderedF32, ScalarImpl};
+    use crate::row::{OwnedRow, RowExt};
+    use crate::types::{DataType, ScalarImpl, F32};
     use crate::util::sort_util::{ColumnOrder, OrderType};
 
     #[test]
@@ -447,11 +450,11 @@ mod tests {
         use num_traits::*;
         use rand::seq::SliceRandom;
 
-        fn serialize(f: OrderedF32) -> Vec<u8> {
+        fn serialize(f: F32) -> Vec<u8> {
             encode_value(&Some(ScalarImpl::from(f)), OrderType::default()).unwrap()
         }
 
-        fn deserialize(data: Vec<u8>) -> OrderedF32 {
+        fn deserialize(data: Vec<u8>) -> F32 {
             decode_value(&DataType::Float32, &data, OrderType::default())
                 .unwrap()
                 .unwrap()
@@ -460,21 +463,21 @@ mod tests {
 
         let floats = vec![
             // -inf
-            OrderedF32::neg_infinity(),
+            F32::neg_infinity(),
             // -1
-            OrderedF32::one().neg(),
+            F32::one().neg(),
             // 0, -0 should be treated the same
-            OrderedF32::zero(),
-            OrderedF32::neg_zero(),
-            OrderedF32::zero(),
+            F32::zero(),
+            F32::neg_zero(),
+            F32::zero(),
             // 1
-            OrderedF32::one(),
+            F32::one(),
             // inf
-            OrderedF32::infinity(),
+            F32::infinity(),
             // nan, -nan should be treated the same
-            OrderedF32::nan(),
-            OrderedF32::nan().neg(),
-            OrderedF32::nan(),
+            F32::nan(),
+            F32::nan().neg(),
+            F32::nan(),
         ];
         assert!(floats.is_sorted());
 
@@ -504,12 +507,10 @@ mod tests {
 
         let row1 = OwnedRow::new(vec![v10, v11, v12]);
         let row2 = OwnedRow::new(vec![v20, v21, v22]);
-        let column_orders = vec![
-            ColumnOrder::new(0, OrderType::ascending()),
-            ColumnOrder::new(1, OrderType::descending()),
-        ];
+        let order_col_indices = vec![0, 1];
+        let order_types = vec![OrderType::ascending(), OrderType::descending()];
 
-        let encoded_row1 = encode_row(&row1, &column_orders);
+        let encoded_row1 = encode_row(row1.project(&order_col_indices), &order_types).unwrap();
         let encoded_v10 = encode_value(
             v10_cloned.as_ref().map(|x| x.as_scalar_ref_impl()),
             OrderType::ascending(),
@@ -526,7 +527,7 @@ mod tests {
             .collect_vec();
         assert_eq!(encoded_row1, concated_encoded_row1);
 
-        let encoded_row2 = encode_row(&row2, &column_orders);
+        let encoded_row2 = encode_row(row2.project(&order_col_indices), &order_types).unwrap();
         assert!(encoded_row1 < encoded_row2);
     }
 
@@ -545,14 +546,17 @@ mod tests {
             &[row1.clone(), row2.clone()],
             &[DataType::Int32, DataType::Varchar, DataType::Float32],
         );
-        let column_orders = vec![
-            ColumnOrder::new(0, OrderType::ascending()),
-            ColumnOrder::new(1, OrderType::descending()),
-        ];
+        let order_col_indices = vec![0, 1];
+        let order_types = vec![OrderType::ascending(), OrderType::descending()];
+        let column_orders = order_col_indices
+            .iter()
+            .zip_eq_fast(&order_types)
+            .map(|(i, o)| ColumnOrder::new(*i, *o))
+            .collect_vec();
 
-        let encoded_row1 = encode_row(&row1, &column_orders);
-        let encoded_row2 = encode_row(&row2, &column_orders);
-        let encoded_chunk = encode_chunk(&chunk, &column_orders);
+        let encoded_row1 = encode_row(row1.project(&order_col_indices), &order_types).unwrap();
+        let encoded_row2 = encode_row(row2.project(&order_col_indices), &order_types).unwrap();
+        let encoded_chunk = encode_chunk(&chunk, &column_orders).unwrap();
         assert_eq!(&encoded_chunk, &[encoded_row1, encoded_row2]);
     }
 }

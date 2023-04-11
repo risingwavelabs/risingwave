@@ -54,11 +54,10 @@ impl CanalJsonParser {
     #[allow(clippy::unused_async)]
     pub async fn parse_inner(
         &self,
-        payload: &[u8],
+        mut payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        let mut payload_mut = payload.to_vec();
-        let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
+        let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
         let is_ddl = event.get(IS_DDL).and_then(|v| v.as_bool()).ok_or_else(|| {
@@ -96,7 +95,7 @@ impl CanalJsonParser {
                         writer.insert(|column| {
                             cannal_simd_json_parse_value(
                                 &column.data_type,
-                                v.get(column.name.to_ascii_lowercase().as_str()),
+                                v.get(column.name_in_lower_case.as_str()),
                             )
                         })
                     })
@@ -135,15 +134,14 @@ impl CanalJsonParser {
                             // in origin canal, old only contains the changed columns but data
                             // contains all columns.
                             // in ticdc, old contains all fields
-                            let col_name_lc = column.name.to_ascii_lowercase();
-                            let before_value = before
-                                .get(col_name_lc.as_str())
-                                .or_else(|| after.get(col_name_lc.as_str()));
+                            let col_name_lc = column.name_in_lower_case.as_str();
+                            let before_value =
+                                before.get(col_name_lc).or_else(|| after.get(col_name_lc));
                             let before =
                                 cannal_simd_json_parse_value(&column.data_type, before_value)?;
                             let after = cannal_simd_json_parse_value(
                                 &column.data_type,
-                                after.get(col_name_lc.as_str()),
+                                after.get(col_name_lc),
                             )?;
                             Ok((before, after))
                         })
@@ -169,7 +167,7 @@ impl CanalJsonParser {
                         writer.delete(|column| {
                             cannal_simd_json_parse_value(
                                 &column.data_type,
-                                v.get(column.name.to_ascii_lowercase().as_str()),
+                                v.get(column.name_in_lower_case.as_str()),
                             )
                         })
                     })
@@ -264,7 +262,7 @@ mod tests {
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 
         let writer = builder.row_writer();
-        parser.parse_inner(payload, writer).await.unwrap();
+        parser.parse_inner(payload.to_vec(), writer).await.unwrap();
 
         let chunk = builder.finish();
 
@@ -288,7 +286,7 @@ mod tests {
             );
             assert_eq!(
                 row.datum_at(4).to_owned_datum(),
-                (Some(ScalarImpl::NaiveDateTime(
+                (Some(ScalarImpl::Timestamp(
                     str_to_timestamp("2018-01-01 00:00:01").unwrap()
                 )))
             );
@@ -316,7 +314,7 @@ mod tests {
             );
             assert_eq!(
                 row.datum_at(4).to_owned_datum(),
-                (Some(ScalarImpl::NaiveDateTime(
+                (Some(ScalarImpl::Timestamp(
                     str_to_timestamp("2018-01-01 00:00:01").unwrap()
                 )))
             );
@@ -341,7 +339,7 @@ mod tests {
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 
         let writer = builder.row_writer();
-        parser.parse_inner(payload, writer).await.unwrap();
+        parser.parse_inner(payload.to_vec(), writer).await.unwrap();
 
         let chunk = builder.finish();
 

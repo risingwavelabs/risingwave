@@ -32,10 +32,11 @@ const CASCADE_MV: &str = "create materialized view m2 as select * from m1;";
 #[madsim::test]
 async fn test_singleton_migration() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let mut session = cluster.start_session();
 
-    cluster.run(ROOT_TABLE_CREATE).await?;
-    cluster.run(ROOT_MV).await?;
-    cluster.run(CASCADE_MV).await?;
+    session.run(ROOT_TABLE_CREATE).await?;
+    session.run(ROOT_MV).await?;
+    session.run(CASCADE_MV).await?;
 
     let fragment = cluster
         .locate_one_fragment(vec![
@@ -69,16 +70,16 @@ async fn test_singleton_migration() -> Result<()> {
 
     sleep(Duration::from_secs(3)).await;
 
-    cluster
+    session
         .run(&format!(
             "insert into t values {}",
             (1..=10).map(|x| format!("({x})")).join(",")
         ))
         .await?;
 
-    cluster.run("flush").await?;
+    session.run("flush").await?;
 
-    cluster
+    session
         .run("select * from m2")
         .await?
         .assert_result_eq("10");
@@ -94,16 +95,16 @@ async fn test_singleton_migration() -> Result<()> {
 
     sleep(Duration::from_secs(3)).await;
 
-    cluster
+    session
         .run(&format!(
             "insert into t values {}",
             (11..=20).map(|x| format!("({x})")).join(",")
         ))
         .await?;
 
-    cluster.run("flush").await?;
+    session.run("flush").await?;
 
-    cluster
+    session
         .run("select * from m2")
         .await?
         .assert_result_eq("20");

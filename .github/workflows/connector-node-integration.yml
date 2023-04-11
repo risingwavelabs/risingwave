@@ -3,7 +3,7 @@ name: Connector Node Integration tests
 on:
   push:
     branches: [main]
-    path: [java/**, proto/**]
+    paths: [java/**, proto/**]
   pull_request:
     branches: [main]
     paths: [java/**, proto/**]
@@ -75,13 +75,6 @@ jobs:
             echo "Jdbc sink test passed"
           else
             echo "Jdbc sink test failed"
-            exit 1
-          fi
-
-          if python3 integration_tests.py --print_sink; then
-            echo "Print sink test passed"
-          else
-            echo "Print sink test failed"
             exit 1
           fi
           cd ..

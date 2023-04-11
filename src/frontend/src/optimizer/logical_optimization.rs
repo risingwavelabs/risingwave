@@ -209,6 +209,7 @@ lazy_static! {
             ProjectEliminateRule::create(),
             TrivialProjectToValuesRule::create(),
             UnionInputValuesMergeRule::create(),
+            JoinProjectTransposeRule::create(),
             // project-join merge should be applied after merge
             // eliminate and to values
             ProjectJoinMergeRule::create(),
@@ -247,6 +248,24 @@ lazy_static! {
         vec![TopNOnIndexRule::create(),
              MinMaxOnIndexRule::create()],
         ApplyOrder::TopDown,
+    );
+
+    static ref ALWAYS_FALSE_FILTER: OptimizationStage = OptimizationStage::new(
+        "Void always-false filter's downstream",
+        vec![AlwaysFalseFilterRule::create()],
+        ApplyOrder::TopDown,
+    );
+
+    static ref LIMIT_PUSH_DOWN: OptimizationStage = OptimizationStage::new(
+        "Push Down Limit",
+        vec![LimitPushDownRule::create()],
+        ApplyOrder::TopDown,
+    );
+
+    static ref PULL_UP_HOP: OptimizationStage = OptimizationStage::new(
+        "Pull up hop",
+        vec![PullUpHopRule::create()],
+        ApplyOrder::BottomUp,
     );
 }
 
@@ -440,6 +459,7 @@ impl LogicalOptimizer {
 
         plan = plan.optimize_by_rules(&REWRITE_LIKE_EXPR);
         plan = plan.optimize_by_rules(&UNION_MERGE);
+        plan = plan.optimize_by_rules(&ALWAYS_FALSE_FILTER);
 
         plan = Self::subquery_unnesting(plan, false, explain_trace, &ctx)?;
 
@@ -473,6 +493,8 @@ impl LogicalOptimizer {
 
         plan = plan.optimize_by_rules(&PROJECT_REMOVE);
 
+        plan = plan.optimize_by_rules(&PULL_UP_HOP);
+
         plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
 
         if has_logical_over_agg(plan.clone()) {
@@ -486,6 +508,8 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&DEDUP_GROUP_KEYS);
 
         plan = plan.optimize_by_rules(&TOP_N_AGG_ON_INDEX);
+
+        plan = plan.optimize_by_rules(&LIMIT_PUSH_DOWN);
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());

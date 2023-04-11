@@ -154,18 +154,14 @@ fn health_check_port(port: u16) -> HealthCheck {
 impl Compose for ComputeNodeConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("compute-node");
-        ComputeNodeService::apply_command_args(
-            &mut command,
-            self,
-            HummockInMemoryStrategy::Disallowed,
-        )?;
+        ComputeNodeService::apply_command_args(&mut command, self)?;
         if self.enable_tiered_cache {
             command.arg("--file-cache-dir").arg("/filecache");
         }
 
         if let Some(c) = &config.rw_config_path {
             let target = Path::new(&config.config_directory).join("risingwave.toml");
-            std::fs::copy(c, target)?;
+            fs_err::copy(c, target)?;
             command.arg("--config-path").arg("/risingwave.toml");
         }
 
@@ -201,11 +197,15 @@ impl Compose for ComputeNodeConfig {
 impl Compose for MetaNodeConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("meta-node");
-        MetaNodeService::apply_command_args(&mut command, self)?;
+        MetaNodeService::apply_command_args(
+            &mut command,
+            self,
+            HummockInMemoryStrategy::Disallowed,
+        )?;
 
         if let Some(c) = &config.rw_config_path {
             let target = Path::new(&config.config_directory).join("risingwave.toml");
-            std::fs::copy(c, target)?;
+            fs_err::copy(c, target)?;
             command.arg("--config-path").arg("/risingwave.toml");
         }
 
@@ -238,7 +238,7 @@ impl Compose for FrontendConfig {
 
         if let Some(c) = &config.rw_config_path {
             let target = Path::new(&config.config_directory).join("risingwave.toml");
-            std::fs::copy(c, target)?;
+            fs_err::copy(c, target)?;
             command.arg("--config-path").arg("/risingwave.toml");
         }
 
@@ -264,15 +264,11 @@ impl Compose for FrontendConfig {
 impl Compose for CompactorConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("compactor-node");
-        CompactorService::apply_command_args(
-            &mut command,
-            self,
-            HummockInMemoryStrategy::Disallowed,
-        )?;
+        CompactorService::apply_command_args(&mut command, self)?;
 
         if let Some(c) = &config.rw_config_path {
             let target = Path::new(&config.config_directory).join("risingwave.toml");
-            std::fs::copy(c, target)?;
+            fs_err::copy(c, target)?;
             command.arg("--config-path").arg("/risingwave.toml");
         }
 
@@ -408,7 +404,7 @@ impl Compose for PrometheusConfig {
             ..Default::default()
         };
 
-        std::fs::write(
+        fs_err::write(
             Path::new(&config.config_directory).join("prometheus.yaml"),
             prometheus_config,
         )?;
@@ -423,17 +419,17 @@ impl Compose for PrometheusConfig {
 impl Compose for GrafanaConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let config_root = Path::new(&config.config_directory);
-        std::fs::write(
+        fs_err::write(
             config_root.join("grafana.ini"),
             GrafanaGen.gen_custom_ini(self),
         )?;
 
-        std::fs::write(
+        fs_err::write(
             config_root.join("grafana-risedev-datasource.yml"),
             GrafanaGen.gen_datasource_yml(self)?,
         )?;
 
-        std::fs::write(
+        fs_err::write(
             config_root.join("grafana-risedev-dashboard.yml"),
             GrafanaGen.gen_dashboard_yml(self, config_root, "/")?,
         )?;

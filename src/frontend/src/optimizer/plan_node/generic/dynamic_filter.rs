@@ -68,8 +68,11 @@ pub fn infer_left_internal_table_catalog(
     let mut pk_indices = vec![left_key_index];
     let read_prefix_len_hint = pk_indices.len();
 
-    // TODO(yuhao): dedup the dist key and pk.
-    pk_indices.extend(me.logical_pk());
+    for i in me.logical_pk() {
+        if *i != left_key_index {
+            pk_indices.push(*i);
+        }
+    }
 
     let mut internal_table_catalog_builder =
         TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());

@@ -14,7 +14,6 @@
 
 #![allow(clippy::needless_question_mark)]
 
-use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 
 use anyhow::{Context, Result};
@@ -22,6 +21,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use console::style;
 use dialoguer::MultiSelect;
 use enum_iterator::{all, Sequence};
+use fs_err::OpenOptions;
 use itertools::Itertools;
 use risedev::RISEDEV_CONFIG_FILE;
 
@@ -65,10 +65,9 @@ pub enum Components {
     Kafka,
     Pubsub,
     Redis,
-    ConnectorNode,
-    BuildConnectorNode,
     Tracing,
     RustComponents,
+    BuildConnectorNode,
     Dashboard,
     Release,
     AllInOne,
@@ -85,8 +84,7 @@ impl Components {
             Self::Kafka => "[Component] Kafka",
             Self::Pubsub => "[Component] Google Pubsub",
             Self::Redis => "[Component] Redis",
-            Self::ConnectorNode => "[Component] RisingWave Connector",
-            Self::BuildConnectorNode => "[Build] Build RisingWave Connector from source",
+            Self::BuildConnectorNode => "[Build] Build RisingWave Connector (Java)",
             Self::RustComponents => "[Build] Rust components",
             Self::Dashboard => "[Build] Dashboard v2",
             Self::Tracing => "[Component] Tracing: Jaeger",
@@ -165,11 +163,6 @@ a dev cluster.
 Required if you want to sink data to redis.
                 "
             }
-            Self::ConnectorNode => {
-                "
-Required if you want to create CDC source from external Databases.
-                "
-            }
             Self::BuildConnectorNode => {
                 "
 Required if you want to build Connector Node from source locally.
@@ -194,7 +187,6 @@ Required if you want to build Connector Node from source locally.
             "ENABLE_ALL_IN_ONE" => Some(Self::AllInOne),
             "ENABLE_SANITIZER" => Some(Self::Sanitizer),
             "ENABLE_REDIS" => Some(Self::Redis),
-            "ENABLE_RW_CONNECTOR" => Some(Self::ConnectorNode),
             "ENABLE_BUILD_RW_CONNECTOR" => Some(Self::BuildConnectorNode),
             _ => None,
         }
@@ -215,7 +207,6 @@ Required if you want to build Connector Node from source locally.
             Self::Release => "ENABLE_RELEASE_PROFILE",
             Self::AllInOne => "ENABLE_ALL_IN_ONE",
             Self::Sanitizer => "ENABLE_SANITIZER",
-            Self::ConnectorNode => "ENABLE_RW_CONNECTOR",
             Self::BuildConnectorNode => "ENABLE_BUILD_RW_CONNECTOR",
         }
         .into()

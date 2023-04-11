@@ -14,6 +14,8 @@
 
 package com.risingwave.connector;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkFactory;
@@ -35,33 +37,34 @@ public class JDBCSinkFactory implements SinkFactory {
 
     @Override
     public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
-        String tableName = tableProperties.get(TABLE_NAME_PROP);
-        String jdbcUrl = tableProperties.get(JDBC_URL_PROP);
-        return new JDBCSink(tableName, jdbcUrl, tableSchema);
+        ObjectMapper mapper = new ObjectMapper();
+        JDBCSinkConfig config = mapper.convertValue(tableProperties, JDBCSinkConfig.class);
+        return new JDBCSink(config, tableSchema);
     }
 
     @Override
     public void validate(
             TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType) {
-        if (!tableProperties.containsKey(JDBC_URL_PROP)
-                || !tableProperties.containsKey(TABLE_NAME_PROP)) {
-            throw Status.INVALID_ARGUMENT
-                    .withDescription(
-                            String.format(
-                                    "%s or %s is not specified", JDBC_URL_PROP, TABLE_NAME_PROP))
-                    .asRuntimeException();
-        }
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
+        JDBCSinkConfig config = mapper.convertValue(tableProperties, JDBCSinkConfig.class);
 
-        String jdbcUrl = tableProperties.get(JDBC_URL_PROP);
-        String tableName = tableProperties.get(TABLE_NAME_PROP);
+        String jdbcUrl = config.getJdbcUrl();
+        String tableName = config.getTableName();
         Set<String> jdbcColumns = new HashSet<>();
         Set<String> jdbcPk = new HashSet<>();
+        Set<String> jdbcTableNames = new HashSet<>();
 
         try (Connection conn = DriverManager.getConnection(jdbcUrl);
+                ResultSet tableNamesResultSet =
+                        conn.getMetaData().getTables(null, null, "%", null);
                 ResultSet columnResultSet =
                         conn.getMetaData().getColumns(null, null, tableName, null);
                 ResultSet pkResultSet =
                         conn.getMetaData().getPrimaryKeys(null, null, tableName); ) {
+            while (tableNamesResultSet.next()) {
+                jdbcTableNames.add(tableNamesResultSet.getString("TABLE_NAME"));
+            }
             while (columnResultSet.next()) {
                 jdbcColumns.add(columnResultSet.getString("COLUMN_NAME"));
             }
@@ -69,7 +72,15 @@ public class JDBCSinkFactory implements SinkFactory {
                 jdbcPk.add(pkResultSet.getString("COLUMN_NAME"));
             }
         } catch (SQLException e) {
-            throw Status.INTERNAL.withCause(e).asRuntimeException();
+            throw Status.INVALID_ARGUMENT
+                    .withDescription("failed to connect to target database: " + e.getSQLState())
+                    .asRuntimeException();
+        }
+
+        if (!jdbcTableNames.contains(tableName)) {
+            throw Status.INVALID_ARGUMENT
+                    .withDescription("table not found: " + tableName)
+                    .asRuntimeException();
         }
 
         // Check that all columns in tableSchema exist in the JDBC table.

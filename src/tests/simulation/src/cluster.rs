@@ -16,12 +16,14 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::LazyLock;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{bail, Result};
 use clap::Parser;
+use futures::channel::{mpsc, oneshot};
 use futures::future::join_all;
+use futures::{SinkExt, StreamExt};
 use madsim::net::ipvs::*;
 use madsim::runtime::{Handle, NodeHandle};
 use rand::Rng;
@@ -29,13 +31,23 @@ use sqllogictest::AsyncDB;
 
 use crate::client::RisingWave;
 
-/// Embed the config file and create a temporary file at runtime.
-static CONFIG_PATH: LazyLock<tempfile::TempPath> = LazyLock::new(|| {
-    let mut file = tempfile::NamedTempFile::new().expect("failed to create temp config file");
-    file.write_all(include_bytes!("risingwave.toml"))
-        .expect("failed to write config file");
-    file.into_temp_path()
-});
+/// The path to the configuration file for the cluster.
+#[derive(Clone, Debug)]
+pub enum ConfigPath {
+    /// A regular path pointing to a external configuration file.
+    Regular(String),
+    /// A temporary path pointing to a configuration file created at runtime.
+    Temp(Arc<tempfile::TempPath>),
+}
+
+impl ConfigPath {
+    fn as_str(&self) -> &str {
+        match self {
+            ConfigPath::Regular(s) => s,
+            ConfigPath::Temp(p) => p.as_os_str().to_str().unwrap(),
+        }
+    }
+}
 
 /// RisingWave cluster configuration.
 #[derive(Debug, Clone)]
@@ -43,7 +55,7 @@ pub struct Configuration {
     /// The path to configuration file.
     ///
     /// Empty string means using the default config.
-    pub config_path: String,
+    pub config_path: ConfigPath,
 
     /// The number of frontend nodes.
     pub frontend_nodes: usize,
@@ -72,11 +84,21 @@ pub struct Configuration {
 impl Configuration {
     /// Returns the config for scale test.
     pub fn for_scale() -> Self {
+        // Embed the config file and create a temporary file at runtime. The file will be deleted
+        // automatically when it's dropped.
+        let config_path = {
+            let mut file =
+                tempfile::NamedTempFile::new().expect("failed to create temp config file");
+            file.write_all(include_bytes!("risingwave-scale.toml"))
+                .expect("failed to write config file");
+            file.into_temp_path()
+        };
+
         Configuration {
-            config_path: CONFIG_PATH.as_os_str().to_string_lossy().into(),
+            config_path: ConfigPath::Temp(config_path.into()),
             frontend_nodes: 2,
             compute_nodes: 3,
-            meta_nodes: 1,
+            meta_nodes: 3,
             compactor_nodes: 2,
             compute_node_cores: 2,
             etcd_timeout_rate: 0.0,
@@ -198,7 +220,7 @@ impl Cluster {
             let opts = risingwave_meta::MetaNodeOpts::parse_from([
                 "meta-node",
                 "--config-path",
-                &conf.config_path,
+                conf.config_path.as_str(),
                 "--listen-addr",
                 "0.0.0.0:5690",
                 "--advertise-addr",
@@ -207,6 +229,8 @@ impl Cluster {
                 "etcd",
                 "--etcd-endpoints",
                 "etcd:2388",
+                "--state-store",
+                "hummock+minio://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
             ]);
             handle
                 .create_node()
@@ -224,7 +248,7 @@ impl Cluster {
             let opts = risingwave_frontend::FrontendOpts::parse_from([
                 "frontend-node",
                 "--config-path",
-                &conf.config_path,
+                conf.config_path.as_str(),
                 "--listen-addr",
                 "0.0.0.0:4566",
                 "--advertise-addr",
@@ -243,13 +267,13 @@ impl Cluster {
             let opts = risingwave_compute::ComputeNodeOpts::parse_from([
                 "compute-node",
                 "--config-path",
-                &conf.config_path,
+                conf.config_path.as_str(),
                 "--listen-addr",
                 "0.0.0.0:5688",
                 "--advertise-addr",
                 &format!("192.168.3.{i}:5688"),
-                "--state-store",
-                "hummock+minio://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
+                "--total-memory-bytes",
+                "6979321856",
                 "--parallelism",
                 &conf.compute_node_cores.to_string(),
             ]);
@@ -267,13 +291,11 @@ impl Cluster {
             let opts = risingwave_compactor::CompactorOpts::parse_from([
                 "compactor-node",
                 "--config-path",
-                &conf.config_path,
+                conf.config_path.as_str(),
                 "--listen-addr",
                 "0.0.0.0:6660",
                 "--advertise-addr",
                 &format!("192.168.4.{i}:6660"),
-                "--state-store",
-                "hummock+minio://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
             ]);
             handle
                 .create_node()
@@ -308,35 +330,47 @@ impl Cluster {
         })
     }
 
-    /// Run a SQL query from the client.
-    pub async fn run(&mut self, sql: impl Into<String>) -> Result<String> {
-        let sql = sql.into();
+    /// Start a SQL session on the client node.
+    pub fn start_session(&mut self) -> Session {
+        let (query_tx, mut query_rx) = mpsc::channel::<SessionRequest>(0);
 
-        let result = self
-            .client
-            .spawn(async move {
-                // TODO: reuse session
-                let mut session = RisingWave::connect("frontend".into(), "dev".into())
+        self.client.spawn(async move {
+            let mut client = RisingWave::connect("frontend".into(), "dev".into()).await?;
+
+            while let Some((sql, tx)) = query_rx.next().await {
+                let result = client
+                    .run(&sql)
                     .await
-                    .expect("failed to connect to RisingWave");
-                let result = session.run(&sql).await?;
-                Ok::<_, anyhow::Error>(result)
-            })
-            .await??;
+                    .map(|output| match output {
+                        sqllogictest::DBOutput::Rows { rows, .. } => rows
+                            .into_iter()
+                            .map(|row| {
+                                row.into_iter()
+                                    .map(|v| v.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(" ")
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                        _ => "".to_string(),
+                    })
+                    .map_err(Into::into);
 
-        match result {
-            sqllogictest::DBOutput::Rows { rows, .. } => Ok(rows
-                .into_iter()
-                .map(|row| {
-                    row.into_iter()
-                        .map(|v| v.to_string())
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                })
-                .collect::<Vec<_>>()
-                .join("\n")),
-            _ => Ok("".to_string()),
-        }
+                let _ = tx.send(result);
+            }
+
+            Ok::<_, anyhow::Error>(())
+        });
+
+        Session { query_tx }
+    }
+
+    /// Run a SQL query on a **new** session of the client node.
+    ///
+    /// This is a convenience method that creates a new session and runs the query on it. If you
+    /// want to run multiple queries on the same session, use `start_session` and `Session::run`.
+    pub async fn run(&mut self, sql: impl Into<String>) -> Result<String> {
+        self.start_session().run(sql).await
     }
 
     /// Run a future on the client node.
@@ -398,6 +432,10 @@ impl Cluster {
                 }
                 nodes.push(format!("meta-{}", i));
             }
+            // don't kill all meta services
+            if nodes.len() == self.config.meta_nodes {
+                nodes.truncate(1);
+            }
         }
         if opts.kill_frontend {
             let rand = rand::thread_rng().gen_range(0..3);
@@ -441,7 +479,14 @@ impl Cluster {
             tracing::info!("kill {name}");
             madsim::runtime::Handle::current().kill(name);
 
-            let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
+            let mut t =
+                rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
+            // has a small chance to restart after a long time
+            // so that the node is expired and removed from the cluster
+            if rand::thread_rng().gen_bool(0.1) {
+                // max_heartbeat_interval_secs = 60
+                t += Duration::from_secs(20);
+            }
             tokio::time::sleep(t).await;
             tracing::info!("restart {name}");
             madsim::runtime::Handle::current().restart(name);
@@ -514,6 +559,26 @@ impl Cluster {
                 panic!("failed to graceful shutdown {node} in {waiting_time:?}");
             }
         }
+    }
+}
+
+type SessionRequest = (
+    String,                          // query sql
+    oneshot::Sender<Result<String>>, // channel to send result back
+);
+
+/// A SQL session on the simulated client node.
+#[derive(Debug, Clone)]
+pub struct Session {
+    query_tx: mpsc::Sender<SessionRequest>,
+}
+
+impl Session {
+    /// Run the given SQL query on the session.
+    pub async fn run(&mut self, sql: impl Into<String>) -> Result<String> {
+        let (tx, rx) = oneshot::channel();
+        self.query_tx.send((sql.into(), tx)).await?;
+        rx.await?
     }
 }
 

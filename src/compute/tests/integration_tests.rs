@@ -26,7 +26,8 @@ use risingwave_batch::executor::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
     RowSeqScanExecutor, ScanRange,
 };
-use risingwave_common::array::{Array, DataChunk, F64Array, I64Array};
+use risingwave_common::array::serial_array::SerialArray;
+use risingwave_common::array::{Array, DataChunk, F64Array};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{
     ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, INITIAL_TABLE_VERSION_ID,
@@ -106,7 +107,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let table_id = TableId::default();
     let schema = Schema {
         fields: vec![
-            Field::unnamed(DataType::Int64),
+            Field::unnamed(DataType::Serial),
             Field::unnamed(DataType::Float64),
         ],
     };
@@ -120,15 +121,9 @@ async fn test_table_materialize() -> StreamResult<()> {
         "fields.v1.max" => "1000",
         "fields.v1.seed" => "12345",
     ));
-    let pk_column_ids = vec![0];
     let row_id_index: usize = 0;
-    let source_builder = create_source_desc_builder(
-        &schema,
-        pk_column_ids,
-        Some(row_id_index),
-        source_info,
-        properties,
-    );
+    let source_builder =
+        create_source_desc_builder(&schema, Some(row_id_index), source_info, properties);
 
     // Ensure the source exists.
     let source_desc = source_builder.build().await.unwrap();
@@ -157,6 +152,7 @@ async fn test_table_materialize() -> StreamResult<()> {
             name: field.name,
             field_descs: vec![],
             type_name: "".to_string(),
+            generated_column: None,
         })
         .collect_vec();
     let (barrier_tx, barrier_rx) = unbounded_channel();
@@ -292,7 +288,7 @@ async fn test_table_materialize() -> StreamResult<()> {
             todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
         }
         Message::Chunk(c) => {
-            let col_row_id = c.columns()[0].array_ref().as_int64();
+            let col_row_id = c.columns()[0].array_ref().as_serial();
             col_row_ids.push(col_row_id.value_at(0).unwrap());
             col_row_ids.push(col_row_id.value_at(1).unwrap());
 
@@ -343,7 +339,7 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     // Delete some data using `DeleteExecutor`, assuming we are inserting into the "mv".
     let columns = vec![
-        column_nonnull! { I64Array, [ col_row_ids[0]] }, // row id column
+        column_nonnull! { SerialArray, [ col_row_ids[0]] }, // row id column
         column_nonnull! { F64Array, [1.14] },
     ];
     let chunk = DataChunk::new(columns.clone(), 1);
@@ -371,7 +367,7 @@ async fn test_table_materialize() -> StreamResult<()> {
             todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
         }
         Message::Chunk(c) => {
-            let col_row_id = c.columns()[0].array_ref().as_int64();
+            let col_row_id = c.columns()[0].array_ref().as_serial();
             assert_eq!(col_row_id.value_at(0).unwrap(), col_row_ids[0]);
 
             let col_data = c.columns()[1].array_ref().as_float64();

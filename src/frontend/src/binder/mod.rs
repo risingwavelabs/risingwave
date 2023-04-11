@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
 use itertools::Itertools;
@@ -55,7 +55,7 @@ pub use update::BoundUpdate;
 pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;
-use crate::catalog::ViewId;
+use crate::catalog::{TableId, ViewId};
 use crate::session::{AuthContext, SessionImpl};
 
 pub type ShareId = usize;
@@ -89,11 +89,14 @@ pub struct Binder {
     next_share_id: ShareId,
 
     search_path: SearchPath,
-    /// Whether the Binder is binding an MV.
-    in_create_mv: bool,
+    /// Whether the Binder is binding an MV/SINK.
+    in_streaming: bool,
 
     /// `ShareId`s identifying shared views.
     shared_views: HashMap<ViewId, ShareId>,
+
+    /// The included relations while binding a query.
+    included_relations: HashSet<TableId>,
 
     param_types: ParameterTypes,
 }
@@ -181,7 +184,7 @@ impl ParameterTypes {
 }
 
 impl Binder {
-    fn new_inner(session: &SessionImpl, in_create_mv: bool, param_types: Vec<DataType>) -> Binder {
+    fn new_inner(session: &SessionImpl, in_streaming: bool, param_types: Vec<DataType>) -> Binder {
         let now_ms = session
             .env()
             .hummock_snapshot_manager()
@@ -200,22 +203,26 @@ impl Binder {
             next_values_id: 0,
             next_share_id: 0,
             search_path: session.config().get_search_path(),
-            in_create_mv,
+            in_streaming,
             shared_views: HashMap::new(),
+            included_relations: HashSet::new(),
             param_types: ParameterTypes::new(param_types),
         }
     }
 
-    pub fn new(session: &SessionImpl) -> Binder {
-        Self::new_inner(session, false, vec![])
-    }
-
-    pub fn new_with_param_types(session: &SessionImpl, param_types: Vec<DataType>) -> Binder {
+    pub fn new(session: &SessionImpl, param_types: Vec<DataType>) -> Binder {
         Self::new_inner(session, false, param_types)
     }
 
     pub fn new_for_stream(session: &SessionImpl) -> Binder {
         Self::new_inner(session, true, vec![])
+    }
+
+    pub fn new_for_stream_with_param_types(
+        session: &SessionImpl,
+        param_types: Vec<DataType>,
+    ) -> Binder {
+        Self::new_inner(session, true, param_types)
     }
 
     /// Bind a [`Statement`].
@@ -225,6 +232,15 @@ impl Binder {
 
     pub fn export_param_types(&self) -> Result<Vec<DataType>> {
         self.param_types.export()
+    }
+
+    /// Returns included relations in the query after binding. This is used for resolving relation
+    /// dependencies. Note that it only contains referenced relations discovered during binding.
+    /// After the plan is built, the referenced relations may be changed. We cannot rely on the
+    /// collection result of plan, because we still need to record the dependencies that have been
+    /// optimised away.
+    pub fn included_relations(&self) -> HashSet<TableId> {
+        self.included_relations.clone()
     }
 
     fn push_context(&mut self) {
@@ -307,12 +323,12 @@ pub mod test_utils {
 
     #[cfg(test)]
     pub fn mock_binder() -> Binder {
-        Binder::new(&SessionImpl::mock())
+        Binder::new(&SessionImpl::mock(), vec![])
     }
 
     #[cfg(test)]
     pub fn mock_binder_with_param_types(param_types: Vec<DataType>) -> Binder {
-        Binder::new_with_param_types(&SessionImpl::mock(), param_types)
+        Binder::new(&SessionImpl::mock(), param_types)
     }
 }
 

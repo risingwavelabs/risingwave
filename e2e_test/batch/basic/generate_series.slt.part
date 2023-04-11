@@ -87,3 +87,7 @@ SELECT * FROM generate_series('2'::INT,'10'::INT,'0'::INT);
 query I
 SELECT * FROM generate_series('2'::INT,'10'::INT,'-2'::INT);
 ----
+
+query I
+SELECT * FROM generate_series(1, 100000000, 1) where 1=0;
+----

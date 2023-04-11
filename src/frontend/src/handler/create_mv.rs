@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::PbTable;
@@ -22,9 +23,10 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
 use super::privilege::resolve_relation_privileges;
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
+use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::Explain;
-use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
 use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
@@ -85,10 +87,14 @@ pub fn gen_create_mv_plan(
 
     let definition = context.normalized_sql().to_owned();
 
-    let bound = {
+    let (dependent_relations, bound) = {
         let mut binder = Binder::new_for_stream(session);
-        binder.bind_query(query)?
+        let bound = binder.bind_query(query)?;
+        (binder.included_relations(), bound)
     };
+
+    let check_items = resolve_query_privileges(&bound);
+    session.check_privileges(&check_items)?;
 
     let col_names = get_column_names(&bound, session, columns)?;
 
@@ -105,7 +111,16 @@ pub fn gen_create_mv_plan(
         );
     }
     let plan: PlanRef = materialize.into();
+    let dependent_relations =
+        RelationCollectorVisitor::collect_with(dependent_relations, plan.clone());
+
     table.owner = session.user_id();
+
+    // record dependent relations.
+    table.dependent_relations = dependent_relations
+        .into_iter()
+        .map(|t| t.table_id)
+        .collect_vec();
 
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();
@@ -244,7 +259,7 @@ pub mod tests {
         );
         let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
-            row_id_col_name.as_str() => DataType::Int64,
+            row_id_col_name.as_str() => DataType::Serial,
             "country" => DataType::new_struct(
                  vec![DataType::Varchar,city_type,DataType::Varchar],
                  vec!["address".to_string(), "city".to_string(), "zipcode".to_string()],

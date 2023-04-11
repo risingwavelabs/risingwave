@@ -18,6 +18,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use enum_as_inner::EnumAsInner;
 use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
@@ -38,6 +39,7 @@ use risingwave_storage::StateStore;
 use crate::cache::{new_unbounded, ExecutorCache};
 use crate::common::table::state_table::StateTableInner;
 use crate::executor::error::StreamExecutorError;
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, ActorContext, ActorContextRef, BoxedExecutor, BoxedMessageStream,
     Executor, ExecutorInfo, Message, PkIndicesRef, StreamExecutorResult,
@@ -58,6 +60,7 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     info: ExecutorInfo,
 
     materialize_cache: MaterializeCache<SD>,
+
     conflict_behavior: ConflictBehavior,
 }
 
@@ -76,6 +79,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         table_catalog: &Table,
         watermark_epoch: AtomicU64Ref,
         conflict_behavior: ConflictBehavior,
+        metrics: Arc<StreamingMetrics>,
     ) -> Self {
         let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_index).collect();
 
@@ -88,7 +92,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         // decoded row.
         let state_table =
             StateTableInner::from_table_catalog_inconsistent_op(table_catalog, store, vnodes).await;
-
+        let actor_id = actor_context.id;
+        let table_id = table_catalog.id;
         Self {
             input,
             state_table,
@@ -99,7 +104,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 pk_indices: arrange_columns,
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
-            materialize_cache: MaterializeCache::new(watermark_epoch),
+            materialize_cache: MaterializeCache::new(watermark_epoch, metrics, actor_id, table_id),
             conflict_behavior,
         }
     }
@@ -122,7 +127,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 Message::Watermark(w) => Message::Watermark(w),
                 Message::Chunk(chunk) => {
                     match self.conflict_behavior {
-                        ConflictBehavior::OverWrite | ConflictBehavior::IgnoreConflict => {
+                        ConflictBehavior::Overwrite | ConflictBehavior::IgnoreConflict => {
                             // create MaterializeBuffer from chunk
                             let buffer = MaterializeBuffer::fill_buffer_from_chunk(
                                 chunk,
@@ -138,11 +143,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                             let fixed_changes = self
                                 .materialize_cache
-                                .handlle_conflict(
-                                    buffer,
-                                    &self.state_table,
-                                    &self.conflict_behavior,
-                                )
+                                .handle_conflict(buffer, &self.state_table, &self.conflict_behavior)
                                 .await?;
 
                             // TODO(st1page): when materialize partial columns(), we should
@@ -171,7 +172,12 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                     // Update the vnode bitmap for the state table if asked.
                     if let Some(vnode_bitmap) = b.as_update_vnode_bitmap(self.actor_context.id) {
-                        let _ = self.state_table.update_vnode_bitmap(vnode_bitmap);
+                        let (_, cache_may_stale) =
+                            self.state_table.update_vnode_bitmap(vnode_bitmap);
+
+                        if cache_may_stale {
+                            self.materialize_cache.data.clear();
+                        }
                     }
                     self.materialize_cache.evict();
                     Message::Barrier(b)
@@ -222,7 +228,12 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
                 pk_indices: arrange_columns,
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
-            materialize_cache: MaterializeCache::new(watermark_epoch),
+            materialize_cache: MaterializeCache::new(
+                watermark_epoch,
+                Arc::new(StreamingMetrics::unused()),
+                0,
+                0,
+            ),
             conflict_behavior,
         }
     }
@@ -417,27 +428,46 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S
 
 /// A cache for materialize executors.
 pub struct MaterializeCache<SD> {
-    data: ExecutorCache<Vec<u8>, Option<CompactedRow>>,
+    data: ExecutorCache<Vec<u8>, CacheValue>,
     _serde: PhantomData<SD>,
+    metrics: Arc<StreamingMetrics>,
+    actor_id: String,
+    table_id: String,
 }
 
+#[derive(EnumAsInner)]
+pub enum CacheValue {
+    Overwrite(Option<CompactedRow>),
+    Ignore(Option<EmptyValue>),
+}
+
+type EmptyValue = ();
+
 impl<SD: ValueRowSerde> MaterializeCache<SD> {
-    pub fn new(watermark_epoch: AtomicU64Ref) -> Self {
+    pub fn new(
+        watermark_epoch: AtomicU64Ref,
+        metrics: Arc<StreamingMetrics>,
+        actor_id: u32,
+        table_id: u32,
+    ) -> Self {
         let cache = ExecutorCache::new(new_unbounded(watermark_epoch));
         Self {
             data: cache,
             _serde: PhantomData,
+            metrics,
+            actor_id: actor_id.to_string(),
+            table_id: table_id.to_string(),
         }
     }
 
-    pub async fn handlle_conflict<'a, S: StateStore>(
+    pub async fn handle_conflict<'a, S: StateStore>(
         &mut self,
         buffer: MaterializeBuffer,
         table: &StateTableInner<S, SD>,
         conflict_behavior: &ConflictBehavior,
     ) -> StreamExecutorResult<Vec<(Vec<u8>, KeyOp)>> {
         // fill cache
-        self.fetch_keys(buffer.keys().map(|v| v.as_ref()), table)
+        self.fetch_keys(buffer.keys().map(|v| v.as_ref()), table, conflict_behavior)
             .await?;
 
         let mut fixed_changes = vec![];
@@ -446,8 +476,8 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
             match row_op {
                 KeyOp::Insert(new_row) => {
                     match conflict_behavior {
-                        ConflictBehavior::OverWrite => {
-                            match self.force_get(&key) {
+                        ConflictBehavior::Overwrite => {
+                            match self.force_get(&key).as_overwrite().unwrap() {
                                 Some(old_row) => fixed_changes.push((
                                     key.clone(),
                                     KeyOp::Update((old_row.row.clone(), new_row.clone())),
@@ -458,7 +488,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                             update_cache = true;
                         }
                         ConflictBehavior::IgnoreConflict => {
-                            match self.force_get(&key) {
+                            match self.force_get(&key).as_ignore().unwrap() {
                                 Some(_) => (),
                                 None => {
                                     fixed_changes
@@ -471,13 +501,24 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                     };
 
                     if update_cache {
-                        self.put(key, Some(CompactedRow { row: new_row }));
+                        match conflict_behavior {
+                            ConflictBehavior::Overwrite => {
+                                self.data.push(
+                                    key,
+                                    CacheValue::Overwrite(Some(CompactedRow { row: new_row })),
+                                );
+                            }
+                            ConflictBehavior::IgnoreConflict => {
+                                self.data.push(key, CacheValue::Ignore(Some(())));
+                            }
+                            _ => unreachable!(),
+                        }
                     }
                 }
                 KeyOp::Delete(_) => {
                     match conflict_behavior {
-                        ConflictBehavior::OverWrite => {
-                            match self.force_get(&key) {
+                        ConflictBehavior::Overwrite => {
+                            match self.force_get(&key).as_overwrite().unwrap() {
                                 Some(old_row) => {
                                     fixed_changes
                                         .push((key.clone(), KeyOp::Delete(old_row.row.clone())));
@@ -491,13 +532,21 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                     };
 
                     if update_cache {
-                        self.put(key, None);
+                        match conflict_behavior {
+                            ConflictBehavior::Overwrite => {
+                                self.data.push(key, CacheValue::Overwrite(None));
+                            }
+                            ConflictBehavior::IgnoreConflict => {
+                                self.data.push(key, CacheValue::Ignore(Some(())));
+                            }
+                            _ => unreachable!(),
+                        }
                     }
                 }
                 KeyOp::Update((_, new_row)) => {
                     match conflict_behavior {
-                        ConflictBehavior::OverWrite => {
-                            match self.force_get(&key) {
+                        ConflictBehavior::Overwrite => {
+                            match self.force_get(&key).as_overwrite().unwrap() {
                                 Some(old_row) => fixed_changes.push((
                                     key.clone(),
                                     KeyOp::Update((old_row.row.clone(), new_row.clone())),
@@ -508,7 +557,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                             update_cache = true;
                         }
                         ConflictBehavior::IgnoreConflict => {
-                            match self.force_get(&key) {
+                            match self.force_get(&key).as_ignore().unwrap() {
                                 Some(_) => (),
                                 None => {
                                     fixed_changes
@@ -521,7 +570,18 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                     };
 
                     if update_cache {
-                        self.put(key, Some(CompactedRow { row: new_row }));
+                        match conflict_behavior {
+                            ConflictBehavior::Overwrite => {
+                                self.data.push(
+                                    key,
+                                    CacheValue::Overwrite(Some(CompactedRow { row: new_row })),
+                                );
+                            }
+                            ConflictBehavior::IgnoreConflict => {
+                                self.data.push(key, CacheValue::Ignore(Some(())));
+                            }
+                            _ => unreachable!(),
+                        }
                     }
                 }
             }
@@ -533,13 +593,21 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         &mut self,
         keys: impl Iterator<Item = &'a [u8]>,
         table: &StateTableInner<S, SD>,
+        conflict_behavior: &ConflictBehavior,
     ) -> StreamExecutorResult<()> {
         let mut futures = vec![];
         for key in keys {
+            self.metrics
+                .materialize_cache_total_count
+                .with_label_values(&[&self.table_id, &self.actor_id])
+                .inc();
             if self.data.contains(key) {
+                self.metrics
+                    .materialize_cache_hit_count
+                    .with_label_values(&[&self.table_id, &self.actor_id])
+                    .inc();
                 continue;
             }
-
             futures.push(async {
                 let key_row = table.pk_serde().deserialize(key).unwrap();
                 (key.to_vec(), table.get_compacted_row(&key_row).await)
@@ -549,23 +617,25 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         let mut buffered = stream::iter(futures).buffer_unordered(10).fuse();
         while let Some(result) = buffered.next().await {
             let (key, value) = result;
-            self.data.push(key, value?);
+            match conflict_behavior {
+                ConflictBehavior::Overwrite => self.data.push(key, CacheValue::Overwrite(value?)),
+                ConflictBehavior::IgnoreConflict => {
+                    self.data.push(key, CacheValue::Ignore(value?.map(|_| ())))
+                }
+                _ => unreachable!(),
+            };
         }
 
         Ok(())
     }
 
-    pub fn force_get(&mut self, key: &[u8]) -> &Option<CompactedRow> {
+    pub fn force_get(&mut self, key: &[u8]) -> &CacheValue {
         self.data.get(key).unwrap_or_else(|| {
             panic!(
                 "the key {:?} has not been fetched in the materialize executor's cache ",
                 key
             )
         })
-    }
-
-    pub fn put(&mut self, key: Vec<u8>, value: Option<CompactedRow>) {
-        self.data.push(key, value);
     }
 
     fn evict(&mut self) {
@@ -770,7 +840,7 @@ mod tests {
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
-                ConflictBehavior::OverWrite,
+                ConflictBehavior::Overwrite,
             )
             .await,
         )
@@ -903,7 +973,7 @@ mod tests {
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
-                ConflictBehavior::OverWrite,
+                ConflictBehavior::Overwrite,
             )
             .await,
         )
@@ -1151,7 +1221,7 @@ mod tests {
         ]);
         let column_ids = vec![0.into(), 1.into()];
 
-        // test double insert one pk, the latter needs to override the former.
+        // test double insert one pk, the latter should be ignored.
         let chunk1 = StreamChunk::from_pretty(
             " i i
             + 1 4

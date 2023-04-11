@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 
+use crate::catalog::system_catalog::pg_catalog::PG_NAMESPACE_TABLE_NAME;
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalApply, LogicalExpand, LogicalFilter, LogicalHopWindow, LogicalLimit,
     LogicalNow, LogicalProject, LogicalProjectSet, LogicalScan, LogicalTopN, LogicalUnion,
@@ -65,8 +66,22 @@ impl PlanVisitor<bool> for MaxOneRowVisitor {
                 eq_set.insert(input_ref.index);
             }
         }
-        eq_set.is_superset(&plan.input().logical_pk().iter().copied().collect())
-            || self.visit(plan.input())
+        let input = plan.input();
+        eq_set.is_superset(&input.logical_pk().iter().copied().collect())
+            || {
+                // We don't have UNIQUE key now. So we hack here to support some complex queries on
+                // system tables.
+                if let Some(scan) = input.as_logical_scan() && scan.is_sys_table() && scan.table_name() == PG_NAMESPACE_TABLE_NAME {
+                    let nspname = scan.output_col_idx().iter().find(|i| scan.table_desc().columns[**i].name == "nspname").unwrap();
+                    let unique_key = [
+                        *nspname
+                    ];
+                    eq_set.is_superset(&unique_key.into_iter().collect())
+                } else {
+                    false
+                }
+            }
+            || self.visit(input)
     }
 
     fn visit_logical_union(&mut self, _plan: &LogicalUnion) -> bool {
