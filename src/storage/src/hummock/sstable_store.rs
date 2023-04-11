@@ -19,7 +19,7 @@ use await_tree::InstrumentAwait;
 use bytes::{Buf, BufMut, Bytes};
 use fail::fail_point;
 use itertools::Itertools;
-use risingwave_common::cache::{CachePriority, LruCacheEventListener};
+use risingwave_common::cache::{CachePriority, LookupResponse, LruCacheEventListener};
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_object_store::object::{
     BlockLocation, MonitoredStreamingReader, ObjectError, ObjectMetadata, ObjectStoreRef,
@@ -358,18 +358,17 @@ impl SstableStore {
         self.meta_cache.lookup(sst_id, &sst_id)
     }
 
-    pub fn is_hot_block(&self, sst_id: u64, block_index: u64) -> bool {
-        self.block_cache.is_hot_block(sst_id, block_index)
-    }
-
+    /// Returns `table_holder`, `local_cache_meta_block_miss` (1 if cache miss) and
+    /// `local_cache_meta_block_unhit` (1 if not cache hit).
     pub async fn sstable_syncable(
         &self,
         sst: &SstableInfo,
         stats: &StoreLocalStatistic,
-    ) -> HummockResult<(TableHolder, u64)> {
+    ) -> HummockResult<(TableHolder, u64, u64)> {
         let mut local_cache_meta_block_miss = 0;
+        let mut local_cache_meta_block_unhit = 0;
         let object_id = sst.get_object_id();
-        let result = self
+        let lookup_response = self
             .meta_cache
             .lookup_with_request_dedup::<_, HummockError, _>(
                 object_id,
@@ -398,10 +397,20 @@ impl SstableStore {
                         Ok((Box::new(sst), charge))
                     }
                 },
-            )
+            );
+        if !matches!(lookup_response, LookupResponse::Cached(..)) {
+            local_cache_meta_block_unhit += 1;
+        }
+        let result = lookup_response
             .verbose_instrument_await("meta_cache_lookup")
             .await;
-        result.map(|table_holder| (table_holder, local_cache_meta_block_miss))
+        result.map(|table_holder| {
+            (
+                table_holder,
+                local_cache_meta_block_miss,
+                local_cache_meta_block_unhit,
+            )
+        })
     }
 
     pub async fn sstable(
@@ -410,7 +419,7 @@ impl SstableStore {
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<TableHolder> {
         self.sstable_syncable(sst, stats).await.map(
-            |(table_holder, local_cache_meta_block_miss)| {
+            |(table_holder, local_cache_meta_block_miss, ..)| {
                 stats.apply_meta_fetch(local_cache_meta_block_miss);
                 table_holder
             },

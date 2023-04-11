@@ -177,11 +177,6 @@ impl BlockCache {
             .contains(Self::hash(sst_id, block_idx), &(sst_id, block_idx))
     }
 
-    pub fn is_hot_block(&self, sst_id: HummockSstableObjectId, block_idx: u64) -> bool {
-        self.inner
-            .is_hot_block(Self::hash(sst_id, block_idx), &(sst_id, block_idx))
-    }
-
     pub fn insert(
         &self,
         object_id: HummockSstableObjectId,

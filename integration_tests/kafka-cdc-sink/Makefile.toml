@@ -18,32 +18,13 @@ dependencies = ["start-cluster"]
 
 [tasks.setup-pg]
 script = """
-docker run \
-    --network risingwave-compose_default \
-    -v ./:/tmp/ \
-    --env PGPASSWORD=123456 \
-    postgres:14.7 \
-    psql \
-    -h postgres \
-    -p 5432 \
-    -d mydb \
-    -U myuser \
-    -f /tmp/pg.sql
+PGPASSWORD=123456 psql -h localhost -p 5432 -d mydb -U myuser -f pg.sql
 """
 dependencies = ["start-cluster"]
 
 [tasks.setup-risingwave]
 script = """
-docker run \
-    --network risingwave-compose_default \
-    -v ./:/tmp/ \
-    postgres:14.7 \
-    psql \
-    -h frontend-node-0 \
-    -p 4566 \
-    -d dev \
-    -U root \
-    -f /tmp/risingwave.sql
+psql -h localhost -p 4566 -d dev -U root -f risingwave.sql
 """
 dependencies = ["setup-kafka"]
 
@@ -68,3 +49,13 @@ dependencies = [
 script = """
 docker compose down --remove-orphans -v
 """
+
+[tasks.show-json-logs]
+script = """
+docker run --network host \
+    bitnami/kafka:latest \
+    /opt/bitnami/kafka/bin/kafka-console-consumer.sh \
+    --bootstrap-server localhost:9092 \
+    --topic counts --from-beginning
+"""
+description = "Show produces kafka json logs"

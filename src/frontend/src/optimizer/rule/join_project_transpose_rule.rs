@@ -37,18 +37,8 @@ impl Rule for JoinProjectTransposeRule {
 
         let (left, right, on, join_type, _) = join.clone().decompose();
 
-        let (left_input_index_on_condition, right_input_index_on_condition) = {
-            let input_refs = on.collect_input_refs(left.schema().len() + right.schema().len());
-            let index_group = input_refs.ones().group_by(|i| *i < left.schema().len());
-            let left_index = index_group
-                .into_iter()
-                .next()
-                .map_or(vec![], |group| group.1.collect_vec());
-            let right_index = index_group.into_iter().next().map_or(vec![], |group| {
-                group.1.map(|i| i - left.schema().len()).collect_vec()
-            });
-            (left_index, right_index)
-        };
+        let (left_input_index_on_condition, right_input_index_on_condition) =
+            join.input_idx_on_condition();
 
         let full_output_len = left.schema().len() + right.schema().len();
         let right_output_len = right.schema().len();

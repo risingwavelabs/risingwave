@@ -167,7 +167,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
 
         let null_safe = distributed_lookup_join_node.get_null_safe().to_vec();
 
-        let chunk_size = source.context.get_config().developer.batch_chunk_size;
+        let chunk_size = source.context.get_config().developer.chunk_size;
 
         let table_id = TableId {
             table_id: table_desc.table_id,

@@ -210,16 +210,19 @@ impl Binder {
         }
     }
 
-    pub fn new(session: &SessionImpl) -> Binder {
-        Self::new_inner(session, false, vec![])
-    }
-
-    pub fn new_with_param_types(session: &SessionImpl, param_types: Vec<DataType>) -> Binder {
+    pub fn new(session: &SessionImpl, param_types: Vec<DataType>) -> Binder {
         Self::new_inner(session, false, param_types)
     }
 
     pub fn new_for_stream(session: &SessionImpl) -> Binder {
         Self::new_inner(session, true, vec![])
+    }
+
+    pub fn new_for_stream_with_param_types(
+        session: &SessionImpl,
+        param_types: Vec<DataType>,
+    ) -> Binder {
+        Self::new_inner(session, true, param_types)
     }
 
     /// Bind a [`Statement`].
@@ -320,12 +323,12 @@ pub mod test_utils {
 
     #[cfg(test)]
     pub fn mock_binder() -> Binder {
-        Binder::new(&SessionImpl::mock())
+        Binder::new(&SessionImpl::mock(), vec![])
     }
 
     #[cfg(test)]
     pub fn mock_binder_with_param_types(param_types: Vec<DataType>) -> Binder {
-        Binder::new_with_param_types(&SessionImpl::mock(), param_types)
+        Binder::new(&SessionImpl::mock(), param_types)
     }
 }
 

@@ -397,6 +397,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             barrier_scheduler.clone(),
             catalog_manager.clone(),
             fragment_manager.clone(),
+            meta_metrics.clone(),
         )
         .await
         .unwrap(),
@@ -618,6 +619,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             }
         }
     };
+
+    tracing::info!("Starting meta services");
 
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))

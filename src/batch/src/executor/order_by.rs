@@ -73,7 +73,7 @@ impl BoxedExecutorBuilder for SortExecutor {
             child,
             column_orders,
             source.plan_node().get_identity().clone(),
-            source.context.get_config().developer.batch_chunk_size,
+            source.context.get_config().developer.chunk_size,
         )))
     }
 }
@@ -91,7 +91,7 @@ impl SortExecutor {
         }
 
         for chunk in &chunks {
-            let encoded_chunk = encode_chunk(chunk, &self.column_orders);
+            let encoded_chunk = encode_chunk(chunk, &self.column_orders)?;
             encoded_rows.extend(
                 encoded_chunk
                     .into_iter()

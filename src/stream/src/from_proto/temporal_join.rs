@@ -155,7 +155,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
             table_output_indices,
             executor_id: params.executor_id,
             watermark_epoch: stream.get_watermark_epoch(),
-            chunk_size: params.env.config().developer.stream_chunk_size,
+            chunk_size: params.env.config().developer.chunk_size,
             metrics: params.executor_stats,
             join_type_proto: node.get_join_type()?,
         };

@@ -78,7 +78,11 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
     /// Serializes the row with value encoding and returns the bytes.
     #[inline]
     fn value_serialize(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(self.len()); // each datum is at least 1 byte
+        let estimate_size = self
+            .iter()
+            .map(value_encoding::estimate_serialize_datum_size)
+            .sum();
+        let mut buf = Vec::with_capacity(estimate_size);
         self.value_serialize_into(&mut buf);
         buf
     }
@@ -86,7 +90,11 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
     /// Serializes the row with value encoding and returns the bytes.
     #[inline]
     fn value_serialize_bytes(&self) -> Bytes {
-        let mut buf = BytesMut::with_capacity(self.len()); // each datum is at least 1 byte
+        let estimate_size = self
+            .iter()
+            .map(value_encoding::estimate_serialize_datum_size)
+            .sum();
+        let mut buf = BytesMut::with_capacity(estimate_size);
         self.value_serialize_into(&mut buf);
         buf.freeze()
     }
@@ -174,11 +182,11 @@ impl<R: Row> RowExt for R {}
 /// Forward the implementation of [`Row`] to the deref target.
 macro_rules! deref_forward_row {
     () => {
-        fn datum_at(&self, index: usize) -> DatumRef<'_> {
+        fn datum_at(&self, index: usize) -> crate::types::DatumRef<'_> {
             (**self).datum_at(index)
         }
 
-        unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        unsafe fn datum_at_unchecked(&self, index: usize) -> crate::types::DatumRef<'_> {
             (**self).datum_at_unchecked(index)
         }
 
@@ -367,6 +375,7 @@ impl<R: Row> Row for Option<R> {
     }
 }
 
+mod ascent_owned_row;
 mod chain;
 mod compacted_row;
 mod empty;
@@ -374,10 +383,12 @@ mod once;
 mod owned_row;
 mod project;
 mod repeat_n;
+#[allow(deprecated)]
+pub use ascent_owned_row::AscentOwnedRow;
 pub use chain::Chain;
 pub use compacted_row::CompactedRow;
 pub use empty::{empty, Empty};
 pub use once::{once, Once};
-pub use owned_row::{AscentOwnedRow, OwnedRow, RowDeserializer};
+pub use owned_row::{OwnedRow, RowDeserializer};
 pub use project::Project;
 pub use repeat_n::{repeat_n, RepeatN};

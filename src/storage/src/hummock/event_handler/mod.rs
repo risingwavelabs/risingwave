@@ -102,7 +102,9 @@ impl HummockEvent {
                 format!("VersionUpdate {:?}", version_update_payload)
             }
 
-            HummockEvent::ImmToUploader(imm) => format!("ImmToUploader {:?}", imm),
+            HummockEvent::ImmToUploader(imm) => {
+                format!("ImmToUploader {:?}", imm)
+            }
 
             HummockEvent::SealEpoch {
                 epoch,

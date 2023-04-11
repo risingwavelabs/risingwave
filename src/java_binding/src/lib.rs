@@ -35,7 +35,7 @@ use once_cell::sync::OnceCell;
 use prost::{DecodeError, Message};
 use risingwave_common::array::{ArrayError, StreamChunk};
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::row::OwnedRow;
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use tokio::runtime::Runtime;
@@ -388,7 +388,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowIsNull<'a>(
     idx: jint,
 ) -> jboolean {
     execute_and_catch(env, move || {
-        Ok(pointer.as_ref().is_null(idx as usize) as jboolean)
+        Ok(pointer.as_ref().datum_at(idx as usize).is_none() as jboolean)
     })
 }
 
@@ -398,7 +398,13 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetInt16Value
     pointer: Pointer<'a, JavaBindingRow>,
     idx: jint,
 ) -> jshort {
-    execute_and_catch(env, move || Ok(pointer.as_ref().get_int16(idx as usize)))
+    execute_and_catch(env, move || {
+        Ok(pointer
+            .as_ref()
+            .datum_at(idx as usize)
+            .unwrap()
+            .into_int16())
+    })
 }
 
 #[no_mangle]
@@ -407,7 +413,13 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetInt32Value
     pointer: Pointer<'a, JavaBindingRow>,
     idx: jint,
 ) -> jint {
-    execute_and_catch(env, move || Ok(pointer.as_ref().get_int32(idx as usize)))
+    execute_and_catch(env, move || {
+        Ok(pointer
+            .as_ref()
+            .datum_at(idx as usize)
+            .unwrap()
+            .into_int32())
+    })
 }
 
 #[no_mangle]
@@ -416,7 +428,13 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetInt64Value
     pointer: Pointer<'a, JavaBindingRow>,
     idx: jint,
 ) -> jlong {
-    execute_and_catch(env, move || Ok(pointer.as_ref().get_int64(idx as usize)))
+    execute_and_catch(env, move || {
+        Ok(pointer
+            .as_ref()
+            .datum_at(idx as usize)
+            .unwrap()
+            .into_int64())
+    })
 }
 
 #[no_mangle]
@@ -425,7 +443,14 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetFloatValue
     pointer: Pointer<'a, JavaBindingRow>,
     idx: jint,
 ) -> jfloat {
-    execute_and_catch(env, move || Ok(pointer.as_ref().get_f32(idx as usize)))
+    execute_and_catch(env, move || {
+        Ok(pointer
+            .as_ref()
+            .datum_at(idx as usize)
+            .unwrap()
+            .into_float32()
+            .into())
+    })
 }
 
 #[no_mangle]
@@ -434,7 +459,14 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetDoubleValu
     pointer: Pointer<'a, JavaBindingRow>,
     idx: jint,
 ) -> jdouble {
-    execute_and_catch(env, move || Ok(pointer.as_ref().get_f64(idx as usize)))
+    execute_and_catch(env, move || {
+        Ok(pointer
+            .as_ref()
+            .datum_at(idx as usize)
+            .unwrap()
+            .into_float64()
+            .into())
+    })
 }
 
 #[no_mangle]
@@ -444,7 +476,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetBooleanVal
     idx: jint,
 ) -> jboolean {
     execute_and_catch(env, move || {
-        Ok(pointer.as_ref().get_bool(idx as usize) as jboolean)
+        Ok(pointer.as_ref().datum_at(idx as usize).unwrap().into_bool() as jboolean)
     })
 }
 
@@ -455,7 +487,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetStringValu
     idx: jint,
 ) -> JString<'a> {
     execute_and_catch(env, move || {
-        Ok(env.new_string(pointer.as_ref().get_utf8(idx as usize))?)
+        Ok(env.new_string(pointer.as_ref().datum_at(idx as usize).unwrap().into_utf8())?)
     })
 }
 
@@ -468,7 +500,9 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetTimestampV
     execute_and_catch(env, move || {
         let millis = pointer
             .as_ref()
-            .get_datetime(idx as usize)
+            .datum_at(idx as usize)
+            .unwrap()
+            .into_timestamp()
             .0
             .timestamp_millis();
         let (ts_class_ref, constructor) = pointer
@@ -494,7 +528,12 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetDecimalVal
     idx: jint,
 ) -> JObject<'a> {
     execute_and_catch(env, move || {
-        let value = pointer.as_ref().get_decimal(idx as usize).to_string();
+        let value = pointer
+            .as_ref()
+            .datum_at(idx as usize)
+            .unwrap()
+            .into_decimal()
+            .to_string();
         let string_value = env.new_string(value)?;
         let (decimal_class_ref, constructor) = pointer
             .as_ref()
