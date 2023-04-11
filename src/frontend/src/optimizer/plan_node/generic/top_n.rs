@@ -130,8 +130,10 @@ impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
         );
         builder
             .field("limit", &self.limit_attr.limit())
-            .field("with_ties", &self.limit_attr.with_ties())
             .field("offset", &self.offset);
+        if self.limit_attr.with_ties() {
+            builder.field("with_ties", &true);
+        }
         if !self.group_key.is_empty() {
             builder.field("group_key", &self.group_key);
         }

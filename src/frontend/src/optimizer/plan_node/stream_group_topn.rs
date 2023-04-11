@@ -135,9 +135,11 @@ impl fmt::Display for StreamGroupTopN {
         );
         builder
             .field("limit", &self.limit_attr().limit())
-            .field("with_ties", &self.limit_attr().with_ties())
             .field("offset", &self.offset())
             .field("group_key", &self.group_key());
+        if self.limit_attr().with_ties() {
+            builder.field("with_ties", &true);
+        }
         let watermark_columns = &self.base.watermark_columns;
         if self.base.watermark_columns.count_ones(..) > 0 {
             let schema = self.schema();
