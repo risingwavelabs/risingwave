@@ -125,7 +125,7 @@ pub fn cosd_f64(input: F64) -> F64 {
         return F64::from(f64::NAN);
     }
 
-    return result.into();
+    result.into()
 }
 
 #[cfg(test)]
