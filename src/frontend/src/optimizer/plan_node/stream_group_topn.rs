@@ -19,6 +19,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::FieldDisplay;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
+use super::generic::Limit;
 use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Order, OrderDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -36,7 +37,7 @@ pub struct StreamGroupTopN {
 impl StreamGroupTopN {
     pub fn new(logical: generic::TopN<PlanRef>, vnode_col_idx: Option<usize>) -> Self {
         assert!(!logical.group_key.is_empty());
-        assert!(logical.limit > 0);
+        assert!(logical.limit_attr.limit() > 0);
         let input = &logical.input;
         let schema = input.schema().clone();
 
@@ -68,8 +69,8 @@ impl StreamGroupTopN {
         }
     }
 
-    pub fn limit(&self) -> u64 {
-        self.logical.limit
+    pub fn limit_attr(&self) -> Limit {
+        self.logical.limit_attr
     }
 
     pub fn offset(&self) -> u64 {
@@ -85,7 +86,7 @@ impl StreamGroupTopN {
     }
 
     pub fn with_ties(&self) -> bool {
-        self.logical.with_ties
+        self.logical.limit_attr.with_ties()
     }
 }
 
@@ -98,9 +99,9 @@ impl StreamNode for StreamGroupTopN {
             .with_id(state.gen_table_id_wrapped());
         assert!(!self.group_key().is_empty());
         let group_topn_node = GroupTopNNode {
-            limit: self.limit(),
+            limit: self.limit_attr().limit(),
             offset: self.offset(),
-            with_ties: self.with_ties(),
+            with_ties: self.limit_attr().with_ties(),
             group_key: self.group_key().iter().map(|idx| *idx as u32).collect(),
             table: Some(table.to_internal_table_prost()),
             order_by: self.topn_order().to_protobuf(),
@@ -133,13 +134,10 @@ impl fmt::Display for StreamGroupTopN {
             ),
         );
         builder
-            .field("limit", &self.limit())
+            .field("limit", &self.limit_attr().limit())
+            .field("with_ties", &self.limit_attr().with_ties())
             .field("offset", &self.offset())
             .field("group_key", &self.group_key());
-        if self.with_ties() {
-            builder.field("with_ties", &format_args!("{}", "true"));
-        }
-
         let watermark_columns = &self.base.watermark_columns;
         if self.base.watermark_columns.count_ones(..) > 0 {
             let schema = self.schema();

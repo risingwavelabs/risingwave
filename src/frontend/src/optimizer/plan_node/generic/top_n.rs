@@ -27,9 +27,8 @@ use crate::TableCatalog;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TopN<PlanRef> {
     pub input: PlanRef,
-    pub limit: u64,
+    pub limit_attr: Limit,
     pub offset: u64,
-    pub with_ties: bool,
     pub order: Order,
     pub group_key: Vec<usize>,
 }
@@ -90,18 +89,27 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
-    pub fn without_group(
+    pub fn with_group(
         input: PlanRef,
-        limit: u64,
+        limit_attr: Limit,
         offset: u64,
-        with_ties: bool,
         order: Order,
+        group_key: Vec<usize>,
     ) -> Self {
         Self {
             input,
-            limit,
+            limit_attr,
             offset,
-            with_ties,
+            order,
+            group_key,
+        }
+    }
+
+    pub fn without_group(input: PlanRef, limit_attr: Limit, offset: u64, order: Order) -> Self {
+        Self {
+            input,
+            limit_attr,
+            offset,
             order,
             group_key: vec![],
         }
@@ -121,11 +129,9 @@ impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
             ),
         );
         builder
-            .field("limit", &self.limit)
+            .field("limit", &self.limit_attr.limit())
+            .field("with_ties", &self.limit_attr.with_ties())
             .field("offset", &self.offset);
-        if self.with_ties {
-            builder.field("with_ties", &true);
-        }
         if !self.group_key.is_empty() {
             builder.field("group_key", &self.group_key);
         }
@@ -148,5 +154,48 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for TopN<PlanRef> {
 
     fn functional_dependency(&self) -> FunctionalDependencySet {
         self.input.functional_dependency().clone()
+    }
+}
+
+/// [`Limit`] is used to specify the number of records to return.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum Limit {
+    /// The number of records returned is exactly the same as the number after `LIMIT` in the SQL
+    /// query.
+    Simple(u64),
+    /// If the SQL query contains `WITH TIES`, then it is supposed to bring all records with the
+    /// same value even if the number of records exceeds the number specified after `LIMIT` in the
+    /// query.
+    WithTies(u64),
+}
+
+impl Limit {
+    pub fn new(limit: u64, with_ties: bool) -> Self {
+        if with_ties {
+            Self::WithTies(limit)
+        } else {
+            Self::Simple(limit)
+        }
+    }
+
+    pub fn limit(&self) -> u64 {
+        match self {
+            Limit::Simple(limit) => *limit,
+            Limit::WithTies(limit) => *limit,
+        }
+    }
+
+    pub fn with_ties(&self) -> bool {
+        match self {
+            Limit::Simple(_) => false,
+            Limit::WithTies(_) => true,
+        }
+    }
+
+    pub fn one_record_per_value(&self) -> bool {
+        match self {
+            Limit::Simple(limit) => *limit == 1,
+            Limit::WithTies(_) => false,
+        }
     }
 }
