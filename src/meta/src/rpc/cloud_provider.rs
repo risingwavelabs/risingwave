@@ -105,7 +105,7 @@ impl AwsEc2Client {
     }
 
     pub async fn is_vpc_endpoint_ready(&self, vpc_endpoint_id: &str) -> MetaResult<bool> {
-        let mut available = false;
+        let mut is_ready = false;
         let filter = Filter::builder()
             .name("vpc-endpoint-id")
             .values(vpc_endpoint_id)
@@ -123,8 +123,16 @@ impl AwsEc2Client {
                     MetaError::from(anyhow!("More than one VPC endpoint found with the same ID"))
                 })?;
                 if let Some(state) = endpoint.state {
-                    if state == State::Available {
-                        available = true;
+                    match state {
+                        State::Available => {
+                            is_ready = true;
+                        }
+                        State::Unknown(str) => {
+                            is_ready = str.eq_ignore_ascii_case("available");
+                        }
+                        _ => {
+                            is_ready = false;
+                        }
                     }
                 }
             }
@@ -135,7 +143,7 @@ impl AwsEc2Client {
                 )));
             }
         }
-        Ok(available)
+        Ok(is_ready)
     }
 
     async fn get_endpoint_service_az_names(&self, service_name: &str) -> MetaResult<Vec<String>> {
