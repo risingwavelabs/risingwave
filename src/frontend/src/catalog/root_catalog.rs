@@ -28,13 +28,12 @@ use super::function_catalog::FunctionCatalog;
 use super::source_catalog::SourceCatalog;
 use super::system_catalog::get_sys_catalogs_in_schema;
 use super::view_catalog::ViewCatalog;
-use super::{CatalogError, CatalogResult, SinkId, SourceId, ViewId};
-use crate::catalog::connection_catalog::ConnectionCatalog;
+use super::{CatalogError, CatalogResult, ConnectionId, SinkId, SourceId, ViewId};
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
-use crate::catalog::{ConnectionId, DatabaseId, IndexCatalog, SchemaId};
+use crate::catalog::{DatabaseId, IndexCatalog, SchemaId};
 
 #[derive(Copy, Clone)]
 pub enum SchemaPath<'a> {
@@ -95,8 +94,6 @@ pub struct Catalog {
     db_name_by_id: HashMap<DatabaseId, String>,
     /// all table catalogs in the cluster identified by universal unique table id.
     table_by_id: HashMap<TableId, TableCatalog>,
-    connection_by_id: HashMap<ConnectionId, ConnectionCatalog>,
-    connection_id_by_name: HashMap<String, ConnectionId>,
 }
 
 #[expect(clippy::derivable_impls)]
@@ -107,8 +104,6 @@ impl Default for Catalog {
             database_by_name: HashMap::new(),
             db_name_by_id: HashMap::new(),
             table_by_id: HashMap::new(),
-            connection_by_id: HashMap::new(), // TODO: move to schema_catalog
-            connection_id_by_name: HashMap::new(), // TODO: move to schema_catalog
         }
     }
 }
@@ -201,16 +196,24 @@ impl Catalog {
     }
 
     pub fn create_connection(&mut self, proto: &PbConnection) {
-        let name = proto.name.clone();
-        let id = proto.id;
-
-        self.connection_by_id.try_insert(id, proto.into()).unwrap();
-        self.connection_id_by_name.try_insert(name, id).unwrap();
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .create_connection(proto);
     }
 
-    pub fn drop_connection(&mut self, connection_name: &str) {
-        let id = self.connection_id_by_name.remove(connection_name).unwrap();
-        let _connection = self.connection_by_id.remove(&id).unwrap();
+    pub fn drop_connection(
+        &mut self,
+        db_id: DatabaseId,
+        schema_id: SchemaId,
+        connection_id: ConnectionId,
+    ) {
+        self.get_database_mut(db_id)
+            .unwrap()
+            .get_schema_mut(schema_id)
+            .unwrap()
+            .drop_connection(connection_id);
     }
 
     pub fn drop_database(&mut self, db_id: DatabaseId) {
@@ -544,20 +547,7 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("function", function_name.to_string()))
     }
 
-    pub fn get_connection_by_name(
-        &self,
-        connection_name: &str,
-    ) -> CatalogResult<&ConnectionCatalog> {
-        let connection_id = self
-            .connection_id_by_name
-            .get(connection_name)
-            .ok_or_else(|| CatalogError::NotFound("connection", connection_name.to_string()))?;
-        self.connection_by_id
-            .get(connection_id)
-            .ok_or_else(|| CatalogError::NotFound("connection", connection_name.to_string()))
-    }
-
-    /// Check the name if duplicated with existing table, materialized view or source.
+    /// Check if the name duplicates with existing table, materialized view or source.
     pub fn check_relation_name_duplicated(
         &self,
         db_name: &str,
@@ -586,6 +576,25 @@ impl Catalog {
             Err(CatalogError::Duplicated("sink", relation_name.to_string()))
         } else if schema.get_view_by_name(relation_name).is_some() {
             Err(CatalogError::Duplicated("view", relation_name.to_string()))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Check if the name duplicates with existing connection.
+    pub fn check_connection_name_duplicated(
+        &self,
+        db_name: &str,
+        schema_name: &str,
+        connection_name: &str,
+    ) -> CatalogResult<()> {
+        let schema = self.get_schema_by_name(db_name, schema_name)?;
+
+        if schema.get_connection_by_name(connection_name).is_some() {
+            Err(CatalogError::Duplicated(
+                "connection",
+                connection_name.to_string(),
+            ))
         } else {
             Ok(())
         }
@@ -640,9 +649,5 @@ impl Catalog {
             })?
             .map(|(id, _)| id)
             .ok_or_else(|| CatalogError::NotFound("class", class_name.to_string()))
-    }
-
-    pub fn get_all_connections(&self) -> Vec<ConnectionCatalog> {
-        self.connection_by_id.values().cloned().collect_vec()
     }
 }

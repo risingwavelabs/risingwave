@@ -3588,7 +3588,9 @@ impl Parser {
                     }
                 }
                 Keyword::CONNECTIONS => {
-                    return Ok(Statement::ShowObjects(ShowObject::Connection));
+                    return Ok(Statement::ShowObjects(ShowObject::Connection {
+                        schema: self.parse_from_and_identifier()?,
+                    }));
                 }
                 _ => {}
             }

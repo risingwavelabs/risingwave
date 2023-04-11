@@ -291,7 +291,11 @@ impl FrontendObserverNode {
             },
             Info::Connection(connection) => match resp.operation() {
                 Operation::Add => catalog_guard.create_connection(connection),
-                Operation::Delete => catalog_guard.drop_connection(connection.get_name().as_str()),
+                Operation::Delete => catalog_guard.drop_connection(
+                    connection.database_id,
+                    connection.schema_id,
+                    connection.id,
+                ),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             _ => unreachable!(),

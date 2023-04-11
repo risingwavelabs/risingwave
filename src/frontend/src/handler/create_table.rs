@@ -532,6 +532,7 @@ fn gen_table_plan_inner(
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs: watermark_descs.clone(),
+        connection_id: None,
         optional_associated_table_id: Some(OptionalAssociatedTableId::AssociatedTableId(
             TableId::placeholder().table_id,
         )),

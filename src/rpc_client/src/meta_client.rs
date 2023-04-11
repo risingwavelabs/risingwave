@@ -129,10 +129,14 @@ impl MetaClient {
     pub async fn create_connection(
         &self,
         connection_name: String,
+        database_id: u32,
+        schema_id: u32,
         req: create_connection_request::Payload,
     ) -> Result<(ConnectionId, CatalogVersion)> {
         let request = CreateConnectionRequest {
             name: connection_name,
+            database_id,
+            schema_id,
             payload: Some(req),
         };
         let resp = self.inner.create_connection(request).await?;
@@ -145,10 +149,8 @@ impl MetaClient {
         Ok(resp.connections)
     }
 
-    pub async fn drop_connection(&self, connection_name: &str) -> Result<CatalogVersion> {
-        let request = DropConnectionRequest {
-            connection_name: connection_name.to_string(),
-        };
+    pub async fn drop_connection(&self, connection_id: ConnectionId) -> Result<CatalogVersion> {
+        let request = DropConnectionRequest { connection_id };
         let resp = self.inner.drop_connection(request).await?;
         Ok(resp.version)
     }

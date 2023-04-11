@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod connection;
 mod database;
 mod fragment;
 mod user;
@@ -24,7 +23,6 @@ use std::option::Option::Some;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
-pub use connection::*;
 pub use database::*;
 pub use fragment::*;
 use itertools::Itertools;
@@ -112,19 +110,13 @@ pub struct CatalogManager<S: MetaStore> {
 pub struct CatalogManagerCore {
     pub database: DatabaseManager,
     pub user: UserManager,
-    pub connection: ConnectionManager,
 }
 
 impl CatalogManagerCore {
     async fn new<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
         let database = DatabaseManager::new(env.clone()).await?;
         let user = UserManager::new(env.clone(), &database).await?;
-        let connection = ConnectionManager::new(env).await?;
-        Ok(Self {
-            database,
-            user,
-            connection,
-        })
+        Ok(Self { database, user })
     }
 }
 
@@ -342,21 +334,26 @@ where
         }
     }
 
-    /// Each connection is identified by a unique name
     pub async fn create_connection(
         &self,
         connection: Connection,
     ) -> MetaResult<NotificationVersion> {
-        let core = &mut self.core.lock().await.connection;
-        core.check_connection_duplicated(&connection.name)?;
+        let core = &mut self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_database_id(connection.database_id)?;
+        database_core.ensure_schema_id(connection.schema_id)?;
+
+        let key = (
+            connection.database_id,
+            connection.schema_id,
+            connection.name.clone(),
+        );
+        database_core.check_connection_name_duplicated(&key)?;
 
         let conn_id = connection.id;
-        let conn_name = connection.name.clone();
-        let mut connections = BTreeMapTransaction::new(&mut core.connections);
+        let mut connections = BTreeMapTransaction::new(&mut database_core.connections);
         connections.insert(conn_id, connection.to_owned());
         commit_meta!(self, connections)?;
-
-        core.connection_by_name.insert(conn_name, conn_id);
 
         let version = self
             .notify_frontend(Operation::Add, Info::Connection(connection))
@@ -364,16 +361,15 @@ where
         Ok(version)
     }
 
-    pub async fn drop_connection(&self, conn_name: &str) -> MetaResult<NotificationVersion> {
-        let core = &mut self.core.lock().await.connection;
+    pub async fn drop_connection(&self, conn_id: ConnectionId) -> MetaResult<NotificationVersion> {
+        let core = &mut self.core.lock().await;
+        let database_core = &mut core.database;
+        let mut connections = BTreeMapTransaction::new(&mut database_core.connections);
 
-        let conn_id = core
-            .connection_by_name
-            .remove(conn_name)
-            .ok_or_else(|| anyhow!("connection {} not found", conn_name))?;
+        let connection = connections
+            .remove(conn_id)
+            .ok_or_else(|| anyhow!("connection not found"))?;
 
-        let mut connections = BTreeMapTransaction::new(&mut core.connections);
-        let connection = connections.remove(conn_id).unwrap();
         commit_meta!(self, connections)?;
 
         let version = self
@@ -1245,9 +1241,14 @@ where
         }
     }
 
-    pub async fn get_connection_by_name(&self, name: &str) -> MetaResult<Connection> {
-        let core = &mut self.core.lock().await.connection;
-        core.get_connection_by_name(name)
+    pub async fn get_connection_by_id(
+        &self,
+        connection_id: ConnectionId,
+    ) -> MetaResult<Connection> {
+        let core = &mut self.core.lock().await;
+        let database_core = &core.database;
+        database_core
+            .get_connection(connection_id)
             .cloned()
             .ok_or_else(|| anyhow!(format!("could not find connection by the given name")).into())
     }
@@ -1995,7 +1996,7 @@ where
     }
 
     pub async fn list_connections(&self) -> Vec<Connection> {
-        self.core.lock().await.connection.list_connections()
+        self.core.lock().await.database.list_connections()
     }
 
     pub async fn list_databases(&self) -> Vec<Database> {

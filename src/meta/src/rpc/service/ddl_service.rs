@@ -32,8 +32,8 @@ use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
 use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, IdCategoryType,
-    MetaSrvEnv, StreamingJob,
+    CatalogManagerRef, ClusterManagerRef, ConnectionId, FragmentManagerRef, IdCategory,
+    IdCategoryType, MetaSrvEnv, StreamingJob,
 };
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::ddl_controller::{DdlCommand, DdlController, StreamingJobId};
@@ -188,8 +188,10 @@ where
         let mut source = request.into_inner().get_source()?.clone();
 
         // resolve private links before starting the DDL procedure
-        self.resolve_private_link_info(&mut source.properties)
-            .await?;
+        if let Some(connection_id) = source.connection_id {
+            self.resolve_private_link_info(connection_id, &mut source.properties)
+                .await?;
+        }
 
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         source.id = id;
@@ -617,6 +619,8 @@ where
                 let id = self.gen_unique_id::<{ IdCategory::Connection }>().await?;
                 let connection = Connection {
                     id,
+                    schema_id: req.schema_id,
+                    database_id: req.database_id,
                     name: req.name,
                     info: Some(connection::Info::PrivateLinkService(private_link_svc)),
                 };
@@ -652,7 +656,7 @@ where
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropConnection(req.connection_name))
+            .run_command(DdlCommand::DropConnection(req.connection_id))
             .await?;
 
         Ok(Response::new(DropConnectionResponse {
@@ -673,6 +677,7 @@ where
 
     async fn resolve_private_link_info(
         &self,
+        connection_id: ConnectionId,
         properties: &mut HashMap<String, String>,
     ) -> MetaResult<()> {
         let mut broker_rewrite_map = HashMap::new();
@@ -697,7 +702,7 @@ where
             for (link, broker) in link_info.infos.iter().zip_eq_fast(broker_addrs.into_iter()) {
                 let conn = self
                     .catalog_manager
-                    .get_connection_by_name(&link.service_name)
+                    .get_connection_by_id(connection_id)
                     .await?;
 
                 if let Some(info) = conn.info {

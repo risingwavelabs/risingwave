@@ -32,7 +32,7 @@ use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::config::{load_config, BatchConfig};
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::session_config::ConfigMap;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
@@ -60,7 +60,7 @@ use tracing::info;
 use crate::binder::{Binder, BoundStatement};
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::root_catalog::Catalog;
-use crate::catalog::{check_schema_writable, DatabaseId, SchemaId};
+use crate::catalog::{check_schema_writable, ConnectionId, DatabaseId, SchemaId};
 use crate::handler::extended_handle::{
     handle_bind, handle_execute, handle_parse, Portal, PrepareStatement,
 };
@@ -495,8 +495,9 @@ impl SessionImpl {
     pub fn check_relation_name_duplicated(&self, name: ObjectName) -> Result<()> {
         let db_name = self.database();
         let catalog_reader = self.env().catalog_reader().read_guard();
-        let (schema_name, view_name) = {
-            let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
+        let (schema_name, relation_name) = {
+            let (schema_name, relation_name) =
+                Binder::resolve_schema_qualified_name(db_name, name)?;
             let search_path = self.config().get_search_path();
             let user_name = &self.auth_context().user_name;
             let schema_name = match schema_name {
@@ -505,10 +506,31 @@ impl SessionImpl {
                     .first_valid_schema(db_name, &search_path, user_name)?
                     .name(),
             };
-            (schema_name, table_name)
+            (schema_name, relation_name)
         };
         catalog_reader
-            .check_relation_name_duplicated(db_name, &schema_name, &view_name)
+            .check_relation_name_duplicated(db_name, &schema_name, &relation_name)
+            .map_err(RwError::from)
+    }
+
+    pub fn check_connection_name_duplicated(&self, name: ObjectName) -> Result<()> {
+        let db_name = self.database();
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let (schema_name, connection_name) = {
+            let (schema_name, connection_name) =
+                Binder::resolve_schema_qualified_name(db_name, name)?;
+            let search_path = self.config().get_search_path();
+            let user_name = &self.auth_context().user_name;
+            let schema_name = match schema_name {
+                Some(schema_name) => schema_name,
+                None => catalog_reader
+                    .first_valid_schema(db_name, &search_path, user_name)?
+                    .name(),
+            };
+            (schema_name, connection_name)
+        };
+        catalog_reader
+            .check_relation_name_duplicated(db_name, &schema_name, &connection_name)
             .map_err(RwError::from)
     }
 
@@ -539,6 +561,31 @@ impl SessionImpl {
 
         let db_id = catalog_reader.get_database_by_name(db_name)?.id();
         Ok((db_id, schema.id()))
+    }
+
+    pub fn get_connection_id_for_create(
+        &self,
+        schema_name: Option<String>,
+        connection_name: &str,
+    ) -> Result<ConnectionId> {
+        let db_name = self.database();
+        let search_path = self.config().get_search_path();
+        let user_name = &self.auth_context().user_name;
+
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let schema = match schema_name {
+            Some(schema_name) => catalog_reader.get_schema_by_name(db_name, &schema_name)?,
+            None => catalog_reader.first_valid_schema(db_name, &search_path, user_name)?,
+        };
+        let schema = catalog_reader.get_schema_by_name(db_name, schema.name().as_str())?;
+        let connection_id = schema
+            .get_connection_by_name(connection_name)
+            .ok_or(RwError::from(ErrorCode::ItemNotFound(format!(
+                "connection {} not found",
+                connection_name
+            ))))?
+            .id;
+        Ok(connection_id)
     }
 
     pub fn clear_cancel_query_flag(&self) {

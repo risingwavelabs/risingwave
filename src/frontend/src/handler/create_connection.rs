@@ -24,7 +24,6 @@ use serde_json;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::CatalogError;
 use crate::handler::HandlerArgs;
 
 pub(crate) const CONNECTION_TYPE_PROP: &str = "type";
@@ -89,23 +88,21 @@ pub async fn handle_create_connection(
     stmt: CreateConnectionStatement,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-    let connection_name = Binder::resolve_connection_name(stmt.connection_name)?;
+    let db_name = session.database();
+    let (schema_name, connection_name) =
+        Binder::resolve_schema_qualified_name(db_name, stmt.connection_name.clone())?;
 
-    {
-        let catalog_reader = session.env().catalog_reader();
-        let reader = catalog_reader.read_guard();
-        if reader.get_connection_by_name(&connection_name).is_ok() {
-            return if stmt.if_not_exists {
-                Ok(PgResponse::empty_result_with_notice(
-                    StatementType::CREATE_CONNECTION,
-                    format!("connection \"{}\" exists, skipping", connection_name),
-                ))
-            } else {
-                Err(CatalogError::Duplicated("connection", connection_name).into())
-            };
-        }
+    if let Err(e) = session.check_connection_name_duplicated(stmt.connection_name) {
+        return if stmt.if_not_exists {
+            Ok(PgResponse::empty_result_with_notice(
+                StatementType::CREATE_CONNECTION,
+                format!("connection \"{}\" exists, skipping", connection_name),
+            ))
+        } else {
+            Err(e)
+        };
     }
-
+    let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
     let with_properties = handler_args
         .with_options
         .inner()
@@ -117,7 +114,12 @@ pub async fn handle_create_connection(
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
-        .create_connection(connection_name, create_connection_payload)
+        .create_connection(
+            connection_name,
+            database_id,
+            schema_id,
+            create_connection_payload,
+        )
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_CONNECTION))

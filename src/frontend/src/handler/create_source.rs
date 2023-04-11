@@ -642,7 +642,8 @@ pub async fn handle_create_source(
 
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, stmt.source_name)?;
-    let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
+    let (database_id, schema_id) =
+        session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
     if handler_args.with_options.is_empty() {
         return Err(RwError::from(InvalidInputSyntax(
@@ -705,6 +706,17 @@ pub async fn handle_create_source(
 
     let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
 
+    // TODO(weili): use const instead of literal
+    let connection_name = with_properties.get("privatelink.name").map(|s| s.as_str());
+    let connection_id = match connection_name {
+        Some(connection_name) => Some(
+            session
+                .get_connection_id_for_create(schema_name, connection_name)
+                .map_err(|_| ErrorCode::ItemNotFound("jaja".to_string()))?,
+        ),
+        None => None,
+    };
+
     let source = PbSource {
         id: TableId::placeholder().table_id,
         schema_id,
@@ -717,6 +729,7 @@ pub async fn handle_create_source(
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs,
+        connection_id,
         optional_associated_table_id: None,
     };
 

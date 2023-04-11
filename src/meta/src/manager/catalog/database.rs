@@ -17,9 +17,11 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableOption;
-use risingwave_pb::catalog::{Database, Function, Index, Schema, Sink, Source, Table, View};
+use risingwave_pb::catalog::{
+    Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
+};
 
-use super::{DatabaseId, FunctionId, RelationId, SchemaId, SinkId, SourceId, ViewId};
+use super::{ConnectionId, DatabaseId, FunctionId, RelationId, SchemaId, SinkId, SourceId, ViewId};
 use crate::manager::{IndexId, MetaSrvEnv, TableId};
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
@@ -34,6 +36,7 @@ pub type Catalog = (
     Vec<Index>,
     Vec<View>,
     Vec<Function>,
+    Vec<Connection>,
 );
 
 type DatabaseKey = String;
@@ -59,6 +62,8 @@ pub struct DatabaseManager {
     pub(super) views: BTreeMap<ViewId, View>,
     /// Cached function information.
     pub(super) functions: BTreeMap<FunctionId, Function>,
+    /// Cached connection information.
+    pub(super) connections: BTreeMap<ConnectionId, Connection>,
 
     /// Relation refer count mapping.
     // TODO(zehua): avoid key conflicts after distinguishing table's and source's id generator.
@@ -83,6 +88,7 @@ impl DatabaseManager {
         let indexes = Index::list(env.meta_store()).await?;
         let views = View::list(env.meta_store()).await?;
         let functions = Function::list(env.meta_store()).await?;
+        let connections = Connection::list(env.meta_store()).await?;
 
         let mut relation_ref_count = HashMap::new();
 
@@ -113,6 +119,7 @@ impl DatabaseManager {
             (view.id, view)
         }));
         let functions = BTreeMap::from_iter(functions.into_iter().map(|f| (f.id, f)));
+        let connections = BTreeMap::from_iter(connections.into_iter().map(|c| (c.id, c)));
 
         Ok(Self {
             databases,
@@ -123,6 +130,7 @@ impl DatabaseManager {
             tables,
             indexes,
             functions,
+            connections,
             relation_ref_count,
             in_progress_creation_tracker: HashSet::default(),
             in_progress_creation_streaming_job: HashMap::default(),
@@ -140,6 +148,7 @@ impl DatabaseManager {
             self.indexes.values().cloned().collect_vec(),
             self.views.values().cloned().collect_vec(),
             self.functions.values().cloned().collect_vec(),
+            self.connections.values().cloned().collect_vec(),
         )
     }
 
@@ -180,6 +189,18 @@ impl DatabaseManager {
                 && x.name.eq(&relation_key.2)
         }) {
             Err(MetaError::catalog_duplicated("function", &relation_key.2))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn check_connection_name_duplicated(&self, relation_key: &RelationKey) -> MetaResult<()> {
+        if self.connections.values().any(|conn| {
+            conn.database_id == relation_key.0
+                && conn.schema_id == relation_key.1
+                && conn.name.eq(&relation_key.2)
+        }) {
+            Err(MetaError::catalog_duplicated("connection", &relation_key.2))
         } else {
             Ok(())
         }
@@ -229,6 +250,14 @@ impl DatabaseManager {
             .filter(|&s| s.schema_id == schema_id)
             .map(|s| s.id)
             .collect_vec()
+    }
+
+    pub fn get_connection(&self, connection_id: ConnectionId) -> Option<&Connection> {
+        self.connections.get(&connection_id)
+    }
+
+    pub fn list_connections(&self) -> Vec<Connection> {
+        self.connections.values().cloned().collect()
     }
 
     pub fn list_stream_job_ids(&self) -> impl Iterator<Item = RelationId> + '_ {
