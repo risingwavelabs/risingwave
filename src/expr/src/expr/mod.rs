@@ -83,8 +83,8 @@ use super::{ExprError, Result};
 
 /// Interface of an expression.
 ///
-/// There're two functions to evaluate an expression: `eval` and `eval_new`, exactly one of them
-/// should be implemented. Prefer calling and implementing `eval_new` instead of `eval` if possible,
+/// There're two functions to evaluate an expression: `eval` and `eval_v2`, exactly one of them
+/// should be implemented. Prefer calling and implementing `eval_v2` instead of `eval` if possible,
 /// to gain the performance benefit of scalar expression.
 #[async_trait::async_trait]
 pub trait Expression: std::fmt::Debug + Sync + Send {
@@ -103,9 +103,9 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
 
     /// Evaluate the expression in vectorized execution. Returns an array.
     ///
-    /// The default implementation calls `eval_new` and always converts the result to an array.
+    /// The default implementation calls `eval_v2` and always converts the result to an array.
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let value = self.eval_new(input).await?;
+        let value = self.eval_v2(input).await?;
         Ok(match value {
             ValueImpl::Array(array) => array,
             ValueImpl::Scalar { value, capacity } => {
@@ -120,7 +120,7 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     /// array, or a scalar if all values in the array are the same.
     ///
     /// The default implementation calls `eval` and puts the result into the `Array` variant.
-    async fn eval_new(&self, input: &DataChunk) -> Result<ValueImpl> {
+    async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
         self.eval(input).map_ok(ValueImpl::Array).await
     }
 

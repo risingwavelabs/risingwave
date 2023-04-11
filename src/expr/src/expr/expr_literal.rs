@@ -38,7 +38,7 @@ impl Expression for LiteralExpression {
         self.return_type.clone()
     }
 
-    async fn eval_new(&self, input: &DataChunk) -> Result<ValueImpl> {
+    async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
         Ok(ValueImpl::Scalar {
             value: self.literal.clone(),
             capacity: input.capacity(),

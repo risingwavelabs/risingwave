@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use itertools::{multizip, Itertools};
 use paste::paste;
-use risingwave_common::array::{Array, ArrayBuilder, ArrayImpl, DataChunk, Utf8Array};
+use risingwave_common::array::{Array, ArrayBuilder, DataChunk, Utf8Array};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{option_as_scalar_ref, DataType, Datum, Scalar};
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -30,7 +30,7 @@ use crate::expr::{BoxedExpression, Expression, ValueImpl, ValueRef};
 
 macro_rules! gen_eval {
     { ($macro:ident, $macro_row:ident), $ty_name:ident, $OA:ty, $($arg:ident,)* } => {
-        fn eval_new<'a, 'b, 'async_trait>(&'a self, data_chunk: &'b DataChunk)
+        fn eval_v2<'a, 'b, 'async_trait>(&'a self, data_chunk: &'b DataChunk)
             -> Pin<Box<dyn Future<Output = $crate::Result<ValueImpl>> + Send + 'async_trait>>
         where
             'a: 'async_trait,
@@ -38,7 +38,7 @@ macro_rules! gen_eval {
         {
             Box::pin(async move { paste! {
                 $(
-                    let [<ret_ $arg:lower>] = self.[<expr_ $arg:lower>].eval_new(data_chunk).await?;
+                    let [<ret_ $arg:lower>] = self.[<expr_ $arg:lower>].eval_v2(data_chunk).await?;
                     let [<val_ $arg:lower>]: ValueRef<'_, $arg> = (&[<ret_ $arg:lower>]).into();
                 )*
 
@@ -58,7 +58,6 @@ macro_rules! gen_eval {
                     }
 
                     // Otherwise, fallback to array computation.
-                    // TODO: match all possible combinations to further get rid of the overhead of `Either` iterators.
                     ($([<val_ $arg:lower>], )*) => {
                         let bitmap = data_chunk.visibility();
                         let mut output_array = <$OA as Array>::Builder::with_meta(data_chunk.capacity(), (&self.return_type).into());
