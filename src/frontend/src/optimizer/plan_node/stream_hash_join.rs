@@ -283,7 +283,18 @@ impl StreamHashJoin {
 
 impl fmt::Display for StreamHashJoin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = if self.clean_left_state_conjunction_idx.is_some()
+        let (ljk, rjk) = self
+            .eq_join_predicate
+            .eq_indexes()
+            .first()
+            .cloned()
+            .expect("first join key");
+
+        let mut builder = if self.left().watermark_columns().contains(ljk)
+            && self.right().watermark_columns().contains(rjk)
+        {
+            f.debug_struct("StreamWindowJoin")
+        } else if self.clean_left_state_conjunction_idx.is_some()
             && self.clean_right_state_conjunction_idx.is_some()
         {
             f.debug_struct("StreamIntervalJoin")

@@ -17,6 +17,7 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
+use super::generic::Limit;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Distribution, Order};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -31,7 +32,7 @@ pub struct StreamTopN {
 impl StreamTopN {
     pub fn new(logical: generic::TopN<PlanRef>) -> Self {
         assert!(logical.group_key.is_empty());
-        assert!(logical.limit > 0);
+        assert!(logical.limit_attr.limit() > 0);
         let base = PlanBase::new_logical_with_core(&logical);
         let ctx = base.ctx;
         let input = &logical.input;
@@ -54,16 +55,12 @@ impl StreamTopN {
         StreamTopN { base, logical }
     }
 
-    pub fn limit(&self) -> u64 {
-        self.logical.limit
+    pub fn limit_attr(&self) -> Limit {
+        self.logical.limit_attr
     }
 
     pub fn offset(&self) -> u64 {
         self.logical.offset
-    }
-
-    pub fn with_ties(&self) -> bool {
-        self.logical.with_ties
     }
 
     pub fn topn_order(&self) -> &Order {
@@ -101,9 +98,9 @@ impl StreamNode for StreamTopN {
 
         let input = self.input();
         let topn_node = TopNNode {
-            limit: self.limit(),
+            limit: self.limit_attr().limit(),
             offset: self.offset(),
-            with_ties: self.with_ties(),
+            with_ties: self.limit_attr().with_ties(),
             table: Some(
                 self.logical
                     .infer_internal_table_catalog(
