@@ -27,11 +27,10 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
     }
 
     fn visit_function_call(&mut self, func_call: &super::FunctionCall) -> bool {
-        match func_call.get_expr_type() {
-            risingwave_pb::expr::expr_node::Type::Now
-            | risingwave_pb::expr::expr_node::Type::Udf => true,
-            _ => false,
-        }
+        matches!(
+            func_call.get_expr_type(),
+            risingwave_pb::expr::expr_node::Type::Now | risingwave_pb::expr::expr_node::Type::Udf
+        )
     }
 }
 
