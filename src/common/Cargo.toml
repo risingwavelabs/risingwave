@@ -16,8 +16,9 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 arc-swap = "1"
-arrow-array = "34"
-arrow-schema = "34"
+arrow-array = "36"
+arrow-buffer = "36"
+arrow-schema = "36"
 async-trait = "0.1"
 auto_enums = "0.8"
 bitflags = "2"
@@ -35,6 +36,7 @@ derivative = "2"
 easy-ext = "1"
 either = "1"
 enum-as-inner = "0.5"
+ethnum = { version = "1", features = ["serde"] }
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
@@ -58,12 +60,13 @@ rand = "0.8"
 regex = "1"
 reqwest = { version = "0.11", features = ["json"] }
 risingwave_pb = { path = "../prost" }
-rust_decimal = { version = "1", features = ["db-tokio-postgres"] }
+rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 ryu = "1.0"
 serde = { version = "1", features = ["derive"] }
 serde_default = "0.1"
 serde_json = "1"
 serde_with = "2"
+smallbitset = "0.6.1"
 static_assertions = "1"
 strum = "0.24"
 strum_macros = "0.24"
@@ -93,7 +96,7 @@ libc = "0.2"
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
 libc = "0.2.72"
-mach = "0.3.2"
+mach2 = "0.4"
 
 [dev-dependencies]
 criterion = "0.4"
@@ -116,6 +119,10 @@ harness = false
 
 [[bench]]
 name = "bench_hash_key_encoding"
+harness = false
+
+[[bench]]
+name = "bench_data_chunk_encoding"
 harness = false
 
 [[bin]]

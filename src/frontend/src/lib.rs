@@ -25,7 +25,7 @@
 #![feature(assert_matches)]
 #![feature(lint_reasons)]
 #![feature(box_patterns)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![feature(result_option_inspect)]
 #![feature(macro_metavar_expr)]
 #![feature(slice_internals)]
@@ -47,7 +47,6 @@ mod optimizer;
 pub use optimizer::{Explain, OptimizerContext, OptimizerContextRef, PlanRef};
 mod planner;
 pub use planner::Planner;
-#[expect(dead_code)]
 mod scheduler;
 pub mod session;
 mod stream_fragmenter;

@@ -14,7 +14,6 @@
 
 use std::io::Error as IoError;
 
-use anyhow::anyhow;
 use thiserror::Error;
 
 use crate::pg_server::BoxedError;
@@ -42,8 +41,8 @@ pub enum PsqlError {
     IoError(#[from] IoError),
 
     #[error("{0}")]
-    /// Include error for describe, bind, parse, execute etc.
-    Internal(#[from] anyhow::Error),
+    /// Include error for describe, bind.
+    Internal(BoxedError),
 
     #[error("{0}")]
     SslError(String),
@@ -51,10 +50,10 @@ pub enum PsqlError {
 
 impl PsqlError {
     pub fn no_statement() -> Self {
-        PsqlError::Internal(anyhow!("No statement found".to_string()))
+        PsqlError::Internal("No statement found".into())
     }
 
     pub fn no_portal() -> Self {
-        PsqlError::Internal(anyhow!("No portal found".to_string()))
+        PsqlError::Internal("No portal found".into())
     }
 }

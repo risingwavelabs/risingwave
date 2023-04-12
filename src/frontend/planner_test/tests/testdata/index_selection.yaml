@@ -613,7 +613,7 @@
     create table t1 (a int primary key);
     select * from t1 order by a limit 1;
   stream_plan: |
-    StreamMaterialize { columns: [a], stream_key: [a], pk_columns: [a], pk_conflict: "NoCheck" }
+    StreamMaterialize { columns: [a], stream_key: [], pk_columns: [a], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [t1.a] }
       └─StreamTopN { order: "[t1.a ASC]", limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
@@ -671,3 +671,35 @@
       └─BatchLookupJoin { type: Inner, predicate: t2.d1 = idx_t1.c2, output: all }
         └─BatchExchange { order: [], dist: UpstreamHashShard(t2.d1) }
           └─BatchScan { table: t2, columns: [t2.d1, t2.d2], distribution: SomeShard }
+- sql: |
+    create table t (j jsonb, v1 int, v2 int);
+    create index idx1 on t(j->>'k1');
+    select * from t where j->>'k1' = 'abc';
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: idx1, columns: [idx1.j, idx1.v1, idx1.v2], scan_ranges: [idx1.JSONB_ACCESS_STR = Utf8("abc")], distribution: SomeShard }
+- sql: |
+    create table t (j jsonb, v1 int, v2 int);
+    create index idx1 on t(j->>'k1') include(v1);
+    select * from t where j->>'k1' = 'abc';
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchLookupJoin { type: Inner, predicate: idx1.t._row_id IS NOT DISTINCT FROM t._row_id, output: [t.j, t.v1, t.v2] }
+      └─BatchExchange { order: [], dist: UpstreamHashShard(idx1.t._row_id) }
+        └─BatchScan { table: idx1, columns: [idx1.t._row_id], scan_ranges: [idx1.JSONB_ACCESS_STR = Utf8("abc")], distribution: SomeShard }
+- sql: |
+    create table t (j jsonb, v1 int, v2 int);
+    create index idx1 on t(j->>'k1') include(v1);
+    create index idx2 on t(j->>'k2') include(v2);
+    select * from t where j->>'k1' = 'abc' or j->>'k2' = 'ABC';
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchLookupJoin { type: Inner, predicate: idx1.t._row_id IS NOT DISTINCT FROM t._row_id AND ((JsonbAccessStr(t.j, 'k1':Varchar) = 'abc':Varchar) OR (JsonbAccessStr(t.j, 'k2':Varchar) = 'ABC':Varchar)), output: [t.j, t.v1, t.v2] }
+      └─BatchExchange { order: [], dist: UpstreamHashShard(idx1.t._row_id) }
+        └─BatchHashAgg { group_key: [idx1.t._row_id], aggs: [] }
+          └─BatchExchange { order: [], dist: HashShard(idx1.t._row_id) }
+            └─BatchUnion { all: true }
+              ├─BatchExchange { order: [], dist: Single }
+              | └─BatchScan { table: idx1, columns: [idx1.t._row_id], scan_ranges: [idx1.JSONB_ACCESS_STR = Utf8("abc")], distribution: SomeShard }
+              └─BatchExchange { order: [], dist: Single }
+                └─BatchScan { table: idx2, columns: [idx2.t._row_id], scan_ranges: [idx2.JSONB_ACCESS_STR = Utf8("ABC")], distribution: SomeShard }

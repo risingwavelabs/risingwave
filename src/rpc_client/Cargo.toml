@@ -19,7 +19,7 @@ async-trait = "0.1"
 either = "1.8.1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10.5"
-lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "769fe6e" }
+lru = "0.10.0"
 rand = "0.8"
 risingwave_common = { path = "../common" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
@@ -40,5 +40,5 @@ tracing = "0.1"
 url = "2.3.1"
 
 [target.'cfg(not(madsim))'.dependencies]
-moka = { version = "0.9", features = ["future"] }
+moka = { version = "0.10", features = ["future"] }
 workspace-hack = { path = "../workspace-hack" }

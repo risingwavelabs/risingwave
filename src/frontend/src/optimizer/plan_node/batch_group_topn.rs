@@ -19,8 +19,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::GroupTopNNode;
 
 use super::{
-    ExprRewritable, LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb,
-    ToDistributedBatch,
+    generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Order, RequiredDist};
@@ -29,25 +28,26 @@ use crate::optimizer::property::{Order, RequiredDist};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchGroupTopN {
     pub base: PlanBase,
-    logical: LogicalTopN,
+    logical: generic::TopN<PlanRef>,
 }
 
 impl BatchGroupTopN {
-    pub fn new(logical: LogicalTopN) -> Self {
-        assert!(!logical.group_key().is_empty());
-        let ctx = logical.base.ctx.clone();
+    pub fn new(logical: generic::TopN<PlanRef>) -> Self {
+        assert!(!logical.group_key.is_empty());
+        let base = PlanBase::new_logical_with_core(&logical);
+        let ctx = base.ctx;
         let base = PlanBase::new_batch(
             ctx,
-            logical.schema().clone(),
-            logical.input().distribution().clone(),
+            base.schema,
+            logical.input.distribution().clone(),
             // BatchGroupTopN outputs data in the order of specified order
-            logical.topn_order().clone(),
+            logical.order.clone(),
         );
         BatchGroupTopN { base, logical }
     }
 
     fn group_key(&self) -> &[usize] {
-        self.logical.group_key()
+        &self.logical.group_key
     }
 }
 
@@ -59,11 +59,13 @@ impl fmt::Display for BatchGroupTopN {
 
 impl PlanTreeNodeUnary for BatchGroupTopN {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let mut logical = self.logical.clone();
+        logical.input = input;
+        Self::new(logical)
     }
 }
 
@@ -80,13 +82,13 @@ impl ToDistributedBatch for BatchGroupTopN {
 
 impl ToBatchPb for BatchGroupTopN {
     fn to_batch_prost_body(&self) -> NodeBody {
-        let column_orders = self.logical.topn_order().to_protobuf();
+        let column_orders = self.logical.order.to_protobuf();
         NodeBody::GroupTopN(GroupTopNNode {
-            limit: self.logical.limit(),
-            offset: self.logical.offset(),
+            limit: self.logical.limit_attr.limit(),
+            offset: self.logical.offset,
             column_orders,
             group_key: self.group_key().iter().map(|c| *c as u32).collect(),
-            with_ties: self.logical.with_ties(),
+            with_ties: self.logical.limit_attr.with_ties(),
         })
     }
 }

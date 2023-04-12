@@ -151,8 +151,22 @@ impl SplitReader for DatagenSplitReader {
         // spawn_data_generation_stream(self.generator.into_native_stream(), BUFFER_SIZE).boxed()
         match self.parser_config.specific {
             SpecificParserConfig::Native => {
-                spawn_data_generation_stream(self.generator.into_native_stream(), BUFFER_SIZE)
-                    .boxed()
+                let actor_id = self.source_ctx.source_info.actor_id.to_string();
+                let source_id = self.source_ctx.source_info.source_id.to_string();
+                let split_id = self.split_id.to_string();
+                let metrics = self.source_ctx.metrics.clone();
+                spawn_data_generation_stream(
+                    self.generator
+                        .into_native_stream()
+                        .inspect_ok(move |chunk_with_states| {
+                            metrics
+                                .partition_input_count
+                                .with_label_values(&[&actor_id, &source_id, &split_id])
+                                .inc_by(chunk_with_states.chunk.cardinality() as u64);
+                        }),
+                    BUFFER_SIZE,
+                )
+                .boxed()
             }
             _ => self.into_chunk_stream(),
         }

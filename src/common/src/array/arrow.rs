@@ -13,11 +13,14 @@
 // limitations under the License.
 
 //! Converts between arrays and Apache Arrow arrays.
-use arrow_schema::Field;
+
+use arrow_schema::{Field, DECIMAL256_MAX_PRECISION};
 use chrono::{NaiveDateTime, NaiveTime};
+use itertools::Itertools;
 
 use super::column::Column;
 use super::*;
+use crate::types::num256::Int256;
 use crate::types::struct_type::StructType;
 use crate::util::iter_util::ZipEqFast;
 
@@ -89,6 +92,7 @@ converts_generic! {
     { arrow_array::StringArray, Utf8, ArrayImpl::Utf8 },
     { arrow_array::BooleanArray, Boolean, ArrayImpl::Bool },
     { arrow_array::Decimal128Array, Decimal128(_, _), ArrayImpl::Decimal },
+    { arrow_array::Decimal256Array, Decimal256(_, _), ArrayImpl::Int256 },
     { arrow_array::IntervalMonthDayNanoArray, Interval(MonthDayNano), ArrayImpl::Interval },
     { arrow_array::Date32Array, Date32, ArrayImpl::Date },
     { arrow_array::TimestampNanosecondArray, Timestamp(Nanosecond, _), ArrayImpl::Timestamp },
@@ -123,6 +127,7 @@ impl From<&arrow_schema::DataType> for DataType {
                 datatype: Box::new(field.data_type().into()),
             },
             Decimal128(_, _) => Self::Decimal,
+            Decimal256(_, _) => Self::Int256,
             _ => todo!("Unsupported arrow data type: {value:?}"),
         }
     }
@@ -141,6 +146,7 @@ impl From<&DataType> for arrow_schema::DataType {
             DataType::Int16 => Self::Int16,
             DataType::Int32 => Self::Int32,
             DataType::Int64 => Self::Int64,
+            DataType::Int256 => Self::Decimal256(DECIMAL256_MAX_PRECISION, 0),
             DataType::Float32 => Self::Float32,
             DataType::Float64 => Self::Float64,
             DataType::Date => Self::Date32,
@@ -149,12 +155,12 @@ impl From<&DataType> for arrow_schema::DataType {
             DataType::Interval => Self::Interval(arrow_schema::IntervalUnit::DayTime),
             DataType::Varchar => Self::Utf8,
             DataType::Bytea => Self::Binary,
-            DataType::Decimal => Self::Decimal128(0, 0),
+            DataType::Decimal => Self::Decimal128(28, 0), // arrow precision can not be 0
             DataType::Struct(struct_type) => {
                 Self::Struct(get_field_vector_from_struct_type(struct_type))
             }
             DataType::List { datatype } => {
-                Self::List(Box::new(Field::new("", datatype.as_ref().into(), true)))
+                Self::List(Box::new(Field::new("item", datatype.as_ref().into(), true)))
             }
             _ => todo!("Unsupported arrow data type: {value:?}"),
         }
@@ -198,6 +204,11 @@ macro_rules! converts {
                 array.iter().collect()
             }
         }
+        impl From<&[$ArrowType]> for $ArrayType {
+            fn from(arrays: &[$ArrowType]) -> Self {
+                arrays.iter().flat_map(|a| a.iter()).collect()
+            }
+        }
     };
     // convert values using FromIntoArrow
     ($ArrayType:ty, $ArrowType:ty, @map) => {
@@ -218,6 +229,19 @@ macro_rules! converts {
                     .collect()
             }
         }
+        impl From<&[$ArrowType]> for $ArrayType {
+            fn from(arrays: &[$ArrowType]) -> Self {
+                arrays
+                    .iter()
+                    .flat_map(|a| a.iter())
+                    .map(|o| {
+                        o.map(|v| {
+                            <<$ArrayType as Array>::RefItem<'_> as FromIntoArrow>::from_arrow(v)
+                        })
+                    })
+                    .collect()
+            }
+        }
     };
 }
 converts!(BoolArray, arrow_array::BooleanArray);
@@ -226,7 +250,6 @@ converts!(I32Array, arrow_array::Int32Array);
 converts!(I64Array, arrow_array::Int64Array);
 converts!(F32Array, arrow_array::Float32Array, @map);
 converts!(F64Array, arrow_array::Float64Array, @map);
-converts!(DecimalArray, arrow_array::Decimal128Array, @map);
 converts!(BytesArray, arrow_array::BinaryArray);
 converts!(Utf8Array, arrow_array::StringArray);
 converts!(DateArray, arrow_array::Date32Array, @map);
@@ -263,29 +286,6 @@ impl FromIntoArrow for F64 {
 
     fn into_arrow(self) -> Self::ArrowType {
         self.into()
-    }
-}
-
-impl FromIntoArrow for Decimal {
-    type ArrowType = i128;
-
-    fn from_arrow(value: Self::ArrowType) -> Self {
-        const NAN: i128 = i128::MIN + 1;
-        match value {
-            NAN => Decimal::NaN,
-            i128::MAX => Decimal::PositiveInf,
-            i128::MIN => Decimal::NegativeInf,
-            _ => Decimal::Normalized(rust_decimal::Decimal::deserialize(value.to_be_bytes())),
-        }
-    }
-
-    fn into_arrow(self) -> Self::ArrowType {
-        match self {
-            Decimal::Normalized(d) => i128::from_be_bytes(d.serialize()),
-            Decimal::NaN => i128::MIN + 1,
-            Decimal::PositiveInf => i128::MAX,
-            Decimal::NegativeInf => i128::MIN,
-        }
     }
 }
 
@@ -353,11 +353,81 @@ impl FromIntoArrow for Interval {
 
     fn into_arrow(self) -> Self::ArrowType {
         arrow_array::types::IntervalMonthDayNanoType::make_value(
-            self.get_months(),
-            self.get_days(),
+            self.months(),
+            self.days(),
             // TODO: this may overflow and we need `try_into`
-            self.get_usecs() * 1000,
+            self.usecs() * 1000,
         )
+    }
+}
+
+// RisingWave Decimal type is self-contained, but Arrow is not.
+// In Arrow DecimalArray, the scale is stored in data type as metadata, and the mantissa is stored
+// as i128 in the array.
+impl From<&DecimalArray> for arrow_array::Decimal128Array {
+    fn from(array: &DecimalArray) -> Self {
+        let max_scale = array
+            .iter()
+            .filter_map(|o| o.map(|v| v.scale()))
+            .max()
+            .unwrap_or(0) as u32;
+        let mut builder = arrow_array::builder::Decimal128Builder::with_capacity(array.len())
+            .with_data_type(arrow_schema::DataType::Decimal128(28, max_scale as i8));
+        for value in array.iter() {
+            builder.append_option(value.map(|d| decimal_to_i128(d, max_scale)));
+        }
+        builder.finish()
+    }
+}
+
+fn decimal_to_i128(value: Decimal, scale: u32) -> i128 {
+    match value {
+        Decimal::Normalized(mut d) => {
+            d.rescale(scale);
+            d.mantissa()
+        }
+        Decimal::NaN => i128::MIN + 1,
+        Decimal::PositiveInf => i128::MAX,
+        Decimal::NegativeInf => i128::MIN,
+    }
+}
+
+impl From<&arrow_array::Decimal128Array> for DecimalArray {
+    fn from(array: &arrow_array::Decimal128Array) -> Self {
+        assert!(array.scale() >= 0, "todo: support negative scale");
+        let from_arrow = |value| {
+            const NAN: i128 = i128::MIN + 1;
+            match value {
+                NAN => Decimal::NaN,
+                i128::MAX => Decimal::PositiveInf,
+                i128::MIN => Decimal::NegativeInf,
+                _ => Decimal::Normalized(rust_decimal::Decimal::from_i128_with_scale(
+                    value,
+                    array.scale() as u32,
+                )),
+            }
+        };
+        array.iter().map(|o| o.map(from_arrow)).collect()
+    }
+}
+
+impl From<&Int256Array> for arrow_array::Decimal256Array {
+    fn from(array: &Int256Array) -> Self {
+        array
+            .iter()
+            .map(|o| o.map(arrow_buffer::i256::from))
+            .collect()
+    }
+}
+
+impl From<&arrow_array::Decimal256Array> for Int256Array {
+    fn from(array: &arrow_array::Decimal256Array) -> Self {
+        let values = array.iter().map(|o| o.map(Int256::from)).collect_vec();
+
+        values
+            .iter()
+            .map(|i| i.as_ref().map(|v| v.as_scalar_ref()))
+            .collect()
     }
 }
 
@@ -394,6 +464,7 @@ impl From<&ListArray> for arrow_array::ListArray {
             ArrayImpl::Int64(a) => build(array, a, Int64Builder::with_capacity(a.len()), |b, v| {
                 b.append_option(v)
             }),
+
             ArrayImpl::Float32(a) => {
                 build(array, a, Float32Builder::with_capacity(a.len()), |b, v| {
                     b.append_option(v.map(|f| f.0))
@@ -410,17 +481,33 @@ impl From<&ListArray> for arrow_array::ListArray {
                 StringBuilder::with_capacity(a.len(), a.data().len()),
                 |b, v| b.append_option(v),
             ),
+            ArrayImpl::Int256(a) => build(
+                array,
+                a,
+                Decimal256Builder::with_capacity(a.len()).with_data_type(
+                    arrow_schema::DataType::Decimal256(DECIMAL256_MAX_PRECISION, 0),
+                ),
+                |b, v| b.append_option(v.map(Into::into)),
+            ),
             ArrayImpl::Bool(a) => {
                 build(array, a, BooleanBuilder::with_capacity(a.len()), |b, v| {
                     b.append_option(v)
                 })
             }
-            ArrayImpl::Decimal(a) => build(
-                array,
-                a,
-                Decimal128Builder::with_capacity(a.len()),
-                |b, v| b.append_option(v.map(|d| d.into_arrow())),
-            ),
+            ArrayImpl::Decimal(a) => {
+                let max_scale = a
+                    .iter()
+                    .filter_map(|o| o.map(|v| v.scale()))
+                    .max()
+                    .unwrap_or(0) as u32;
+                build(
+                    array,
+                    a,
+                    Decimal128Builder::with_capacity(a.len())
+                        .with_data_type(arrow_schema::DataType::Decimal128(28, max_scale as i8)),
+                    |b, v| b.append_option(v.map(|d| decimal_to_i128(d, max_scale))),
+                )
+            }
             ArrayImpl::Interval(a) => build(
                 array,
                 a,
@@ -592,11 +679,37 @@ mod tests {
             Some(Decimal::NaN),
             Some(Decimal::PositiveInf),
             Some(Decimal::NegativeInf),
+            Some(Decimal::Normalized("123.4".parse().unwrap())),
             Some(Decimal::Normalized("123.456".parse().unwrap())),
         ]);
         let arrow = arrow_array::Decimal128Array::from(&array);
         assert_eq!(DecimalArray::from(&arrow), array);
     }
+
+    #[test]
+    fn int256() {
+        let values = vec![
+            None,
+            Some(Int256::from(1)),
+            Some(Int256::from(i64::MAX)),
+            Some(Int256::from(i64::MAX) * Int256::from(i64::MAX)),
+            Some(Int256::from(i64::MAX) * Int256::from(i64::MAX) * Int256::from(i64::MAX)),
+            Some(
+                Int256::from(i64::MAX)
+                    * Int256::from(i64::MAX)
+                    * Int256::from(i64::MAX)
+                    * Int256::from(i64::MAX),
+            ),
+            Some(Int256::min()),
+            Some(Int256::max()),
+        ];
+
+        let array =
+            Int256Array::from_iter(values.iter().map(|r| r.as_ref().map(|x| x.as_scalar_ref())));
+        let arrow = arrow_array::Decimal256Array::from(&array);
+        assert_eq!(Int256Array::from(&arrow), array);
+    }
+
     #[test]
     fn struct_array() {
         use arrow_array::Array as _;

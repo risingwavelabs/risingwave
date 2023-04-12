@@ -17,7 +17,9 @@ use std::io;
 use std::result::Result;
 use std::sync::Arc;
 
-use futures::Stream;
+use bytes::Bytes;
+use futures::{Stream, TryFutureExt};
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Statement;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
@@ -32,11 +34,13 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 pub type SessionId = (i32, i32);
 /// The interface for a database system behind pgwire protocol.
 /// We can mock it for testing purpose.
-pub trait SessionManager<VS>: Send + Sync + 'static
+pub trait SessionManager<VS, PS, PO>: Send + Sync + 'static
 where
     VS: Stream<Item = RowSetResult> + Unpin + Send,
+    PS: Send + Clone + 'static,
+    PO: Send + Clone + 'static,
 {
-    type Session: Session<VS>;
+    type Session: Session<VS, PS, PO>;
 
     fn connect(&self, database: &str, user_name: &str) -> Result<Arc<Self::Session>, BoxedError>;
 
@@ -50,16 +54,12 @@ where
 /// A psql connection. Each connection binds with a database. Switching database will need to
 /// recreate another connection.
 #[async_trait::async_trait]
-pub trait Session<VS>: Send + Sync
+pub trait Session<VS, PS, PO>: Send + Sync
 where
     VS: Stream<Item = RowSetResult> + Unpin + Send,
+    PS: Send + Clone + 'static,
+    PO: Send + Clone + 'static,
 {
-    async fn run_statement(
-        self: Arc<Self>,
-        sql: &str,
-        formats: Vec<Format>,
-    ) -> Result<PgResponse<VS>, BoxedError>;
-
     /// The str sql can not use the unparse from AST: There is some problem when dealing with create
     /// view, see  https://github.com/risingwavelabs/risingwave/issues/6801.
     async fn run_one_query(
@@ -68,10 +68,29 @@ where
         format: Format,
     ) -> Result<PgResponse<VS>, BoxedError>;
 
-    async fn infer_return_type(
+    fn parse(
         self: Arc<Self>,
-        sql: &str,
-    ) -> Result<Vec<PgFieldDescriptor>, BoxedError>;
+        sql: Statement,
+        params_types: Vec<DataType>,
+    ) -> Result<PS, BoxedError>;
+
+    fn bind(
+        self: Arc<Self>,
+        prepare_statement: PS,
+        params: Vec<Bytes>,
+        param_formats: Vec<Format>,
+        result_formats: Vec<Format>,
+    ) -> Result<PO, BoxedError>;
+
+    async fn execute(self: Arc<Self>, portal: PO) -> Result<PgResponse<VS>, BoxedError>;
+
+    fn describe_statement(
+        self: Arc<Self>,
+        prepare_statement: PS,
+    ) -> Result<(Vec<DataType>, Vec<PgFieldDescriptor>), BoxedError>;
+
+    fn describe_portral(self: Arc<Self>, portal: PO) -> Result<Vec<PgFieldDescriptor>, BoxedError>;
+
     fn user_authenticator(&self) -> &UserAuthenticator;
 
     fn id(&self) -> SessionId;
@@ -103,13 +122,15 @@ impl UserAuthenticator {
 }
 
 /// Binds a Tcp listener at `addr`. Spawn a coroutine to serve every new connection.
-pub async fn pg_serve<VS>(
+pub async fn pg_serve<VS, PS, PO>(
     addr: &str,
-    session_mgr: Arc<impl SessionManager<VS>>,
+    session_mgr: Arc<impl SessionManager<VS, PS, PO>>,
     ssl_config: Option<TlsConfig>,
 ) -> io::Result<()>
 where
     VS: Stream<Item = RowSetResult> + Unpin + Send + 'static,
+    PS: Send + Clone + 'static,
+    PO: Send + Clone + 'static,
 {
     let listener = TcpListener::bind(addr).await.unwrap();
     // accept connections and process them, spawning a new thread for each one
@@ -123,11 +144,7 @@ where
                 stream.set_nodelay(true)?;
                 let ssl_config = ssl_config.clone();
                 let fut = handle_connection(stream, session_mgr, ssl_config);
-                tokio::spawn(async {
-                    if let Err(e) = fut.await {
-                        debug!("error handling connection : {}", e);
-                    }
-                });
+                tokio::spawn(fut.inspect_err(|e| debug!("error handling connection: {e}")));
             }
 
             Err(e) => {
@@ -138,15 +155,17 @@ where
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn handle_connection<S, SM, VS>(
+pub fn handle_connection<S, SM, VS, PS, PO>(
     stream: S,
     session_mgr: Arc<SM>,
     tls_config: Option<TlsConfig>,
 ) -> impl Future<Output = Result<(), anyhow::Error>>
 where
     S: AsyncWrite + AsyncRead + Unpin,
-    SM: SessionManager<VS>,
+    SM: SessionManager<VS, PS, PO>,
     VS: Stream<Item = RowSetResult> + Unpin + Send + 'static,
+    PS: Send + Clone + 'static,
+    PO: Send + Clone + 'static,
 {
     let mut pg_proto = PgProtocol::new(stream, session_mgr, tls_config);
     async {
@@ -169,8 +188,8 @@ mod tests {
     use bytes::Bytes;
     use futures::stream::BoxStream;
     use futures::StreamExt;
+    use risingwave_common::types::DataType;
     use risingwave_sqlparser::ast::Statement;
-    use tokio_postgres::types::*;
     use tokio_postgres::NoTls;
 
     use crate::pg_field_descriptor::PgFieldDescriptor;
@@ -182,8 +201,9 @@ mod tests {
     use crate::types::Row;
 
     struct MockSessionManager {}
+    struct MockSession {}
 
-    impl SessionManager<BoxStream<'static, RowSetResult>> for MockSessionManager {
+    impl SessionManager<BoxStream<'static, RowSetResult>, String, String> for MockSessionManager {
         type Session = MockSession;
 
         fn connect(
@@ -205,58 +225,17 @@ mod tests {
         fn end_session(&self, _session: &Self::Session) {}
     }
 
-    struct MockSession {}
-
     #[async_trait::async_trait]
-    impl Session<BoxStream<'static, RowSetResult>> for MockSession {
-        async fn run_statement(
-            self: Arc<Self>,
-            sql: &str,
-            _format: Vec<types::Format>,
-        ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, Box<dyn Error + Send + Sync>>
-        {
-            // split a statement and trim \' around the input param to construct result.
-            // Ex:
-            //    SELECT 'a','b' -> result: a , b
-            let res: Vec<Option<Bytes>> = sql
-                .split(&[' ', ',', ';'])
-                .skip(1)
-                .map(|x| {
-                    Some(
-                        x.trim_start_matches('\'')
-                            .trim_end_matches('\'')
-                            .to_string()
-                            .into(),
-                    )
-                })
-                .collect();
-            let len = res.len();
-
-            Ok(PgResponse::new_for_stream(
-                StatementType::SELECT,
-                None,
-                futures::stream::iter(vec![Ok(vec![Row::new(res)])]).boxed(),
-                vec![
-                    // 1043 is the oid of varchar type.
-                    // -1 is the type len of varchar type.
-                    PgFieldDescriptor::new("".to_string(), 1043, -1);
-                    len
-                ],
-            ))
-        }
-
-        /// The test below will issue "BEGIN", "ROLLBACK" as simple query, but the results do not
-        /// matter, so just return a fake one.
+    impl Session<BoxStream<'static, RowSetResult>, String, String> for MockSession {
         async fn run_one_query(
             self: Arc<Self>,
             _sql: Statement,
             _format: types::Format,
         ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, BoxedError> {
-            let res: Vec<Option<Bytes>> = vec![Some(Bytes::new())];
             Ok(PgResponse::new_for_stream(
                 StatementType::SELECT,
                 None,
-                futures::stream::iter(vec![Ok(vec![Row::new(res)])]).boxed(),
+                futures::stream::iter(vec![Ok(vec![Row::new(vec![Some(Bytes::new())])])]).boxed(),
                 vec![
                     // 1043 is the oid of varchar type.
                     // -1 is the type len of varchar type.
@@ -266,25 +245,60 @@ mod tests {
             ))
         }
 
-        fn user_authenticator(&self) -> &UserAuthenticator {
-            &UserAuthenticator::None
+        fn parse(
+            self: Arc<Self>,
+            _sql: Statement,
+            _params_types: Vec<DataType>,
+        ) -> Result<String, BoxedError> {
+            Ok(String::new())
         }
 
-        async fn infer_return_type(
+        fn bind(
             self: Arc<Self>,
-            sql: &str,
-        ) -> Result<Vec<PgFieldDescriptor>, super::BoxedError> {
-            let count = sql.split(&[' ', ',', ';']).skip(1).count();
-            Ok(vec![
-                // 1043 is the oid of varchar type.
-                // -1 is the type len of varchar type.
-                PgFieldDescriptor::new(
-                    "".to_string(),
-                    1043,
-                    -1
-                );
-                count
-            ])
+            _prepare_statement: String,
+            _params: Vec<Bytes>,
+            _param_formats: Vec<types::Format>,
+            _result_formats: Vec<types::Format>,
+        ) -> Result<String, BoxedError> {
+            Ok(String::new())
+        }
+
+        async fn execute(
+            self: Arc<Self>,
+            _portal: String,
+        ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, BoxedError> {
+            Ok(PgResponse::new_for_stream(
+                StatementType::SELECT,
+                None,
+                futures::stream::iter(vec![Ok(vec![Row::new(vec![Some(Bytes::new())])])]).boxed(),
+                vec![
+                    // 1043 is the oid of varchar type.
+                    // -1 is the type len of varchar type.
+                    PgFieldDescriptor::new("".to_string(), 1043, -1);
+                    1
+                ],
+            ))
+        }
+
+        fn describe_statement(
+            self: Arc<Self>,
+            _statement: String,
+        ) -> Result<(Vec<DataType>, Vec<PgFieldDescriptor>), BoxedError> {
+            Ok((
+                vec![],
+                vec![PgFieldDescriptor::new("".to_string(), 1043, -1)],
+            ))
+        }
+
+        fn describe_portral(
+            self: Arc<Self>,
+            _portal: String,
+        ) -> Result<Vec<PgFieldDescriptor>, BoxedError> {
+            Ok(vec![PgFieldDescriptor::new("".to_string(), 1043, -1)])
+        }
+
+        fn user_authenticator(&self) -> &UserAuthenticator {
+            &UserAuthenticator::None
         }
 
         fn id(&self) -> SessionId {
@@ -292,21 +306,15 @@ mod tests {
         }
     }
 
-    // test_psql_extended_mode_explicit_simple
-    // constrain:
-    // - Only support simple SELECT statement.
-    // - Must provide all type description of the generic types.
-    // - Input description(params description) should include all the generic params description we
-    //   need.
     #[tokio::test]
-    async fn test_psql_extended_mode_explicit_simple() {
+    async fn test_query() {
         let session_mgr = Arc::new(MockSessionManager {});
         tokio::spawn(async move { pg_serve("127.0.0.1:10000", session_mgr, None).await });
         // wait for server to start
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
         // Connect to the database.
-        let (mut client, connection) = tokio_postgres::connect("host=localhost port=10000", NoTls)
+        let (client, connection) = tokio_postgres::connect("host=localhost port=10000", NoTls)
             .await
             .unwrap();
 
@@ -318,121 +326,17 @@ mod tests {
             }
         });
 
-        // explicit parameter (test pre_statement)
-        {
-            let statement = client
-                .prepare_typed("SELECT $1;", &[Type::VARCHAR])
-                .await
-                .unwrap();
+        let rows = client
+            .simple_query("SELECT ''")
+            .await
+            .expect("Error executing query");
+        // Row + CommandComplete
+        assert_eq!(rows.len(), 2);
 
-            let rows = client.query(&statement, &[&"AA"]).await.unwrap();
-            let value: &str = rows[0].get(0);
-            assert_eq!(value, "AA");
-
-            let rows = client.query(&statement, &[&"BB"]).await.unwrap();
-            let value: &str = rows[0].get(0);
-            assert_eq!(value, "BB");
-        }
-        // explicit parameter (test portal)
-        {
-            let transaction = client.transaction().await.unwrap();
-            let statement = transaction
-                .prepare_typed("SELECT $1;", &[Type::VARCHAR])
-                .await
-                .unwrap();
-            let portal1 = transaction.bind(&statement, &[&"AA"]).await.unwrap();
-            let portal2 = transaction.bind(&statement, &[&"BB"]).await.unwrap();
-            let rows = transaction.query_portal(&portal1, 0).await.unwrap();
-            let value: &str = rows[0].get(0);
-            assert_eq!(value, "AA");
-            let rows = transaction.query_portal(&portal2, 0).await.unwrap();
-            let value: &str = rows[0].get(0);
-            assert_eq!(value, "BB");
-            transaction.rollback().await.unwrap();
-        }
-        // mix parameter
-        {
-            let statement = client
-                .prepare_typed("SELECT $1,$2;", &[Type::VARCHAR, Type::VARCHAR])
-                .await
-                .unwrap();
-            let rows = client.query(&statement, &[&"AA", &"BB"]).await.unwrap();
-            let value: &str = rows[0].get(0);
-            assert_eq!(value, "AA");
-            let value: &str = rows[0].get(1);
-            assert_eq!(value, "BB");
-
-            let statement = client
-                .prepare_typed("SELECT $1,$1;", &[Type::VARCHAR])
-                .await
-                .unwrap();
-            let rows = client.query(&statement, &[&"AA"]).await.unwrap();
-            let value: &str = rows[0].get(0);
-            assert_eq!(value, "AA");
-            let value: &str = rows[0].get(1);
-            assert_eq!(value, "AA");
-
-            let statement = client
-                .prepare_typed(
-                    "SELECT $2,$3,$1,$3,$2;",
-                    &[Type::VARCHAR, Type::VARCHAR, Type::VARCHAR],
-                )
-                .await
-                .unwrap();
-            let rows = client
-                .query(&statement, &[&"AA", &"BB", &"CC"])
-                .await
-                .unwrap();
-            let value: &str = rows[0].get(0);
-            assert_eq!(value, "BB");
-            let value: &str = rows[0].get(1);
-            assert_eq!(value, "CC");
-            let value: &str = rows[0].get(2);
-            assert_eq!(value, "AA");
-            let value: &str = rows[0].get(3);
-            assert_eq!(value, "CC");
-            let value: &str = rows[0].get(4);
-            assert_eq!(value, "BB");
-
-            let statement = client
-                .prepare_typed(
-                    "SELECT $3,$1;",
-                    &[Type::VARCHAR, Type::VARCHAR, Type::VARCHAR],
-                )
-                .await
-                .unwrap();
-            let rows = client
-                .query(&statement, &[&"AA", &"BB", &"CC"])
-                .await
-                .unwrap();
-            let value: &str = rows[0].get(0);
-            assert_eq!(value, "CC");
-            let value: &str = rows[0].get(1);
-            assert_eq!(value, "AA");
-
-            let statement = client
-                .prepare_typed(
-                    "SELECT $2,$1;",
-                    &[Type::VARCHAR, Type::VARCHAR, Type::VARCHAR],
-                )
-                .await
-                .unwrap();
-            let rows = client
-                .query(&statement, &[&"AA", &"BB", &"CC"])
-                .await
-                .unwrap();
-            let value: &str = rows[0].get(0);
-            assert_eq!(value, "BB");
-            let value: &str = rows[0].get(1);
-            assert_eq!(value, "AA");
-        }
-        // no params
-        {
-            let rows = client.query("SELECT 'AA','BB';", &[]).await.unwrap();
-            let value: &str = rows[0].get(0);
-            assert_eq!(value, "AA");
-            let value: &str = rows[0].get(1);
-            assert_eq!(value, "BB");
-        }
+        let rows = client
+            .query("SELECT ''", &[])
+            .await
+            .expect("Error executing query");
+        assert_eq!(rows.len(), 1);
     }
 }

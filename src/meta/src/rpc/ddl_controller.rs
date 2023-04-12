@@ -532,7 +532,6 @@ where
                 .await;
             Ok((version, delete_jobs))
         } else {
-            assert!(internal_table_ids.is_empty());
             self.catalog_manager
                 .drop_table(table_id, internal_table_ids)
                 .await
