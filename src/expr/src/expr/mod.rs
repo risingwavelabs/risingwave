@@ -205,7 +205,7 @@ impl ExprContext {
         Self { curr_epoch }
     }
 
-    pub fn get_unix_micro(&self) -> u64 {
+    pub fn get_proctime(&self) -> u64 {
         self.curr_epoch.as_unix_millis() * 1000
     }
 }

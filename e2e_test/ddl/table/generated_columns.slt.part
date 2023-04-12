@@ -58,7 +58,7 @@ statement ok
 flush;
 
 query T
-select v2 >= date '2021-01-01' as later_than_2023 from t3;
+select v2 >= date '2021-01-01' as later_than_2021 from t3;
 ----
 t
 t

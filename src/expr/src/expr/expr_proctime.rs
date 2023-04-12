@@ -53,7 +53,7 @@ impl Expression for ProcTimeExpression {
 
     async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
         let proctime = CONTEXT
-            .try_with(|context| context.get_unix_micro())
+            .try_with(|context| context.get_proctime())
             .map_err(|_| ExprError::Context)?;
         let datum = Some(ScalarImpl::Int64(proctime as i64));
 
@@ -65,7 +65,7 @@ impl Expression for ProcTimeExpression {
 
     async fn eval_row(&self, _input: &OwnedRow) -> Result<Datum> {
         let proctime = CONTEXT
-            .try_with(|context| context.get_unix_micro())
+            .try_with(|context| context.get_proctime())
             .map_err(|_| ExprError::Context)?;
         let datum = Some(ScalarImpl::Int64(proctime as i64));
 
