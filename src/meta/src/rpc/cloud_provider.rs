@@ -128,12 +128,8 @@ impl AwsEc2Client {
                             is_ready = true;
                         }
                         // forward-compatible with protocol change
-                        other @ _ if other.as_str() == "Available" => {
-                            // handles a case for `NewFeature`
+                        other @ _ => {
                             is_ready = other.as_str().eq_ignore_ascii_case("available");
-                        }
-                        _ => {
-                            is_ready = false;
                         }
                     }
                 }

@@ -703,40 +703,43 @@ where
             let broker_addrs = servers.split(',').collect_vec();
             let link_targets: Vec<AwsPrivateLinkItem> =
                 serde_json::from_str(link_target_value).map_err(|e| anyhow!(e))?;
+
+            let conn = self
+                .catalog_manager
+                .get_connection_by_name(&private_link_name)
+                .await?;
+
+            if let Some(connection::Info::PrivateLinkService(svc)) = &conn.info {
+                // check whether the VPC endpoint is ready
+                let cli = self.aws_client.as_ref().unwrap();
+                if !cli.is_vpc_endpoint_ready(&svc.endpoint_id).await? {
+                    return Err(MetaError::from(anyhow!(
+                        "Private link endpoint {} is not ready",
+                        svc.endpoint_id
+                    )));
+                }
+            } else {
+                return Err(MetaError::from(anyhow!(
+                    "Connection {} is not a private link service",
+                    private_link_name
+                )));
+            }
+
             // construct the rewrite mapping for brokers
             for (link, broker) in link_targets.iter().zip_eq_fast(broker_addrs.into_iter()) {
-                let conn = self
-                    .catalog_manager
-                    .get_connection_by_name(&private_link_name)
-                    .await?;
-
-                if let Some(info) = conn.info {
-                    match info {
-                        connection::Info::PrivateLinkService(svc) => {
-                            // check whether the VPC endpoint is ready
-                            let cli = self.aws_client.as_ref().unwrap();
-                            if !cli.is_vpc_endpoint_ready(&svc.endpoint_id).await? {
-                                return Err(MetaError::from(anyhow!(
-                                    "Private link endpoint {} is not ready",
-                                    svc.endpoint_id
-                                )));
-                            }
-
-                            if svc.dns_entries.is_empty() {
-                                return Err(MetaError::from(anyhow!(
-                                    "No available private link endpoints for Kafka broker {}",
-                                    broker
-                                )));
-                            }
-                            // rewrite the broker address to the dns name w/o az
-                            // requires the NLB has enabled the cross-zone load balancing
-                            let target_dns = svc.endpoint_dns_name;
-                            broker_rewrite_map.insert(
-                                broker.to_string(),
-                                format!("{}:{}", target_dns, link.port),
-                            );
-                        }
+                if let Some(connection::Info::PrivateLinkService(svc)) = &conn.info {
+                    if svc.dns_entries.is_empty() {
+                        return Err(MetaError::from(anyhow!(
+                            "No available private link endpoints for Kafka broker {}",
+                            broker
+                        )));
                     }
+                    // rewrite the broker address to the dns name w/o az
+                    // requires the NLB has enabled the cross-zone load balancing
+                    broker_rewrite_map.insert(
+                        broker.to_string(),
+                        format!("{}:{}", &svc.endpoint_dns_name, link.port),
+                    );
                 }
             }
 
