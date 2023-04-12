@@ -33,7 +33,6 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::planner::LIMIT_ALL_COUNT;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
-use crate::TableCatalog;
 
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -111,12 +110,6 @@ impl LogicalTopN {
 
     pub fn group_key(&self) -> &[usize] {
         &self.core.group_key
-    }
-
-    /// Infers the state table catalog for [`StreamTopN`] and [`StreamGroupTopN`].
-    pub fn infer_internal_table_catalog(&self, vnode_col_idx: Option<usize>) -> TableCatalog {
-        self.core
-            .infer_internal_table_catalog(&self.base, vnode_col_idx)
     }
 
     fn gen_dist_stream_top_n_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
