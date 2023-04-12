@@ -22,6 +22,7 @@ mod general_agg;
 mod general_distinct_agg;
 mod general_sorted_grouper;
 mod string_agg;
+mod non_primitive;
 
 pub use aggregator::{create_agg_state_unary, AggStateFactory, BoxedAggState};
 pub use general_sorted_grouper::{create_sorted_grouper, BoxedSortedGrouper, EqGroups};
