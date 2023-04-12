@@ -5854,6 +5854,7 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "arrow-array",
+ "arrow-buffer",
  "arrow-schema",
  "async-trait",
  "auto_enums",

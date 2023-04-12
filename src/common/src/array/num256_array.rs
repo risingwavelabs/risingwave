@@ -32,7 +32,7 @@ pub struct Int256ArrayBuilder {
     data: Vec<I256>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Int256Array {
     bitmap: Bitmap,
     data: Vec<I256>,
@@ -147,8 +147,19 @@ macro_rules! impl_array_for_num256 {
             }
         }
 
+        impl<$gen> FromIterator<Option<$scalar_ref<$gen>>> for $array {
+            fn from_iter<T: IntoIterator<Item = Option<$scalar_ref<$gen>>>>(iter: T) -> Self {
+                let iter = iter.into_iter();
+                let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
+                for i in iter {
+                    builder.append(i);
+                }
+                builder.finish()
+            }
+        }
+
         impl $array {
-            pub fn from_protobuf(array: &PbArray, cardinality:usize) -> ArrayResult<ArrayImpl> {
+            pub fn from_protobuf(array: &PbArray, cardinality: usize) -> ArrayResult<ArrayImpl> {
                 ensure!(
                     array.get_values().len() == 1,
                     "Must have only 1 buffer in array"
@@ -175,7 +186,6 @@ macro_rules! impl_array_for_num256 {
                 Ok(arr.into())
             }
         }
-
     };
 }
 
