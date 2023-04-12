@@ -15,7 +15,6 @@
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use futures::executor::block_on;
 use futures::StreamExt;
-use serde_json::error::Category::Data;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::*;
@@ -53,27 +52,36 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
         // price
         DataType::Int64,
     ];
-
     let fields = vec![
-        Field::with_name(DataType::Int64, "auction"),
-        Field::with_name(DataType::Varchar, "to_char"),
-
-        Field::with_name(DataType::Int64, "count"),
-        Field::with_name(DataType::Int64, "count_filter_10_000"),
-        Field::with_name(DataType::Int64, "count_filter_10_000_to_100_000"),
-        Field::with_name(DataType::Int64, "count_filter_10_000_to_100_000"),
-
-        Field::with_name(DataType::Int64, "min"),
-        Field::with_name(DataType::Int64, "max"),
-        Field::with_name(DataType::Int64, "avg"),
-        Field::with_name(DataType::Int64, "sum"),
+        // to_char(date_time)
+        Field::unnamed(DataType::Varchar),
+        // auction
+        Field::unnamed(DataType::Int64),
+        // price
+        Field::unnamed(DataType::Int64),
     ];
+
+    // Aggregation fields
+    // let fields = vec![
+    //     Field::with_name(DataType::Int64, "auction"),
+    //     Field::with_name(DataType::Varchar, "to_char"),
+    //
+    //     Field::with_name(DataType::Int64, "count"),
+    //     Field::with_name(DataType::Int64, "count_filter_below_10_000"),
+    //     Field::with_name(DataType::Int64, "count_filter_10_000_to_100_000"),
+    //     Field::with_name(DataType::Int64, "count_filter_above_100_000"),
+    //
+    //     Field::with_name(DataType::Int64, "min"),
+    //     Field::with_name(DataType::Int64, "max"),
+    //     Field::with_name(DataType::Int64, "avg"),
+    //     Field::with_name(DataType::Int64, "sum"),
+    // ];
 
     let schema = Schema { fields };
 
     let group_key_indices = vec![0, 1];
 
-    let append_only = true;
+    let append_only = false;
 
     let agg_calls = vec![
          AggCall {
@@ -112,8 +120,39 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
             filter: Some(build_from_pretty("(greater_than_or_equal:boolean $2:int8 100000:int8)").into()),
             distinct: false,
         },
+        // FIXME(kwannoel): Can ignore for now, since it is low cost in q17 (blackhole).
+        // It does not work can't diagnose root cause yet.
+        // AggCall {
+        //     kind: AggKind::Min,
+        //     args: AggArgs::Unary(DataType::Int64, 2),
+        //     return_type: DataType::Int64,
+        //     column_orders: vec![],
+        //     append_only,
+        //     filter: None,
+        //     distinct: false,
+        // },
+        // AggCall {
+        //     kind: AggKind::Max,
+        //     args: AggArgs::Unary(DataType::Int64, 2),
+        //     return_type: DataType::Int64,
+        //     column_orders: vec![],
+        //     append_only,
+        //     filter: None,
+        //     distinct: false,
+        // },
+        // Not supported, just use extra sum + count
+        // AggCall {
+        //     kind: AggKind::Avg,
+        //     args: AggArgs::Unary(DataType::Int64, 2),
+        //     return_type: DataType::Int64,
+        //     column_orders: vec![],
+        //     append_only,
+        //     filter: None,
+        //     distinct: false,
+        // },
+        // avg (sum)
         AggCall {
-            kind: AggKind::Min,
+            kind: AggKind::Sum,
             args: AggArgs::Unary(DataType::Int64, 2),
             return_type: DataType::Int64,
             column_orders: vec![],
@@ -121,17 +160,9 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
             filter: None,
             distinct: false,
         },
+        // avg (count)
         AggCall {
-            kind: AggKind::Max,
-            args: AggArgs::Unary(DataType::Int64, 2),
-            return_type: DataType::Int64,
-            column_orders: vec![],
-            append_only,
-            filter: None,
-            distinct: false,
-        },
-        AggCall {
-            kind: AggKind::Avg,
+            kind: AggKind::Count,
             args: AggArgs::Unary(DataType::Int64, 2),
             return_type: DataType::Int64,
             column_orders: vec![],
@@ -152,7 +183,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
 
     // ---- Generate Data ----
 
-    let num_of_chunks = 1024;
+    let num_of_chunks = 1000;
     let chunk_size = 1024;
     let chunks = gen_data(num_of_chunks, chunk_size, &input_data_types);
 
