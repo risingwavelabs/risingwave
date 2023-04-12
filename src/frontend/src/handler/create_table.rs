@@ -212,7 +212,7 @@ pub fn bind_sql_column_constraints(
         names
     };
 
-    let mut binder = Binder::new_for_stream(session);
+    let mut binder = Binder::new_for_ddl(session);
     binder.bind_columns_to_context(table_name.clone(), column_catalogs.to_vec())?;
     for column in columns {
         for option_def in column.options {

@@ -237,9 +237,7 @@ mod tests {
 
     #[test]
     fn test_clone_for_plan() {
-        let plan_node = PlanNode {
-            ..Default::default()
-        };
+        let plan_node = PlanNode::default();
         let task_id = &TaskId {
             task_id: 1,
             stage_id: 1,
@@ -251,9 +249,7 @@ mod tests {
             ComputeNodeContext::for_test(),
             to_committed_batch_query_epoch(u64::MAX),
         );
-        let child_plan = &PlanNode {
-            ..Default::default()
-        };
+        let child_plan = &PlanNode::default();
         let cloned_builder = builder.clone_for_plan(child_plan);
         assert_eq!(builder.task_id, cloned_builder.task_id);
     }

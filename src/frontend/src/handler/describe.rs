@@ -32,7 +32,7 @@ use crate::handler::HandlerArgs;
 
 pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let mut binder = Binder::new(&session, vec![]);
+    let mut binder = Binder::new_for_system(&session);
     let relation = binder.bind_relation_by_name(table_name.clone(), None, false)?;
     // For Source, it doesn't have table catalog so use get source to get column descs.
     let (columns, pk_columns, indices): (Vec<ColumnDesc>, Vec<ColumnDesc>, Vec<Arc<IndexCatalog>>) = {
