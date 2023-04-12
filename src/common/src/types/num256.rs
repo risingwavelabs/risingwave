@@ -23,8 +23,7 @@ use std::str::FromStr;
 use bytes::{BufMut, Bytes};
 use ethnum::i256;
 use num_traits::{
-    CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, FromPrimitive, Num,
-    One, Signed, ToPrimitive, Zero,
+    CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Signed, Zero,
 };
 use risingwave_pb::data::ArrayType;
 use serde::de::{Error, Visitor};
@@ -129,12 +128,6 @@ macro_rules! impl_common_for_num256 {
         impl From<$inner> for $scalar {
             fn from(value: $inner) -> Self {
                 Self(Box::new(value))
-            }
-        }
-
-        impl From<$scalar> for $inner {
-            fn from(value: $scalar) -> Self {
-                *value.0
             }
         }
 
