@@ -115,6 +115,10 @@ impl FunctionAttr {
         let exprs = (0..num_args)
             .map(|i| format_ident!("e{i}"))
             .collect::<Vec<_>>();
+        #[expect(
+            clippy::redundant_clone,
+            reason = "false positive https://github.com/rust-lang/rust-clippy/issues/10545"
+        )]
         let exprs0 = exprs.clone();
 
         let build_expr = if self.ret == "varchar" && self.user_fn.is_writer_style() {

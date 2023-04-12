@@ -847,9 +847,7 @@ async fn test_trigger_manual_compaction() {
     {
         let option = ManualCompactionOption {
             level: 6,
-            key_range: KeyRange {
-                ..Default::default()
-            },
+            key_range: KeyRange::default(),
             ..Default::default()
         };
 
