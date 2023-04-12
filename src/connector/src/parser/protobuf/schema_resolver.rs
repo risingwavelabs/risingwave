@@ -12,17 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::iter;
 use std::path::Path;
 
 use protobuf_native::compiler::{SourceTreeDescriptorDatabase, VirtualSourceTree};
 use protobuf_native::MessageLite;
-use risingwave_common::error::ErrorCode::{InternalError, InvalidConfigValue, ProtocolError};
+use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use url::Url;
 
-use crate::aws_utils::{default_conn_config, s3_client, AwsConfigV2, AWS_DEFAULT_CONFIG};
 use crate::parser::schema_registry::Client;
 use crate::parser::util::download_from_http;
 

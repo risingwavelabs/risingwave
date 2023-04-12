@@ -18,7 +18,6 @@ pub mod split;
 pub mod topic;
 
 use std::collections::HashMap;
-use std::fs::File;
 use std::io::Write;
 
 use anyhow::{anyhow, Result};
@@ -29,10 +28,10 @@ use risingwave_common::error::ErrorCode::InvalidParameterValue;
 use risingwave_common::error::RwError;
 use serde::Deserialize;
 pub use split::*;
-use tempfile::{tempfile, NamedTempFile, TempPath};
+use tempfile::NamedTempFile;
 use url::Url;
 
-use crate::aws_utils::{load_file_descriptor_from_s3, AWS_DEFAULT_CONFIG};
+use crate::aws_utils::load_file_descriptor_from_s3;
 
 pub const PULSAR_CONNECTOR: &str = "pulsar";
 
