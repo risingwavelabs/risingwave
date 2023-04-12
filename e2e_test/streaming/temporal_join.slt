@@ -8,7 +8,7 @@ statement ok
 create table version(id2 int, a2 int, b2 int, primary key (id2));
 
 statement ok
-create materialized view v as select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF NOW() on id1 = id2
+create materialized view v as select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on id1 = id2
 
 statement ok
 insert into stream values(1, 11, 111);
@@ -45,7 +45,7 @@ statement ok
 drop materialized view v;
 
 statement ok
-create materialized view v as select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF NOW() on id1 = id2
+create materialized view v as select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on id1 = id2
 
 query IIII rowsort
 select * from v;
