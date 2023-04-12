@@ -14,7 +14,7 @@
 
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![feature(type_alias_impl_trait)]
 
 mod hummock_iterator;
