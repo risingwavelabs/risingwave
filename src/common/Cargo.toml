@@ -17,6 +17,7 @@ normal = ["workspace-hack"]
 anyhow = "1"
 arc-swap = "1"
 arrow-array = "36"
+arrow-buffer = "36"
 arrow-schema = "36"
 async-trait = "0.1"
 auto_enums = "0.8"

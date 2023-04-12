@@ -36,6 +36,7 @@ use crate::types::{to_text, Buf, DataType, Scalar, ScalarRef};
 
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
 pub struct Int256(Box<i256>);
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
 pub struct Int256Ref<'a>(pub &'a i256);
 
@@ -339,6 +340,20 @@ impl Signed for Int256 {
 
     fn is_negative(&self) -> bool {
         self.0.is_negative()
+    }
+}
+
+impl From<arrow_buffer::i256> for Int256 {
+    fn from(value: arrow_buffer::i256) -> Self {
+        let buffer = value.to_be_bytes();
+        Int256::from_be_bytes(buffer)
+    }
+}
+
+impl<'a> From<Int256Ref<'a>> for arrow_buffer::i256 {
+    fn from(val: Int256Ref<'a>) -> Self {
+        let buffer = val.to_be_bytes();
+        arrow_buffer::i256::from_be_bytes(buffer)
     }
 }
 
