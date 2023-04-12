@@ -29,7 +29,7 @@ use crate::source::kinesis::config::AwsConfigInfo;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AwsPrivateLinkItem {
-    pub az: String,
+    pub az_id: Option<String>,
     pub port: u16,
 }
 

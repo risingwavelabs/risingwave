@@ -127,8 +127,10 @@ impl AwsEc2Client {
                         State::Available => {
                             is_ready = true;
                         }
-                        State::Unknown(str) => {
-                            is_ready = str.eq_ignore_ascii_case("available");
+                        // forward-compatible with protocol change
+                        other @ _ if other.as_str() == "Available" => {
+                            // handles a case for `NewFeature`
+                            is_ready = other.as_str().eq_ignore_ascii_case("available");
                         }
                         _ => {
                             is_ready = false;
