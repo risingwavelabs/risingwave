@@ -112,7 +112,7 @@ impl PulsarProperties {
                         .to_str()
                         .unwrap()
                         .to_string();
-                    raw_path.insert_str(0, "file:");
+                    raw_path.insert_str(0, "file://");
                     raw_path
                 },
                 audience: Some(oauth.audience.clone()),
