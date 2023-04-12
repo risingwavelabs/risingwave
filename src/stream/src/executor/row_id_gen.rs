@@ -74,7 +74,7 @@ impl RowIdGenExecutor {
     }
 
     /// Generate a row ID column according to ops.
-    async fn gen_row_id_column_by_op(&mut self, column: &Column, ops: Ops<'_>) -> Column {
+    fn gen_row_id_column_by_op(&mut self, column: &Column, ops: Ops<'_>) -> Column {
         let len = column.array_ref().len();
         let mut builder = SerialArrayBuilder::new(len);
 
@@ -105,9 +105,8 @@ impl RowIdGenExecutor {
                 Message::Chunk(chunk) => {
                     // For chunk message, we fill the row id column and then yield it.
                     let (ops, mut columns, bitmap) = chunk.into_inner();
-                    columns[self.row_id_index] = self
-                        .gen_row_id_column_by_op(&columns[self.row_id_index], &ops)
-                        .await;
+                    columns[self.row_id_index] =
+                        self.gen_row_id_column_by_op(&columns[self.row_id_index], &ops);
                     yield Message::Chunk(StreamChunk::new(ops, columns, bitmap));
                 }
                 Message::Barrier(barrier) => {
