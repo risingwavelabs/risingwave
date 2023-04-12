@@ -85,7 +85,7 @@ impl ArrayRemoveExpression {
     /// statement error
     /// select array_remove(ARRAY[array[1],array[2],array[3],array[2],null::int[]], array[true]);
     /// ```
-    fn evaluate(&self, left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
+    fn evaluate(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match left {
             Some(ScalarRefImpl::List(left)) => Some(
                 ListValue::new(
