@@ -210,9 +210,10 @@ impl PredicatePushdown for LogicalProject {
         let mut subst = Substitute {
             mapping: self.exprs().clone(),
         };
-        let predicate = predicate.rewrite_expr(&mut subst);
+        let (pushed_cond, remained_cond) = predicate.split_immutable_expr();
+        let pushed_cond = pushed_cond.rewrite_expr(&mut subst);
 
-        gen_filter_and_pushdown(self, Condition::true_cond(), predicate, ctx)
+        gen_filter_and_pushdown(self, remained_cond, pushed_cond, ctx)
     }
 }
 
