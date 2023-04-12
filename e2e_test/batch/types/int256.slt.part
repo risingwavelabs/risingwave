@@ -128,6 +128,11 @@ select 1::rw_int256 is null;
 ----
 f
 
+query I
+select distinct v::rw_int256 from generate_series(1, 1, 1) as t(v);
+----
+1
+
 statement ok
 drop table t;
 
