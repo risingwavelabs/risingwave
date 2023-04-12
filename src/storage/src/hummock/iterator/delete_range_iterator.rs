@@ -163,6 +163,12 @@ impl Ord for RangeIteratorTyped {
     }
 }
 
+/// For each SST or batch delete range iterator, it represents the union set of delete ranges in the
+/// corresponding SST/batch. Therefore delete ranges are then ordered and do not overlap with each
+/// other in every `RangeIteratorTyped`. However, in each SST, since original delete ranges are
+/// replaced with a union set of delete ranges, we lose exact information about whether a key
+/// is deleted by a delete range in the same SST. Therefore we need to construct a
+/// corresponding delete key (aka key tombstone) to represent this.
 pub struct ForwardMergeRangeIterator {
     heap: BinaryHeap<RangeIteratorTyped>,
     unused_iters: Vec<RangeIteratorTyped>,

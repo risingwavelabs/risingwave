@@ -657,9 +657,10 @@ impl Compactor {
                 user_key_last_delete_epoch = earliest_range_delete_which_can_see_iter_key;
 
                 // In each SST, since a union set of delete ranges is constructed and thus original
-                // delete ranges are not used in read, we lose exact information about whether a key
-                // is deleted by a delete range in the same SST. Therefore we need to construct a
-                // corresponding delete key to represent this.
+                // delete ranges are replaced with the union set and not used in read, we lose exact
+                // information about whether a key is deleted by a delete range in
+                // the same SST. Therefore we need to construct a corresponding
+                // delete key to represent this.
                 iter_key.epoch = earliest_range_delete_which_can_see_iter_key;
                 sst_builder
                     .add_full_key(iter_key, HummockValue::Delete, is_new_user_key)
