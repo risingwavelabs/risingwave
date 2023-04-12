@@ -373,9 +373,9 @@ mod tests {
                 frame: Frame::Offset(-1),
             },
             WindowFuncCall {
-                kind: WindowFuncKind::Lag,
-                args: AggArgs::Unary(DataType::Int64, 2),
-                frame: Frame::Offset(-2),
+                kind: WindowFuncKind::Lead,
+                args: AggArgs::Unary(DataType::Int32, 3),
+                frame: Frame::Offset(1),
             },
         ];
 

@@ -41,7 +41,7 @@ impl WindowFuncCall {
         use WindowFuncKind::*;
         match self.kind {
             Lag => Box::new(LagState::new(&self.frame)),
-            Lead => Box::new(LeadState::new()),
+            Lead => Box::new(LeadState::new(&self.frame)),
             FirstValue => todo!(),
             LastValue => todo!(),
             NthValue => todo!(),

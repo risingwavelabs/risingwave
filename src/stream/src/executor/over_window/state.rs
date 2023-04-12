@@ -86,26 +86,42 @@ impl WindowFuncState for LagState {
 }
 
 pub(super) struct LeadState {
-    //
+    offset: usize,
+    buffer: VecDeque<BufferValue>,
 }
 
 impl LeadState {
-    pub(super) fn new() -> Self {
-        Self {}
+    pub(super) fn new(frame: &Frame) -> Self {
+        let offset = must_match!(frame, Frame::Offset(offset) if *offset > 0 => *offset as usize);
+        Self {
+            offset,
+            buffer: Default::default(),
+        }
     }
 }
 
 impl WindowFuncState for LeadState {
     fn append(&mut self, key: StateKey, args: SmallVec<[Datum; 2]>) {
-        todo!()
+        self.buffer
+            .push_back(BufferValue(key, args.into_iter().next().unwrap()));
     }
 
     fn curr_window(&self) -> StatePos<'_> {
-        todo!()
+        let curr_key = self.buffer.front().map(|BufferValue(key, _)| key);
+        StatePos {
+            key: curr_key,
+            is_ready: self.buffer.len() > self.offset,
+        }
     }
 
     fn output(&mut self) -> StateOutput {
-        todo!()
+        debug_assert!(self.curr_window().is_ready);
+        let lead_value = self.buffer[self.offset].1.clone();
+        let BufferValue(key, _) = self.buffer.pop_front().unwrap();
+        StateOutput {
+            return_value: lead_value,
+            last_evicted_key: Some(key),
+        }
     }
 }
 
