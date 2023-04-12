@@ -540,6 +540,19 @@ fn infer_type_for_special(
                 .into()),
             }
         }
+        ExprType::ArrayRemove => {
+            ensure_arity!("array_remove", | inputs | == 2);
+            let common_type = align_array_and_element(0, 1, inputs);
+            match common_type {
+                Ok(casted) => Ok(Some(casted)),
+                Err(_) => Err(ErrorCode::BindError(format!(
+                    "Cannot remove {} from {}",
+                    inputs[1].return_type(),
+                    inputs[0].return_type()
+                ))
+                .into()),
+            }
+        }
         ExprType::ArrayDistinct => {
             ensure_arity!("array_distinct", | inputs | == 1);
             let ret_type = inputs[0].return_type();

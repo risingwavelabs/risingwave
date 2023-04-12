@@ -35,6 +35,7 @@
 mod expr_array_concat;
 mod expr_array_distinct;
 mod expr_array_length;
+mod expr_array_remove;
 mod expr_array_to_string;
 mod expr_binary_nonnull;
 mod expr_binary_nullable;
