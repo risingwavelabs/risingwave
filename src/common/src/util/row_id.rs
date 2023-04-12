@@ -17,6 +17,7 @@ use std::time::SystemTime;
 
 use static_assertions::const_assert;
 
+use super::epoch::UNIX_RISINGWAVE_DATE_EPOCH;
 use crate::hash::VirtualNode;
 
 const TIMESTAMP_SHIFT_BITS: u8 = 22;
@@ -59,14 +60,15 @@ pub fn extract_vnode_id_from_row_id(id: RowId) -> VirtualNode {
 }
 
 impl RowIdGenerator {
+    /// Create a new `RowIdGenerator` with given single virtual node.
     #[cfg(test)]
     pub fn for_test(vnode: VirtualNode) -> Self {
-        use std::time::UNIX_EPOCH;
-
-        Self::new(std::iter::once(vnode), UNIX_EPOCH)
+        Self::new(std::iter::once(vnode))
     }
 
-    pub fn new(vnodes: impl IntoIterator<Item = VirtualNode>, base: SystemTime) -> Self {
+    /// Create a new `RowIdGenerator` with given virtual nodes.
+    pub fn new(vnodes: impl IntoIterator<Item = VirtualNode>) -> Self {
+        let base = *UNIX_RISINGWAVE_DATE_EPOCH;
         Self {
             base,
             last_timestamp_ms: base.elapsed().unwrap().as_millis() as i64,

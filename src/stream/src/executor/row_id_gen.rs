@@ -21,7 +21,6 @@ use risingwave_common::array::{ArrayBuilder, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::util::epoch::UNIX_RISINGWAVE_DATE_EPOCH;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::row_id::RowIdGenerator;
 
@@ -70,7 +69,7 @@ impl RowIdGenExecutor {
 
     /// Create a new row id generator based on the assigned vnodes.
     fn new_generator(vnodes: &Bitmap) -> RowIdGenerator {
-        RowIdGenerator::new(vnodes.iter_vnodes(), *UNIX_RISINGWAVE_DATE_EPOCH)
+        RowIdGenerator::new(vnodes.iter_vnodes())
     }
 
     /// Generate a row ID column according to ops.
