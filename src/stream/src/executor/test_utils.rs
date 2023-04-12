@@ -562,10 +562,10 @@ pub fn gen_data(
         }
         // Generate columns of this chunk.
         for data_type in data_types {
-            // FIXME(kwannoel): This is specific to q17, this should be a configurable parameter.
-            // varchar (overwrite default, we want to simulate a fixed date string.
             let mut array_builder = data_type.create_array_builder(chunk_size);
             for j in 0..chunk_size {
+                // FIXME(kwannoel): This is specific to q17, this should be a configurable parameter.
+                // We overwrite default, we want to simulate a fixed date string.
                 if *data_type == DataType::Varchar {
                     array_builder.append_datum(&Some("2022-02-02".into()));
                 } else {
