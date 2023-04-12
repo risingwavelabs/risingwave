@@ -187,7 +187,11 @@ mod tests {
         let chunk = format!(
             "SRL I
              {} 1
-             {} 2",
+             {} 2
+             {} 3
+             {} 4",
+            gen.next(),
+            gen.next(),
             gen.next(),
             gen.next(),
         );
@@ -197,7 +201,12 @@ mod tests {
 
         assert_eq!(
             vnodes.as_slice(),
-            &[VirtualNode::from_index(100), VirtualNode::from_index(200)]
+            &[
+                VirtualNode::from_index(100),
+                VirtualNode::from_index(200),
+                VirtualNode::from_index(100),
+                VirtualNode::from_index(200),
+            ]
         );
     }
 }
