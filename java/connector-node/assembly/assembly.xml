@@ -45,7 +45,7 @@
                 <include>*:risingwave-sink-hudi</include>
 
                 <!-- For S3-->
-                <include>*:risingwave-s3-common</include>
+                <include>*:s3-common</include>
             </includes>
             <useTransitiveDependencies>true</useTransitiveDependencies>
             <useTransitiveFiltering>true</useTransitiveFiltering>

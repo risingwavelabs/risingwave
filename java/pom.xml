@@ -188,7 +188,6 @@
                 <groupId>com.risingwave.java</groupId>
                 <artifactId>s3-common</artifactId>
                 <version>${module.version}</version>
-                <scope>provided</scope>
             </dependency>
             <dependency>
                 <groupId>com.risingwave.java</groupId>
