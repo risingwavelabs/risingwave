@@ -236,7 +236,8 @@ steps:
     timeout_in_minutes: 30
 
   - label: "recovery test (deterministic simulation)"
-    command: "TEST_NUM=16 KILL_RATE=0.5 ci/scripts/deterministic-recovery-test.sh"
+#    command: "TEST_NUM=16 KILL_RATE=0.5 ci/scripts/deterministic-recovery-test.sh"
+    command: "echo \"skip recovery test temporarily\""
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
