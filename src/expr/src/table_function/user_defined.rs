@@ -58,7 +58,7 @@ impl TableFunction for UserDefinedTableFunction {
             Arc::new(arrow_array::StructArray::from(output))
         };
         // TODO: split by chunk_size
-        Ok(vec![Arc::new(ArrayImpl::from(&array))])
+        Ok(vec![Arc::new(ArrayImpl::try_from(&array)?)])
     }
 }
 
