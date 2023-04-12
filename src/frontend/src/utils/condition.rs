@@ -26,9 +26,9 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 
 use crate::expr::{
-    derive_volatility, factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
+    factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
     try_get_bool_constant, ExprDisplay, ExprImpl, ExprMutator, ExprRewriter, ExprType, ExprVisitor,
-    FunctionCall, InequalityInputPair, InputRef, Volatility,
+    FunctionCall, InequalityInputPair, InputRef,
 };
 use crate::utils::condition::cast_compare::{ResultForCmp, ResultForEq};
 
@@ -137,20 +137,6 @@ impl Condition {
                 1
             } else {
                 2
-            }
-        })
-        .into_iter()
-        .next_tuple()
-        .unwrap()
-    }
-
-    /// Split the condition into 2 groups: immutable(pure/deterministic) and volatility functions
-    pub fn split_immutable_expr(self) -> (Self, Self) {
-        self.group_by::<_, 2>(|expr| {
-            if derive_volatility(expr) == Volatility::Immutable {
-                0
-            } else {
-                1
             }
         })
         .into_iter()

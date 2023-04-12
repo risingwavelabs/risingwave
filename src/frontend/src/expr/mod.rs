@@ -29,10 +29,10 @@ mod function_call;
 mod input_ref;
 mod literal;
 mod parameter;
+mod pure;
 mod subquery;
 mod table_function;
 mod user_defined_function;
-mod volatility;
 mod window_function;
 
 mod order_by_expr;
@@ -54,6 +54,7 @@ pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
 pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
 pub use literal::Literal;
 pub use parameter::Parameter;
+pub use pure::*;
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
 pub use session_timezone::SessionTimezone;
 pub use subquery::{Subquery, SubqueryKind};
@@ -64,7 +65,6 @@ pub use type_inference::{
 };
 pub use user_defined_function::UserDefinedFunction;
 pub use utils::*;
-pub use volatility::*;
 pub use window_function::{WindowFunction, WindowFunctionType};
 
 /// the trait of bound expressions
