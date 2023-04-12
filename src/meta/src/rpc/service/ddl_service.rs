@@ -598,12 +598,6 @@ where
         &self,
         request: Request<CreateConnectionRequest>,
     ) -> Result<Response<CreateConnectionResponse>, Status> {
-        if self.aws_client.is_none() {
-            return Err(Status::from(MetaError::unavailable(
-                "AWS client is not configured".into(),
-            )));
-        }
-
         let req = request.into_inner();
         if req.payload.is_none() {
             return Err(Status::invalid_argument("request is empty"));
@@ -631,6 +625,11 @@ where
                 }))
             }
             create_connection_request::Payload::PrivateLink(link) => {
+                if self.aws_client.is_none() {
+                    return Err(Status::from(MetaError::unavailable(
+                        "AWS client is not configured".into(),
+                    )));
+                }
                 let cli = self.aws_client.as_ref().unwrap();
                 let private_link_svc = cli
                     .create_aws_private_link(&link.service_name, &link.availability_zones)
