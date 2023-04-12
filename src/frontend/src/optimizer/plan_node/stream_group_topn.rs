@@ -53,10 +53,18 @@ impl StreamGroupTopN {
             watermark_columns
         };
 
+        // We can use the group key as the stream key when there is at most one record for each
+        // value of the group key.
+        let logical_pk = if logical.limit_attr.max_one_row() {
+            logical.group_key.clone()
+        } else {
+            input.logical_pk().to_vec()
+        };
+
         let base = PlanBase::new_stream(
             input.ctx(),
             schema,
-            input.logical_pk().to_vec(),
+            logical_pk,
             input.functional_dependency().clone(),
             input.distribution().clone(),
             false,
@@ -89,9 +97,16 @@ impl StreamGroupTopN {
 impl StreamNode for StreamGroupTopN {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
+
+        let input = self.input();
         let table = self
             .logical
-            .infer_internal_table_catalog(&self.base, self.vnode_col_idx)
+            .infer_internal_table_catalog(
+                input.schema(),
+                input.ctx(),
+                input.logical_pk(),
+                self.vnode_col_idx,
+            )
             .with_id(state.gen_table_id_wrapped());
         assert!(!self.group_key().is_empty());
         let group_topn_node = GroupTopNNode {
