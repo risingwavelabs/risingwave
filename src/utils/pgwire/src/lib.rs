@@ -13,7 +13,7 @@
 // limitations under the License.
 
 #![feature(io_error_other)]
-#![feature(lint_reasons, once_cell)]
+#![feature(lint_reasons)]
 #![feature(trait_alias)]
 #![feature(result_option_inspect)]
 #![feature(iterator_try_collect)]

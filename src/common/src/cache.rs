@@ -707,6 +707,14 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
         }
     }
 
+    pub fn contains(self: &Arc<Self>, hash: u64, key: &K) -> bool {
+        let mut shard = self.shards[self.shard(hash)].lock();
+        unsafe {
+            let ptr = shard.lookup(hash, key);
+            !ptr.is_null()
+        }
+    }
+
     pub fn lookup(self: &Arc<Self>, hash: u64, key: &K) -> Option<CacheableEntry<K, T>> {
         let mut shard = self.shards[self.shard(hash)].lock();
         unsafe {

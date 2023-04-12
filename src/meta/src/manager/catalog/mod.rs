@@ -1183,6 +1183,7 @@ where
         // 2. rename source and its definition.
         let old_name = source.name.clone();
         source.name = source_name.to_string();
+        source.definition = alter_relation_rename(&source.definition, source_name);
 
         // 3. update, commit and notify all relations that depend on this source.
         self.alter_relation_name_refs_inner(
