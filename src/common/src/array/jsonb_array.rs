@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt;
 use std::mem::size_of;
 
-use parse_display::Display;
 use postgres_types::{FromSql as _, ToSql as _, Type};
 use serde_json::Value;
 
@@ -24,11 +24,27 @@ use crate::collection::estimate_size::EstimateSize;
 use crate::types::{Scalar, ScalarRef};
 use crate::util::iter_util::ZipEqFast;
 
-#[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsonbVal(Box<Value>); // The `Box` is just to keep `size_of::<ScalarImpl>` smaller.
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Display)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct JsonbRef<'a>(&'a Value);
+
+/// The display of `JsonbVal` is pg-compatible format which has slightly different from
+/// `serde_json::Value`.
+impl fmt::Display for JsonbVal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        crate::types::to_text::ToText::write(&self.as_scalar_ref(), f)
+    }
+}
+
+/// The display of `JsonbRef` is pg-compatible format which has slightly different from
+/// `serde_json::Value`.
+impl fmt::Display for JsonbRef<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        crate::types::to_text::ToText::write(self, f)
+    }
+}
 
 impl Scalar for JsonbVal {
     type ScalarRefType<'a> = JsonbRef<'a>;
