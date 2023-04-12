@@ -284,7 +284,7 @@ impl FromIterator<Option<JsonbVal>> for JsonbArray {
         let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
         for i in iter {
             match i {
-                Some(x) => builder.append(Some(x.as_scalar_ref())),
+                Some(x) => builder.append_move(x),
                 None => builder.append(None),
             }
         }
@@ -355,10 +355,7 @@ impl ArrayBuilder for JsonbArrayBuilder {
 }
 
 impl JsonbArrayBuilder {
-    pub fn append_move(
-        &mut self,
-        value: <<JsonbArrayBuilder as ArrayBuilder>::ArrayType as Array>::OwnedItem,
-    ) {
+    pub fn append_move(&mut self, value: JsonbVal) {
         self.bitmap.append(true);
         self.data.push(*value.0);
     }
