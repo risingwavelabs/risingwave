@@ -54,6 +54,7 @@ use std::rc::Rc;
 use itertools::Itertools;
 use risingwave_common::array::serial_array::Serial;
 use risingwave_common::catalog::Schema;
+use risingwave_common::types::num256::Int256;
 use risingwave_common::types::{DataType, Date, Decimal, Interval, Time, Timestamp};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
@@ -103,6 +104,10 @@ impl Rule for IndexSelectionRule {
         );
 
         let mut final_plan: PlanRef = logical_scan.clone().into();
+        #[expect(
+            clippy::redundant_clone,
+            reason = "false positive https://github.com/rust-lang/rust-clippy/issues/10545"
+        )]
         let mut min_cost = primary_cost.clone();
 
         for index in indexes {
@@ -742,6 +747,7 @@ impl<'a> TableScanIoEstimator<'a> {
             DataType::Timestamp => size_of::<Timestamp>(),
             DataType::Timestamptz => size_of::<i64>(),
             DataType::Interval => size_of::<Interval>(),
+            DataType::Int256 => Int256::size(),
             DataType::Varchar => 20,
             DataType::Bytea => 20,
             DataType::Jsonb => 20,

@@ -5854,6 +5854,7 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "arrow-array",
+ "arrow-buffer",
  "arrow-schema",
  "async-trait",
  "auto_enums",
@@ -6146,9 +6147,9 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap 4.1.11",
+ "madsim-tokio",
  "pg_interval",
  "rust_decimal",
- "tokio",
  "tokio-postgres",
  "tracing",
  "tracing-subscriber",
@@ -6540,6 +6541,7 @@ dependencies = [
  "risingwave_compactor",
  "risingwave_compute",
  "risingwave_ctl",
+ "risingwave_e2e_extended_mode_test",
  "risingwave_frontend",
  "risingwave_meta",
  "risingwave_pb",
@@ -7351,9 +7353,9 @@ dependencies = [
 
 [[package]]
 name = "simd-json"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e3375b6c3d8c048ba09c8b4b6c3f1d3f35e06b71db07d231c323943a949e1b8"
+checksum = "1663db38e6e50038d4de020667c364490d43473ad6d073822a6af6576fc343a5"
 dependencies = [
  "halfbrown",
  "lexical-core",
