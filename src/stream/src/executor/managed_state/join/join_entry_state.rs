@@ -36,6 +36,14 @@ pub struct JoinEntryState {
     cached: BTreeMap<PkType, StateValueType>,
 }
 
+impl EstimateSize for JoinEntryState {
+    fn estimated_heap_size(&self) -> usize {
+        // FIXME: implement a correct size.
+        // https://github.com/risingwavelabs/risingwave/issues/8957
+        0
+    }
+}
+
 impl JoinEntryState {
     /// Insert into the cache.
     pub fn insert(&mut self, key: PkType, value: StateValueType) {

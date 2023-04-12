@@ -124,6 +124,12 @@ pub type HashValueType = Box<JoinEntryState>;
 /// map, which can make the compiler happy.
 struct HashValueWrapper(Option<HashValueType>);
 
+impl EstimateSize for HashValueWrapper {
+    fn estimated_heap_size(&self) -> usize {
+        0
+    }
+}
+
 impl HashValueWrapper {
     const MESSAGE: &str = "the state should always be `Some`";
 

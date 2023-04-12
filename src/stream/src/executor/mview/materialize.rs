@@ -25,6 +25,7 @@ use itertools::{izip, Itertools};
 use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Schema, TableId};
+use risingwave_common::collection::estimate_size::EstimateSize;
 use risingwave_common::row::{CompactedRow, RowDeserializer};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -430,6 +431,14 @@ pub enum CacheValue {
 }
 
 type EmptyValue = ();
+
+impl EstimateSize for CacheValue {
+    fn estimated_heap_size(&self) -> usize {
+        // FIXME: implement a correct size.
+        // https://github.com/risingwavelabs/risingwave/issues/8957
+        0
+    }
+}
 
 impl<SD: ValueRowSerde> MaterializeCache<SD> {
     pub fn new(watermark_epoch: AtomicU64Ref) -> Self {

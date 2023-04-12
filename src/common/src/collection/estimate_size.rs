@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use bytes::Bytes;
 use fixedbitset::FixedBitSet;
 
 /// The trait for estimating the actual memory usage of a struct.
 ///
 /// Used for cache eviction now.
-pub trait EstimateSize: 'static {
+pub trait EstimateSize {
     /// The estimated heap size of the current struct in bytes.
     fn estimated_heap_size(&self) -> usize;
 
@@ -65,11 +67,21 @@ impl<T: EstimateSize> EstimateSize for Option<T> {
     }
 }
 
-// impl EstimateSize for Bytes {
-//     fn estimated_heap_size(&self) -> usize {
-//         self.len()
-//     }
-// }
+/// SAFETY: `Bytes` can store a pointer in some cases, that may cause the size
+/// of a `Bytes` be calculated more than one and when memory stats is larger than the real value. 
+impl EstimateSize for Bytes {
+    fn estimated_heap_size(&self) -> usize {
+        self.len()
+    }
+}
+
+// FIXME: implement a wrapper structure for `HashSet` that impl `EstimateSize`
+// https://github.com/risingwavelabs/risingwave/issues/8957
+impl<T: EstimateSize> EstimateSize for HashSet<T> {
+    fn estimated_heap_size(&self) -> usize {
+        0
+    }
+}
 
 macro_rules! estimate_size_impl {
     ($($t:ty)*) => ($(

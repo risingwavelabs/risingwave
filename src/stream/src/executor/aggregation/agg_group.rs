@@ -21,6 +21,7 @@ use risingwave_common::array::stream_record::{Record, RecordType};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::collection::estimate_size::EstimateSize;
 use risingwave_common::must_match;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::DataType;
@@ -136,6 +137,13 @@ impl<S: StateStore, Strtg: Strategy> Debug for AggGroup<S, Strtg> {
             .field("group_key", &self.group_key)
             .field("prev_outputs", &self.prev_outputs)
             .finish()
+    }
+}
+
+impl<S: StateStore, Strtg: Strategy> EstimateSize for AggGroup<S, Strtg> {
+    fn estimated_heap_size(&self) -> usize {
+        // https://github.com/risingwavelabs/risingwave/issues/8957
+        0
     }
 }
 

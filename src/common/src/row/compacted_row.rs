@@ -49,8 +49,8 @@ impl<R: Row> From<R> for CompactedRow {
     }
 }
 
-// impl EstimateSize for CompactedRow {
-//     fn estimated_heap_size(&self) -> usize {
-//         self.row.estimated_heap_size()
-//     }
-// }
+impl EstimateSize for CompactedRow {
+    fn estimated_heap_size(&self) -> usize {
+        self.row.estimated_heap_size()
+    }
+}
