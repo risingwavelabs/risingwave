@@ -14,6 +14,8 @@
 
 //! Converts between arrays and Apache Arrow arrays.
 
+use std::fmt::Write;
+
 use arrow_schema::{Field, DECIMAL256_MAX_PRECISION};
 use chrono::{NaiveDateTime, NaiveTime};
 use itertools::Itertools;
@@ -420,7 +422,13 @@ impl From<&JsonbArray> for arrow_array::LargeStringArray {
         let mut builder =
             arrow_array::builder::LargeStringBuilder::with_capacity(array.len(), array.len() * 16);
         for value in array.iter() {
-            builder.append_option(value.map(|j| j.to_string()));
+            match value {
+                Some(jsonb) => {
+                    write!(&mut builder, "{}", jsonb).unwrap();
+                    builder.append_value("");
+                }
+                None => builder.append_null(),
+            }
         }
         builder.finish()
     }
