@@ -72,7 +72,7 @@ impl RowIdGenExecutor {
         // TODO: We may generate row id for each vnode in the future instead of using the first
         // vnode.
         let vnode_id = vnodes.next_set_bit(0).unwrap() as u32;
-        RowIdGenerator::with_epoch(vnode_id, *UNIX_RISINGWAVE_DATE_EPOCH)
+        RowIdGenerator::new(vnode_id, *UNIX_RISINGWAVE_DATE_EPOCH)
     }
 
     /// Generate a row ID column according to ops.

@@ -150,13 +150,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_serial_key_chunk() {
-        let mut gen = RowIdGenerator::new(100);
+        let mut gen = RowIdGenerator::for_test(100);
         let chunk = format!(
             "SRL I
              {} 1
              {} 2",
-            gen.next().await,
-            gen.next().await,
+            gen.next(),
+            gen.next(),
         );
 
         let chunk = DataChunk::from_pretty(chunk.as_str());
@@ -170,9 +170,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_serial_key_row() {
-        let mut gen = RowIdGenerator::new(100);
+        let mut gen = RowIdGenerator::for_test(100);
         let row = OwnedRow::new(vec![
-            Some(ScalarImpl::Serial(gen.next().await.into())),
+            Some(ScalarImpl::Serial(gen.next().into())),
             Some(ScalarImpl::Int64(12345)),
         ]);
 

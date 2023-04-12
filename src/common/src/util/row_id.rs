@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::cmp::Ordering;
+use std::time::SystemTime;
 
 use crate::hash::VirtualNode;
 
@@ -24,18 +25,22 @@ const VNODE_ID_UPPER_BOUND: u32 = 1 << 10;
 /// `RowIdGenerator` generates unique row ids using snowflake algorithm as following format:
 ///
 /// | timestamp | vnode id | sequence |
-/// |-----------|-----------|----------|
-/// |  41 bits  | 10 bits   | 12 bits  |
+/// |-----------|----------|----------|
+/// |  41 bits  | 10 bits  | 12 bits  |
 #[derive(Debug)]
 pub struct RowIdGenerator {
-    /// Specific epoch using for generating row ids.
-    epoch: SystemTime,
+    /// Specific base timestamp using for generating row ids.
+    base: SystemTime,
 
     /// Last timestamp part of row id.
-    last_duration_ms: i64,
+    last_timestamp_ms: i64,
+
     /// Current vnode id.
     /// FIXME: Use `VirtualNode` instead.
-    pub vnode_id: u32,
+    pub vnodes: Vec<VirtualNode>,
+
+    vnodes_index: u16,
+
     /// Last sequence part of row id.
     sequence: u16,
 }
@@ -50,67 +55,112 @@ pub fn extract_vnode_id_from_row_id(id: RowId) -> VirtualNode {
 }
 
 impl RowIdGenerator {
-    pub fn new(vnode_id: u32) -> Self {
+    #[cfg(test)]
+    pub fn for_test(vnode_id: u32) -> Self {
+        use std::time::UNIX_EPOCH;
+
         assert!(vnode_id < VNODE_ID_UPPER_BOUND);
-        Self::with_epoch(vnode_id, UNIX_EPOCH)
+        Self::new(vnode_id, UNIX_EPOCH)
     }
 
-    pub fn with_epoch(vnode_id: u32, epoch: SystemTime) -> Self {
+    pub fn new(vnode_id: u32, base: SystemTime) -> Self {
         Self {
-            epoch,
-            last_duration_ms: epoch.elapsed().unwrap().as_millis() as i64,
-            vnode_id,
+            base,
+            last_timestamp_ms: base.elapsed().unwrap().as_millis() as i64,
+            vnodes: vec![VirtualNode::from_index(vnode_id as usize)],
+            vnodes_index: 0,
             sequence: 0,
         }
     }
 
-    fn row_id(&self) -> RowId {
-        self.last_duration_ms << TIMESTAMP_SHIFT_BITS
-            | (self.vnode_id << VNODE_ID_SHIFT_BITS) as i64
-            | self.sequence as i64
-    }
+    /// Update the timestamp, so that the millisecond part of row id is **always** increased.
+    ///
+    /// This method will immediately return if the timestamp is increased or there's remaining
+    /// sequence for the current millisecond. Otherwise, it will spin loop until the timestamp is
+    /// increased.
+    fn try_update_timestamp(&mut self) {
+        let get_current_timestamp_ms = || self.base.elapsed().unwrap().as_millis() as i64;
 
-    async fn try_update_duration(&mut self) {
-        let current_duration = self.epoch.elapsed().unwrap();
-        let current_duration_ms = current_duration.as_millis() as i64;
-        if current_duration_ms < self.last_duration_ms {
-            tracing::warn!(
-                "Clock moved backwards: last_duration={}, current_duration={}",
-                self.last_duration_ms,
-                current_duration_ms
-            );
-        }
+        let current_timestamp_ms = get_current_timestamp_ms();
+        let to_update = match current_timestamp_ms.cmp(&self.last_timestamp_ms) {
+            Ordering::Less => {
+                tracing::warn!(
+                    "Clock moved backwards: last={}, current={}",
+                    self.last_timestamp_ms,
+                    current_timestamp_ms,
+                );
+                true
+            }
+            Ordering::Equal => self.sequence == SEQUENCE_UPPER_BOUND,
+            Ordering::Greater => true,
+        };
 
-        if current_duration_ms > self.last_duration_ms {
-            self.last_duration_ms = current_duration_ms;
+        if to_update {
+            // If the timestamp is not increased, spin loop here and wait for next millisecond. The
+            // case for time going backwards and sequence reaches the upper bound are both covered.
+            let mut current_timestamp_ms = current_timestamp_ms;
+            loop {
+                current_timestamp_ms = get_current_timestamp_ms();
+                if current_timestamp_ms > self.last_timestamp_ms {
+                    break;
+                }
+                std::hint::spin_loop();
+            }
+
+            self.last_timestamp_ms = current_timestamp_ms;
             self.sequence = 0;
-        } else if self.sequence == SEQUENCE_UPPER_BOUND {
-            // If the sequence reaches the upper bound, spin loop here and wait for next
-            // millisecond. Here we do not consider time goes backwards, it can also be covered
-            // here.
-            tracing::warn!("Sequence for row-id reached upper bound, spin loop.");
-            tokio::time::sleep(
-                Duration::from_millis(current_duration.subsec_millis() as u64 + 1)
-                    - Duration::from_nanos(current_duration.subsec_nanos() as u64),
-            )
-            .await;
         }
     }
 
-    /// Generate a sequence `RowId`s.
+    /// Generate a new `RowId`. Returns `None` if the sequence reaches the upper bound of current
+    /// timestamp, and `try_update_timestamp` should be called to update the timestamp and reset the
+    /// sequence. After that, the next call of this method always returns `Some`.
+    fn next_row_id_in_current_timestamp(&mut self) -> Option<RowId> {
+        if self.sequence >= SEQUENCE_UPPER_BOUND {
+            return None;
+        }
+
+        let vnode = self.vnodes[self.vnodes_index as usize].to_index();
+        let sequence = self.sequence;
+
+        self.vnodes_index = (self.vnodes_index + 1) % self.vnodes.len() as u16;
+        if self.vnodes_index == 0 {
+            self.sequence += 1;
+        }
+
+        Some(
+            self.last_timestamp_ms << TIMESTAMP_SHIFT_BITS
+                | (vnode << VNODE_ID_SHIFT_BITS) as i64
+                | sequence as i64,
+        )
+    }
+
+    /// Returns an infinite iterator that generates `RowId`s.
+    fn gen_iter(&mut self) -> impl Iterator<Item = RowId> + '_ {
+        std::iter::from_fn(move || {
+            if let Some(next) = self.next_row_id_in_current_timestamp() {
+                Some(next)
+            } else {
+                self.try_update_timestamp();
+                Some(
+                    self.next_row_id_in_current_timestamp()
+                        .expect("timestamp should be updated"),
+                )
+            }
+        })
+    }
+
+    /// Generate a sequence of `RowId`s. Compared to `next`, this method is more efficient as it
+    /// only checks the timestamp once before generating the first `RowId`, instead of doing that
+    /// every `RowId`.
     ///
     /// This may block for a while if too many IDs are generated in one millisecond.
-    pub async fn next_batch(&mut self, length: usize) -> Vec<RowId> {
-        self.try_update_duration().await;
+    pub fn next_batch(&mut self, length: usize) -> Vec<RowId> {
+        self.try_update_timestamp();
+
         let mut ret = Vec::with_capacity(length);
-        while ret.len() < length {
-            if self.sequence < SEQUENCE_UPPER_BOUND {
-                ret.push(self.row_id());
-                self.sequence += 1;
-            } else {
-                self.try_update_duration().await;
-            }
-        }
+        ret.extend(self.gen_iter().take(length));
+        assert_eq!(ret.len(), length);
         ret
     }
 
@@ -118,35 +168,32 @@ impl RowIdGenerator {
     ///
     /// This may block for a while if too many IDs are generated in one millisecond.
     #[allow(clippy::should_implement_trait)]
-    pub async fn next(&mut self) -> RowId {
-        loop {
-            self.try_update_duration().await;
-            if self.sequence < SEQUENCE_UPPER_BOUND {
-                let row_id = self.row_id();
-                self.sequence += 1;
-                return row_id;
-            }
-        }
+    pub fn next(&mut self) -> RowId {
+        self.try_update_timestamp();
+
+        self.gen_iter().next().unwrap()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use itertools::Itertools;
 
     use super::*;
 
     #[tokio::test]
     async fn test_generator() {
-        let mut generator = RowIdGenerator::new(0);
-        let mut last_row_id = generator.next().await;
+        let mut generator = RowIdGenerator::for_test(0);
+        let mut last_row_id = generator.next();
         for _ in 0..100000 {
-            let row_id = generator.next().await;
+            let row_id = generator.next();
             assert!(row_id > last_row_id);
             last_row_id = row_id;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
-        let row_id = generator.next().await;
+        let row_id = generator.next();
         assert!(row_id > last_row_id);
         assert_ne!(
             row_id >> TIMESTAMP_SHIFT_BITS,
@@ -154,10 +201,8 @@ mod tests {
         );
         assert_eq!(row_id & (SEQUENCE_UPPER_BOUND as i64 - 1), 0);
 
-        let mut generator = RowIdGenerator::new(1);
-        let row_ids = generator
-            .next_batch((SEQUENCE_UPPER_BOUND + 10) as usize)
-            .await;
+        let mut generator = RowIdGenerator::for_test(1);
+        let row_ids = generator.next_batch((SEQUENCE_UPPER_BOUND + 10) as usize);
         let mut expected = (0..SEQUENCE_UPPER_BOUND).collect_vec();
         expected.extend(0..10);
         assert_eq!(
