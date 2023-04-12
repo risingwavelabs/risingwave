@@ -63,7 +63,7 @@ impl ArrayRemoveExpression {
     /// query T
     /// select array_remove(array[array[1],array[2],array[3],array[2],null::int[]], array[2]);
     /// ----
-    ///  {{1},{3},NULL}
+    /// {{1},{3},NULL}
     ///
     /// query T
     /// select array_remove(array[array[1],array[2],array[3],array[2],null::int[]], null::int[]);
