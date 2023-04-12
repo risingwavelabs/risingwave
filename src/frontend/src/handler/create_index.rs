@@ -29,7 +29,7 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
-use crate::expr::{Expr, ExprImpl, ExprType, InputRef};
+use crate::expr::{Expr, ExprImpl, FunctionalIndexVisitor, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMaterialize};
@@ -79,47 +79,20 @@ pub(crate) fn gen_create_index_plan(
     let mut binder = Binder::new_for_stream(session);
     binder.bind_table(Some(&schema_name), &table_name, None)?;
 
+    let mut functional_index_visitor = FunctionalIndexVisitor {};
     let mut index_columns_ordered_expr = vec![];
     let mut include_columns_expr = vec![];
     let mut distributed_columns_expr = vec![];
     for column in columns {
         let order_type = OrderType::from_bools(column.asc, column.nulls_first);
         let expr_impl = binder.bind_expr(column.expr)?;
-        match &expr_impl {
-            ExprImpl::InputRef(_) => {}
-            ExprImpl::FunctionCall(func) => {
-                match func.get_expr_type() {
-                    // TODO: support more functions after verification
-                    ExprType::Lower
-                    | ExprType::Upper
-                    | ExprType::JsonbAccessInner
-                    | ExprType::JsonbAccessStr => {}
-                    _ => {
-                        return Err(ErrorCode::NotSupported(
-                            "this function is not supported for indexes".into(),
-                            "use other functions instead".into(),
-                        )
-                        .into())
-                    }
-                };
-                if !func.inputs().iter().all(|input| {
-                    matches!(input, ExprImpl::InputRef(_)) || matches!(input, ExprImpl::Literal(_))
-                }) {
-                    return Err(ErrorCode::NotSupported(
-                        "complex arguments for functions are not supported".into(),
-                        "use columns or literals instead".into(),
-                    )
-                    .into());
-                }
-            }
-            _ => {
-                return Err(ErrorCode::NotSupported(
-                    "index columns should be columns or functions".into(),
-                    "use columns or functions instead".into(),
-                )
-                .into())
-            }
-        };
+        if let Err(reason) = functional_index_visitor.support(&expr_impl) {
+            return Err(ErrorCode::NotSupported(
+                "this function is not supported for indexes".into(),
+                reason.into(),
+            )
+            .into());
+        }
         index_columns_ordered_expr.push((expr_impl, order_type));
     }
 

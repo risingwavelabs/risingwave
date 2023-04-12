@@ -544,6 +544,53 @@ impl WatermarkAnalyzer {
     }
 }
 
+#[derive(Clone, Default)]
+pub struct FunctionalIndexVisitor {}
+
+impl FunctionalIndexVisitor {
+    pub fn support(&mut self, expr: &ExprImpl) -> Result<(), &str> {
+        if self.visit_expr(expr) {
+            Ok(())
+        } else {
+            Err("functional indexes only support: LOWER, UPPER, ->, ->>, ||.")
+        }
+    }
+}
+
+impl ExprVisitor<bool> for FunctionalIndexVisitor {
+    fn merge(a: bool, b: bool) -> bool {
+        a && b
+    }
+
+    fn visit_function_call(&mut self, func_call: &FunctionCall) -> bool {
+        match func_call.get_expr_type() {
+            // TODO: support more functions after verification
+            ExprType::Lower
+            | ExprType::Upper
+            | ExprType::JsonbAccessInner
+            | ExprType::JsonbAccessStr
+            | Type::ConcatOp => true,
+            _ => false,
+        };
+
+        func_call
+            .inputs()
+            .iter()
+            .map(|expr| self.visit_expr(expr))
+            .reduce(Self::merge)
+            .unwrap_or_default()
+    }
+
+    fn visit_expr(&mut self, expr: &ExprImpl) -> bool {
+        match expr {
+            ExprImpl::InputRef(_) => true,
+            ExprImpl::Literal(_) => true,
+            ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
+            _ => false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
