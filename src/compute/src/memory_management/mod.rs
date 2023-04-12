@@ -34,8 +34,8 @@ pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
 /// The memory reserved for system usage (stack and code segment of processes, allocation
 /// overhead, network buffer, etc.) in megabytes.
 pub const MIN_SYSTEM_RESERVED_MEMORY_MB: usize = 512;
-pub const MAX_SYSTEM_RESERVED_MEMORY_MB: usize = 4096;
-pub const SYSTEM_RESERVED_MEMORY_PROPORTION: f64 = 0.3;
+pub const MAX_SYSTEM_RESERVED_MEMORY_MB: usize = 2700;
+pub const SYSTEM_RESERVED_MEMORY_PROPORTION: f64 = 0.2;
 
 pub const STORAGE_MEMORY_PROPORTION: f64 = 0.3;
 
