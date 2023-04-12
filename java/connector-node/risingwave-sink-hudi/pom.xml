@@ -39,6 +39,11 @@
             <groupId>com.risingwave.java</groupId>
             <artifactId>connector-api</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.risingwave.java</groupId>
+            <artifactId>s3-common</artifactId>
+            <scope>provided</scope>
+        </dependency>
 
         <dependency>
             <groupId>org.apache.logging.log4j</groupId>
