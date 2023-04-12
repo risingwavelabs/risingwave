@@ -68,7 +68,7 @@ impl<T: EstimateSize> EstimateSize for Option<T> {
 }
 
 /// SAFETY: `Bytes` can store a pointer in some cases, that may cause the size
-/// of a `Bytes` be calculated more than one and when memory stats is larger than the real value. 
+/// of a `Bytes` be calculated more than one and when memory stats is larger than the real value.
 impl EstimateSize for Bytes {
     fn estimated_heap_size(&self) -> usize {
         self.len()

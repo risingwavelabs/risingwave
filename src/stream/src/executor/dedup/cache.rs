@@ -14,16 +14,18 @@
 
 use std::hash::Hash;
 
+use risingwave_common::collection::estimate_size::EstimateSize;
+
 use crate::cache::{new_unbounded, ExecutorCache};
 use crate::task::AtomicU64Ref;
 
 /// [`DedupCache`] is used for key deduplication. Currently, the cache behaves like a set that only
 /// accepts a key without a value. This could be refined in the future to support k-v pairs.
-pub struct DedupCache<K: Hash + Eq> {
+pub struct DedupCache<K: Hash + Eq + EstimateSize> {
     inner: ExecutorCache<K, ()>,
 }
 
-impl<K: Hash + Eq> DedupCache<K> {
+impl<K: Hash + Eq + EstimateSize> DedupCache<K> {
     pub fn new(watermark_epoch: AtomicU64Ref) -> Self {
         let cache = ExecutorCache::new(new_unbounded(watermark_epoch));
         Self { inner: cache }
