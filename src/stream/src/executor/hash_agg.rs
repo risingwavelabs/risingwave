@@ -418,6 +418,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         vars: &mut ExecutionVars<K, S, E>,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
+        let chunk = chunk.compact();
         // Find groups in this chunk and generate visibility for each group key.
         let keys = K::build(&this.group_key_indices, chunk.data_chunk())?;
         let group_visibilities = Self::get_group_visibilities(keys, chunk.visibility());
