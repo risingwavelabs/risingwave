@@ -120,7 +120,7 @@ impl Expression for ArrayRemoveExpression {
             if !vis {
                 builder.append_null();
             } else {
-                builder.append_datum(&self.evaluate(left, right));
+                builder.append_datum(Self::evaluate(left, right));
             }
         }
         Ok(Arc::new(builder.finish()))
@@ -129,7 +129,10 @@ impl Expression for ArrayRemoveExpression {
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let left_data = self.left.eval_row(input).await?;
         let right_data = self.right.eval_row(input).await?;
-        Ok(self.evaluate(left_data.to_datum_ref(), right_data.to_datum_ref()))
+        Ok(Self::evaluate(
+            left_data.to_datum_ref(),
+            right_data.to_datum_ref(),
+        ))
     }
 }
 
