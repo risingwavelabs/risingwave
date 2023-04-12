@@ -16,43 +16,20 @@
 
 package com.risingwave.connector;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.risingwave.connector.api.sink.CommonSinkConfig;
+import com.risingwave.connector.common.S3Config;
 
-public class DeltaLakeSinkConfig extends CommonSinkConfig {
+public class DeltaLakeSinkConfig extends S3Config {
+    @JsonProperty(value = "location")
     private String location;
 
-    private String locationType;
-
+    @JsonProperty(value = "type")
     private String sinkType;
 
     @JsonProperty(value = "force_append_only")
     private Boolean forceAppendOnly;
 
-    @JsonCreator
-    public DeltaLakeSinkConfig(
-            @JsonProperty(value = "location") String location,
-            @JsonProperty(value = "location.type") String locationType,
-            @JsonProperty(value = "type") String sinkType) {
-        this.location = location;
-        this.locationType = locationType;
-        this.sinkType = sinkType;
-    }
-
     public String getLocation() {
         return location;
-    }
-
-    public void setLocation(String location) {
-        this.location = location;
-    }
-
-    public String getLocationType() {
-        return locationType;
-    }
-
-    public void setLocationType(String locationType) {
-        this.locationType = locationType;
     }
 }

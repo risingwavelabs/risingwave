@@ -74,8 +74,7 @@ public class DeltaLakeSinkFactoryTest {
                 TableSchema.getMockTableSchema(),
                 new HashMap<>() {
                     {
-                        put("location", location);
-                        put("location.type", "local");
+                        put("location", String.format("file://%s", location));
                     }
                 });
         dropMockTable(location);
