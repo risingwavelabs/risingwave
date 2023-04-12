@@ -118,10 +118,6 @@ macro_rules! impl_common_for_num256 {
                 Self(Box::new(<$inner>::from_be_bytes(bytes)))
             }
 
-            // pub fn from_str_hex(src: &str) -> Result<Self, ParseIntError> {
-            //     <$inner>::from_str_hex(src).map(Into::into)
-            // }
-
             pub fn from_protobuf(input: &mut impl Read) -> ArrayResult<Self> {
                 let mut buf = [0u8; mem::size_of::<$inner>()];
                 input.read_exact(&mut buf)?;
@@ -188,11 +184,21 @@ macro_rules! impl_common_for_num256 {
 impl_common_for_num256!(Int256, Int256Ref<'a>, i256, Int256);
 
 impl Int256 {
-    pub fn from_str_hex(src: &str) -> Result<Self, ParseIntError> {
-        // `i256::str_from_hex` doesn't support uppercase "0X", so when it fails
-        // it will try to parse the lowercase version of the `src`
+    // `i256::str_from_hex` and `i256::str_from_prefixed` doesn't support uppercase "0X", so when it
+    // fails it will try to parse the lowercase version of the `src`
+
+    // `from_str_prefixed` function accepts string inputs that start with "0x". If the parsing
+    // fails, it will attempt to parse the input as a decimal value.
+    pub fn from_str_prefixed(src: &str) -> Result<Self, ParseIntError> {
         i256::from_str_prefixed(src)
             .or_else(|_| i256::from_str_prefixed(&src.to_lowercase()))
+            .map(Into::into)
+    }
+
+    // `from_str_hex` function only accepts string inputs that start with "0x".
+    pub fn from_str_hex(src: &str) -> Result<Self, ParseIntError> {
+        i256::from_str_hex(src)
+            .or_else(|_| i256::from_str_hex(&src.to_lowercase()))
             .map(Into::into)
     }
 }

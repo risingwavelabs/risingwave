@@ -31,13 +31,26 @@ mod tests {
 
     #[test]
     fn test_hex_to_int256() {
-        assert_eq!(hex_to_int256("0").unwrap(), Int256::from(0));
-        assert_eq!(hex_to_int256("1").unwrap(), Int256::from(1));
-        assert_eq!(hex_to_int256("-1").unwrap(), Int256::from(-1));
         assert_eq!(hex_to_int256("0x0").unwrap(), Int256::from(0));
         assert_eq!(hex_to_int256("0x0000").unwrap(), Int256::from(0));
         assert_eq!(hex_to_int256("0x1").unwrap(), Int256::from(1));
         assert_eq!(hex_to_int256("-0x1").unwrap(), Int256::from(-1));
         assert_eq!(hex_to_int256("0xf").unwrap(), Int256::from(15));
+        assert_eq!(hex_to_int256("0xff").unwrap(), Int256::from(255));
+        assert_eq!(hex_to_int256("-0xff").unwrap(), Int256::from(-255));
+
+        // int256 max
+        assert_eq!(
+            hex_to_int256("0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+                .unwrap(),
+            Int256::max(),
+        );
+
+        // int256 min
+        assert_eq!(
+            hex_to_int256("-0x8000000000000000000000000000000000000000000000000000000000000000")
+                .unwrap(),
+            Int256::min(),
+        );
     }
 }
