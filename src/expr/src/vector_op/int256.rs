@@ -18,6 +18,16 @@ use risingwave_expr_macro::function;
 use crate::ExprError::Parse;
 use crate::Result;
 
+/// Returns the integer value of the hexadecimal string.
+///
+/// # Example
+///
+/// ```slt
+/// query I
+/// select hex_to_int256('0xdeadbeef');
+/// ----
+/// 3735928559
+/// ```
 #[function("hex_to_int256(varchar) -> int256")]
 pub fn hex_to_int256(s: &str) -> Result<Int256> {
     Int256::from_str_hex(s).map_err(|e| Parse(e.to_string().into()))
