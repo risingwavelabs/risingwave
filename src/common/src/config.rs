@@ -35,6 +35,7 @@ pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
 /// For non-user-facing components where the CLI arguments do not override the config file.
 pub const NO_OVERRIDE: Option<NoOverride> = None;
 
+// `[system]` is ignored since it should not be exposed to users.
 macro_rules! for_all_config_sections {
     ($macro:ident) => {
         $macro! {
@@ -97,7 +98,8 @@ impl OverrideConfig for NoOverride {
 
 /// [`RwConfig`] corresponds to the whole config file `risingwave.toml`. Each field corresponds to a
 /// section.
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[derive(Derivative, Clone, Serialize, Deserialize, Default)]
+#[derivative(Debug)]
 pub struct RwConfig {
     #[serde(default)]
     pub server: ServerConfig,
@@ -115,6 +117,7 @@ pub struct RwConfig {
     pub storage: StorageConfig,
 
     #[serde(default)]
+    #[derivative(Debug = "ignore")]
     pub system: SystemConfig,
 
     #[serde(flatten)]
