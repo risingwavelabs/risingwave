@@ -21,7 +21,7 @@ use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::catalog::{
-    PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
+    PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
 };
 
 use super::function_catalog::FunctionCatalog;
@@ -29,11 +29,12 @@ use super::source_catalog::SourceCatalog;
 use super::system_catalog::get_sys_catalogs_in_schema;
 use super::view_catalog::ViewCatalog;
 use super::{CatalogError, CatalogResult, SinkId, SourceId, ViewId};
+use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
-use crate::catalog::{DatabaseId, IndexCatalog, SchemaId};
+use crate::catalog::{ConnectionId, DatabaseId, IndexCatalog, SchemaId};
 
 #[derive(Copy, Clone)]
 pub enum SchemaPath<'a> {
@@ -93,7 +94,9 @@ pub struct Catalog {
     database_by_name: HashMap<String, DatabaseCatalog>,
     db_name_by_id: HashMap<DatabaseId, String>,
     /// all table catalogs in the cluster identified by universal unique table id.
-    table_by_id: HashMap<TableId, TableCatalog>,
+    table_by_id: HashMap<TableId, Arc<TableCatalog>>,
+    connection_by_id: HashMap<ConnectionId, ConnectionCatalog>,
+    connection_id_by_name: HashMap<String, ConnectionId>,
 }
 
 #[expect(clippy::derivable_impls)]
@@ -104,6 +107,8 @@ impl Default for Catalog {
             database_by_name: HashMap::new(),
             db_name_by_id: HashMap::new(),
             table_by_id: HashMap::new(),
+            connection_by_id: HashMap::new(), // TODO: move to schema_catalog
+            connection_id_by_name: HashMap::new(), // TODO: move to schema_catalog
         }
     }
 }
@@ -147,12 +152,13 @@ impl Catalog {
     }
 
     pub fn create_table(&mut self, proto: &PbTable) {
-        self.table_by_id.insert(proto.id.into(), proto.into());
-        self.get_database_mut(proto.database_id)
+        let table = self
+            .get_database_mut(proto.database_id)
             .unwrap()
             .get_schema_mut(proto.schema_id)
             .unwrap()
             .create_table(proto);
+        self.table_by_id.insert(proto.id.into(), table);
     }
 
     pub fn create_index(&mut self, proto: &PbIndex) {
@@ -195,9 +201,25 @@ impl Catalog {
             .create_function(proto);
     }
 
+    pub fn create_connection(&mut self, proto: &PbConnection) {
+        let name = proto.name.clone();
+        let id = proto.id;
+
+        self.connection_by_id.try_insert(id, proto.into()).unwrap();
+        self.connection_id_by_name.try_insert(name, id).unwrap();
+    }
+
+    pub fn drop_connection(&mut self, connection_name: &str) {
+        let id = self.connection_id_by_name.remove(connection_name).unwrap();
+        let _connection = self.connection_by_id.remove(&id).unwrap();
+    }
+
     pub fn drop_database(&mut self, db_id: DatabaseId) {
         let name = self.db_name_by_id.remove(&db_id).unwrap();
-        let _database = self.database_by_name.remove(&name).unwrap();
+        let database = self.database_by_name.remove(&name).unwrap();
+        database.iter_all_table_ids().for_each(|table| {
+            self.table_by_id.remove(&table);
+        });
     }
 
     pub fn drop_schema(&mut self, db_id: DatabaseId, schema_id: SchemaId) {
@@ -214,12 +236,13 @@ impl Catalog {
     }
 
     pub fn update_table(&mut self, proto: &PbTable) {
-        self.table_by_id.insert(proto.id.into(), proto.into());
-        self.get_database_mut(proto.database_id)
+        let table = self
+            .get_database_mut(proto.database_id)
             .unwrap()
             .get_schema_mut(proto.schema_id)
             .unwrap()
             .update_table(proto);
+        self.table_by_id.insert(proto.id.into(), table);
     }
 
     pub fn update_index(&mut self, proto: &PbIndex) {
@@ -238,12 +261,28 @@ impl Catalog {
             .drop_source(source_id);
     }
 
+    pub fn update_source(&mut self, proto: &PbSource) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .update_source(proto);
+    }
+
     pub fn drop_sink(&mut self, db_id: DatabaseId, schema_id: SchemaId, sink_id: SinkId) {
         self.get_database_mut(db_id)
             .unwrap()
             .get_schema_mut(schema_id)
             .unwrap()
             .drop_sink(sink_id);
+    }
+
+    pub fn update_sink(&mut self, proto: &PbSink) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .update_sink(proto);
     }
 
     pub fn drop_index(&mut self, db_id: DatabaseId, schema_id: SchemaId, index_id: IndexId) {
@@ -260,6 +299,14 @@ impl Catalog {
             .get_schema_mut(schema_id)
             .unwrap()
             .drop_view(view_id);
+    }
+
+    pub fn update_view(&mut self, proto: &PbView) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .update_view(proto);
     }
 
     pub fn drop_function(
@@ -321,7 +368,8 @@ impl Catalog {
     }
 
     pub fn get_table_name_by_id(&self, table_id: TableId) -> CatalogResult<String> {
-        self.get_table_by_id(&table_id).map(|table| table.name)
+        self.get_table_by_id(&table_id)
+            .map(|table| table.name.clone())
     }
 
     pub fn get_schema_by_id(
@@ -372,21 +420,47 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()))
     }
 
-    pub fn get_table_by_id(&self, table_id: &TableId) -> CatalogResult<TableCatalog> {
+    pub fn get_table_by_id(&self, table_id: &TableId) -> CatalogResult<&Arc<TableCatalog>> {
         self.table_by_id
             .get(table_id)
-            .cloned()
             .ok_or_else(|| CatalogError::NotFound("table id", table_id.to_string()))
+    }
+
+    // Used by test_utils only.
+    pub fn alter_table_name_by_id(&mut self, table_id: &TableId, table_name: &str) {
+        let (mut database_id, mut schema_id) = (0, 0);
+        let mut found = false;
+        for database in self.database_by_name.values() {
+            if !found {
+                for schema in database.iter_schemas() {
+                    if schema.iter_table().any(|t| t.id() == *table_id) {
+                        found = true;
+                        database_id = database.id();
+                        schema_id = schema.id();
+                        break;
+                    }
+                }
+            }
+        }
+
+        if found {
+            let mut table = self
+                .get_table_by_id(table_id)
+                .unwrap()
+                .to_prost(schema_id, database_id);
+            table.name = table_name.to_string();
+            self.update_table(&table);
+        }
     }
 
     #[cfg(test)]
     pub fn insert_table_id_mapping(&mut self, table_id: TableId, fragment_id: super::FragmentId) {
         self.table_by_id.insert(
             table_id,
-            TableCatalog {
+            Arc::new(TableCatalog {
                 fragment_id,
                 ..Default::default()
-            },
+            }),
         );
     }
 
@@ -478,6 +552,19 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("function", function_name.to_string()))
     }
 
+    pub fn get_connection_by_name(
+        &self,
+        connection_name: &str,
+    ) -> CatalogResult<&ConnectionCatalog> {
+        let connection_id = self
+            .connection_id_by_name
+            .get(connection_name)
+            .ok_or_else(|| CatalogError::NotFound("connection", connection_name.to_string()))?;
+        self.connection_by_id
+            .get(connection_id)
+            .ok_or_else(|| CatalogError::NotFound("connection", connection_name.to_string()))
+    }
+
     /// Check the name if duplicated with existing table, materialized view or source.
     pub fn check_relation_name_duplicated(
         &self,
@@ -561,5 +648,9 @@ impl Catalog {
             })?
             .map(|(id, _)| id)
             .ok_or_else(|| CatalogError::NotFound("class", class_name.to_string()))
+    }
+
+    pub fn get_all_connections(&self) -> Vec<ConnectionCatalog> {
+        self.connection_by_id.values().cloned().collect_vec()
     }
 }

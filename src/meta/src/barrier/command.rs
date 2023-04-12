@@ -35,7 +35,6 @@ use risingwave_rpc_client::StreamClientPoolRef;
 use uuid::Uuid;
 
 use super::info::BarrierActorInfo;
-use super::snapshot::SnapshotManagerRef;
 use crate::barrier::CommandChanges;
 use crate::manager::{FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
@@ -205,8 +204,6 @@ impl Command {
 pub struct CommandContext<S: MetaStore> {
     fragment_manager: FragmentManagerRef<S>,
 
-    snapshot_manager: SnapshotManagerRef<S>,
-
     client_pool: StreamClientPoolRef,
 
     /// Resolved info in this barrier loop.
@@ -227,7 +224,6 @@ impl<S: MetaStore> CommandContext<S> {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         fragment_manager: FragmentManagerRef<S>,
-        snapshot_manager: SnapshotManagerRef<S>,
         client_pool: StreamClientPoolRef,
         info: BarrierActorInfo,
         prev_epoch: Epoch,
@@ -238,7 +234,6 @@ impl<S: MetaStore> CommandContext<S> {
     ) -> Self {
         Self {
             fragment_manager,
-            snapshot_manager,
             client_pool,
             info: Arc::new(info),
             prev_epoch,
@@ -277,6 +272,7 @@ where
             }
 
             Command::CreateStreamingJob {
+                table_fragments,
                 dispatchers,
                 init_split_assignment: split_assignment,
                 ..
@@ -292,12 +288,14 @@ where
                         )
                     })
                     .collect();
+                let added_actors = table_fragments.actor_ids();
                 let actor_splits = split_assignment
                     .values()
                     .flat_map(build_actor_connector_splits)
                     .collect();
                 Some(Mutation::Add(AddMutation {
                     actor_dispatchers,
+                    added_actors,
                     actor_splits,
                 }))
             }
@@ -455,10 +453,15 @@ where
     /// returns an empty set.
     pub fn actors_to_track(&self) -> HashSet<ActorId> {
         match &self.command {
-            Command::CreateStreamingJob { dispatchers, .. } => dispatchers
+            Command::CreateStreamingJob {
+                dispatchers,
+                table_fragments,
+                ..
+            } => dispatchers
                 .values()
                 .flatten()
                 .flat_map(|dispatcher| dispatcher.downstream_actor_id.iter().copied())
+                .chain(table_fragments.values_actor_ids().into_iter())
                 .collect(),
 
             _ => Default::default(),
@@ -580,11 +583,6 @@ where
                     )
                     .await?;
 
-                // For mview creation, the snapshot ingestion may last for several epochs. By
-                // pinning a snapshot in `post_collect` which is called sequentially, we can ensure
-                // that the pinned snapshot is the just committed one.
-                self.snapshot_manager.pin(self.prev_epoch).await?;
-
                 // Extract the fragments that include source operators.
                 let source_fragments = table_fragments.stream_source_fragments();
 
@@ -685,11 +683,6 @@ where
                 self.fragment_manager
                     .mark_table_fragments_created(table_fragments.table_id())
                     .await?;
-
-                // Since the compute node reports that the chain actors have caught up with the
-                // upstream and finished the creation, we can unpin the snapshot.
-                // TODO: we can unpin the snapshot earlier, when the snapshot ingestion is done.
-                self.snapshot_manager.unpin(self.prev_epoch).await?;
             }
 
             _ => {}

@@ -116,7 +116,7 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                 match tester
                     .run_async(record.clone())
                     .timed(|_res, elapsed| {
-                        println!("Record {:?} finished in {:?}", record, elapsed)
+                        tracing::debug!("Record {:?} finished in {:?}", record, elapsed)
                     })
                     .await
                 {
@@ -138,7 +138,7 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                     if let Err(err) = tester
                         .run_async(record.clone())
                         .timed(|_res, elapsed| {
-                            println!("Record {:?} finished in {:?}", record, elapsed)
+                            tracing::debug!("Record {:?} finished in {:?}", record, elapsed)
                         })
                         .await
                     {
@@ -158,7 +158,7 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                 continue;
             }
 
-            let should_kill = thread_rng().gen_ratio((opts.kill_rate * 1000.0) as u32, 1000);
+            let should_kill = thread_rng().gen_bool(opts.kill_rate as f64);
             // spawn a background task to kill nodes
             let handle = if should_kill {
                 let cluster = cluster.clone();
@@ -178,7 +178,7 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                 match tester
                     .run_async(record.clone())
                     .timed(|_res, elapsed| {
-                        println!("Record {:?} finished in {:?}", record, elapsed)
+                        tracing::debug!("Record {:?} finished in {:?}", record, elapsed)
                     })
                     .await
                 {

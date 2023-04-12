@@ -16,6 +16,7 @@ use core::fmt;
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::hash::Hash;
+use std::mem::size_of;
 
 use bytes::{Buf, BufMut};
 use itertools::EitherOrBoth::{Both, Left, Right};
@@ -25,10 +26,12 @@ use serde::{Deserializer, Serializer};
 
 use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayMeta, ArrayResult, RowRef};
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::collection::estimate_size::EstimateSize;
 use crate::row::Row;
 use crate::types::to_text::ToText;
 use crate::types::{hash_datum, DataType, Datum, DatumRef, Scalar, ScalarRefImpl, ToDatumRef};
 use crate::util::memcmp_encoding;
+use crate::util::value_encoding::estimate_serialize_datum_size;
 
 #[derive(Debug)]
 pub struct ListArrayBuilder {
@@ -157,6 +160,14 @@ pub struct ListArray {
     pub(super) offsets: Vec<u32>,
     pub(super) value: Box<ArrayImpl>,
     pub(super) value_type: DataType,
+}
+
+impl EstimateSize for ListArray {
+    fn estimated_heap_size(&self) -> usize {
+        self.bitmap.estimated_heap_size()
+            + self.offsets.capacity() * size_of::<u32>()
+            + self.value.estimated_heap_size()
+    }
 }
 
 impl Array for ListArray {
@@ -443,6 +454,15 @@ impl<'a> ListRef<'a> {
             for datum_ref in it {
                 hash_datum(datum_ref, state);
             }
+        })
+    }
+
+    /// estimate the serialized size with value encoding
+    pub fn estimate_serialize_size_inner(&self) -> usize {
+        iter_elems_ref!(self, it, {
+            it.fold(0, |acc, datum_ref| {
+                acc + estimate_serialize_datum_size(datum_ref)
+            })
         })
     }
 }

@@ -20,6 +20,7 @@ use crate::common::CtlContext;
 
 pub async fn create_connection(
     context: &CtlContext,
+    connection_name: String,
     provider: String,
     service_name: String,
     availability_zone: String,
@@ -29,14 +30,15 @@ pub async fn create_connection(
         .split(',')
         .map(|str| str.to_string())
         .collect();
-    let conn_id = meta_client
-        .create_connection(create_connection_request::Payload::PrivateLink(
-            PrivateLink {
+    let (conn_id, _) = meta_client
+        .create_connection(
+            connection_name,
+            create_connection_request::Payload::PrivateLink(PrivateLink {
                 provider,
                 service_name,
                 availability_zones,
-            },
-        ))
+            }),
+        )
         .await?;
 
     println!("Create connection success id#{}", conn_id);

@@ -80,7 +80,7 @@ pub fn wrap(input: BoxedExecutor, actor_id: ActorId) -> (SubtaskHandle, SubtaskR
             // causes the stream dropped in the scope of the current async task and blocks other
             // actors. See `spawn_blocking_drop_stream` for more details.
             let to_stop = match &item {
-                Ok(Message::Barrier(barrier)) => barrier.is_stop_or_update_drop_actor(actor_id),
+                Ok(Message::Barrier(barrier)) => barrier.is_stop(actor_id),
                 Ok(_) => false,
                 Err(_) => true,
             };

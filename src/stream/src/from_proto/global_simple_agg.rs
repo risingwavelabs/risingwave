@@ -22,7 +22,7 @@ use super::agg_common::{
 };
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::agg_common::AggExecutorArgs;
+use crate::executor::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
 use crate::executor::aggregation::AggCall;
 use crate::executor::GlobalSimpleAggExecutor;
 
@@ -60,7 +60,7 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
             pk_indices: params.pk_indices,
             executor_id: params.executor_id,
 
-            extreme_cache_size: stream.config.developer.unsafe_stream_extreme_cache_size,
+            extreme_cache_size: stream.config.developer.unsafe_extreme_cache_size,
 
             agg_calls,
             row_count_index: node.get_row_count_index() as usize,
@@ -69,7 +69,7 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
             distinct_dedup_tables,
             watermark_epoch: stream.get_watermark_epoch(),
 
-            extra: None,
+            extra: SimpleAggExecutorExtraArgs {},
         })?
         .boxed())
     }

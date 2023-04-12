@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::config::RwConfig;
+use risingwave_common::config::{extract_storage_memory_config, RwConfig, StorageMemoryConfig};
 use risingwave_common::system_param::default_system_params;
 use risingwave_common::system_param::reader::SystemParamsReader;
 
@@ -32,6 +32,8 @@ pub struct StorageOpts {
     /// Maximum shared buffer size, writes attempting to exceed the capacity will stall until there
     /// is enough space.
     pub shared_buffer_capacity_mb: usize,
+    /// The threshold for the number of immutable memtables to merge to a new imm.
+    pub imm_merge_threshold: usize,
     /// Remote directory for storing data and metadata objects.
     pub data_directory: String,
     /// Whether to enable write conflict detection
@@ -40,6 +42,8 @@ pub struct StorageOpts {
     pub block_cache_capacity_mb: usize,
     /// Capacity of sstable meta cache.
     pub meta_cache_capacity_mb: usize,
+    /// Percent of the ratio of high priority data in block-cache
+    pub high_priority_ratio: usize,
     pub disable_remote_compactor: bool,
     pub enable_local_spill: bool,
     /// Local object store root. We should call `get_local_object_store` to get the object store.
@@ -67,18 +71,21 @@ pub struct StorageOpts {
     pub backup_storage_url: String,
     /// The storage directory for storing backups.
     pub backup_storage_directory: String,
+    /// max time which wait for preload. 0 represent do not do any preload.
+    pub max_preload_wait_time_mill: u64,
 }
 
 impl Default for StorageOpts {
     fn default() -> Self {
         let c = RwConfig::default();
         let p = default_system_params();
-        Self::from((&c, &p.into()))
+        let s = extract_storage_memory_config(&c);
+        Self::from((&c, &p.into(), &s))
     }
 }
 
-impl From<(&RwConfig, &SystemParamsReader)> for StorageOpts {
-    fn from((c, p): (&RwConfig, &SystemParamsReader)) -> Self {
+impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpts {
+    fn from((c, p, s): (&RwConfig, &SystemParamsReader, &StorageMemoryConfig)) -> Self {
         Self {
             sstable_size_mb: p.sstable_size_mb(),
             block_size_kb: p.block_size_kb(),
@@ -87,26 +94,29 @@ impl From<(&RwConfig, &SystemParamsReader)> for StorageOpts {
             share_buffer_compaction_worker_threads_number: c
                 .storage
                 .share_buffer_compaction_worker_threads_number,
-            shared_buffer_capacity_mb: c.storage.shared_buffer_capacity_mb,
+            shared_buffer_capacity_mb: s.shared_buffer_capacity_mb,
+            imm_merge_threshold: c.storage.imm_merge_threshold,
             data_directory: p.data_directory().to_string(),
             write_conflict_detection_enabled: c.storage.write_conflict_detection_enabled,
-            block_cache_capacity_mb: c.storage.block_cache_capacity_mb,
-            meta_cache_capacity_mb: c.storage.meta_cache_capacity_mb,
+            high_priority_ratio: s.high_priority_ratio_in_percent,
+            block_cache_capacity_mb: s.block_cache_capacity_mb,
+            meta_cache_capacity_mb: s.meta_cache_capacity_mb,
             disable_remote_compactor: c.storage.disable_remote_compactor,
             enable_local_spill: c.storage.enable_local_spill,
             local_object_store: c.storage.local_object_store.to_string(),
             share_buffer_upload_concurrency: c.storage.share_buffer_upload_concurrency,
-            compactor_memory_limit_mb: c.storage.compactor_memory_limit_mb,
+            compactor_memory_limit_mb: s.compactor_memory_limit_mb,
             sstable_id_remote_fetch_number: c.storage.sstable_id_remote_fetch_number,
             min_sst_size_for_streaming_upload: c.storage.min_sst_size_for_streaming_upload,
             max_sub_compaction: c.storage.max_sub_compaction,
             max_concurrent_compaction_task_number: c.storage.max_concurrent_compaction_task_number,
             file_cache_dir: c.storage.file_cache.dir.clone(),
             file_cache_capacity_mb: c.storage.file_cache.capacity_mb,
-            file_cache_total_buffer_capacity_mb: c.storage.file_cache.total_buffer_capacity_mb,
+            file_cache_total_buffer_capacity_mb: s.file_cache_total_buffer_capacity_mb,
             file_cache_file_fallocate_unit_mb: c.storage.file_cache.cache_file_fallocate_unit_mb,
             file_cache_meta_fallocate_unit_mb: c.storage.file_cache.cache_meta_fallocate_unit_mb,
             file_cache_file_max_write_size_mb: c.storage.file_cache.cache_file_max_write_size_mb,
+            max_preload_wait_time_mill: c.storage.max_preload_wait_time_mill,
             backup_storage_url: p.backup_storage_url().to_string(),
             backup_storage_directory: p.backup_storage_directory().to_string(),
         }

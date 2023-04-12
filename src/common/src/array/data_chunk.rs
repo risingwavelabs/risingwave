@@ -12,27 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
 use std::hash::BuildHasher;
 use std::sync::Arc;
+use std::{fmt, usize};
 
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_pb::data::PbDataChunk;
 
-use super::{ArrayResult, Vis};
+use super::{Array, ArrayResult, StructArray, Vis};
 use crate::array::column::Column;
 use crate::array::data_chunk_iter::RowRef;
-use crate::array::{ArrayBuilderImpl, StructValue};
+use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::collection::estimate_size::EstimateSize;
 use crate::hash::HashCode;
 use crate::row::Row;
 use crate::types::struct_type::StructType;
 use crate::types::to_text::ToText;
-use crate::types::{DataType, Datum, NaiveDateTimeWrapper, ToOwnedDatum};
+use crate::types::{DataType, ToOwnedDatum};
 use crate::util::hash_util::finalize_hashers;
 use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
-use crate::util::value_encoding::{serialize_datum_into, ValueRowSerializer};
+use crate::util::value_encoding::{
+    estimate_serialize_datum_size, serialize_datum_into, try_get_exact_serialize_datum_size,
+    ValueRowSerializer,
+};
 
 /// [`DataChunk`] is a collection of Columns,
 /// a with visibility mask for each row.
@@ -181,6 +185,13 @@ impl DataChunk {
         &self.columns
     }
 
+    pub fn split_column_at(&self, idx: usize) -> (Self, Self) {
+        let (left, right) = self.columns.split_at(idx);
+        let left = DataChunk::new(left.to_vec(), self.vis2.clone());
+        let right = DataChunk::new(right.to_vec(), self.vis2.clone());
+        (left, right)
+    }
+
     pub fn to_protobuf(&self) -> PbDataChunk {
         assert!(
             matches!(self.vis2, Vis::Compact(_)),
@@ -324,6 +335,7 @@ impl DataChunk {
         Ok(new_chunks)
     }
 
+    /// Compute hash values for each row.
     pub fn get_hash_values<H: BuildHasher>(
         &self,
         column_idxes: &[usize],
@@ -331,6 +343,7 @@ impl DataChunk {
     ) -> Vec<HashCode> {
         let mut states = Vec::with_capacity(self.capacity());
         states.resize_with(self.capacity(), || hasher_builder.build_hasher());
+        // Compute hash for the specified columns.
         for column_idx in column_idxes {
             let array = self.column_at(*column_idx).array();
             array.hash_vec(&mut states[..]);
@@ -427,7 +440,36 @@ impl DataChunk {
         let buffers = match &self.vis2 {
             Vis::Bitmap(vis) => {
                 let rows_num = vis.len();
-                let mut buffers = vec![BytesMut::new(); rows_num];
+                let mut buffers: Vec<Vec<u8>> = vec![];
+                let mut col_variable: Vec<&Column> = vec![];
+                let mut row_len_fixed: usize = 0;
+                for c in &self.columns {
+                    if let Some(field_len) = try_get_exact_serialize_datum_size(&c.array()) {
+                        row_len_fixed += field_len;
+                    } else {
+                        col_variable.push(c);
+                    }
+                }
+                for i in 0..rows_num {
+                    // SAFETY(value_at_unchecked): the idx is always in bound.
+                    unsafe {
+                        if vis.is_set_unchecked(i) {
+                            buffers.push(Vec::with_capacity(
+                                row_len_fixed
+                                    + col_variable
+                                        .iter()
+                                        .map(|col| {
+                                            estimate_serialize_datum_size(
+                                                col.array_ref().value_at_unchecked(i),
+                                            )
+                                        })
+                                        .sum::<usize>(),
+                            ));
+                        } else {
+                            buffers.push(vec![]);
+                        }
+                    }
+                }
                 for c in &self.columns {
                     let c = c.array_ref();
                     assert_eq!(c.len(), rows_num);
@@ -443,7 +485,31 @@ impl DataChunk {
                 buffers
             }
             Vis::Compact(rows_num) => {
-                let mut buffers = vec![BytesMut::new(); *rows_num];
+                let mut buffers: Vec<Vec<u8>> = vec![];
+                let mut col_variable: Vec<&Column> = vec![];
+                let mut row_len_fixed: usize = 0;
+                for c in &self.columns {
+                    if let Some(field_len) = try_get_exact_serialize_datum_size(&c.array()) {
+                        row_len_fixed += field_len;
+                    } else {
+                        col_variable.push(c);
+                    }
+                }
+                for i in 0..*rows_num {
+                    unsafe {
+                        buffers.push(Vec::with_capacity(
+                            row_len_fixed
+                                + col_variable
+                                    .iter()
+                                    .map(|col| {
+                                        estimate_serialize_datum_size(
+                                            col.array_ref().value_at_unchecked(i),
+                                        )
+                                    })
+                                    .sum::<usize>(),
+                        ));
+                    }
+                }
                 for c in &self.columns {
                     let c = c.array_ref();
                     assert_eq!(c.len(), *rows_num);
@@ -458,7 +524,7 @@ impl DataChunk {
             }
         };
 
-        buffers.into_iter().map(BytesMut::freeze).collect_vec()
+        buffers.into_iter().map(|item| item.into()).collect_vec()
     }
 
     /// Serialize each row into bytes with given serializer.
@@ -476,6 +542,22 @@ impl DataChunk {
         }
         results
     }
+
+    /// Estimate size of hash keys. Their indices in a row are indicated by `column_indices`.
+    /// Size here refers to the number of u8s required to store the serialized datum.
+    pub fn estimate_value_encoding_size(&self, column_indices: &[usize]) -> usize {
+        if self.capacity() == 0 {
+            0
+        } else {
+            column_indices
+                .iter()
+                .map(|idx| {
+                    let datum = self.column_at(*idx).array_ref().datum_at(0);
+                    estimate_serialize_datum_size(datum)
+                })
+                .sum()
+        }
+    }
 }
 
 impl fmt::Debug for DataChunk {
@@ -487,6 +569,26 @@ impl fmt::Debug for DataChunk {
             self.capacity(),
             self.to_pretty_string()
         )
+    }
+}
+
+impl From<StructArray> for DataChunk {
+    fn from(array: StructArray) -> Self {
+        let columns = array.fields().map(|array| array.clone().into()).collect();
+        Self {
+            columns,
+            vis2: Vis::Compact(array.len()),
+        }
+    }
+}
+
+impl EstimateSize for DataChunk {
+    fn estimated_heap_size(&self) -> usize {
+        self.columns
+            .iter()
+            .map(Column::estimated_heap_size)
+            .sum::<usize>()
+            + self.vis2.estimated_heap_size()
     }
 }
 
@@ -513,6 +615,7 @@ pub trait DataChunkTestExt {
     /// );
     ///
     /// // type chars:
+    /// //     B: bool
     /// //     I: i64
     /// //     i: i32
     /// //     F: f64
@@ -538,12 +641,12 @@ impl DataChunkTestExt for DataChunk {
         use crate::types::ScalarImpl;
         fn parse_type(s: &str) -> DataType {
             match s {
+                "B" => DataType::Boolean,
                 "I" => DataType::Int64,
                 "i" => DataType::Int32,
                 "F" => DataType::Float64,
                 "f" => DataType::Float32,
                 "TS" => DataType::Timestamp,
-                "TSZ" => DataType::Timestamptz,
                 "T" => DataType::Varchar,
                 "SRL" => DataType::Serial,
                 array if array.starts_with('{') && array.ends_with('}') => {
@@ -562,10 +665,13 @@ impl DataChunkTestExt for DataChunk {
         let mut lines = s.split('\n').filter(|l| !l.trim().is_empty());
         // initialize array builders from the first line
         let header = lines.next().unwrap().trim();
-        let mut array_builders = header
+        let datatypes = header
             .split_ascii_whitespace()
             .take_while(|c| *c != "//")
             .map(parse_type)
+            .collect::<Vec<_>>();
+        let mut array_builders = datatypes
+            .iter()
             .map(|ty| ty.create_array_builder(1))
             .collect::<Vec<_>>();
         let mut visibility = vec![];
@@ -573,59 +679,16 @@ impl DataChunkTestExt for DataChunk {
             let mut token = line.trim().split_ascii_whitespace();
             // allow `zip` since `token` may longer than `array_builders`
             #[allow(clippy::disallowed_methods)]
-            for (builder, val_str) in array_builders.iter_mut().zip(&mut token) {
-                fn parse_datum(s: &str, builder: &ArrayBuilderImpl) -> Datum {
-                    if s == "." {
-                        return None;
-                    }
-                    Some(match builder {
-                        ArrayBuilderImpl::Int32(_) => ScalarImpl::Int32(
-                            s.parse()
-                                .map_err(|_| panic!("invalid int32: {s:?}"))
-                                .unwrap(),
-                        ),
-                        ArrayBuilderImpl::Int64(_) => ScalarImpl::Int64(
-                            s.parse()
-                                .map_err(|_| panic!("invalid int64: {s:?}"))
-                                .unwrap(),
-                        ),
-                        ArrayBuilderImpl::Float32(_) => ScalarImpl::Float32(
-                            s.parse()
-                                .map_err(|_| panic!("invalid float32: {s:?}"))
-                                .unwrap(),
-                        ),
-                        ArrayBuilderImpl::Float64(_) => ScalarImpl::Float64(
-                            s.parse()
-                                .map_err(|_| panic!("invalid float64: {s:?}"))
-                                .unwrap(),
-                        ),
-                        ArrayBuilderImpl::NaiveDateTime(_) => {
-                            ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
-                                s.parse()
-                                    .map_err(|_| panic!("invalid datetime: {s:?}"))
-                                    .unwrap(),
-                            ))
-                        }
-                        ArrayBuilderImpl::Utf8(_) => ScalarImpl::Utf8(s.into()),
-                        ArrayBuilderImpl::Serial(_) => ScalarImpl::Serial(
-                            s.parse::<i64>()
-                                .map_err(|_| panic!("invalid serial: {s:?}"))
-                                .unwrap()
-                                .into(),
-                        ),
-                        ArrayBuilderImpl::Struct(builder) => {
-                            assert!(s.starts_with('{') && s.ends_with('}'));
-                            let fields = s[1..s.len() - 1]
-                                .split(',')
-                                .zip_eq_debug(&builder.children_array)
-                                .map(|(s, builder)| parse_datum(s, builder))
-                                .collect_vec();
-                            ScalarImpl::Struct(StructValue::new(fields))
-                        }
-                        b => panic!("invalid data type: {b:?}"),
-                    })
-                }
-                builder.append_datum(&parse_datum(val_str, builder));
+            for ((builder, ty), val_str) in
+                array_builders.iter_mut().zip(&datatypes).zip(&mut token)
+            {
+                let datum = match val_str {
+                    "." => None,
+                    "t" => Some(true.into()),
+                    "f" => Some(false.into()),
+                    _ => Some(ScalarImpl::from_text(val_str.as_bytes(), ty).unwrap()),
+                };
+                builder.append_datum(datum);
             }
             let visible = match token.next() {
                 None | Some("//") => true,

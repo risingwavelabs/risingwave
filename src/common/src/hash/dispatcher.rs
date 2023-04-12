@@ -15,6 +15,7 @@
 use super::HashKey;
 use crate::array::serial_array::Serial;
 use crate::hash;
+use crate::hash::{HeapNullBitmap, NullBitmap, StackNullBitmap, MAX_GROUP_KEYS_ON_STACK};
 use crate::types::DataType;
 
 /// An enum to help to dynamically dispatch [`HashKey`] template.
@@ -64,15 +65,30 @@ pub trait HashKeyDispatcher: Sized {
     /// The data types used to build the hash key.
     fn data_types(&self) -> &[DataType];
 
+    /// Based on the number of group keys and total size of group keys,
+    /// we decide:
+    /// 1. What bitmap to use for representing null values in group keys.
+    /// 2. What key type to store group keys in.
     fn dispatch(self) -> Self::Output {
+        if self.data_types().len() <= MAX_GROUP_KEYS_ON_STACK {
+            self.dispatch_by_key_size::<StackNullBitmap>()
+        } else {
+            self.dispatch_by_key_size::<HeapNullBitmap>()
+        }
+    }
+
+    /// All data types will be stored in a single `HashKey`.
+    /// We use `Key<N>` for fixed size keys,
+    /// `KeySerialized` for variable length keys.
+    fn dispatch_by_key_size<T: NullBitmap>(self) -> Self::Output {
         match calc_hash_key_kind(self.data_types()) {
-            HashKeyKind::Key8 => self.dispatch_impl::<hash::Key8>(),
-            HashKeyKind::Key16 => self.dispatch_impl::<hash::Key16>(),
-            HashKeyKind::Key32 => self.dispatch_impl::<hash::Key32>(),
-            HashKeyKind::Key64 => self.dispatch_impl::<hash::Key64>(),
-            HashKeyKind::Key128 => self.dispatch_impl::<hash::Key128>(),
-            HashKeyKind::Key256 => self.dispatch_impl::<hash::Key256>(),
-            HashKeyKind::KeySerialized => self.dispatch_impl::<hash::KeySerialized>(),
+            HashKeyKind::Key8 => self.dispatch_impl::<hash::Key8<T>>(),
+            HashKeyKind::Key16 => self.dispatch_impl::<hash::Key16<T>>(),
+            HashKeyKind::Key32 => self.dispatch_impl::<hash::Key32<T>>(),
+            HashKeyKind::Key64 => self.dispatch_impl::<hash::Key64<T>>(),
+            HashKeyKind::Key128 => self.dispatch_impl::<hash::Key128<T>>(),
+            HashKeyKind::Key256 => self.dispatch_impl::<hash::Key256<T>>(),
+            HashKeyKind::KeySerialized => self.dispatch_impl::<hash::KeySerialized<T>>(),
         }
     }
 }
@@ -80,10 +96,7 @@ pub trait HashKeyDispatcher: Sized {
 fn hash_key_size(data_type: &DataType) -> HashKeySize {
     use std::mem::size_of;
 
-    use crate::types::{
-        Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
-        OrderedF32, OrderedF64,
-    };
+    use crate::types::{Date, Decimal, Interval, Time, Timestamp, F32, F64};
 
     match data_type {
         // for `Boolean` in `HashKey` use 1 FixedBytes , but in `Array` use 1 FixedBits
@@ -92,14 +105,14 @@ fn hash_key_size(data_type: &DataType) -> HashKeySize {
         DataType::Int32 => HashKeySize::Fixed(size_of::<i32>()),
         DataType::Int64 => HashKeySize::Fixed(size_of::<i64>()),
         DataType::Serial => HashKeySize::Fixed(size_of::<Serial>()),
-        DataType::Float32 => HashKeySize::Fixed(size_of::<OrderedF32>()),
-        DataType::Float64 => HashKeySize::Fixed(size_of::<OrderedF64>()),
+        DataType::Float32 => HashKeySize::Fixed(size_of::<F32>()),
+        DataType::Float64 => HashKeySize::Fixed(size_of::<F64>()),
         DataType::Decimal => HashKeySize::Fixed(size_of::<Decimal>()),
-        DataType::Date => HashKeySize::Fixed(size_of::<NaiveDateWrapper>()),
-        DataType::Time => HashKeySize::Fixed(size_of::<NaiveTimeWrapper>()),
-        DataType::Timestamp => HashKeySize::Fixed(size_of::<NaiveDateTimeWrapper>()),
+        DataType::Date => HashKeySize::Fixed(size_of::<Date>()),
+        DataType::Time => HashKeySize::Fixed(size_of::<Time>()),
+        DataType::Timestamp => HashKeySize::Fixed(size_of::<Timestamp>()),
         DataType::Timestamptz => HashKeySize::Fixed(size_of::<i64>()),
-        DataType::Interval => HashKeySize::Fixed(size_of::<IntervalUnit>()),
+        DataType::Interval => HashKeySize::Fixed(size_of::<Interval>()),
 
         DataType::Varchar => HashKeySize::Variable,
         DataType::Bytea => HashKeySize::Variable,

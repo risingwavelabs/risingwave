@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
+
 use anyhow::{anyhow, Result};
 use num_traits::FromPrimitive;
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::types::{
-    DataType, Datum, Decimal, NaiveDateWrapper, NaiveTimeWrapper, ScalarImpl,
-};
+use risingwave_common::types::{DataType, Date, Datum, Decimal, ScalarImpl, Time};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::vector_op::cast::{
     i64_to_timestamp, i64_to_timestamptz, str_to_date, str_to_time, str_to_timestamp,
@@ -27,6 +27,21 @@ use simd_json::value::StaticNode;
 use simd_json::{BorrowedValue, ValueAccess};
 
 use crate::{ensure_i16, ensure_i32, ensure_i64, ensure_str, simd_json_ensure_float};
+pub(crate) fn json_object_smart_get_value<'a, 'b>(
+    v: &'b simd_json::BorrowedValue<'a>,
+    key: Cow<'b, str>,
+) -> Option<&'b BorrowedValue<'a>> {
+    let obj = v.as_object()?;
+    if obj.contains_key(key.as_ref()) {
+        return obj.get(key.as_ref());
+    }
+    for (k, v) in obj {
+        if k.eq_ignore_ascii_case(key.as_ref()) {
+            return Some(v);
+        }
+    }
+    None
+}
 
 fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<ScalarImpl> {
     let v = match dtype {
@@ -65,14 +80,14 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
         DataType::Date => match v {
             BorrowedValue::String(s) => str_to_date(s)?.into(),
             BorrowedValue::Static(_) => {
-                NaiveDateWrapper::with_days_since_unix_epoch(ensure_i32!(v, i32))?.into()
+                Date::with_days_since_unix_epoch(ensure_i32!(v, i32))?.into()
             }
             _ => anyhow::bail!("expect date, but found {v}"),
         },
         // debezium converts time to i64 for mysql and postgres
         DataType::Time => match v {
             BorrowedValue::String(s) => str_to_time(s)?.into(),
-            BorrowedValue::Static(_) => NaiveTimeWrapper::with_milli(
+            BorrowedValue::Static(_) => Time::with_milli(
                 ensure_i64!(v, i64)
                     .try_into()
                     .map_err(|_| anyhow!("cannot cast i64 to time, value out of range"))?,
@@ -101,7 +116,7 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
                 .iter()
                 .zip_eq_fast(struct_type_info.fields.iter())
                 .map(|field| {
-                    simd_json_parse_value(field.1, v.get(field.0.to_ascii_lowercase().as_str()))
+                    simd_json_parse_value(field.1, json_object_smart_get_value(v, field.0.into()))
                 })
                 .collect::<Result<Vec<Datum>>>()?;
             ScalarImpl::Struct(StructValue::new(fields))

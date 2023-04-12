@@ -90,10 +90,10 @@ converts_generic! {
     { arrow_array::BooleanArray, Boolean, ArrayImpl::Bool },
     { arrow_array::Decimal128Array, Decimal128(_, _), ArrayImpl::Decimal },
     { arrow_array::IntervalMonthDayNanoArray, Interval(MonthDayNano), ArrayImpl::Interval },
-    { arrow_array::Date32Array, Date32, ArrayImpl::NaiveDate },
-    { arrow_array::TimestampNanosecondArray, Timestamp(Nanosecond, _), ArrayImpl::NaiveDateTime },
-    { arrow_array::Time64NanosecondArray, Time64(Nanosecond), ArrayImpl::NaiveTime },
-    // { arrow_array::StructArray, Struct(_), ArrayImpl::Struct }, // TODO: convert struct
+    { arrow_array::Date32Array, Date32, ArrayImpl::Date },
+    { arrow_array::TimestampNanosecondArray, Timestamp(Nanosecond, _), ArrayImpl::Timestamp },
+    { arrow_array::Time64NanosecondArray, Time64(Nanosecond), ArrayImpl::Time },
+    { arrow_array::StructArray, Struct(_), ArrayImpl::Struct },
     { arrow_array::ListArray, List(_), ArrayImpl::List },
     { arrow_array::BinaryArray, Binary, ArrayImpl::Bytea }
 }
@@ -149,12 +149,12 @@ impl From<&DataType> for arrow_schema::DataType {
             DataType::Interval => Self::Interval(arrow_schema::IntervalUnit::DayTime),
             DataType::Varchar => Self::Utf8,
             DataType::Bytea => Self::Binary,
-            DataType::Decimal => Self::Decimal128(0, 0),
+            DataType::Decimal => Self::Decimal128(28, 0), // arrow precision can not be 0
             DataType::Struct(struct_type) => {
                 Self::Struct(get_field_vector_from_struct_type(struct_type))
             }
             DataType::List { datatype } => {
-                Self::List(Box::new(Field::new("", datatype.as_ref().into(), true)))
+                Self::List(Box::new(Field::new("item", datatype.as_ref().into(), true)))
             }
             _ => todo!("Unsupported arrow data type: {value:?}"),
         }
@@ -198,6 +198,11 @@ macro_rules! converts {
                 array.iter().collect()
             }
         }
+        impl From<&[$ArrowType]> for $ArrayType {
+            fn from(arrays: &[$ArrowType]) -> Self {
+                arrays.iter().flat_map(|a| a.iter()).collect()
+            }
+        }
     };
     // convert values using FromIntoArrow
     ($ArrayType:ty, $ArrowType:ty, @map) => {
@@ -218,6 +223,19 @@ macro_rules! converts {
                     .collect()
             }
         }
+        impl From<&[$ArrowType]> for $ArrayType {
+            fn from(arrays: &[$ArrowType]) -> Self {
+                arrays
+                    .iter()
+                    .flat_map(|a| a.iter())
+                    .map(|o| {
+                        o.map(|v| {
+                            <<$ArrayType as Array>::RefItem<'_> as FromIntoArrow>::from_arrow(v)
+                        })
+                    })
+                    .collect()
+            }
+        }
     };
 }
 converts!(BoolArray, arrow_array::BooleanArray);
@@ -226,12 +244,11 @@ converts!(I32Array, arrow_array::Int32Array);
 converts!(I64Array, arrow_array::Int64Array);
 converts!(F32Array, arrow_array::Float32Array, @map);
 converts!(F64Array, arrow_array::Float64Array, @map);
-converts!(DecimalArray, arrow_array::Decimal128Array, @map);
 converts!(BytesArray, arrow_array::BinaryArray);
 converts!(Utf8Array, arrow_array::StringArray);
-converts!(NaiveDateArray, arrow_array::Date32Array, @map);
-converts!(NaiveTimeArray, arrow_array::Time64NanosecondArray, @map);
-converts!(NaiveDateTimeArray, arrow_array::TimestampNanosecondArray, @map);
+converts!(DateArray, arrow_array::Date32Array, @map);
+converts!(TimeArray, arrow_array::Time64NanosecondArray, @map);
+converts!(TimestampArray, arrow_array::TimestampNanosecondArray, @map);
 converts!(IntervalArray, arrow_array::IntervalMonthDayNanoArray, @map);
 
 /// Converts RisingWave value from and into Arrow value.
@@ -242,7 +259,7 @@ trait FromIntoArrow {
     fn into_arrow(self) -> Self::ArrowType;
 }
 
-impl FromIntoArrow for OrderedF32 {
+impl FromIntoArrow for F32 {
     type ArrowType = f32;
 
     fn from_arrow(value: Self::ArrowType) -> Self {
@@ -254,7 +271,7 @@ impl FromIntoArrow for OrderedF32 {
     }
 }
 
-impl FromIntoArrow for OrderedF64 {
+impl FromIntoArrow for F64 {
     type ArrowType = f64;
 
     fn from_arrow(value: Self::ArrowType) -> Self {
@@ -266,34 +283,11 @@ impl FromIntoArrow for OrderedF64 {
     }
 }
 
-impl FromIntoArrow for Decimal {
-    type ArrowType = i128;
-
-    fn from_arrow(value: Self::ArrowType) -> Self {
-        const NAN: i128 = i128::MIN + 1;
-        match value {
-            NAN => Decimal::NaN,
-            i128::MAX => Decimal::PositiveInf,
-            i128::MIN => Decimal::NegativeInf,
-            _ => Decimal::Normalized(rust_decimal::Decimal::deserialize(value.to_be_bytes())),
-        }
-    }
-
-    fn into_arrow(self) -> Self::ArrowType {
-        match self {
-            Decimal::Normalized(d) => i128::from_be_bytes(d.serialize()),
-            Decimal::NaN => i128::MIN + 1,
-            Decimal::PositiveInf => i128::MAX,
-            Decimal::NegativeInf => i128::MIN,
-        }
-    }
-}
-
-impl FromIntoArrow for NaiveDateWrapper {
+impl FromIntoArrow for Date {
     type ArrowType = i32;
 
     fn from_arrow(value: Self::ArrowType) -> Self {
-        NaiveDateWrapper(arrow_array::types::Date32Type::to_naive_date(value))
+        Date(arrow_array::types::Date32Type::to_naive_date(value))
     }
 
     fn into_arrow(self) -> Self::ArrowType {
@@ -301,11 +295,11 @@ impl FromIntoArrow for NaiveDateWrapper {
     }
 }
 
-impl FromIntoArrow for NaiveTimeWrapper {
+impl FromIntoArrow for Time {
     type ArrowType = i64;
 
     fn from_arrow(value: Self::ArrowType) -> Self {
-        NaiveTimeWrapper(
+        Time(
             NaiveTime::from_num_seconds_from_midnight_opt(
                 (value / 1_000_000_000) as _,
                 (value % 1_000_000_000) as _,
@@ -322,11 +316,11 @@ impl FromIntoArrow for NaiveTimeWrapper {
     }
 }
 
-impl FromIntoArrow for NaiveDateTimeWrapper {
+impl FromIntoArrow for Timestamp {
     type ArrowType = i64;
 
     fn from_arrow(value: Self::ArrowType) -> Self {
-        NaiveDateTimeWrapper(
+        Timestamp(
             NaiveDateTime::from_timestamp_opt(
                 (value / 1_000_000_000) as _,
                 (value % 1_000_000_000) as _,
@@ -343,21 +337,71 @@ impl FromIntoArrow for NaiveDateTimeWrapper {
     }
 }
 
-impl FromIntoArrow for IntervalUnit {
+impl FromIntoArrow for Interval {
     type ArrowType = i128;
 
     fn from_arrow(value: Self::ArrowType) -> Self {
         let (months, days, ns) = arrow_array::types::IntervalMonthDayNanoType::to_parts(value);
-        IntervalUnit::from_month_day_usec(months, days, ns / 1000)
+        Interval::from_month_day_usec(months, days, ns / 1000)
     }
 
     fn into_arrow(self) -> Self::ArrowType {
         arrow_array::types::IntervalMonthDayNanoType::make_value(
-            self.get_months(),
-            self.get_days(),
+            self.months(),
+            self.days(),
             // TODO: this may overflow and we need `try_into`
-            self.get_usecs() * 1000,
+            self.usecs() * 1000,
         )
+    }
+}
+
+// RisingWave Decimal type is self-contained, but Arrow is not.
+// In Arrow DecimalArray, the scale is stored in data type as metadata, and the mantissa is stored
+// as i128 in the array.
+impl From<&DecimalArray> for arrow_array::Decimal128Array {
+    fn from(array: &DecimalArray) -> Self {
+        let max_scale = array
+            .iter()
+            .filter_map(|o| o.map(|v| v.scale()))
+            .max()
+            .unwrap_or(0) as u32;
+        let mut builder = arrow_array::builder::Decimal128Builder::with_capacity(array.len())
+            .with_data_type(arrow_schema::DataType::Decimal128(28, max_scale as i8));
+        for value in array.iter() {
+            builder.append_option(value.map(|d| decimal_to_i128(d, max_scale)));
+        }
+        builder.finish()
+    }
+}
+
+fn decimal_to_i128(value: Decimal, scale: u32) -> i128 {
+    match value {
+        Decimal::Normalized(mut d) => {
+            d.rescale(scale);
+            d.mantissa()
+        }
+        Decimal::NaN => i128::MIN + 1,
+        Decimal::PositiveInf => i128::MAX,
+        Decimal::NegativeInf => i128::MIN,
+    }
+}
+
+impl From<&arrow_array::Decimal128Array> for DecimalArray {
+    fn from(array: &arrow_array::Decimal128Array) -> Self {
+        assert!(array.scale() >= 0, "todo: support negative scale");
+        let from_arrow = |value| {
+            const NAN: i128 = i128::MIN + 1;
+            match value {
+                NAN => Decimal::NaN,
+                i128::MAX => Decimal::PositiveInf,
+                i128::MIN => Decimal::NegativeInf,
+                _ => Decimal::Normalized(rust_decimal::Decimal::from_i128_with_scale(
+                    value,
+                    array.scale() as u32,
+                )),
+            }
+        };
+        array.iter().map(|o| o.map(from_arrow)).collect()
     }
 }
 
@@ -394,6 +438,7 @@ impl From<&ListArray> for arrow_array::ListArray {
             ArrayImpl::Int64(a) => build(array, a, Int64Builder::with_capacity(a.len()), |b, v| {
                 b.append_option(v)
             }),
+
             ArrayImpl::Float32(a) => {
                 build(array, a, Float32Builder::with_capacity(a.len()), |b, v| {
                     b.append_option(v.map(|f| f.0))
@@ -410,35 +455,42 @@ impl From<&ListArray> for arrow_array::ListArray {
                 StringBuilder::with_capacity(a.len(), a.data().len()),
                 |b, v| b.append_option(v),
             ),
+            ArrayImpl::Int256(_a) => todo!(),
             ArrayImpl::Bool(a) => {
                 build(array, a, BooleanBuilder::with_capacity(a.len()), |b, v| {
                     b.append_option(v)
                 })
             }
-            ArrayImpl::Decimal(a) => build(
-                array,
-                a,
-                Decimal128Builder::with_capacity(a.len()),
-                |b, v| b.append_option(v.map(|d| d.into_arrow())),
-            ),
+            ArrayImpl::Decimal(a) => {
+                let max_scale = a
+                    .iter()
+                    .filter_map(|o| o.map(|v| v.scale()))
+                    .max()
+                    .unwrap_or(0) as u32;
+                build(
+                    array,
+                    a,
+                    Decimal128Builder::with_capacity(a.len())
+                        .with_data_type(arrow_schema::DataType::Decimal128(28, max_scale as i8)),
+                    |b, v| b.append_option(v.map(|d| decimal_to_i128(d, max_scale))),
+                )
+            }
             ArrayImpl::Interval(a) => build(
                 array,
                 a,
                 IntervalMonthDayNanoBuilder::with_capacity(a.len()),
                 |b, v| b.append_option(v.map(|d| d.into_arrow())),
             ),
-            ArrayImpl::NaiveDate(a) => {
-                build(array, a, Date32Builder::with_capacity(a.len()), |b, v| {
-                    b.append_option(v.map(|d| d.into_arrow()))
-                })
-            }
-            ArrayImpl::NaiveDateTime(a) => build(
+            ArrayImpl::Date(a) => build(array, a, Date32Builder::with_capacity(a.len()), |b, v| {
+                b.append_option(v.map(|d| d.into_arrow()))
+            }),
+            ArrayImpl::Timestamp(a) => build(
                 array,
                 a,
                 TimestampNanosecondBuilder::with_capacity(a.len()),
                 |b, v| b.append_option(v.map(|d| d.into_arrow())),
             ),
-            ArrayImpl::NaiveTime(a) => build(
+            ArrayImpl::Time(a) => build(
                 array,
                 a,
                 Time64NanosecondBuilder::with_capacity(a.len()),
@@ -470,19 +522,17 @@ impl From<&StructArray> for arrow_array::StructArray {
         let struct_data_vector: Vec<(arrow_schema::Field, arrow_array::ArrayRef)> =
             if array.children_names().len() != array.children_array_types().len() {
                 array
-                    .field_arrays()
-                    .iter()
+                    .fields()
                     .zip_eq_fast(array.children_array_types())
-                    .map(|(arr, datatype)| (Field::new("", datatype.into(), true), (*arr).into()))
+                    .map(|(arr, datatype)| (Field::new("", datatype.into(), true), arr.into()))
                     .collect()
             } else {
                 array
-                    .field_arrays()
-                    .iter()
+                    .fields()
                     .zip_eq_fast(array.children_array_types())
                     .zip_eq_fast(array.children_names())
                     .map(|((arr, datatype), field_name)| {
-                        (Field::new(field_name, datatype.into(), true), (*arr).into())
+                        (Field::new(field_name, datatype.into(), true), arr.into())
                     })
                     .collect()
             };
@@ -514,7 +564,7 @@ impl From<&arrow_array::StructArray> for StructArray {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::interval::test_utils::IntervalUnitTestExt;
+    use crate::types::interval::test_utils::IntervalTestExt;
     use crate::{array, empty_array};
 
     #[test]
@@ -533,54 +583,50 @@ mod tests {
 
     #[test]
     fn f32() {
-        let array = F32Array::from_iter([
-            None,
-            Some(OrderedF32::from(-7.0)),
-            Some(OrderedF32::from(25.0)),
-        ]);
+        let array = F32Array::from_iter([None, Some(F32::from(-7.0)), Some(F32::from(25.0))]);
         let arrow = arrow_array::Float32Array::from(&array);
         assert_eq!(F32Array::from(&arrow), array);
     }
 
     #[test]
     fn date() {
-        let array = NaiveDateArray::from_iter([
+        let array = DateArray::from_iter([
             None,
-            NaiveDateWrapper::with_days(12345).ok(),
-            NaiveDateWrapper::with_days(-12345).ok(),
+            Date::with_days(12345).ok(),
+            Date::with_days(-12345).ok(),
         ]);
         let arrow = arrow_array::Date32Array::from(&array);
-        assert_eq!(NaiveDateArray::from(&arrow), array);
+        assert_eq!(DateArray::from(&arrow), array);
     }
 
     #[test]
     fn time() {
-        let array = NaiveTimeArray::from_iter([
+        let array = TimeArray::from_iter([
             None,
-            NaiveTimeWrapper::with_secs_nano(12345, 123456789).ok(),
-            NaiveTimeWrapper::with_secs_nano(1, 0).ok(),
+            Time::with_secs_nano(12345, 123456789).ok(),
+            Time::with_secs_nano(1, 0).ok(),
         ]);
         let arrow = arrow_array::Time64NanosecondArray::from(&array);
-        assert_eq!(NaiveTimeArray::from(&arrow), array);
+        assert_eq!(TimeArray::from(&arrow), array);
     }
 
     #[test]
     fn timestamp() {
-        let array = NaiveDateTimeArray::from_iter([
+        let array = TimestampArray::from_iter([
             None,
-            NaiveDateTimeWrapper::with_secs_nsecs(12345, 123456789).ok(),
-            NaiveDateTimeWrapper::with_secs_nsecs(1, 0).ok(),
+            Timestamp::with_secs_nsecs(12345, 123456789).ok(),
+            Timestamp::with_secs_nsecs(1, 0).ok(),
         ]);
         let arrow = arrow_array::TimestampNanosecondArray::from(&array);
-        assert_eq!(NaiveDateTimeArray::from(&arrow), array);
+        assert_eq!(TimestampArray::from(&arrow), array);
     }
 
     #[test]
     fn interval() {
         let array = IntervalArray::from_iter([
             None,
-            Some(IntervalUnit::from_millis(123456789)),
-            Some(IntervalUnit::from_millis(-123456789)),
+            Some(Interval::from_millis(123456789)),
+            Some(Interval::from_millis(-123456789)),
         ]);
         let arrow = arrow_array::IntervalMonthDayNanoArray::from(&array);
         assert_eq!(IntervalArray::from(&arrow), array);
@@ -600,6 +646,7 @@ mod tests {
             Some(Decimal::NaN),
             Some(Decimal::PositiveInf),
             Some(Decimal::NegativeInf),
+            Some(Decimal::Normalized("123.4".parse().unwrap())),
             Some(Decimal::Normalized("123.456".parse().unwrap())),
         ]);
         let arrow = arrow_array::Decimal128Array::from(&array);

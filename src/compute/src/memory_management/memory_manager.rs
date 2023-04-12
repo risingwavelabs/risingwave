@@ -24,14 +24,7 @@ use risingwave_stream::task::LocalStreamManager;
 use super::MemoryControlPolicy;
 use crate::memory_management::MemoryControlStats;
 
-/// The minimal memory requirement of computing tasks in megabytes.
-pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
-/// The memory reserved for system usage (stack and code segment of processes, allocation overhead,
-/// network buffer, etc.) in megabytes.
-pub const SYSTEM_RESERVED_MEMORY_MB: usize = 512;
-
-/// When `enable_managed_cache` is set, compute node will launch a [`GlobalMemoryManager`] to limit
-/// the memory usage.
+/// Compute node uses [`GlobalMemoryManager`] to limit the memory usage.
 pub struct GlobalMemoryManager {
     /// All cached data before the watermark should be evicted.
     watermark_epoch: Arc<AtomicU64>,

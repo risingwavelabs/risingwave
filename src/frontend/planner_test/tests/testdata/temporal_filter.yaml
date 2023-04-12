@@ -4,7 +4,7 @@
     create table t1 (ts timestamp with time zone);
     select * from t1 where ts + interval '1 hour' > now();
   stream_plan: |
-    StreamMaterialize { columns: [ts, t1._row_id(hidden)], pk_columns: [t1._row_id], pk_conflict: "no check" }
+    StreamMaterialize { columns: [ts, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [t1.ts, t1._row_id] }
       └─StreamDynamicFilter { predicate: ($expr1 > now), output_watermarks: [$expr1], output: [t1.ts, $expr1, t1._row_id] }
         ├─StreamProject { exprs: [t1.ts, (AtTimeZone((AtTimeZone(t1.ts, 'UTC':Varchar) + '00:00:00':Interval), 'UTC':Varchar) + '01:00:00':Interval) as $expr1, t1._row_id] }
@@ -16,7 +16,7 @@
     create table t1 (ts timestamp with time zone, time_to_live interval);
     select * from t1 where ts + time_to_live * 1.5 > now();
   stream_plan: |
-    StreamMaterialize { columns: [ts, time_to_live, t1._row_id(hidden)], pk_columns: [t1._row_id], pk_conflict: "no check" }
+    StreamMaterialize { columns: [ts, time_to_live, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [t1.ts, t1.time_to_live, t1._row_id] }
       └─StreamDynamicFilter { predicate: ($expr1 > now), output_watermarks: [$expr1], output: [t1.ts, t1.time_to_live, $expr1, t1._row_id] }
         ├─StreamProject { exprs: [t1.ts, t1.time_to_live, (AtTimeZone((AtTimeZone(t1.ts, 'UTC':Varchar) + DateTrunc('day':Varchar, (t1.time_to_live * 1.5:Decimal))), 'UTC':Varchar) + ((t1.time_to_live * 1.5:Decimal) - DateTrunc('day':Varchar, (t1.time_to_live * 1.5:Decimal)))) as $expr1, t1._row_id] }
@@ -28,7 +28,7 @@
     create table t1 (ts timestamp with time zone, additional_time_to_live interval);
     select * from t1 where now() - interval '15 minutes' < ts + additional_time_to_live * 1.5;
   stream_plan: |
-    StreamMaterialize { columns: [ts, additional_time_to_live, t1._row_id(hidden)], pk_columns: [t1._row_id], pk_conflict: "no check" }
+    StreamMaterialize { columns: [ts, additional_time_to_live, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [t1.ts, t1.additional_time_to_live, t1._row_id] }
       └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [t1.ts, t1.additional_time_to_live, $expr1, t1._row_id] }
         ├─StreamProject { exprs: [t1.ts, t1.additional_time_to_live, (AtTimeZone((AtTimeZone(t1.ts, 'UTC':Varchar) + DateTrunc('day':Varchar, (t1.additional_time_to_live * 1.5:Decimal))), 'UTC':Varchar) + ((t1.additional_time_to_live * 1.5:Decimal) - DateTrunc('day':Varchar, (t1.additional_time_to_live * 1.5:Decimal)))) as $expr1, t1._row_id] }
@@ -46,7 +46,7 @@
     create table t1 (ts timestamp with time zone);
     select * from t1 where ts < now() - interval '1 hour' and ts >= now() - interval '2 hour';
   stream_plan: |
-    StreamMaterialize { columns: [ts, t1._row_id(hidden)], pk_columns: [t1._row_id], pk_conflict: "no check" }
+    StreamMaterialize { columns: [ts, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: "NoCheck" }
     └─StreamDynamicFilter { predicate: (t1.ts < $expr2), output: [t1.ts, t1._row_id] }
       ├─StreamDynamicFilter { predicate: (t1.ts >= $expr1), output_watermarks: [t1.ts], output: [t1.ts, t1._row_id] }
       | ├─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
@@ -58,11 +58,9 @@
           └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [ts, t1._row_id(hidden)], pk_columns: [t1._row_id], pk_conflict: "no check" }
+    StreamMaterialize { columns: [ts, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: "NoCheck" }
     ├── materialized table: 4294967294
-    └── StreamDynamicFilter { predicate: (t1.ts < $expr2), output: [t1.ts, t1._row_id] }
-        ├── left table: 0
-        ├── right table: 1
+    └── StreamDynamicFilter { predicate: (t1.ts < $expr2), output: [t1.ts, t1._row_id] } { left table: 0, right table: 1 }
         ├── StreamDynamicFilter { predicate: (t1.ts >= $expr1), output_watermarks: [t1.ts], output: [t1.ts, t1._row_id] }
         │   ├── left table: 2
         │   ├── right table: 3

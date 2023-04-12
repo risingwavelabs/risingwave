@@ -26,36 +26,32 @@
       └─BatchSimpleAgg { aggs: [count] }
         └─BatchHashJoin { type: Inner, predicate: id = id, output: [] }
           ├─BatchExchange { order: [], dist: HashShard(id) }
-          | └─BatchProject { exprs: [id] }
-          |   └─BatchFilter { predicate: (initial_bid = 1:Int32) }
-          |     └─BatchSource { source: "auction", columns: ["id", "item_name", "description", "initial_bid", "reserve", "date_time", "expires", "seller", "category", "extra", "_row_id"], filter: (None, None) }
+          | └─BatchFilter { predicate: (initial_bid = 1:Int32) }
+          |   └─BatchSource { source: "auction", columns: ["id", "item_name", "description", "initial_bid", "reserve", "date_time", "expires", "seller", "category", "extra", "_row_id"], filter: (None, None) }
           └─BatchExchange { order: [], dist: HashShard(id) }
-            └─BatchProject { exprs: [id] }
-              └─BatchFilter { predicate: (initial_bid = 2:Int32) }
-                └─BatchSource { source: "auction", columns: ["id", "item_name", "description", "initial_bid", "reserve", "date_time", "expires", "seller", "category", "extra", "_row_id"], filter: (None, None) }
+            └─BatchFilter { predicate: (initial_bid = 2:Int32) }
+              └─BatchSource { source: "auction", columns: ["id", "item_name", "description", "initial_bid", "reserve", "date_time", "expires", "seller", "category", "extra", "_row_id"], filter: (None, None) }
   stream_plan: |
-    StreamMaterialize { columns: [cnt], pk_columns: [], pk_conflict: "no check" }
+    StreamMaterialize { columns: [cnt], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [sum0(count)] }
       └─StreamAppendOnlyGlobalSimpleAgg { aggs: [sum0(count), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count] }
             └─StreamAppendOnlyHashJoin { type: Inner, predicate: id = id, output: [_row_id, id, _row_id] }
               ├─StreamExchange { dist: HashShard(id) }
-              | └─StreamProject { exprs: [id, _row_id] }
-              |   └─StreamFilter { predicate: (initial_bid = 1:Int32) }
-              |     └─StreamShare { id = 6 }
-              |       └─StreamProject { exprs: [id, initial_bid, _row_id] }
-              |         └─StreamFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }
-              |           └─StreamRowIdGen { row_id_index: 10 }
-              |             └─StreamSource { source: "auction", columns: ["id", "item_name", "description", "initial_bid", "reserve", "date_time", "expires", "seller", "category", "extra", "_row_id"] }
+              | └─StreamFilter { predicate: (initial_bid = 1:Int32) }
+              |   └─StreamShare { id = 6 }
+              |     └─StreamProject { exprs: [id, initial_bid, _row_id] }
+              |       └─StreamFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }
+              |         └─StreamRowIdGen { row_id_index: 10 }
+              |           └─StreamSource { source: "auction", columns: ["id", "item_name", "description", "initial_bid", "reserve", "date_time", "expires", "seller", "category", "extra", "_row_id"] }
               └─StreamExchange { dist: HashShard(id) }
-                └─StreamProject { exprs: [id, _row_id] }
-                  └─StreamFilter { predicate: (initial_bid = 2:Int32) }
-                    └─StreamShare { id = 6 }
-                      └─StreamProject { exprs: [id, initial_bid, _row_id] }
-                        └─StreamFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }
-                          └─StreamRowIdGen { row_id_index: 10 }
-                            └─StreamSource { source: "auction", columns: ["id", "item_name", "description", "initial_bid", "reserve", "date_time", "expires", "seller", "category", "extra", "_row_id"] }
+                └─StreamFilter { predicate: (initial_bid = 2:Int32) }
+                  └─StreamShare { id = 6 }
+                    └─StreamProject { exprs: [id, initial_bid, _row_id] }
+                      └─StreamFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }
+                        └─StreamRowIdGen { row_id_index: 10 }
+                          └─StreamSource { source: "auction", columns: ["id", "item_name", "description", "initial_bid", "reserve", "date_time", "expires", "seller", "category", "extra", "_row_id"] }
 - id: nexmark_q5
   before:
   - create_sources
@@ -88,33 +84,49 @@
         CountBids.starttime_c
     ) AS MaxBids
     ON AuctionBids.starttime = MaxBids.starttime_c AND AuctionBids.num >= MaxBids.maxn;
+  logical_plan: |
+    LogicalProject { exprs: [auction, count] }
+    └─LogicalJoin { type: Inner, on: (window_start = window_start) AND (count >= max(count)), output: all }
+      ├─LogicalProject { exprs: [auction, count, window_start] }
+      | └─LogicalAgg { group_key: [auction, window_start], aggs: [count] }
+      |   └─LogicalProject { exprs: [auction, window_start] }
+      |     └─LogicalHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: all }
+      |       └─LogicalFilter { predicate: IsNotNull(date_time) }
+      |         └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
+      └─LogicalProject { exprs: [max(count), window_start] }
+        └─LogicalAgg { group_key: [window_start], aggs: [max(count)] }
+          └─LogicalProject { exprs: [window_start, count] }
+            └─LogicalProject { exprs: [count, window_start] }
+              └─LogicalAgg { group_key: [auction, window_start], aggs: [count] }
+                └─LogicalProject { exprs: [auction, window_start] }
+                  └─LogicalHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: all }
+                    └─LogicalFilter { predicate: IsNotNull(date_time) }
+                      └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: Inner, predicate: window_start = window_start AND (count >= max(count)), output: [auction, count] }
       ├─BatchExchange { order: [], dist: HashShard(window_start) }
-      | └─BatchProject { exprs: [auction, count, window_start] }
-      |   └─BatchHashAgg { group_key: [auction, window_start], aggs: [count] }
-      |     └─BatchHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start] }
-      |       └─BatchExchange { order: [], dist: HashShard(auction) }
-      |         └─BatchProject { exprs: [auction, date_time] }
-      |           └─BatchFilter { predicate: IsNotNull(date_time) }
-      |             └─BatchSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"], filter: (None, None) }
-      └─BatchProject { exprs: [max(count), window_start] }
-        └─BatchHashAgg { group_key: [window_start], aggs: [max(count)] }
-          └─BatchExchange { order: [], dist: HashShard(window_start) }
-            └─BatchHashAgg { group_key: [auction, window_start], aggs: [count] }
-              └─BatchHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start] }
-                └─BatchExchange { order: [], dist: HashShard(auction) }
-                  └─BatchProject { exprs: [auction, date_time] }
-                    └─BatchFilter { predicate: IsNotNull(date_time) }
-                      └─BatchSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"], filter: (None, None) }
+      | └─BatchHashAgg { group_key: [auction, window_start], aggs: [count] }
+      |   └─BatchHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start] }
+      |     └─BatchExchange { order: [], dist: HashShard(auction) }
+      |       └─BatchProject { exprs: [auction, date_time] }
+      |         └─BatchFilter { predicate: IsNotNull(date_time) }
+      |           └─BatchSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"], filter: (None, None) }
+      └─BatchHashAgg { group_key: [window_start], aggs: [max(count)] }
+        └─BatchExchange { order: [], dist: HashShard(window_start) }
+          └─BatchHashAgg { group_key: [auction, window_start], aggs: [count] }
+            └─BatchHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start] }
+              └─BatchExchange { order: [], dist: HashShard(auction) }
+                └─BatchProject { exprs: [auction, date_time] }
+                  └─BatchFilter { predicate: IsNotNull(date_time) }
+                    └─BatchSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"], filter: (None, None) }
   stream_plan: |
-    StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], pk_columns: [auction, window_start, window_start#1], pk_conflict: "no check" }
+    StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], stream_key: [auction, window_start, window_start#1], pk_columns: [auction, window_start, window_start#1], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [auction, count, window_start, window_start] }
       └─StreamFilter { predicate: (count >= max(count)) }
         └─StreamHashJoin { type: Inner, predicate: window_start = window_start, output: all }
           ├─StreamExchange { dist: HashShard(window_start) }
-          | └─StreamProject { exprs: [auction, count, window_start] }
+          | └─StreamProject { exprs: [auction, window_start, count] }
           |   └─StreamShare { id = 11 }
           |     └─StreamAppendOnlyHashAgg { group_key: [auction, window_start], aggs: [count] }
           |       └─StreamExchange { dist: HashShard(auction, window_start) }
@@ -123,7 +135,7 @@
           |             └─StreamFilter { predicate: IsNotNull(date_time) }
           |               └─StreamRowIdGen { row_id_index: 7 }
           |                 └─StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
-          └─StreamProject { exprs: [max(count), window_start] }
+          └─StreamProject { exprs: [window_start, max(count)] }
             └─StreamHashAgg { group_key: [window_start], aggs: [max(count), count] }
               └─StreamExchange { dist: HashShard(window_start) }
                 └─StreamProject { exprs: [auction, window_start, count] }
@@ -140,7 +152,7 @@
     create table t(a int, b int);
     with cte as (select count(*) from t) select * from cte union all select * from cte;
   stream_plan: |
-    StreamMaterialize { columns: [count, 0:Int32(hidden)], pk_columns: [0:Int32], pk_conflict: "no check" }
+    StreamMaterialize { columns: [count, 0:Int32(hidden)], stream_key: [0:Int32], pk_columns: [0:Int32], pk_conflict: "NoCheck" }
     └─StreamUnion { all: true }
       ├─StreamExchange { dist: HashShard(0:Int32) }
       | └─StreamProject { exprs: [sum0(count), 0:Int32] }
@@ -163,7 +175,7 @@
     create table t(a int, b int);
     with cte as (select count(*) from t) select * from cte union all select * from cte;
   stream_plan: |
-    StreamMaterialize { columns: [count, 0:Int32(hidden)], pk_columns: [0:Int32], pk_conflict: "no check" }
+    StreamMaterialize { columns: [count, 0:Int32(hidden)], stream_key: [0:Int32], pk_columns: [0:Int32], pk_conflict: "NoCheck" }
     └─StreamUnion { all: true }
       ├─StreamExchange { dist: HashShard(0:Int32) }
       | └─StreamProject { exprs: [sum0(count), 0:Int32] }
@@ -184,7 +196,7 @@
     set rw_enable_share_plan=false;
     select count(*) cnt from auction A join auction B on A.id = B.id;
   stream_plan: |
-    StreamMaterialize { columns: [cnt], pk_columns: [], pk_conflict: "no check" }
+    StreamMaterialize { columns: [cnt], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [sum0(count)] }
       └─StreamAppendOnlyGlobalSimpleAgg { aggs: [sum0(count), count] }
         └─StreamExchange { dist: Single }

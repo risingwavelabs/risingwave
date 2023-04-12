@@ -25,7 +25,7 @@ use crate::executor::{ActorContextRef, PkIndices};
 use crate::task::AtomicU64Ref;
 
 /// Arguments needed to construct an `XxxAggExecutor`.
-pub struct AggExecutorArgs<S: StateStore> {
+pub struct AggExecutorArgs<S: StateStore, E: AggExecutorExtraArgs> {
     // basic
     pub input: Box<dyn Executor>,
     pub actor_ctx: ActorContextRef,
@@ -44,15 +44,19 @@ pub struct AggExecutorArgs<S: StateStore> {
     pub watermark_epoch: AtomicU64Ref,
 
     // extra
-    pub extra: Option<AggExecutorArgsExtra>,
+    pub extra: E,
 }
 
-/// Extra arguments needed to construct an `XxxAggExecutor`.
-pub struct AggExecutorArgsExtra {
-    // hash agg specific things
+pub trait AggExecutorExtraArgs {}
+
+pub struct SimpleAggExecutorExtraArgs {}
+impl AggExecutorExtraArgs for SimpleAggExecutorExtraArgs {}
+
+/// Extra arguments needed to construct an `HashAggExecutor`.
+pub struct GroupAggExecutorExtraArgs {
     pub group_key_indices: Vec<usize>,
-
-    // things only used by hash agg currently
-    pub metrics: Arc<StreamingMetrics>,
     pub chunk_size: usize,
+    pub emit_on_window_close: bool,
+    pub metrics: Arc<StreamingMetrics>,
 }
+impl AggExecutorExtraArgs for GroupAggExecutorExtraArgs {}

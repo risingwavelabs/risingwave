@@ -12,5 +12,6 @@ FROM
     target_count WITH (
         connector = 'jdbc',
         jdbc.url = 'jdbc:mysql://mysql:3306/mydb?user=root&password=123456',
-        table.name = 'target_count'
+        table.name = 'target_count',
+        type = 'upsert'
     );

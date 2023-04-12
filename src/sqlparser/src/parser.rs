@@ -24,7 +24,9 @@ use core::fmt;
 
 use tracing::{debug, instrument};
 
-use crate::ast::ddl::SourceWatermark;
+use crate::ast::ddl::{
+    AlterIndexOperation, AlterSinkOperation, AlterViewOperation, SourceWatermark,
+};
 use crate::ast::{ParseTo, *};
 use crate::keywords::{self, Keyword};
 use crate::tokenizer::*;
@@ -69,6 +71,7 @@ pub enum IsLateral {
 
 use IsLateral::*;
 
+#[derive(Debug)]
 pub enum WildcardOrExpr {
     Expr(Expr),
     /// Expr is an arbitrary expression, returning either a table or a column.
@@ -368,6 +371,8 @@ impl Parser {
             Expr::CompoundIdentifier(_) => expr,
             // expr is `((1,2,3)::foo)`
             Expr::Cast { .. } => expr,
+            // expr is `(func())`
+            Expr::Function(_) => expr,
             // expr is `((foo.v1).v2)`
             Expr::FieldIdentifier(expr, ids) => {
                 // Put `ids` to the latter part!
@@ -491,6 +496,7 @@ impl Parser {
                 Keyword::EXISTS => self.parse_exists_expr(),
                 Keyword::EXTRACT => self.parse_extract_expr(),
                 Keyword::SUBSTRING => self.parse_substring_expr(),
+                Keyword::POSITION => self.parse_position_expr(),
                 Keyword::OVERLAY => self.parse_overlay_expr(),
                 Keyword::TRIM => self.parse_trim_expr(),
                 Keyword::INTERVAL => self.parse_literal_interval(),
@@ -923,6 +929,25 @@ impl Parser {
         })
     }
 
+    /// POSITION(<expr> IN <expr>)
+    pub fn parse_position_expr(&mut self) -> Result<Expr, ParserError> {
+        self.expect_token(&Token::LParen)?;
+
+        // Logically `parse_expr`, but limited to those with precedence higher than `BETWEEN`/`IN`,
+        // to avoid conflict with general IN operator, for example `position(a IN (b) IN (c))`.
+        // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/parser/gram.y#L16012
+        let substring = self.parse_subexpr(Precedence::Between)?;
+        self.expect_keyword(Keyword::IN)?;
+        let string = self.parse_subexpr(Precedence::Between)?;
+
+        self.expect_token(&Token::RParen)?;
+
+        Ok(Expr::Position {
+            substring: Box::new(substring),
+            string: Box::new(string),
+        })
+    }
+
     /// OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])
     pub fn parse_overlay_expr(&mut self) -> Result<Expr, ParserError> {
         self.expect_token(&Token::LParen)?;
@@ -950,28 +975,41 @@ impl Parser {
         })
     }
 
-    /// TRIM (WHERE 'text' FROM 'text')\
-    /// TRIM ('text')
+    /// TRIM ([WHERE] ['text'] FROM 'text')\
+    /// TRIM ([WHERE] [FROM] 'text' [, 'text'])
     pub fn parse_trim_expr(&mut self) -> Result<Expr, ParserError> {
         self.expect_token(&Token::LParen)?;
-        let mut where_expr = None;
+        let mut trim_where = None;
         if let Token::Word(word) = self.peek_token().token {
             if [Keyword::BOTH, Keyword::LEADING, Keyword::TRAILING]
                 .iter()
                 .any(|d| word.keyword == *d)
             {
-                let trim_where = self.parse_trim_where()?;
-                let sub_expr = self.parse_expr()?;
-                self.expect_keyword(Keyword::FROM)?;
-                where_expr = Some((trim_where, Box::new(sub_expr)));
+                trim_where = Some(self.parse_trim_where()?);
             }
         }
-        let expr = self.parse_expr()?;
+
+        let (mut trim_what, expr) = if self.parse_keyword(Keyword::FROM) {
+            (None, self.parse_expr()?)
+        } else {
+            let mut expr = self.parse_expr()?;
+            if self.parse_keyword(Keyword::FROM) {
+                let trim_what = std::mem::replace(&mut expr, self.parse_expr()?);
+                (Some(Box::new(trim_what)), expr)
+            } else {
+                (None, expr)
+            }
+        };
+
+        if trim_what.is_none() && self.consume_token(&Token::Comma) {
+            trim_what = Some(Box::new(self.parse_expr()?));
+        }
         self.expect_token(&Token::RParen)?;
 
         Ok(Expr::Trim {
             expr: Box::new(expr),
-            trim_where: where_expr,
+            trim_where,
+            trim_what,
         })
     }
 
@@ -1720,6 +1758,8 @@ impl Parser {
             self.parse_create_source(or_replace)
         } else if self.parse_keyword(Keyword::SINK) {
             self.parse_create_sink(or_replace)
+        } else if self.parse_keyword(Keyword::CONNECTION) {
+            self.parse_create_connection()
         } else if self.parse_keyword(Keyword::FUNCTION) {
             self.parse_create_function(or_replace, temporary)
         } else if or_replace {
@@ -1813,6 +1853,17 @@ impl Parser {
     pub fn parse_create_sink(&mut self, _or_replace: bool) -> Result<Statement, ParserError> {
         Ok(Statement::CreateSink {
             stmt: CreateSinkStatement::parse_to(self)?,
+        })
+    }
+
+    // CREATE
+    // CONNECTION
+    // [IF NOT EXISTS]?
+    // <connection_name: Ident>
+    // [WITH (properties)]?
+    pub fn parse_create_connection(&mut self) -> Result<Statement, ParserError> {
+        Ok(Statement::CreateConnection {
+            stmt: CreateConnectionStatement::parse_to(self)?,
         })
     }
 
@@ -2415,12 +2466,25 @@ impl Parser {
     pub fn parse_alter(&mut self) -> Result<Statement, ParserError> {
         if self.parse_keyword(Keyword::TABLE) {
             self.parse_alter_table()
+        } else if self.parse_keyword(Keyword::INDEX) {
+            self.parse_alter_index()
+        } else if self.parse_keyword(Keyword::VIEW) {
+            self.parse_alter_view(false)
+        } else if self.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEW]) {
+            self.parse_alter_view(true)
+        } else if self.parse_keyword(Keyword::SINK) {
+            self.parse_alter_sink()
+        } else if self.parse_keyword(Keyword::SOURCE) {
+            self.parse_alter_source()
         } else if self.parse_keyword(Keyword::USER) {
             self.parse_alter_user()
         } else if self.parse_keyword(Keyword::SYSTEM) {
             self.parse_alter_system()
         } else {
-            self.expected("TABLE or USER after ALTER", self.peek_token())
+            self.expected(
+                "TABLE, INDEX, MATERIALIZED, VIEW, SINK, SOURCE, USER or SYSTEM after ALTER",
+                self.peek_token(),
+            )
         }
     }
 
@@ -2511,6 +2575,89 @@ impl Parser {
         };
         Ok(Statement::AlterTable {
             name: table_name,
+            operation,
+        })
+    }
+
+    pub fn parse_alter_index(&mut self) -> Result<Statement, ParserError> {
+        let index_name = self.parse_object_name()?;
+        let operation = if self.parse_keyword(Keyword::RENAME) {
+            if self.parse_keyword(Keyword::TO) {
+                let index_name = self.parse_object_name()?;
+                AlterIndexOperation::RenameIndex { index_name }
+            } else {
+                return self.expected("TO after RENAME", self.peek_token());
+            }
+        } else {
+            return self.expected("RENAME after ALTER INDEX", self.peek_token());
+        };
+
+        Ok(Statement::AlterIndex {
+            name: index_name,
+            operation,
+        })
+    }
+
+    pub fn parse_alter_view(&mut self, materialized: bool) -> Result<Statement, ParserError> {
+        let view_name = self.parse_object_name()?;
+        let operation = if self.parse_keyword(Keyword::RENAME) {
+            if self.parse_keyword(Keyword::TO) {
+                let view_name = self.parse_object_name()?;
+                AlterViewOperation::RenameView { view_name }
+            } else {
+                return self.expected("TO after RENAME", self.peek_token());
+            }
+        } else {
+            return self.expected(
+                &format!(
+                    "RENAME after ALTER {}VIEW",
+                    if materialized { "MATERIALIZED " } else { "" }
+                ),
+                self.peek_token(),
+            );
+        };
+
+        Ok(Statement::AlterView {
+            materialized,
+            name: view_name,
+            operation,
+        })
+    }
+
+    pub fn parse_alter_sink(&mut self) -> Result<Statement, ParserError> {
+        let sink_name = self.parse_object_name()?;
+        let operation = if self.parse_keyword(Keyword::RENAME) {
+            if self.parse_keyword(Keyword::TO) {
+                let sink_name = self.parse_object_name()?;
+                AlterSinkOperation::RenameSink { sink_name }
+            } else {
+                return self.expected("TO after RENAME", self.peek_token());
+            }
+        } else {
+            return self.expected("RENAME after ALTER SINK", self.peek_token());
+        };
+
+        Ok(Statement::AlterSink {
+            name: sink_name,
+            operation,
+        })
+    }
+
+    pub fn parse_alter_source(&mut self) -> Result<Statement, ParserError> {
+        let source_name = self.parse_object_name()?;
+        let operation = if self.parse_keyword(Keyword::RENAME) {
+            if self.parse_keyword(Keyword::TO) {
+                let source_name = self.parse_object_name()?;
+                AlterSourceOperation::RenameSource { source_name }
+            } else {
+                return self.expected("TO after RENAME", self.peek_token());
+            }
+        } else {
+            return self.expected("RENAME after ALTER SOURCE", self.peek_token());
+        };
+
+        Ok(Statement::AlterSource {
+            name: source_name,
             operation,
         })
     }
@@ -3473,6 +3620,9 @@ impl Parser {
                         return self.expected("from after columns", self.peek_token());
                     }
                 }
+                Keyword::CONNECTIONS => {
+                    return Ok(Statement::ShowObjects(ShowObject::Connection));
+                }
                 _ => {}
             }
         }
@@ -3934,7 +4084,13 @@ impl Parser {
     pub fn parse_assignment(&mut self) -> Result<Assignment, ParserError> {
         let id = self.parse_identifiers_non_keywords()?;
         self.expect_token(&Token::Eq)?;
-        let value = self.parse_expr()?;
+
+        let value = if self.parse_keyword(Keyword::DEFAULT) {
+            AssignmentValue::Default
+        } else {
+            AssignmentValue::Expr(self.parse_expr()?)
+        };
+
         Ok(Assignment { id, value })
     }
 

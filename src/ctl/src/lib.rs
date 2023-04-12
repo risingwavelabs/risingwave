@@ -183,6 +183,8 @@ enum MetaCommands {
     Resume,
     /// get cluster info
     ClusterInfo,
+    /// get source split info
+    SourceSplitInfo,
     /// Reschedule the parallel unit in the stream graph
     ///
     /// The format is `fragment_id-[removed]+[added]`
@@ -213,6 +215,8 @@ enum MetaCommands {
 
     /// Create a new connection object
     CreateConnection {
+        #[clap(long)]
+        connection_name: String,
         #[clap(long)]
         provider: String,
         #[clap(long)]
@@ -337,6 +341,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::Pause) => cmd_impl::meta::pause(context).await?,
         Commands::Meta(MetaCommands::Resume) => cmd_impl::meta::resume(context).await?,
         Commands::Meta(MetaCommands::ClusterInfo) => cmd_impl::meta::cluster_info(context).await?,
+        Commands::Meta(MetaCommands::SourceSplitInfo) => {
+            cmd_impl::meta::source_split_info(context).await?
+        }
         Commands::Meta(MetaCommands::Reschedule { plan, dry_run }) => {
             cmd_impl::meta::reschedule(context, plan, dry_run).await?
         }
@@ -345,12 +352,19 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::meta::delete_meta_snapshots(context, &snapshot_ids).await?
         }
         Commands::Meta(MetaCommands::CreateConnection {
+            connection_name,
             provider,
             service_name,
             availability_zones,
         }) => {
-            cmd_impl::meta::create_connection(context, provider, service_name, availability_zones)
-                .await?
+            cmd_impl::meta::create_connection(
+                context,
+                connection_name,
+                provider,
+                service_name,
+                availability_zones,
+            )
+            .await?
         }
         Commands::Meta(MetaCommands::ListConnections) => {
             cmd_impl::meta::list_connections(context).await?

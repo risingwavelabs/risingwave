@@ -29,7 +29,8 @@ use super::{
 };
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{
-    CollectInputRef, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
+    CollectInputRef, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall,
+    InputRef,
 };
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
@@ -202,10 +203,6 @@ impl LogicalScan {
         ids
     }
 
-    pub fn output_column_indices(&self) -> &[usize] {
-        &self.core.output_col_idx
-    }
-
     /// Get all indexes on this table
     pub fn indexes(&self) -> &[Rc<IndexCatalog>] {
         &self.core.indexes
@@ -318,6 +315,7 @@ impl LogicalScan {
                 &index.name,
                 index.index_table.table_desc().into(),
                 p2s_mapping,
+                index.function_mapping(),
             );
             Some(index_scan)
         } else {
@@ -332,6 +330,7 @@ impl LogicalScan {
         index_name: &str,
         index_table_desc: Rc<TableDesc>,
         primary_to_secondary_mapping: &BTreeMap<usize, usize>,
+        function_mapping: &HashMap<FunctionCall, usize>,
     ) -> LogicalScan {
         let new_output_col_idx = self
             .output_col_idx()
@@ -341,6 +340,7 @@ impl LogicalScan {
 
         struct Rewriter<'a> {
             primary_to_secondary_mapping: &'a BTreeMap<usize, usize>,
+            function_mapping: &'a HashMap<FunctionCall, usize>,
         }
         impl ExprRewriter for Rewriter<'_> {
             fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
@@ -353,9 +353,23 @@ impl LogicalScan {
                 )
                 .into()
             }
+
+            fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
+                if let Some(index) = self.function_mapping.get(&func_call) {
+                    return InputRef::new(*index, func_call.return_type()).into();
+                }
+
+                let (func_type, inputs, ret) = func_call.decompose();
+                let inputs = inputs
+                    .into_iter()
+                    .map(|expr| self.rewrite_expr(expr))
+                    .collect();
+                FunctionCall::new_unchecked(func_type, inputs, ret).into()
+            }
         }
         let mut rewriter = Rewriter {
             primary_to_secondary_mapping,
+            function_mapping,
         };
 
         let new_predicate = self.predicate().clone().rewrite_expr(&mut rewriter);
@@ -621,7 +635,7 @@ impl LogicalScan {
 
             let mut plan: PlanRef = BatchSeqScan::new(scan, scan_ranges).into();
             if !predicate.always_true() {
-                plan = BatchFilter::new(LogicalFilter::new(plan, predicate)).into();
+                plan = BatchFilter::new(generic::Filter::new(predicate, plan)).into();
             }
             if let Some(exprs) = project_expr {
                 plan = BatchProject::new(LogicalProject::new(plan, exprs)).into()

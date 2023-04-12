@@ -34,6 +34,7 @@
 #![cfg_attr(coverage, feature(no_coverage))]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 #![feature(is_sorted)]
+#![feature(string_leak)]
 
 pub mod backup_restore;
 mod barrier;
@@ -229,6 +230,12 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 max_idle_ms,
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,
                 vacuum_interval_sec: config.meta.vacuum_interval_sec,
+                hummock_version_checkpoint_interval_sec: config
+                    .meta
+                    .hummock_version_checkpoint_interval_sec,
+                min_delta_log_num_for_hummock_version_checkpoint: config
+                    .meta
+                    .min_delta_log_num_for_hummock_version_checkpoint,
                 min_sst_retention_time_sec: config.meta.min_sst_retention_time_sec,
                 collect_gc_watermark_spin_interval_sec: config
                     .meta
@@ -269,8 +276,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 tokio::select! {
                     _ = &mut handle => {
                         tracing::info!("receive leader lost signal");
-                        shutdown_send.send(()).unwrap();
-                        join_handle.await.unwrap()
+                        // When we lose leadership, we will exit as soon as possible.
                     }
                     _ = tokio::signal::ctrl_c() => {
                         tracing::info!("receive ctrl+c");

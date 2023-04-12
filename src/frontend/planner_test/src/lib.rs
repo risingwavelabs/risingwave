@@ -397,7 +397,17 @@ impl TestCase {
                     .await?;
                 }
                 Statement::CreateSource { stmt } => {
-                    create_source::handle_create_source(handler_args, stmt).await?;
+                    if let Err(error) =
+                        create_source::handle_create_source(handler_args, stmt).await
+                    {
+                        let actual_result = TestCaseResult {
+                            planner_error: Some(error.to_string()),
+                            ..Default::default()
+                        };
+
+                        check_result(self, &actual_result)?;
+                        result = Some(actual_result);
+                    }
                 }
                 Statement::CreateIndex {
                     name,
@@ -498,7 +508,7 @@ impl TestCase {
         let mut ret = TestCaseResult::default();
 
         let bound = {
-            let mut binder = Binder::new(&session);
+            let mut binder = Binder::new(&session, vec![]);
             match binder.bind(stmt.clone()) {
                 Ok(bound) => bound,
                 Err(err) => {

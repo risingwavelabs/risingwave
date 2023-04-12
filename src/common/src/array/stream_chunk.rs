@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt;
+use std::mem::size_of;
 
 use itertools::Itertools;
 use risingwave_pb::data::{PbOp, PbStreamChunk};
@@ -21,6 +22,7 @@ use super::{ArrayResult, DataChunkTestExt};
 use crate::array::column::Column;
 use crate::array::{DataChunk, Vis};
 use crate::buffer::Bitmap;
+use crate::collection::estimate_size::EstimateSize;
 use crate::row::{OwnedRow, Row};
 use crate::types::to_text::ToText;
 use crate::types::DataType;
@@ -291,6 +293,12 @@ impl fmt::Debug for StreamChunk {
     }
 }
 
+impl EstimateSize for StreamChunk {
+    fn estimated_heap_size(&self) -> usize {
+        self.data.estimated_heap_size() + self.ops.capacity() * size_of::<Op>()
+    }
+}
+
 /// Test utilities for [`StreamChunk`].
 pub trait StreamChunkTestExt: Sized {
     fn from_pretty(s: &str) -> Self;
@@ -341,7 +349,6 @@ impl StreamChunkTestExt for StreamChunk {
     /// //     f: f32
     /// //     T: str
     /// //    TS: Timestamp
-    /// //   TSZ: Timestamptz
     /// //   SRL: Serial
     /// // {i,f}: struct
     /// ```

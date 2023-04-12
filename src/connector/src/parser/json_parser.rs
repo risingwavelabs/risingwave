@@ -20,7 +20,7 @@ use simd_json::{BorrowedValue, ValueAccess};
 
 use crate::common::UpsertMessage;
 use crate::impl_common_parser_logic;
-use crate::parser::common::simd_json_parse_value;
+use crate::parser::common::{json_object_smart_get_value, simd_json_parse_value};
 use crate::parser::util::at_least_one_ok;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{SourceColumnDesc, SourceContextRef};
@@ -114,7 +114,7 @@ impl JsonParser {
             let fill_fn = |desc: &SourceColumnDesc| {
                 simd_json_parse_value(
                     &desc.data_type,
-                    value.get(desc.name_in_lower_case.as_str()),
+                    json_object_smart_get_value(&value,desc.name.as_str().into())
                 )
                 .map_err(|e| {
                     tracing::error!(
@@ -218,11 +218,11 @@ mod tests {
             );
             assert_eq!(
                 row.datum_at(7).to_owned_datum(),
-                (Some(ScalarImpl::NaiveDate(str_to_date("2021-01-01").unwrap())))
+                (Some(ScalarImpl::Date(str_to_date("2021-01-01").unwrap())))
             );
             assert_eq!(
                 row.datum_at(8).to_owned_datum(),
-                (Some(ScalarImpl::NaiveDateTime(
+                (Some(ScalarImpl::Timestamp(
                     str_to_timestamp("2021-01-01 16:06:12.269").unwrap()
                 )))
             );
@@ -364,7 +364,7 @@ mod tests {
 
         let expected = vec![
             Some(ScalarImpl::Struct(StructValue::new(vec![
-                Some(ScalarImpl::NaiveDateTime(
+                Some(ScalarImpl::Timestamp(
                     str_to_timestamp("2022-07-13 20:48:37.07").unwrap()
                 )),
                 Some(ScalarImpl::Utf8("1732524418112319151".into())),
@@ -372,7 +372,7 @@ mod tests {
                 Some(ScalarImpl::Utf8("English".into())),
             ]))),
             Some(ScalarImpl::Struct(StructValue::new(vec![
-                Some(ScalarImpl::NaiveDateTime(
+                Some(ScalarImpl::Timestamp(
                     str_to_timestamp("2018-01-29 12:19:11.07").unwrap()
                 )),
                 Some(ScalarImpl::Utf8("7772634297".into())),

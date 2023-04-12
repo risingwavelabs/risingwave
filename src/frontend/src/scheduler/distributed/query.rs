@@ -64,9 +64,6 @@ enum QueryState {
 
     /// Failed
     Failed,
-
-    /// Completed
-    Completed,
 }
 
 pub struct QueryExecution {
@@ -86,8 +83,6 @@ struct QueryRunner {
 
     /// Will be set to `None` after all stage scheduled.
     root_stage_sender: Option<oneshot::Sender<SchedulerResult<QueryResultFetcher>>>,
-
-    compute_client_pool: ComputeClientPoolRef,
 
     // Used for cleaning up `QueryExecution` after execution.
     query_execution_info: QueryExecutionInfoRef,
@@ -155,7 +150,6 @@ impl QueryExecution {
                     msg_receiver,
                     root_stage_sender: Some(root_stage_sender),
                     scheduled_stages_count: 0,
-                    compute_client_pool,
                     query_execution_info,
                     query_metrics,
                 };
@@ -377,7 +371,6 @@ impl QueryRunner {
             HostAddress {
                 ..Default::default()
             },
-            self.compute_client_pool.clone(),
             chunk_rx,
             self.query.query_id.clone(),
             self.query_execution_info.clone(),
@@ -454,8 +447,7 @@ pub(crate) mod tests {
     use crate::catalog::root_catalog::Catalog;
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
-        BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalFilter, LogicalJoin,
-        LogicalScan, ToBatch,
+        generic, BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalScan, ToBatch,
     };
     use crate::optimizer::property::{Distribution, Order};
     use crate::optimizer::{OptimizerContext, PlanRef};
@@ -539,11 +531,11 @@ pub(crate) mod tests {
         .unwrap()
         .to_distributed()
         .unwrap();
-        let batch_filter = BatchFilter::new(LogicalFilter::new(
-            batch_plan_node.clone(),
+        let batch_filter = BatchFilter::new(generic::Filter::new(
             Condition {
                 conjunctions: vec![],
             },
+            batch_plan_node.clone(),
         ))
         .into();
         let batch_exchange_node1: PlanRef = BatchExchange::new(
@@ -558,43 +550,38 @@ pub(crate) mod tests {
             Distribution::HashShard(vec![0, 1]),
         )
         .into();
-        let hash_join_node: PlanRef = BatchHashJoin::new(
-            LogicalJoin::new(
-                batch_exchange_node1.clone(),
-                batch_exchange_node2.clone(),
-                JoinType::Inner,
-                Condition::true_cond(),
-            ),
-            EqJoinPredicate::new(
-                Condition::true_cond(),
-                vec![
-                    (
-                        InputRef {
-                            index: 0,
-                            data_type: DataType::Int32,
-                        },
-                        InputRef {
-                            index: 2,
-                            data_type: DataType::Int32,
-                        },
-                        false,
-                    ),
-                    (
-                        InputRef {
-                            index: 1,
-                            data_type: DataType::Float64,
-                        },
-                        InputRef {
-                            index: 3,
-                            data_type: DataType::Float64,
-                        },
-                        false,
-                    ),
-                ],
-                2,
-            ),
-        )
-        .into();
+        let logical_join_node = generic::Join::with_full_output(
+            batch_exchange_node1.clone(),
+            batch_exchange_node2.clone(),
+            JoinType::Inner,
+            Condition::true_cond(),
+        );
+        let eq_key_1 = (
+            InputRef {
+                index: 0,
+                data_type: DataType::Int32,
+            },
+            InputRef {
+                index: 2,
+                data_type: DataType::Int32,
+            },
+            false,
+        );
+        let eq_key_2 = (
+            InputRef {
+                index: 1,
+                data_type: DataType::Float64,
+            },
+            InputRef {
+                index: 3,
+                data_type: DataType::Float64,
+            },
+            false,
+        );
+        let eq_join_predicate =
+            EqJoinPredicate::new(Condition::true_cond(), vec![eq_key_1, eq_key_2], 2, 2);
+        let hash_join_node: PlanRef =
+            BatchHashJoin::new(logical_join_node, eq_join_predicate).into();
         let batch_exchange_node: PlanRef = BatchExchange::new(
             hash_join_node.clone(),
             Order::default(),

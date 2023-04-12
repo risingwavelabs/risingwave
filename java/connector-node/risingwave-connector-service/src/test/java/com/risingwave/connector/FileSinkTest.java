@@ -35,7 +35,8 @@ public class FileSinkTest {
             Files.createDirectories(Paths.get(path));
         }
 
-        FileSink sink = new FileSink(path, TableSchema.getMockTableSchema());
+        FileSinkConfig config = new FileSinkConfig(path);
+        FileSink sink = new FileSink(config, TableSchema.getMockTableSchema());
         String filePath = sink.getSinkPath();
 
         Path file = Paths.get(filePath);
@@ -76,7 +77,8 @@ public class FileSinkTest {
         if (!Paths.get(path).toFile().isDirectory()) {
             Files.createDirectories(Paths.get(path));
         }
-        FileSink sink = new FileSink(path, TableSchema.getMockTableSchema());
+        FileSinkConfig config = new FileSinkConfig(path);
+        FileSink sink = new FileSink(config, TableSchema.getMockTableSchema());
 
         String filePath = sink.getSinkPath();
         try {
@@ -104,7 +106,8 @@ public class FileSinkTest {
         if (!Paths.get(path).toFile().isDirectory()) {
             Files.createDirectories(Paths.get(path));
         }
-        FileSink sink = new FileSink(path, TableSchema.getMockTableSchema());
+        FileSinkConfig config = new FileSinkConfig(path);
+        FileSink sink = new FileSink(config, TableSchema.getMockTableSchema());
 
         sink.drop();
 

@@ -361,7 +361,6 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             table_id: 1,
             table: Some(make_materialize_table(888)),
             column_orders: vec![make_column_order(1), make_column_order(2)],
-            handle_pk_conflict_behavior: 0,
         })),
         fields: vec![], // TODO: fill this later
         operator_id: 7,
@@ -412,7 +411,7 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
         fragments: HashMap::from_iter(fragments.into_iter().map(|f| (f.fragment_id, f))),
         edges: make_fragment_edges(),
         env: Some(StreamEnvironment::default()),
-        dependent_relation_ids: vec![],
+        dependent_table_ids: vec![],
         table_ids_cnt: 3,
         parallelism: None,
     }

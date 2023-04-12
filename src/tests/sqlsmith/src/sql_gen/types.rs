@@ -25,7 +25,7 @@ use risingwave_expr::sig::agg::{agg_func_sigs, AggFuncSig as RwAggFuncSig};
 use risingwave_expr::sig::cast::{cast_sigs, CastContext, CastSig as RwCastSig};
 use risingwave_expr::sig::func::{func_sigs, FuncSign as RwFuncSig};
 use risingwave_frontend::expr::ExprType;
-use risingwave_sqlparser::ast::{DataType as AstDataType, StructField};
+use risingwave_sqlparser::ast::{BinaryOperator, DataType as AstDataType, StructField};
 
 pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
     match data_type {
@@ -244,3 +244,53 @@ pub(crate) static IMPLICIT_CAST_TABLE: LazyLock<HashMap<DataType, Vec<CastSig>>>
             .for_each(|cast| casts.entry(cast.to_type.clone()).or_default().push(cast));
         casts
     });
+
+fn expr_type_to_inequality_op(typ: ExprType) -> Option<BinaryOperator> {
+    match typ {
+        ExprType::GreaterThan => Some(BinaryOperator::Gt),
+        ExprType::GreaterThanOrEqual => Some(BinaryOperator::GtEq),
+        ExprType::LessThan => Some(BinaryOperator::Lt),
+        ExprType::LessThanOrEqual => Some(BinaryOperator::LtEq),
+        ExprType::NotEqual => Some(BinaryOperator::NotEq),
+        _ => None,
+    }
+}
+
+/// Build set of binary inequality functions like `>`, `<`, etc...
+/// Maps from LHS, RHS argument to Inequality Operation
+/// For instance:
+/// GreaterThanOrEqual(Int16, Int64) -> Boolean
+/// Will store an entry of:
+/// Key: Int16, Int64
+/// Value: `BinaryOp::GreaterThanOrEqual`
+/// in the table.
+pub(crate) static BINARY_INEQUALITY_OP_TABLE: LazyLock<
+    HashMap<(DataType, DataType), Vec<BinaryOperator>>,
+> = LazyLock::new(|| {
+    let mut funcs = HashMap::<(DataType, DataType), Vec<BinaryOperator>>::new();
+    func_sigs()
+        .filter(|func| {
+            !FUNC_BAN_LIST.contains(&func.func)
+                && func.ret_type == DataTypeName::Boolean
+                && func.inputs_type.len() == 2
+                && func
+                    .inputs_type
+                    .iter()
+                    .all(|t| *t != DataTypeName::Timestamptz)
+        })
+        .filter_map(|func| {
+            let Some(lhs) = data_type_name_to_ast_data_type(&func.inputs_type[0]) else {
+                return None;
+            };
+            let Some(rhs) = data_type_name_to_ast_data_type(&func.inputs_type[1]) else {
+                return None;
+            };
+            let args = (lhs, rhs);
+            let Some(op) = expr_type_to_inequality_op(func.func) else {
+                return None;
+            };
+            Some((args, op))
+        })
+        .for_each(|(args, op)| funcs.entry(args).or_default().push(op));
+    funcs
+});

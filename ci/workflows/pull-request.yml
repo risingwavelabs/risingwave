@@ -7,17 +7,12 @@ cargo-cache: &cargo-cache
   backend: s3
   s3:
     bucket: ci-cache-bucket
+    args: '--no-progress'
   paths:
     - ".cargo/registry/index"
     - ".cargo/registry/cache"
     - ".cargo/git/db"
-
-auto-retry: &auto-retry
-  automatic:
-    - exit_status: -1 # Agent was lost
-      limit: 2
-    - exit_status: 255 # Forced agent shutdown
-      limit: 2
+    - ".cargo/advisory-db"
 
 steps:
   - label: "check ci image rebuild"
@@ -41,7 +36,6 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 15
-    retry: *auto-retry
 
   - label: "build other components"
     command: "ci/scripts/build-other.sh"
@@ -57,7 +51,6 @@ steps:
           environment:
             - GITHUB_TOKEN
     timeout_in_minutes: 10
-    retry: *auto-retry
 
   - label: "build (deterministic simulation)"
     command: "ci/scripts/build-simulation.sh"
@@ -69,7 +62,6 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 15
-    retry: *auto-retry
 
   - label: "docslt"
     command: "ci/scripts/docslt.sh"
@@ -81,7 +73,6 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 10
-    retry: *auto-retry
 
   - label: "end-to-end test"
     command: "ci/scripts/e2e-test.sh -p ci-dev"
@@ -96,7 +87,6 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 12
-    retry: *auto-retry
 
   - label: "end-to-end test (parallel)"
     command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
@@ -111,7 +101,6 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 12
-    retry: *auto-retry
 
   - label: "end-to-end test for opendal (parallel)"
     command: "ci/scripts/e2e-test-parallel-for-opendal.sh -p ci-dev"
@@ -126,7 +115,6 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 12
-    retry: *auto-retry
 
   - label: "end-to-end test (parallel, in-memory)"
     command: "ci/scripts/e2e-test-parallel-in-memory.sh -p ci-dev"
@@ -139,7 +127,6 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 12
-    retry: *auto-retry
 
   - label: "end-to-end source test"
     command: "ci/scripts/e2e-source-test.sh -p ci-dev"
@@ -154,7 +141,6 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 18
-    retry: *auto-retry
 
   - label: "end-to-end sink test"
     command: "ci/scripts/e2e-sink-test.sh -p ci-dev"
@@ -169,7 +155,6 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 5
-    retry: *auto-retry
 
   - label: "end-to-end iceberg sink test"
     command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-dev"
@@ -184,7 +169,6 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 5
-    retry: *auto-retry
 
   - label: "e2e java-binding test"
     command: "ci/scripts/java-binding-test.sh -p ci-dev"
@@ -196,8 +180,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 5
-    retry: *auto-retry
+    timeout_in_minutes: 7
 
   - label: "regress test"
     command: "ci/scripts/regress-test.sh -p ci-dev"
@@ -210,7 +193,6 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 5
-    retry: *auto-retry
 
   - label: "unit test"
     command: "ci/scripts/pr-unit-test.sh"
@@ -226,7 +208,6 @@ steps:
           environment:
             - CODECOV_TOKEN
     timeout_in_minutes: 12
-    retry: *auto-retry
 
   - label: "fuzz test"
     command: "ci/scripts/pr-fuzz-test.sh -p ci-dev"
@@ -242,7 +223,6 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
-    retry: *auto-retry
     soft_fail: true
 
   - label: "check"
@@ -253,7 +233,6 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
     timeout_in_minutes: 20
-    retry: *auto-retry
 
   - label: "unit test (deterministic simulation)"
     command: "ci/scripts/deterministic-unit-test.sh"
@@ -264,7 +243,6 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 10
-    retry: *auto-retry
 
   - label: "scaling test (deterministic simulation)"
     command: "TEST_NUM=5 ci/scripts/deterministic-scale-test.sh"
@@ -276,10 +254,9 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 10
-    retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"
-    command: "TEST_NUM=16 timeout 14m ci/scripts/deterministic-e2e-test.sh"
+    command: "TEST_NUM=16 ci/scripts/deterministic-e2e-test.sh"
     depends_on: "build-simulation"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
@@ -294,10 +271,9 @@ steps:
             - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
-    retry: *auto-retry
 
   - label: "recovery test (deterministic simulation)"
-    command: "TEST_NUM=8 KILL_RATE=0.5 timeout 14m ci/scripts/deterministic-recovery-test.sh"
+    command: "TEST_NUM=8 KILL_RATE=0.5 ci/scripts/deterministic-recovery-test.sh"
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -312,8 +288,7 @@ steps:
       #     files: "*-junit.xml"
       #     format: "junit"
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 18
-    retry: *auto-retry
+    timeout_in_minutes: 25
 
   - label: "misc check"
     command: "ci/scripts/misc-check.sh"
@@ -325,4 +300,3 @@ steps:
       - shellcheck#v1.2.0:
           files: ./**/*.sh
     timeout_in_minutes: 5
-    retry: *auto-retry

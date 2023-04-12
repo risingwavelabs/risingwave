@@ -129,7 +129,7 @@ impl BoxedExecutorBuilder for ValuesExecutor {
             rows: rows.into_iter(),
             schema: Schema { fields },
             identity: source.plan_node().get_identity().clone(),
-            chunk_size: source.context.get_config().developer.batch_chunk_size,
+            chunk_size: source.context.get_config().developer.chunk_size,
         }))
     }
 }

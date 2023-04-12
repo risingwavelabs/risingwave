@@ -1,0 +1,30 @@
+statement ok
+create table t5 (v1 smallint primary key, v2 int, v3 bigint, v4 float, v5 double, v6 decimal, v7 varchar, v8 timestamp, v9 boolean);
+
+statement ok
+create sink s from t5 with (
+    connector = 'jdbc',
+    jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
+    table.name = 't5',
+    type = 'upsert'
+);
+
+statement ok
+drop sink s;
+
+statement ok
+drop table t5;
+
+statement ok
+create table t6 (v1 smallint primary key, v2 int, v3 bigint, v4 float, v5 double, v6 decimal, v7 varchar, v8 timestamp, v9 boolean, v10 date, v11 struct<v12 time, v13 timestamptz>, v14 varchar[]);
+
+statement error
+create sink s from t6 with (
+    connector = 'jdbc',
+    jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
+    table.name = 't6',
+    type = 'upsert'
+);
+
+statement ok
+drop table t6;

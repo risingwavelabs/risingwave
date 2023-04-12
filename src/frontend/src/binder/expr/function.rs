@@ -342,10 +342,21 @@ impl Binder {
                 // "power" is the function name used in PG.
                 ("power", raw_call(ExprType::Pow)),
                 ("ceil", raw_call(ExprType::Ceil)),
+                ("ceiling", raw_call(ExprType::Ceil)),
                 ("floor", raw_call(ExprType::Floor)),
                 ("abs", raw_call(ExprType::Abs)),
                 ("exp", raw_call(ExprType::Exp)),
                 ("mod", raw_call(ExprType::Modulus)),
+                ("sin", raw_call(ExprType::Sin)),
+                ("cos", raw_call(ExprType::Cos)), 
+                ("tan", raw_call(ExprType::Tan)), 
+                ("cot", raw_call(ExprType::Cot)), 
+                ("asin", raw_call(ExprType::Asin)), 
+                ("acos", raw_call(ExprType::Acos)), 
+                ("atan", raw_call(ExprType::Atan)), 
+                ("atan2", raw_call(ExprType::Atan2)), 
+                ("sqrt", raw_call(ExprType::Sqrt)),     
+
                 (
                     "to_timestamp",
                     dispatch_by_len(vec![
@@ -354,6 +365,7 @@ impl Binder {
                     ]),
                 ),
                 ("date_trunc", raw_call(ExprType::DateTrunc)),
+                ("date_part", raw_call(ExprType::DatePart)),
                 // string
                 ("substr", raw_call(ExprType::Substr)),
                 ("length", raw_call(ExprType::Length)),
@@ -362,7 +374,7 @@ impl Binder {
                 ("trim", raw_call(ExprType::Trim)),
                 ("replace", raw_call(ExprType::Replace)),
                 ("overlay", raw_call(ExprType::Overlay)),
-                ("position", raw_call(ExprType::Position)),
+                ("btrim", raw_call(ExprType::Trim)),
                 ("ltrim", raw_call(ExprType::Ltrim)),
                 ("rtrim", raw_call(ExprType::Rtrim)),
                 ("md5", raw_call(ExprType::Md5)),
@@ -372,6 +384,7 @@ impl Binder {
                     rewrite(ExprType::ConcatWs, Binder::rewrite_concat_to_concat_ws),
                 ),
                 ("concat_ws", raw_call(ExprType::ConcatWs)),
+                ("translate", raw_call(ExprType::Translate)),
                 ("split_part", raw_call(ExprType::SplitPart)),
                 ("char_length", raw_call(ExprType::CharLength)),
                 ("character_length", raw_call(ExprType::CharLength)),
@@ -380,6 +393,16 @@ impl Binder {
                 ("octet_length", raw_call(ExprType::OctetLength)),
                 ("bit_length", raw_call(ExprType::BitLength)),
                 ("regexp_match", raw_call(ExprType::RegexpMatch)),
+                ("chr", raw_call(ExprType::Chr)),
+                ("starts_with", raw_call(ExprType::StartsWith)),
+                ("initcap", raw_call(ExprType::Initcap)),
+                ("lpad", raw_call(ExprType::Lpad)),
+                ("rpad", raw_call(ExprType::Rpad)),
+                ("reverse", raw_call(ExprType::Reverse)),
+                ("strpos", raw_call(ExprType::Position)),
+                ("to_ascii", raw_call(ExprType::ToAscii)),
+                ("to_hex", raw_call(ExprType::ToHex)),
+                ("quote_ident", raw_call(ExprType::QuoteIdent)),
                 // array
                 ("array_cat", raw_call(ExprType::ArrayCat)),
                 ("array_append", raw_call(ExprType::ArrayAppend)),
@@ -388,6 +411,7 @@ impl Binder {
                 ("array_to_string", raw_call(ExprType::ArrayToString)),
                 ("array_distinct", raw_call(ExprType::ArrayDistinct)),
                 ("array_length", raw_call(ExprType::ArrayLength)),
+                ("cardinality", raw_call(ExprType::Cardinality)),
                 // jsonb
                 ("jsonb_object_field", raw_call(ExprType::JsonbAccessInner)),
                 ("jsonb_array_element", raw_call(ExprType::JsonbAccessInner)),
@@ -400,14 +424,14 @@ impl Binder {
                 // System information operations.
                 (
                     "pg_typeof",
-                    raw(|_binder, inputs| {
+                    guard_by_len(1, raw(|_binder, inputs| {
                         let input = &inputs[0];
                         let v = match input.is_unknown() {
                             true => "unknown".into(),
                             false => input.return_type().to_string(),
                         };
                         Ok(ExprImpl::literal_varchar(v))
-                    }),
+                    })),
                 ),
                 ("current_database", guard_by_len(0, raw(|binder, _inputs| {
                     Ok(ExprImpl::literal_varchar(binder.db_name.clone()))

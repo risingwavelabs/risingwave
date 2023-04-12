@@ -29,10 +29,12 @@ mod iterator;
 mod jsonb_array;
 pub mod list_array;
 mod macros;
+mod num256_array;
 mod primitive_array;
 pub mod serial_array;
 pub mod stream_chunk;
 mod stream_chunk_iter;
+pub mod stream_record;
 pub mod struct_array;
 mod utf8_array;
 mod value_reader;
@@ -45,8 +47,7 @@ use std::sync::Arc;
 pub use bool_array::{BoolArray, BoolArrayBuilder};
 pub use bytes_array::*;
 pub use chrono_array::{
-    NaiveDateArray, NaiveDateArrayBuilder, NaiveDateTimeArray, NaiveDateTimeArrayBuilder,
-    NaiveTimeArray, NaiveTimeArrayBuilder,
+    DateArray, DateArrayBuilder, TimeArray, TimeArrayBuilder, TimestampArray, TimestampArrayBuilder,
 };
 pub use column_proto_readers::*;
 pub use data_chunk::{DataChunk, DataChunkTestExt};
@@ -66,22 +67,24 @@ pub use utf8_array::*;
 pub use vis::{Vis, VisRef};
 
 pub use self::error::ArrayError;
+pub use crate::array::num256_array::{Int256Array, Int256ArrayBuilder};
 use crate::buffer::Bitmap;
+use crate::collection::estimate_size::EstimateSize;
 use crate::types::*;
 use crate::util::iter_util::ZipEqFast;
-pub type ArrayResult<T> = std::result::Result<T, ArrayError>;
+pub type ArrayResult<T> = Result<T, ArrayError>;
 
 pub type I64Array = PrimitiveArray<i64>;
 pub type I32Array = PrimitiveArray<i32>;
 pub type I16Array = PrimitiveArray<i16>;
-pub type F64Array = PrimitiveArray<OrderedF64>;
-pub type F32Array = PrimitiveArray<OrderedF32>;
+pub type F64Array = PrimitiveArray<F64>;
+pub type F32Array = PrimitiveArray<F32>;
 
 pub type I64ArrayBuilder = PrimitiveArrayBuilder<i64>;
 pub type I32ArrayBuilder = PrimitiveArrayBuilder<i32>;
 pub type I16ArrayBuilder = PrimitiveArrayBuilder<i16>;
-pub type F64ArrayBuilder = PrimitiveArrayBuilder<OrderedF64>;
-pub type F32ArrayBuilder = PrimitiveArrayBuilder<OrderedF32>;
+pub type F64ArrayBuilder = PrimitiveArrayBuilder<F64>;
+pub type F32ArrayBuilder = PrimitiveArrayBuilder<F32>;
 
 /// The hash source for `None` values when hashing an item.
 pub(crate) const NULL_VAL_FOR_HASH: u32 = 0xfffffff0;
@@ -158,7 +161,9 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
 /// In some cases, we will need to store owned data. For example, when aggregating min
 /// and max, we need to store current maximum in the aggregator. In this case, we
 /// could use `A::OwnedItem` in aggregator struct.
-pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImpl> {
+pub trait Array:
+    std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImpl> + EstimateSize
+{
     /// A reference to item in array, as well as return type of `value_at`, which is
     /// reciprocal to `Self::OwnedItem`.
     type RefItem<'a>: ScalarRef<'a, ScalarType = Self::OwnedItem>
@@ -338,15 +343,16 @@ macro_rules! for_all_variants {
             { Int16, int16, I16Array, I16ArrayBuilder },
             { Int32, int32, I32Array, I32ArrayBuilder },
             { Int64, int64, I64Array, I64ArrayBuilder },
+            { Int256, int256, Int256Array, Int256ArrayBuilder },
             { Float32, float32, F32Array, F32ArrayBuilder },
             { Float64, float64, F64Array, F64ArrayBuilder },
             { Utf8, utf8, Utf8Array, Utf8ArrayBuilder },
             { Bool, bool, BoolArray, BoolArrayBuilder },
             { Decimal, decimal, DecimalArray, DecimalArrayBuilder },
             { Interval, interval, IntervalArray, IntervalArrayBuilder },
-            { NaiveDate, naivedate, NaiveDateArray, NaiveDateArrayBuilder },
-            { NaiveDateTime, naivedatetime, NaiveDateTimeArray, NaiveDateTimeArrayBuilder },
-            { NaiveTime, naivetime, NaiveTimeArray, NaiveTimeArrayBuilder },
+            { Date, date, DateArray, DateArrayBuilder },
+            { Timestamp, timestamp, TimestampArray, TimestampArrayBuilder },
+            { Time, time, TimeArray, TimeArrayBuilder },
             { Jsonb, jsonb, JsonbArray, JsonbArrayBuilder },
             { Serial, serial, SerialArray, SerialArrayBuilder },
             { Struct, struct, StructArray, StructArrayBuilder },
@@ -372,6 +378,12 @@ for_all_variants! { array_impl_enum }
 impl<T: PrimitiveArrayItemType> From<PrimitiveArray<T>> for ArrayImpl {
     fn from(arr: PrimitiveArray<T>) -> Self {
         T::erase_array_type(arr)
+    }
+}
+
+impl From<Int256Array> for ArrayImpl {
+    fn from(arr: Int256Array) -> Self {
+        Self::Int256(arr)
     }
 }
 
@@ -658,6 +670,20 @@ macro_rules! impl_array {
 
 for_all_variants! { impl_array }
 
+macro_rules! impl_array_estimate_size {
+    ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        impl EstimateSize for ArrayImpl {
+            fn estimated_heap_size(&self) -> usize {
+                match self {
+                    $( Self::$variant_name(inner) => inner.estimated_heap_size(), )*
+                }
+            }
+        }
+    }
+}
+
+for_all_variants! { impl_array_estimate_size }
+
 impl ArrayImpl {
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = DatumRef<'_>> + ExactSizeIterator {
         (0..self.len()).map(|i| self.value_at(i))
@@ -673,12 +699,8 @@ impl ArrayImpl {
             PbArrayType::Serial => {
                 read_numeric_array::<Serial, SerialValueReader>(array, cardinality)?
             }
-            PbArrayType::Float32 => {
-                read_numeric_array::<OrderedF32, F32ValueReader>(array, cardinality)?
-            }
-            PbArrayType::Float64 => {
-                read_numeric_array::<OrderedF64, F64ValueReader>(array, cardinality)?
-            }
+            PbArrayType::Float32 => read_numeric_array::<F32, F32ValueReader>(array, cardinality)?,
+            PbArrayType::Float64 => read_numeric_array::<F64, F64ValueReader>(array, cardinality)?,
             PbArrayType::Bool => read_bool_array(array, cardinality)?,
             PbArrayType::Utf8 => {
                 read_string_array::<Utf8ArrayBuilder, Utf8ValueReader>(array, cardinality)?
@@ -686,10 +708,10 @@ impl ArrayImpl {
             PbArrayType::Decimal => {
                 read_numeric_array::<Decimal, DecimalValueReader>(array, cardinality)?
             }
-            PbArrayType::Date => read_naive_date_array(array, cardinality)?,
-            PbArrayType::Time => read_naive_time_array(array, cardinality)?,
-            PbArrayType::Timestamp => read_naive_date_time_array(array, cardinality)?,
-            PbArrayType::Interval => read_interval_unit_array(array, cardinality)?,
+            PbArrayType::Date => read_date_array(array, cardinality)?,
+            PbArrayType::Time => read_time_array(array, cardinality)?,
+            PbArrayType::Timestamp => read_timestamp_array(array, cardinality)?,
+            PbArrayType::Interval => read_interval_array(array, cardinality)?,
             PbArrayType::Jsonb => {
                 read_string_array::<JsonbArrayBuilder, JsonbValueReader>(array, cardinality)?
             }
@@ -699,6 +721,7 @@ impl ArrayImpl {
             PbArrayType::Bytea => {
                 read_string_array::<BytesArrayBuilder, BytesValueReader>(array, cardinality)?
             }
+            PbArrayType::Int256 => Int256Array::from_protobuf(array, cardinality)?,
         };
         Ok(array)
     }

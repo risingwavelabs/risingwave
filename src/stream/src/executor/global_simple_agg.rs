@@ -19,7 +19,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
-use super::agg_common::AggExecutorArgs;
+use super::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
 use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggStateStorage, AlwaysOutput, DistinctDeduplicater,
 };
@@ -126,7 +126,7 @@ impl<S: StateStore> Executor for GlobalSimpleAggExecutor<S> {
 }
 
 impl<S: StateStore> GlobalSimpleAggExecutor<S> {
-    pub fn new(args: AggExecutorArgs<S>) -> StreamResult<Self> {
+    pub fn new(args: AggExecutorArgs<S, SimpleAggExecutorExtraArgs>) -> StreamResult<Self> {
         let input_info = args.input.info();
         let schema = generate_agg_schema(args.input.as_ref(), &args.agg_calls, None);
         Ok(Self {
@@ -226,7 +226,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         vars: &mut ExecutionVars<S>,
         epoch: EpochPair,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        if vars.state_changed || vars.agg_group.is_uninitialized() {
+        let chunk = if vars.state_changed || vars.agg_group.is_uninitialized() {
             // Flush agg states.
             vars.agg_group
                 .flush_state_if_needed(&mut this.storages)
@@ -242,42 +242,31 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             )
             .await?;
 
-            // Create array builders.
-            // As the datatype is retrieved from schema, it contains both group key and aggregation
-            // state outputs.
-            let mut builders = this.info.schema.create_array_builders(2);
-            let mut new_ops = Vec::with_capacity(2);
             // Retrieve modified states and put the changes into the builders.
             let curr_outputs = vars.agg_group.get_outputs(&this.storages).await?;
-            if let Some(change) = vars.agg_group.build_change(curr_outputs) {
-                vars.agg_group
-                    .apply_change_to_builders(&change, &mut builders, &mut new_ops);
-                vars.agg_group
-                    .apply_change_to_result_table(&change, &mut this.result_table);
-                this.result_table.commit(epoch).await?;
-            } else {
-                // Agg result is not changed.
-                this.result_table.commit_no_data_expected(epoch);
-                return Ok(None);
+            match vars.agg_group.build_change(curr_outputs) {
+                Some(change) => {
+                    this.result_table.write_record(change.as_ref());
+                    this.result_table.commit(epoch).await?;
+                    Some(change.to_stream_chunk(&this.info.schema.data_types()))
+                }
+                None => {
+                    // Agg result is not changed.
+                    this.result_table.commit_no_data_expected(epoch);
+                    None
+                }
             }
-
-            let columns = builders
-                .into_iter()
-                .map(|builder| builder.finish().into())
-                .collect();
-
-            let chunk = StreamChunk::new(new_ops, columns, None);
-
-            vars.state_changed = false;
-            Ok(Some(chunk))
         } else {
             // No state is changed.
             // Call commit on state table to increment the epoch.
             this.all_state_tables_mut().for_each(|table| {
                 table.commit_no_data_expected(epoch);
             });
-            Ok(None)
-        }
+            None
+        };
+
+        vars.state_changed = false;
+        Ok(chunk)
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]

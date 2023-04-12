@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{Decimal, OrderedF64};
+use risingwave_common::types::{Decimal, F64};
 use risingwave_expr_macro::function;
 
 #[function("round_digit(decimal, int32) -> decimal")]
@@ -27,7 +27,7 @@ pub fn round_digits<D: Into<i32>>(input: Decimal, digits: D) -> Decimal {
 }
 
 #[function("ceil(float64) -> float64")]
-pub fn ceil_f64(input: OrderedF64) -> OrderedF64 {
+pub fn ceil_f64(input: F64) -> F64 {
     f64::ceil(input.0).into()
 }
 
@@ -37,7 +37,7 @@ pub fn ceil_decimal(input: Decimal) -> Decimal {
 }
 
 #[function("floor(float64) -> float64")]
-pub fn floor_f64(input: OrderedF64) -> OrderedF64 {
+pub fn floor_f64(input: F64) -> F64 {
     f64::floor(input.0).into()
 }
 
@@ -48,7 +48,7 @@ pub fn floor_decimal(input: Decimal) -> Decimal {
 
 // Ties are broken by rounding away from zero
 #[function("round(float64) -> float64")]
-pub fn round_f64(input: OrderedF64) -> OrderedF64 {
+pub fn round_f64(input: F64) -> F64 {
     f64::round(input.0).into()
 }
 
@@ -63,7 +63,7 @@ mod tests {
     use std::str::FromStr;
 
     use num_traits::FromPrimitive;
-    use risingwave_common::types::{Decimal, OrderedF64};
+    use risingwave_common::types::{Decimal, F64};
 
     use super::ceil_f64;
     use crate::vector_op::round::*;
@@ -88,15 +88,15 @@ mod tests {
 
     #[test]
     fn test_round_f64() {
-        assert_eq!(ceil_f64(OrderedF64::from(42.2)), OrderedF64::from(43.0));
-        assert_eq!(ceil_f64(OrderedF64::from(-42.8)), OrderedF64::from(-42.0));
+        assert_eq!(ceil_f64(F64::from(42.2)), F64::from(43.0));
+        assert_eq!(ceil_f64(F64::from(-42.8)), F64::from(-42.0));
 
-        assert_eq!(floor_f64(OrderedF64::from(42.8)), OrderedF64::from(42.0));
-        assert_eq!(floor_f64(OrderedF64::from(-42.8)), OrderedF64::from(-43.0));
+        assert_eq!(floor_f64(F64::from(42.8)), F64::from(42.0));
+        assert_eq!(floor_f64(F64::from(-42.8)), F64::from(-43.0));
 
-        assert_eq!(round_f64(OrderedF64::from(42.4)), OrderedF64::from(42.0));
-        assert_eq!(round_f64(OrderedF64::from(42.5)), OrderedF64::from(43.0));
-        assert_eq!(round_f64(OrderedF64::from(-6.5)), OrderedF64::from(-7.0));
+        assert_eq!(round_f64(F64::from(42.4)), F64::from(42.0));
+        assert_eq!(round_f64(F64::from(42.5)), F64::from(43.0));
+        assert_eq!(round_f64(F64::from(-6.5)), F64::from(-7.0));
     }
 
     #[test]
