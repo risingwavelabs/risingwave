@@ -22,7 +22,9 @@ use std::str::FromStr;
 
 use bytes::{BufMut, Bytes};
 use ethnum::i256;
-use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
+use num_traits::{
+    CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Signed, Zero,
+};
 use risingwave_pb::data::ArrayType;
 use serde::de::{Error, Visitor};
 use serde::{Deserializer, Serializer};
@@ -294,11 +296,51 @@ impl CheckedNeg for Int256 {
 
 impl Zero for Int256 {
     fn zero() -> Self {
-        Int256::from(i256::new(0))
+        Int256::from(i256::ZERO)
     }
 
     fn is_zero(&self) -> bool {
         !self.0.is_negative() && !self.0.is_positive()
+    }
+}
+
+impl One for Int256 {
+    fn one() -> Self {
+        Self::from(i256::ONE)
+    }
+}
+
+impl Num for Int256 {
+    type FromStrRadixErr = ParseIntError;
+
+    fn from_str_radix(str: &str, radix: u32) -> Result<Self, Self::FromStrRadixErr> {
+        i256::from_str_radix(str, radix).map(Into::into)
+    }
+}
+
+impl Signed for Int256 {
+    fn abs(&self) -> Self {
+        self.0.abs().into()
+    }
+
+    fn abs_sub(&self, other: &Self) -> Self {
+        if self <= other {
+            Self::zero()
+        } else {
+            self.abs()
+        }
+    }
+
+    fn signum(&self) -> Self {
+        self.0.signum().into()
+    }
+
+    fn is_positive(&self) -> bool {
+        self.0.is_positive()
+    }
+
+    fn is_negative(&self) -> bool {
+        self.0.is_negative()
     }
 }
 
@@ -373,5 +415,12 @@ mod tests {
         assert_eq!(-Int256::from(1), Int256::from(-1));
         assert_eq!(Int256::from(0).neg(), Int256::from(0));
         assert_eq!(-Int256::from(0), Int256::from(0));
+    }
+
+    #[test]
+    fn test_abs() {
+        assert_eq!(Int256::from(-1).abs(), Int256::from(1));
+        assert_eq!(Int256::from(1).abs(), Int256::from(1));
+        assert_eq!(Int256::from(0).abs(), Int256::from(0));
     }
 }

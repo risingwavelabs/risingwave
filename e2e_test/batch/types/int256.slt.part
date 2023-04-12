@@ -46,6 +46,17 @@ select '10000000000000000'::rw_int256 % '-2'::rw_int256;
 ----
 0
 
+query I
+select abs('-10000000000000000'::rw_int256);
+----
+10000000000000000
+
+query I
+select -('-10000000000000000'::rw_int256);
+----
+10000000000000000
+
+
 statement ok
 create table t (v rw_int256)
 

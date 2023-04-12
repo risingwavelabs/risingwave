@@ -110,7 +110,7 @@ pub fn general_neg<T1: CheckedNeg>(expr: T1) -> Result<T1> {
 pub fn int256_neg<TRef, T>(expr: TRef) -> Result<T>
 where
     TRef: Into<T> + Debug,
-    T: CheckedNeg,
+    T: CheckedNeg + Debug,
 {
     expr.into()
         .checked_neg()
@@ -125,6 +125,20 @@ where
 pub fn general_abs<T1: Signed + CheckedNeg>(expr: T1) -> Result<T1> {
     if expr.is_negative() {
         general_neg(expr)
+    } else {
+        Ok(expr)
+    }
+}
+
+#[function("abs(int256) -> int256")]
+pub fn int256_abs<TRef, T>(expr: TRef) -> Result<T>
+where
+    TRef: Into<T> + Debug,
+    T: Signed + CheckedNeg + Debug,
+{
+    let expr = expr.into();
+    if expr.is_negative() {
+        int256_neg(expr)
     } else {
         Ok(expr)
     }
