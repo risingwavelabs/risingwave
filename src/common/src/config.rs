@@ -21,6 +21,7 @@ use std::collections::HashMap;
 use std::fs;
 
 use clap::ValueEnum;
+use derivative::Derivative;
 use risingwave_pb::meta::SystemParams;
 use serde::{Deserialize, Serialize};
 use serde_default::DefaultFromSerde;
