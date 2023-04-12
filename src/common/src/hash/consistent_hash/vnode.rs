@@ -150,7 +150,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_serial_key_chunk() {
-        let mut gen = RowIdGenerator::for_test(100);
+        let mut gen = RowIdGenerator::for_test(VirtualNode::from_index(100));
         let chunk = format!(
             "SRL I
              {} 1
@@ -170,7 +170,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_serial_key_row() {
-        let mut gen = RowIdGenerator::for_test(100);
+        let mut gen = RowIdGenerator::for_test(VirtualNode::from_index(100));
         let row = OwnedRow::new(vec![
             Some(ScalarImpl::Serial(gen.next().into())),
             Some(ScalarImpl::Int64(12345)),

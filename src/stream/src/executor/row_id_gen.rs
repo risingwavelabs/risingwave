@@ -20,6 +20,7 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayBuilder, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::util::epoch::UNIX_RISINGWAVE_DATE_EPOCH;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::row_id::RowIdGenerator;
@@ -69,10 +70,7 @@ impl RowIdGenExecutor {
 
     /// Create a new row id generator based on the assigned vnodes.
     fn new_generator(vnodes: &Bitmap) -> RowIdGenerator {
-        // TODO: We may generate row id for each vnode in the future instead of using the first
-        // vnode.
-        let vnode_id = vnodes.next_set_bit(0).unwrap() as u32;
-        RowIdGenerator::new(vnode_id, *UNIX_RISINGWAVE_DATE_EPOCH)
+        RowIdGenerator::new(vnodes.iter_vnodes(), *UNIX_RISINGWAVE_DATE_EPOCH)
     }
 
     /// Generate a row ID column according to ops.
@@ -83,7 +81,7 @@ impl RowIdGenExecutor {
         for (datum, op) in column.array_ref().iter().zip_eq_fast(ops) {
             // Only refill row_id for insert operation.
             match op {
-                Op::Insert => builder.append(Some(self.row_id_generator.next().await.into())),
+                Op::Insert => builder.append(Some(self.row_id_generator.next().into())),
                 _ => builder.append(Some(Serial::try_from(datum.unwrap()).unwrap())),
             }
         }

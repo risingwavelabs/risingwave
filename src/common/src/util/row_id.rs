@@ -15,12 +15,16 @@
 use std::cmp::Ordering;
 use std::time::SystemTime;
 
+use static_assertions::const_assert;
+
 use crate::hash::VirtualNode;
 
 const TIMESTAMP_SHIFT_BITS: u8 = 22;
 const VNODE_ID_SHIFT_BITS: u8 = 12;
 const SEQUENCE_UPPER_BOUND: u16 = 1 << 12;
 const VNODE_ID_UPPER_BOUND: u32 = 1 << 10;
+
+const_assert!(VNODE_ID_UPPER_BOUND >= VirtualNode::COUNT as u32);
 
 /// `RowIdGenerator` generates unique row ids using snowflake algorithm as following format:
 ///
@@ -32,13 +36,13 @@ pub struct RowIdGenerator {
     /// Specific base timestamp using for generating row ids.
     base: SystemTime,
 
-    /// Last timestamp part of row id.
+    /// Last timestamp part of row id, based on `base`.
     last_timestamp_ms: i64,
 
-    /// Current vnode id.
-    /// FIXME: Use `VirtualNode` instead.
+    /// Virtual nodes used by this generator.
     pub vnodes: Vec<VirtualNode>,
 
+    /// Current index of `vnodes`.
     vnodes_index: u16,
 
     /// Last sequence part of row id.
@@ -56,18 +60,17 @@ pub fn extract_vnode_id_from_row_id(id: RowId) -> VirtualNode {
 
 impl RowIdGenerator {
     #[cfg(test)]
-    pub fn for_test(vnode_id: u32) -> Self {
+    pub fn for_test(vnode: VirtualNode) -> Self {
         use std::time::UNIX_EPOCH;
 
-        assert!(vnode_id < VNODE_ID_UPPER_BOUND);
-        Self::new(vnode_id, UNIX_EPOCH)
+        Self::new(std::iter::once(vnode), UNIX_EPOCH)
     }
 
-    pub fn new(vnode_id: u32, base: SystemTime) -> Self {
+    pub fn new(vnodes: impl IntoIterator<Item = VirtualNode>, base: SystemTime) -> Self {
         Self {
             base,
             last_timestamp_ms: base.elapsed().unwrap().as_millis() as i64,
-            vnodes: vec![VirtualNode::from_index(vnode_id as usize)],
+            vnodes: vnodes.into_iter().collect(),
             vnodes_index: 0,
             sequence: 0,
         }
@@ -100,13 +103,14 @@ impl RowIdGenerator {
             // case for time going backwards and sequence reaches the upper bound are both covered.
             let mut current_timestamp_ms = current_timestamp_ms;
             loop {
-                current_timestamp_ms = get_current_timestamp_ms();
                 if current_timestamp_ms > self.last_timestamp_ms {
                     break;
                 }
+                current_timestamp_ms = get_current_timestamp_ms();
                 std::hint::spin_loop();
             }
 
+            // Reset states. We do not reset the `vnode_index` to make all vnodes are evenly used.
             self.last_timestamp_ms = current_timestamp_ms;
             self.sequence = 0;
         }
@@ -185,7 +189,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_generator() {
-        let mut generator = RowIdGenerator::for_test(0);
+        let mut generator = RowIdGenerator::for_test(VirtualNode::from_index(0));
+
         let mut last_row_id = generator.next();
         for _ in 0..100000 {
             let row_id = generator.next();
@@ -201,7 +206,7 @@ mod tests {
         );
         assert_eq!(row_id & (SEQUENCE_UPPER_BOUND as i64 - 1), 0);
 
-        let mut generator = RowIdGenerator::for_test(1);
+        let mut generator = RowIdGenerator::for_test(VirtualNode::from_index(1));
         let row_ids = generator.next_batch((SEQUENCE_UPPER_BOUND + 10) as usize);
         let mut expected = (0..SEQUENCE_UPPER_BOUND).collect_vec();
         expected.extend(0..10);
