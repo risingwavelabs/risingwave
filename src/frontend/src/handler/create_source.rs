@@ -703,11 +703,18 @@ pub async fn handle_create_source(
 
     let connection_name = with_properties.get("connection.name").map(|s| s.as_str());
     let connection_id = match connection_name {
-        Some(connection_name) => Some(
-            session
+        Some(connection_name) => {
+            let connection_id = session
                 .get_connection_id_for_create(schema_name, connection_name)
-                .map_err(|_| ErrorCode::ItemNotFound(connection_name.to_string()))?,
-        ),
+                .map_err(|_| ErrorCode::ItemNotFound(connection_name.to_string()))?;
+            if !is_kafka_source(&with_properties) {
+                return Err(RwError::from(ErrorCode::ProtocolError(
+                    "Create source with connection is only supported for kafka connectors."
+                        .to_string(),
+                )));
+            }
+            Some(connection_id)
+        }
         None => None,
     };
     let definition = handler_args.normalized_sql;
