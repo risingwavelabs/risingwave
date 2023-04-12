@@ -569,7 +569,9 @@ pub fn gen_data(
                 if *data_type == DataType::Varchar {
                     array_builder.append_datum(&Some("2022-02-02".into()));
                 } else {
-                    let mut data_gen = FieldGeneratorImpl::with_number_random(data_type.clone(), None, None, SEED).unwrap();
+                    let mut data_gen =
+                        FieldGeneratorImpl::with_number_random(data_type.clone(), None, None, SEED)
+                            .unwrap();
                     let datum = data_gen.generate_datum(((i + 1) * (j + 1)) as u64);
                     array_builder.append_datum(datum);
                 }
