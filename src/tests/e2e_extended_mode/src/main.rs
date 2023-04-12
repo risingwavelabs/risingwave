@@ -12,37 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod opts;
-mod test;
-
 use std::process::exit;
 
 use clap::Parser;
-use tracing::{error, info};
-
-use crate::opts::Opts;
-use crate::test::TestSuite;
+use risingwave_e2e_extended_mode_test::{run_test_suit, Opts};
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 5)]
 async fn main() {
-    exit(run_test().await)
-}
-
-async fn run_test() -> i32 {
     let opts = Opts::parse();
 
     tracing_subscriber::fmt::init();
 
-    let test_suite = TestSuite::new(opts);
-
-    match test_suite.test().await {
-        Ok(_) => {
-            info!("Risingwave e2e extended mode test completed successfully!");
-            0
-        }
-        Err(e) => {
-            error!("Risingwave e2e extended mode test failed: {:?}. Please ensure that your psql version is larger than 14.1", e);
-            1
-        }
-    }
+    exit(
+        run_test_suit(
+            opts.pg_db_name,
+            opts.pg_user_name,
+            opts.pg_server_host,
+            opts.pg_server_port,
+            opts.pg_password,
+        )
+        .await,
+    )
 }

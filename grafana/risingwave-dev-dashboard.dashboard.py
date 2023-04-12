@@ -212,6 +212,10 @@ def section_compaction(outer_panels):
                             [90, "max"],
                         ),
                         panels.target(
+                            f"histogram_quantile(0.99, sum(rate({metric('compute_refill_cache_duration_bucket')}[$__rate_interval])) by (le, instance))",
+                            "compute_apply_version_duration_p99 - {{instance}}",
+                        ),
+                        panels.target(
                             f"sum by(le)(rate({metric('compactor_compact_task_duration_sum')}[$__rate_interval])) / sum by(le)(rate({metric('compactor_compact_task_duration_count')}[$__rate_interval]))",
                             "compact-task avg",
                         ),
@@ -1338,7 +1342,7 @@ def section_frontend(outer_panels):
 
 
 def section_hummock(panels):
-    mete_miss_filter = "type='meta_miss'"
+    meta_miss_filter = "type='meta_miss'"
     meta_total_filter = "type='meta_total'"
     data_miss_filter = "type='data_miss'"
     data_total_filter = "type='data_total'"
@@ -1377,6 +1381,10 @@ def section_hummock(panels):
                 panels.target(
                     f"sum(rate({metric('file_cache_miss')}[$__rate_interval])) by (instance)",
                     "file cache miss @ {{instance}}",
+                ),
+                panels.target(
+                    f"sum(rate({metric('sstable_preload_io_count')}[$__rate_interval])) ",
+                    "preload iops",
                 ),
             ],
         ),
@@ -1568,7 +1576,7 @@ def section_hummock(panels):
                     "bloom filter miss rate - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"(sum(rate({metric('state_store_sst_store_block_request_counts', mete_miss_filter)}[$__rate_interval])) by (job,instance,table_id)) / (sum(rate({metric('state_store_sst_store_block_request_counts', meta_total_filter)}[$__rate_interval])) by (job,instance,table_id))",
+                    f"(sum(rate({metric('state_store_sst_store_block_request_counts', meta_miss_filter)}[$__rate_interval])) by (job,instance,table_id)) / (sum(rate({metric('state_store_sst_store_block_request_counts', meta_total_filter)}[$__rate_interval])) by (job,instance,table_id))",
                     "meta cache miss rate - {{table_id}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
@@ -1747,6 +1755,28 @@ def section_hummock(panels):
                 panels.target(
                     f"sum by(le, job, instance, table_id) (rate({metric('state_store_iter_fetch_meta_duration_sum')}[$__rate_interval])) / sum by(le, job, instance, table_id) (rate({metric('state_store_iter_fetch_meta_duration_count')}[$__rate_interval]))",
                     "fetch_meta_duration avg - {{table_id}} @ {{job}} @ {{instance}}",
+                ),
+            ],
+        ),
+
+        panels.timeseries_count(
+            "Fetch Meta Unhits",
+            "",
+            [
+                panels.target(
+                    f"{metric('state_store_iter_fetch_meta_cache_unhits')}",
+                    "",
+                ),
+            ],
+        ),
+
+        panels.timeseries_count(
+            "Slow Fetch Meta Unhits",
+            "",
+            [
+                panels.target(
+                    f"{metric('state_store_iter_slow_fetch_meta_cache_unhits')}",
+                    "",
                 ),
             ],
         ),

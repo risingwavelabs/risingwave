@@ -26,7 +26,7 @@ use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
 use crate::source::base::{SourceMessage, MAX_CHUNK_SIZE};
-use crate::source::kafka::{KafkaProperties, PrivateLinkConsumerContext};
+use crate::source::kafka::{KafkaProperties, PrivateLinkConsumerContext, KAFKA_ISOLATION_LEVEL};
 use crate::source::{
     BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitImpl, SplitMetaData,
     SplitReader,
@@ -67,6 +67,7 @@ impl SplitReader for KafkaSplitReader {
         config.set("enable.partition.eof", "false");
         config.set("enable.auto.commit", "false");
         config.set("auto.offset.reset", "smallest");
+        config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
         config.set("bootstrap.servers", bootstrap_servers);
 
         properties.common.set_security_properties(&mut config);
