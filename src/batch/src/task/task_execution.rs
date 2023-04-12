@@ -405,22 +405,27 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     .task_first_poll_delay
                     .with_label_values(labels)
                     .set(cumulative.total_first_poll_delay.as_secs_f64());
+                task_metrics.remove_labels(task_metrics.task_first_poll_delay.clone(), labels);
                 task_metrics
                     .task_fast_poll_duration
                     .with_label_values(labels)
                     .set(cumulative.total_fast_poll_duration.as_secs_f64());
+                task_metrics.remove_labels(task_metrics.task_fast_poll_duration.clone(), labels);
                 task_metrics
                     .task_idle_duration
                     .with_label_values(labels)
                     .set(cumulative.total_idle_duration.as_secs_f64());
+                task_metrics.remove_labels(task_metrics.task_idle_duration.clone(), labels);
                 task_metrics
                     .task_poll_duration
                     .with_label_values(labels)
                     .set(cumulative.total_poll_duration.as_secs_f64());
+                task_metrics.remove_labels(task_metrics.task_poll_duration.clone(), labels);
                 task_metrics
                     .task_scheduled_duration
                     .with_label_values(labels)
                     .set(cumulative.total_scheduled_duration.as_secs_f64());
+                task_metrics.remove_labels(task_metrics.task_scheduled_duration.clone(), labels);
                 task_metrics
                     .task_slow_poll_duration
                     .with_label_values(labels)

@@ -14,7 +14,11 @@
 
 use std::sync::Arc;
 
-use prometheus::core::{AtomicF64, AtomicU64, Collector, Desc, GenericCounterVec, GenericGaugeVec};
+use parking_lot::Mutex;
+use prometheus::core::{
+    AtomicF64, AtomicU64, Collector, Desc, GenericCounterVec, GenericGaugeVec, MetricVec,
+    MetricVecBuilder,
+};
 use prometheus::{
     exponential_buckets, opts, proto, GaugeVec, HistogramOpts, HistogramVec, IntCounterVec,
     IntGauge, Registry,
@@ -43,6 +47,8 @@ macro_rules! def_task_metrics {
         pub struct BatchTaskMetrics {
             descs: Vec<Desc>,
             $( pub $metric: $type, )*
+            /// Labels to remove after each `collect`.
+            labels_to_remove: Arc<Mutex<Vec<Box<dyn Fn() + Send>>>>,
         }
     };
 }
@@ -151,6 +157,7 @@ impl BatchTaskMetrics {
             task_slow_poll_duration,
             task_exchange_recv_row_number,
             task_row_seq_scan_next_duration,
+            labels_to_remove: Arc::new(Mutex::new(Vec::new())),
         };
         registry.register(Box::new(metrics.clone())).unwrap();
         metrics
@@ -159,6 +166,21 @@ impl BatchTaskMetrics {
     /// Create a new `BatchTaskMetrics` instance used in tests or other places.
     pub fn for_test() -> Self {
         Self::new(prometheus::Registry::new())
+    }
+
+    pub fn remove_labels<T: MetricVecBuilder + 'static>(
+        &self,
+        metric: MetricVec<T>,
+        labels: &[&str],
+    ) {
+        let owned_labels = labels
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>();
+        self.labels_to_remove.lock().push(Box::new(move || {
+            let _ = metric
+                .remove_label_values(&owned_labels.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+        }));
     }
 }
 
@@ -177,11 +199,13 @@ impl Collector for BatchTaskMetrics {
             ($({ $metric:ident, $type:ty },)*) => {
                 $(
                     mfs.extend(self.$metric.collect());
-                    self.$metric.reset();
                 )*
             };
         }
         for_all_task_metrics!(collect_and_clear);
+        for callback in self.labels_to_remove.lock().drain(..) {
+            callback();
+        }
         mfs
     }
 }
