@@ -532,6 +532,10 @@ impl SharedBufferBatch {
         self.inner.range_tombstone_list.clone()
     }
 
+    pub fn get_delete_range_tombstones_for_query(&self) -> Vec<DeleteRangeTombstone> {
+        self.inner.range_tombstone_list_for_query.clone()
+    }
+
     #[cfg(test)]
     fn check_tombstone_prefix(table_id: TableId, tombstones: &[DeleteRangeTombstone]) {
         for tombstone in tombstones {
@@ -1308,6 +1312,7 @@ mod tests {
         let delete_ranges = vec![
             (Bytes::from(b"111".to_vec()), Bytes::from(b"222".to_vec())),
             (Bytes::from(b"555".to_vec()), Bytes::from(b"777".to_vec())),
+            (Bytes::from(b"aaa".to_vec()), Bytes::from(b"ddd".to_vec())),
         ];
         let shared_buffer_items1: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
             (
@@ -1351,6 +1356,7 @@ mod tests {
         let delete_ranges = vec![
             (Bytes::from(b"444".to_vec()), Bytes::from(b"555".to_vec())),
             (Bytes::from(b"888".to_vec()), Bytes::from(b"999".to_vec())),
+            (Bytes::from(b"bbb".to_vec()), Bytes::from(b"ccc".to_vec())),
         ];
         let shared_buffer_items2: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
             (
@@ -1388,6 +1394,11 @@ mod tests {
 
         let imms = vec![imm2, imm1];
         let merged_imm = merge_imms_in_memory(table_id, 0, imms, None).await.unwrap();
+
+        assert_ne!(
+            merged_imm.get_delete_range_tombstones(),
+            merged_imm.get_delete_range_tombstones_for_query()
+        );
 
         assert_eq!(
             Some(1),
