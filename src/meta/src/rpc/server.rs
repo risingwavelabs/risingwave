@@ -575,7 +575,10 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let mgr = TelemetryManager::new(
         local_system_params_manager.watch_params(),
         Arc::new(MetaTelemetryInfoFetcher::new(meta_store.clone())),
-        Arc::new(MetaReportCreator::new(cluster_manager)),
+        Arc::new(MetaReportCreator::new(
+            cluster_manager,
+            meta_store.meta_store_type(),
+        )),
     );
 
     {

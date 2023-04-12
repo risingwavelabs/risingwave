@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use risingwave_common::config::MetaBackend;
 use risingwave_common::telemetry::report::{TelemetryInfoFetcher, TelemetryReportCreator};
 use risingwave_common::telemetry::{
     current_timestamp, SystemData, TelemetryNodeType, TelemetryReport, TelemetryReportBase,
@@ -120,6 +121,8 @@ pub(crate) struct MetaTelemetryReport {
     #[serde(flatten)]
     base: TelemetryReportBase,
     node_count: NodeCount,
+    // At this point, it will always be etcd, but we will enable telemetry when using memory.
+    meta_backend: MetaBackend,
 }
 
 impl TelemetryReport for MetaTelemetryReport {
@@ -153,11 +156,15 @@ impl<S: MetaStore> TelemetryInfoFetcher for MetaTelemetryInfoFetcher<S> {
 #[derive(Clone)]
 pub(crate) struct MetaReportCreator<S: MetaStore> {
     cluster_mgr: Arc<ClusterManager<S>>,
+    meta_backend: MetaBackend,
 }
 
 impl<S: MetaStore> MetaReportCreator<S> {
-    pub(crate) fn new(cluster_mgr: Arc<ClusterManager<S>>) -> Self {
-        Self { cluster_mgr }
+    pub(crate) fn new(cluster_mgr: Arc<ClusterManager<S>>, meta_backend: MetaBackend) -> Self {
+        Self {
+            cluster_mgr,
+            meta_backend,
+        }
     }
 }
 
@@ -185,6 +192,7 @@ impl<S: MetaStore> TelemetryReportCreator for MetaReportCreator<S> {
                 frontend_count: *node_map.get(&WorkerType::Frontend).unwrap_or(&0),
                 compactor_count: *node_map.get(&WorkerType::Compactor).unwrap_or(&0),
             },
+            meta_backend: self.meta_backend,
         })
     }
 
