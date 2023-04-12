@@ -46,3 +46,4 @@ pub mod trigonometric;
 pub mod trim;
 pub mod tumble;
 pub mod upper;
+pub mod int256;

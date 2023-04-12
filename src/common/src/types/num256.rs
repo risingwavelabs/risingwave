@@ -191,8 +191,8 @@ impl Int256 {
     pub fn from_str_hex(src: &str) -> Result<Self, ParseIntError> {
         // `i256::str_from_hex` doesn't support uppercase "0X", so when it fails
         // it will try to parse the lowercase version of the `src`
-        i256::from_str_hex(src)
-            .or_else(|_| i256::from_str_hex(&src.to_lowercase()))
+        i256::from_str_prefixed(src)
+            .or_else(|_| i256::from_str_prefixed(&src.to_lowercase()))
             .map(Into::into)
     }
 }

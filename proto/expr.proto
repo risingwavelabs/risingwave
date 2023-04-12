@@ -144,6 +144,9 @@ message ExprNode {
     CARDINALITY = 537;
     ARRAY_REMOVE = 538;
 
+    // Int256 functions
+    HEX_TO_INT256 = 540;
+
     // Jsonb functions
 
     // jsonb -> int, jsonb -> text, jsonb #> text[] that returns jsonb
