@@ -60,12 +60,6 @@ pub fn extract_vnode_id_from_row_id(id: RowId) -> VirtualNode {
 }
 
 impl RowIdGenerator {
-    /// Create a new `RowIdGenerator` with given single virtual node.
-    #[cfg(test)]
-    pub fn for_test(vnode: VirtualNode) -> Self {
-        Self::new(std::iter::once(vnode))
-    }
-
     /// Create a new `RowIdGenerator` with given virtual nodes.
     pub fn new(vnodes: impl IntoIterator<Item = VirtualNode>) -> Self {
         let base = *UNIX_RISINGWAVE_DATE_EPOCH;
@@ -191,7 +185,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_generator() {
-        let mut generator = RowIdGenerator::for_test(VirtualNode::from_index(0));
+        let mut generator = RowIdGenerator::new([VirtualNode::from_index(0)]);
 
         let mut last_row_id = generator.next();
         for _ in 0..100000 {
@@ -208,7 +202,7 @@ mod tests {
         );
         assert_eq!(row_id & (SEQUENCE_UPPER_BOUND as i64 - 1), 0);
 
-        let mut generator = RowIdGenerator::for_test(VirtualNode::from_index(1));
+        let mut generator = RowIdGenerator::new([VirtualNode::from_index(1)]);
         let row_ids = generator.next_batch((SEQUENCE_UPPER_BOUND + 10) as usize);
         let mut expected = (0..SEQUENCE_UPPER_BOUND).collect_vec();
         expected.extend(0..10);
