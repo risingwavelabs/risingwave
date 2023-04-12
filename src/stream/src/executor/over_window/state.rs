@@ -24,11 +24,11 @@ use smallvec::SmallVec;
 use super::window_func_call::Frame;
 use super::{StateKey, StateOutput, StatePos, WindowFuncState};
 
-struct BufferValue(StateKey, Datum);
+struct BufferEntry(StateKey, Datum);
 
 pub(super) struct LagState {
     offset: usize,
-    buffer: VecDeque<BufferValue>,
+    buffer: VecDeque<BufferEntry>,
     curr_idx: usize,
 }
 
@@ -46,7 +46,7 @@ impl LagState {
 impl WindowFuncState for LagState {
     fn append(&mut self, key: StateKey, args: SmallVec<[Datum; 2]>) {
         self.buffer
-            .push_back(BufferValue(key, args.into_iter().next().unwrap()));
+            .push_back(BufferEntry(key, args.into_iter().next().unwrap()));
     }
 
     fn curr_window(&self) -> StatePos<'_> {
@@ -57,7 +57,7 @@ impl WindowFuncState for LagState {
         let curr_key = self
             .buffer
             .get(self.curr_idx)
-            .map(|BufferValue(key, _)| key);
+            .map(|BufferEntry(key, _)| key);
         StatePos {
             key: curr_key,
             is_ready: curr_key.is_some(),
@@ -76,7 +76,7 @@ impl WindowFuncState for LagState {
         } else {
             // in the other case, the first item in buffer is always the `LAG(offset)` row
             assert_eq!(self.curr_idx, self.offset);
-            let BufferValue(key, value) = self.buffer.pop_front().unwrap();
+            let BufferEntry(key, value) = self.buffer.pop_front().unwrap();
             StateOutput {
                 return_value: value,
                 last_evicted_key: Some(key),
@@ -87,7 +87,7 @@ impl WindowFuncState for LagState {
 
 pub(super) struct LeadState {
     offset: usize,
-    buffer: VecDeque<BufferValue>,
+    buffer: VecDeque<BufferEntry>,
 }
 
 impl LeadState {
@@ -103,11 +103,11 @@ impl LeadState {
 impl WindowFuncState for LeadState {
     fn append(&mut self, key: StateKey, args: SmallVec<[Datum; 2]>) {
         self.buffer
-            .push_back(BufferValue(key, args.into_iter().next().unwrap()));
+            .push_back(BufferEntry(key, args.into_iter().next().unwrap()));
     }
 
     fn curr_window(&self) -> StatePos<'_> {
-        let curr_key = self.buffer.front().map(|BufferValue(key, _)| key);
+        let curr_key = self.buffer.front().map(|BufferEntry(key, _)| key);
         StatePos {
             key: curr_key,
             is_ready: self.buffer.len() > self.offset,
@@ -117,7 +117,7 @@ impl WindowFuncState for LeadState {
     fn output(&mut self) -> StateOutput {
         debug_assert!(self.curr_window().is_ready);
         let lead_value = self.buffer[self.offset].1.clone();
-        let BufferValue(key, _) = self.buffer.pop_front().unwrap();
+        let BufferEntry(key, _) = self.buffer.pop_front().unwrap();
         StateOutput {
             return_value: lead_value,
             last_evicted_key: Some(key),
