@@ -3,7 +3,7 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-source ci/scripts/common.env.sh
+source ci/scripts/common.sh
 
 while getopts 'p:' opt; do
     case ${opt} in
@@ -21,16 +21,10 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-echo "--- Download artifacts"
-mkdir -p target/debug
-buildkite-agent artifact download risingwave-"$profile" target/debug/
-buildkite-agent artifact download risedev-dev-"$profile" target/debug/
-buildkite-agent artifact download librisingwave_java_binding.so-"$profile" target/debug
-mv target/debug/risingwave-"$profile" target/debug/risingwave
-mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
-mv target/debug/librisingwave_java_binding.so-"$profile" target/debug/librisingwave_java_binding.so
+download_and_prepare_rw "$profile" source
 
-export RW_JAVA_BINDING_LIB_PATH=${PWD}/target/debug
+download_java_binding "$profile"
+
 # TODO: Switch to stream_chunk encoding once it's completed, and then remove json encoding as well as this env var.
 export RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT=stream_chunk
 
@@ -38,18 +32,6 @@ echo "--- Download connector node package"
 buildkite-agent artifact download risingwave-connector.tar.gz ./
 mkdir ./connector-node
 tar xf ./risingwave-connector.tar.gz -C ./connector-node
-
-
-echo "--- Adjust permission"
-chmod +x ./target/debug/risingwave
-chmod +x ./target/debug/risedev-dev
-
-echo "--- Generate RiseDev CI config"
-cp ci/risedev-components.ci.source.env risedev-components.user.env
-
-echo "--- Prepare RiseDev dev cluster"
-cargo make pre-start-dev
-cargo make link-all-in-one-binaries
 
 # prepare environment mysql sink
 mysql --host=mysql --port=3306 -u root -p123456 -e "CREATE DATABASE IF NOT EXISTS test;"
@@ -121,3 +103,12 @@ fi
 echo "--- Kill cluster"
 cargo make ci-kill
 pkill -f connector-node
+
+echo "--- e2e, ci-1cn-1fe, nexmark endless"
+RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+cargo make ci-start ci-1cn-1fe
+sqllogictest -p 4566 -d dev './e2e_test/source/nexmark_endless_mvs/*.slt'
+sqllogictest -p 4566 -d dev './e2e_test/source/nexmark_endless_sinks/*.slt'
+
+echo "--- Kill cluster"
+cargo make ci-kill

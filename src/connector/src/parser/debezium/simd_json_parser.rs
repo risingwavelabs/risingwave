@@ -21,7 +21,7 @@ use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 
 use super::operators::*;
 use crate::impl_common_parser_logic;
-use crate::parser::common::simd_json_parse_value;
+use crate::parser::common::{json_object_smart_get_value, simd_json_parse_value};
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{SourceColumnDesc, SourceContextRef};
 
@@ -96,11 +96,11 @@ impl DebeziumJsonParser {
                 writer.update(|column| {
                     let before = simd_json_parse_value(
                         &column.data_type,
-                        before.get(column.name_in_lower_case.as_str()),
+                        json_object_smart_get_value(before, (&column.name).into()),
                     )?;
                     let after = simd_json_parse_value(
                         &column.data_type,
-                        after.get(column.name_in_lower_case.as_str()),
+                        json_object_smart_get_value(after, (&column.name).into()),
                     )?;
 
                     Ok((before, after))
@@ -119,7 +119,7 @@ impl DebeziumJsonParser {
                 writer.insert(|column| {
                     simd_json_parse_value(
                         &column.data_type,
-                        after.get(column.name_in_lower_case.as_str()),
+                        json_object_smart_get_value(after, (&column.name).into()),
                     )
                     .map_err(Into::into)
                 })
@@ -137,7 +137,7 @@ impl DebeziumJsonParser {
                 writer.delete(|column| {
                     simd_json_parse_value(
                         &column.data_type,
-                        before.get(column.name_in_lower_case.as_str()),
+                        json_object_smart_get_value(before, (&column.name).into()),
                     )
                     .map_err(Into::into)
                 })

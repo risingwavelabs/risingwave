@@ -16,15 +16,16 @@ use std::convert::TryInto;
 use std::fmt::Debug;
 
 use chrono::{Duration, NaiveDateTime};
-use num_traits::real::Real;
-use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed, Zero};
+use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Float, Signed, Zero};
 use risingwave_common::types::{CheckedAdd, Date, Decimal, Interval, Time, Timestamp, F64};
 use risingwave_expr_macro::function;
+use rust_decimal::MathematicalOps;
 
 use crate::{ExprError, Result};
 
 #[function("add(*number, *number) -> auto")]
 #[function("add(interval, interval) -> interval")]
+#[function("add(int256, int256) -> int256")]
 pub fn general_add<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -38,6 +39,7 @@ where
 
 #[function("subtract(*number, *number) -> auto")]
 #[function("subtract(interval, interval) -> interval")]
+#[function("subtract(int256, int256) -> int256")]
 pub fn general_sub<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -50,6 +52,7 @@ where
 }
 
 #[function("multiply(*number, *number) -> auto")]
+#[function("multiply(int256, int256) -> int256")]
 pub fn general_mul<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -62,6 +65,7 @@ where
 }
 
 #[function("divide(*number, *number) -> auto")]
+#[function("divide(int256, int256) -> int256")]
 pub fn general_div<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -80,6 +84,7 @@ where
 }
 
 #[function("modulus(*number, *number) -> auto")]
+#[function("modulus(int256, int256) -> int256")]
 pub fn general_mod<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -101,6 +106,17 @@ pub fn general_neg<T1: CheckedNeg>(expr: T1) -> Result<T1> {
     expr.checked_neg().ok_or(ExprError::NumericOutOfRange)
 }
 
+#[function("neg(int256) -> int256")]
+pub fn int256_neg<TRef, T>(expr: TRef) -> Result<T>
+where
+    TRef: Into<T> + Debug,
+    T: CheckedNeg + Debug,
+{
+    expr.into()
+        .checked_neg()
+        .ok_or(ExprError::NumericOutOfRange)
+}
+
 #[function("abs(int16) -> int16")]
 #[function("abs(int32) -> int32")]
 #[function("abs(int64) -> int64")]
@@ -109,6 +125,20 @@ pub fn general_neg<T1: CheckedNeg>(expr: T1) -> Result<T1> {
 pub fn general_abs<T1: Signed + CheckedNeg>(expr: T1) -> Result<T1> {
     if expr.is_negative() {
         general_neg(expr)
+    } else {
+        Ok(expr)
+    }
+}
+
+#[function("abs(int256) -> int256")]
+pub fn int256_abs<TRef, T>(expr: TRef) -> Result<T>
+where
+    TRef: Into<T> + Debug,
+    T: Signed + CheckedNeg + Debug,
+{
+    let expr = expr.into();
+    if expr.is_negative() {
+        int256_neg(expr)
     } else {
         Ok(expr)
     }
@@ -327,6 +357,39 @@ where
     r.mul_float(l).ok_or(ExprError::NumericOutOfRange)
 }
 
+#[function("sqrt(float64) -> float64")]
+pub fn sqrt_f64(expr: F64) -> Result<F64> {
+    if expr < F64::from(0.0) {
+        return Err(ExprError::InvalidParam {
+            name: "sqrt input",
+            reason: "input cannot be negative value".to_string(),
+        });
+    }
+    // Edge cases: nan, inf, negative zero should return itself.
+    match expr.is_nan() || expr == f64::INFINITY || expr.is_negative() {
+        true => Ok(expr),
+        false => Ok(expr.sqrt()),
+    }
+}
+
+#[function("sqrt(decimal) -> decimal")]
+pub fn sqrt_decimal(expr: Decimal) -> Result<Decimal> {
+    match expr {
+        Decimal::NaN | Decimal::PositiveInf => Ok(expr),
+        Decimal::Normalized(value) => match value.sqrt() {
+            Some(res) => Ok(Decimal::from(res)),
+            None => Err(ExprError::InvalidParam {
+                name: "sqrt input",
+                reason: "input cannot be negative value".to_string(),
+            }),
+        },
+        Decimal::NegativeInf => Err(ExprError::InvalidParam {
+            name: "sqrt input",
+            reason: "input cannot be negative value".to_string(),
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -428,6 +491,41 @@ mod tests {
                 NaiveDateTime::parse_from_str("1993-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
             )
         );
+        assert_eq!(sqrt_f64(F64::from(25.00)).unwrap(), F64::from(5.0));
+        assert_eq!(
+            sqrt_f64(F64::from(107)).unwrap(),
+            F64::from(10.344080432788601)
+        );
+        assert_eq!(
+            sqrt_f64(F64::from(12.234567)).unwrap(),
+            F64::from(3.4977945908815173)
+        );
+        assert!(sqrt_f64(F64::from(-25.00)).is_err());
+        // sqrt edge cases.
+        assert_eq!(sqrt_f64(F64::from(f64::NAN)).unwrap(), F64::from(f64::NAN));
+        assert_eq!(
+            sqrt_f64(F64::from(f64::neg_zero())).unwrap(),
+            F64::from(f64::neg_zero())
+        );
+        assert_eq!(
+            sqrt_f64(F64::from(f64::INFINITY)).unwrap(),
+            F64::from(f64::INFINITY)
+        );
+        assert!(sqrt_f64(F64::from(f64::NEG_INFINITY)).is_err());
+        assert_eq!(sqrt_decimal(dec("25.0")).unwrap(), dec("5.0"));
+        assert_eq!(
+            sqrt_decimal(dec("107")).unwrap(),
+            dec("10.344080432788600469738599442")
+        );
+        assert_eq!(
+            sqrt_decimal(dec("12.234567")).unwrap(),
+            dec("3.4977945908815171589625746860")
+        );
+        assert!(sqrt_decimal(dec("-25.0")).is_err());
+        assert_eq!(sqrt_decimal(dec("nan")).unwrap(), dec("nan"));
+        assert_eq!(sqrt_decimal(dec("inf")).unwrap(), dec("inf"));
+        assert_eq!(sqrt_decimal(dec("-0")).unwrap(), dec("-0"));
+        assert!(sqrt_decimal(dec("-inf")).is_err());
     }
 
     fn dec(s: &str) -> Decimal {

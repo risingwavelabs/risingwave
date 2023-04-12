@@ -4703,7 +4703,6 @@ dependencies = [
  "regex",
  "risingwave_common",
  "risingwave_sqlparser",
- "rust_decimal",
  "thiserror",
  "tokio-openssl",
  "tokio-postgres",
@@ -6147,9 +6146,9 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap 4.1.11",
+ "madsim-tokio",
  "pg_interval",
  "rust_decimal",
- "tokio",
  "tokio-postgres",
  "tracing",
  "tracing-subscriber",
@@ -6183,6 +6182,7 @@ dependencies = [
  "risingwave_expr_macro",
  "risingwave_pb",
  "risingwave_udf",
+ "rust_decimal",
  "serde_json",
  "speedate",
  "static_assertions",
@@ -6540,6 +6540,7 @@ dependencies = [
  "risingwave_compactor",
  "risingwave_compute",
  "risingwave_ctl",
+ "risingwave_e2e_extended_mode_test",
  "risingwave_frontend",
  "risingwave_meta",
  "risingwave_pb",
@@ -6882,7 +6883,6 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_json",
- "tokio-postgres",
 ]
 
 [[package]]
@@ -7352,8 +7352,9 @@ dependencies = [
 
 [[package]]
 name = "simd-json"
-version = "0.7.0"
-source = "git+https://github.com/tabVersion/simd-json.git?branch=main#b52fef754645ecf07c059b42d1b995f3c9f96063"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1663db38e6e50038d4de020667c364490d43473ad6d073822a6af6576fc343a5"
 dependencies = [
  "halfbrown",
  "lexical-core",
