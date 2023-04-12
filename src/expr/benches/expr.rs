@@ -205,6 +205,15 @@ fn bench_expr(c: &mut Criterion) {
             .to_async(FuturesExecutor)
             .iter(|| constant.eval(&input))
     });
+    c.bench_function("extract(constant)", |bencher| {
+        let extract = build_from_pretty(format!(
+            "(extract:decimal HOUR:varchar ${}:timestamp)",
+            input_index_for_type(DataType::Timestamp)
+        ));
+        bencher
+            .to_async(FuturesExecutor)
+            .iter(|| extract.eval(&input))
+    });
 
     let sigs = func_sigs();
     let sigs = sigs.sorted_by_cached_key(|sig| format!("{sig:?}"));

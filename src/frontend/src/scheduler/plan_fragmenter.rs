@@ -38,6 +38,7 @@ use uuid::Uuid;
 
 use super::SchedulerError;
 use crate::catalog::catalog_service::CatalogReader;
+use crate::catalog::TableId;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{PlanNodeId, PlanNodeType};
 use crate::optimizer::property::Distribution;
@@ -357,6 +358,7 @@ pub struct QueryStage {
     pub table_scan_info: Option<TableScanInfo>,
     pub source_info: Option<SourceScanInfo>,
     pub has_lookup_join: bool,
+    pub dml_table_id: Option<TableId>,
 
     /// Used to generate exchange information when complete source scan information.
     children_exchange_distribution: Option<HashMap<StageId, Distribution>>,
@@ -387,6 +389,7 @@ impl QueryStage {
                 table_scan_info: self.table_scan_info.clone(),
                 source_info: self.source_info.clone(),
                 has_lookup_join: self.has_lookup_join,
+                dml_table_id: self.dml_table_id,
                 children_exchange_distribution: self.children_exchange_distribution.clone(),
             };
         }
@@ -414,6 +417,7 @@ impl QueryStage {
             table_scan_info: self.table_scan_info.clone(),
             source_info: Some(source_info),
             has_lookup_join: self.has_lookup_join,
+            dml_table_id: self.dml_table_id,
             children_exchange_distribution: None,
         }
     }
@@ -457,11 +461,13 @@ struct QueryStageBuilder {
     table_scan_info: Option<TableScanInfo>,
     source_info: Option<SourceScanInfo>,
     has_lookup_join: bool,
+    dml_table_id: Option<TableId>,
 
     children_exchange_distribution: HashMap<StageId, Distribution>,
 }
 
 impl QueryStageBuilder {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         id: StageId,
         query_id: QueryId,
@@ -470,6 +476,7 @@ impl QueryStageBuilder {
         table_scan_info: Option<TableScanInfo>,
         source_info: Option<SourceScanInfo>,
         has_lookup_join: bool,
+        dml_table_id: Option<TableId>,
     ) -> Self {
         Self {
             query_id,
@@ -481,6 +488,7 @@ impl QueryStageBuilder {
             table_scan_info,
             source_info,
             has_lookup_join,
+            dml_table_id,
             children_exchange_distribution: HashMap::new(),
         }
     }
@@ -500,6 +508,7 @@ impl QueryStageBuilder {
             table_scan_info: self.table_scan_info,
             source_info: self.source_info,
             has_lookup_join: self.has_lookup_join,
+            dml_table_id: self.dml_table_id,
             children_exchange_distribution,
         });
 
@@ -780,7 +789,7 @@ impl BatchPlanFragmenter {
         } else {
             Some(parallelism as u32)
         };
-
+        let dml_table_id = Self::collect_dml_table_id(&root);
         let mut builder = QueryStageBuilder::new(
             next_stage_id,
             self.query_id.clone(),
@@ -789,6 +798,7 @@ impl BatchPlanFragmenter {
             table_scan_info,
             source_info,
             has_lookup_join,
+            dml_table_id,
         );
 
         self.visit_node(root, &mut builder, None)?;
@@ -922,6 +932,24 @@ impl BatchPlanFragmenter {
                 .into_iter()
                 .find_map(|n| self.collect_stage_table_scan(n).transpose())
                 .transpose()
+        }
+    }
+
+    /// Returns the dml table id if any.
+    fn collect_dml_table_id(node: &PlanRef) -> Option<TableId> {
+        if node.node_type() == PlanNodeType::BatchExchange {
+            return None;
+        }
+        if let Some(insert) = node.as_batch_insert() {
+            Some(insert.logical.table_id())
+        } else if let Some(update) = node.as_batch_update() {
+            Some(update.logical.table_id())
+        } else if let Some(delete) = node.as_batch_delete() {
+            Some(delete.logical.table_id())
+        } else {
+            node.inputs()
+                .into_iter()
+                .find_map(|n| Self::collect_dml_table_id(&n))
         }
     }
 

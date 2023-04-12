@@ -64,9 +64,11 @@ pub(crate) mod data_types;
 pub(crate) mod template;
 pub(crate) mod template_fast;
 pub mod test_utils;
+mod value;
 
 use std::sync::Arc;
 
+use futures_util::TryFutureExt;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
@@ -76,9 +78,14 @@ pub use self::agg::AggKind;
 pub use self::build::*;
 pub use self::expr_input_ref::InputRefExpression;
 pub use self::expr_literal::LiteralExpression;
+pub use self::value::{ValueImpl, ValueRef};
 use super::{ExprError, Result};
 
-/// Instance of an expression
+/// Interface of an expression.
+///
+/// There're two functions to evaluate an expression: `eval` and `eval_v2`, exactly one of them
+/// should be implemented. Prefer calling and implementing `eval_v2` instead of `eval` if possible,
+/// to gain the performance benefit of scalar expression.
 #[async_trait::async_trait]
 pub trait Expression: std::fmt::Debug + Sync + Send {
     /// Get the return data type.
@@ -94,14 +101,30 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
         Ok(res)
     }
 
-    /// Evaluate the expression
+    /// Evaluate the expression in vectorized execution. Returns an array.
     ///
-    /// # Arguments
-    ///
-    /// * `input` - input data of the Project Executor
-    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef>;
+    /// The default implementation calls `eval_v2` and always converts the result to an array.
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let value = self.eval_v2(input).await?;
+        Ok(match value {
+            ValueImpl::Array(array) => array,
+            ValueImpl::Scalar { value, capacity } => {
+                let mut builder = self.return_type().create_array_builder(capacity);
+                builder.append_datum_n(capacity, value);
+                builder.finish().into()
+            }
+        })
+    }
 
-    /// Evaluate the expression in row-based execution.
+    /// Evaluate the expression in vectorized execution. Returns a value that can be either an
+    /// array, or a scalar if all values in the array are the same.
+    ///
+    /// The default implementation calls `eval` and puts the result into the `Array` variant.
+    async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
+        self.eval(input).map_ok(ValueImpl::Array).await
+    }
+
+    /// Evaluate the expression in row-based execution. Returns a nullable scalar.
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum>;
 
     /// Evaluate if the expression is constant.

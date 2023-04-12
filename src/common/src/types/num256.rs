@@ -17,7 +17,7 @@ use std::hash::Hasher;
 use std::mem;
 
 use bytes::Bytes;
-use ethnum::{I256, U256};
+use ethnum::I256;
 use postgres_types::{ToSql, Type};
 use risingwave_pb::data::ArrayType;
 use serde::{Serialize, Serializer};
@@ -26,11 +26,6 @@ use to_text::ToText;
 use crate::array::ArrayResult;
 use crate::types::to_binary::ToBinary;
 use crate::types::{to_text, DataType, Scalar, ScalarRef};
-
-#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
-pub struct Uint256(Box<U256>);
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
-pub struct Uint256Ref<'a>(pub &'a U256);
 
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
 pub struct Int256(Box<I256>);
@@ -141,5 +136,4 @@ macro_rules! impl_common_for_num256 {
     };
 }
 
-impl_common_for_num256!(Uint256, Uint256Ref<'a>, U256, Uint256);
 impl_common_for_num256!(Int256, Int256Ref<'a>, I256, Int256);

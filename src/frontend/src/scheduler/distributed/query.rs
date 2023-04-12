@@ -368,9 +368,7 @@ impl QueryRunner {
         let root_stage_result = QueryResultFetcher::new(
             root_task_output_id,
             // Execute in local, so no need to fill meaningful address.
-            HostAddress {
-                ..Default::default()
-            },
+            HostAddress::default(),
             chunk_rx,
             self.query.query_id.clone(),
             self.query_execution_info.clone(),

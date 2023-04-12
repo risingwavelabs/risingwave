@@ -44,9 +44,7 @@ use self::command::CommandContext;
 use self::info::BarrierActorInfo;
 use self::notifier::Notifier;
 use self::progress::TrackingCommand;
-use self::snapshot::SnapshotManagerRef;
 use crate::barrier::progress::CreateMviewProgressTracker;
-use crate::barrier::snapshot::SnapshotManager;
 use crate::barrier::BarrierEpochState::{Completed, InFlight};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{
@@ -65,7 +63,6 @@ mod notifier;
 mod progress;
 mod recovery;
 mod schedule;
-mod snapshot;
 
 pub use self::command::{Command, Reschedule};
 pub use self::schedule::BarrierScheduler;
@@ -138,8 +135,6 @@ pub struct GlobalBarrierManager<S: MetaStore> {
     fragment_manager: FragmentManagerRef<S>,
 
     hummock_manager: HummockManagerRef<S>,
-
-    snapshot_manager: SnapshotManagerRef<S>,
 
     source_manager: SourceManagerRef<S>,
 
@@ -491,7 +486,6 @@ where
         let enable_recovery = env.opts.enable_recovery;
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
 
-        let snapshot_manager = SnapshotManager::new(hummock_manager.clone()).into();
         let tracker = CreateMviewProgressTracker::new();
         Self {
             enable_recovery,
@@ -502,7 +496,6 @@ where
             catalog_manager,
             fragment_manager,
             hummock_manager,
-            snapshot_manager,
             source_manager,
             metrics,
             env,
@@ -652,7 +645,6 @@ where
 
         let command_ctx = Arc::new(CommandContext::new(
             self.fragment_manager.clone(),
-            self.snapshot_manager.clone(),
             self.env.stream_client_pool_ref(),
             info,
             prev_epoch,
@@ -872,10 +864,6 @@ where
             self.set_status(BarrierManagerStatus::Recovering).await;
             let mut tracker = self.tracker.lock().await;
             *tracker = CreateMviewProgressTracker::new();
-            self.snapshot_manager
-                .unpin_all()
-                .await
-                .expect("unpin meta's snapshots");
             let new_epoch = self.recovery(state.in_flight_prev_epoch).await;
             state.in_flight_prev_epoch = new_epoch;
             state

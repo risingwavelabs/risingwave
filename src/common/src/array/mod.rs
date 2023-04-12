@@ -67,9 +67,7 @@ pub use utf8_array::*;
 pub use vis::{Vis, VisRef};
 
 pub use self::error::ArrayError;
-pub use crate::array::num256_array::{
-    Int256Array, Int256ArrayBuilder, Uint256Array, Uint256ArrayBuilder,
-};
+pub use crate::array::num256_array::{Int256Array, Int256ArrayBuilder};
 use crate::buffer::Bitmap;
 use crate::collection::estimate_size::EstimateSize;
 use crate::types::*;
@@ -346,7 +344,6 @@ macro_rules! for_all_variants {
             { Int32, int32, I32Array, I32ArrayBuilder },
             { Int64, int64, I64Array, I64ArrayBuilder },
             { Int256, int256, Int256Array, Int256ArrayBuilder },
-            { Uint256, uint256, Uint256Array, Uint256ArrayBuilder },
             { Float32, float32, F32Array, F32ArrayBuilder },
             { Float64, float64, F64Array, F64ArrayBuilder },
             { Utf8, utf8, Utf8Array, Utf8ArrayBuilder },
@@ -387,12 +384,6 @@ impl<T: PrimitiveArrayItemType> From<PrimitiveArray<T>> for ArrayImpl {
 impl From<Int256Array> for ArrayImpl {
     fn from(arr: Int256Array) -> Self {
         Self::Int256(arr)
-    }
-}
-
-impl From<Uint256Array> for ArrayImpl {
-    fn from(arr: Uint256Array) -> Self {
-        Self::Uint256(arr)
     }
 }
 
@@ -731,7 +722,6 @@ impl ArrayImpl {
                 read_string_array::<BytesArrayBuilder, BytesValueReader>(array, cardinality)?
             }
             PbArrayType::Int256 => Int256Array::from_protobuf(array, cardinality)?,
-            PbArrayType::Uint256 => Uint256Array::from_protobuf(array, cardinality)?,
         };
         Ok(array)
     }

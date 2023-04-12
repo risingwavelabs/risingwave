@@ -48,7 +48,7 @@ use crate::catalog::{FragmentId, TableId};
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
-use crate::scheduler::{PinnedHummockSnapshot, SchedulerResult};
+use crate::scheduler::{PinnedHummockSnapshot, SchedulerError, SchedulerResult};
 use crate::session::{AuthContext, FrontendEnv};
 
 pub type LocalQueryStream = ReceiverStream<Result<DataChunk, BoxedError>>;
@@ -467,21 +467,20 @@ impl LocalQueryExecution {
     }
 
     fn choose_worker(&self, stage: &Arc<QueryStage>) -> SchedulerResult<Vec<WorkerNode>> {
-        if stage.parallelism.unwrap() == 1 {
-            if let NodeBody::Insert(insert_node) = &stage.root.node
-                && let Some(vnode_mapping) = self.get_vnode_mapping(&insert_node.table_id.into()) {
-                // #8940 dml should use streaming vnode mapping
-                    let worker_node = {
-                        let parallel_unit_ids = vnode_mapping.iter_unique().collect_vec();
-                        let candidates = self.front_env
-                            .worker_node_manager()
-                            .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
-                        candidates.choose(&mut rand::thread_rng()).unwrap().clone()
-                    };
-                    Ok(vec![worker_node])
-            } else {
-                Ok(vec![self.front_env.worker_node_manager().next_random()?])
-            }
+        if let Some(table_id) = stage.dml_table_id.as_ref() {
+            // dml should use streaming vnode mapping
+            let vnode_mapping = self
+                .get_vnode_mapping(table_id)
+                .ok_or_else(|| SchedulerError::EmptyWorkerNodes)?;
+            let worker_node = {
+                let parallel_unit_ids = vnode_mapping.iter_unique().collect_vec();
+                let candidates = self
+                    .front_env
+                    .worker_node_manager()
+                    .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
+                candidates.choose(&mut rand::thread_rng()).unwrap().clone()
+            };
+            Ok(vec![worker_node])
         } else {
             let mut workers = Vec::with_capacity(stage.parallelism.unwrap() as usize);
             for _ in 0..stage.parallelism.unwrap() {
