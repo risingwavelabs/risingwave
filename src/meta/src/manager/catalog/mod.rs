@@ -382,16 +382,25 @@ where
         let database_core = &mut core.database;
         let mut connections = BTreeMapTransaction::new(&mut database_core.connections);
 
-        let connection = connections
-            .remove(conn_id)
-            .ok_or_else(|| anyhow!("connection not found"))?;
+        // TODO(weili): wait for yezizp to refactor ref cnt
+        match database_core.relation_ref_count.get(&conn_id) {
+            Some(ref_count) => Err(MetaError::permission_denied(format!(
+                "Fail to delete connection because {} other relation(s) depend on it",
+                ref_count
+            ))),
+            None => {
+                let connection = connections
+                    .remove(conn_id)
+                    .ok_or_else(|| anyhow!("connection not found"))?;
 
-        commit_meta!(self, connections)?;
+                commit_meta!(self, connections)?;
 
-        let version = self
-            .notify_frontend(Operation::Delete, Info::Connection(connection))
-            .await;
-        Ok(version)
+                let version = self
+                    .notify_frontend(Operation::Delete, Info::Connection(connection))
+                    .await;
+                Ok(version)
+            }
+        }
     }
 
     pub async fn create_schema(&self, schema: &Schema) -> MetaResult<NotificationVersion> {
@@ -1261,6 +1270,10 @@ where
         } else {
             database_core.mark_creating(&key);
             user_core.increase_ref(source.owner);
+            if let Some(connection_id) = source.connection_id {
+                // TODO(weili): wait for yezizp to refactor ref cnt
+                database_core.increase_ref_count(connection_id);
+            }
             Ok(())
         }
     }
@@ -1315,6 +1328,10 @@ where
 
         database_core.unmark_creating(&key);
         user_core.decrease_ref(source.owner);
+        if let Some(connection_id) = source.connection_id {
+            // TODO(weili): wait for yezizp to refactor ref cnt
+            database_core.decrease_ref_count(connection_id);
+        }
         Ok(())
     }
 
@@ -1340,6 +1357,10 @@ where
                 commit_meta!(self, sources, users)?;
 
                 user_core.decrease_ref(source.owner);
+                if let Some(connection_id) = source.connection_id {
+                    // TODO(weili): wait for yezizp to refactor ref cnt
+                    database_core.decrease_ref_count(connection_id);
+                }
 
                 for user in users_need_update {
                     self.notify_frontend(Operation::Update, Info::User(user))

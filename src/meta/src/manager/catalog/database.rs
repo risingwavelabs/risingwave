@@ -65,11 +65,10 @@ pub struct DatabaseManager {
     /// Cached connection information.
     pub(super) connections: BTreeMap<ConnectionId, Connection>,
 
-    /// Relation refer count mapping.
+    /// Relation reference count mapping.
     // TODO(zehua): avoid key conflicts after distinguishing table's and source's id generator.
     pub(super) relation_ref_count: HashMap<RelationId, usize>,
-
-    // In-progress creation tracker
+    // In-progress creation tracker.
     pub(super) in_progress_creation_tracker: HashSet<RelationKey>,
     // In-progress creating streaming job tracker: this is a temporary workaround to avoid clean up
     // creating streaming jobs.
@@ -98,7 +97,13 @@ impl DatabaseManager {
                 .map(|database| (database.id, database)),
         );
         let schemas = BTreeMap::from_iter(schemas.into_iter().map(|schema| (schema.id, schema)));
-        let sources = BTreeMap::from_iter(sources.into_iter().map(|source| (source.id, source)));
+        let sources = BTreeMap::from_iter(sources.into_iter().map(|source| {
+            // TODO(weili): wait for yezizp to refactor ref cnt
+            if let Some(connection_id) = source.connection_id {
+                *relation_ref_count.entry(connection_id).or_default() += 1;
+            }
+            (source.id, source)
+        }));
         let sinks = BTreeMap::from_iter(sinks.into_iter().map(|sink| {
             for depend_relation_id in &sink.dependent_relations {
                 *relation_ref_count.entry(*depend_relation_id).or_default() += 1;
