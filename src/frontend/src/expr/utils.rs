@@ -569,8 +569,8 @@ impl ExprVisitor<bool> for FunctionalIndexVisitor {
             | ExprType::Upper
             | ExprType::JsonbAccessInner
             | ExprType::JsonbAccessStr
-            | Type::ConcatOp => true,
-            _ => false,
+            | Type::ConcatOp => {}
+            _ => return false,
         };
 
         func_call
