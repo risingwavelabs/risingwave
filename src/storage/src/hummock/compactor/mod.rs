@@ -28,7 +28,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-pub use compaction_executor::CompactionExecutor;
+pub use compaction_executor::{CompactionExecutor, TaskHandle};
 pub use compaction_filter::{
     CompactionFilter, DummyCompactionFilter, MultiCompactionFilter, StateCleanUpCompactionFilter,
     TtlCompactionFilter,

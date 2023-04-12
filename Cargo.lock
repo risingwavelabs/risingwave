@@ -1714,6 +1714,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-skiplist"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "883a5821d7d079fcf34ac55f27a833ee61678110f6b97637cc74513c0d0b42fc"
+dependencies = [
+ "cfg-if",
+ "crossbeam-epoch",
+ "crossbeam-utils",
+ "scopeguard",
+]
+
+[[package]]
 name = "crossbeam-utils"
 version = "0.8.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6706,6 +6718,7 @@ dependencies = [
  "workspace-hack",
  "xorf",
  "xxhash-rust",
+ "yatp",
  "zstd",
 ]
 
@@ -9016,6 +9029,23 @@ name = "yansi"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09041cd90cf85f7f8b2df60c646f853b7f535ce68f85244eb6731cf89fa498ec"
+
+[[package]]
+name = "yatp"
+version = "0.0.1"
+source = "git+https://github.com/tikv/yatp.git?branch=master#5523a9a6a4d0d6242bdb02b0a344f7ee1477b39b"
+dependencies = [
+ "crossbeam-deque",
+ "crossbeam-skiplist",
+ "crossbeam-utils",
+ "dashmap",
+ "fail",
+ "lazy_static",
+ "num_cpus",
+ "parking_lot_core 0.9.7",
+ "prometheus",
+ "rand 0.8.5",
+]
 
 [[package]]
 name = "zerocopy"

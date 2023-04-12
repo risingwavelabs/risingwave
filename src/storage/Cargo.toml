@@ -67,6 +67,7 @@ tracing = "0.1"
 xorf = "0.8.1"
 xxhash-rust = { version = "0.8.5", features = ["xxh32", "xxh64"] }
 zstd = "0.11.2"
+yatp = { git = "https://github.com/tikv/yatp.git", branch = "master" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = { version = "0.12", default-features = false }

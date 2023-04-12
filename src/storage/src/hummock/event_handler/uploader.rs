@@ -32,7 +32,7 @@ use risingwave_hummock_sdk::{info_in_release, CompactionGroupId, HummockEpoch, L
 use tokio::task::JoinHandle;
 use tracing::error;
 
-use crate::hummock::compactor::{merge_imms_in_memory, CompactionExecutor};
+use crate::hummock::compactor::{merge_imms_in_memory, CompactionExecutor, TaskHandle};
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -91,7 +91,7 @@ struct MergingImmTask {
     table_id: TableId,
     instance_id: LocalInstanceId,
     input_imms: Vec<ImmutableMemtable>,
-    join_handle: JoinHandle<HummockResult<ImmutableMemtable>>,
+    join_handle: TaskHandle<HummockResult<ImmutableMemtable>>,
 }
 
 impl MergingImmTask {
@@ -324,9 +324,9 @@ impl SealedData {
         self.spilled_data.clear();
         self.imms_by_table_shard.clear();
         self.merged_imms.clear();
-        self.merging_tasks
-            .iter()
-            .for_each(|task| task.join_handle.abort());
+        // self.merging_tasks
+        //     .iter()
+        //     .for_each(|task| task.join_handle.abort());
         self.merging_tasks.clear();
     }
 
@@ -397,7 +397,7 @@ impl SealedData {
         // pop from oldest merging task to restore candidate imms back
         while let Some(task) = self.merging_tasks.pop_back() {
             // cancel the task
-            task.join_handle.abort();
+            // task.join_handle.abort();
             self.imms_by_table_shard
                 .entry((task.table_id, task.instance_id))
                 .and_modify(|imms| imms.extend(task.input_imms.into_iter()));

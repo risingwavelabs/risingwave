@@ -13,14 +13,56 @@
 // limitations under the License.
 
 use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use futures::{FutureExt, TryFutureExt};
 
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use tokio::task::JoinHandle;
+use yatp::ThreadPool;
+use yatp::task::future::TaskCell;
+use tokio::sync::oneshot::{channel, Receiver};
+use crate::hummock::{HummockError, HummockResult};
+
+pub enum TypedRuntime {
+    Tokio(BackgroundShutdownRuntime),
+    Yatp(ThreadPool<TaskCell>),
+}
 
 /// `CompactionExecutor` is a dedicated runtime for compaction's CPU intensive jobs.
 pub struct CompactionExecutor {
     /// Runtime for compaction tasks.
-    runtime: BackgroundShutdownRuntime,
+    runtime: TypedRuntime,
+}
+
+pub enum TaskHandle<T> {
+    Tokio(JoinHandle<T>),
+    Yatp(Receiver<T>),
+}
+
+impl<T: Send + 'static> Future for TaskHandle<T> {
+    type Output = HummockResult<T>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.get_mut() {
+            TaskHandle::Yatp(task) => {
+                match task.poll_unpin(cx) {
+                    Poll::Pending => Poll::Pending,
+                    Poll::Ready(ret) => {
+                        Poll::Ready(ret.map_err(|_| HummockError::other("yapt pool canceled")))
+                    }
+                }
+            },
+            TaskHandle::Tokio(task) => {
+                match task.poll_unpin(cx) {
+                    Poll::Pending => Poll::Pending,
+                    Poll::Ready(ret) => {
+                        Poll::Ready(ret.map_err(|_| HummockError::other("tokio pool canceled")))
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl CompactionExecutor {
@@ -35,16 +77,28 @@ impl CompactionExecutor {
         };
 
         Self {
-            runtime: runtime.into(),
+            runtime: TypedRuntime::Tokio(runtime.into()),
         }
     }
 
     /// Send a request to the executor, returns a [`JoinHandle`] to retrieve the result.
-    pub fn spawn<F, T>(&self, t: F) -> JoinHandle<T>
+    pub fn spawn<F, T>(&self, t: F) -> TaskHandle<T>
     where
         F: Future<Output = T> + Send + 'static,
         T: Send + 'static,
     {
-        self.runtime.spawn(t)
+        match &self.runtime {
+            TypedRuntime::Tokio(pool) => {
+                TaskHandle::Tokio(pool.spawn(t))
+            }
+            TypedRuntime::Yatp(pool) => {
+                let (tx, rx) = channel();
+                pool.spawn(async move {
+                    let res = t.await;
+                    let _ = tx.send(res);
+                });
+                TaskHandle::Yatp(rx)
+            }
+        }
     }
 }
