@@ -56,22 +56,22 @@ impl ArrayRemoveExpression {
     ///
     /// ```slt
     /// query T
-    /// select array_remove(ARRAY[array[1],array[2],array[3],array[2],null::int[]], array[1]);
+    /// select array_remove(array[array[1],array[2],array[3],array[2],null::int[]], array[1]);
     /// ----
     /// {{2},{3},{2},NULL}
     ///
     /// query T
-    /// select array_remove(ARRAY[array[1],array[2],array[3],array[2],null::int[]], array[2]);
+    /// select array_remove(array[array[1],array[2],array[3],array[2],null::int[]], array[2]);
     /// ----
     ///  {{1},{3},NULL}
     ///
     /// query T
-    /// select array_remove(ARRAY[array[1],array[2],array[3],array[2],null::int[]], null::int[]);
+    /// select array_remove(array[array[1],array[2],array[3],array[2],null::int[]], null::int[]);
     /// ----
     /// {{1},{2},{3},{2}}
     ///
     /// query T
-    /// select array_remove(ARRAY[array[1],array[2],array[3],array[2],null::int[]], array[4]);
+    /// select array_remove(array[array[1],array[2],array[3],array[2],null::int[]], array[4]);
     /// ----
     /// {{1},{2},{3},{2},NULL}
     ///
@@ -81,10 +81,10 @@ impl ArrayRemoveExpression {
     /// NULL
     ///
     /// query error unknown type
-    /// select array_remove(ARRAY[array[1],array[2],array[3],array[2],null::int[]], 1);
+    /// select array_remove(array[array[1],array[2],array[3],array[2],null::int[]], 1);
     ///
     /// query error unknown type
-    /// select array_remove(ARRAY[array[1],array[2],array[3],array[2],null::int[]], array[array[3]]);
+    /// select array_remove(array[array[1],array[2],array[3],array[2],null::int[]], array[array[3]]);
     /// ```
     fn array_remove(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match left {
