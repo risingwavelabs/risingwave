@@ -90,6 +90,9 @@ impl ArrayRemoveExpression {
     ///
     /// statement error
     /// select array_remove(array[array[1],array[2],array[3],array[2],null::int[]], array[array[3]]);
+    ///
+    /// statement error
+    /// select array_remove(ARRAY[array[1],array[2],array[3],array[2],null::int[]], array[true]);
     /// ```
     fn array_remove(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match left {
