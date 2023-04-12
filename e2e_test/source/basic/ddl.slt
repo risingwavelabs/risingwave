@@ -83,3 +83,23 @@ s
 
 statement ok
 drop table s
+
+# Test create source with connection
+statement ok 
+create connection mock with (type = 'mock');
+
+statement ok
+create source s with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092'
+) row format json;
+
+statement error other relation\(s\) depend on it
+drop connection mock;
+
+statement ok
+drop source s;
+
+statement ok
+drop connection mock;
