@@ -497,12 +497,15 @@ profile:
       - use: compute-node
         port: 5687
         exporter-port: 1222
+        disable-serving: true
       - use: compute-node
         port: 5688
         exporter-port: 1223
+        disable-serving: true
       - use: compute-node
         port: 5689
         exporter-port: 1224
+        disable-serving: true
       - use: frontend
         port: 4565
         exporter-port: 2222
@@ -843,7 +846,7 @@ template:
     disable-streaming: false
 
     # Whether used for serving.
-    disable-serving: true
+    disable-serving: false
 
   meta-node:
     # Meta-node advertise address
