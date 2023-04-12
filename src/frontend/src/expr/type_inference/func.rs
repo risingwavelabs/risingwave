@@ -616,6 +616,10 @@ fn infer_type_for_special(
             ensure_arity!("now", | inputs | <= 1);
             Ok(Some(DataType::Timestamptz))
         }
+        ExprType::Proctime => {
+            ensure_arity!("proctime", | inputs | == 0);
+            Ok(Some(DataType::Timestamptz))
+        }
         _ => Ok(None),
     }
 }

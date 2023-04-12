@@ -31,6 +31,7 @@ use super::expr_regexp::RegexpMatchExpression;
 use super::expr_some_all::SomeAllExpression;
 use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
+use crate::expr::expr_proctime::ProcTimeExpression;
 use crate::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpression};
 use crate::sig::func::FUNC_SIG_MAP;
 use crate::{bail, ExprError, Result};
@@ -83,6 +84,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         E::Vnode => VnodeExpression::try_from(prost).map(Expression::boxed),
         E::Udf => UdfExpression::try_from(prost).map(Expression::boxed),
         E::ArrayRemove => ArrayRemoveExpression::try_from(prost).map(Expression::boxed),
+        E::Proctime => ProcTimeExpression::try_from(prost).map(Expression::boxed),
         _ => Err(ExprError::UnsupportedFunction(format!(
             "{:?}",
             prost.get_expr_type()
