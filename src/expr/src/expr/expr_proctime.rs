@@ -53,7 +53,7 @@ impl Expression for ProcTimeExpression {
 
     async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
         let proctime = CONTEXT
-            .try_with(|context| context.get_physical_time())
+            .try_with(|context| context.get_unix_millis() * 1000)
             .map_err(|_| ExprError::Context)?;
         let datum = Some(ScalarImpl::Int64(proctime as i64));
 
@@ -65,7 +65,7 @@ impl Expression for ProcTimeExpression {
 
     async fn eval_row(&self, _input: &OwnedRow) -> Result<Datum> {
         let proctime = CONTEXT
-            .try_with(|context| context.get_physical_time())
+            .try_with(|context| context.get_unix_millis() * 1000)
             .map_err(|_| ExprError::Context)?;
         let datum = Some(ScalarImpl::Int64(proctime as i64));
 
@@ -86,8 +86,8 @@ mod tests {
     async fn test_expr_proctime() {
         let proctime_expr = ProcTimeExpression::new();
         let epoch = Epoch::now();
-        let time = epoch.physical_time();
-        let time_datum = Some(ScalarRefImpl::Int64(time as i64));
+        let time_us = epoch.as_unix_millis() * 1000;
+        let time_datum = Some(ScalarRefImpl::Int64(time_us as i64));
         let context = ExprContext::new(epoch);
         let chunk = DataChunk::new_dummy(3);
 
