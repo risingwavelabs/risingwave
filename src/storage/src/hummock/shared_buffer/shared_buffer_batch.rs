@@ -55,6 +55,7 @@ pub(crate) struct SharedBufferBatchInner {
     /// The epochs of the data in batch, sorted in ascending order (old to new)
     epochs: Vec<HummockEpoch>,
     range_tombstone_list: Vec<DeleteRangeTombstone>,
+    range_tombstone_list_for_query: Vec<DeleteRangeTombstone>,
     largest_table_key: Vec<u8>,
     smallest_table_key: Vec<u8>,
     kv_count: usize,
@@ -100,7 +101,8 @@ impl SharedBufferBatchInner {
             payload: items,
             imm_ids: vec![batch_id],
             epochs: vec![epoch],
-            range_tombstone_list: range_tombstones,
+            range_tombstone_list: range_tombstones.clone(),
+            range_tombstone_list_for_query: range_tombstones,
             kv_count,
             size,
             largest_table_key,
@@ -110,12 +112,16 @@ impl SharedBufferBatchInner {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_with_multi_epoch_batches(
         epochs: Vec<HummockEpoch>,
         payload: Vec<SharedBufferVersionedEntry>,
+        smallest_table_key: Vec<u8>,
+        largest_table_key: Vec<u8>,
         num_items: usize,
         imm_ids: Vec<ImmId>,
         range_tombstone_list: Vec<DeleteRangeTombstone>,
+        range_tombstone_list_for_query: Vec<DeleteRangeTombstone>,
         size: usize,
         tracker: Option<MemoryTracker>,
     ) -> Self {
@@ -123,28 +129,13 @@ impl SharedBufferBatchInner {
         debug_assert!(!epochs.is_empty());
         debug_assert!(epochs.is_sorted());
 
-        let (smallest_empty, mut smallest_table_key, mut largest_table_key, range_tombstones) =
-            Self::get_table_key_ends(range_tombstone_list);
-
-        if let Some(item) = payload.last() {
-            if item.0.gt(&largest_table_key) {
-                largest_table_key.clear();
-                largest_table_key.extend_from_slice(item.0.as_ref());
-            }
-        }
-        if let Some(item) = payload.first() {
-            if smallest_empty || item.0.lt(&smallest_table_key) {
-                smallest_table_key.clear();
-                smallest_table_key.extend_from_slice(item.0.as_ref());
-            }
-        }
-
         let max_imm_id = *imm_ids.iter().max().unwrap();
         Self {
             payload,
             epochs,
             imm_ids,
-            range_tombstone_list: range_tombstones,
+            range_tombstone_list,
+            range_tombstone_list_for_query,
             largest_table_key,
             smallest_table_key,
             kv_count: num_items,
@@ -238,24 +229,24 @@ impl SharedBufferBatchInner {
 
     /// Get the latest epoch that deleted the given key
     fn get_delete_range_epoch(&self, full_key: &FullKey<&[u8]>) -> Option<HummockEpoch> {
-        if self.range_tombstone_list.is_empty() {
+        if self.range_tombstone_list_for_query.is_empty() {
             return None;
         }
         let watermark = full_key.epoch;
         let mut idx = self
-            .range_tombstone_list
+            .range_tombstone_list_for_query
             .partition_point(|tombstone| tombstone.end_user_key.as_ref().le(&full_key.user_key));
-        if idx >= self.range_tombstone_list.len() {
+        if idx >= self.range_tombstone_list_for_query.len() {
             return None;
         }
         let mut epoch = None;
-        while idx < self.range_tombstone_list.len()
-            && self.range_tombstone_list[idx]
+        while idx < self.range_tombstone_list_for_query.len()
+            && self.range_tombstone_list_for_query[idx]
                 .start_user_key
                 .as_ref()
                 .le(&full_key.user_key)
         {
-            let sequence = self.range_tombstone_list[idx].sequence;
+            let sequence = self.range_tombstone_list_for_query[idx].sequence;
             if sequence > watermark {
                 idx += 1;
                 continue;
@@ -447,8 +438,18 @@ impl SharedBufferBatch {
     }
 
     #[inline(always)]
+    pub fn raw_smallest_key(&self) -> &Vec<u8> {
+        &self.inner.smallest_table_key
+    }
+
+    #[inline(always)]
     pub fn end_table_key(&self) -> TableKey<&[u8]> {
         TableKey(&self.inner.largest_table_key)
+    }
+
+    #[inline(always)]
+    pub fn raw_largest_key(&self) -> &Vec<u8> {
+        &self.inner.largest_table_key
     }
 
     /// return inclusive left endpoint, which means that all data in this batch should be larger or
@@ -758,19 +759,19 @@ impl SharedBufferDeleteRangeIterator {
 
 impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
     fn start_user_key(&self) -> UserKey<&[u8]> {
-        self.inner.range_tombstone_list[self.current_idx]
+        self.inner.range_tombstone_list_for_query[self.current_idx]
             .start_user_key
             .as_ref()
     }
 
     fn end_user_key(&self) -> UserKey<&[u8]> {
-        self.inner.range_tombstone_list[self.current_idx]
+        self.inner.range_tombstone_list_for_query[self.current_idx]
             .end_user_key
             .as_ref()
     }
 
     fn current_epoch(&self) -> HummockEpoch {
-        self.inner.range_tombstone_list[self.current_idx].sequence
+        self.inner.range_tombstone_list_for_query[self.current_idx].sequence
     }
 
     fn next(&mut self) {
@@ -784,12 +785,12 @@ impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
     fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
         self.current_idx = self
             .inner
-            .range_tombstone_list
+            .range_tombstone_list_for_query
             .partition_point(|tombstone| tombstone.end_user_key.as_ref().le(&target_user_key));
     }
 
     fn is_valid(&self) -> bool {
-        self.current_idx < self.inner.range_tombstone_list.len()
+        self.current_idx < self.inner.range_tombstone_list_for_query.len()
     }
 }
 
