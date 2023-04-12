@@ -95,7 +95,7 @@ impl ArrayPositionsExpression {
     /// statement error
     /// select array_positions(ARRAY[array[1],array[2],array[3],array[2],null::int[]], array[true]);
     /// ```
-    fn array_positions(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
+    fn evaluate(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match left {
             Some(ScalarRefImpl::List(left)) => Some(
                 ListValue::new(
@@ -111,10 +111,6 @@ impl ArrayPositionsExpression {
             ),
             _ => None,
         }
-    }
-
-    fn evaluate(&self, left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
-        Self::array_positions(left, right)
     }
 }
 
@@ -138,7 +134,7 @@ impl Expression for ArrayPositionsExpression {
             if !vis {
                 builder.append_null();
             } else {
-                builder.append_datum(&self.evaluate(left, right));
+                builder.append_datum(&Self::evaluate(left, right));
             }
         }
         Ok(Arc::new(builder.finish()))
@@ -147,7 +143,7 @@ impl Expression for ArrayPositionsExpression {
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let left_data = self.left.eval_row(input).await?;
         let right_data = self.right.eval_row(input).await?;
-        Ok(self.evaluate(left_data.to_datum_ref(), right_data.to_datum_ref()))
+        Ok(Self::evaluate(left_data.to_datum_ref(), right_data.to_datum_ref()))
     }
 }
 
