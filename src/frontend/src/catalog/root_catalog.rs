@@ -29,6 +29,7 @@ use super::source_catalog::SourceCatalog;
 use super::system_catalog::get_sys_catalogs_in_schema;
 use super::view_catalog::ViewCatalog;
 use super::{CatalogError, CatalogResult, ConnectionId, SinkId, SourceId, ViewId};
+use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
@@ -537,6 +538,21 @@ impl Catalog {
                     .get_view_by_name(view_name))
             })?
             .ok_or_else(|| CatalogError::NotFound("view", view_name.to_string()))
+    }
+
+    pub fn get_connection_by_name<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        connection_name: &str,
+    ) -> CatalogResult<(&Arc<ConnectionCatalog>, &'a str)> {
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_connection_by_name(connection_name))
+            })?
+            .ok_or_else(|| CatalogError::NotFound("connection", connection_name.to_string()))
     }
 
     pub fn get_function_by_name_args<'a>(
