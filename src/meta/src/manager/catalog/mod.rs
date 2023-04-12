@@ -384,10 +384,17 @@ where
 
         // TODO(weili): wait for yezizp to refactor ref cnt
         match database_core.relation_ref_count.get(&conn_id) {
-            Some(ref_count) => Err(MetaError::permission_denied(format!(
-                "Fail to delete connection because {} other relation(s) depend on it",
-                ref_count
-            ))),
+            Some(ref_count) => {
+                let connection_name = connections
+                    .get(&conn_id)
+                    .ok_or_else(|| anyhow!("connection not found"))?
+                    .name
+                    .clone();
+                Err(MetaError::permission_denied(format!(
+                    "Fail to delete connection {} because {} other relation(s) depend on it",
+                    connection_name, ref_count
+                )))
+            }
             None => {
                 let connection = connections
                     .remove(conn_id)

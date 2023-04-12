@@ -701,13 +701,12 @@ pub async fn handle_create_source(
 
     let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
 
-    // TODO(weili): use const instead of literal
-    let connection_name = with_properties.get("privatelink.name").map(|s| s.as_str());
+    let connection_name = with_properties.get("connection.name").map(|s| s.as_str());
     let connection_id = match connection_name {
         Some(connection_name) => Some(
             session
                 .get_connection_id_for_create(schema_name, connection_name)
-                .map_err(|_| ErrorCode::ItemNotFound("jaja".to_string()))?,
+                .map_err(|_| ErrorCode::ItemNotFound(connection_name.to_string()))?,
         ),
         None => None,
     };
