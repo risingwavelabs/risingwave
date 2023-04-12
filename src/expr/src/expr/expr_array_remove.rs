@@ -80,10 +80,15 @@ impl ArrayRemoveExpression {
     /// ----
     /// NULL
     ///
-    /// query error unknown type
+    /// query T
+    /// select array_remove(ARRAY[array[1],array[2],array[3],array[2],null::int[]], array[3.14]);
+    /// ----
+    /// {{1},{2},{3},{2},NULL}
+    ///
+    /// statement error
     /// select array_remove(array[array[1],array[2],array[3],array[2],null::int[]], 1);
     ///
-    /// query error unknown type
+    /// statement error
     /// select array_remove(array[array[1],array[2],array[3],array[2],null::int[]], array[array[3]]);
     /// ```
     fn array_remove(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
