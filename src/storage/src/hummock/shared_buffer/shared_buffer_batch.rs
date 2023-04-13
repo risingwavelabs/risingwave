@@ -34,8 +34,12 @@ use crate::hummock::iterator::{
 use crate::hummock::store::memtable::ImmId;
 use crate::hummock::utils::{range_overlap, MemoryTracker};
 use crate::hummock::value::HummockValue;
-use crate::hummock::{DeleteRangeTombstone, HummockEpoch, HummockResult};
+use crate::hummock::{
+    create_monotonic_events, DeleteRangeTombstone, HummockEpoch, HummockResult,
+    MonotonicDeleteEvent,
+};
 use crate::storage_value::StorageValue;
+use crate::store::ReadOptions;
 
 /// The key is `table_key`, which does not contain table id or epoch.
 pub(crate) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
@@ -55,7 +59,7 @@ pub(crate) struct SharedBufferBatchInner {
     /// The epochs of the data in batch, sorted in ascending order (old to new)
     epochs: Vec<HummockEpoch>,
     range_tombstone_list: Vec<DeleteRangeTombstone>,
-    range_tombstone_list_for_query: Vec<DeleteRangeTombstone>,
+    monotonic_tombstone_events: Vec<MonotonicDeleteEvent>,
     largest_table_key: Vec<u8>,
     smallest_table_key: Vec<u8>,
     kv_count: usize,
@@ -96,13 +100,25 @@ impl SharedBufferBatchInner {
             .map(|(k, v)| (k, vec![(epoch, v)]))
             .collect_vec();
 
+        let mut monotonic_tombstone_events = Vec::with_capacity(range_tombstones.len() * 2);
+        for range_tombstone in &range_tombstones {
+            monotonic_tombstone_events.push(MonotonicDeleteEvent {
+                event_key: range_tombstone.start_user_key.clone(),
+                new_epoch: range_tombstone.sequence,
+            });
+            monotonic_tombstone_events.push(MonotonicDeleteEvent {
+                event_key: range_tombstone.end_user_key.clone(),
+                new_epoch: HummockEpoch::MAX,
+            });
+        }
+
         let batch_id = SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed);
         SharedBufferBatchInner {
             payload: items,
             imm_ids: vec![batch_id],
             epochs: vec![epoch],
-            range_tombstone_list: range_tombstones.clone(),
-            range_tombstone_list_for_query: range_tombstones,
+            range_tombstone_list: range_tombstones,
+            monotonic_tombstone_events,
             kv_count,
             size,
             largest_table_key,
@@ -121,7 +137,6 @@ impl SharedBufferBatchInner {
         num_items: usize,
         imm_ids: Vec<ImmId>,
         range_tombstone_list: Vec<DeleteRangeTombstone>,
-        range_tombstone_list_for_query: Vec<DeleteRangeTombstone>,
         size: usize,
         tracker: Option<MemoryTracker>,
     ) -> Self {
@@ -130,12 +145,14 @@ impl SharedBufferBatchInner {
         debug_assert!(epochs.is_sorted());
 
         let max_imm_id = *imm_ids.iter().max().unwrap();
+
+        let monotonic_tombstone_events = create_monotonic_events(&range_tombstone_list);
         Self {
             payload,
             epochs,
             imm_ids,
             range_tombstone_list,
-            range_tombstone_list_for_query,
+            monotonic_tombstone_events,
             largest_table_key,
             smallest_table_key,
             kv_count: num_items,
@@ -196,74 +213,41 @@ impl SharedBufferBatchInner {
         table_id: TableId,
         table_key: TableKey<&[u8]>,
         read_epoch: HummockEpoch,
+        read_options: &ReadOptions,
     ) -> Option<HummockValue<Bytes>> {
-        let full_key = FullKey::new(table_id, table_key, read_epoch);
-        let delete_epoch = self.get_delete_range_epoch(&full_key);
-
         // Perform binary search on table key to find the corresponding entry
-        match self.payload.binary_search_by(|m| (m.0[..]).cmp(*table_key)) {
-            Ok(i) => {
-                let item = &self.payload[i];
-                assert_eq!(item.0.as_ref(), *table_key);
-                // Scan to find the first version <= epoch
-                for (e, v) in &item.1 {
-                    // skip invisible versions
-                    if read_epoch < *e {
-                        continue;
-                    }
-                    return match delete_epoch {
-                        Some(del_epoch) => {
-                            if *e > del_epoch {
-                                Some(v.clone())
-                            } else {
-                                // key has been deleted by del_epoch
-                                Some(HummockValue::Delete)
-                            }
-                        }
-                        None => Some(v.clone()),
-                    };
+        if let Ok(i) = self.payload.binary_search_by(|m| (m.0[..]).cmp(*table_key)) {
+            let item = &self.payload[i];
+            assert_eq!(item.0.as_ref(), *table_key);
+            // Scan to find the first version <= epoch
+            for (e, v) in &item.1 {
+                // skip invisible versions
+                if read_epoch < *e {
+                    continue;
                 }
-                // cannot find a visible version
-                None
+                return Some(v.clone());
             }
-            Err(_) => None,
+            // cannot find a visible version
+        }
+
+        if !read_options.ignore_range_tombstone
+            && self.get_min_delete_range_epoch(&UserKey::new(table_id, table_key)) <= read_epoch
+        {
+            Some(HummockValue::Delete)
+        } else {
+            None
         }
     }
 
-    /// Get the latest epoch that deleted the given key
-    fn get_delete_range_epoch(&self, full_key: &FullKey<&[u8]>) -> Option<HummockEpoch> {
-        if self.range_tombstone_list_for_query.is_empty() {
-            return None;
+    fn get_min_delete_range_epoch(&self, query_user_key: &UserKey<&[u8]>) -> HummockEpoch {
+        let idx = self.monotonic_tombstone_events.partition_point(
+            |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(query_user_key),
+        );
+        if idx == 0 {
+            HummockEpoch::MAX
+        } else {
+            self.monotonic_tombstone_events[idx - 1].new_epoch
         }
-        let watermark = full_key.epoch;
-        let mut idx = self
-            .range_tombstone_list_for_query
-            .partition_point(|tombstone| tombstone.end_user_key.as_ref().le(&full_key.user_key));
-        if idx >= self.range_tombstone_list_for_query.len() {
-            return None;
-        }
-        let mut epoch = None;
-        while idx < self.range_tombstone_list_for_query.len()
-            && self.range_tombstone_list_for_query[idx]
-                .start_user_key
-                .as_ref()
-                .le(&full_key.user_key)
-        {
-            let sequence = self.range_tombstone_list_for_query[idx].sequence;
-            if sequence > watermark {
-                idx += 1;
-                continue;
-            }
-            if epoch
-                .as_ref()
-                .map(|epoch| *epoch < sequence)
-                .unwrap_or(true)
-            {
-                epoch = Some(sequence);
-            }
-            idx += 1;
-        }
-        epoch
     }
 }
 
@@ -380,12 +364,14 @@ impl SharedBufferBatch {
         &self,
         table_key: TableKey<&[u8]>,
         read_epoch: HummockEpoch,
+        read_options: &ReadOptions,
     ) -> Option<HummockValue<Bytes>> {
-        self.inner.get_value(self.table_id, table_key, read_epoch)
+        self.inner
+            .get_value(self.table_id, table_key, read_epoch, read_options)
     }
 
-    pub fn get_delete_range_epoch(&self, full_key: &FullKey<&[u8]>) -> Option<HummockEpoch> {
-        self.inner.get_delete_range_epoch(full_key)
+    pub fn get_min_delete_range_epoch(&self, user_key: &UserKey<&[u8]>) -> HummockEpoch {
+        self.inner.get_min_delete_range_epoch(user_key)
     }
 
     pub fn range_exists(&self, table_key_range: &TableKeyRange) -> bool {
@@ -533,10 +519,6 @@ impl SharedBufferBatch {
 
     pub fn get_delete_range_tombstones(&self) -> Vec<DeleteRangeTombstone> {
         self.inner.range_tombstone_list.clone()
-    }
-
-    pub fn get_delete_range_tombstones_for_query(&self) -> Vec<DeleteRangeTombstone> {
-        self.inner.range_tombstone_list_for_query.clone()
     }
 
     #[cfg(test)]
@@ -752,62 +734,46 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
 
 pub struct SharedBufferDeleteRangeIterator {
     inner: Arc<SharedBufferBatchInner>,
-    next_absolute_idx: usize,
+    next_idx: usize,
 }
 
 impl SharedBufferDeleteRangeIterator {
     pub(crate) fn new(inner: Arc<SharedBufferBatchInner>) -> Self {
-        Self {
-            inner,
-            next_absolute_idx: 0,
-        }
-    }
-
-    fn absolute_idx(&self, idx: usize) -> &UserKey<Vec<u8>> {
-        if (idx & 1) == 0 {
-            &self.inner.range_tombstone_list[idx >> 1].start_user_key
-        } else {
-            &self.inner.range_tombstone_list[idx >> 1].end_user_key
-        }
+        Self { inner, next_idx: 0 }
     }
 }
 
 impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
     fn next_user_key(&self) -> UserKey<&[u8]> {
-        self.absolute_idx(self.next_absolute_idx).as_ref()
+        self.inner.monotonic_tombstone_events[self.next_idx]
+            .event_key
+            .as_ref()
     }
 
     fn current_epoch(&self) -> HummockEpoch {
-        if (self.next_absolute_idx & 1) == 1 {
-            self.inner.range_tombstone_list[self.next_absolute_idx >> 1].sequence
+        if self.next_idx > 0 {
+            self.inner.monotonic_tombstone_events[self.next_idx - 1].new_epoch
         } else {
             HummockEpoch::MAX
         }
     }
 
     fn next(&mut self) {
-        self.next_absolute_idx += 1;
+        self.next_idx += 1;
     }
 
     fn rewind(&mut self) {
-        self.next_absolute_idx = 0;
+        self.next_idx = 0;
     }
 
     fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
-        let (mut lft, mut rht) = (0, self.inner.range_tombstone_list.len() << 1);
-        while lft < rht {
-            let mid = (lft + rht) >> 1;
-            if self.absolute_idx(mid).as_ref().le(&target_user_key) {
-                lft = mid + 1;
-            } else {
-                rht = mid;
-            }
-        }
-        self.next_absolute_idx = lft;
+        self.next_idx = self.inner.monotonic_tombstone_events.partition_point(
+            |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(&target_user_key),
+        );
     }
 
     fn is_valid(&self) -> bool {
-        self.next_absolute_idx < (self.inner.range_tombstone_list.len() << 1)
+        self.next_idx < self.inner.monotonic_tombstone_events.len()
     }
 }
 
@@ -859,16 +825,24 @@ mod tests {
         // Point lookup
         for (k, v) in &shared_buffer_items {
             assert_eq!(
-                shared_buffer_batch.get(TableKey(k.as_slice()), epoch),
+                shared_buffer_batch.get(TableKey(k.as_slice()), epoch, &ReadOptions::default()),
                 Some(v.clone())
             );
         }
         assert_eq!(
-            shared_buffer_batch.get(TableKey(iterator_test_table_key_of(3).as_slice()), epoch),
+            shared_buffer_batch.get(
+                TableKey(iterator_test_table_key_of(3).as_slice()),
+                epoch,
+                &ReadOptions::default()
+            ),
             None
         );
         assert_eq!(
-            shared_buffer_batch.get(TableKey(iterator_test_table_key_of(4).as_slice()), epoch),
+            shared_buffer_batch.get(
+                TableKey(iterator_test_table_key_of(4).as_slice()),
+                epoch,
+                &ReadOptions::default()
+            ),
             None
         );
 
@@ -1073,36 +1047,24 @@ mod tests {
             None,
         );
         assert_eq!(
-            Some(epoch),
-            shared_buffer_batch.get_delete_range_epoch(&FullKey::new(
-                Default::default(),
-                TableKey(b"aaa"),
-                epoch
-            ))
+            epoch,
+            shared_buffer_batch
+                .get_min_delete_range_epoch(&UserKey::new(Default::default(), TableKey(b"aaa"),))
         );
         assert_eq!(
-            None,
-            shared_buffer_batch.get_delete_range_epoch(&FullKey::new(
-                Default::default(),
-                TableKey(b"bbb"),
-                epoch
-            ))
+            HummockEpoch::MAX,
+            shared_buffer_batch
+                .get_min_delete_range_epoch(&UserKey::new(Default::default(), TableKey(b"bbb"),))
         );
         assert_eq!(
-            Some(epoch),
-            shared_buffer_batch.get_delete_range_epoch(&FullKey::new(
-                Default::default(),
-                TableKey(b"ddd"),
-                epoch
-            ))
+            epoch,
+            shared_buffer_batch
+                .get_min_delete_range_epoch(&UserKey::new(Default::default(), TableKey(b"ddd"),))
         );
         assert_eq!(
-            None,
-            shared_buffer_batch.get_delete_range_epoch(&FullKey::new(
-                Default::default(),
-                TableKey(b"eee"),
-                epoch
-            ))
+            HummockEpoch::MAX,
+            shared_buffer_batch
+                .get_min_delete_range_epoch(&UserKey::new(Default::default(), TableKey(b"eee"),))
         );
     }
 
@@ -1242,7 +1204,11 @@ mod tests {
         for (i, items) in batch_items.iter().enumerate() {
             for (key, value) in items {
                 assert_eq!(
-                    merged_imm.get(TableKey(key.as_slice()), i as u64 + 1),
+                    merged_imm.get(
+                        TableKey(key.as_slice()),
+                        i as u64 + 1,
+                        &ReadOptions::default()
+                    ),
                     Some(value.clone()),
                     "epoch: {}, key: {:?}",
                     i + 1,
@@ -1251,11 +1217,19 @@ mod tests {
             }
         }
         assert_eq!(
-            merged_imm.get(TableKey(iterator_test_table_key_of(4).as_slice()), 1),
+            merged_imm.get(
+                TableKey(iterator_test_table_key_of(4).as_slice()),
+                1,
+                &ReadOptions::default()
+            ),
             None
         );
         assert_eq!(
-            merged_imm.get(TableKey(iterator_test_table_key_of(5).as_slice()), 1),
+            merged_imm.get(
+                TableKey(iterator_test_table_key_of(5).as_slice()),
+                1,
+                &ReadOptions::default()
+            ),
             None
         );
 
@@ -1329,24 +1303,12 @@ mod tests {
         ];
         let shared_buffer_items1: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
             (
-                test_table_key_of(111),
-                HummockValue::put(Bytes::from("value1")),
-            ),
-            (
                 test_table_key_of(222),
                 HummockValue::put(Bytes::from("value2")),
             ),
             (
                 test_table_key_of(333),
                 HummockValue::put(Bytes::from("value3")),
-            ),
-            (
-                test_table_key_of(555),
-                HummockValue::put(Bytes::from("value5")),
-            ),
-            (
-                test_table_key_of(666),
-                HummockValue::put(Bytes::from("value6")),
             ),
             (
                 test_table_key_of(888),
@@ -1385,10 +1347,6 @@ mod tests {
                 HummockValue::put(Bytes::from("value32")),
             ),
             (
-                test_table_key_of(444),
-                HummockValue::put(Bytes::from("value42")),
-            ),
-            (
                 test_table_key_of(555),
                 HummockValue::put(Bytes::from("value52")),
             ),
@@ -1408,61 +1366,51 @@ mod tests {
         let imms = vec![imm2, imm1];
         let merged_imm = merge_imms_in_memory(table_id, 0, imms, None).await.unwrap();
 
-        assert_ne!(
-            merged_imm.get_delete_range_tombstones(),
-            merged_imm.get_delete_range_tombstones_for_query()
-        );
-
         assert_eq!(
-            Some(1),
-            merged_imm.get_delete_range_epoch(&FullKey::new(table_id, TableKey(b"111"), 2))
+            1,
+            merged_imm.get_min_delete_range_epoch(&UserKey::new(table_id, TableKey(b"111")))
         );
         assert_eq!(
-            Some(1),
-            merged_imm.get_delete_range_epoch(&FullKey::new(table_id, TableKey(b"555"), 2))
+            1,
+            merged_imm.get_min_delete_range_epoch(&UserKey::new(table_id, TableKey(b"555")))
         );
         assert_eq!(
-            Some(2),
-            merged_imm.get_delete_range_epoch(&FullKey::new(table_id, TableKey(b"888"), 2))
-        );
-
-        assert_eq!(
-            None,
-            merged_imm.get_delete_range_epoch(&FullKey::new(table_id, TableKey(b"888"), 1))
+            2,
+            merged_imm.get_min_delete_range_epoch(&UserKey::new(table_id, TableKey(b"888")))
         );
 
         assert_eq!(
             Some(HummockValue::put(Bytes::from("value12"))),
-            merged_imm.get(TableKey(b"111"), 2)
+            merged_imm.get(TableKey(b"111"), 2, &ReadOptions::default())
         );
 
         // 555 is deleted in epoch=1
         assert_eq!(
             Some(HummockValue::Delete),
-            merged_imm.get(TableKey(b"555"), 1)
+            merged_imm.get(TableKey(b"555"), 1, &ReadOptions::default())
         );
 
         // 555 is inserted again in epoch=2
         assert_eq!(
             Some(HummockValue::put(Bytes::from("value52"))),
-            merged_imm.get(TableKey(b"555"), 2)
+            merged_imm.get(TableKey(b"555"), 2, &ReadOptions::default())
         );
 
         // "666" is deleted in epoch=1 and isn't inserted in later epochs
         assert_eq!(
             Some(HummockValue::Delete),
-            merged_imm.get(TableKey(b"666"), 2)
+            merged_imm.get(TableKey(b"666"), 2, &ReadOptions::default())
         );
         // "888" is deleted in epoch=2
         assert_eq!(
             Some(HummockValue::Delete),
-            merged_imm.get(TableKey(b"888"), 2)
+            merged_imm.get(TableKey(b"888"), 2, &ReadOptions::default())
         );
 
         // 888 exists in the snapshot of epoch=1
         assert_eq!(
             Some(HummockValue::put(Bytes::from("value8"))),
-            merged_imm.get(TableKey(b"888"), 1)
+            merged_imm.get(TableKey(b"888"), 1, &ReadOptions::default())
         );
     }
 }

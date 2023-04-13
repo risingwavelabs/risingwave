@@ -537,6 +537,7 @@ impl HummockVersionReader {
                 imm,
                 TableKey(table_key.as_ref()),
                 epoch,
+                &read_options,
                 &mut stats_guard.local_stats,
             ) {
                 return Ok(data.into_user_value());

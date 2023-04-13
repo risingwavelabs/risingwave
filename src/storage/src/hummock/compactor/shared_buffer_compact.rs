@@ -23,7 +23,7 @@ use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
-use risingwave_hummock_sdk::key::{FullKey, UserKey, TableKey};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
@@ -294,8 +294,9 @@ pub async fn merge_imms_in_memory(
     }
     let mut builder = DeleteRangeAggregatorBuilder::default();
     builder.add_tombstone(range_tombstone_list.clone());
-    let compaction_delete_ranges = builder.build_for_compaction(GC_WATERMARK_FOR_FLUSH, GC_DELETE_KEYS_FOR_FLUSH);
-    let del_iter = compaction_delete_ranges.iter();
+    let compaction_delete_ranges =
+        builder.build_for_compaction(GC_WATERMARK_FOR_FLUSH, GC_DELETE_KEYS_FOR_FLUSH);
+    let mut del_iter = compaction_delete_ranges.iter();
     del_iter.rewind();
     epochs.sort();
 
@@ -311,10 +312,13 @@ pub async fn merge_imms_in_memory(
 
     let mut merged_payload: Vec<SharedBufferVersionedEntry> = Vec::new();
     let mut pivot = items.first().map(|((k, _), _)| k.clone()).unwrap();
-    del_iter.earliest_delete_which_can_see_key(&UserKey::new(table_id, TableKey(pivot.as_ref())), HummockEpoch::MAX);
+    del_iter.earliest_delete_which_can_see_key(
+        &UserKey::new(table_id, TableKey(pivot.as_ref())),
+        HummockEpoch::MAX,
+    );
     let mut versions: Vec<(HummockEpoch, HummockValue<Bytes>)> = Vec::new();
 
-    let pivot_last_delete_epoch = HummockEpoch::MAX;
+    let mut pivot_last_delete_epoch = HummockEpoch::MAX;
 
     for ((key, value), epoch) in items {
         assert!(key >= pivot, "key should be in ascending order");
@@ -325,18 +329,28 @@ pub async fn merge_imms_in_memory(
             pivot = key;
             pivot_last_delete_epoch = HummockEpoch::MAX;
             versions = vec![];
-            del_iter.earliest_delete_which_can_see_key(&UserKey::new(table_id, TableKey(pivot.as_ref())), epoch)
+            del_iter.earliest_delete_which_can_see_key(
+                &UserKey::new(table_id, TableKey(pivot.as_ref())),
+                epoch,
+            )
         };
         if value.is_delete() {
             pivot_last_delete_epoch = epoch;
         } else if earliest_range_delete_which_can_see_key < pivot_last_delete_epoch {
             debug_assert!(
                 epoch < earliest_range_delete_which_can_see_key
-                    && earliest_range_delete_which_can_see_key
-                        < pivot_last_delete_epoch
+                    && earliest_range_delete_which_can_see_key < pivot_last_delete_epoch
             );
             pivot_last_delete_epoch = earliest_range_delete_which_can_see_key;
-            versions.push((earliest_range_delete_which_can_see_key, HummockValue::Delete));
+            // In each merged immutable memtable, since a union set of delete ranges is constructed
+            // and thus original delete ranges are replaced with the union set and not
+            // used in read, we lose exact information about whether a key is deleted by
+            // a delete range in the merged imm which it belongs to. Therefore we need
+            // to construct a corresponding delete key to represent this.
+            versions.push((
+                earliest_range_delete_which_can_see_key,
+                HummockValue::Delete,
+            ));
         }
         versions.push((epoch, value));
     }
@@ -346,7 +360,6 @@ pub async fn merge_imms_in_memory(
     }
 
     drop(del_iter);
-    let events = Arc::unwrap_or_clone(compaction_delete_ranges).events();
 
     Ok(SharedBufferBatch {
         inner: Arc::new(SharedBufferBatchInner::new_with_multi_epoch_batches(
@@ -357,7 +370,6 @@ pub async fn merge_imms_in_memory(
             kv_count,
             merged_imm_ids,
             range_tombstone_list,
-            collector.get_all_tombstones(),
             merged_size,
             memory_tracker,
         )),

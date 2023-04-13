@@ -92,19 +92,6 @@ pub(crate) fn apply_event(epochs: &mut BTreeSet<HummockEpoch>, event: &Compactio
     }
 }
 
-pub(crate) fn build_monotonic_tombstone_events(events: Vec<CompactionDeleteRangeEvent>)  {
-    let mut epochs = BTreeSet::new();
-        let mut monotonic_tombstone_events = Vec::with_capacity(events.len());
-        for event in events {
-            apply_event(&mut epochs, &event);
-            monotonic_tombstone_events.push((
-                event.0,
-                epochs.first().map_or(HummockEpoch::MAX, |epoch| *epoch),
-            ));
-        }
-        monotonic_tombstone_events.dedup_by_key(|(_, epoch)| *epoch);
-}
-
 #[derive(Clone)]
 pub struct CompactionDeleteRanges {
     delete_tombstones: Vec<DeleteRangeTombstone>,
@@ -288,10 +275,6 @@ impl CompactionDeleteRanges {
                 .map(|(_index, tombstone)| tombstone),
         );
         ret
-    }
-
-    pub(crate) fn events(self) -> Vec<CompactionDeleteRangeEvent> {
-        self.events
     }
 }
 

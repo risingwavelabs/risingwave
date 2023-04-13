@@ -128,8 +128,8 @@ impl DeleteRangeTombstone {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MonotonicDeleteEvent {
-    event_key: UserKey<Vec<u8>>,
-    new_epoch: HummockEpoch,
+    pub event_key: UserKey<Vec<u8>>,
+    pub new_epoch: HummockEpoch,
 }
 
 impl MonotonicDeleteEvent {
@@ -148,7 +148,7 @@ impl MonotonicDeleteEvent {
     }
 }
 
-fn create_monotonic_events(
+pub(crate) fn create_monotonic_events(
     delete_range_tombstones: &Vec<DeleteRangeTombstone>,
 ) -> Vec<MonotonicDeleteEvent> {
     let (events, _) = DeleteRangeAggregatorBuilder::build_events(delete_range_tombstones);

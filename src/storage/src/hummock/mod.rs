@@ -432,9 +432,10 @@ pub fn get_from_batch(
     imm: &ImmutableMemtable,
     table_key: TableKey<&[u8]>,
     read_epoch: HummockEpoch,
+    read_options: &ReadOptions,
     local_stats: &mut StoreLocalStatistic,
 ) -> Option<HummockValue<Bytes>> {
-    imm.get(table_key, read_epoch).map(|v| {
+    imm.get(table_key, read_epoch, read_options).map(|v| {
         local_stats.get_shared_buffer_hit_counts += 1;
         v
     })
