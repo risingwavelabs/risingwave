@@ -21,11 +21,13 @@ mod iterator;
 mod shared_buffer_compact;
 pub(super) mod task_progress;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::marker::PhantomData;
 use std::ops::Div;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::task::Poll;
 use std::time::Duration;
 
 pub use compaction_executor::CompactionExecutor;
@@ -35,7 +37,7 @@ pub use compaction_filter::{
 };
 pub use context::CompactorContext;
 use futures::future::try_join_all;
-use futures::{stream, StreamExt};
+use futures::{stream, Future, FutureExt, StreamExt};
 pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
 use risingwave_common::util::resource_util;
@@ -53,7 +55,7 @@ use risingwave_rpc_client::HummockMetaClient;
 pub use shared_buffer_compact::{compact, merge_imms_in_memory};
 use sysinfo::{CpuRefreshKind, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
 use tokio::sync::oneshot::{Receiver, Sender};
-use tokio::task::JoinHandle;
+use tokio::task::{JoinError, JoinHandle};
 
 pub use self::compaction_utils::{CompactionStatistics, RemoteBuilderFactory, TaskConfig};
 use self::task_progress::TaskProgress;
@@ -83,6 +85,39 @@ pub struct Compactor {
 }
 
 pub type CompactOutput = (usize, Vec<LocalSstableInfo>, CompactionStatistics);
+
+#[derive(Default)]
+struct TaskCollector {
+    task_handles: VecDeque<JoinHandle<()>>,
+}
+
+impl TaskCollector {
+    fn push(&mut self, task_handle: JoinHandle<()>) {
+        self.task_handles.push_back(task_handle);
+    }
+}
+
+impl Future for TaskCollector {
+    type Output = Vec<Result<(), JoinError>>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        let mut ret = vec![];
+        while let Some(task_handle) = self.task_handles.front_mut() {
+            match task_handle.poll_unpin(cx) {
+                Poll::Ready(result) => {
+                    ret.push(result);
+                    self.task_handles.pop_front();
+                }
+                Poll::Pending => break,
+            }
+        }
+        if ret.is_empty() {
+            Poll::Pending
+        } else {
+            Poll::Ready(ret)
+        }
+    }
+}
 
 impl Compactor {
     /// Handles a compaction task and reports its status to hummock manager.
@@ -369,6 +404,8 @@ impl Compactor {
             let mut task_progress_interval = tokio::time::interval(task_progress_update_interval);
             let mut workload_collect_interval = tokio::time::interval(Duration::from_secs(60));
 
+            let mut task_collector = TaskCollector::default();
+
             // This outer loop is to recreate stream.
             'start_stream: loop {
                 tokio::select! {
@@ -378,6 +415,15 @@ impl Compactor {
                     _ = &mut shutdown_rx => {
                         tracing::info!("Compactor is shutting down");
                         return;
+                    }
+                    // Handle failed tasks.
+                    task_results = &mut task_collector => {
+                        for task_result in task_results {
+                            if let Err(e) = task_result {
+                                tracing::error!("Failed to execute task {:#?}", e);
+                            }
+                        }
+                        continue;
                     }
                 }
 
@@ -406,6 +452,15 @@ impl Compactor {
                 // This inner loop is to consume stream or report task progress.
                 'consume_stream: loop {
                     let message = tokio::select! {
+                        task_results = &mut task_collector => {
+                            for task_result in task_results {
+                                if let Err(e) = task_result {
+                                    tracing::error!("Failed to execute task {:#?}", e);
+                                }
+                            }
+                            continue;
+                        }
+
                         _ = task_progress_interval.tick() => {
                             let mut progress_list = Vec::new();
                             for (&task_id, progress) in task_progress.lock().iter() {
@@ -462,7 +517,7 @@ impl Compactor {
                             let context = compactor_context.clone();
                             let meta_client = hummock_meta_client.clone();
 
-                            executor.spawn(async move {
+                            let task_handle = executor.spawn(async move {
                                 match task {
                                     Task::CompactTask(compact_task) => {
                                         let (tx, rx) = tokio::sync::oneshot::channel();
@@ -515,6 +570,7 @@ impl Compactor {
                                 }
                             }
                             });
+                            task_collector.push(task_handle);
                         }
                         Some(Err(e)) => {
                             tracing::warn!("Failed to consume stream. {}", e.message());
