@@ -345,13 +345,13 @@ mod tests {
             ],
         };
 
-        // TODO: currently the order is fixed
+        // TODO: currently the order is fixed unless the hasher is changed
         let expect_exec = MockExecutor::with_chunk(
             DataChunk::from_pretty(
                 "i i I
+                 0 1 3
                  0 0 3
                  1 1 6
-                 0 1 3
                  1 0 1",
             ),
             schema,
