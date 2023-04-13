@@ -896,4 +896,28 @@ mod tests {
         assert_eq!(chunk.clone().reorder_columns(&[0, 1, 2]), chunk);
         assert_eq!(chunk.reorder_columns(&[]).cardinality(), 3);
     }
+
+    #[test]
+    fn test_chunk_estimated_size() {
+        assert_eq!(
+            120,
+            DataChunk::from_pretty(
+                "I I I
+                 1 5 2
+                 2 9 4
+                 3 9 6",
+            )
+            .estimated_heap_size()
+        );
+        assert_eq!(
+            80,
+            DataChunk::from_pretty(
+                "I I
+                 1 2
+                 2 4
+                 3 6",
+            )
+            .estimated_heap_size()
+        );
+    }
 }

@@ -1715,9 +1715,7 @@ fn parse_explain_analyze_with_simple_select() {
     run_explain_analyze(
         "EXPLAIN SELECT sqrt(id) FROM foo",
         false,
-        ExplainOptions {
-            ..Default::default()
-        },
+        ExplainOptions::default(),
     );
     run_explain_analyze(
         "EXPLAIN (VERBOSE) SELECT sqrt(id) FROM foo",
@@ -1730,9 +1728,7 @@ fn parse_explain_analyze_with_simple_select() {
     run_explain_analyze(
         "EXPLAIN ANALYZE SELECT sqrt(id) FROM foo",
         true,
-        ExplainOptions {
-            ..Default::default()
-        },
+        ExplainOptions::default(),
     );
     run_explain_analyze(
         "EXPLAIN (TRACE) SELECT sqrt(id) FROM foo",
