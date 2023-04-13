@@ -50,8 +50,8 @@ impl ArrayPositionsExpression {
         }
     }
 
-    /// Returns an array of the subscripts of all occurrences of the second argument in the array given as first argument.
-    /// Note the behavior is slightly different from PG.
+    /// Returns an array of the subscripts of all occurrences of the second argument in the array
+    /// given as first argument. Note the behavior is slightly different from PG.
     ///
     /// Examples:
     ///
@@ -86,6 +86,11 @@ impl ArrayPositionsExpression {
     /// ----
     /// {}
     ///
+    /// query T
+    /// select array_positions(array[1,NULL,NULL,3], NULL::int);
+    /// ----
+    /// {2,3}
+    ///
     /// statement error
     /// select array_positions(array[array[1],array[2],array[3],array[2],null::int[]], 1);
     ///
@@ -102,9 +107,8 @@ impl ArrayPositionsExpression {
                     left.values_ref()
                         .into_iter()
                         .enumerate()
-                        .map(|(idx, x)| (idx + 1, x))
                         .filter(|(_, x)| x == &right)
-                        .map(|(idx, _)| Some(ScalarImpl::Int64(idx.to_i64().unwrap())))
+                        .map(|(idx, _)| Some(ScalarImpl::Int64((idx + 1).to_i64().unwrap())))
                         .collect(),
                 )
                 .into(),
@@ -143,7 +147,10 @@ impl Expression for ArrayPositionsExpression {
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let left_data = self.left.eval_row(input).await?;
         let right_data = self.right.eval_row(input).await?;
-        Ok(Self::evaluate(left_data.to_datum_ref(), right_data.to_datum_ref()))
+        Ok(Self::evaluate(
+            left_data.to_datum_ref(),
+            right_data.to_datum_ref(),
+        ))
     }
 }
 
