@@ -77,13 +77,6 @@ public class JDBCSink extends SinkBase {
         return pkColumnNames;
     }
 
-    public JDBCSink(Connection conn, TableSchema tableSchema, String tableName, String sinkType) {
-        super(tableSchema);
-        this.config = new JDBCSinkConfig(null, tableName, sinkType);
-        this.conn = conn;
-        this.pkColumnNames = getPkColumnNames(conn, tableName);
-    }
-
     private PreparedStatement prepareStatement(SinkRow row) {
         switch (row.getOp()) {
             case INSERT:
@@ -108,24 +101,21 @@ public class JDBCSink extends SinkBase {
                             .withDescription(
                                     String.format(
                                             ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                            .withCause(e)
                             .asRuntimeException();
                 }
             case DELETE:
-                String deleteCondition;
                 if (this.pkColumnNames.isEmpty()) {
-                    deleteCondition =
-                            IntStream.range(0, getTableSchema().getNumColumns())
-                                    .mapToObj(
-                                            index ->
-                                                    getTableSchema().getColumnNames()[index]
-                                                            + " = ?")
-                                    .collect(Collectors.joining(" AND "));
-                } else {
-                    deleteCondition =
-                            this.pkColumnNames.stream()
-                                    .map(key -> key + " = ?")
-                                    .collect(Collectors.joining(" AND "));
+                    throw Status.INTERNAL
+                            .withDescription(
+                                    "downstream jdbc table should have primary key to handle delete event")
+                            .asRuntimeException();
                 }
+                String deleteCondition =
+                        this.pkColumnNames.stream()
+                                .map(key -> key + " = ?")
+                                .collect(Collectors.joining(" AND "));
+
                 String deleteStmt =
                         String.format(DELETE_TEMPLATE, config.getTableName(), deleteCondition);
                 try {
@@ -146,34 +136,20 @@ public class JDBCSink extends SinkBase {
                 }
             case UPDATE_DELETE:
                 if (this.pkColumnNames.isEmpty()) {
-                    updateDeleteConditionBuffer =
-                            IntStream.range(0, getTableSchema().getNumColumns())
-                                    .mapToObj(
-                                            index ->
-                                                    getTableSchema().getColumnNames()[index]
-                                                            + " = ?")
-                                    .collect(Collectors.joining(" AND "));
-                    updateDeleteValueBuffer =
-                            IntStream.range(0, getTableSchema().getNumColumns())
-                                    .mapToObj(
-                                            index ->
-                                                    getTableSchema()
-                                                            .getFromRow(
-                                                                    getTableSchema()
-                                                                            .getColumnNames()[
-                                                                            index],
-                                                                    row))
-                                    .toArray();
-                } else {
-                    updateDeleteConditionBuffer =
-                            this.pkColumnNames.stream()
-                                    .map(key -> key + " = ?")
-                                    .collect(Collectors.joining(" AND "));
-                    updateDeleteValueBuffer =
-                            this.pkColumnNames.stream()
-                                    .map(key -> getTableSchema().getFromRow(key, row))
-                                    .toArray();
+                    throw Status.INTERNAL
+                            .withDescription(
+                                    "downstream jdbc table should have primary key to handle update_delete event")
+                            .asRuntimeException();
                 }
+                updateDeleteConditionBuffer =
+                        this.pkColumnNames.stream()
+                                .map(key -> key + " = ?")
+                                .collect(Collectors.joining(" AND "));
+                updateDeleteValueBuffer =
+                        this.pkColumnNames.stream()
+                                .map(key -> getTableSchema().getFromRow(key, row))
+                                .toArray();
+
                 LOG.debug(
                         "update delete condition: {} on values {}",
                         updateDeleteConditionBuffer,
@@ -287,5 +263,9 @@ public class JDBCSink extends SinkBase {
 
     public String getTableName() {
         return config.getTableName();
+    }
+
+    public Connection getConn() {
+        return conn;
     }
 }
