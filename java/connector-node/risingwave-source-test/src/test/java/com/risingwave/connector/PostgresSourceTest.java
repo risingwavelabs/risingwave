@@ -75,7 +75,12 @@ public class PostgresSourceTest {
                             "sh",
                             "-c",
                             "echo 'host replication postgres 172.17.0.1/32 trust' >> /var/lib/postgresql/data/pg_hba.conf");
-            pgDataSource = SourceTestClient.getDataSource(pg);
+            pgDataSource =
+                    SourceTestClient.getDataSource(
+                            pg.getJdbcUrl(),
+                            pg.getUsername(),
+                            pg.getPassword(),
+                            pg.getDriverClassName());
             LOG.info("postgres started");
         } catch (IOException e) {
             fail("IO exception: ", e);
@@ -137,19 +142,34 @@ public class PostgresSourceTest {
         int count = countResult.get();
         LOG.info("number of cdc messages received: {}", count);
         assertEquals(count, 10000);
+        // cleanup
+        query = "DROP TABLE orders";
+        SourceTestClient.performQuery(connection, query);
         connection.close();
     }
 
     // test whether validation catches permission errors
     @Test
-    public void testPermissionCheck() {
-        Connection connection = SourceTestClient.connect(pgDataSource);
-        String query =
+    public void testPermissionCheck() throws SQLException {
+        // user Postgres creates a superuser debezium
+        Connection connPg = SourceTestClient.connect(pgDataSource);
+        String query = "CREATE USER debezium";
+        SourceTestClient.performQuery(connPg, query);
+        query = "ALTER USER debezium SUPERUSER REPLICATION";
+        SourceTestClient.performQuery(connPg, query);
+        query = "ALTER USER debezium WITH PASSWORD '" + pg.getPassword() + "'";
+        SourceTestClient.performQuery(connPg, query);
+        // user debezium connects to Postgres
+        DataSource dbzDataSource =
+                SourceTestClient.getDataSource(
+                        pg.getJdbcUrl(), "debezium", pg.getPassword(), pg.getDriverClassName());
+        Connection connDbz = SourceTestClient.connect(dbzDataSource);
+        query =
                 "CREATE TABLE IF NOT EXISTS orders (o_key BIGINT NOT NULL, o_val INT, PRIMARY KEY (o_key))";
-        SourceTestClient.performQuery(connection, query);
+        SourceTestClient.performQuery(connDbz, query);
         // create a partial publication, check whether error is reported
         query = "CREATE PUBLICATION dbz_publication FOR TABLE orders (o_key)";
-        SourceTestClient.performQuery(connection, query);
+        SourceTestClient.performQuery(connDbz, query);
         ConnectorServiceProto.TableSchema tableSchema =
                 ConnectorServiceProto.TableSchema.newBuilder()
                         .addColumns(
@@ -166,7 +186,10 @@ public class PostgresSourceTest {
                         .build();
         Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream1 =
                 testClient.getEventStreamValidate(
-                        pg,
+                        pg.getJdbcUrl(),
+                        pg.getHost(),
+                        "debezium",
+                        pg.getPassword(),
                         ConnectorServiceProto.SourceType.POSTGRES,
                         tableSchema,
                         "test",
@@ -178,16 +201,19 @@ public class PostgresSourceTest {
                             eventStream1.hasNext();
                         });
         assertEquals(
-                exception1.getMessage(),
-                "INVALID_ARGUMENT: INTERNAL: The publication 'dbz_publication' does not cover all necessary columns in table orders");
+                "INVALID_ARGUMENT: INTERNAL: The publication 'dbz_publication' does not cover all necessary columns in table orders",
+                exception1.getMessage());
         query = "DROP PUBLICATION dbz_publication";
-        SourceTestClient.performQuery(connection, query);
+        SourceTestClient.performQuery(connDbz, query);
         // revoke superuser and replication, check if reports error
-        query = "ALTER USER " + pg.getUsername() + " nosuperuser noreplication";
-        SourceTestClient.performQuery(connection, query);
+        query = "ALTER USER debezium nosuperuser noreplication";
+        SourceTestClient.performQuery(connDbz, query);
         Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream2 =
                 testClient.getEventStreamValidate(
-                        pg,
+                        pg.getJdbcUrl(),
+                        pg.getHost(),
+                        "debezium",
+                        pg.getPassword(),
                         ConnectorServiceProto.SourceType.POSTGRES,
                         tableSchema,
                         "test",
@@ -201,6 +227,13 @@ public class PostgresSourceTest {
         assertEquals(
                 exception2.getMessage(),
                 "INVALID_ARGUMENT: INTERNAL: Postgres user must be superuser or replication role to start walsender.");
+        // cleanup
+        query = "DROP TABLE orders";
+        SourceTestClient.performQuery(connDbz, query);
+        query = "DROP USER debezium";
+        SourceTestClient.performQuery(connPg, query);
+        connDbz.close();
+        connPg.close();
     }
 
     // generates test cases for the risingwave debezium parser

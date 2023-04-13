@@ -72,7 +72,12 @@ public class MySQLSourceTest {
             mysql.withCopyFileToContainer(
                     MountableFile.forClasspathResource("orders.tbl"), "/home/orders.tbl");
             mysql.start();
-            mysqlDataSource = SourceTestClient.getDataSource(mysql);
+            mysqlDataSource =
+                    SourceTestClient.getDataSource(
+                            mysql.getJdbcUrl(),
+                            mysql.getUsername(),
+                            mysql.getPassword(),
+                            mysql.getDriverClassName());
             LOG.info("mysql started");
         } catch (IOException e) {
             fail("IO exception: ", e);
