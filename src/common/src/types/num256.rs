@@ -21,7 +21,7 @@ use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 use std::str::FromStr;
 
 use bytes::{BufMut, Bytes};
-use ethnum::i256;
+use ethnum::{i256, AsI256};
 use num_traits::{
     CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Signed, Zero,
 };
@@ -32,7 +32,7 @@ use to_text::ToText;
 
 use crate::array::ArrayResult;
 use crate::types::to_binary::ToBinary;
-use crate::types::{to_text, Buf, DataType, Scalar, ScalarRef};
+use crate::types::{to_text, Buf, DataType, Scalar, ScalarRef, F64};
 
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
 pub struct Int256(Box<i256>);
@@ -252,13 +252,19 @@ macro_rules! impl_convert_from {
         impl From<$t> for Int256 {
             #[inline]
             fn from(value: $t) -> Self {
-                Self(Box::new(i256::from(value)))
+                Self(Box::new(value.as_i256()))
             }
         }
     )*};
 }
 
 impl_convert_from!(i16, i32, i64);
+
+impl<'a> From<Int256Ref<'a>> for F64 {
+    fn from(value: Int256Ref<'a>) -> Self {
+        Self::from(value.0.as_f64())
+    }
+}
 
 // Conversions for mathematical operations.
 impl From<Int256Ref<'_>> for Int256 {
@@ -380,6 +386,7 @@ impl<'a> From<Int256Ref<'a>> for arrow_buffer::i256 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::F64;
 
     macro_rules! check_op {
         ($t:ty, $lhs:expr, $rhs:expr, [$($op:tt),+]) => {
@@ -455,6 +462,16 @@ mod tests {
         assert_eq!(Int256::from(-1).abs(), Int256::from(1));
         assert_eq!(Int256::from(1).abs(), Int256::from(1));
         assert_eq!(Int256::from(0).abs(), Int256::from(0));
+    }
+
+    #[test]
+    fn test_float64() {
+        let vs: Vec<i64> = vec![-9007199254740990, -100, -1, 0, 1, 100, 9007199254740991];
+
+        for v in vs {
+            let i = Int256::from(v);
+            assert_eq!(F64::from(i.as_scalar_ref()), F64::from(v));
+        }
     }
 
     #[test]

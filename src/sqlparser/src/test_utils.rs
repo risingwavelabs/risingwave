@@ -138,7 +138,7 @@ pub fn table_alias(name: impl Into<String>) -> Option<TableAlias> {
 pub fn table(name: impl Into<String>) -> TableFactor {
     TableFactor::Table {
         name: ObjectName(vec![Ident::new_unchecked(name.into())]),
-        for_system_time_as_of_now: false,
+        for_system_time_as_of_proctime: false,
         alias: None,
     }
 }
