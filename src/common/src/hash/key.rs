@@ -41,7 +41,7 @@ use crate::collection::estimate_size::EstimateSize;
 use crate::row::{OwnedRow, RowDeserializer};
 use crate::types::num256::Int256Ref;
 use crate::types::{DataType, Date, Decimal, ScalarRef, Time, Timestamp, F32, F64};
-use crate::util::hash_util::Crc32FastBuilder;
+use crate::util::hash_util::Xxhash64Builder;
 use crate::util::iter_util::ZipEqFast;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum_into};
 
@@ -268,7 +268,7 @@ pub trait HashKey:
     type S: HashKeySerializer<K = Self>;
 
     fn build(column_idxes: &[usize], data_chunk: &DataChunk) -> ArrayResult<Vec<Self>> {
-        let hash_codes = data_chunk.get_hash_values(column_idxes, Crc32FastBuilder);
+        let hash_codes = data_chunk.get_hash_values(column_idxes, Xxhash64Builder);
         Ok(Self::build_from_hash_code(
             column_idxes,
             data_chunk,
@@ -394,13 +394,13 @@ impl Hasher for PrecomputedHasher {
         self.hash_code
     }
 
-    fn write(&mut self, bytes: &[u8]) {
+    fn write_u64(&mut self, i: u64) {
         assert_eq!(self.hash_code, 0);
-        self.hash_code = u64::from_ne_bytes(
-            bytes
-                .try_into()
-                .expect("must writes from HashKey with write_u64"),
-        );
+        self.hash_code = i;
+    }
+
+    fn write(&mut self, _bytes: &[u8]) {
+        unreachable!("must writes from HashKey with write_u64")
     }
 }
 
