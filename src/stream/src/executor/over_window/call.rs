@@ -14,13 +14,13 @@
 
 use std::ops::Bound;
 
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::expr::WindowFuncKind;
 
 use crate::executor::aggregation::AggArgs;
 
 #[derive(Clone)]
-pub(super) enum Frame {
+pub enum Frame {
     Offset(isize), // for `lag` and `lead`
     Rows(Bound<usize>, Bound<usize>),
     Groups(Bound<usize>, Bound<usize>),
@@ -28,8 +28,9 @@ pub(super) enum Frame {
 }
 
 #[derive(Clone)]
-pub(super) struct WindowFuncCall {
+pub struct WindowFuncCall {
     pub kind: WindowFuncKind,
     pub args: AggArgs, // TODO(rc): give `AggArgs` a more general name
+    pub return_type: DataType,
     pub frame: Frame,
 }

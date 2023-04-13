@@ -12,13 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![expect(dead_code)]
+
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
-use futures_async_stream::for_await;
+use futures::StreamExt;
+use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -31,7 +35,10 @@ use risingwave_storage::StateStore;
 use self::call::WindowFuncCall;
 use self::partition::Partition;
 use self::state::StateKey;
-use super::StreamExecutorResult;
+use super::{
+    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
+    ExecutorInfo, Message, PkIndices, StreamExecutorError, StreamExecutorResult,
+};
 use crate::cache::ExecutorCache;
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
@@ -40,42 +47,55 @@ mod call;
 mod partition;
 mod state;
 
+type MemcmpEncoded = Box<[u8]>;
+
+/// [`OverWindowExecutor`] consumes ordered input and outputs window function results.
+/// One [`OverWindowExecutor`] can handle one combination of partition key and order key.
+///
+/// State table schema:
+///
+///     partition key | order key | pk | window function arguments
+///
+/// Output schema:
+///
+///     partition key | order key | pk | window function results
+///
 /// Basic idea:
 ///
-/// ──────────────┬──────────────────────────────────────────────────────curr evict row
+/// ```
+/// ──────────────┬────────────────────────────────────────────────────── curr evict row
 ///               │ROWS BETWEEN 5 PRECEDING AND 1 PRECEDING
-///        111    │ ─┬─
+///        (1)    │ ─┬─
 ///               │  │RANGE BETWEEN '1hr' PRECEDING AND '1hr' FOLLOWING
 ///        ─┬─    │  │ ─┬─
 ///   LAG(1)│        │  │
-/// ────────┴──┬─────┼──┼────────────────────────────────────────────────curr output row
+/// ────────┴──┬─────┼──┼──────────────────────────────────────────────── curr output row
 ///     LEAD(1)│     │  │GROUPS 1 PRECEDING AND 1 FOLLOWING
 ///                  │
-///                  │ 222
-/// ─────────────────┴───────────────────────────────────────────────────curr input row
-/// 111: additional buffered input (unneeded) for some window
-/// 222: additional delay (already able to output) for some window
-///
-/// State table schema:
-///     partition key | order key | pk | window function arguments
+///                  │ (2)
+/// ─────────────────┴─────────────────────────────────────────────────── curr input row
+/// (1): additional buffered input (unneeded) for some window
+/// (2): additional delay (already able to output) for some window
+/// ```
 ///
 /// - Rows in range (`curr evict row`, `curr input row`] are in `state_table`.
 /// - `curr evict row` <= min(last evict rows of all `WindowState`s).
 /// - `WindowState` should output agg result for `curr output row`.
 /// - Recover: iterate through `state_table`, push rows to `WindowState`, ignore ready windows.
+struct OverWindowExecutor<S: StateStore> {
+    input: Box<dyn Executor>,
+    inner: ExecutorInner<S>,
+}
 
-type MemcmpEncoded = Box<[u8]>;
-
-/// One for each combination of partition key and order key.
-///
-/// Output schema:
-///     partition key | order key | pk | window function results
 struct ExecutorInner<S: StateStore> {
-    window_func_calls: Vec<WindowFuncCall>,
+    actor_ctx: ActorContextRef,
+    info: ExecutorInfo,
+
+    calls: Vec<WindowFuncCall>,
     state_table: StateTable<S>,
-    mapping: StateTableColumnMapping,
-    pk_indices: Vec<usize>,
+    col_mapping: StateTableColumnMapping,
     pk_data_types: Vec<DataType>,
+    input_pk_indices: Vec<usize>,
     partition_key_indices: Vec<usize>,
     order_key_index: usize,
 }
@@ -87,218 +107,342 @@ struct ExecutionVars<S: StateStore> {
     _phantom: PhantomData<S>,
 }
 
-async fn apply_chunk<S: StateStore>(
-    this: &mut ExecutorInner<S>,
-    vars: &mut ExecutionVars<S>,
-    chunk: StreamChunk,
-) -> StreamExecutorResult<Vec<OwnedRow>> {
-    let mut output_rows = vec![];
+impl<S: StateStore> Executor for OverWindowExecutor<S> {
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        self.executor_inner().boxed()
+    }
 
-    // We assume that the input is sorted by order key.
-    for record in chunk.records() {
-        let input_row = must_match!(record, Record::Insert { new_row } => new_row);
+    fn schema(&self) -> &Schema {
+        &self.inner.info.schema
+    }
 
-        let partition_key = input_row.project(&this.partition_key_indices);
-        let encoded_partition_key = memcmp_encoding::encode_row(
-            partition_key,
-            &vec![OrderType::ascending(); this.partition_key_indices.len()],
-        )?
-        .into_boxed_slice();
+    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
+        &self.inner.info.pk_indices
+    }
 
-        {
-            let input_row: bool; // in case of accidental use
+    fn identity(&self) -> &str {
+        &self.inner.info.identity
+    }
+}
 
-            // ensure_key_in_cache
-            if !vars.partitions.contains_key(&encoded_partition_key) {
-                let mut partition = Partition::new(&this.window_func_calls);
+pub struct OverWindowExecutorArgs<S: StateStore> {
+    pub input: BoxedExecutor,
 
-                {
-                    // recover from state table
+    pub actor_ctx: ActorContextRef,
+    pub pk_indices: PkIndices,
+    pub executor_id: u64,
 
-                    let iter = this
-                        .state_table
-                        .iter_with_pk_prefix(partition_key, PrefetchOptions::new_for_exhaust_iter())
-                        .await?;
+    pub calls: Vec<WindowFuncCall>,
+    pub state_table: StateTable<S>,
+    pub col_mapping: StateTableColumnMapping,
+    pub partition_key_indices: Vec<usize>,
+    pub order_key_index: usize,
+}
 
-                    #[for_await]
-                    for res in iter {
-                        let row: OwnedRow = res?;
-                        let order_key = row
-                            .datum_at(
-                                this.mapping
-                                    .upstream_to_state_table(this.order_key_index)
-                                    .unwrap(),
-                            )
-                            .expect("order key column must be non-NULL")
-                            .into_scalar_impl();
-                        let encoded_pk = memcmp_encoding::encode_row(
-                            (&row).project(
-                                &this
-                                    .pk_indices
-                                    .iter()
-                                    .map(|idx| this.mapping.upstream_to_state_table(*idx).unwrap())
-                                    .collect_vec(),
-                            ),
-                            &vec![OrderType::ascending(); this.pk_indices.len()],
-                        )?
-                        .into_boxed_slice();
-                        let key = StateKey {
-                            order_key,
-                            encoded_pk,
-                        };
-                        for (call, state) in this
-                            .window_func_calls
-                            .iter()
-                            .zip_eq_fast(&mut partition.states)
-                        {
-                            state.append(
-                                key.clone(),
-                                (&row)
-                                    .project(
-                                        &call
-                                            .args
-                                            .val_indices()
-                                            .iter()
-                                            .map(|idx| {
-                                                this.mapping.upstream_to_state_table(*idx).unwrap()
-                                            })
-                                            .collect_vec(),
-                                    )
-                                    .into_owned_row()
-                                    .into_inner()
-                                    .into(),
-                            );
-                        }
-                    }
+impl<S: StateStore> OverWindowExecutor<S> {
+    pub fn new(args: OverWindowExecutorArgs<S>) -> Self {
+        let input_info = args.input.info();
 
-                    {
-                        // ensure state correctness
-                        // TODO(): need some proof
-                        assert!(partition.curr_windows_are_aligned());
-                    }
-
-                    {
-                        // ignore ready windows
-                        while partition
-                            .states
-                            .iter()
-                            .all(|state| state.curr_window().is_ready)
-                        {
-                            partition.states.iter_mut().for_each(|state| {
-                                state.slide();
-                            });
-                        }
-                    }
-                }
-
-                vars.partitions
-                    .insert(encoded_partition_key.clone(), partition);
-            }
-        }
-
-        let partition = vars.partitions.get_mut(&encoded_partition_key).unwrap();
-
-        // Materialize input to state table.
-        this.state_table
-            .insert(input_row.project(this.mapping.upstream_columns()));
-
-        // Feed the row to all window states.
-        let order_key = input_row
-            .datum_at(this.order_key_index)
-            .expect("order key column must be non-NULL")
-            .into_scalar_impl();
-        let encoded_pk = memcmp_encoding::encode_row(
-            input_row.project(&this.pk_indices),
-            &vec![OrderType::ascending(); this.pk_indices.len()],
-        )?
-        .into_boxed_slice();
-        let key = StateKey {
-            order_key,
-            encoded_pk,
-        };
-        for (call, state) in this
-            .window_func_calls
+        let fields = args
+            .partition_key_indices
             .iter()
-            .zip_eq_fast(&mut partition.states)
-        {
-            state.append(
-                key.clone(),
-                input_row
-                    .project(call.args.val_indices())
-                    .into_owned_row()
-                    .into_inner()
-                    .into(),
-            );
-        }
+            .chain(std::iter::once(&args.order_key_index))
+            .chain(&input_info.pk_indices)
+            .map(|&i| input_info.schema.fields()[i].clone())
+            .chain(
+                args.calls
+                    .iter()
+                    .map(|call| Field::unnamed(call.return_type.clone())),
+            )
+            .collect();
+        let schema = Schema::new(fields);
 
-        while partition
-            .states
+        let pk_data_types = input_info
+            .pk_indices
             .iter()
-            .all(|state| state.curr_window().is_ready)
-        {
-            // All window states are ready to output, so we can yield an output row.
-            debug_assert!(partition.curr_windows_are_aligned());
-            let key = partition.states[0]
-                .curr_window()
-                .key
-                .cloned()
-                .expect("ready window must have state key");
-            let pk = memcmp_encoding::decode_row(
-                &key.encoded_pk,
-                &this.pk_data_types,
-                &vec![OrderType::ascending(); this.pk_indices.len()],
-            )?;
-            let outputs = partition.states.iter_mut().map(|state| state.slide());
-            // TODO(): evict unneeded rows from state table
-            let output_row = partition_key
-                .chain(row::once(Some(key.order_key)))
-                .chain(pk)
-                .chain(OwnedRow::new(
-                    outputs.map(|output| output.return_value).collect(),
-                ))
-                .into_owned_row();
-            output_rows.push(output_row);
+            .map(|&i| input_info.schema.fields()[i].data_type())
+            .collect();
+
+        Self {
+            input: args.input,
+            inner: ExecutorInner {
+                actor_ctx: args.actor_ctx,
+                info: ExecutorInfo {
+                    schema,
+                    pk_indices: args.pk_indices,
+                    identity: format!("OverWindowExecutor {:X}", args.executor_id),
+                },
+                calls: args.calls,
+                state_table: args.state_table,
+                col_mapping: args.col_mapping,
+                pk_data_types,
+                input_pk_indices: input_info.pk_indices,
+                partition_key_indices: args.partition_key_indices,
+                order_key_index: args.order_key_index,
+            },
         }
     }
 
-    Ok(output_rows)
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn executor_inner(self) {
+        let OverWindowExecutor {
+            input,
+            inner: mut this,
+        } = self;
+
+        let mut vars = ExecutionVars {
+            partitions: BTreeMap::new(),
+            _phantom: PhantomData::<S>,
+        };
+
+        let mut input = input.execute();
+        let barrier = expect_first_barrier(&mut input).await?;
+        this.state_table.init_epoch(barrier.epoch);
+
+        yield Message::Barrier(barrier);
+
+        #[for_await]
+        for msg in input {
+            let msg = msg?;
+            match msg {
+                Message::Watermark(watermark) => {
+                    // TODO()
+                }
+                Message::Chunk(chunk) => {
+                    let output_rows = Self::apply_chunk(&mut this, &mut vars, chunk).await?;
+                    for row in output_rows {
+                        println!("{:?}", row.as_inner());
+                    }
+                    println!("-------------------------");
+                }
+                Message::Barrier(barrier) => {
+                    this.state_table.commit(barrier.epoch).await?;
+
+                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(this.actor_ctx.id) {
+                        let (_, cache_may_stale) =
+                            this.state_table.update_vnode_bitmap(vnode_bitmap);
+                        if cache_may_stale {
+                            vars.partitions.clear();
+                        }
+                    }
+
+                    yield Message::Barrier(barrier);
+                }
+            }
+        }
+    }
+
+    async fn apply_chunk(
+        this: &mut ExecutorInner<S>,
+        vars: &mut ExecutionVars<S>,
+        chunk: StreamChunk,
+    ) -> StreamExecutorResult<Vec<OwnedRow>> {
+        let mut output_rows = vec![];
+
+        // We assume that the input is sorted by order key.
+        for record in chunk.records() {
+            let input_row = must_match!(record, Record::Insert { new_row } => new_row);
+
+            let partition_key = input_row.project(&this.partition_key_indices);
+            let encoded_partition_key = memcmp_encoding::encode_row(
+                partition_key,
+                &vec![OrderType::ascending(); this.partition_key_indices.len()],
+            )?
+            .into_boxed_slice();
+
+            {
+                let input_row: bool; // in case of accidental use
+
+                // ensure_key_in_cache
+                if !vars.partitions.contains_key(&encoded_partition_key) {
+                    let mut partition = Partition::new(&this.calls);
+
+                    {
+                        // recover from state table
+
+                        let iter = this
+                            .state_table
+                            .iter_with_pk_prefix(
+                                partition_key,
+                                PrefetchOptions::new_for_exhaust_iter(),
+                            )
+                            .await?;
+
+                        #[for_await]
+                        for res in iter {
+                            let row: OwnedRow = res?;
+                            let order_key = row
+                                .datum_at(
+                                    this.col_mapping
+                                        .upstream_to_state_table(this.order_key_index)
+                                        .unwrap(),
+                                )
+                                .expect("order key column must be non-NULL")
+                                .into_scalar_impl();
+                            let encoded_pk = memcmp_encoding::encode_row(
+                                (&row).project(
+                                    &this
+                                        .input_pk_indices
+                                        .iter()
+                                        .map(|idx| {
+                                            this.col_mapping.upstream_to_state_table(*idx).unwrap()
+                                        })
+                                        .collect_vec(),
+                                ),
+                                &vec![OrderType::ascending(); this.input_pk_indices.len()],
+                            )?
+                            .into_boxed_slice();
+                            let key = StateKey {
+                                order_key,
+                                encoded_pk,
+                            };
+                            for (call, state) in
+                                this.calls.iter().zip_eq_fast(&mut partition.states)
+                            {
+                                state.append(
+                                    key.clone(),
+                                    (&row)
+                                        .project(
+                                            &call
+                                                .args
+                                                .val_indices()
+                                                .iter()
+                                                .map(|idx| {
+                                                    this.col_mapping
+                                                        .upstream_to_state_table(*idx)
+                                                        .unwrap()
+                                                })
+                                                .collect_vec(),
+                                        )
+                                        .into_owned_row()
+                                        .into_inner()
+                                        .into(),
+                                );
+                            }
+                        }
+
+                        {
+                            // ensure state correctness
+                            // TODO(): need some proof
+                            assert!(partition.curr_windows_are_aligned());
+                        }
+
+                        {
+                            // ignore ready windows
+                            while partition
+                                .states
+                                .iter()
+                                .all(|state| state.curr_window().is_ready)
+                            {
+                                partition.states.iter_mut().for_each(|state| {
+                                    state.slide();
+                                });
+                            }
+                        }
+                    }
+
+                    vars.partitions
+                        .insert(encoded_partition_key.clone(), partition);
+                }
+            }
+
+            let partition = vars.partitions.get_mut(&encoded_partition_key).unwrap();
+
+            // Materialize input to state table.
+            this.state_table
+                .insert(input_row.project(this.col_mapping.upstream_columns()));
+
+            // Feed the row to all window states.
+            let order_key = input_row
+                .datum_at(this.order_key_index)
+                .expect("order key column must be non-NULL")
+                .into_scalar_impl();
+            let encoded_pk = memcmp_encoding::encode_row(
+                input_row.project(&this.input_pk_indices),
+                &vec![OrderType::ascending(); this.input_pk_indices.len()],
+            )?
+            .into_boxed_slice();
+            let key = StateKey {
+                order_key,
+                encoded_pk,
+            };
+            for (call, state) in this.calls.iter().zip_eq_fast(&mut partition.states) {
+                state.append(
+                    key.clone(),
+                    input_row
+                        .project(call.args.val_indices())
+                        .into_owned_row()
+                        .into_inner()
+                        .into(),
+                );
+            }
+
+            while partition
+                .states
+                .iter()
+                .all(|state| state.curr_window().is_ready)
+            {
+                // All window states are ready to output, so we can yield an output row.
+                debug_assert!(partition.curr_windows_are_aligned());
+                let key = partition.states[0]
+                    .curr_window()
+                    .key
+                    .cloned()
+                    .expect("ready window must have state key");
+                let pk = memcmp_encoding::decode_row(
+                    &key.encoded_pk,
+                    &this.pk_data_types,
+                    &vec![OrderType::ascending(); this.input_pk_indices.len()],
+                )?;
+                let outputs = partition.states.iter_mut().map(|state| state.slide());
+                // TODO(): evict unneeded rows from state table
+                let output_row = partition_key
+                    .chain(row::once(Some(key.order_key)))
+                    .chain(pk)
+                    .chain(OwnedRow::new(
+                        outputs.map(|output| output.return_value).collect(),
+                    ))
+                    .into_owned_row();
+                output_rows.push(output_row);
+            }
+        }
+
+        Ok(output_rows)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::marker::PhantomData;
-
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
-    use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::expr::WindowFuncKind;
     use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::StateStore;
 
     use super::call::{Frame, WindowFuncCall};
-    use super::ExecutorInner;
+    use super::{OverWindowExecutor, OverWindowExecutorArgs};
     use crate::common::table::state_table::StateTable;
     use crate::common::StateTableColumnMapping;
     use crate::executor::aggregation::AggArgs;
-    use crate::executor::over_window::ExecutionVars;
+    use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
+    use crate::executor::{ActorContext, BoxedMessageStream, Executor};
 
-    #[tokio::test]
-    async fn test() {
+    async fn create_executor<S: StateStore>(
+        calls: Vec<WindowFuncCall>,
+        store: S,
+    ) -> (MessageSender, BoxedMessageStream) {
         let input_schema = Schema::new(vec![
             Field::unnamed(DataType::Int32),   // order key
             Field::unnamed(DataType::Varchar), // partition key
             Field::unnamed(DataType::Int64),   // pk
             Field::unnamed(DataType::Int32),   // x
         ]);
-        let pk_indices = vec![2];
-        let pk_data_types = vec![DataType::Int64];
+        let input_pk_indices = vec![2];
         let partition_key_indices = vec![1];
         let order_key_index = 0;
-
-        let store = MemoryStateStore::new();
-        let mut epoch = EpochPair::new_test_epoch(1);
 
         let table_columns = vec![
             ColumnDesc::unnamed(ColumnId::new(0), DataType::Varchar), // partition key
@@ -312,51 +456,60 @@ mod tests {
             OrderType::ascending(),
             OrderType::ascending(),
         ];
-        let mapping = StateTableColumnMapping::new(vec![1, 0, 2, 3], None);
+        let col_mapping = StateTableColumnMapping::new(vec![1, 0, 2, 3], None);
 
-        let window_func_calls = vec![
+        let output_pk_indices = vec![2];
+
+        let state_table = StateTable::new_without_distribution(
+            store,
+            TableId::new(1),
+            table_columns,
+            table_order_types,
+            table_pk_indices,
+        )
+        .await;
+
+        let (tx, source) = MockSource::channel(input_schema, input_pk_indices.clone());
+        let executor = OverWindowExecutor::new(OverWindowExecutorArgs {
+            input: source.boxed(),
+            actor_ctx: ActorContext::create(123),
+            pk_indices: output_pk_indices,
+            executor_id: 1,
+            calls,
+            state_table,
+            col_mapping,
+            partition_key_indices,
+            order_key_index,
+        });
+        (tx, executor.boxed().execute())
+    }
+
+    #[tokio::test]
+    async fn test() {
+        let store = MemoryStateStore::new();
+        let calls = vec![
             WindowFuncCall {
                 kind: WindowFuncKind::Lag,
                 args: AggArgs::Unary(DataType::Int32, 3),
+                return_type: DataType::Int32,
                 frame: Frame::Offset(-1),
             },
             WindowFuncCall {
                 kind: WindowFuncKind::Lead,
                 args: AggArgs::Unary(DataType::Int32, 3),
+                return_type: DataType::Int32,
                 frame: Frame::Offset(1),
             },
         ];
 
         {
             // test basic
+            let (mut tx, mut over_window) = create_executor(calls.clone(), store.clone()).await;
 
-            let state_table = StateTable::new_without_distribution(
-                store.clone(),
-                TableId::new(1),
-                table_columns.clone(),
-                table_order_types.clone(),
-                table_pk_indices.clone(),
-            )
-            .await;
+            tx.push_barrier(1, false);
+            over_window.expect_barrier().await;
 
-            let mut this = ExecutorInner {
-                window_func_calls: window_func_calls.clone(),
-                state_table,
-                mapping: mapping.clone(),
-                pk_indices: pk_indices.clone(),
-                pk_data_types: pk_data_types.clone(),
-                partition_key_indices: partition_key_indices.clone(),
-                order_key_index,
-            };
-            let mut vars = ExecutionVars {
-                partitions: Default::default(),
-                _phantom: PhantomData,
-            };
-
-            epoch.inc();
-            this.state_table.init_epoch(epoch);
-
-            let chunk = StreamChunk::from_pretty(
+            tx.push_chunk(StreamChunk::from_pretty(
                 " i T  I   i
                 + 1 p1 100 10
                 + 1 p1 101 16
@@ -364,66 +517,30 @@ mod tests {
                 + 5 p1 102 18
                 + 7 p2 201 22
                 + 8 p3 300 33",
-            );
+            ));
+            // TODO(): expect chunk
 
-            let result = super::apply_chunk(&mut this, &mut vars, chunk)
-                .await
-                .unwrap();
-            for row in result {
-                println!("{:?}", row.as_inner());
-            }
-            println!("-------------------------");
-
-            epoch.inc();
-            this.state_table.commit(epoch).await.unwrap();
+            tx.push_barrier(2, false);
+            over_window.expect_barrier().await;
         }
 
         {
             // test recovery
+            let (mut tx, mut over_window) = create_executor(calls.clone(), store.clone()).await;
 
-            let state_table = StateTable::new_without_distribution(
-                store.clone(),
-                TableId::new(1),
-                table_columns.clone(),
-                table_order_types.clone(),
-                table_pk_indices.clone(),
-            )
-            .await;
+            tx.push_barrier(3, false);
+            over_window.expect_barrier().await;
 
-            let mut this = ExecutorInner {
-                window_func_calls: window_func_calls.clone(),
-                state_table,
-                mapping: mapping.clone(),
-                pk_indices: pk_indices.clone(),
-                pk_data_types: pk_data_types.clone(),
-                partition_key_indices: partition_key_indices.clone(),
-                order_key_index,
-            };
-            let mut vars = ExecutionVars {
-                partitions: Default::default(),
-                _phantom: PhantomData,
-            };
-
-            epoch.inc();
-            this.state_table.init_epoch(epoch);
-
-            let chunk = StreamChunk::from_pretty(
+            tx.push_chunk(StreamChunk::from_pretty(
                 " i  T  I   i
                 + 10 p1 103 13
                 + 12 p2 202 28
                 + 13 p3 301 39",
-            );
+            ));
+            // TODO(): expect chunk
 
-            let result = super::apply_chunk(&mut this, &mut vars, chunk)
-                .await
-                .unwrap();
-            for row in result {
-                println!("{:?}", row.as_inner());
-            }
-            println!("-------------------------");
-
-            epoch.inc();
-            this.state_table.commit(epoch).await.unwrap();
+            tx.push_barrier(4, false);
+            over_window.expect_barrier().await;
         }
     }
 }

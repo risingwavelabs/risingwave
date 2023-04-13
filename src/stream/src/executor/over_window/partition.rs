@@ -18,7 +18,7 @@ use super::call::WindowFuncCall;
 use super::state::{create_window_state, WindowState};
 
 pub(super) struct Partition {
-    pub states: Vec<Box<dyn WindowState>>,
+    pub states: Vec<Box<dyn WindowState + Send>>,
 }
 
 impl Partition {

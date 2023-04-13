@@ -54,7 +54,7 @@ pub(super) trait WindowState {
     fn slide(&mut self) -> StateOutput;
 }
 
-pub(super) fn create_window_state(call: &WindowFuncCall) -> Box<dyn WindowState> {
+pub(super) fn create_window_state(call: &WindowFuncCall) -> Box<dyn WindowState + Send> {
     use WindowFuncKind::*;
     match call.kind {
         Lag => Box::new(lag::LagState::new(&call.frame)),
