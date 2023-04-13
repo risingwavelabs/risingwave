@@ -103,6 +103,13 @@ impl RowIdGenerator {
                     break;
                 }
                 current_timestamp_ms = get_current_timestamp_ms();
+
+                #[cfg(madsim)]
+                tokio::task::block_in_place(move || {
+                    tokio::runtime::Handle::current()
+                        .block_on(tokio::time::sleep(std::time::Duration::from_micros(10)));
+                });
+                #[cfg(not(madsim))]
                 std::hint::spin_loop();
             }
 
