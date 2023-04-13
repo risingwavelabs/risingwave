@@ -777,10 +777,10 @@ impl BatchPlanFragmenter {
                 } else if let Some(num) = self.batch_parallelism {
                     min(
                         num.get() as usize,
-                        self.worker_node_manager.schedule_unit_count(),
+                        self.worker_node_manager.serving_schedule_unit_count(),
                     )
                 } else {
-                    self.worker_node_manager.worker_node_count()
+                    self.worker_node_manager.serving_worker_node_count()
                 }
             }
         };

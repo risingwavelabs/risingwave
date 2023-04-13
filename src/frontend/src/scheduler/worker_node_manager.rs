@@ -94,30 +94,26 @@ impl WorkerNodeManager {
         write_guard.streaming_fragment_vnode_mapping = mapping;
     }
 
-    /// Get a random worker node.
-    pub fn next_random(&self) -> SchedulerResult<WorkerNode> {
-        let inner = self.inner.read().unwrap();
-        if inner.worker_nodes.is_empty() {
-            tracing::error!("No worker node available.");
-            return Err(SchedulerError::EmptyWorkerNodes);
-        }
-
-        Ok(inner
-            .worker_nodes
-            .choose(&mut rand::thread_rng())
-            .unwrap()
-            .clone())
-    }
-
-    pub fn worker_node_count(&self) -> usize {
-        self.inner.read().unwrap().worker_nodes.len()
-    }
-
-    pub fn schedule_unit_count(&self) -> usize {
+    /// Get a random serving worker node.
+    pub fn next_random_serving_worker(&self) -> SchedulerResult<WorkerNode> {
         self.inner
             .read()
             .unwrap()
-            .worker_nodes
+            .serving_worker_nodes()
+            .choose(&mut rand::thread_rng())
+            .ok_or_else(|| SchedulerError::EmptyWorkerNodes)
+            .map(|w| (*w).clone())
+    }
+
+    pub fn serving_worker_node_count(&self) -> usize {
+        self.inner.read().unwrap().serving_worker_nodes().len()
+    }
+
+    pub fn serving_schedule_unit_count(&self) -> usize {
+        self.inner
+            .read()
+            .unwrap()
+            .serving_worker_nodes()
             .iter()
             .map(|node| node.parallel_units.len())
             .sum()
@@ -276,7 +272,7 @@ mod tests {
         use super::*;
 
         let manager = WorkerNodeManager::mock(vec![]);
-        assert_eq!(manager.worker_node_count(), 0);
+        assert_eq!(manager.serving_worker_node_count(), 0);
         assert_eq!(manager.list_worker_nodes(), vec![]);
 
         let worker_nodes = vec![
@@ -300,11 +296,11 @@ mod tests {
         worker_nodes
             .iter()
             .for_each(|w| manager.add_worker_node(w.clone()));
-        assert_eq!(manager.worker_node_count(), 2);
+        assert_eq!(manager.serving_worker_node_count(), 2);
         assert_eq!(manager.list_worker_nodes(), worker_nodes);
 
         manager.remove_worker_node(worker_nodes[0].clone());
-        assert_eq!(manager.worker_node_count(), 1);
+        assert_eq!(manager.serving_worker_node_count(), 1);
         assert_eq!(
             manager.list_worker_nodes(),
             worker_nodes.as_slice()[1..].to_vec()

@@ -289,7 +289,7 @@ impl LocalQueryExecution {
                             epoch: Some(self.snapshot.get_batch_query_epoch()),
                         };
                         // NOTE: select a random work node here.
-                        let worker_node = self.front_env.worker_node_manager().next_random()?;
+                        let worker_node = self.front_env.worker_node_manager().next_random_serving_worker()?;
                         let exchange_source = ExchangeSource {
                             task_output_id: Some(TaskOutputId {
                                 task_id: Some(PbTaskId {
@@ -485,7 +485,11 @@ impl LocalQueryExecution {
         } else {
             let mut workers = Vec::with_capacity(stage.parallelism.unwrap() as usize);
             for _ in 0..stage.parallelism.unwrap() {
-                workers.push(self.front_env.worker_node_manager().next_random()?);
+                workers.push(
+                    self.front_env
+                        .worker_node_manager()
+                        .next_random_serving_worker()?,
+                );
             }
             Ok(workers)
         }

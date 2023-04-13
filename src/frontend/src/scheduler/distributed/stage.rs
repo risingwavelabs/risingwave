@@ -817,7 +817,7 @@ impl StageRunner {
         worker: Option<WorkerNode>,
     ) -> SchedulerResult<Fuse<Streaming<TaskInfoResponse>>> {
         let worker_node_addr = worker
-            .unwrap_or(self.worker_node_manager.next_random()?)
+            .unwrap_or(self.worker_node_manager.next_random_serving_worker()?)
             .host
             .unwrap();
 
