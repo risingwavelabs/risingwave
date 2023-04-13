@@ -30,6 +30,7 @@ impl DataType {
             | DataType::Time => 8,
             DataType::Decimal
             | DataType::Varchar
+            | DataType::Int256
             | DataType::Bytea
             | DataType::Interval
             | DataType::Jsonb
@@ -118,6 +119,7 @@ impl DataType {
             DataType::Serial => 20,
             DataType::Float32 => 700,
             DataType::Float64 => 701,
+            DataType::Int256 => 1301,
             DataType::Decimal => 1700,
             DataType::Date => 1082,
             DataType::Varchar => 1043,
@@ -135,6 +137,7 @@ impl DataType {
                 DataType::Int16 => 1005,
                 DataType::Int32 => 1007,
                 DataType::Int64 => 1016,
+                DataType::Int256 => 1302,
                 DataType::Serial => 1016,
                 DataType::Float32 => 1021,
                 DataType::Float64 => 1022,

@@ -636,9 +636,7 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
         async move {
             self.inner.flush()?;
             // memory backend doesn't need to push to S3, so this is a no-op
-            Ok(SyncResult {
-                ..Default::default()
-            })
+            Ok(SyncResult::default())
         }
     }
 

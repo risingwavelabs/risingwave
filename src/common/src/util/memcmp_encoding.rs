@@ -165,6 +165,7 @@ fn calculate_encoded_size_inner(
             DataType::Jsonb => deserializer.skip_bytes()?,
             DataType::Varchar => deserializer.skip_bytes()?,
             DataType::Bytea => deserializer.skip_bytes()?,
+            DataType::Int256 => deserializer.skip_bytes()?,
         };
 
         // consume offset of fixed_type

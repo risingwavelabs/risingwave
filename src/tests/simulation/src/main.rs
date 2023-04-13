@@ -13,7 +13,7 @@
 // limitations under the License.
 
 #![cfg_attr(not(madsim), allow(dead_code))]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 
 use std::path::PathBuf;
 
@@ -36,7 +36,7 @@ fn main() {
 #[derive(Debug, Parser)]
 pub struct Args {
     /// Glob of sqllogictest scripts.
-    #[clap()]
+    #[clap(default_value = "")]
     files: String,
 
     /// The number of frontend nodes.
@@ -132,6 +132,9 @@ pub struct Args {
     /// Dump etcd data into toml file before exit.
     #[clap(long)]
     etcd_dump: Option<PathBuf>,
+
+    #[arg(short, long)]
+    e2e_extended_test: bool,
 }
 
 #[cfg(madsim)]
@@ -246,5 +249,21 @@ async fn main() {
             })
             .await;
     }
+
+    if args.e2e_extended_test {
+        cluster
+            .run_on_client(async move {
+                risingwave_e2e_extended_mode_test::run_test_suit(
+                    "dev".to_string(),
+                    "root".to_string(),
+                    "frontend".to_string(),
+                    4566,
+                    "".to_string(),
+                )
+                .await;
+            })
+            .await;
+    }
+
     cluster.graceful_shutdown().await;
 }

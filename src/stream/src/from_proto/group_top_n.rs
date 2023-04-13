@@ -60,7 +60,17 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
             .map(ColumnOrder::from_protobuf)
             .collect();
 
-        assert_eq!(&params.pk_indices, input.pk_indices());
+        if node.limit == 1 && !node.with_ties {
+            // When there is at most one record for each value of the group key, `params.pk_indices`
+            // is the group key instead of the input's stream key.
+            assert_eq!(
+                &params.pk_indices,
+                &node.group_key.iter().map(|idx| *idx as usize).collect_vec()
+            );
+        } else {
+            assert_eq!(&params.pk_indices, input.pk_indices());
+        }
+
         let args = GroupTopNExecutorDispatcherArgs {
             input,
             ctx: params.actor_context,
