@@ -126,7 +126,7 @@ impl AwsEc2Client {
                             is_ready = true;
                         }
                         // forward-compatible with protocol change
-                        other @ _ => {
+                        other => {
                             is_ready = other.as_str().eq_ignore_ascii_case("available");
                         }
                     }
