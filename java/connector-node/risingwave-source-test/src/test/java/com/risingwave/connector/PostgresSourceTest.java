@@ -141,7 +141,7 @@ public class PostgresSourceTest {
         Future<Integer> countResult = executorService.submit(countTask);
         int count = countResult.get();
         LOG.info("number of cdc messages received: {}", count);
-        assertEquals(count, 10000);
+        assertEquals(10000, count);
         // cleanup
         query = "DROP TABLE orders";
         SourceTestClient.performQuery(connection, query);
@@ -225,8 +225,8 @@ public class PostgresSourceTest {
                             eventStream2.hasNext();
                         });
         assertEquals(
-                exception2.getMessage(),
-                "INVALID_ARGUMENT: INTERNAL: Postgres user must be superuser or replication role to start walsender.");
+                "INVALID_ARGUMENT: INTERNAL: Postgres user must be superuser or replication role to start walsender.",
+                exception2.getMessage());
         // cleanup
         query = "DROP TABLE orders";
         SourceTestClient.performQuery(connDbz, query);

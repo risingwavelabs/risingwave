@@ -136,7 +136,7 @@ public class MySQLSourceTest {
         try {
             int count = countResult.get();
             LOG.info("number of cdc messages received: {}", count);
-            assertEquals(count, 10000);
+            assertEquals(10000, count);
         } catch (ExecutionException e) {
             fail("Execution exception: ", e);
         }
