@@ -47,6 +47,13 @@ pub struct Unrecognized<T: 'static> {
     _marker: std::marker::PhantomData<&'static T>,
 }
 
+impl<T> Unrecognized<T> {
+    /// Returns all unrecognized fields as a map.
+    pub fn into_inner(self) -> BTreeMap<String, Value> {
+        self.inner
+    }
+}
+
 impl<'de, T> Deserialize<'de> for Unrecognized<T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
