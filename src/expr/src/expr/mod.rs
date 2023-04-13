@@ -207,8 +207,8 @@ impl ExprContext {
         Self { curr_epoch }
     }
 
-    pub fn get_physical_time(&self) -> u64 {
-        self.curr_epoch.physical_time()
+    pub fn get_proctime(&self) -> u64 {
+        self.curr_epoch.as_unix_millis() * 1000
     }
 }
 
