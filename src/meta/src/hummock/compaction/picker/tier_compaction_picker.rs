@@ -177,10 +177,25 @@ impl TierCompactionPicker {
             while target_level_idx > 0 {
                 if l0.sub_levels[target_level_idx - 1].level_type
                     != LevelType::Nonoverlapping as i32
-                    || !overlap
-                        .check_multiple_overlap(&l0.sub_levels[target_level_idx - 1].table_infos)
-                        .is_empty()
                 {
+                    break;
+                }
+                let mut overlap = false;
+                for idx in 0..select_tables.len() {
+                    let ssts = &select_tables[idx..(idx + 1)];
+                    if !self
+                        .overlap_strategy
+                        .check_base_level_overlap(
+                            ssts,
+                            &l0.sub_levels[target_level_idx - 1].table_infos,
+                        )
+                        .is_empty()
+                    {
+                        overlap = true;
+                        break;
+                    }
+                }
+                if overlap {
                     break;
                 }
                 target_level_idx -= 1;

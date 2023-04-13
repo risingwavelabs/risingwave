@@ -54,6 +54,7 @@ impl MinOverlappingPicker {
         level_handlers: &[LevelHandler],
     ) -> (Vec<SstableInfo>, Vec<SstableInfo>) {
         let mut scores = vec![];
+        let mut trivial_move_files = vec![];
         for left in 0..select_tables.len() {
             if level_handlers[self.level].is_pending_compact(&select_tables[left].sst_id) {
                 continue;
@@ -73,6 +74,12 @@ impl MinOverlappingPicker {
                 select_file_size += table.file_size;
                 overlap_info.update(table);
                 let overlap_files = overlap_info.check_multiple_overlap(target_tables);
+                if overlap_files.is_empty() {
+                    if right == left {
+                        trivial_move_files.push(table.clone());
+                    }
+                    continue;
+                }
                 let mut total_file_size = 0;
                 let mut pending_campct = false;
                 for other in overlap_files {
@@ -87,6 +94,9 @@ impl MinOverlappingPicker {
                 }
                 scores.push((total_file_size * 100 / select_file_size, (left, right)));
             }
+        }
+        if !trivial_move_files.is_empty() {
+            return (trivial_move_files, vec![]);
         }
         if scores.is_empty() {
             return (vec![], vec![]);
