@@ -14,11 +14,9 @@
 
 use anyhow::anyhow;
 use num_traits::Zero;
-use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk,
-};
+use risingwave_common::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk};
 use risingwave_common::bail;
-use risingwave_common::types::num256::{Int256, Int256Ref};
+use risingwave_common::types::num256::Int256;
 use risingwave_common::types::{CheckedAdd, DataType, Scalar, ScalarRef};
 
 use crate::vector_op::agg::aggregator::Aggregator;
@@ -35,13 +33,6 @@ impl Int256Sum {
             input_col_idx,
             result: Int256::zero(),
         }
-    }
-
-    fn add(&mut self, scalar_ref: Option<Int256Ref<'_>>) -> crate::Result<()> {
-        self.result = self.result
-            .checked_add(scalar_ref.to_owned_scalar())
-            .ok_or_else(|| anyhow!("Overflow when summing up Int256 values."))?;
-        Ok(())
     }
 }
 
@@ -87,10 +78,9 @@ impl Aggregator for Int256Sum {
     }
 
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> crate::Result<()> {
-        let res = std::mem::take(&mut self.result);
         match builder {
             ArrayBuilderImpl::Int256(b) => {
-                b.append(Some(res.as_scalar_ref()));
+                b.append(Some(self.result.as_scalar_ref()));
                 Ok(())
             }
             _ => bail!("Unexpected builder for sum(int256)."),
