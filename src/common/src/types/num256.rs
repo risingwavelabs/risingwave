@@ -183,6 +183,26 @@ macro_rules! impl_common_for_num256 {
 
 impl_common_for_num256!(Int256, Int256Ref<'a>, i256, Int256);
 
+impl Int256 {
+    // `i256::str_from_hex` and `i256::str_from_prefixed` doesn't support uppercase "0X", so when it
+    // fails it will try to parse the lowercase version of the `src`
+
+    // `from_str_prefixed` function accepts string inputs that start with "0x". If the parsing
+    // fails, it will attempt to parse the input as a decimal value.
+    pub fn from_str_prefixed(src: &str) -> Result<Self, ParseIntError> {
+        i256::from_str_prefixed(src)
+            .or_else(|_| i256::from_str_prefixed(&src.to_lowercase()))
+            .map(Into::into)
+    }
+
+    // `from_str_hex` function only accepts string inputs that start with "0x".
+    pub fn from_str_hex(src: &str) -> Result<Self, ParseIntError> {
+        i256::from_str_hex(src)
+            .or_else(|_| i256::from_str_hex(&src.to_lowercase()))
+            .map(Into::into)
+    }
+}
+
 impl<'a> Int256Ref<'a> {
     pub fn memcmp_serialize(
         &self,
@@ -435,5 +455,109 @@ mod tests {
         assert_eq!(Int256::from(-1).abs(), Int256::from(1));
         assert_eq!(Int256::from(1).abs(), Int256::from(1));
         assert_eq!(Int256::from(0).abs(), Int256::from(0));
+    }
+
+    #[test]
+    fn hex_to_int256() {
+        assert_eq!(Int256::from_str_hex("0x0").unwrap(), Int256::from(0));
+        assert_eq!(Int256::from_str_hex("0x1").unwrap(), Int256::from(1));
+        assert_eq!(Int256::from_str_hex("-0x1").unwrap(), Int256::from(-1));
+        assert_eq!(Int256::from_str_hex("0xa").unwrap(), Int256::from(10));
+        assert_eq!(Int256::from_str_hex("0xA").unwrap(), Int256::from(10));
+        assert_eq!(Int256::from_str_hex("-0Xff").unwrap(), Int256::from(-255));
+        assert_eq!(Int256::from_str_hex("0Xff").unwrap(), Int256::from(255));
+        assert_eq!(
+            Int256::from_str_hex("0xf").unwrap(),
+            Int256::from_str("15").unwrap()
+        );
+        assert_eq!(
+            Int256::from_str_hex("0xfffff").unwrap(),
+            Int256::from_str("1048575").unwrap()
+        );
+        assert_eq!(
+            Int256::from_str_hex("0xfffffffff").unwrap(),
+            Int256::from_str("68719476735").unwrap()
+        );
+        assert_eq!(
+            Int256::from_str_hex("0xfffffffffffff").unwrap(),
+            Int256::from_str("4503599627370495").unwrap()
+        );
+        assert_eq!(
+            Int256::from_str_hex("0xfffffffffffffffff").unwrap(),
+            Int256::from_str("295147905179352825855").unwrap()
+        );
+        assert_eq!(
+            Int256::from_str_hex("0xfffffffffffffffffffff").unwrap(),
+            Int256::from_str("19342813113834066795298815").unwrap()
+        );
+        assert_eq!(
+            Int256::from_str_hex("0xfffffffffffffffffffffffff").unwrap(),
+            Int256::from_str("1267650600228229401496703205375").unwrap()
+        );
+        assert_eq!(
+            Int256::from_str_hex("0xfffffffffffffffffffffffffffff").unwrap(),
+            Int256::from_str("83076749736557242056487941267521535").unwrap()
+        );
+        assert_eq!(
+            Int256::from_str_hex("0xfffffffffffffffffffffffffffffffff").unwrap(),
+            Int256::from_str("5444517870735015415413993718908291383295").unwrap()
+        );
+        assert_eq!(
+            Int256::from_str_hex("0xfffffffffffffffffffffffffffffffffffff").unwrap(),
+            Int256::from_str("356811923176489970264571492362373784095686655").unwrap()
+        );
+        assert_eq!(
+            Int256::from_str_hex("0xfffffffffffffffffffffffffffffffffffffffff").unwrap(),
+            Int256::from_str("23384026197294446691258957323460528314494920687615").unwrap()
+        );
+        assert_eq!(
+            Int256::from_str_hex("0xfffffffffffffffffffffffffffffffffffffffffffff").unwrap(),
+            Int256::from_str("1532495540865888858358347027150309183618739122183602175").unwrap()
+        );
+        assert_eq!(
+            Int256::from_str_hex("0xfffffffffffffffffffffffffffffffffffffffffffffffff").unwrap(),
+            Int256::from_str("100433627766186892221372630771322662657637687111424552206335")
+                .unwrap()
+        );
+        assert_eq!(
+            Int256::from_str_hex("0xfffffffffffffffffffffffffffffffffffffffffffffffffffff")
+                .unwrap(),
+            Int256::from_str("6582018229284824168619876730229402019930943462534319453394436095")
+                .unwrap()
+        );
+        assert_eq!(
+            Int256::from_str_hex("0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+                .unwrap(),
+            Int256::from_str(
+                "431359146674410236714672241392314090778194310760649159697657763987455"
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            Int256::from_str_hex("0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+                .unwrap(),
+            Int256::from_str(
+                "28269553036454149273332760011886696253239742350009903329945699220681916415"
+            )
+            .unwrap()
+        );
+
+        // int256 max
+        assert_eq!(
+            Int256::from_str_hex(
+                "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            )
+            .unwrap(),
+            Int256::max(),
+        );
+
+        // int256 min
+        assert_eq!(
+            Int256::from_str_hex(
+                "-0x8000000000000000000000000000000000000000000000000000000000000000"
+            )
+            .unwrap(),
+            Int256::min(),
+        );
     }
 }
