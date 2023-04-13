@@ -28,3 +28,7 @@ labels:
 - label: "user-facing-changes"
   negate: true
   body: 'My PR \*\*DOES NOT\*\* contain user-facing changes'
+  
+- label: "breaking-change"
+  negate: true
+  body: 'This PR \*\*IS NOT\*\* a breaking change.'
