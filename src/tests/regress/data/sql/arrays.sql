@@ -618,13 +618,13 @@ select unnest(array[1,2,3,4.5]::numeric[]);
 select unnest(array[1,2,3,null,4,null,null,5,6]);
 select unnest(array[1,2,3,null,4,null,null,5,6]::text[]);
 select abs(unnest(array[1,2,null,-3]));
---@ select array_remove(array[1,2,2,3], 2);
---@ select array_remove(array[1,2,2,3], 5);
+select array_remove(array[1,2,2,3], 2);
+select array_remove(array[1,2,2,3], 5);
 --@ select array_remove(array[1,NULL,NULL,3], NULL);
---@ select array_remove(array['A','CC','D','C','RR'], 'RR');
---@ select array_remove(array[1.0, 2.1, 3.3], 1);
---@ select array_remove('{{1,2,2},{1,4,3}}', 2); -- not allowed
---@ select array_remove(array['X','X','X'], 'X') = '{}';
+select array_remove(array['A','CC','D','C','RR'], 'RR');
+select array_remove(array[1.0, 2.1, 3.3], 1);
+select array_remove('{{1,2,2},{1,4,3}}', 2); -- not allowed
+select array_remove(array['X','X','X'], 'X') = '{}';
 --@ select array_replace(array[1,2,5,4],5,3);
 --@ select array_replace(array[1,2,5,4],5,NULL);
 --@ select array_replace(array[1,2,NULL,4,NULL],NULL,5);

@@ -428,7 +428,7 @@ async fn test_state_store_sync() {
 
     let read_version = hummock_storage.read_version();
 
-    let epoch1: _ = read_version.read().committed().max_committed_epoch() + 1;
+    let epoch1 = read_version.read().committed().max_committed_epoch() + 1;
     hummock_storage.init(epoch1);
 
     // ingest 16B batch

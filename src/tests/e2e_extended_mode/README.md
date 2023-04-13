@@ -5,6 +5,7 @@ This is a program used for e2e test in extended mode.
 For e2e test in extended query mode, there are two thing we can't test in sqllogitest
 1. bind parameter 
 2. max row number 
+3. cancel query
 See [detail](https://www.postgresql.org/docs/15/protocol-flow.html#PROTOCOL-FLOW-PIPELINING:~:text=Once%20a%20portal,count%20is%20ignored)
 
 So before sqllogictest supporting these, we test these function in this program. 

@@ -394,13 +394,14 @@ impl SealedData {
     }
 
     fn drop_merging_tasks(&mut self) {
-        // pop from oldest merging task to restore candidate imms back
-        while let Some(task) = self.merging_tasks.pop_back() {
+        // pop from newest merging task to restore candidate imms back
+        while let Some(task) = self.merging_tasks.pop_front() {
             // cancel the task
             task.join_handle.abort();
             self.imms_by_table_shard
-                .entry((task.table_id, task.instance_id))
-                .and_modify(|imms| imms.extend(task.input_imms.into_iter()));
+                .get_mut(&(task.table_id, task.instance_id))
+                .unwrap()
+                .extend(task.input_imms.into_iter());
         }
     }
 
@@ -447,20 +448,11 @@ impl SealedData {
             // pop the finished task
             let task = self.merging_tasks.pop_back().expect("must exist");
 
-            match merge_result {
-                Ok(merged_imm) => Poll::Ready(Some(MergeImmTaskOutput {
-                    table_id: task.table_id,
-                    instance_id: task.instance_id,
-                    merged_imm,
-                })),
-                Err(err) => {
-                    error!(
-                        "poll merge imm task failed. table_id: {}, shard_id: {},  {}",
-                        task.table_id, task.instance_id, err
-                    );
-                    Poll::Ready(None)
-                }
-            }
+            Poll::Ready(Some(MergeImmTaskOutput {
+                table_id: task.table_id,
+                instance_id: task.instance_id,
+                merged_imm: merge_result.unwrap(),
+            }))
         } else {
             Poll::Ready(None)
         }

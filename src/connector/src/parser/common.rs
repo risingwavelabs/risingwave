@@ -12,9 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
+use std::str::FromStr;
+
 use anyhow::{anyhow, Result};
 use num_traits::FromPrimitive;
 use risingwave_common::array::{ListValue, StructValue};
+use risingwave_common::types::num256::Int256;
 use risingwave_common::types::{DataType, Date, Datum, Decimal, ScalarImpl, Time};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::vector_op::cast::{
@@ -25,6 +29,21 @@ use simd_json::value::StaticNode;
 use simd_json::{BorrowedValue, ValueAccess};
 
 use crate::{ensure_i16, ensure_i32, ensure_i64, ensure_str, simd_json_ensure_float};
+pub(crate) fn json_object_smart_get_value<'a, 'b>(
+    v: &'b simd_json::BorrowedValue<'a>,
+    key: Cow<'b, str>,
+) -> Option<&'b BorrowedValue<'a>> {
+    let obj = v.as_object()?;
+    if obj.contains_key(key.as_ref()) {
+        return obj.get(key.as_ref());
+    }
+    for (k, v) in obj {
+        if k.eq_ignore_ascii_case(key.as_ref()) {
+            return Some(v);
+        }
+    }
+    None
+}
 
 fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<ScalarImpl> {
     let v = match dtype {
@@ -41,6 +60,7 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
         DataType::Int16 => ensure_i16!(v, i16).into(),
         DataType::Int32 => ensure_i32!(v, i32).into(),
         DataType::Int64 => ensure_i64!(v, i64).into(),
+        DataType::Int256 => Int256::from_str(ensure_str!(v, "quoted int256"))?.into(),
         DataType::Serial => anyhow::bail!("serial should not be parsed"),
         // when f32 overflows, the value is converted to `inf` which is inappropriate
         DataType::Float32 => {
@@ -99,7 +119,7 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
                 .iter()
                 .zip_eq_fast(struct_type_info.fields.iter())
                 .map(|field| {
-                    simd_json_parse_value(field.1, v.get(field.0.to_ascii_lowercase().as_str()))
+                    simd_json_parse_value(field.1, json_object_smart_get_value(v, field.0.into()))
                 })
                 .collect::<Result<Vec<Datum>>>()?;
             ScalarImpl::Struct(StructValue::new(fields))

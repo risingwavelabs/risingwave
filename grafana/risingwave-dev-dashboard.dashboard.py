@@ -14,6 +14,18 @@ datasource = {"type": "prometheus", "uid": f"{source_uid}"}
 panels = Panels(datasource)
 logging.basicConfig(level=logging.WARN)
 
+def section_actor_info(panels):
+    excluded_cols = ['Time', 'Value', '__name__', 'job', 'instance']
+    return [
+        panels.row("Actor/Table Id Info"),
+        panels.table_info("Actor Id Info",
+                          "Mapping from actor id to fragment id",
+                          [panels.table_target(f"{metric('actor_info')}")], excluded_cols),
+        panels.table_info("Table Id Info",
+                          "Mapping from table id to actor id and table name",
+                          [panels.table_target(f"{metric('table_info')}")], excluded_cols),
+
+    ]
 
 def section_cluster_node(panels):
     return [
@@ -210,6 +222,10 @@ def section_compaction(outer_panels):
                                 " - {{job}} @ {{instance}}",
                             ),
                             [90, "max"],
+                        ),
+                        panels.target(
+                            f"histogram_quantile(0.99, sum(rate({metric('compute_refill_cache_duration_bucket')}[$__rate_interval])) by (le, instance))",
+                            "compute_apply_version_duration_p99 - {{instance}}",
                         ),
                         panels.target(
                             f"sum by(le)(rate({metric('compactor_compact_task_duration_sum')}[$__rate_interval])) / sum by(le)(rate({metric('compactor_compact_task_duration_count')}[$__rate_interval]))",
@@ -1378,6 +1394,10 @@ def section_hummock(panels):
                     f"sum(rate({metric('file_cache_miss')}[$__rate_interval])) by (instance)",
                     "file cache miss @ {{instance}}",
                 ),
+                panels.target(
+                    f"sum(rate({metric('sstable_preload_io_count')}[$__rate_interval])) ",
+                    "preload iops",
+                ),
             ],
         ),
         panels.timeseries_ops(
@@ -2412,6 +2432,7 @@ dashboard = Dashboard(
     templating=templating,
     version=dashboard_version,
     panels=[
+        *section_actor_info(panels),
         *section_cluster_node(panels),
         *section_recovery_node(panels),
         *section_streaming(panels),

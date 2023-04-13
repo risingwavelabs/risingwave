@@ -1938,7 +1938,7 @@ impl Parser {
         // parse: [ argname ] argtype
         let mut name = None;
         let mut data_type = self.parse_data_type()?;
-        if let DataType::Custom(n) = &data_type {
+        if let DataType::Custom(n) = &data_type && !matches!(self.peek_token().token, Token::Comma | Token::RParen) {
             // the first token is actually a name
             name = Some(n.0[0].clone());
             data_type = self.parse_data_type()?;

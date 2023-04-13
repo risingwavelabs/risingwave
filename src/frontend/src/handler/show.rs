@@ -35,7 +35,7 @@ pub fn get_columns_from_table(
     session: &SessionImpl,
     table_name: ObjectName,
 ) -> Result<Vec<ColumnDesc>> {
-    let mut binder = Binder::new(session, vec![]);
+    let mut binder = Binder::new_for_system(session);
     let relation = binder.bind_relation_by_name(table_name.clone(), None, false)?;
     let catalogs = match relation {
         Relation::Source(s) => s.catalog.columns,
@@ -222,6 +222,19 @@ pub fn handle_show_create_object(
                 .filter(|t| t.is_table())
                 .ok_or_else(|| CatalogError::NotFound("table", name.to_string()))?;
             table.create_sql()
+        }
+        ShowCreateType::Sink => {
+            let sink = schema
+                .get_sink_by_name(&object_name)
+                .ok_or_else(|| CatalogError::NotFound("sink", name.to_string()))?;
+            sink.create_sql()
+        }
+        ShowCreateType::Source => {
+            let source = schema
+                .get_source_by_name(&object_name)
+                .filter(|s| s.associated_table_id.is_none())
+                .ok_or_else(|| CatalogError::NotFound("source", name.to_string()))?;
+            source.create_sql()
         }
         _ => {
             return Err(ErrorCode::NotImplemented(

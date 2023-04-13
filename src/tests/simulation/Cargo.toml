@@ -31,6 +31,7 @@ risingwave_common = { path = "../../common" }
 risingwave_compactor = { path = "../../storage/compactor" }
 risingwave_compute = { path = "../../compute" }
 risingwave_ctl = { path = "../../ctl" }
+risingwave_e2e_extended_mode_test = { path = "../e2e_extended_mode" }
 risingwave_frontend = { path = "../../frontend" }
 risingwave_meta = { path = "../../meta" }
 risingwave_pb = { path = "../../prost" }
