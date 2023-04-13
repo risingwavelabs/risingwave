@@ -106,8 +106,8 @@ pub async fn compute_node_serve(
         &advertise_addr,
         Property {
             worker_node_parallelism: opts.parallelism as u64,
-            is_streaming: !opts.disable_streaming,
-            is_serving: !opts.disable_serving,
+            is_streaming: opts.role.for_streaming(),
+            is_serving: opts.role.for_serving(),
         },
         &config.meta,
     )

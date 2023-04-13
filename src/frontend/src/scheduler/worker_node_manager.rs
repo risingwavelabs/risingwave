@@ -203,29 +203,26 @@ impl WorkerNodeManager {
             .inner
             .read()
             .unwrap()
-            .serving_fragment_vnode_mapping
-            .get(&fragment_id)
-            .cloned()
+            .serving_vnode_mapping(fragment_id)
         {
             return Ok(pu_mapping);
         }
         let mut guard = self.inner.write().unwrap();
-        if let Some(pu_mapping) = guard
-            .serving_fragment_vnode_mapping
-            .get(&fragment_id)
-            .cloned()
-        {
+        if let Some(pu_mapping) = guard.serving_vnode_mapping(fragment_id) {
             return Ok(pu_mapping);
         }
-        let pu_mapping = guard.schedule_serving(fragment_id)?;
-        guard
-            .serving_fragment_vnode_mapping
-            .insert(fragment_id, pu_mapping.clone());
+        let pu_mapping = guard.reschedule_serving(fragment_id)?;
         Ok(pu_mapping)
     }
 }
 
 impl WorkerNodeManagerInner {
+    fn serving_vnode_mapping(&self, fragment_id: FragmentId) -> Option<ParallelUnitMapping> {
+        self.serving_fragment_vnode_mapping
+            .get(&fragment_id)
+            .cloned()
+    }
+
     fn serving_worker_nodes(&self) -> Vec<&WorkerNode> {
         self.worker_nodes
             .iter()
@@ -233,7 +230,10 @@ impl WorkerNodeManagerInner {
             .collect_vec()
     }
 
-    fn schedule_serving(&self, fragment_id: FragmentId) -> SchedulerResult<ParallelUnitMapping> {
+    fn reschedule_serving(
+        &mut self,
+        fragment_id: FragmentId,
+    ) -> SchedulerResult<ParallelUnitMapping> {
         let serving_pus = self
             .serving_worker_nodes()
             .iter()
@@ -258,7 +258,10 @@ impl WorkerNodeManagerInner {
         let pus = serving_pus
             .into_iter()
             .choose_multiple(&mut rand::thread_rng(), serving_parallelism);
-        Ok(ParallelUnitMapping::build(&pus))
+        let pu_mapping = ParallelUnitMapping::build(&pus);
+        self.serving_fragment_vnode_mapping
+            .insert(fragment_id, pu_mapping.clone());
+        Ok(pu_mapping)
     }
 }
 

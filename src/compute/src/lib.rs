@@ -30,11 +30,12 @@ pub mod rpc;
 pub mod server;
 pub mod telemetry;
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use risingwave_common::config::AsyncStackTraceOption;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
 use risingwave_common_proc_macro::OverrideConfig;
+use serde::{Deserialize, Serialize};
 
 /// Command-line arguments for compute-node.
 #[derive(Parser, Clone, Debug)]
@@ -84,13 +85,9 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_PARALLELISM", default_value_t = default_parallelism())]
     pub parallelism: usize,
 
-    /// Whether used for streaming.
-    #[clap(long)]
-    pub disable_streaming: bool,
-
-    /// Whether used for streaming.
-    #[clap(long)]
-    pub disable_serving: bool,
+    /// Decides whether the compute node can be used for streaming and serving.
+    #[clap(long, value_enum)]
+    pub role: Role,
 
     /// The policy for compute node memory control. Valid values:
     /// - streaming-only
@@ -139,6 +136,32 @@ struct OverrideConfigOpts {
     pub async_stack_trace: Option<AsyncStackTraceOption>,
 }
 
+#[derive(Copy, Clone, Debug, Default, ValueEnum, Serialize, Deserialize)]
+pub enum Role {
+    Serving,
+    Streaming,
+    #[default]
+    Both,
+}
+
+impl Role {
+    pub fn for_streaming(&self) -> bool {
+        match self {
+            Role::Serving => false,
+            Role::Streaming => true,
+            Role::Both => true,
+        }
+    }
+
+    pub fn for_serving(&self) -> bool {
+        match self {
+            Role::Serving => true,
+            Role::Streaming => false,
+            Role::Both => true,
+        }
+    }
+}
+
 fn validate_opts(opts: &ComputeNodeOpts) {
     let total_memory_available_bytes = total_memory_available_bytes();
     if opts.total_memory_bytes > total_memory_available_bytes {
@@ -148,11 +171,6 @@ fn validate_opts(opts: &ComputeNodeOpts) {
     }
     if opts.parallelism == 0 {
         let error_msg = "parallelism should not be zero";
-        tracing::error!(error_msg);
-        panic!("{}", error_msg);
-    }
-    if opts.disable_streaming && opts.disable_serving {
-        let error_msg = "disable_streaming and disable_serving should not both be true";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }

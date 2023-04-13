@@ -487,7 +487,7 @@ profile:
         health-check-port: 6788
       - use: compactor
 
-  ci-3cn-3fe-in-memory:
+  ci-1cn-3fe-in-memory:
     config-path: src/config/ci.toml
     steps:
       - use: etcd
@@ -497,15 +497,12 @@ profile:
       - use: compute-node
         port: 5687
         exporter-port: 1222
-        disable-serving: true
       - use: compute-node
         port: 5688
         exporter-port: 1223
-        disable-serving: true
       - use: compute-node
         port: 5689
         exporter-port: 1224
-        disable-serving: true
       - use: frontend
         port: 4565
         exporter-port: 2222
@@ -563,31 +560,31 @@ profile:
         port: 5687
         exporter-port: 1222
         enable-tiered-cache: true
-        disable-serving: true
+        role: streaming
         parallelism: 4
       - use: compute-node
         port: 5688
         exporter-port: 1223
         enable-tiered-cache: true
-        disable-serving: true
+        role: streaming
         parallelism: 4
       - use: compute-node
         port: 5689
         exporter-port: 1224
         enable-tiered-cache: true
-        disable-serving: true
+        role: streaming
         parallelism: 4
       - use: compute-node
         port: 5685
         exporter-port: 1225
         enable-tiered-cache: true
-        disable-streaming: true
+        role: serving
         parallelism: 3
       - use: compute-node
         port: 5686
         exporter-port: 1226
         enable-tiered-cache: true
-        disable-streaming: true
+        role: serving
         parallelism: 3
       - use: frontend
         port: 4565
@@ -842,11 +839,7 @@ template:
     # Parallelism of tasks per compute node
     parallelism: 4
 
-    # Whether used for streaming.
-    disable-streaming: false
-
-    # Whether used for serving.
-    disable-serving: false
+    role: both
 
   meta-node:
     # Meta-node advertise address

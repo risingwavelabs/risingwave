@@ -43,8 +43,7 @@ pub struct ComputeNodeConfig {
     pub memory_control_policy: String,
     pub streaming_memory_proportion: f64,
     pub parallelism: usize,
-    pub disable_streaming: bool,
-    pub disable_serving: bool,
+    pub role: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -25,15 +25,15 @@ download_and_prepare_rw "$profile" common
 
 host_args="-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567"
 
-echo "--- e2e, ci-3cn-3fe-in-memory, streaming"
-cargo make ci-start ci-3cn-3fe-in-memory
+echo "--- e2e, ci-1cn-3fe-in-memory, streaming"
+cargo make ci-start ci-1cn-3fe-in-memory
 sqllogictest ${host_args} -d dev  './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-in-memory-streaming-${profile}"
 
 echo "--- Kill cluster"
 cargo make ci-kill
 
-echo "--- e2e, ci-3cn-3fe-in-memory, batch"
-cargo make ci-start ci-3cn-3fe-in-memory
+echo "--- e2e, ci-1cn-3fe-in-memory, batch"
+cargo make ci-start ci-1cn-3fe-in-memory
 sqllogictest ${host_args} -d dev  './e2e_test/ddl/**/*.slt' --junit "parallel-in-memory-batch-ddl-${profile}"
 sqllogictest ${host_args} -d dev  './e2e_test/batch/**/*.slt' -j 16 --junit "parallel-in-memory-batch-${profile}"
 
