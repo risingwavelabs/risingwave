@@ -9,3 +9,11 @@ CREATE CONNECTION conn0 WITH (type = 'mock');
 # Test quoting.
 statement ok
 CREATE CONNECTION "conn1" WITH (type = 'mock');
+
+# Drop connections.
+statement ok
+DROP CONNECTION conn0;
+
+# Drop connections.
+statement ok
+DROP CONNECTION conn1;
