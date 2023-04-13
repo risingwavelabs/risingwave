@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use rand::seq::{IteratorRandom, SliceRandom};
 use risingwave_common::bail;
@@ -32,8 +33,10 @@ pub struct WorkerNodeManager {
 
 struct WorkerNodeManagerInner {
     worker_nodes: Vec<WorkerNode>,
-    /// fragment vnode mapping info.
-    fragment_vnode_mapping: HashMap<FragmentId, ParallelUnitMapping>,
+    /// fragment vnode mapping info for streaming. It's from meta node.
+    streaming_fragment_vnode_mapping: HashMap<FragmentId, ParallelUnitMapping>,
+    /// fragment vnode mapping info for serving. It's calculated locally.
+    serving_fragment_vnode_mapping: HashMap<FragmentId, ParallelUnitMapping>,
 }
 
 pub type WorkerNodeManagerRef = Arc<WorkerNodeManager>;
@@ -49,7 +52,8 @@ impl WorkerNodeManager {
         Self {
             inner: RwLock::new(WorkerNodeManagerInner {
                 worker_nodes: Default::default(),
-                fragment_vnode_mapping: Default::default(),
+                streaming_fragment_vnode_mapping: Default::default(),
+                serving_fragment_vnode_mapping: Default::default(),
             }),
         }
     }
@@ -58,7 +62,8 @@ impl WorkerNodeManager {
     pub fn mock(worker_nodes: Vec<WorkerNode>) -> Self {
         let inner = RwLock::new(WorkerNodeManagerInner {
             worker_nodes,
-            fragment_vnode_mapping: HashMap::new(),
+            streaming_fragment_vnode_mapping: HashMap::new(),
+            serving_fragment_vnode_mapping: HashMap::new(),
         });
         Self { inner }
     }
@@ -86,7 +91,7 @@ impl WorkerNodeManager {
     ) {
         let mut write_guard = self.inner.write().unwrap();
         write_guard.worker_nodes = nodes;
-        write_guard.fragment_vnode_mapping = mapping;
+        write_guard.streaming_fragment_vnode_mapping = mapping;
     }
 
     /// Get a random worker node.
@@ -147,7 +152,7 @@ impl WorkerNodeManager {
         self.inner
             .read()
             .unwrap()
-            .fragment_vnode_mapping
+            .streaming_fragment_vnode_mapping
             .get(fragment_id)
             .cloned()
     }
@@ -160,7 +165,7 @@ impl WorkerNodeManager {
         self.inner
             .write()
             .unwrap()
-            .fragment_vnode_mapping
+            .streaming_fragment_vnode_mapping
             .try_insert(fragment_id, vnode_mapping)
             .unwrap();
     }
@@ -170,69 +175,82 @@ impl WorkerNodeManager {
         fragment_id: FragmentId,
         vnode_mapping: ParallelUnitMapping,
     ) {
-        self.inner
-            .write()
-            .unwrap()
-            .fragment_vnode_mapping
+        let mut guard = self.inner.write().unwrap();
+        guard
+            .streaming_fragment_vnode_mapping
             .insert(fragment_id, vnode_mapping)
             .unwrap();
+        // TODO #8940: re-calculate serving schedule to keep locality with best efforts
+        guard.serving_fragment_vnode_mapping.clear();
     }
 
     pub fn remove_fragment_mapping(&self, fragment_id: &FragmentId) {
-        self.inner
-            .write()
-            .unwrap()
-            .fragment_vnode_mapping
+        let mut guard = self.inner.write().unwrap();
+        guard
+            .streaming_fragment_vnode_mapping
             .remove(fragment_id)
             .unwrap();
+        // TODO #8940: re-calculate serving schedule to keep locality with best efforts
+        guard.serving_fragment_vnode_mapping.clear();
     }
 
     /// Returns vnode mapping for serving.
-    /// If there are available serving workers, use them.
-    /// Otherwise fall back to streaming workers, even they have set `disable_serving`.
-    /// `fragment_id` is a hint providing streaming vnode mapping.
     pub fn serving_vnode_mapping(
         &self,
-        fragment_id: Option<FragmentId>,
+        fragment_id: FragmentId,
     ) -> SchedulerResult<ParallelUnitMapping> {
-        let guard = self.inner.read().unwrap();
-        // TODO #8940: improve this naive vnode mapping builder to leverage locality
-        let serving_workers = guard
-            .worker_nodes
+        if let Some(pu_mapping) = self
+            .inner
+            .read()
+            .unwrap()
+            .serving_fragment_vnode_mapping
+            .get(&fragment_id)
+            .cloned()
+        {
+            return Ok(pu_mapping);
+        }
+        let mut guard = self.inner.write().unwrap();
+        let pu_mapping = guard.schedule_serving(fragment_id)?;
+        guard
+            .serving_fragment_vnode_mapping
+            .insert(fragment_id, pu_mapping.clone());
+        Ok(pu_mapping)
+    }
+}
+
+impl WorkerNodeManagerInner {
+    fn serving_worker_nodes(&self) -> Vec<&WorkerNode> {
+        self.worker_nodes
             .iter()
             .filter(|w| w.property.as_ref().unwrap().is_serving)
+            .collect_vec()
+    }
+
+    fn schedule_serving(&self, fragment_id: FragmentId) -> SchedulerResult<ParallelUnitMapping> {
+        let serving_pus = self
+            .serving_worker_nodes()
+            .iter()
+            .flat_map(|w| w.parallel_units.clone())
             .collect_vec();
-        let mut serving_pus = vec![];
-        for w in serving_workers {
-            serving_pus.extend(w.parallel_units.clone());
-        }
         if serving_pus.is_empty() {
-            // Try to fall back to serving with streaming cluster.
-            if let Some(fragment_id) = fragment_id {
-                let streaming_vnode_mapping =
-                    guard.fragment_vnode_mapping.get(&fragment_id).cloned();
-                return streaming_vnode_mapping.ok_or_else(|| SchedulerError::EmptyWorkerNodes);
-            }
             return Err(SchedulerError::EmptyWorkerNodes);
         }
-
-        // Note: arbitrary `select_num` is fine, as we already ensure the correctness even when
-        // querying a singleton with multiple serving PUs. Here we simply set `select_num` equal to
-        // fragment's streaming parallelism if any, or 1 otherwise.
-        // TODO #8940: should we ensure deterministic selection when serving workers doesn't change?
-        let mut select_num = 1;
-        if let Some(fragment_id) = fragment_id {
-            let streaming_vnode_mapping = guard.fragment_vnode_mapping.get(&fragment_id);
-            if let Some(streaming_vnode_mapping) = streaming_vnode_mapping {
-                select_num = std::cmp::min(
-                    serving_pus.len(),
-                    streaming_vnode_mapping.iter_unique().count(),
-                );
-            }
-        }
+        let streaming_vnode_mapping = self
+            .streaming_fragment_vnode_mapping
+            .get(&fragment_id)
+            .ok_or_else(|| {
+                anyhow!(
+                    "streaming vnode mapping for fragment {} not found",
+                    fragment_id
+                )
+            })?;
+        let serving_parallelism = std::cmp::min(
+            serving_pus.len(),
+            streaming_vnode_mapping.iter_unique().count(),
+        );
         let pus = serving_pus
             .into_iter()
-            .choose_multiple(&mut rand::thread_rng(), select_num);
+            .choose_multiple(&mut rand::thread_rng(), serving_parallelism);
         Ok(ParallelUnitMapping::build(&pus))
     }
 }

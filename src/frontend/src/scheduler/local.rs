@@ -16,6 +16,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -403,7 +404,7 @@ impl LocalQueryExecution {
                             .as_ref()
                             .expect("no side table desc");
                         let mapping = self.front_env.worker_node_manager().serving_vnode_mapping(
-                            self.get_fragment_id(&side_table_desc.table_id.into()),
+                            self.get_fragment_id(&side_table_desc.table_id.into())?,
                         )?;
 
                         // TODO: should we use `pb::ParallelUnitMapping` here?
@@ -444,12 +445,12 @@ impl LocalQueryExecution {
     }
 
     #[inline(always)]
-    fn get_fragment_id(&self, table_id: &TableId) -> Option<FragmentId> {
+    fn get_fragment_id(&self, table_id: &TableId) -> SchedulerResult<FragmentId> {
         let reader = self.front_env.catalog_reader().read_guard();
         reader
             .get_table_by_id(table_id)
             .map(|table| table.fragment_id)
-            .ok()
+            .map_err(|e| SchedulerError::Internal(anyhow!(e)))
     }
 
     #[inline(always)]

@@ -921,7 +921,7 @@ impl BatchPlanFragmenter {
                     .map_err(RwError::from)?;
                 let vnode_mapping = self
                     .worker_node_manager
-                    .serving_vnode_mapping(Some(table_catalog.fragment_id))?;
+                    .serving_vnode_mapping(table_catalog.fragment_id)?;
                 let partitions =
                     derive_partitions(scan_node.scan_ranges(), table_desc, &vnode_mapping);
                 TableScanInfo::new(name, partitions)
@@ -971,7 +971,7 @@ impl BatchPlanFragmenter {
                 .map_err(RwError::from)?;
             let vnode_mapping = self
                 .worker_node_manager
-                .serving_vnode_mapping(Some(table_catalog.fragment_id))?;
+                .serving_vnode_mapping(table_catalog.fragment_id)?;
             let parallelism = vnode_mapping.iter().sorted().dedup().count();
             Ok(Some(parallelism))
         } else {

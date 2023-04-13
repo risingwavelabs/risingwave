@@ -634,12 +634,12 @@ impl StageRunner {
     }
 
     #[inline(always)]
-    fn get_fragment_id(&self, table_id: &TableId) -> Option<FragmentId> {
+    fn get_fragment_id(&self, table_id: &TableId) -> SchedulerResult<FragmentId> {
         self.catalog_reader
             .read_guard()
             .get_table_by_id(table_id)
             .map(|table| table.fragment_id)
-            .ok()
+            .map_err(|e| SchedulerError::Internal(anyhow!(e)))
     }
 
     #[inline(always)]
@@ -675,7 +675,7 @@ impl StageRunner {
                             .unwrap()
                             .table_id
                             .into(),
-                    );
+                    )?;
                     let id2pu_vec = self
                         .worker_node_manager
                         .serving_vnode_mapping(fragment_id)?
