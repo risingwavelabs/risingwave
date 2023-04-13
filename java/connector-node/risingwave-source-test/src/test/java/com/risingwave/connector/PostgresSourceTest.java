@@ -108,7 +108,7 @@ public class PostgresSourceTest {
     // insert 10,000 rows into orders
     // check if the number of changes debezium captures is 10,000
     @Test
-    public void testLines() throws InterruptedException, SQLException {
+    public void testLines() throws Exception {
         ExecutorService executorService = Executors.newFixedThreadPool(1);
         Connection connection = SourceTestClient.connect(pgDataSource);
         String query = testClient.sqlStmts.getProperty("tpch.create.orders");
@@ -134,13 +134,9 @@ public class PostgresSourceTest {
                     return count;
                 };
         Future<Integer> countResult = executorService.submit(countTask);
-        try {
-            int count = countResult.get();
-            LOG.info("number of cdc messages received: {}", count);
-            assertEquals(count, 10000);
-        } catch (ExecutionException e) {
-            fail("Execution exception: ", e);
-        }
+        int count = countResult.get();
+        LOG.info("number of cdc messages received: {}", count);
+        assertEquals(count, 10000);
         connection.close();
     }
 
