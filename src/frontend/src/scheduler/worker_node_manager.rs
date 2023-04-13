@@ -210,6 +210,13 @@ impl WorkerNodeManager {
             return Ok(pu_mapping);
         }
         let mut guard = self.inner.write().unwrap();
+        if let Some(pu_mapping) = guard
+            .serving_fragment_vnode_mapping
+            .get(&fragment_id)
+            .cloned()
+        {
+            return Ok(pu_mapping);
+        }
         let pu_mapping = guard.schedule_serving(fragment_id)?;
         guard
             .serving_fragment_vnode_mapping
