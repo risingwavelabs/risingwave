@@ -75,6 +75,32 @@ type CompactionDeleteRangeEvent = (
     // New tombstones which enters at the event key
     Vec<TombstoneEnterExitEvent>,
 );
+/// We introduce `event` to avoid storing excessive range tombstones after compaction if there are
+/// overlaps among range tombstones among different SSTs/batchs in compaction.
+/// The core idea contains two parts:
+/// 1) we only need to keep the smallest epoch of the overlapping
+/// range tomstone intervals since the key covered by the range tombstone in lower level must have
+/// smaller epoches;
+/// 2) due to 1), we lose the information to delete a key by tombstone in a single
+/// SST so we add a tombstone key in the data block.
+/// We leverage `events` to calculate the epoch information mentioned above.
+/// e.g. Delete range [1, 5) at epoch1, delete range [3, 7) at epoch2 and delete range [10, 12) at
+/// epoch3 will first be transformed into `events` below:
+/// `<1, +epoch1> <5, -epoch1> <3, +epoch2> <7, -epoch2> <10, +epoch3> <12, -epoch3>`
+/// Then `events` are sorted by user key:
+/// `<1, +epoch1> <3, +epoch2> <5, -epoch1> <7, -epoch2> <10, +epoch3> <12, -epoch3>`
+/// We rely on the fact that keys met in compaction are in order.
+/// When user key 0 comes, no events have happened yet so no range delete epoch. (will be
+/// represented as range delete epoch `HummockEpoch::MAX`)
+/// When user key 1 comes, event `<1, +epoch1>` happens so there is currently one range delete
+/// epoch: epoch1.
+/// When user key 2 comes, no more events happen so the set remains `{epoch1}`.
+/// When user key 3 comes, event `<3, +epoch2>` happens so the range delete epoch set is now
+/// `{epoch1, epoch2}`.
+/// When user key 5 comes, event `<5, -epoch1>` happens so epoch1 exits the set,
+/// therefore the current range delete epoch set is `{epoch2}`.
+/// When user key 11 comes, events `<7, -epoch2>` and `<10, +epoch3>`
+/// both happen, one after another. The set changes to `{epoch3}` from `{epoch2}`.
 pub(crate) fn apply_event(epochs: &mut BTreeSet<HummockEpoch>, event: &CompactionDeleteRangeEvent) {
     let (_, exit, enter) = event;
     // Correct because ranges in an epoch won't intersect.

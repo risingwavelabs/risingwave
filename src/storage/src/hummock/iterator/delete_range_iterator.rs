@@ -172,6 +172,29 @@ impl Ord for RangeIteratorTyped {
 /// replaced with a union set of delete ranges, we lose exact information about whether a key
 /// is deleted by a delete range in the same SST. Therefore we need to construct a
 /// corresponding delete key (aka key tombstone) to represent this.
+///
+/// In the `ForwardMergeRangeIterator`, assume that SST1 has delete range event
+/// `<5, epoch1>`, `<8, epoch2>` and `<11, epoch3>`
+/// and SST2 has delete range event
+/// `<7, epoch4>`and `<9, epoch5>`.
+/// Initially, `next_user_key` of `ForwardMergeRangeIterator` is 5, which is the earliest event and
+/// current epochs is empty set at this time.
+/// When `UserIterator` queries user key 5, `current_epochs` becomes `{epoch1}`, which means the key
+/// fetched by `UserIterator` is deleted only if `key epoch <= epoch1 <= read_epoch`.
+/// Simultaneously, `next_user_key` becomes 7, which means that the inequality will be kept until
+/// the key fetched by `UserIterator` reaches user key 7.
+/// For example, if the `UserIterator` queries user key 6 later, the delete condition is still
+/// `key epoch <= epoch1 <= read_epoch`.
+///
+/// When `UserIterator` queries user key 8,
+/// `next_user_key` of SST1 is 11, `current_epoch` of SST1 is epoch2;
+/// `next_user_key` of SST2 is 9, `current_epoch` of SST2 is epoch4;
+/// Therefore `current_epochs` of `ForwardMergeRangeIterator` is `{epoch2, epoch4}`,
+/// `next_user_key` of `ForwardMergeRangeIterator` is min(11, 9) == 9,
+/// which means that `current_epochs` won't change until user key 9.
+///
+/// We can then get the largest epoch which is not greater than read epoch in `{epoch2, epoch4}`.
+/// The user key is deleted only if key epoch is below this epoch.
 pub struct ForwardMergeRangeIterator {
     heap: BinaryHeap<RangeIteratorTyped>,
     unused_iters: Vec<RangeIteratorTyped>,
