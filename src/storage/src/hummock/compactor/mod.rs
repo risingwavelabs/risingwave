@@ -416,15 +416,6 @@ impl Compactor {
                         tracing::info!("Compactor is shutting down");
                         return;
                     }
-                    // Handle failed tasks.
-                    task_results = &mut task_collector => {
-                        for task_result in task_results {
-                            if let Err(e) = task_result {
-                                tracing::error!("Failed to execute task {:#?}", e);
-                            }
-                        }
-                        continue;
-                    }
                 }
 
                 let config = compactor_context.lock_config().await;
@@ -452,6 +443,7 @@ impl Compactor {
                 // This inner loop is to consume stream or report task progress.
                 'consume_stream: loop {
                     let message = tokio::select! {
+                        // Handle failed tasks.
                         task_results = &mut task_collector => {
                             for task_result in task_results {
                                 if let Err(e) = task_result {
