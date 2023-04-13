@@ -234,9 +234,9 @@ impl<T: BuildHasher> HashCode<T> {
     }
 }
 
-/// Hash code from the CRC32 hasher. Used for hash-shuffle exchange.
+/// Hash code from the `Crc32` hasher. Used for hash-shuffle exchange.
 pub type Crc32HashCode = HashCode<Crc32FastBuilder>;
-/// Hash code from the XxHash64 hasher. Used for in-memory hash map cache.
+/// Hash code from the `XxHash64` hasher. Used for in-memory hash map cache.
 pub type XxHash64HashCode = HashCode<XxHash64Builder>;
 
 pub trait HashKeySerializer {
