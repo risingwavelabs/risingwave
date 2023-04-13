@@ -20,10 +20,7 @@ use risingwave_pb::expr::expr_node::{PbType, RexNode};
 use risingwave_pb::expr::ExprNode;
 
 use super::expr_array_concat::ArrayConcatExpression;
-<<<<<<< HEAD
 use super::expr_array_positions::ArrayPositionsExpression;
-=======
->>>>>>> origin/main
 use super::expr_array_remove::ArrayRemoveExpression;
 use super::expr_case::CaseExpression;
 use super::expr_coalesce::CoalesceExpression;
