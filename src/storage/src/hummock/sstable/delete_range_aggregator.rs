@@ -96,7 +96,6 @@ pub(crate) fn apply_event(epochs: &mut BTreeSet<HummockEpoch>, event: &Compactio
 pub struct CompactionDeleteRanges {
     delete_tombstones: Vec<DeleteRangeTombstone>,
     events: Vec<CompactionDeleteRangeEvent>,
-    event_seek_mapping: Vec<usize>,
     watermark: HummockEpoch,
     gc_delete_keys: bool,
 }
@@ -113,7 +112,7 @@ impl CompactionDeleteRangesBuilder {
     /// -epoch3> }`
     pub(crate) fn build_events(
         delete_tombstones: &Vec<DeleteRangeTombstone>,
-    ) -> (Vec<CompactionDeleteRangeEvent>, Vec<usize>) {
+    ) -> Vec<CompactionDeleteRangeEvent> {
         let tombstone_len = delete_tombstones.len();
         let mut events = Vec::with_capacity(tombstone_len * 2);
         for (
@@ -131,7 +130,6 @@ impl CompactionDeleteRangesBuilder {
         events.sort();
 
         let mut result = Vec::with_capacity(events.len());
-        let mut enter_pos = vec![0; tombstone_len];
         for (user_key, group) in &events.into_iter().group_by(|(user_key, _, _)| *user_key) {
             let (mut exit, mut enter) = (vec![], vec![]);
             for (_, op, index) in group {
@@ -145,7 +143,6 @@ impl CompactionDeleteRangesBuilder {
                             original_position_in_delete_tombstones: index,
                             tombstone_epoch: delete_tombstones[index].sequence,
                         });
-                        enter_pos[index] = result.len();
                     }
                     _ => unreachable!(),
                 }
@@ -153,7 +150,7 @@ impl CompactionDeleteRangesBuilder {
             result.push((user_key.clone(), exit, enter));
         }
 
-        (result, enter_pos)
+        result
     }
 
     pub(crate) fn build_for_compaction(
@@ -161,33 +158,11 @@ impl CompactionDeleteRangesBuilder {
         watermark: HummockEpoch,
         gc_delete_keys: bool,
     ) -> Arc<CompactionDeleteRanges> {
-        let (result, enter_pos) = Self::build_events(&self.delete_tombstones);
-
-        let result_len = result.len();
-        // `event_seek_mapping` and `hook` are unnecessary so you can ignore them.
-        let mut event_seek_mapping = vec![0; result_len + 1];
-        let mut hook = result_len;
-        event_seek_mapping[result_len] = hook;
-        for (result_idx, (_, exit, _enter)) in result.iter().enumerate().rev() {
-            if result_idx < hook {
-                hook = result_idx;
-            }
-            for TombstoneEnterExitEvent {
-                original_position_in_delete_tombstones,
-                ..
-            } in exit
-            {
-                if enter_pos[*original_position_in_delete_tombstones] < hook {
-                    hook = enter_pos[*original_position_in_delete_tombstones];
-                }
-            }
-            event_seek_mapping[result_idx] = hook;
-        }
+        let result = Self::build_events(&self.delete_tombstones);
 
         Arc::new(CompactionDeleteRanges {
             delete_tombstones: self.delete_tombstones,
             events: result,
-            event_seek_mapping,
             watermark,
             gc_delete_keys,
         })
@@ -199,7 +174,6 @@ impl CompactionDeleteRanges {
         Self {
             delete_tombstones: vec![],
             events: vec![],
-            event_seek_mapping: vec![0],
             gc_delete_keys: false,
             watermark: 0,
         }
@@ -244,7 +218,7 @@ impl CompactionDeleteRanges {
             return ret;
         }
 
-        let (events, _) = CompactionDeleteRangesBuilder::build_events(&tombstones_within_watermark);
+        let events = CompactionDeleteRangesBuilder::build_events(&tombstones_within_watermark);
         let mut epoch2index = BTreeMap::new();
         let mut is_useful = vec![false; tombstones_within_watermark.len()];
         for (_, exit, enter) in events {
@@ -318,8 +292,7 @@ impl CompactionDeleteRangeIterator {
             .events
             .partition_point(|(user_key, ..)| user_key.as_ref().le(&target_user_key));
         self.epochs.clear();
-        let hook = self.events.event_seek_mapping[self.seek_idx];
-        for idx in hook..self.seek_idx {
+        for idx in 0..self.seek_idx {
             self.apply(idx);
         }
     }

@@ -164,7 +164,7 @@ impl MonotonicDeleteEvent {
 pub(crate) fn create_monotonic_events(
     delete_range_tombstones: &Vec<DeleteRangeTombstone>,
 ) -> Vec<MonotonicDeleteEvent> {
-    let (events, _) = CompactionDeleteRangesBuilder::build_events(delete_range_tombstones);
+    let events = CompactionDeleteRangesBuilder::build_events(delete_range_tombstones);
     let mut epochs = BTreeSet::new();
     let mut monotonic_tombstone_events = Vec::with_capacity(events.len());
     for event in events {
