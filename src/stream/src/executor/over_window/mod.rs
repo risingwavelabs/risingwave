@@ -14,7 +14,6 @@
 
 #![expect(dead_code)]
 
-use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
 use futures::StreamExt;
@@ -40,9 +39,10 @@ use super::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
     ExecutorInfo, Message, PkIndices, StreamExecutorError, StreamExecutorResult,
 };
-use crate::cache::ExecutorCache;
+use crate::cache::{new_unbounded, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
+use crate::task::AtomicU64Ref;
 
 mod call;
 mod partition;
@@ -99,12 +99,12 @@ struct ExecutorInner<S: StateStore> {
     input_pk_indices: Vec<usize>,
     partition_key_indices: Vec<usize>,
     order_key_index: usize,
+    watermark_epoch: AtomicU64Ref,
 }
 
 struct ExecutionVars<S: StateStore> {
     // TODO(rc): use `K: HashKey` as key like in hash agg?
-    // TODO(): use `ExecutorCache`
-    partitions: BTreeMap<MemcmpEncoded, Partition>,
+    partitions: ExecutorCache<MemcmpEncoded, Partition>,
     _phantom: PhantomData<S>,
 }
 
@@ -138,6 +138,7 @@ pub struct OverWindowExecutorArgs<S: StateStore> {
     pub col_mapping: StateTableColumnMapping,
     pub partition_key_indices: Vec<usize>,
     pub order_key_index: usize,
+    pub watermark_epoch: AtomicU64Ref,
 }
 
 impl<S: StateStore> OverWindowExecutor<S> {
@@ -180,53 +181,8 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 input_pk_indices: input_info.pk_indices,
                 partition_key_indices: args.partition_key_indices,
                 order_key_index: args.order_key_index,
+                watermark_epoch: args.watermark_epoch,
             },
-        }
-    }
-
-    #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn executor_inner(self) {
-        let OverWindowExecutor {
-            input,
-            inner: mut this,
-        } = self;
-
-        let mut vars = ExecutionVars {
-            partitions: BTreeMap::new(),
-            _phantom: PhantomData::<S>,
-        };
-
-        let mut input = input.execute();
-        let barrier = expect_first_barrier(&mut input).await?;
-        this.state_table.init_epoch(barrier.epoch);
-
-        yield Message::Barrier(barrier);
-
-        #[for_await]
-        for msg in input {
-            let msg = msg?;
-            match msg {
-                Message::Watermark(watermark) => {
-                    // TODO()
-                }
-                Message::Chunk(chunk) => {
-                    let output_chunk = Self::apply_chunk(&mut this, &mut vars, chunk).await?;
-                    yield Message::Chunk(output_chunk);
-                }
-                Message::Barrier(barrier) => {
-                    this.state_table.commit(barrier.epoch).await?;
-
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(this.actor_ctx.id) {
-                        let (_, cache_may_stale) =
-                            this.state_table.update_vnode_bitmap(vnode_bitmap);
-                        if cache_may_stale {
-                            vars.partitions.clear();
-                        }
-                    }
-
-                    yield Message::Barrier(barrier);
-                }
-            }
         }
     }
 
@@ -252,7 +208,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 let input_row: bool; // in case of accidental use
 
                 // ensure_key_in_cache
-                if !vars.partitions.contains_key(&encoded_partition_key) {
+                if !vars.partitions.contains(&encoded_partition_key) {
                     let mut partition = Partition::new(&this.calls);
 
                     {
@@ -340,7 +296,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     }
 
                     vars.partitions
-                        .insert(encoded_partition_key.clone(), partition);
+                        .put(encoded_partition_key.clone(), partition);
                 }
             }
 
@@ -418,10 +374,63 @@ impl<S: StateStore> OverWindowExecutor<S> {
             None,
         ))
     }
+
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn executor_inner(self) {
+        let OverWindowExecutor {
+            input,
+            inner: mut this,
+        } = self;
+
+        let mut vars = ExecutionVars {
+            partitions: ExecutorCache::new(new_unbounded(this.watermark_epoch.clone())),
+            _phantom: PhantomData::<S>,
+        };
+
+        let mut input = input.execute();
+        let barrier = expect_first_barrier(&mut input).await?;
+        this.state_table.init_epoch(barrier.epoch);
+        vars.partitions.update_epoch(barrier.epoch.curr);
+
+        yield Message::Barrier(barrier);
+
+        #[for_await]
+        for msg in input {
+            let msg = msg?;
+            match msg {
+                Message::Watermark(watermark) => {
+                    // TODO()
+                }
+                Message::Chunk(chunk) => {
+                    let output_chunk = Self::apply_chunk(&mut this, &mut vars, chunk).await?;
+                    yield Message::Chunk(output_chunk);
+                }
+                Message::Barrier(barrier) => {
+                    this.state_table.commit(barrier.epoch).await?;
+                    vars.partitions.evict();
+
+                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(this.actor_ctx.id) {
+                        let (_, cache_may_stale) =
+                            this.state_table.update_vnode_bitmap(vnode_bitmap);
+                        if cache_may_stale {
+                            vars.partitions.clear();
+                        }
+                    }
+
+                    vars.partitions.update_epoch(barrier.epoch.curr);
+
+                    yield Message::Barrier(barrier);
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicU64;
+    use std::sync::Arc;
+
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
@@ -489,6 +498,7 @@ mod tests {
             col_mapping,
             partition_key_indices,
             order_key_index,
+            watermark_epoch: Arc::new(AtomicU64::new(0)),
         });
         (tx, executor.boxed().execute())
     }
