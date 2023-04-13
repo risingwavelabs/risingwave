@@ -28,7 +28,7 @@ use super::TaskConfig;
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::{CompactOutput, CompactionFilter, Compactor, CompactorContext};
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
-use crate::hummock::sstable::DeleteRangeAggregatorBuilder;
+use crate::hummock::sstable::CompactionDeleteRangesBuilder;
 use crate::hummock::{
     CachePolicy, CompactionDeleteRanges, CompressionAlgorithm, HummockResult,
     SstableBuilderOptions, SstableStoreRef,
@@ -119,7 +119,7 @@ impl CompactorRunner {
         sstable_store: &SstableStoreRef,
         filter: &mut F,
     ) -> HummockResult<Arc<CompactionDeleteRanges>> {
-        let mut builder = DeleteRangeAggregatorBuilder::default();
+        let mut builder = CompactionDeleteRangesBuilder::default();
         let mut local_stats = StoreLocalStatistic::default();
         for level in &compact_task.input_ssts {
             if level.table_infos.is_empty() {

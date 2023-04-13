@@ -52,7 +52,7 @@ mod sstable_object_id_manager;
 mod utils;
 
 pub use delete_range_aggregator::{
-    get_min_delete_range_epoch_from_sstable, CompactionDeleteRanges, DeleteRangeAggregatorBuilder,
+    get_min_delete_range_epoch_from_sstable, CompactionDeleteRanges, CompactionDeleteRangesBuilder,
     SstableDeleteRangeIterator,
 };
 pub use filter::FilterBuilder;
@@ -126,6 +126,19 @@ impl DeleteRangeTombstone {
     }
 }
 
+/// Assume that watermark1 is 5, watermark2 is 7, watermark3 is 11, delete ranges
+/// `{ [0, wmk1) in epoch1, [wmk1, wmk2) in epoch2, [wmk2, wmk3) in epoch3 }`
+/// can be transformed into events below:
+/// `{ <0, +epoch1> <wmk1, -epoch1> <wmk1, +epoch2> <wmk2, -epoch2> <wmk2, +epoch3> <wmk3,
+/// -epoch3> }`
+/// Then we can get monotonic events (they are in order by user key) as below:
+/// `{ <0, epoch1>, <wmk1, epoch2>, <wmk2, epoch3>, <wmk3, +inf> }`
+/// which means that delete range of [0, wmk1) is epoch1, delete range of [wmk1, wmk2) if epoch2,
+/// etc. In this example, at the event key wmk1 (5), delete range changes from epoch1 to epoch2,
+/// thus the `new epoch` is epoch2. epoch2 will be used from the event key wmk1 (5) and till the
+/// next event key wmk2 (7) (not inclusive).
+/// If there is no range deletes between current event key and next event key, `new_epoch` will be
+/// `HummockEpoch::MAX`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MonotonicDeleteEvent {
     pub event_key: UserKey<Vec<u8>>,
@@ -151,7 +164,7 @@ impl MonotonicDeleteEvent {
 pub(crate) fn create_monotonic_events(
     delete_range_tombstones: &Vec<DeleteRangeTombstone>,
 ) -> Vec<MonotonicDeleteEvent> {
-    let (events, _) = DeleteRangeAggregatorBuilder::build_events(delete_range_tombstones);
+    let (events, _) = CompactionDeleteRangesBuilder::build_events(delete_range_tombstones);
     let mut epochs = BTreeSet::new();
     let mut monotonic_tombstone_events = Vec::with_capacity(events.len());
     for event in events {
@@ -319,6 +332,14 @@ pub struct SstableMeta {
     /// can be transformed into events below:
     /// `{ <0, +epoch1> <wmk1, -epoch1> <wmk1, +epoch2> <wmk2, -epoch2> <wmk2, +epoch3> <wmk3,
     /// -epoch3> }`
+    /// Then we can get monotonic events (they are in order by user key) as below:
+    /// `{ <0, epoch1>, <wmk1, epoch2>, <wmk2, epoch3>, <wmk3, +inf> }`
+    /// which means that delete range of [0, wmk1) is epoch1, delete range of [wmk1, wmk2) if
+    /// epoch2, etc. In this example, at the event key wmk1 (5), delete range changes from
+    /// epoch1 to epoch2, thus the `new epoch` is epoch2. epoch2 will be used from the event
+    /// key wmk1 (5) and till the next event key wmk2 (7) (not inclusive).
+    /// If there is no range deletes between current event key and next event key, `new_epoch` will
+    /// be `HummockEpoch::MAX`.
     pub monotonic_tombstone_events: Vec<MonotonicDeleteEvent>,
     /// Format version, for further compatibility.
     pub version: u32,

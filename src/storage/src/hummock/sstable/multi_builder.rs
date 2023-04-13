@@ -312,7 +312,7 @@ mod tests {
     use crate::hummock::sstable::utils::CompressionAlgorithm;
     use crate::hummock::test_utils::{default_builder_opt_for_test, test_key_of, test_user_key_of};
     use crate::hummock::{
-        DeleteRangeAggregatorBuilder, SstableBuilderOptions, DEFAULT_RESTART_INTERVAL,
+        CompactionDeleteRangesBuilder, SstableBuilderOptions, DEFAULT_RESTART_INTERVAL,
     };
 
     #[tokio::test]
@@ -426,7 +426,7 @@ mod tests {
     async fn test_expand_boundary_by_range_tombstone() {
         let opts = default_builder_opt_for_test();
         let table_id = TableId::default();
-        let mut builder = DeleteRangeAggregatorBuilder::default();
+        let mut builder = CompactionDeleteRangesBuilder::default();
         builder.add_tombstone(vec![
             DeleteRangeTombstone::new(table_id, b"k".to_vec(), b"kkk".to_vec(), 100),
             DeleteRangeTombstone::new(table_id, b"aaa".to_vec(), b"ddd".to_vec(), 200),
@@ -477,7 +477,7 @@ mod tests {
             compression_algorithm: CompressionAlgorithm::None,
         };
         let table_id = TableId::new(1);
-        let mut builder = DeleteRangeAggregatorBuilder::default();
+        let mut builder = CompactionDeleteRangesBuilder::default();
         builder.add_tombstone(vec![
             DeleteRangeTombstone::new(table_id, b"k".to_vec(), b"kkk".to_vec(), 100),
             DeleteRangeTombstone::new(table_id, b"aaa".to_vec(), b"ddd".to_vec(), 200),

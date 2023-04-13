@@ -37,7 +37,10 @@ pub trait DeleteRangeIterator {
     /// This function will panic if the iterator is invalid.
     fn next_user_key(&self) -> UserKey<&[u8]>;
 
-    /// Retrieves the epoch of the current range-tombstone.
+    /// Retrieves the epoch of the current range delete.
+    /// It returns the epoch between the previous `next_user_key` (inclusive) and the current
+    /// `next_user_key` (not inclusive). When there is no range deletes, it will return
+    /// `HummockEpoch::MAX`.
     ///
     /// Note:
     /// - Before calling this function, makes sure the iterator `is_valid`.

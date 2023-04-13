@@ -37,7 +37,7 @@ use crate::hummock::iterator::{Forward, HummockIterator, OrderedMergeIteratorInn
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchInner, SharedBufferVersionedEntry,
 };
-use crate::hummock::sstable::DeleteRangeAggregatorBuilder;
+use crate::hummock::sstable::CompactionDeleteRangesBuilder;
 use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
@@ -105,7 +105,7 @@ async fn compact_shared_buffer(
     // Local memory compaction looks at all key ranges.
     let mut size_and_start_user_keys = vec![];
     let mut compact_data_size = 0;
-    let mut builder = DeleteRangeAggregatorBuilder::default();
+    let mut builder = CompactionDeleteRangesBuilder::default();
     for imm in &payload {
         let data_size = {
             let tombstones = imm.get_delete_range_tombstones();

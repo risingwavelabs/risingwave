@@ -57,7 +57,7 @@ impl Ord for SortedBoundary {
 }
 
 #[derive(Default)]
-pub struct DeleteRangeAggregatorBuilder {
+pub struct CompactionDeleteRangesBuilder {
     delete_tombstones: Vec<DeleteRangeTombstone>,
 }
 
@@ -101,7 +101,7 @@ pub struct CompactionDeleteRanges {
     gc_delete_keys: bool,
 }
 
-impl DeleteRangeAggregatorBuilder {
+impl CompactionDeleteRangesBuilder {
     pub fn add_tombstone(&mut self, data: Vec<DeleteRangeTombstone>) {
         self.delete_tombstones.extend(data);
     }
@@ -244,7 +244,7 @@ impl CompactionDeleteRanges {
             return ret;
         }
 
-        let (events, _) = DeleteRangeAggregatorBuilder::build_events(&tombstones_within_watermark);
+        let (events, _) = CompactionDeleteRangesBuilder::build_events(&tombstones_within_watermark);
         let mut epoch2index = BTreeMap::new();
         let mut is_useful = vec![false; tombstones_within_watermark.len()];
         for (_, exit, enter) in events {
@@ -407,7 +407,7 @@ mod tests {
 
     #[test]
     pub fn test_compaction_delete_range_iterator() {
-        let mut builder = DeleteRangeAggregatorBuilder::default();
+        let mut builder = CompactionDeleteRangesBuilder::default();
         let table_id = TableId::default();
         builder.add_tombstone(vec![
             DeleteRangeTombstone::new(table_id, b"aaaaaa".to_vec(), b"bbbccc".to_vec(), 12),
@@ -471,7 +471,7 @@ mod tests {
     #[test]
     pub fn test_delete_range_split() {
         let table_id = TableId::default();
-        let mut builder = DeleteRangeAggregatorBuilder::default();
+        let mut builder = CompactionDeleteRangesBuilder::default();
         builder.add_tombstone(vec![
             DeleteRangeTombstone::new(table_id, b"aaaa".to_vec(), b"bbbb".to_vec(), 12),
             DeleteRangeTombstone::new(table_id, b"aaaa".to_vec(), b"cccc".to_vec(), 12),
