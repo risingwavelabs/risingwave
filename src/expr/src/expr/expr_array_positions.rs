@@ -103,7 +103,7 @@ impl ArrayPositionsExpression {
     fn evaluate(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match left {
             Some(ScalarRefImpl::List(left)) => {
-                if let Some(_) = left.values_ref().len().to_i64() {
+                if left.values_ref().len().to_i64().is_some() {
                     Some(
                         ListValue::new(
                             left.values_ref()
