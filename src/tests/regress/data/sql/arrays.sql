@@ -270,15 +270,15 @@ SELECT array_cat(ARRAY[[3,4],[5,6]], ARRAY[1,2]) AS "{{3,4},{5,6},{1,2}}";
 --@ SELECT array_position(ARRAY['sun','mon','tue','wed','thu',NULL,'fri','sat'], NULL);
 --@ SELECT array_position(ARRAY['sun','mon','tue','wed','thu',NULL,'fri','sat'], 'sat');
 --@ 
---@ SELECT array_positions(NULL, 10);
---@ SELECT array_positions(NULL, NULL::int);
---@ SELECT array_positions(ARRAY[1,2,3,4,5,6,1,2,3,4,5,6], 4);
---@ SELECT array_positions(ARRAY[[1,2],[3,4]], 4);
---@ SELECT array_positions(ARRAY[1,2,3,4,5,6,1,2,3,4,5,6], NULL);
---@ SELECT array_positions(ARRAY[1,2,3,NULL,5,6,1,2,3,NULL,5,6], NULL);
---@ SELECT array_length(array_positions(ARRAY(SELECT 'AAAAAAAAAAAAAAAAAAAAAAAAA'::text || i % 10
---@                                           FROM generate_series(1,100) g(i)),
---@                                   'AAAAAAAAAAAAAAAAAAAAAAAAA5'), 1);
+SELECT array_positions(NULL, 10);
+SELECT array_positions(NULL, NULL::int);
+SELECT array_positions(ARRAY[1,2,3,4,5,6,1,2,3,4,5,6], 4);
+SELECT array_positions(ARRAY[[1,2],[3,4]], 4);
+SELECT array_positions(ARRAY[1,2,3,4,5,6,1,2,3,4,5,6], NULL);
+SELECT array_positions(ARRAY[1,2,3,NULL,5,6,1,2,3,NULL,5,6], NULL);
+SELECT array_length(array_positions(ARRAY(SELECT 'AAAAAAAAAAAAAAAAAAAAAAAAA'::text || i % 10
+                                          FROM generate_series(1,100) g(i)),
+                                    'AAAAAAAAAAAAAAAAAAAAAAAAA5'), 1);
 
 --@ DO $$
 --@ DECLARE
