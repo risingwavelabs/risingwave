@@ -1,0 +1,22 @@
+include ../../nexmark/create_sources.slt.part
+
+include ../../streaming/nexmark/sinks/q103.slt.part
+include ../../streaming/nexmark/sinks/q104.slt.part
+include ../../streaming/nexmark/sinks/q105.slt.part
+include ../../streaming/nexmark/sinks/q106.slt.part
+
+sleep 20s
+
+statement ok
+drop sink nexmark_q103;
+
+statement ok
+drop sink nexmark_q104;
+
+statement ok
+drop sink nexmark_q105;
+
+statement ok
+drop sink nexmark_q106;
+
+include ../../nexmark/drop_sources.slt.part

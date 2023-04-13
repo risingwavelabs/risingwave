@@ -128,6 +128,16 @@ pub fn cosd_f64(input: F64) -> F64 {
     result.into()
 }
 
+#[function("degrees(float64) -> float64")]
+pub fn degrees_f64(input: F64) -> F64 {
+    input.0.to_degrees().into()
+}
+
+#[function("radians(float64) -> float64")]
+pub fn radians_f64(input: F64) -> F64 {
+    input.0.to_radians().into()
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -200,5 +210,27 @@ mod tests {
             atan2_f64(y, x),
             two * atan_f64(y / (F64::from(F64::from(x.powi(2) + y.powi(2)).sqrt()) + x)),
         )
+    }
+
+    #[test]
+    fn test_degrees_and_radians() {
+        let full_angle = F64::from(360);
+        let tau = F64::from(std::f64::consts::TAU);
+        assert_similar(degrees_f64(tau), full_angle);
+        assert_similar(radians_f64(full_angle), tau);
+
+        let straight_angle = F64::from(180);
+        let pi = F64::from(std::f64::consts::PI);
+        assert_similar(degrees_f64(pi), straight_angle);
+        assert_similar(radians_f64(straight_angle), pi);
+
+        let right_angle = F64::from(90);
+        let half_pi = F64::from(std::f64::consts::PI / 2.);
+        assert_similar(degrees_f64(half_pi), right_angle);
+        assert_similar(radians_f64(right_angle), half_pi);
+
+        let zero = F64::from(0);
+        assert_similar(degrees_f64(zero), zero);
+        assert_similar(radians_f64(zero), zero);
     }
 }

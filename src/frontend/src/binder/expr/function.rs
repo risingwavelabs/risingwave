@@ -300,10 +300,12 @@ impl Binder {
         fn raw_literal(literal: ExprImpl) -> Handle {
             Box::new(move |_binder, _inputs| Ok(literal.clone()))
         }
+
         fn now() -> Handle {
             Box::new(move |binder, mut inputs| {
                 binder.ensure_now_function_allowed()?;
-                if !binder.in_streaming {
+                // `now()` in batch query will be convert to the binder time.
+                if binder.is_for_batch() {
                     inputs.push(ExprImpl::from(Literal::new(
                         Some(ScalarImpl::Int64((binder.bind_timestamp_ms * 1000) as i64)),
                         DataType::Timestamptz,
@@ -312,8 +314,16 @@ impl Binder {
                 raw_call(ExprType::Now)(binder, inputs)
             })
         }
+
         fn pi() -> Handle {
             raw_literal(ExprImpl::literal_f64(std::f64::consts::PI))
+        }
+
+        fn proctime() -> Handle {
+            Box::new(move |binder, inputs| {
+                binder.ensure_proctime_function_allowed()?;
+                raw_call(ExprType::Proctime)(binder, inputs)
+            })
         }
 
         static HANDLES: LazyLock<HashMap<&'static str, Handle>> = LazyLock::new(|| {
@@ -355,8 +365,10 @@ impl Binder {
                 ("acos", raw_call(ExprType::Acos)), 
                 ("atan", raw_call(ExprType::Atan)), 
                 ("atan2", raw_call(ExprType::Atan2)),   
-                ("sqrt", raw_call(ExprType::Sqrt)),     
                 ("cosd", raw_call(ExprType::Cosd)), 
+                ("degrees", raw_call(ExprType::Degrees)),
+                ("radians", raw_call(ExprType::Radians)),
+                ("sqrt", raw_call(ExprType::Sqrt)),     
 
                 (
                     "to_timestamp",
@@ -413,6 +425,9 @@ impl Binder {
                 ("array_distinct", raw_call(ExprType::ArrayDistinct)),
                 ("array_length", raw_call(ExprType::ArrayLength)),
                 ("cardinality", raw_call(ExprType::Cardinality)),
+                ("array_remove", raw_call(ExprType::ArrayRemove)),
+                // int256
+                ("hex_to_int256", raw_call(ExprType::HexToInt256)),
                 // jsonb
                 ("jsonb_object_field", raw_call(ExprType::JsonbAccessInner)),
                 ("jsonb_array_element", raw_call(ExprType::JsonbAccessInner)),
@@ -560,7 +575,8 @@ impl Binder {
                 )))),
                 // non-deterministic
                 ("now", now()),
-                ("current_timestamp", now())
+                ("current_timestamp", now()),
+                ("proctime", proctime())
             ]
             .into_iter()
             .collect()
@@ -666,7 +682,7 @@ impl Binder {
     }
 
     fn ensure_now_function_allowed(&self) -> Result<()> {
-        if self.in_streaming
+        if self.is_for_stream()
             && !matches!(
                 self.context.clause,
                 Some(Clause::Where) | Some(Clause::Having)
@@ -676,6 +692,16 @@ impl Binder {
                 "For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: {:?}",
                 self.context.clause
             ))
+            .into());
+        }
+        Ok(())
+    }
+
+    fn ensure_proctime_function_allowed(&self) -> Result<()> {
+        if !self.is_for_ddl() {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "Function `PROCTIME()` is only allowed in CREATE TABLE/SOURCE. Is `NOW()` what you want?".to_string(),
+            )
             .into());
         }
         Ok(())

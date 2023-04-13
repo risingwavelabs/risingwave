@@ -227,3 +227,24 @@ query R
 SELECT cosd('-NaN')
 ----
 NaN
+
+
+query R 
+SELECT degrees(pi())
+----
+180
+
+query R
+SELECT degrees(pi()/2)
+----
+90
+
+query R
+SELECT abs(radians(180) - pi()) < 0.000000000000001
+----
+t
+
+query R 
+SELECT abs(radians(90) - pi()/2) < 0.000000000000001
+----
+t
