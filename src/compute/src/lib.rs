@@ -86,7 +86,7 @@ pub struct ComputeNodeOpts {
     pub parallelism: usize,
 
     /// Decides whether the compute node can be used for streaming and serving.
-    #[clap(long, value_enum)]
+    #[clap(long, value_enum, default_value_t = default_role())]
     pub role: Role,
 
     /// The policy for compute node memory control. Valid values:
@@ -226,4 +226,8 @@ fn default_total_memory_bytes() -> usize {
 
 fn default_parallelism() -> usize {
     total_cpu_available().ceil() as usize
+}
+
+fn default_role() -> Role {
+    Role::Both
 }
