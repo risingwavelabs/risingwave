@@ -113,7 +113,7 @@ fn hash_key_size(data_type: &DataType) -> HashKeySize {
         DataType::Timestamp => HashKeySize::Fixed(size_of::<Timestamp>()),
         DataType::Timestamptz => HashKeySize::Fixed(size_of::<i64>()),
         DataType::Interval => HashKeySize::Fixed(size_of::<Interval>()),
-
+        DataType::Int256 => HashKeySize::Variable,
         DataType::Varchar => HashKeySize::Variable,
         DataType::Bytea => HashKeySize::Variable,
         DataType::Jsonb => HashKeySize::Variable,

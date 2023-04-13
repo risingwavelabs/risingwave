@@ -115,7 +115,8 @@ message ExprNode {
     ATAN = 251;
     ATAN2 = 252;
     SQRT = 253;
-
+    DEGREES = 254;
+    RADIANS = 255;
     // Boolean comparison
     IS_TRUE = 301;
     IS_NOT_TRUE = 302;
@@ -142,6 +143,10 @@ message ExprNode {
     ARRAY_DISTINCT = 535;
     ARRAY_LENGTH = 536;
     CARDINALITY = 537;
+    ARRAY_REMOVE = 538;
+
+    // Int256 functions
+    HEX_TO_INT256 = 540;
 
     // Jsonb functions
 
@@ -161,6 +166,7 @@ message ExprNode {
     VNODE = 1101;
     // Non-deterministic functions
     NOW = 2022;
+    PROCTIME = 2023;
     // User defined functions
     UDF = 3000;
   }

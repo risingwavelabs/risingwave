@@ -45,6 +45,7 @@ pub trait ToText {
     /// - `ScalarRefImpl::Int16` -> `DataType::Int16`
     /// - `ScalarRefImpl::Int32` -> `DataType::Int32`
     /// - `ScalarRefImpl::Int64` -> `DataType::Int64`
+    /// - `ScalarRefImpl::Int256` -> `DataType::Int256`
     /// - `ScalarRefImpl::Float32` -> `DataType::Float32`
     /// - `ScalarRefImpl::Float64` -> `DataType::Float64`
     /// - `ScalarRefImpl::Decimal` -> `DataType::Decimal`

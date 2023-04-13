@@ -37,15 +37,15 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
     /// Infers the state table catalog for [`StreamTopN`] and [`StreamGroupTopN`].
     pub fn infer_internal_table_catalog(
         &self,
-        me: &impl stream::StreamPlanRef,
+        schema: &Schema,
+        ctx: OptimizerContextRef,
+        stream_key: &[usize],
         vnode_col_idx: Option<usize>,
     ) -> TableCatalog {
-        let schema = me.schema();
-        let pk_indices = me.logical_pk();
         let columns_fields = schema.fields().to_vec();
         let column_orders = &self.order.column_orders;
         let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
+            TableCatalogBuilder::new(ctx.with_options().internal_table_subset());
 
         columns_fields.iter().for_each(|field| {
             internal_table_catalog_builder.add_column(field);
@@ -71,7 +71,7 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
             }
         });
 
-        pk_indices.iter().for_each(|idx| {
+        stream_key.iter().for_each(|idx| {
             if !order_cols.contains(idx) {
                 internal_table_catalog_builder.add_order_column(*idx, OrderType::ascending());
                 order_cols.insert(*idx);
