@@ -35,7 +35,7 @@ use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, IdCategoryType,
     MetaSrvEnv, StreamingJob,
 };
-use crate::rpc::cloud_provider::AwsEc2Client;
+use crate::rpc::cloud_provider::{AwsEc2Client, CLOUD_PROVIDER_AWS};
 use crate::rpc::ddl_controller::{DdlCommand, DdlController, StreamingJobId};
 use crate::storage::MetaStore;
 use crate::stream::{visit_fragment, GlobalStreamManagerRef, SourceManagerRef};
@@ -608,17 +608,25 @@ where
         }
 
         match req.payload.unwrap() {
-            create_connection_request::Payload::PrivateLink(link) => {
-                let cli = self.aws_client.as_ref().unwrap();
-                let private_link_svc = cli
-                    .create_aws_private_link(&link.service_name, &link.availability_zones)
-                    .await?;
+            create_connection_request::Payload::PrivateLink(info) => {
+                // currently we only support AWS
+                let private_link_conn = match info.provider.to_lowercase().as_str() {
+                    CLOUD_PROVIDER_AWS => {
+                        let cli = self.aws_client.as_ref().unwrap();
+                        let private_link_svc =
+                            cli.create_aws_private_link(&info.service_name).await?;
+                        connection::Info::PrivateLinkService(private_link_svc)
+                    }
+                    _ => {
+                        return Err(Status::invalid_argument("unsupported cloud provider"));
+                    }
+                };
 
                 let id = self.gen_unique_id::<{ IdCategory::Connection }>().await?;
                 let connection = Connection {
                     id,
                     name: req.name,
-                    info: Some(connection::Info::PrivateLinkService(private_link_svc)),
+                    info: Some(private_link_conn),
                 };
 
                 // save private link info to catalog
@@ -689,7 +697,7 @@ where
                 .get(kafka_props_broker_key(properties))
                 .cloned()
                 .ok_or(MetaError::from(anyhow!(
-                    "Must specify brokers property in WITH clause",
+                    "Must specify \"{KAFKA_PROPS_BROKER_KEY}\" property in WITH clause",
                 )))?;
 
             let private_link_name =

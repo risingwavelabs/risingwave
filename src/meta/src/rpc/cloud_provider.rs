@@ -23,7 +23,7 @@ use tracing::info;
 
 use crate::{MetaError, MetaResult};
 
-const CLOUD_PROVIDER_AWS: &str = "aws";
+pub const CLOUD_PROVIDER_AWS: &str = "aws";
 
 #[derive(Clone)]
 pub struct AwsEc2Client {
@@ -49,11 +49,9 @@ impl AwsEc2Client {
     }
 
     /// `service_name`: The name of the endpoint service we want to access
-    /// `az_ids`: The AZs in which the service is available (deprecated)
     pub async fn create_aws_private_link(
         &self,
         service_name: &str,
-        _az_ids: &[String],
     ) -> MetaResult<PrivateLinkService> {
         // fetch the AZs of the endpoint service
         let service_azs = self.get_endpoint_service_az_names(service_name).await?;

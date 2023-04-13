@@ -52,7 +52,6 @@ fn resolve_private_link_properties(
     Ok(create_connection_request::PrivateLink {
         provider,
         service_name,
-        availability_zones: vec![],
     })
 }
 
