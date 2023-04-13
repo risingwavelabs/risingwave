@@ -17,7 +17,9 @@ use std::io::{Read, Write};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
 use bytes::{BufMut, Bytes, BytesMut};
-use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
+use num_traits::{
+    CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, One, Zero,
+};
 use postgres_types::{ToSql, Type};
 use risingwave_common_proc_macro::EstimateSize;
 use rust_decimal::prelude::FromStr;
@@ -591,6 +593,12 @@ impl Zero for Decimal {
         } else {
             false
         }
+    }
+}
+
+impl One for Decimal {
+    fn one() -> Self {
+        Self::Normalized(RustDecimal::one())
     }
 }
 

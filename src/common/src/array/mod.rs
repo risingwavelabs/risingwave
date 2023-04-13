@@ -83,6 +83,9 @@ pub type F64ArrayBuilder = PrimitiveArrayBuilder<F64>;
 pub type F32ArrayBuilder = PrimitiveArrayBuilder<F32>;
 pub type SerialArrayBuilder = PrimitiveArrayBuilder<Serial>;
 
+// alias for expr macros
+pub type ArrayImplBuilder = ArrayBuilderImpl;
+
 /// The hash source for `None` values when hashing an item.
 pub(crate) const NULL_VAL_FOR_HASH: u32 = 0xfffffff0;
 

@@ -17,12 +17,18 @@ use risingwave_common::types::{Scalar, ScalarImpl, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_common::{bail, ensure};
+// use risingwave_expr_macro::table_function;
 use risingwave_pb::expr::expr_node::RexNode;
 
 use super::*;
 use crate::expr::expr_regexp::{RegexpContext, NULL_PATTERN};
 use crate::expr::Expression;
 use crate::ExprError;
+
+// #[table_function("regexp_matches(varchar, varchar) -> varchar[]")]
+// fn regexp_matches(s: &str, regex: &str) -> impl Iterator<Item = ListValue> {
+//     todo!()
+// }
 
 /// It is almost the same as `regexp_match` function (see `expr_regexp.rs`), except
 /// that all the captures are returned.

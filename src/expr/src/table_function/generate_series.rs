@@ -12,156 +12,41 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
-use itertools::multizip;
-use num_traits::Zero;
-use risingwave_common::array::{
-    Array, ArrayImpl, DataChunk, I32Array, IntervalArray, TimestampArray,
-};
-use risingwave_common::types::{CheckedAdd, IsNegative, Scalar, ScalarRef, ScalarRefImpl};
-use risingwave_common::util::iter_util::ZipEqDebug;
+use num_traits::One;
+use risingwave_common::types::CheckedAdd;
+use risingwave_expr_macro::table_function;
 
 use super::*;
-use crate::ExprError;
 
-#[derive(Debug)]
-pub struct GenerateSeries<T: Array, S: Array, const STOP_INCLUSIVE: bool> {
-    start: BoxedExpression,
-    stop: BoxedExpression,
-    step: BoxedExpression,
-    chunk_size: usize,
-    _phantom: std::marker::PhantomData<(T, S)>,
+#[table_function("generate_series(int32, int32) -> int32")]
+#[table_function("generate_series(int64, int64) -> int64")]
+#[table_function("generate_series(decimal, decimal) -> decimal")]
+fn generate_series<T>(start: T, stop: T) -> impl Iterator<Item = T>
+where
+    T: CheckedAdd<Output = T> + PartialOrd + Copy + One,
+{
+    generate_series_step(start, stop, T::one())
 }
 
-impl<T: Array, S: Array, const STOP_INCLUSIVE: bool> GenerateSeries<T, S, STOP_INCLUSIVE>
+#[table_function("generate_series(int32, int32, int32) -> int32")]
+#[table_function("generate_series(int64, int64, int64) -> int64")]
+#[table_function("generate_series(decimal, decimal, decimal) -> decimal")]
+#[table_function("generate_series(timestamp, timestamp, interval) -> timestamp")]
+fn generate_series_step<T, S>(start: T, stop: T, step: S) -> impl Iterator<Item = T>
 where
-    T::OwnedItem: for<'a> PartialOrd<T::RefItem<'a>>,
-    T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>, Output = T::OwnedItem>,
-    for<'a> S::RefItem<'a>: IsNegative,
-    for<'a> &'a T: From<&'a ArrayImpl>,
-    for<'a> &'a S: From<&'a ArrayImpl>,
+    T: CheckedAdd<S, Output = T> + PartialOrd + Copy,
+    S: Copy,
 {
-    fn new(
-        start: BoxedExpression,
-        stop: BoxedExpression,
-        step: BoxedExpression,
-        chunk_size: usize,
-    ) -> Self {
-        Self {
-            start,
-            stop,
-            step,
-            chunk_size,
-            _phantom: Default::default(),
-        }
-    }
-
-    #[try_stream(ok = T::OwnedItem, error = ExprError)]
-    async fn eval_row<'a>(
-        &'a self,
-        start: T::RefItem<'a>,
-        stop: T::RefItem<'a>,
-        step: S::RefItem<'a>,
-    ) {
-        if step.is_zero() {
-            return Err(ExprError::InvalidParam {
-                name: "step",
-                reason: "must be non-zero".to_string(),
-            });
-        }
-
-        let mut cur: T::OwnedItem = start.to_owned_scalar();
-
-        while if step.is_negative() {
-            if STOP_INCLUSIVE {
-                cur >= stop
-            } else {
-                cur > stop
-            }
-        } else if STOP_INCLUSIVE {
-            cur <= stop
+    let mut cur = start;
+    std::iter::from_fn(move || {
+        if cur > stop {
+            None
         } else {
-            cur < stop
-        } {
-            yield cur.clone();
-            cur = cur.checked_add(step).ok_or(ExprError::NumericOutOfRange)?;
+            let ret = cur;
+            cur = cur.checked_add(step).unwrap();
+            Some(ret)
         }
-    }
-
-    #[try_stream(boxed, ok = DataChunk, error = ExprError)]
-    async fn eval_inner<'a>(&'a self, input: &'a DataChunk) {
-        let ret_start = self.start.eval_checked(input).await?;
-        let arr_start: &T = ret_start.as_ref().into();
-        let ret_stop = self.stop.eval_checked(input).await?;
-        let arr_stop: &T = ret_stop.as_ref().into();
-        let ret_step = self.step.eval_checked(input).await?;
-        let arr_step: &S = ret_step.as_ref().into();
-
-        let mut builder =
-            DataChunkBuilder::new(vec![DataType::Int64, self.return_type()], self.chunk_size);
-        for (i, ((start, stop, step), visible)) in
-            multizip((arr_start.iter(), arr_stop.iter(), arr_step.iter()))
-                .zip_eq_debug(input.vis().iter())
-                .enumerate()
-        {
-            if let (Some(start), Some(stop), Some(step)) = (start, stop, step) && visible {
-                #[for_await]
-                for res in self.eval_row(start, stop, step) {
-                    let value = res?;
-                    if let Some(chunk) = builder.append_one_row([Some(ScalarRefImpl::Int64(i as i64)), Some(value.as_scalar_ref().into())]) {
-                        yield chunk;
-                    }
-                }
-            }
-        }
-        if let Some(chunk) = builder.consume_all() {
-            yield chunk;
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl<T: Array, S: Array, const STOP_INCLUSIVE: bool> TableFunction
-    for GenerateSeries<T, S, STOP_INCLUSIVE>
-where
-    T::OwnedItem: for<'a> PartialOrd<T::RefItem<'a>>,
-    T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>, Output = T::OwnedItem>,
-    for<'a> S::RefItem<'a>: IsNegative,
-    for<'a> &'a T: From<&'a ArrayImpl>,
-    for<'a> &'a S: From<&'a ArrayImpl>,
-{
-    fn return_type(&self) -> DataType {
-        self.start.return_type()
-    }
-
-    async fn eval<'a>(&'a self, input: &'a DataChunk) -> BoxStream<'a, Result<DataChunk>> {
-        self.eval_inner(input)
-    }
-}
-
-pub fn new_generate_series<const STOP_INCLUSIVE: bool>(
-    prost: &PbTableFunction,
-    chunk_size: usize,
-) -> Result<BoxedTableFunction> {
-    let return_type = DataType::from(prost.get_return_type().unwrap());
-    let args: Vec<_> = prost.args.iter().map(expr_build_from_prost).try_collect()?;
-    let [start, stop, step]: [_; 3] = args.try_into().unwrap();
-
-    match return_type {
-        DataType::Timestamp => Ok(
-            GenerateSeries::<TimestampArray, IntervalArray, STOP_INCLUSIVE>::new(
-                start, stop, step, chunk_size,
-            )
-            .boxed(),
-        ),
-        DataType::Int32 => Ok(GenerateSeries::<I32Array, I32Array, STOP_INCLUSIVE>::new(
-            start, stop, step, chunk_size,
-        )
-        .boxed()),
-        _ => Err(ExprError::Internal(anyhow!(
-            "the return type of Generate Series Function is incorrect".to_string(),
-        ))),
-    }
+    })
 }
 
 #[cfg(test)]

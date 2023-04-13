@@ -203,7 +203,7 @@ message ExprNode {
 message TableFunction {
   enum Type {
     UNSPECIFIED = 0;
-    GENERATE = 1;
+    GENERATE_SERIES = 1;
     UNNEST = 2;
     REGEXP_MATCHES = 3;
     RANGE = 4;

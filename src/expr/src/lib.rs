@@ -24,6 +24,7 @@
 #![feature(round_ties_even)]
 #![feature(generators)]
 #![feature(iter_from_generator)]
+#![feature(step_trait)]
 
 pub mod agg;
 mod error;

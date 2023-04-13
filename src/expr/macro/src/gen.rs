@@ -260,7 +260,6 @@ impl FunctionAttr {
             |return_type, children| {
                 use risingwave_common::array::*;
                 use risingwave_common::types::*;
-                use risingwave_pb::expr::expr_node::RexNode;
 
                 crate::ensure!(children.len() == #num_args);
                 let mut iter = children.into_iter();
@@ -419,6 +418,123 @@ impl FunctionAttr {
                 Ok(Box::new(Agg {
                     return_type: agg.return_type,
                     state: #init_state,
+                }))
+            }
+        })
+    }
+
+    /// Generate a descriptor of the table function.
+    ///
+    /// The types of arguments and return value should not contain wildcard.
+    pub fn generate_table_function_descriptor(&self, build_fn: bool) -> Result<TokenStream2> {
+        let name = self.name.clone();
+        let mut args = Vec::with_capacity(self.args.len());
+        for ty in &self.args {
+            args.push(data_type(ty));
+        }
+        let ret = data_type(&self.ret);
+
+        let pb_type = format_ident!("{}", utils::to_camel_case(&name));
+        let ctor_name = format_ident!("{}_{}_{}", self.name, self.args.join("_"), self.ret);
+        let descriptor_type = quote! { crate::sig::table_function::FuncSign };
+        let build_fn = if build_fn {
+            let name = format_ident!("{}", self.user_fn.name);
+            quote! { #name }
+        } else {
+            self.generate_build_table_function()?
+        };
+        Ok(quote! {
+            #[ctor::ctor]
+            fn #ctor_name() {
+                unsafe { crate::sig::table_function::_register(#descriptor_type {
+                    func: risingwave_pb::expr::table_function::Type::#pb_type,
+                    inputs_type: &[#(#args),*],
+                    ret_type: #ret,
+                    build: #build_fn,
+                }) };
+            }
+        })
+    }
+
+    fn generate_build_table_function(&self) -> Result<TokenStream2> {
+        let num_args = self.args.len();
+        let fn_name = format_ident!("{}", self.user_fn.name);
+        let struct_name = format_ident!("{}_{}_{}", self.name, self.args.join("_"), self.ret);
+        let elems: Vec<_> = (0..num_args).map(|i| format_ident!("v{i}")).collect();
+        let child: Vec<_> = (0..num_args).map(|i| format_ident!("child{i}")).collect();
+        let array_refs: Vec<_> = (0..num_args).map(|i| format_ident!("array{i}")).collect();
+        let arrays: Vec<_> = (0..num_args).map(|i| format_ident!("a{i}")).collect();
+        let arg_arrays = self
+            .args
+            .iter()
+            .map(|t| format_ident!("{}", types::array_type(t)));
+        let array_builder = format_ident!("{}Builder", types::array_type(&self.ret));
+
+        Ok(quote! {
+            |return_type, chunk_size, children| {
+                use risingwave_common::array::*;
+                use risingwave_common::types::*;
+                use risingwave_common::buffer::Bitmap;
+                use risingwave_common::util::iter_util::ZipEqFast;
+                use itertools::multizip;
+
+                crate::ensure!(children.len() == #num_args);
+                let mut iter = children.into_iter();
+
+                #[derive(Debug)]
+                struct #struct_name {
+                    return_type: DataType,
+                    chunk_size: usize,
+                    #(#child: BoxedExpression,)*
+                }
+                #[async_trait::async_trait]
+                impl crate::table_function::TableFunction for #struct_name {
+                    fn return_type(&self) -> DataType {
+                        self.return_type.clone()
+                    }
+                    async fn eval<'a>(&'a self, input: &'a DataChunk) -> BoxStream<'a, Result<DataChunk>> {
+                        self.eval_inner(input)
+                    }
+                }
+                impl #struct_name {
+                    #[try_stream(boxed, ok = DataChunk, error = ExprError)]
+                    async fn eval_inner<'a>(&'a self, input: &'a DataChunk) {
+                        #(
+                        let #array_refs = self.#child.eval_checked(input).await?;
+                        let #arrays: &#arg_arrays = #array_refs.as_ref().into();
+                        )*
+
+                        let mut index_builder = I64ArrayBuilder::new(self.chunk_size);
+                        let mut value_builder = #array_builder::with_type(self.chunk_size, self.return_type.clone());
+
+                        for (i, (row, visible)) in multizip((#(#arrays.iter()),*)).zip_eq_fast(input.vis().iter()).enumerate() {
+                            if let (#(Some(#elems)),*) = row && visible {
+                                for value in #fn_name(#(#elems),*) {
+                                    index_builder.append(Some(i as i64));
+                                    value_builder.append(Some(value));
+
+                                    if index_builder.len() == self.chunk_size {
+                                        let index_array = std::mem::replace(&mut index_builder, I64ArrayBuilder::new(self.chunk_size)).finish();
+                                        let value_array = std::mem::replace(&mut value_builder, #array_builder::with_type(self.chunk_size, self.return_type.clone())).finish();
+                                        yield DataChunk::new(vec![index_array.into(), value_array.into()], self.chunk_size);
+                                    }
+                                }
+                            }
+                        }
+
+                        if index_builder.len() > 0 {
+                            let len = index_builder.len();
+                            let index_array = index_builder.finish();
+                            let value_array = value_builder.finish();
+                            yield DataChunk::new(vec![index_array.into(), value_array.into()], len);
+                        }
+                    }
+                }
+
+                Ok(Box::new(#struct_name {
+                    return_type,
+                    chunk_size,
+                    #(#child: iter.next().unwrap(),)*
                 }))
             }
         })
