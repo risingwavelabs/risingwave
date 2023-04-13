@@ -183,8 +183,8 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test]
-    async fn test_generator() {
+    #[test]
+    fn test_generator() {
         let mut generator = RowIdGenerator::new([VirtualNode::from_index(0)]);
 
         let mut last_row_id = generator.next();
@@ -193,7 +193,7 @@ mod tests {
             assert!(row_id > last_row_id);
             last_row_id = row_id;
         }
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        std::thread::sleep(Duration::from_millis(10));
         let row_id = generator.next();
         assert!(row_id > last_row_id);
         assert_ne!(
@@ -213,5 +213,21 @@ mod tests {
                 .collect_vec(),
             expected
         );
+    }
+
+    #[test]
+    fn test_generator_multiple_vnodes() {
+        let mut generator = RowIdGenerator::new((0..10).map(VirtualNode::from_index));
+
+        let row_ids = generator.next_batch((SEQUENCE_UPPER_BOUND as usize) * 10 + 1);
+        let timestamps = row_ids
+            .into_iter()
+            .map(|r| r >> TIMESTAMP_SHIFT_BITS)
+            .collect_vec();
+
+        let (last_timestamp, first_timestamps) = timestamps.split_last().unwrap();
+        let first_timestamp = first_timestamps.iter().unique().exactly_one().unwrap();
+
+        assert!(last_timestamp > first_timestamp);
     }
 }
