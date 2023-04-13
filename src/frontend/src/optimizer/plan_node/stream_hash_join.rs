@@ -23,7 +23,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DeltaExpression, HashJoinNode, PbInequalityPair};
 
 use super::{
-    ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode,
+    generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode,
 };
 use crate::expr::{Expr, ExprDisplay, ExprRewriter, InequalityInputPair};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -39,7 +39,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamHashJoin {
     pub base: PlanBase,
-    logical: LogicalJoin,
+    logical: generic::Join<PlanRef>,
 
     /// The join condition must be equivalent to `logical.on`, but separated into equal and
     /// non-equal parts to facilitate execution later
@@ -64,17 +64,18 @@ pub struct StreamHashJoin {
 }
 
 impl StreamHashJoin {
-    pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
-        let ctx = logical.base.ctx.clone();
+    pub fn new(logical: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Self {
+        let base = PlanBase::new_logical_with_core(&logical);
+        let ctx = base.ctx;
         // Inner join won't change the append-only behavior of the stream. The rest might.
-        let append_only = match logical.join_type() {
-            JoinType::Inner => logical.left().append_only() && logical.right().append_only(),
+        let append_only = match logical.join_type {
+            JoinType::Inner => logical.left.append_only() && logical.right.append_only(),
             _ => false,
         };
 
         let dist = Self::derive_dist(
-            logical.left().distribution(),
-            logical.right().distribution(),
+            logical.left.distribution(),
+            logical.right.distribution(),
             &logical,
         );
 
@@ -89,8 +90,8 @@ impl StreamHashJoin {
             let mut equal_condition_clean_state = false;
             let mut watermark_columns = FixedBitSet::with_capacity(logical.internal_column_num());
             for (left_key, right_key) in eq_join_predicate.eq_indexes() {
-                if logical.left().watermark_columns().contains(left_key)
-                    && logical.right().watermark_columns().contains(right_key)
+                if logical.left.watermark_columns().contains(left_key)
+                    && logical.right.watermark_columns().contains(right_key)
                 {
                     equal_condition_clean_state = true;
                     if let Some(internal) = l2i.try_map(left_key) {
@@ -113,20 +114,20 @@ impl StreamHashJoin {
             {
                 let both_upstream_has_watermark = if key_required_larger < key_required_smaller {
                     logical
-                        .left()
+                        .left
                         .watermark_columns()
                         .contains(key_required_larger)
                         && logical
-                            .right()
+                            .right
                             .watermark_columns()
                             .contains(key_required_smaller - left_cols_num)
                 } else {
                     logical
-                        .left()
+                        .left
                         .watermark_columns()
                         .contains(key_required_smaller)
                         && logical
-                            .right()
+                            .right
                             .watermark_columns()
                             .contains(key_required_larger - left_cols_num)
                 };
@@ -181,9 +182,9 @@ impl StreamHashJoin {
         // TODO: derive from input
         let base = PlanBase::new_stream(
             ctx,
-            logical.schema().clone(),
-            logical.base.logical_pk.to_vec(),
-            logical.functional_dependency().clone(),
+            base.schema,
+            base.logical_pk,
+            base.functional_dependency,
             dist,
             append_only,
             watermark_columns,
@@ -202,7 +203,7 @@ impl StreamHashJoin {
 
     /// Get join type
     pub fn join_type(&self) -> JoinType {
-        self.logical.join_type()
+        self.logical.join_type
     }
 
     /// Get a reference to the batch hash join's eq join predicate.
@@ -213,14 +214,14 @@ impl StreamHashJoin {
     pub(super) fn derive_dist(
         left: &Distribution,
         right: &Distribution,
-        logical: &LogicalJoin,
+        logical: &generic::Join<PlanRef>,
     ) -> Distribution {
         match (left, right) {
             (Distribution::Single, Distribution::Single) => Distribution::Single,
             (Distribution::HashShard(_), Distribution::HashShard(_)) => {
                 // we can not derive the hash distribution from the side where outer join can
                 // generate a NULL row
-                match logical.join_type() {
+                match logical.join_type {
                     JoinType::Unspecified => unreachable!(),
                     JoinType::FullOuter => Distribution::SomeShard,
                     JoinType::Inner
@@ -248,8 +249,8 @@ impl StreamHashJoin {
     }
 
     /// Convert this hash join to a delta join plan
-    pub fn to_delta_join(&self) -> StreamDeltaJoin {
-        StreamDeltaJoin::new(self.logical.clone(), self.eq_join_predicate.clone())
+    pub fn into_delta_join(self) -> StreamDeltaJoin {
+        StreamDeltaJoin::new(self.logical, self.eq_join_predicate)
     }
 
     pub fn derive_dist_key_in_join_key(&self) -> Vec<usize> {
@@ -274,22 +275,37 @@ impl StreamHashJoin {
         assert_eq!(dk_indices_in_jk.len(), left_dk_indices.len());
         dk_indices_in_jk
     }
+
+    pub fn inequality_pairs(&self) -> &Vec<(bool, InequalityInputPair)> {
+        &self.inequality_pairs
+    }
 }
 
 impl fmt::Display for StreamHashJoin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = if self.is_append_only {
-            f.debug_struct("StreamAppendOnlyHashJoin")
+        let (ljk, rjk) = self
+            .eq_join_predicate
+            .eq_indexes()
+            .first()
+            .cloned()
+            .expect("first join key");
+
+        let mut builder = if self.left().watermark_columns().contains(ljk)
+            && self.right().watermark_columns().contains(rjk)
+        {
+            f.debug_struct("StreamWindowJoin")
         } else if self.clean_left_state_conjunction_idx.is_some()
             && self.clean_right_state_conjunction_idx.is_some()
         {
             f.debug_struct("StreamIntervalJoin")
+        } else if self.is_append_only {
+            f.debug_struct("StreamAppendOnlyHashJoin")
         } else {
             f.debug_struct("StreamHashJoin")
         };
 
         let verbose = self.base.ctx.is_explain_verbose();
-        builder.field("type", &self.logical.join_type());
+        builder.field("type", &self.logical.join_type);
 
         let mut concat_schema = self.left().schema().fields.clone();
         concat_schema.extend(self.right().schema().fields.clone());
@@ -336,7 +352,7 @@ impl fmt::Display for StreamHashJoin {
         if verbose {
             if self
                 .logical
-                .output_indices()
+                .output_indices
                 .iter()
                 .copied()
                 .eq(0..self.logical.internal_column_num())
@@ -346,7 +362,7 @@ impl fmt::Display for StreamHashJoin {
                 builder.field(
                     "output",
                     &IndicesDisplay {
-                        indices: self.logical.output_indices(),
+                        indices: &self.logical.output_indices,
                         input_schema: &concat_schema,
                     },
                 );
@@ -359,18 +375,18 @@ impl fmt::Display for StreamHashJoin {
 
 impl PlanTreeNodeBinary for StreamHashJoin {
     fn left(&self) -> PlanRef {
-        self.logical.left()
+        self.logical.left.clone()
     }
 
     fn right(&self) -> PlanRef {
-        self.logical.right()
+        self.logical.right.clone()
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::new(
-            self.logical.clone_with_left_right(left, right),
-            self.eq_join_predicate.clone(),
-        )
+        let mut logical = self.logical.clone();
+        logical.left = left;
+        logical.right = right;
+        Self::new(logical, self.eq_join_predicate.clone())
     }
 }
 
@@ -421,7 +437,7 @@ impl StreamNode for StreamHashJoin {
         let null_safe_prost = self.eq_join_predicate.null_safes().into_iter().collect();
 
         NodeBody::HashJoin(HashJoinNode {
-            join_type: self.logical.join_type() as i32,
+            join_type: self.logical.join_type as i32,
             left_key: left_jk_indices_prost,
             right_key: right_jk_indices_prost,
             null_safe: null_safe_prost,
@@ -464,7 +480,7 @@ impl StreamNode for StreamHashJoin {
             right_deduped_input_pk_indices,
             output_indices: self
                 .logical
-                .output_indices()
+                .output_indices
                 .iter()
                 .map(|&x| x as u32)
                 .collect(),
@@ -479,14 +495,8 @@ impl ExprRewritable for StreamHashJoin {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self::new(
-            self.logical
-                .rewrite_exprs(r)
-                .as_logical_join()
-                .unwrap()
-                .clone(),
-            self.eq_join_predicate.rewrite_exprs(r),
-        )
-        .into()
+        let mut logical = self.logical.clone();
+        logical.rewrite_exprs(r);
+        Self::new(logical, self.eq_join_predicate.rewrite_exprs(r)).into()
     }
 }

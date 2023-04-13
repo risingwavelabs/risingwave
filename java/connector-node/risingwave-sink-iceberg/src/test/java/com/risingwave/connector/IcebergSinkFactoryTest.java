@@ -64,13 +64,13 @@ public class IcebergSinkFactoryTest {
                         sinkFactory.create(
                                 TableSchema.getMockTableSchema(),
                                 Map.of(
-                                        IcebergSinkFactory.SINK_TYPE_PROP,
+                                        "type",
                                         sinkMode,
-                                        IcebergSinkFactory.WAREHOUSE_PATH_PROP,
+                                        "warehouse.path",
                                         warehousePath,
-                                        IcebergSinkFactory.DATABASE_NAME_PROP,
+                                        "database.name",
                                         databaseName,
-                                        IcebergSinkFactory.TABLE_NAME_PROP,
+                                        "table.name",
                                         tableName));
         try {
             assertTrue(

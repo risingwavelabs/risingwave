@@ -59,7 +59,7 @@ use crate::manager::{
 };
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
-use crate::rpc::metrics::{start_worker_info_monitor, MetaMetrics};
+use crate::rpc::metrics::{start_fragment_info_monitor, start_worker_info_monitor, MetaMetrics};
 use crate::rpc::service::backup_service::BackupServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
@@ -71,7 +71,7 @@ use crate::rpc::service::telemetry_service::TelemetryInfoServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
 use crate::stream::{GlobalStreamManager, SourceManager};
-use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
+use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher, TrackingId};
 use crate::{hummock, MetaResult};
 
 #[derive(Debug)]
@@ -397,6 +397,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             barrier_scheduler.clone(),
             catalog_manager.clone(),
             fragment_manager.clone(),
+            meta_metrics.clone(),
         )
         .await
         .unwrap(),
@@ -540,6 +541,14 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         )
         .await,
     );
+    sub_tasks.push(
+        start_fragment_info_monitor(
+            cluster_manager.clone(),
+            fragment_manager.clone(),
+            meta_metrics.clone(),
+        )
+        .await,
+    );
     sub_tasks.push(SystemParamsManager::start_params_notifier(system_params_manager.clone()).await);
     sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager.clone()).await);
     sub_tasks.push(HummockManager::start_lsm_stat_report(hummock_manager).await);
@@ -572,6 +581,15 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         Arc::new(MetaTelemetryInfoFetcher::new(meta_store.clone())),
         Arc::new(MetaReportCreator::new()),
     );
+
+    {
+        // always create a tracking_id for a cluster
+        // if it's persistent in etcd, won't create a new one
+        let tracking_id: String = TrackingId::get_or_create_meta_store(&meta_store)
+            .await?
+            .into();
+        tracing::info!("Launching Meta {}", tracking_id);
+    }
 
     // May start telemetry reporting
     if let MetaBackend::Etcd = meta_store.meta_store_type() && env.opts.telemetry_enabled && telemetry_env_enabled(){
@@ -609,6 +627,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             }
         }
     };
+
+    tracing::info!("Starting meta services");
 
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))

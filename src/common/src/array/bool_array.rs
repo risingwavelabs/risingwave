@@ -17,6 +17,7 @@ use risingwave_pb::data::{ArrayType, PbArray};
 use super::{Array, ArrayBuilder, ArrayMeta};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::collection::estimate_size::EstimateSize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoolArray {
@@ -63,6 +64,12 @@ impl FromIterator<bool> for BoolArray {
             bitmap: Bitmap::ones(data.len()),
             data,
         }
+    }
+}
+
+impl EstimateSize for BoolArray {
+    fn estimated_heap_size(&self) -> usize {
+        self.bitmap.estimated_heap_size() + self.data.estimated_heap_size()
     }
 }
 
@@ -194,6 +201,8 @@ mod tests {
             })
             .collect_vec();
         let array = helper_test_builder(v.clone());
+        assert_eq!(256, array.estimated_heap_size());
+        assert_eq!(320, array.estimated_size());
         let res = v.iter().zip_eq_fast(array.iter()).all(|(a, b)| *a == b);
         assert!(res);
     }

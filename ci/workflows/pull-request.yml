@@ -7,10 +7,12 @@ cargo-cache: &cargo-cache
   backend: s3
   s3:
     bucket: ci-cache-bucket
+    args: '--no-progress'
   paths:
     - ".cargo/registry/index"
     - ".cargo/registry/cache"
     - ".cargo/git/db"
+    - ".cargo/advisory-db"
 
 steps:
   - label: "check ci image rebuild"
@@ -152,7 +154,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 5
+    timeout_in_minutes: 18
 
   - label: "end-to-end iceberg sink test"
     command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-dev"
@@ -178,7 +180,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 5
+    timeout_in_minutes: 7
 
   - label: "regress test"
     command: "ci/scripts/regress-test.sh -p ci-dev"
@@ -286,7 +288,7 @@ steps:
       #     files: "*-junit.xml"
       #     format: "junit"
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 18
+    timeout_in_minutes: 25
 
   - label: "misc check"
     command: "ci/scripts/misc-check.sh"

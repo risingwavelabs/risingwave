@@ -262,6 +262,11 @@ fn build_fragment(
             current_fragment.requires_singleton = true;
         }
 
+        NodeBody::Values(_) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::Values as u32;
+            current_fragment.requires_singleton = true;
+        }
+
         _ => {}
     };
 

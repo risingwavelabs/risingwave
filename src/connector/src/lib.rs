@@ -21,7 +21,7 @@
 #![feature(trait_alias)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(lint_reasons)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![feature(result_option_inspect)]
 #![feature(let_chains)]
 #![feature(box_into_inner)]
@@ -59,6 +59,19 @@ impl ConnectorParams {
             sink_payload_format,
         }
     }
+}
+
+pub(crate) fn deserialize_u32_from_string<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let s: String = de::Deserialize::deserialize(deserializer)?;
+    s.parse().map_err(|_| {
+        de::Error::invalid_value(
+            de::Unexpected::Str(&s),
+            &"integer greater than or equal to 0",
+        )
+    })
 }
 
 pub(crate) fn deserialize_bool_from_string<'de, D>(deserializer: D) -> Result<bool, D::Error>

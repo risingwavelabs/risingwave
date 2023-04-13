@@ -60,7 +60,7 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
             pk_indices: params.pk_indices,
             executor_id: params.executor_id,
 
-            extreme_cache_size: stream.config.developer.unsafe_stream_extreme_cache_size,
+            extreme_cache_size: stream.config.developer.unsafe_extreme_cache_size,
 
             agg_calls,
             row_count_index: node.get_row_count_index() as usize,

@@ -136,6 +136,8 @@ define_keywords!(
     CONDITION,
     CONFLUENT,
     CONNECT,
+    CONNECTION,
+    CONNECTIONS,
     CONSTRAINT,
     CONTAINS,
     CONVERT,

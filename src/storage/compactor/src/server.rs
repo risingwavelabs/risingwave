@@ -70,9 +70,11 @@ pub async fn compactor_serve(
         WorkerType::Compactor,
         &advertise_addr,
         0,
+        &config.meta,
     )
     .await
     .unwrap();
+
     info!("Assigned compactor id {}", meta_client.worker_id());
     meta_client.activate(&advertise_addr).await.unwrap();
 

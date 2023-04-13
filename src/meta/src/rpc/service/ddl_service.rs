@@ -21,6 +21,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::common::AwsPrivateLinks;
 use risingwave_connector::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
 use risingwave_connector::source::KAFKA_CONNECTOR;
+use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{connection, Connection};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
@@ -403,7 +404,7 @@ where
         let mut source = request.source;
         let mut mview = request.materialized_view.unwrap();
         let mut fragment_graph = request.fragment_graph.unwrap();
-
+        let table_id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         // If we're creating a table with connector, we should additionally fill its ID first.
         if let Some(source) = &mut source {
             // Generate source id.
@@ -425,14 +426,18 @@ where
                 "require exactly 1 external stream source when creating table with a connector"
             );
 
+            // Fill in the correct table id for source.
+            source.optional_associated_table_id =
+                Some(OptionalAssociatedTableId::AssociatedTableId(table_id));
+
             // Fill in the correct source id for mview.
             mview.optional_associated_source_id =
                 Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
         }
 
         let mut stream_job = StreamingJob::Table(source, mview);
-        let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
-        stream_job.set_id(id);
+
+        stream_job.set_id(table_id);
 
         let version = self
             .ddl_controller
@@ -441,7 +446,7 @@ where
 
         Ok(Response::new(CreateTableResponse {
             status: None,
-            table_id: id,
+            table_id,
             version,
         }))
     }
@@ -612,7 +617,7 @@ where
                 let id = self.gen_unique_id::<{ IdCategory::Connection }>().await?;
                 let connection = Connection {
                     id,
-                    name: link.service_name.clone(),
+                    name: req.name,
                     info: Some(connection::Info::PrivateLinkService(private_link_svc)),
                 };
 
@@ -645,11 +650,15 @@ where
     ) -> Result<Response<DropConnectionResponse>, Status> {
         let req = request.into_inner();
 
-        self.ddl_controller
+        let version = self
+            .ddl_controller
             .run_command(DdlCommand::DropConnection(req.connection_name))
             .await?;
 
-        Ok(Response::new(DropConnectionResponse {}))
+        Ok(Response::new(DropConnectionResponse {
+            status: None,
+            version,
+        }))
     }
 }
 

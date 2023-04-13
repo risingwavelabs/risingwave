@@ -19,6 +19,7 @@ use std::sync::Arc;
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::{Stream, StreamExt};
 use itertools::{izip, Itertools};
+use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::cache::CachePriority;
@@ -111,10 +112,10 @@ pub struct StateTableInner<
 
     value_indices: Option<Vec<usize>>,
 
-    /// latest watermark
-    cur_watermark: Option<ScalarImpl>,
-
+    /// Strategy to buffer watermark for lazy state cleaning.
     watermark_buffer_strategy: W,
+    /// State cleaning watermark. Old states will be cleaned under this watermark when committing.
+    state_clean_watermark: Option<ScalarImpl>,
 }
 
 /// `StateTable` will use `BasicSerde` as default
@@ -255,8 +256,8 @@ where
             table_option,
             vnode_col_idx_in_pk,
             value_indices,
-            cur_watermark: None,
             watermark_buffer_strategy: W::default(),
+            state_clean_watermark: None,
         }
     }
 
@@ -426,13 +427,13 @@ where
             table_option: Default::default(),
             vnode_col_idx_in_pk: None,
             value_indices,
-            cur_watermark: None,
             watermark_buffer_strategy: W::default(),
+            state_clean_watermark: None,
         }
     }
 
-    fn table_id(&self) -> TableId {
-        self.table_id
+    pub fn table_id(&self) -> u32 {
+        self.table_id.table_id
     }
 
     /// Returns whether the table is a singleton table.
@@ -597,7 +598,7 @@ where
         let cache_may_stale = cache_may_stale(&self.vnodes, &new_vnodes);
 
         if cache_may_stale {
-            self.cur_watermark = None;
+            self.state_clean_watermark = None;
         }
 
         (
@@ -698,6 +699,15 @@ where
         self.update_inner(new_key_bytes, old_value_bytes, new_value_bytes);
     }
 
+    /// Write a record into state table. Must have the same schema with the table.
+    pub fn write_record(&mut self, record: Record<impl Row>) {
+        match record {
+            Record::Insert { new_row } => self.insert(new_row),
+            Record::Delete { old_row } => self.delete(old_row),
+            Record::Update { old_row, new_row } => self.update(old_row, new_row),
+        }
+    }
+
     /// Write batch with a `StreamChunk` which should have the same schema with the table.
     // allow(izip, which use zip instead of zip_eq)
     #[allow(clippy::disallowed_methods)]
@@ -757,9 +767,17 @@ where
         }
     }
 
-    pub fn update_watermark(&mut self, watermark: ScalarImpl) {
+    /// Update watermark for state cleaning.
+    ///
+    /// # Arguments
+    ///
+    /// * `watermark` - Latest watermark received.
+    /// * `eager_cleaning` - Whether to clean up the state table eagerly.
+    pub fn update_watermark(&mut self, watermark: ScalarImpl, eager_cleaning: bool) {
         trace!(table_id = %self.table_id, watermark = ?watermark, "update watermark");
-        self.cur_watermark = Some(watermark);
+        if self.watermark_buffer_strategy.apply() || eager_cleaning {
+            self.state_clean_watermark = Some(watermark);
+        }
     }
 
     pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
@@ -769,6 +787,9 @@ where
             epoch = ?self.epoch(),
             "commit state table"
         );
+        // Tick the watermark buffer here because state table is expected to be committed once
+        // per epoch.
+        self.watermark_buffer_strategy.tick();
         self.seal_current_epoch(new_epoch.curr).await
     }
 
@@ -778,28 +799,15 @@ where
     pub fn commit_no_data_expected(&mut self, new_epoch: EpochPair) {
         assert_eq!(self.epoch(), new_epoch.prev);
         assert!(!self.is_dirty());
-        if self.cur_watermark.is_some() {
-            self.watermark_buffer_strategy.tick();
-        }
+        // Tick the watermark buffer here because state table is expected to be committed once
+        // per epoch.
+        self.watermark_buffer_strategy.tick();
         self.local_store.seal_current_epoch(new_epoch.curr);
     }
 
     /// Write to state store.
     async fn seal_current_epoch(&mut self, next_epoch: u64) -> StreamExecutorResult<()> {
-        let watermark = {
-            if let Some(watermark) = self.cur_watermark.take() {
-                self.watermark_buffer_strategy.tick();
-                if !self.watermark_buffer_strategy.apply() {
-                    self.cur_watermark = Some(watermark);
-                    None
-                } else {
-                    Some(watermark)
-                }
-            } else {
-                None
-            }
-        };
-
+        let watermark = self.state_clean_watermark.take();
         watermark.as_ref().inspect(|watermark| {
             trace!(table_id = %self.table_id, watermark = ?watermark, "state cleaning");
         });

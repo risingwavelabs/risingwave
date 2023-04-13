@@ -52,7 +52,7 @@ impl PlanVisitor<bool> for MaxOneRowVisitor {
     }
 
     fn visit_logical_top_n(&mut self, plan: &LogicalTopN) -> bool {
-        (plan.limit() <= 1 && !plan.with_ties()) || self.visit(plan.input())
+        plan.limit_attr().max_one_row() || self.visit(plan.input())
     }
 
     fn visit_logical_filter(&mut self, plan: &LogicalFilter) -> bool {

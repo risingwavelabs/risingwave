@@ -1,0 +1,175 @@
+query R
+SELECT abs(sin(1) - 0.8414709848078965) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(cos(1) - 0.5403023058681398) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(tan(1) - 1.557407724654902) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(cot(1) - 0.6420926159343308) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(asin(1) - 1.5707963267948966) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(acos(1) - 0) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(atan(1) - 0.7853981633974483) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(sin(1.1) - 0.8912073600614354) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(cos(1.1) - 0.4535961214255773) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(tan(1.1) - 1.9647596572486525) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(cot(1.1) - 0.5089681052390642) < 0.000000000000001
+----
+t
+
+query R
+SELECT asin(1.1)
+----
+NaN
+
+query R
+SELECT acos(1.1)
+----
+NaN
+
+query R
+SELECT abs(atan(1.1) - 0.8329812666744317) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(sin(-1.1) - -0.8912073600614354) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(cos(-1.1) - 0.4535961214255773) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(tan(-1.1) - -1.9647596572486525) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(cot(-1.1) - -0.5089681052390642) < 0.000000000000001
+----
+t
+
+query R
+SELECT asin(-1.1)
+----
+NaN
+
+query R
+SELECT acos(-1.1)
+----
+NaN
+
+query R
+SELECT abs(atan(-1.1) - -0.8329812666744317) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(sin(pi()) - 0.000000000000001) < 0.000000000000001
+----
+t
+
+query R
+SELECT cos(pi())
+----
+-1
+
+query R
+SELECT abs(tan(pi())) < 0.000000000000001
+----
+t
+
+query R
+SELECT asin(pi())
+----
+NaN
+
+query R
+SELECT acos(pi())
+----
+NaN
+
+query R
+SELECT abs(atan(pi()) - 1.2626272556789115) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(atan2(1, 0) - 1.5707963267948966) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(atan2(1.1, 3.8) - 0.2817718672733522) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(atan2(-1.1, -3.8) - -2.859820786316441) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(atan2(pi(), -3.8) - 2.4507611878363194) < 0.000000000000001
+----
+t
+
+query R
+SELECT degrees(pi())
+----
+180
+
+query R
+SELECT degrees(pi()/2)
+----
+90
+
+query R
+SELECT abs(radians(180) - pi()) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(radians(90) - pi()/2) < 0.000000000000001
+----
+t
+

@@ -104,6 +104,7 @@ pub async fn compute_node_serve(
         WorkerType::ComputeNode,
         &advertise_addr,
         opts.parallelism,
+        &config.meta,
     )
     .await
     .unwrap();

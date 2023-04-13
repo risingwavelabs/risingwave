@@ -23,12 +23,12 @@ use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use task_stats_alloc::{TaskLocalBytesAllocated, BYTES_ALLOCATED};
-use tokio::runtime::Runtime;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio_metrics::TaskMonitor;
 
@@ -293,7 +293,7 @@ pub struct BatchTaskExecution<C> {
     epoch: BatchQueryEpoch,
 
     /// Runtime for the batch tasks.
-    runtime: &'static Runtime,
+    runtime: Arc<BackgroundShutdownRuntime>,
 }
 
 impl<C: BatchTaskContext> BatchTaskExecution<C> {
@@ -302,13 +302,13 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         plan: PlanFragment,
         context: C,
         epoch: BatchQueryEpoch,
-        runtime: &'static Runtime,
+        runtime: Arc<BackgroundShutdownRuntime>,
     ) -> Result<Self> {
         let task_id = TaskId::from(prost_tid);
 
         let (sender, receivers) = create_output_channel(
             plan.get_exchange_info()?,
-            context.get_config().developer.batch_output_channel_size,
+            context.get_config().developer.output_channel_size,
         )?;
 
         let mut rts = Vec::new();

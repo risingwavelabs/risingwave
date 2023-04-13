@@ -52,16 +52,22 @@ impl Expression for UdfExpression {
             columns.push(array.as_ref().into());
         }
         let opts =
-            arrow_array::RecordBatchOptions::default().with_row_count(Some(input.cardinality()));
+            arrow_array::RecordBatchOptions::default().with_row_count(Some(input.capacity()));
         let input =
             arrow_array::RecordBatch::try_new_with_options(self.arg_schema.clone(), columns, &opts)
                 .expect("failed to build record batch");
         let output = self.client.call(&self.identifier, input).await?;
-        let arrow_array = output
-            .columns()
-            .get(0)
-            .ok_or(risingwave_udf::Error::NoColumn)?;
-        let mut array = ArrayImpl::from(arrow_array);
+        if output.num_rows() != vis.len() {
+            bail!(
+                "UDF returned {} rows, but expected {}",
+                output.num_rows(),
+                vis.len(),
+            );
+        }
+        let Some(arrow_array) = output.columns().get(0) else {
+            bail!("UDF returned no columns");
+        };
+        let mut array = ArrayImpl::try_from(arrow_array)?;
         array.set_bitmap(array.null_bitmap() & vis);
         Ok(Arc::new(array))
     }

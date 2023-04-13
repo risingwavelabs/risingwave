@@ -26,6 +26,7 @@ use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::HummockResult;
 use crate::store::SyncResult;
 
+mod cache_refill_policy;
 pub mod hummock_event_handler;
 pub mod uploader;
 
@@ -101,7 +102,9 @@ impl HummockEvent {
                 format!("VersionUpdate {:?}", version_update_payload)
             }
 
-            HummockEvent::ImmToUploader(imm) => format!("ImmToUploader {:?}", imm),
+            HummockEvent::ImmToUploader(imm) => {
+                format!("ImmToUploader {:?}", imm)
+            }
 
             HummockEvent::SealEpoch {
                 epoch,

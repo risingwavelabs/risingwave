@@ -15,6 +15,13 @@ This test will be run as a unit test:
 ./risedev test -E "package(risingwave_sqlsmith)" --features enable_sqlsmith_unit_test
 ```
 
+## Generate snapshots
+
+Take a look at [`gen_queries.sh`](scripts/gen_queries.sh).
+
+Caveat: Even with a given snapshot, certain parts of the system are non-determninistic.
+For instance with scheduler errors, the same query may not trigger errors when executed.
+
 ## E2E
 
 In the second mode, it will test the entire query handling end-to-end. We provide a CLI tool that represents a Postgres client. You can run this tool via:

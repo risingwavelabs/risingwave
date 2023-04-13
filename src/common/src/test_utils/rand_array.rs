@@ -27,6 +27,7 @@ use rand::{Rng, SeedableRng};
 
 use crate::array::serial_array::Serial;
 use crate::array::{Array, ArrayBuilder, ArrayRef, JsonbVal, ListValue, StructValue};
+use crate::types::num256::Int256;
 use crate::types::{Date, Decimal, Interval, NativeType, Scalar, Time, Timestamp};
 
 pub trait RandValue {
@@ -115,6 +116,14 @@ impl RandValue for Serial {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
         // TODO(peng), serial should be in format of RowId
         i64::rand_value(rand).into()
+    }
+}
+
+impl RandValue for Int256 {
+    fn rand_value<R: Rng>(rand: &mut R) -> Self {
+        let mut bytes = [0u8; 32];
+        rand.fill_bytes(&mut bytes);
+        Int256::from_ne_bytes(bytes)
     }
 }
 
