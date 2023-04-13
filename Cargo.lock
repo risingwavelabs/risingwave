@@ -3589,12 +3589,13 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.19"
+version = "0.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "baac280a8f0a7760cfbf788dc523f8784a26550582b07e05ea92b62093c9a72b"
+checksum = "e0296e75e03fc45c2e0bd30a11eb023a6b5698c781355ae526a01478bb09dd83"
 dependencies = [
  "ahash 0.7.6",
  "async-channel",
+ "async-stream",
  "async-task",
  "bincode",
  "bytes",
@@ -3635,9 +3636,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-etcd-client"
-version = "0.2.18"
+version = "0.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72b3894525ac4b7d5732b2123f9d29d018005c96a218e5a7c38d1f42601b927d"
+checksum = "99d983cdf1cd40f94b64cbf89e17f9113a77846a19afaec77d6c9a16ad487a50"
 dependencies = [
  "etcd-client",
  "futures-util",
@@ -3701,9 +3702,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tonic"
-version = "0.2.18"
+version = "0.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a0d4e7468777e5885b6c3b88a97e3dd81547e0f3304324126c1a07ae89be470"
+checksum = "189f256e4ce279a6635b323d2b9652f0cd530c89916ac9b1c08228141104cddd"
 dependencies = [
  "async-stream",
  "chrono",
@@ -8361,7 +8362,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
  "cfg-if",
- "rand 0.7.3",
+ "rand 0.8.5",
  "static_assertions",
 ]
 
