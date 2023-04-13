@@ -504,7 +504,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test() {
+    async fn test_over_window() {
         let store = MemoryStateStore::new();
         let calls = vec![
             WindowFuncCall {
