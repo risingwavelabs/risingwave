@@ -94,7 +94,7 @@ impl Rule for IndexSelectionRule {
         if indexes.is_empty() {
             return None;
         }
-        if logical_scan.for_system_time_as_of_now() {
+        if logical_scan.for_system_time_as_of_proctime() {
             return None;
         }
         let primary_table_row_size = TableScanIoEstimator::estimate_row_size(logical_scan);

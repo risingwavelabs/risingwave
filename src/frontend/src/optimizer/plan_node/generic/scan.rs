@@ -42,7 +42,8 @@ pub struct Scan {
     pub predicate: Condition,
     /// Help RowSeqScan executor use a better chunk size
     pub chunk_size: Option<u32>,
-    pub for_system_time_as_of_now: bool,
+    /// syntax `FOR SYSTEM_TIME AS OF PROCTIME()` is used for temporal join.
+    pub for_system_time_as_of_proctime: bool,
     #[derivative(PartialEq = "ignore")]
     #[derivative(Hash = "ignore")]
     pub ctx: OptimizerContextRef,

@@ -963,7 +963,7 @@ impl LogicalJoin {
     fn should_be_temporal_join(&self) -> bool {
         let right = self.right();
         if let Some(logical_scan) = right.as_logical_scan() {
-            logical_scan.for_system_time_as_of_now()
+            logical_scan.for_system_time_as_of_proctime()
         } else {
             false
         }
@@ -996,10 +996,10 @@ impl LogicalJoin {
             )));
         };
 
-        if !logical_scan.for_system_time_as_of_now() {
+        if !logical_scan.for_system_time_as_of_proctime() {
             return Err(RwError::from(ErrorCode::NotSupported(
                 "Temporal join requires a table defined as temporal table".into(),
-                "Please use FOR SYSTEM_TIME AS OF NOW() syntax".into(),
+                "Please use FOR SYSTEM_TIME AS OF PROCTIME() syntax".into(),
             )));
         }
 
