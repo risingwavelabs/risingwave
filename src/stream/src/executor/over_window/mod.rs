@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{Datum, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::sort_util::OrderType;
@@ -66,10 +66,10 @@ type MemcmpEncoded = Box<[u8]>;
 /// - Recover: iterate through `state_table`, push rows to `WindowState`, ignore ready windows.
 
 /// Unique and ordered identifier for a row in internal states.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct StateKey {
     order_key: ScalarImpl,
-    pk: OwnedRow,
+    encoded_pk: MemcmpEncoded,
 }
 
 struct StatePos<'a> {
@@ -83,27 +83,6 @@ struct StatePos<'a> {
 struct StateOutput {
     return_value: Datum,
     last_evicted_key: Option<StateKey>,
-}
-
-impl PartialOrd for StateKey {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other)) // TODO(): real partial cmp
-    }
-}
-
-impl Ord for StateKey {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // TODO()
-        let res = self.order_key.cmp(&other.order_key);
-        if res.is_eq() {
-            let order_types = vec![OrderType::ascending(); self.pk.len()];
-            memcmp_encoding::encode_row(&self.pk, &order_types)
-                .unwrap()
-                .cmp(&memcmp_encoding::encode_row(&other.pk, &order_types).unwrap())
-        } else {
-            res
-        }
-    }
 }
 
 trait WindowFuncState {
@@ -125,6 +104,19 @@ impl Partition {
         let states = calls.iter().map(|call| call.new_state()).collect();
         Self { states }
     }
+
+    fn curr_windows_are_aligned(&self) -> bool {
+        if self.states.is_empty() {
+            true
+        } else {
+            1 == self
+                .states
+                .iter()
+                .map(|state| state.curr_window().key)
+                .dedup()
+                .count()
+        }
+    }
 }
 
 /// One for each combination of partition key and order key.
@@ -136,6 +128,7 @@ struct ExecutorInner<S: StateStore> {
     state_table: StateTable<S>,
     mapping: StateTableColumnMapping,
     pk_indices: Vec<usize>,
+    pk_data_types: Vec<DataType>,
     partition_key_indices: Vec<usize>,
     order_key_index: usize,
 }
@@ -193,16 +186,21 @@ async fn apply_chunk<S: StateStore>(
                             )
                             .expect("order key column must be non-NULL")
                             .into_scalar_impl();
-                        let pk = (&row)
-                            .project(
+                        let encoded_pk = memcmp_encoding::encode_row(
+                            (&row).project(
                                 &this
                                     .pk_indices
                                     .iter()
                                     .map(|idx| this.mapping.upstream_to_state_table(*idx).unwrap())
                                     .collect_vec(),
-                            )
-                            .into_owned_row();
-                        let key = StateKey { order_key, pk };
+                            ),
+                            &vec![OrderType::ascending(); this.pk_indices.len()],
+                        )?
+                        .into_boxed_slice();
+                        let key = StateKey {
+                            order_key,
+                            encoded_pk,
+                        };
                         for (call, state) in this
                             .window_func_calls
                             .iter()
@@ -231,15 +229,7 @@ async fn apply_chunk<S: StateStore>(
                     {
                         // ensure state correctness
                         // TODO(): need some proof
-                        assert_eq!(
-                            1,
-                            partition
-                                .states
-                                .iter()
-                                .map(|state| state.curr_window().key)
-                                .dedup()
-                                .count()
-                        );
+                        assert!(partition.curr_windows_are_aligned());
                     }
 
                     {
@@ -272,8 +262,15 @@ async fn apply_chunk<S: StateStore>(
             .datum_at(this.order_key_index)
             .expect("order key column must be non-NULL")
             .into_scalar_impl();
-        let pk = input_row.project(&this.pk_indices).into_owned_row();
-        let key = StateKey { order_key, pk };
+        let encoded_pk = memcmp_encoding::encode_row(
+            input_row.project(&this.pk_indices),
+            &vec![OrderType::ascending(); this.pk_indices.len()],
+        )?
+        .into_boxed_slice();
+        let key = StateKey {
+            order_key,
+            encoded_pk,
+        };
         for (call, state) in this
             .window_func_calls
             .iter()
@@ -295,16 +292,22 @@ async fn apply_chunk<S: StateStore>(
             .all(|state| state.curr_window().is_ready)
         {
             // All window states are ready to output, so we can yield an output row.
+            debug_assert!(partition.curr_windows_are_aligned());
             let key = partition.states[0]
                 .curr_window()
                 .key
                 .cloned()
                 .expect("ready window must have state key");
+            let pk = memcmp_encoding::decode_row(
+                &key.encoded_pk,
+                &this.pk_data_types,
+                &vec![OrderType::ascending(); this.pk_indices.len()],
+            )?;
             let outputs = partition.states.iter_mut().map(|state| state.output());
             // TODO(): evict unneeded rows from state table
             let output_row = partition_key
                 .chain(row::once(Some(key.order_key)))
-                .chain(key.pk)
+                .chain(pk)
                 .chain(OwnedRow::new(
                     outputs.map(|output| output.return_value).collect(),
                 ))
@@ -346,6 +349,7 @@ mod tests {
             Field::unnamed(DataType::Int32),   // x
         ]);
         let pk_indices = vec![2];
+        let pk_data_types = vec![DataType::Int64];
         let partition_key_indices = vec![1];
         let order_key_index = 0;
 
@@ -396,6 +400,7 @@ mod tests {
                 state_table,
                 mapping: mapping.clone(),
                 pk_indices: pk_indices.clone(),
+                pk_data_types: pk_data_types.clone(),
                 partition_key_indices: partition_key_indices.clone(),
                 order_key_index,
             };
@@ -446,6 +451,7 @@ mod tests {
                 state_table,
                 mapping: mapping.clone(),
                 pk_indices: pk_indices.clone(),
+                pk_data_types: pk_data_types.clone(),
                 partition_key_indices: partition_key_indices.clone(),
                 order_key_index,
             };
