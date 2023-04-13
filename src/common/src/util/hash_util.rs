@@ -33,9 +33,9 @@ impl BuildHasher for Crc32FastBuilder {
 }
 
 #[derive(Clone, Copy)]
-pub struct Xxhash64Builder;
+pub struct XxHash64Builder;
 
-impl BuildHasher for Xxhash64Builder {
+impl BuildHasher for XxHash64Builder {
     type Hasher = twox_hash::XxHash64;
 
     fn build_hasher(&self) -> Self::Hasher {
