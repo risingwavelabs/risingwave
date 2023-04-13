@@ -263,12 +263,15 @@ macro_rules! impl_system_params_for_test {
     ($({ $field:ident, $type:ty, $default:expr },)*) => {
         #[allow(clippy::needless_update)]
         pub fn system_params_for_test() -> SystemParams {
-            SystemParams {
+            let mut ret = SystemParams {
                 $(
                     $field: $default,
                 )*
                 ..Default::default() // `None` for deprecated params
-            }
+            };
+            ret.data_directory = Some("hummock_001".to_string());
+            ret.state_store = Some("hummock+memory".to_string());
+            ret
         }
     };
 }
