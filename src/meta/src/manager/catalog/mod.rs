@@ -240,6 +240,7 @@ where
         let mut views = BTreeMapTransaction::new(&mut database_core.views);
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
         let mut functions = BTreeMapTransaction::new(&mut database_core.functions);
+        let mut connections = BTreeMapTransaction::new(&mut database_core.connections);
 
         /// `drop_by_database_id` provides a wrapper for dropping relations by database id, it will
         /// return the relation ids that dropped.
@@ -269,6 +270,7 @@ where
             let indexes_to_drop = drop_by_database_id!(indexes, database_id);
             let views_to_drop = drop_by_database_id!(views, database_id);
             let functions_to_drop = drop_by_database_id!(functions, database_id);
+            let connections_to_drop = drop_by_database_id!(connections, database_id);
 
             let objects = std::iter::once(Object::DatabaseId(database_id))
                 .chain(
@@ -317,6 +319,10 @@ where
             }
             for view in &views_to_drop {
                 database_core.relation_ref_count.remove(&view.id);
+            }
+            // TODO(weili): wait for yezizp to refactor ref cnt
+            for connection in &connections_to_drop {
+                database_core.relation_ref_count.remove(&connection.id);
             }
             // FIXME: resolve function refer count.
             for user in users_need_update {
