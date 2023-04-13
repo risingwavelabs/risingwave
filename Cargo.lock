@@ -6422,6 +6422,7 @@ dependencies = [
  "spin 0.9.8",
  "tempfile",
  "thiserror",
+ "tokio-retry",
  "tracing",
 ]
 
