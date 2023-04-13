@@ -265,6 +265,7 @@ impl WorkerNodeManagerInner {
 mod tests {
 
     use risingwave_common::util::addr::HostAddr;
+    use risingwave_pb::common::worker_node::Property;
     use risingwave_pb::common::{worker_node, WorkerType};
 
     #[test]
@@ -282,7 +283,10 @@ mod tests {
                 host: Some(HostAddr::try_from("127.0.0.1:1234").unwrap().to_protobuf()),
                 state: worker_node::State::Running as i32,
                 parallel_units: vec![],
-                property: Default::default(),
+                property: Some(Property {
+                    is_streaming: true,
+                    is_serving: true,
+                }),
             },
             WorkerNode {
                 id: 2,
@@ -290,7 +294,10 @@ mod tests {
                 host: Some(HostAddr::try_from("127.0.0.1:1235").unwrap().to_protobuf()),
                 state: worker_node::State::Running as i32,
                 parallel_units: vec![],
-                property: Default::default(),
+                property: Some(Property {
+                    is_streaming: true,
+                    is_serving: true,
+                }),
             },
         ];
         worker_nodes

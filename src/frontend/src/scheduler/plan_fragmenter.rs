@@ -775,15 +775,20 @@ impl BatchPlanFragmenter {
                 } else if source_info.is_some() {
                     0
                 } else if let Some(num) = self.batch_parallelism {
+                    // can be 0 if no available serving worker
                     min(
                         num.get() as usize,
                         self.worker_node_manager.serving_schedule_unit_count(),
                     )
                 } else {
+                    // can be 0 if no available serving worker
                     self.worker_node_manager.serving_worker_node_count()
                 }
             }
         };
+        if source_info.is_none() && parallelism == 0 {
+            return Err(SchedulerError::EmptyWorkerNodes);
+        }
         let parallelism = if parallelism == 0 {
             None
         } else {
