@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::convert::Infallible;
+
 pub use anyhow::anyhow;
 use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
@@ -28,6 +30,9 @@ pub enum ArrayError {
 
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
+
+    #[error("Arrow error: {0}")]
+    FromArrow(String),
 }
 
 impl From<ArrayError> for RwError {
@@ -39,6 +44,12 @@ impl From<ArrayError> for RwError {
 impl From<PbFieldNotFound> for ArrayError {
     fn from(err: PbFieldNotFound) -> Self {
         anyhow!("Failed to decode prost: field not found `{}`", err.0).into()
+    }
+}
+
+impl From<Infallible> for ArrayError {
+    fn from(err: Infallible) -> Self {
+        unreachable!("Infallible error: {:?}", err)
     }
 }
 

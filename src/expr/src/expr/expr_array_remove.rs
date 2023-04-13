@@ -24,20 +24,11 @@ use risingwave_pb::expr::ExprNode;
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression, Expression};
 use crate::{bail, ensure, ExprError, Result};
 
+#[derive(Debug)]
 pub struct ArrayRemoveExpression {
     return_type: DataType,
     left: BoxedExpression,
     right: BoxedExpression,
-}
-
-impl std::fmt::Debug for ArrayRemoveExpression {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ArrayRemoveExpression")
-            .field("return_type", &self.return_type)
-            .field("left", &self.left)
-            .field("right", &self.right)
-            .finish()
-    }
 }
 
 impl ArrayRemoveExpression {
@@ -63,7 +54,7 @@ impl ArrayRemoveExpression {
     /// query T
     /// select array_remove(array[array[1],array[2],array[3],array[2],null::int[]], array[2]);
     /// ----
-    ///  {{1},{3},NULL}
+    /// {{1},{3},NULL}
     ///
     /// query T
     /// select array_remove(array[array[1],array[2],array[3],array[2],null::int[]], null::int[]);
@@ -85,6 +76,11 @@ impl ArrayRemoveExpression {
     /// ----
     /// {{1},{2},{3},{2},NULL}
     ///
+    /// query T
+    /// select array_remove(array[1,NULL,NULL,3], NULL::int);
+    /// ----
+    /// {1,3}
+    ///
     /// statement error
     /// select array_remove(array[array[1],array[2],array[3],array[2],null::int[]], 1);
     ///
@@ -94,7 +90,7 @@ impl ArrayRemoveExpression {
     /// statement error
     /// select array_remove(ARRAY[array[1],array[2],array[3],array[2],null::int[]], array[true]);
     /// ```
-    fn array_remove(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
+    fn evaluate(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match left {
             Some(ScalarRefImpl::List(left)) => Some(
                 ListValue::new(
@@ -109,10 +105,6 @@ impl ArrayRemoveExpression {
             _ => None,
         }
     }
-
-    fn evaluate(&self, left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
-        Self::array_remove(left, right)
-    }
 }
 
 #[async_trait::async_trait]
@@ -124,9 +116,7 @@ impl Expression for ArrayRemoveExpression {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let left_array = self.left.eval_checked(input).await?;
         let right_array = self.right.eval_checked(input).await?;
-        let mut builder = self
-            .return_type
-            .create_array_builder(left_array.len() + right_array.len());
+        let mut builder = self.return_type.create_array_builder(input.capacity());
         for (vis, (left, right)) in input
             .vis()
             .iter()
@@ -135,7 +125,7 @@ impl Expression for ArrayRemoveExpression {
             if !vis {
                 builder.append_null();
             } else {
-                builder.append_datum(&self.evaluate(left, right));
+                builder.append_datum(Self::evaluate(left, right));
             }
         }
         Ok(Arc::new(builder.finish()))
@@ -144,7 +134,10 @@ impl Expression for ArrayRemoveExpression {
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let left_data = self.left.eval_row(input).await?;
         let right_data = self.right.eval_row(input).await?;
-        Ok(self.evaluate(left_data.to_datum_ref(), right_data.to_datum_ref()))
+        Ok(Self::evaluate(
+            left_data.to_datum_ref(),
+            right_data.to_datum_ref(),
+        ))
     }
 }
 
