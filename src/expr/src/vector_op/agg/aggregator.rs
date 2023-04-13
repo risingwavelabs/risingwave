@@ -111,7 +111,7 @@ impl AggStateFactory {
                 // here. It is important to note that this is a temporary and rough imitation of the
                 // `GeneralAgg` solution and will need to be considered and fixed
                 // when refactoring the code related to aggregation in the future.
-                Box::new(Int256Sum::new(arg.get_index() as usize))
+                Box::new(Int256Sum::new(arg.get_index() as usize, distinct))
             }
             (AggKind::ArrayAgg, [arg]) => {
                 let agg_col_idx = arg.get_index() as usize;
