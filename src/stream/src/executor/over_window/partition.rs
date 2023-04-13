@@ -15,7 +15,7 @@
 use itertools::Itertools;
 
 use super::call::WindowFuncCall;
-use super::state::{create_window_state, WindowState};
+use super::state::{create_window_state, StateKey, WindowState};
 
 pub(super) struct Partition {
     pub states: Vec<Box<dyn WindowState + Send>>,
@@ -27,7 +27,7 @@ impl Partition {
         Self { states }
     }
 
-    pub fn curr_windows_are_aligned(&self) -> bool {
+    pub fn is_aligned(&self) -> bool {
         if self.states.is_empty() {
             true
         } else {
@@ -38,5 +38,18 @@ impl Partition {
                 .dedup()
                 .count()
         }
+    }
+
+    pub fn is_ready(&self) -> bool {
+        debug_assert!(self.is_aligned());
+        self.states.iter().all(|state| state.curr_window().is_ready)
+    }
+
+    pub fn curr_window_key(&self) -> Option<&StateKey> {
+        debug_assert!(self.is_aligned());
+        self.states
+            .first()
+            .map(|state| state.curr_window().key)
+            .flatten()
     }
 }

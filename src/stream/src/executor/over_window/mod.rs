@@ -20,12 +20,13 @@ use std::marker::PhantomData;
 use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
+use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::StreamChunk;
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::DataType;
-use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::types::{DataType, ToDatumRef};
+use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::{must_match, row};
@@ -209,11 +210,8 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     // TODO()
                 }
                 Message::Chunk(chunk) => {
-                    let output_rows = Self::apply_chunk(&mut this, &mut vars, chunk).await?;
-                    for row in output_rows {
-                        println!("{:?}", row.as_inner());
-                    }
-                    println!("-------------------------");
+                    let output_chunk = Self::apply_chunk(&mut this, &mut vars, chunk).await?;
+                    yield Message::Chunk(output_chunk);
                 }
                 Message::Barrier(barrier) => {
                     this.state_table.commit(barrier.epoch).await?;
@@ -236,8 +234,8 @@ impl<S: StateStore> OverWindowExecutor<S> {
         this: &mut ExecutorInner<S>,
         vars: &mut ExecutionVars<S>,
         chunk: StreamChunk,
-    ) -> StreamExecutorResult<Vec<OwnedRow>> {
-        let mut output_rows = vec![];
+    ) -> StreamExecutorResult<StreamChunk> {
+        let mut builders = this.info.schema.create_array_builders(chunk.capacity()); // just an estimate
 
         // We assume that the input is sorted by order key.
         for record in chunk.records() {
@@ -324,7 +322,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                         {
                             // ensure state correctness
                             // TODO(): need some proof
-                            assert!(partition.curr_windows_are_aligned());
+                            assert!(partition.is_aligned());
                         }
 
                         {
@@ -377,16 +375,10 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 );
             }
 
-            while partition
-                .states
-                .iter()
-                .all(|state| state.curr_window().is_ready)
-            {
+            while partition.is_ready() {
                 // All window states are ready to output, so we can yield an output row.
-                debug_assert!(partition.curr_windows_are_aligned());
-                let key = partition.states[0]
-                    .curr_window()
-                    .key
+                let key = partition
+                    .curr_window_key()
                     .cloned()
                     .expect("ready window must have state key");
                 let pk = memcmp_encoding::decode_row(
@@ -394,20 +386,37 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     &this.pk_data_types,
                     &vec![OrderType::ascending(); this.input_pk_indices.len()],
                 )?;
-                let outputs = partition.states.iter_mut().map(|state| state.slide());
-                // TODO(): evict unneeded rows from state table
-                let output_row = partition_key
+                let outputs = partition
+                    .states
+                    .iter_mut()
+                    .map(|state| state.slide())
+                    .collect_vec();
+                let key_part = partition_key
                     .chain(row::once(Some(key.order_key)))
-                    .chain(pk)
-                    .chain(OwnedRow::new(
-                        outputs.map(|output| output.return_value).collect(),
-                    ))
-                    .into_owned_row();
-                output_rows.push(output_row);
+                    .chain(pk);
+                for (builder, datum) in builders.iter_mut().zip_eq_debug(
+                    key_part.iter().chain(
+                        outputs
+                            .iter()
+                            .map(|output| output.return_value.to_datum_ref()),
+                    ),
+                ) {
+                    builder.append_datum(datum);
+                }
+                // TODO(): evict unneeded rows from state table
             }
         }
 
-        Ok(output_rows)
+        let columns: Vec<Column> = builders
+            .into_iter()
+            .map(|b| b.finish().into())
+            .collect_vec();
+        let chunk_size = columns[0].len();
+        Ok(StreamChunk::new(
+            vec![Op::Insert; chunk_size],
+            columns,
+            None,
+        ))
     }
 }
 
@@ -518,7 +527,8 @@ mod tests {
                 + 7 p2 201 22
                 + 8 p3 300 33",
             ));
-            // TODO(): expect chunk
+            let chunk = over_window.expect_chunk().await;
+            println!("{}", chunk.to_pretty_string());
 
             tx.push_barrier(2, false);
             over_window.expect_barrier().await;
@@ -537,7 +547,8 @@ mod tests {
                 + 12 p2 202 28
                 + 13 p3 301 39",
             ));
-            // TODO(): expect chunk
+            let chunk = over_window.expect_chunk().await;
+            println!("{}", chunk.to_pretty_string());
 
             tx.push_barrier(4, false);
             over_window.expect_barrier().await;
