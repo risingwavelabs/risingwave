@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::i64::MAX;
 use std::sync::Arc;
 
 use num_traits::ToPrimitive;
@@ -102,17 +103,25 @@ impl ArrayPositionsExpression {
     /// ```
     fn evaluate(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match left {
-            Some(ScalarRefImpl::List(left)) => Some(
-                ListValue::new(
-                    left.values_ref()
-                        .into_iter()
-                        .enumerate()
-                        .filter(|(_, x)| x == &right)
-                        .map(|(idx, _)| Some(ScalarImpl::Int64((idx + 1).to_i64().unwrap())))
-                        .collect(),
-                )
-                .into(),
-            ),
+            Some(ScalarRefImpl::List(left)) => {
+                if let Some(_) = left.values_ref().len().to_i64() {
+                    Some(
+                        ListValue::new(
+                            left.values_ref()
+                                .into_iter()
+                                .enumerate()
+                                .filter(|(_, x)| x == &right)
+                                .map(|(idx, _)| {
+                                    Some(ScalarImpl::Int64((idx + 1).to_i64().unwrap()))
+                                })
+                                .collect(),
+                        )
+                        .into(),
+                    )
+                } else {
+                    None
+                }
+            }
             _ => None,
         }
     }
