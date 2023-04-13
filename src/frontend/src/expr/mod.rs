@@ -173,12 +173,12 @@ impl ExprImpl {
     }
 
     /// Check if the expression has no side effects and output is deterministic
-    pub fn is_pure(expr: &ExprImpl) -> bool {
-        is_pure(expr)
+    pub fn is_pure(&self) -> bool {
+        is_pure(self)
     }
 
-    pub fn is_impure(expr: &ExprImpl) -> bool {
-        is_impure(expr)
+    pub fn is_impure(&self) -> bool {
+        is_impure(self)
     }
 
     /// Count `Now`s in the expression.

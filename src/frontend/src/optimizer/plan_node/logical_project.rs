@@ -22,7 +22,7 @@ use super::{
     gen_filter_and_pushdown, generic, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamProject, ToBatch, ToStream,
 };
-use crate::expr::{is_impure, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
+use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     CollectInputRef, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
@@ -214,7 +214,7 @@ impl PredicatePushdown for LogicalProject {
         let impure_mask = {
             let mut impure_mask = FixedBitSet::with_capacity(self.exprs().len());
             for (i, e) in self.exprs().iter().enumerate() {
-                impure_mask.set(i, is_impure(e))
+                impure_mask.set(i, e.is_impure())
             }
             impure_mask
         };
