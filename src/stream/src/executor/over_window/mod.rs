@@ -49,6 +49,7 @@ mod partition;
 mod state;
 
 type MemcmpEncoded = Box<[u8]>;
+type PartitionCache = ExecutorCache<MemcmpEncoded, Partition>; // TODO(rc): use `K: HashKey` as key like in hash agg?
 
 /// [`OverWindowExecutor`] consumes ordered input and outputs window function results.
 /// One [`OverWindowExecutor`] can handle one combination of partition key and order key.
@@ -103,8 +104,7 @@ struct ExecutorInner<S: StateStore> {
 }
 
 struct ExecutionVars<S: StateStore> {
-    // TODO(rc): use `K: HashKey` as key like in hash agg?
-    partitions: ExecutorCache<MemcmpEncoded, Partition>,
+    partitions: PartitionCache,
     _phantom: PhantomData<S>,
 }
 
@@ -186,6 +186,87 @@ impl<S: StateStore> OverWindowExecutor<S> {
         }
     }
 
+    async fn ensure_key_in_cache(
+        this: &mut ExecutorInner<S>,
+        cache: &mut PartitionCache,
+        partition_key: impl Row,
+        encoded_partition_key: &MemcmpEncoded,
+    ) -> StreamExecutorResult<()> {
+        if cache.contains(encoded_partition_key) {
+            return Ok(());
+        }
+
+        let mut partition = Partition::new(&this.calls);
+
+        // Recover states from state table.
+        let table_iter = this
+            .state_table
+            .iter_with_pk_prefix(partition_key, PrefetchOptions::new_for_exhaust_iter())
+            .await?;
+
+        #[for_await]
+        for row in table_iter {
+            let row: OwnedRow = row?;
+            let order_key = row
+                .datum_at(
+                    this.col_mapping
+                        .upstream_to_state_table(this.order_key_index)
+                        .unwrap(),
+                )
+                .expect("order key column must be non-NULL")
+                .into_scalar_impl();
+            let encoded_pk = memcmp_encoding::encode_row(
+                (&row).project(
+                    &this
+                        .input_pk_indices
+                        .iter()
+                        .map(|idx| this.col_mapping.upstream_to_state_table(*idx).unwrap())
+                        .collect_vec(),
+                ),
+                &vec![OrderType::ascending(); this.input_pk_indices.len()],
+            )?
+            .into_boxed_slice();
+            let key = StateKey {
+                order_key,
+                encoded_pk,
+            };
+            for (call, state) in this.calls.iter().zip_eq_fast(&mut partition.states) {
+                state.append(
+                    key.clone(),
+                    (&row)
+                        .project(
+                            &call
+                                .args
+                                .val_indices()
+                                .iter()
+                                .map(|idx| this.col_mapping.upstream_to_state_table(*idx).unwrap())
+                                .collect_vec(),
+                        )
+                        .into_owned_row()
+                        .into_inner()
+                        .into(),
+                );
+            }
+        }
+
+        // Ensure states correctness.
+        assert!(partition.is_aligned());
+
+        // Ignore ready windows (all ready windows were outputted before).
+        while partition
+            .states
+            .iter()
+            .all(|state| state.curr_window().is_ready)
+        {
+            partition.states.iter_mut().for_each(|state| {
+                state.slide();
+            });
+        }
+
+        cache.put(encoded_partition_key.clone(), partition);
+        Ok(())
+    }
+
     async fn apply_chunk(
         this: &mut ExecutorInner<S>,
         vars: &mut ExecutionVars<S>,
@@ -197,109 +278,23 @@ impl<S: StateStore> OverWindowExecutor<S> {
         for record in chunk.records() {
             let input_row = must_match!(record, Record::Insert { new_row } => new_row);
 
-            let partition_key = input_row.project(&this.partition_key_indices);
+            let partition_key = input_row
+                .project(&this.partition_key_indices)
+                .into_owned_row();
             let encoded_partition_key = memcmp_encoding::encode_row(
-                partition_key,
+                &partition_key,
                 &vec![OrderType::ascending(); this.partition_key_indices.len()],
             )?
             .into_boxed_slice();
 
-            {
-                let input_row: bool; // in case of accidental use
-
-                // ensure_key_in_cache
-                if !vars.partitions.contains(&encoded_partition_key) {
-                    let mut partition = Partition::new(&this.calls);
-
-                    {
-                        // recover from state table
-
-                        let iter = this
-                            .state_table
-                            .iter_with_pk_prefix(
-                                partition_key,
-                                PrefetchOptions::new_for_exhaust_iter(),
-                            )
-                            .await?;
-
-                        #[for_await]
-                        for res in iter {
-                            let row: OwnedRow = res?;
-                            let order_key = row
-                                .datum_at(
-                                    this.col_mapping
-                                        .upstream_to_state_table(this.order_key_index)
-                                        .unwrap(),
-                                )
-                                .expect("order key column must be non-NULL")
-                                .into_scalar_impl();
-                            let encoded_pk = memcmp_encoding::encode_row(
-                                (&row).project(
-                                    &this
-                                        .input_pk_indices
-                                        .iter()
-                                        .map(|idx| {
-                                            this.col_mapping.upstream_to_state_table(*idx).unwrap()
-                                        })
-                                        .collect_vec(),
-                                ),
-                                &vec![OrderType::ascending(); this.input_pk_indices.len()],
-                            )?
-                            .into_boxed_slice();
-                            let key = StateKey {
-                                order_key,
-                                encoded_pk,
-                            };
-                            for (call, state) in
-                                this.calls.iter().zip_eq_fast(&mut partition.states)
-                            {
-                                state.append(
-                                    key.clone(),
-                                    (&row)
-                                        .project(
-                                            &call
-                                                .args
-                                                .val_indices()
-                                                .iter()
-                                                .map(|idx| {
-                                                    this.col_mapping
-                                                        .upstream_to_state_table(*idx)
-                                                        .unwrap()
-                                                })
-                                                .collect_vec(),
-                                        )
-                                        .into_owned_row()
-                                        .into_inner()
-                                        .into(),
-                                );
-                            }
-                        }
-
-                        {
-                            // ensure state correctness
-                            // TODO(): need some proof
-                            assert!(partition.is_aligned());
-                        }
-
-                        {
-                            // ignore ready windows
-                            while partition
-                                .states
-                                .iter()
-                                .all(|state| state.curr_window().is_ready)
-                            {
-                                partition.states.iter_mut().for_each(|state| {
-                                    state.slide();
-                                });
-                            }
-                        }
-                    }
-
-                    vars.partitions
-                        .put(encoded_partition_key.clone(), partition);
-                }
-            }
-
+            // Get the partition.
+            Self::ensure_key_in_cache(
+                this,
+                &mut vars.partitions,
+                &partition_key,
+                &encoded_partition_key,
+            )
+            .await?;
             let partition = vars.partitions.get_mut(&encoded_partition_key).unwrap();
 
             // Materialize input to state table.
@@ -332,7 +327,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             }
 
             while partition.is_ready() {
-                // All window states are ready to output, so we can yield an output row.
+                // The partition is ready to output, so we can produce a row.
                 let key = partition
                     .curr_window_key()
                     .cloned()
@@ -342,12 +337,14 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     &this.pk_data_types,
                     &vec![OrderType::ascending(); this.input_pk_indices.len()],
                 )?;
+
                 let outputs = partition
                     .states
                     .iter_mut()
                     .map(|state| state.slide())
                     .collect_vec();
-                let key_part = partition_key
+
+                let key_part = (&partition_key)
                     .chain(row::once(Some(key.order_key)))
                     .chain(pk);
                 for (builder, datum) in builders.iter_mut().zip_eq_debug(
