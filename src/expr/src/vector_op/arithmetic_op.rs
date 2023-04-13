@@ -66,6 +66,7 @@ where
 
 #[function("divide(*number, *number) -> auto")]
 #[function("divide(int256, int256) -> int256")]
+#[function("divide(int256, float64) -> float64")]
 pub fn general_div<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -394,8 +395,9 @@ pub fn sqrt_decimal(expr: Decimal) -> Result<Decimal> {
 mod tests {
     use std::str::FromStr;
 
+    use risingwave_common::types::num256::{Int256, Int256Ref};
     use risingwave_common::types::test_utils::IntervalTestExt;
-    use risingwave_common::types::{Date, Decimal, Interval, Timestamp, F32, F64};
+    use risingwave_common::types::{Date, Decimal, Interval, Scalar, Timestamp, F32, F64};
 
     use super::*;
 
@@ -526,6 +528,29 @@ mod tests {
         assert_eq!(sqrt_decimal(dec("inf")).unwrap(), dec("inf"));
         assert_eq!(sqrt_decimal(dec("-0")).unwrap(), dec("-0"));
         assert!(sqrt_decimal(dec("-inf")).is_err());
+    }
+
+    #[test]
+    fn test_arithmetic_int256() {
+        let tuples = vec![
+            (0, 1, "0"),
+            (0, -1, "0"),
+            (1, 1, "1"),
+            (1, -1, "-1"),
+            (1, 2, "0.5"),
+            (1, -2, "-0.5"),
+            (9007199254740991i64, 2, "4503599627370495.5"),
+        ];
+
+        for (i, j, k) in tuples {
+            let lhs = Int256::from(i);
+            let rhs = F64::from(j);
+            let res = F64::from_str(k).unwrap();
+            assert_eq!(
+                general_div::<Int256Ref<'_>, F64, F64>(lhs.as_scalar_ref(), rhs).unwrap(),
+                res,
+            );
+        }
     }
 
     fn dec(s: &str) -> Decimal {
