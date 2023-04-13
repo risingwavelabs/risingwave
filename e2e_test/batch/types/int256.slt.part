@@ -169,4 +169,4 @@ drop table t;
 query TT
 select v::varchar, pg_typeof(v) from (select 1::rw_int256 / 1::float8) as t(v);
 ----
-2 double precision
+1 double precision
