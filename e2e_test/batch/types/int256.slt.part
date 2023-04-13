@@ -56,6 +56,21 @@ select -('-10000000000000000'::rw_int256);
 ----
 10000000000000000
 
+query I
+select hex_to_int256('0x11');
+----
+17
+
+query I
+select hex_to_int256('-0x11');
+----
+-17
+
+query I
+select hex_to_int256('0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff');
+----
+7237005577332262213973186563042994240829374041602535252466099000494570602495
+
 
 statement ok
 create table t (v rw_int256)
