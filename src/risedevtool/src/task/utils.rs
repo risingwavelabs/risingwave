@@ -128,8 +128,6 @@ pub fn add_hummock_backend(
             true
         }
 
-        cmd.arg("--data-directory").arg("hummock_001");
-
         (other_minio, other_s3, _) => {
             return Err(anyhow!(
                 "{} minio and {} s3 instance found in config, but only 1 is needed",
@@ -138,6 +136,8 @@ pub fn add_hummock_backend(
             ))
         }
     };
+
+    cmd.arg("--data-directory").arg("hummock_001");
 
     Ok(is_shared_backend)
 }
