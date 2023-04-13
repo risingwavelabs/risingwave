@@ -61,7 +61,6 @@ impl<'de, T> Deserialize<'de> for Unrecognized<T> {
     {
         let inner = BTreeMap::deserialize(deserializer)?;
         if !inner.is_empty() {
-            // TODO: may reject unrecognized fields in the future.
             tracing::warn!(
                 "unrecognized fields in `{}`: {:?}",
                 std::any::type_name::<T>(),
