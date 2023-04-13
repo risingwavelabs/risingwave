@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{ExprImpl, ExprVisitor};
+use risingwave_pb::expr::expr_node;
 
+use super::{ExprImpl, ExprVisitor};
 struct ImpureAnalyzer {}
 
 impl ExprVisitor<bool> for ImpureAnalyzer {
@@ -29,7 +30,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
     fn visit_function_call(&mut self, func_call: &super::FunctionCall) -> bool {
         matches!(
             func_call.get_expr_type(),
-            risingwave_pb::expr::expr_node::Type::Now | risingwave_pb::expr::expr_node::Type::Udf
+            expr_node::Type::Now | expr_node::Type::Udf
         )
     }
 }
