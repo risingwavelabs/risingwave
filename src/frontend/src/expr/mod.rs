@@ -172,6 +172,15 @@ impl ExprImpl {
         visitor.into()
     }
 
+    /// Check if the expression has no side effects and output is deterministic
+    pub fn is_pure(expr: &ExprImpl) -> bool {
+        is_pure(expr)
+    }
+
+    pub fn is_impure(expr: &ExprImpl) -> bool {
+        is_impure(expr)
+    }
+
     /// Count `Now`s in the expression.
     pub fn count_nows(&self) -> usize {
         let mut visitor = CountNow::default();
