@@ -27,29 +27,32 @@ type Result<T> = core::result::Result<T, SystemParamsError>;
 
 /// Only includes undeprecated params.
 /// Macro input is { field identifier, type, default value }
+///
+/// Note:
+/// - Having `None` as default value means the parameter must be initialized.
 #[macro_export]
 macro_rules! for_all_undeprecated_params {
     ($macro:ident
         // Hack: match trailing fields to implement `for_all_params`
         $(, { $field:ident, $type:ty, $default:expr })*) => {
         $macro! {
-            { barrier_interval_ms, u32, 1000_u32 },
-            { checkpoint_frequency, u64, 10_u64 },
-            { sstable_size_mb, u32, 256_u32 },
-            { block_size_kb, u32, 64_u32 },
-            { bloom_false_positive, f64, 0.001_f64 },
-            { state_store, String, "".to_string() },
-            { data_directory, String, "hummock_001".to_string() },
-            { backup_storage_url, String, "memory".to_string() },
-            { backup_storage_directory, String, "backup".to_string() },
-            { telemetry_enabled, bool, true},
+            { barrier_interval_ms, u32, Some(1000_u32) },
+            { checkpoint_frequency, u64, Some(10_u64) },
+            { sstable_size_mb, u32, Some(256_u32) },
+            { block_size_kb, u32, Some(64_u32) },
+            { bloom_false_positive, f64, Some(0.001_f64) },
+            { state_store, String, None },
+            { data_directory, String, None },
+            { backup_storage_url, String, Some("memory".to_string()) },
+            { backup_storage_directory, String, Some("backup".to_string()) },
+            { telemetry_enabled, bool, Some(true) },
             $({ $field, $type, $default },)*
         }
     };
 }
 
 /// Includes all params.
-/// Macro input is { field identifier, type, default value }
+/// Macro input is same as `for_all_undeprecated_params`.
 macro_rules! for_all_params {
     ($macro:ident) => {
         for_all_undeprecated_params!(
@@ -85,7 +88,7 @@ macro_rules! def_default {
     ($({ $field:ident, $type:ty, $default:expr },)*) => {
         pub mod default {
             $(
-                pub fn $field() -> $type {
+                pub fn $field() -> Option<$type> {
                     $default
                 }
             )*
@@ -238,7 +241,7 @@ macro_rules! impl_set_system_param {
                         let v = if let Some(v) = value {
                             v.parse().map_err(|_| format!("cannot parse parameter value"))?
                         } else {
-                            $default
+                            $default.ok_or(format!("{} does not have a default value", key))?
                         };
                         OverrideValidateOnSet::$field(&v)?;
                         params.$field = Some(v);
@@ -256,15 +259,15 @@ macro_rules! impl_set_system_param {
     };
 }
 
-macro_rules! impl_default_system_params {
+macro_rules! impl_system_params_for_test {
     ($({ $field:ident, $type:ty, $default:expr },)*) => {
         #[allow(clippy::needless_update)]
-        pub fn default_system_params() -> SystemParams {
+        pub fn system_params_for_test() -> SystemParams {
             SystemParams {
                 $(
-                    $field: Some($default),
+                    $field: $default,
                 )*
-                ..Default::default()
+                ..Default::default() // `None` for deprecated params
             }
         }
     };
@@ -275,7 +278,7 @@ for_all_params!(impl_system_params_from_kv);
 for_all_undeprecated_params!(impl_system_params_to_kv);
 for_all_undeprecated_params!(impl_set_system_param);
 for_all_undeprecated_params!(impl_default_validation_on_set);
-for_all_undeprecated_params!(impl_default_system_params);
+for_all_undeprecated_params!(impl_system_params_for_test);
 
 struct OverrideValidateOnSet;
 impl ValidateOnSet for OverrideValidateOnSet {

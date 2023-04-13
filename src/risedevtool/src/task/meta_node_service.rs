@@ -21,7 +21,7 @@ use itertools::Itertools;
 
 use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_storage_backend, HummockInMemoryStrategy, MetaNodeConfig};
+use crate::{add_hummock_backend, HummockInMemoryStrategy, MetaNodeConfig};
 
 pub struct MetaNodeService {
     config: MetaNodeConfig,
@@ -119,7 +119,7 @@ impl MetaNodeService {
                     "When `enable_in_memory_kv_state_backend` is enabled, no minio and aws-s3 should be provided.",
                 ));
             }
-            (_, provide_minio, provide_aws_s3, provide_opendal) => add_storage_backend(
+            (_, provide_minio, provide_aws_s3, provide_opendal) => add_hummock_backend(
                 &config.id,
                 provide_opendal,
                 provide_minio,
