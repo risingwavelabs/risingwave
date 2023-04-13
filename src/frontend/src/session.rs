@@ -531,7 +531,7 @@ impl SessionImpl {
             (schema_name, connection_name)
         };
         catalog_reader
-            .check_relation_name_duplicated(db_name, &schema_name, &connection_name)
+            .check_connection_name_duplicated(db_name, &schema_name, &connection_name)
             .map_err(RwError::from)
     }
 
