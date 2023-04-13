@@ -29,7 +29,7 @@ use crate::vector_op::agg::filter::*;
 use crate::vector_op::agg::functions::*;
 use crate::vector_op::agg::general_agg::*;
 use crate::vector_op::agg::general_distinct_agg::*;
-use crate::vector_op::agg::non_primitive::NonPrimitiveSum;
+use crate::vector_op::agg::non_primitive::Int256Sum;
 use crate::vector_op::agg::string_agg::create_string_agg_state;
 use crate::Result;
 
@@ -104,7 +104,7 @@ impl AggStateFactory {
             (AggKind::Sum, [arg])
                 if matches!(DataType::from(arg.get_type()?), DataType::Int256) =>
             {
-                Box::new(NonPrimitiveSum::new(return_type.clone()))
+                Box::new(Int256Sum::new(arg.get_index() as usize))
             }
             (AggKind::ArrayAgg, [arg]) => {
                 let agg_col_idx = arg.get_index() as usize;
