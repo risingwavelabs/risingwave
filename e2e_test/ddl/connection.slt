@@ -6,6 +6,10 @@ CREATE CONNECTION conn0 WITH (type = 'mock');
 statement error
 CREATE CONNECTION conn0 WITH (type = 'mock');
 
+# Create if not exists.
+statement ok
+CREATE CONNECTION IF NOT EXISTS conn0 WITH (type = 'mock');
+
 # Test quoting.
 statement ok
 CREATE CONNECTION "conn1" WITH (type = 'mock');
