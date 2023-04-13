@@ -46,6 +46,21 @@ select '10000000000000000'::rw_int256 % '-2'::rw_int256;
 ----
 0
 
+query R
+select '1'::rw_int256 / 2::float8;
+----
+0.5
+
+query R
+select '1'::rw_int256 / 3::double precision;
+----
+0.3333333333333333
+
+query R
+select '10000000000000000'::rw_int256 / 2::double precision;
+----
+5000000000000000
+
 query I
 select abs('-10000000000000000'::rw_int256);
 ----
@@ -151,4 +166,7 @@ select distinct v::rw_int256 from generate_series(1, 1, 1) as t(v);
 statement ok
 drop table t;
 
-
+query TT
+select v::varchar, pg_typeof(v) from (select 1::rw_int256 / 1::float8) as t(v);
+----
+2 double precision
