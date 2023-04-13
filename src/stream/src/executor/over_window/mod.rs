@@ -12,34 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
-use futures::pin_mut;
 use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{DataChunk, StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::{must_match, row};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
-use smallvec::SmallVec;
 
-use self::window_func_call::WindowFuncCall;
+use self::call::WindowFuncCall;
+use self::partition::Partition;
+use self::state::StateKey;
 use super::StreamExecutorResult;
 use crate::cache::ExecutorCache;
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
 
+mod call;
+mod partition;
 mod state;
-mod window_func_call;
-
-type MemcmpEncoded = Box<[u8]>;
 
 /// Basic idea:
 ///
@@ -65,59 +64,7 @@ type MemcmpEncoded = Box<[u8]>;
 /// - `WindowState` should output agg result for `curr output row`.
 /// - Recover: iterate through `state_table`, push rows to `WindowState`, ignore ready windows.
 
-/// Unique and ordered identifier for a row in internal states.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct StateKey {
-    order_key: ScalarImpl,
-    encoded_pk: MemcmpEncoded,
-}
-
-struct StatePos<'a> {
-    /// Only 2 cases in which the `key` is `None`:
-    /// 1. The state is empty.
-    /// 2. It's a pure preceding window, and all ready outputs are consumed.
-    key: Option<&'a StateKey>,
-    is_ready: bool,
-}
-
-struct StateOutput {
-    return_value: Datum,
-    last_evicted_key: Option<StateKey>,
-}
-
-trait WindowFuncState {
-    fn append(&mut self, key: StateKey, args: SmallVec<[Datum; 2]>); // TODO(): change to `input(chunk)`
-
-    /// Get the current window frame position.
-    fn curr_window(&self) -> StatePos<'_>;
-
-    /// Return the output for the current ready window frame and push the window forward.
-    fn output(&mut self) -> StateOutput;
-}
-
-struct Partition {
-    states: Vec<Box<dyn WindowFuncState>>,
-}
-
-impl Partition {
-    fn new(calls: &[WindowFuncCall]) -> Self {
-        let states = calls.iter().map(|call| call.new_state()).collect();
-        Self { states }
-    }
-
-    fn curr_windows_are_aligned(&self) -> bool {
-        if self.states.is_empty() {
-            true
-        } else {
-            1 == self
-                .states
-                .iter()
-                .map(|state| state.curr_window().key)
-                .dedup()
-                .count()
-        }
-    }
-}
+type MemcmpEncoded = Box<[u8]>;
 
 /// One for each combination of partition key and order key.
 ///
@@ -134,7 +81,7 @@ struct ExecutorInner<S: StateStore> {
 }
 
 struct ExecutionVars<S: StateStore> {
-    // TODO(): use `K: HashKey` as key like in hash agg?
+    // TODO(rc): use `K: HashKey` as key like in hash agg?
     // TODO(): use `ExecutorCache`
     partitions: BTreeMap<MemcmpEncoded, Partition>,
     _phantom: PhantomData<S>,
@@ -149,8 +96,6 @@ async fn apply_chunk<S: StateStore>(
 
     // We assume that the input is sorted by order key.
     for record in chunk.records() {
-        // TODO(): do this in batching way later
-
         let input_row = must_match!(record, Record::Insert { new_row } => new_row);
 
         let partition_key = input_row.project(&this.partition_key_indices);
@@ -240,7 +185,7 @@ async fn apply_chunk<S: StateStore>(
                             .all(|state| state.curr_window().is_ready)
                         {
                             partition.states.iter_mut().for_each(|state| {
-                                state.output();
+                                state.slide();
                             });
                         }
                     }
@@ -303,7 +248,7 @@ async fn apply_chunk<S: StateStore>(
                 &this.pk_data_types,
                 &vec![OrderType::ascending(); this.pk_indices.len()],
             )?;
-            let outputs = partition.states.iter_mut().map(|state| state.output());
+            let outputs = partition.states.iter_mut().map(|state| state.slide());
             // TODO(): evict unneeded rows from state table
             let output_row = partition_key
                 .chain(row::once(Some(key.order_key)))
@@ -322,7 +267,6 @@ async fn apply_chunk<S: StateStore>(
 #[cfg(test)]
 mod tests {
     use std::marker::PhantomData;
-    use std::ops::Bound;
 
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
@@ -333,7 +277,7 @@ mod tests {
     use risingwave_expr::expr::WindowFuncKind;
     use risingwave_storage::memory::MemoryStateStore;
 
-    use super::window_func_call::{Frame, WindowFuncCall};
+    use super::call::{Frame, WindowFuncCall};
     use super::ExecutorInner;
     use crate::common::table::state_table::StateTable;
     use crate::common::StateTableColumnMapping;

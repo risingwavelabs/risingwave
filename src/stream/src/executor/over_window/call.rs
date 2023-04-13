@@ -17,13 +17,11 @@ use std::ops::Bound;
 use risingwave_common::types::ScalarImpl;
 use risingwave_expr::expr::WindowFuncKind;
 
-use super::WindowFuncState;
 use crate::executor::aggregation::AggArgs;
-use crate::executor::over_window::state::{LagState, LeadState};
 
 #[derive(Clone)]
 pub(super) enum Frame {
-    Offset(isize), // for `LAG` and `LEAD`
+    Offset(isize), // for `lag` and `lead`
     Rows(Bound<usize>, Bound<usize>),
     Groups(Bound<usize>, Bound<usize>),
     Range(Bound<ScalarImpl>, Bound<ScalarImpl>),
@@ -32,20 +30,6 @@ pub(super) enum Frame {
 #[derive(Clone)]
 pub(super) struct WindowFuncCall {
     pub kind: WindowFuncKind,
-    pub args: AggArgs, // TODO(): give `AggArgs` a more general name
+    pub args: AggArgs, // TODO(rc): give `AggArgs` a more general name
     pub frame: Frame,
-}
-
-impl WindowFuncCall {
-    pub(super) fn new_state(&self) -> Box<dyn WindowFuncState> {
-        use WindowFuncKind::*;
-        match self.kind {
-            Lag => Box::new(LagState::new(&self.frame)),
-            Lead => Box::new(LeadState::new(&self.frame)),
-            FirstValue => todo!(),
-            LastValue => todo!(),
-            NthValue => todo!(),
-            Aggregate(_) => todo!(),
-        }
-    }
 }

@@ -12,17 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, VecDeque};
-use std::ops::Bound;
+use std::collections::VecDeque;
 
-use risingwave_common::array::DataChunk;
 use risingwave_common::must_match;
-use risingwave_common::row::OwnedRow;
 use risingwave_common::types::Datum;
 use smallvec::SmallVec;
 
-use super::window_func_call::Frame;
-use super::{StateKey, StateOutput, StatePos, WindowFuncState};
+use super::{StateKey, StateOutput, StatePos, WindowState};
+use crate::executor::over_window::call::Frame;
 
 struct BufferEntry(StateKey, Datum);
 
@@ -33,7 +30,7 @@ pub(super) struct LagState {
 }
 
 impl LagState {
-    pub(super) fn new(frame: &Frame) -> Self {
+    pub fn new(frame: &Frame) -> Self {
         let offset = must_match!(frame, Frame::Offset(offset) if *offset < 0 => -offset as usize);
         Self {
             offset,
@@ -43,7 +40,7 @@ impl LagState {
     }
 }
 
-impl WindowFuncState for LagState {
+impl WindowState for LagState {
     fn append(&mut self, key: StateKey, args: SmallVec<[Datum; 2]>) {
         self.buffer
             .push_back(BufferEntry(key, args.into_iter().next().unwrap()));
@@ -64,7 +61,7 @@ impl WindowFuncState for LagState {
         }
     }
 
-    fn output(&mut self) -> StateOutput {
+    fn slide(&mut self) -> StateOutput {
         debug_assert!(self.curr_window().is_ready);
         if self.curr_idx < self.offset {
             // the ready window doesn't have enough preceding rows, just return NULL
@@ -82,55 +79,5 @@ impl WindowFuncState for LagState {
                 last_evicted_key: Some(key),
             }
         }
-    }
-}
-
-pub(super) struct LeadState {
-    offset: usize,
-    buffer: VecDeque<BufferEntry>,
-}
-
-impl LeadState {
-    pub(super) fn new(frame: &Frame) -> Self {
-        let offset = must_match!(frame, Frame::Offset(offset) if *offset > 0 => *offset as usize);
-        Self {
-            offset,
-            buffer: Default::default(),
-        }
-    }
-}
-
-impl WindowFuncState for LeadState {
-    fn append(&mut self, key: StateKey, args: SmallVec<[Datum; 2]>) {
-        self.buffer
-            .push_back(BufferEntry(key, args.into_iter().next().unwrap()));
-    }
-
-    fn curr_window(&self) -> StatePos<'_> {
-        let curr_key = self.buffer.front().map(|BufferEntry(key, _)| key);
-        StatePos {
-            key: curr_key,
-            is_ready: self.buffer.len() > self.offset,
-        }
-    }
-
-    fn output(&mut self) -> StateOutput {
-        debug_assert!(self.curr_window().is_ready);
-        let lead_value = self.buffer[self.offset].1.clone();
-        let BufferEntry(key, _) = self.buffer.pop_front().unwrap();
-        StateOutput {
-            return_value: lead_value,
-            last_evicted_key: Some(key),
-        }
-    }
-}
-
-pub(super) struct OverAggState {
-    //
-}
-
-impl OverAggState {
-    pub(super) fn new() -> Self {
-        Self {}
     }
 }
