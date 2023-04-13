@@ -92,7 +92,8 @@ statement ok
 create source s with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
-  properties.bootstrap.server = '127.0.0.1:29092'
+  properties.bootstrap.server = '127.0.0.1:29092',
+  connection.name = 'mock',
 ) row format json;
 
 statement error other relation\(s\) depend on it
