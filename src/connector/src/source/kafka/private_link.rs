@@ -17,14 +17,23 @@ use std::str::FromStr;
 
 use rdkafka::client::BrokerAddr;
 use rdkafka::consumer::ConsumerContext;
+use rdkafka::message::DeliveryResult;
+use rdkafka::producer::ProducerContext;
 use rdkafka::ClientContext;
 use risingwave_common::util::addr::HostAddr;
 
-pub struct PrivateLinkConsumerContext {
+struct BrokerAddrRewriter {
     rewrite_map: BTreeMap<BrokerAddr, BrokerAddr>,
 }
 
-impl PrivateLinkConsumerContext {
+impl BrokerAddrRewriter {
+    fn rewrite_broker_addr(&self, addr: BrokerAddr) -> BrokerAddr {
+        match self.rewrite_map.get(&addr) {
+            None => addr,
+            Some(new_addr) => new_addr.clone(),
+        }
+    }
+
     pub fn new(broker_rewrite_map: Option<HashMap<String, String>>) -> anyhow::Result<Self> {
         let rewrite_map: anyhow::Result<BTreeMap<BrokerAddr, BrokerAddr>> = broker_rewrite_map
             .map_or(Ok(BTreeMap::new()), |addr_map| {
@@ -46,22 +55,51 @@ impl PrivateLinkConsumerContext {
                     .collect()
             });
         let rewrite_map = rewrite_map?;
-        tracing::info!("broker addr rewrite map {:?}", rewrite_map);
         Ok(Self { rewrite_map })
+    }
+}
+
+pub struct PrivateLinkConsumerContext {
+    inner: BrokerAddrRewriter,
+}
+
+impl PrivateLinkConsumerContext {
+    pub fn new(broker_rewrite_map: Option<HashMap<String, String>>) -> anyhow::Result<Self> {
+        tracing::info!("kafka consumer rewrite map {:?}", broker_rewrite_map);
+        let inner = BrokerAddrRewriter::new(broker_rewrite_map)?;
+        Ok(Self { inner })
     }
 }
 
 impl ClientContext for PrivateLinkConsumerContext {
     fn rewrite_broker_addr(&self, addr: BrokerAddr) -> BrokerAddr {
-        match self.rewrite_map.get(&addr) {
-            None => addr,
-            Some(new_addr) => {
-                tracing::debug!("broker addr {:?} rewrote to {:?}", addr, new_addr);
-                new_addr.clone()
-            }
-        }
+        self.inner.rewrite_broker_addr(addr)
     }
 }
 
 // required by the trait bound of BaseConsumer
 impl ConsumerContext for PrivateLinkConsumerContext {}
+
+pub struct PrivateLinkProducerContext {
+    inner: BrokerAddrRewriter,
+}
+
+impl PrivateLinkProducerContext {
+    pub fn new(broker_rewrite_map: Option<HashMap<String, String>>) -> anyhow::Result<Self> {
+        tracing::info!("kafka producer rewrite map {:?}", broker_rewrite_map);
+        let inner = BrokerAddrRewriter::new(broker_rewrite_map)?;
+        Ok(Self { inner })
+    }
+}
+
+impl ClientContext for PrivateLinkProducerContext {
+    fn rewrite_broker_addr(&self, addr: BrokerAddr) -> BrokerAddr {
+        self.inner.rewrite_broker_addr(addr)
+    }
+}
+
+impl ProducerContext for PrivateLinkProducerContext {
+    type DeliveryOpaque = ();
+
+    fn delivery(&self, _: &DeliveryResult<'_>, _: Self::DeliveryOpaque) {}
+}

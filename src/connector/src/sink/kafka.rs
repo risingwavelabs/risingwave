@@ -20,7 +20,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::anyhow;
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::message::ToBytes;
-use rdkafka::producer::{BaseRecord, DefaultProducerContext, Producer, ThreadedProducer};
+use rdkafka::producer::{BaseRecord, Producer, ThreadedProducer};
 use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
@@ -35,6 +35,7 @@ use super::{
 };
 use crate::common::KafkaCommon;
 use crate::sink::{datum_to_json_object, record_to_json, Result};
+use crate::source::kafka::PrivateLinkProducerContext;
 use crate::{
     deserialize_bool_from_string, deserialize_duration_from_string, deserialize_u32_from_string,
 };
@@ -66,6 +67,9 @@ const fn _default_force_append_only() -> bool {
 pub struct KafkaConfig {
     #[serde(skip_serializing)]
     pub connector: String, // Must be "kafka" here.
+
+    #[serde(rename = "connection.name")]
+    pub connection: String,
 
     #[serde(flatten)]
     pub common: KafkaCommon,
@@ -495,12 +499,12 @@ fn schema_to_json(schema: &Schema) -> Value {
 /// the struct conducts all transactions with Kafka
 pub struct KafkaTransactionConductor {
     properties: KafkaConfig,
-    inner: ThreadedProducer<DefaultProducerContext>,
+    inner: ThreadedProducer<PrivateLinkProducerContext>,
 }
 
 impl KafkaTransactionConductor {
     async fn new(config: KafkaConfig) -> Result<Self> {
-        let inner: ThreadedProducer<DefaultProducerContext> = {
+        let inner: ThreadedProducer<PrivateLinkProducerContext> = {
             let mut c = ClientConfig::new();
             config.common.set_security_properties(&mut c);
             c.set("bootstrap.servers", &config.common.brokers)
@@ -508,7 +512,9 @@ impl KafkaTransactionConductor {
             if config.use_transaction {
                 c.set("transactional.id", &config.identifier); // required by kafka transaction
             }
-            c.create().await?
+            let client_ctx =
+                PrivateLinkProducerContext::new(config.common.broker_rewrite_map.clone())?;
+            c.create_with_context(client_ctx).await?
         };
 
         if config.use_transaction {

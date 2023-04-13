@@ -29,6 +29,7 @@ use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use tonic::{Request, Response, Status};
+use tracing::info;
 
 use crate::barrier::BarrierManagerRef;
 use crate::manager::{
@@ -228,8 +229,11 @@ where
         self.env.idle_manager().record_activity();
 
         let req = request.into_inner();
-        let sink = req.get_sink()?.clone();
+        let mut sink = req.get_sink()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
+
+        // resolve private links before starting the DDL procedure
+        self.resolve_private_link_info(&mut sink.properties).await?;
 
         let mut stream_job = StreamingJob::Sink(sink);
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
@@ -704,12 +708,12 @@ where
             let link_targets: Vec<AwsPrivateLinkItem> =
                 serde_json::from_str(link_target_value).map_err(|e| anyhow!(e))?;
 
-            let conn = self
+            let connection = self
                 .catalog_manager
                 .get_connection_by_name(&private_link_name)
                 .await?;
 
-            if let Some(connection::Info::PrivateLinkService(svc)) = &conn.info {
+            if let Some(connection::Info::PrivateLinkService(svc)) = &connection.info {
                 // check whether the VPC endpoint is ready
                 let cli = self.aws_client.as_ref().unwrap();
                 if !cli.is_vpc_endpoint_ready(&svc.endpoint_id).await? {
@@ -727,7 +731,7 @@ where
 
             // construct the rewrite mapping for brokers
             for (link, broker) in link_targets.iter().zip_eq_fast(broker_addrs.into_iter()) {
-                if let Some(connection::Info::PrivateLinkService(svc)) = &conn.info {
+                if let Some(connection::Info::PrivateLinkService(svc)) = &connection.info {
                     if svc.dns_entries.is_empty() {
                         return Err(MetaError::from(anyhow!(
                             "No available private link endpoints for Kafka broker {}",
