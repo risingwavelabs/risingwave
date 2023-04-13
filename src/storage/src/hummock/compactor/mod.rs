@@ -183,12 +183,17 @@ impl Compactor {
             .await;
         let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
 
-        generate_splits(&mut compact_task, context.clone()).await;
+        let mut task_status = TaskStatus::Success;
+        if let Err(e) = generate_splits(&mut compact_task, context.clone()).await {
+            tracing::warn!("Failed to generate_splits {:#?}", e);
+            task_status = TaskStatus::ExecuteFailed;
+            Self::compact_done(&mut compact_task, context.clone(), vec![], task_status).await;
+            return task_status;
+        }
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
         assert_ne!(parallelism, 0, "splits cannot be empty");
         context.compactor_metrics.compact_task_pending_num.inc();
-        let mut task_status = TaskStatus::Success;
         let mut output_ssts = Vec::with_capacity(parallelism);
         let mut compaction_futures = vec![];
         let task_progress_guard =
@@ -203,7 +208,9 @@ impl Compactor {
             Ok(agg) => agg,
             Err(err) => {
                 tracing::warn!("Failed to build delete range aggregator {:#?}", err);
-                return TaskStatus::ExecuteFailed;
+                task_status = TaskStatus::ExecuteFailed;
+                Self::compact_done(&mut compact_task, context.clone(), vec![], task_status).await;
+                return task_status;
             }
         };
 
@@ -259,18 +266,19 @@ impl Compactor {
             }
         }
 
+        if task_status != TaskStatus::Success {
+            output_ssts.clear();
+        }
         // Sort by split/key range index.
         if !output_ssts.is_empty() {
             output_ssts.sort_by_key(|(split_index, ..)| *split_index);
         }
 
-        sync_point::sync_point!("BEFORE_COMPACT_REPORT");
         // After a compaction is done, mutate the compaction task.
         Self::compact_done(&mut compact_task, context.clone(), output_ssts, task_status).await;
-        sync_point::sync_point!("AFTER_COMPACT_REPORT");
         let cost_time = timer.stop_and_record() * 1000.0;
         tracing::info!(
-            "Finished compaction task in {:?}ms: \n{}",
+            "Finished compaction task in {:?}ms: {}",
             cost_time,
             compact_task_to_string(&compact_task)
         );
@@ -283,7 +291,7 @@ impl Compactor {
         task_status
     }
 
-    /// Fill in the compact task and let hummock manager know the compaction output ssts.
+    /// Fills in the compact task and tries to report the task result to meta node.
     async fn compact_done(
         compact_task: &mut CompactTask,
         context: Arc<CompactorContext>,
