@@ -193,7 +193,6 @@ impl Compactor {
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
         assert_ne!(parallelism, 0, "splits cannot be empty");
-        context.compactor_metrics.compact_task_pending_num.inc();
         let mut output_ssts = Vec::with_capacity(parallelism);
         let mut compaction_futures = vec![];
         let task_progress_guard =
@@ -214,6 +213,7 @@ impl Compactor {
             }
         };
 
+        context.compactor_metrics.compact_task_pending_num.inc();
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let filter = multi_filter.clone();
             let multi_filter_key_extractor = multi_filter_key_extractor.clone();
