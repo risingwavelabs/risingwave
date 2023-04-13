@@ -88,6 +88,15 @@ drop table s
 statement ok 
 create connection mock with (type = 'mock');
 
+# Reference to non-existant connection
+statement error
+create source s with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  connection.name = 'nonexist',
+) row format json;
+
 statement ok
 create source s with (
   connector = 'kafka',
@@ -96,7 +105,8 @@ create source s with (
   connection.name = 'mock',
 ) row format json;
 
-statement error other relation\(s\) depend on it
+# Drop a connection in use
+statement error
 drop connection mock;
 
 statement ok

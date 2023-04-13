@@ -55,6 +55,7 @@ use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
 use crate::session::SessionImpl;
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
+pub(crate) const CONNECTION_NAME_KEY: &str = "connection.name";
 
 /// Map an Avro schema to a relational schema.
 async fn extract_avro_table_schema(
@@ -176,6 +177,13 @@ async fn extract_protobuf_table_schema(
 fn get_connector(with_properties: &HashMap<String, String>) -> Option<String> {
     with_properties
         .get(UPSTREAM_SOURCE_KEY)
+        .map(|s| s.to_lowercase())
+}
+
+#[inline(always)]
+fn get_connection_name(with_properties: &HashMap<String, String>) -> Option<String> {
+    with_properties
+        .get(CONNECTION_NAME_KEY)
         .map(|s| s.to_lowercase())
 }
 
@@ -701,12 +709,12 @@ pub async fn handle_create_source(
 
     let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
 
-    let connection_name = with_properties.get("connection.name").map(|s| s.as_str());
+    let connection_name = get_connection_name(&with_properties);
     let connection_id = match connection_name {
         Some(connection_name) => {
             let connection_id = session
-                .get_connection_id_for_create(schema_name, connection_name)
-                .map_err(|_| ErrorCode::ItemNotFound(connection_name.to_string()))?;
+                .get_connection_id_for_create(schema_name, connection_name.as_str())
+                .map_err(|_| ErrorCode::ItemNotFound(connection_name))?;
             if !is_kafka_source(&with_properties) {
                 return Err(RwError::from(ErrorCode::ProtocolError(
                     "Create source with connection is only supported for kafka connectors."
