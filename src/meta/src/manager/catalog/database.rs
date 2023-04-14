@@ -174,12 +174,19 @@ impl DatabaseManager {
                 && x.name.eq(&relation_key.2)
         }) {
             Err(MetaError::catalog_duplicated("view", &relation_key.2))
-        } else if self.functions.values().any(|x| {
-            x.database_id == relation_key.0
-                && x.schema_id == relation_key.1
-                && x.name.eq(&relation_key.2)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn check_function_duplicated(&self, function: &Function) -> MetaResult<()> {
+        if self.functions.values().any(|x| {
+            x.database_id == function.database_id
+                && x.schema_id == function.schema_id
+                && x.name.eq(&function.name)
+                && x.arg_types == function.arg_types
         }) {
-            Err(MetaError::catalog_duplicated("function", &relation_key.2))
+            Err(MetaError::catalog_duplicated("function", &function.name))
         } else {
             Ok(())
         }
