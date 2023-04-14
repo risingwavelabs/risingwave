@@ -429,6 +429,7 @@ where
 #[function("cast(date) -> timestamp")]
 #[function("cast(time) -> interval")]
 #[function("cast(varchar) -> varchar")]
+#[function("cast(int256) -> float64")]
 pub fn cast<T1, T2>(elem: T1) -> T2
 where
     T1: Into<T2>,

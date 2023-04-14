@@ -26,6 +26,8 @@ use crate::{ExprError, Result};
 #[function("add(*number, *number) -> auto")]
 #[function("add(interval, interval) -> interval")]
 #[function("add(int256, int256) -> int256")]
+#[function("add(int256, *int) -> int256")]
+#[function("add(*int, int256) -> int256")]
 pub fn general_add<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -40,6 +42,8 @@ where
 #[function("subtract(*number, *number) -> auto")]
 #[function("subtract(interval, interval) -> interval")]
 #[function("subtract(int256, int256) -> int256")]
+#[function("subtract(int256, *int) -> int256")]
+#[function("subtract(*int, int256) -> int256")]
 pub fn general_sub<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -53,6 +57,8 @@ where
 
 #[function("multiply(*number, *number) -> auto")]
 #[function("multiply(int256, int256) -> int256")]
+#[function("multiply(int256, *int) -> int256")]
+#[function("multiply(*int, int256) -> int256")]
 pub fn general_mul<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -67,6 +73,9 @@ where
 #[function("divide(*number, *number) -> auto")]
 #[function("divide(int256, int256) -> int256")]
 #[function("divide(int256, float64) -> float64")]
+#[function("divide(float64, int256) -> float64")]
+#[function("divide(int256, *int) -> int256")]
+#[function("divide(*int, int256) -> int256")]
 pub fn general_div<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -86,6 +95,8 @@ where
 
 #[function("modulus(*number, *number) -> auto")]
 #[function("modulus(int256, int256) -> int256")]
+#[function("modulus(*int, int256) -> int256")]
+#[function("modulus(int256, *int) -> int256")]
 pub fn general_mod<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
