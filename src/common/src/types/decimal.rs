@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::io::{Read, Write};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
@@ -30,7 +31,7 @@ use crate::error::Result as RwResult;
 use crate::types::ordered_float::OrderedFloat;
 use crate::types::Decimal::Normalized;
 
-#[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
+#[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq)]
 pub enum Decimal {
     #[display("{0}")]
     Normalized(RustDecimal),
@@ -40,6 +41,31 @@ pub enum Decimal {
     PositiveInf,
     #[display("-Infinity")]
     NegativeInf,
+}
+
+impl Ord for Decimal {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Decimal::NegativeInf, Decimal::NegativeInf) => Ordering::Equal,
+            (Decimal::NegativeInf, _) => Ordering::Less,
+            (Decimal::NaN, Decimal::NaN) => Ordering::Equal,
+            (Decimal::NaN, _) => Ordering::Greater,
+            (Decimal::Normalized(a), Decimal::Normalized(b)) => a.cmp(b),
+            (Decimal::Normalized(_), Decimal::PositiveInf) => Ordering::Less,
+            (Decimal::Normalized(_), Decimal::NaN) => Ordering::Less,
+            (Decimal::Normalized(_), Decimal::NegativeInf) => Ordering::Greater,
+            (Decimal::PositiveInf, Decimal::PositiveInf) => Ordering::Equal,
+            (Decimal::PositiveInf, Decimal::Normalized(_)) => Ordering::Greater,
+            (Decimal::PositiveInf, Decimal::NaN) => Ordering::Less,
+            (Decimal::PositiveInf, Decimal::NegativeInf) => Ordering::Greater,
+        }
+    }
+}
+
+impl PartialOrd for Decimal {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 impl ToText for Decimal {
