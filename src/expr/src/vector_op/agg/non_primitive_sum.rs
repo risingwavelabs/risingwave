@@ -24,6 +24,7 @@ use risingwave_common::types::num256::Int256;
 use risingwave_common::types::{DataType, Scalar, ScalarRef};
 
 use crate::vector_op::agg::aggregator::Aggregator;
+use crate::Result;
 
 #[derive(Clone)]
 pub struct Int256Sum {
@@ -43,7 +44,7 @@ impl Int256Sum {
         }
     }
 
-    fn accumulate_value_at(&mut self, array: &Int256Array, row_id: usize) -> crate::Result<()> {
+    fn accumulate_value_at(&mut self, array: &Int256Array, row_id: usize) -> Result<()> {
         let value = array
             .value_at(row_id)
             .map(|scalar_ref| scalar_ref.to_owned_scalar());
@@ -67,7 +68,7 @@ impl Aggregator for Int256Sum {
         DataType::Int256
     }
 
-    async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> crate::Result<()> {
+    async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
         if let ArrayImpl::Int256(array) = input.column_at(self.input_col_idx).array_ref() {
             self.accumulate_value_at(array, row_id)?;
         }
@@ -79,7 +80,7 @@ impl Aggregator for Int256Sum {
         input: &DataChunk,
         start_row_id: usize,
         end_row_id: usize,
-    ) -> crate::Result<()> {
+    ) -> Result<()> {
         if let ArrayImpl::Int256(array) = input.column_at(self.input_col_idx).array_ref() {
             for row_id in start_row_id..end_row_id {
                 self.accumulate_value_at(array, row_id)?;
@@ -90,7 +91,7 @@ impl Aggregator for Int256Sum {
         }
     }
 
-    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> crate::Result<()> {
+    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         match builder {
             ArrayBuilderImpl::Int256(b) => {
                 b.append(Some(self.result.as_scalar_ref()));
@@ -98,5 +99,71 @@ impl Aggregator for Int256Sum {
             }
             _ => bail!("Unexpected builder for sum(int256)."),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use itertools::Itertools;
+    use risingwave_common::array::column::Column;
+    use risingwave_common::array::Int256ArrayBuilder;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn vec_sum_int256() -> Result<()> {
+        let numbers = vec![1, 2, 3, 4, 1];
+        let values = numbers.iter().cloned().map(Int256::from).collect_vec();
+        let input = Int256Array::from_iter(values.iter().map(|r| Some(r.as_scalar_ref())));
+
+        let input_len = input.len();
+        let array_ref = Arc::new(input.into());
+        let input_chunk = DataChunk::new(vec![Column::new(array_ref)], input_len);
+
+        let actual = sum(&input_chunk, false)
+            .await?
+            .iter()
+            .map(|v| v.map(|v| v.to_owned_scalar()))
+            .collect_vec();
+
+        assert_eq!(
+            actual,
+            vec![Some(Int256::from(numbers.iter().sum::<i64>()))]
+        );
+
+        let actual = sum(&input_chunk, true)
+            .await?
+            .iter()
+            .map(|v| v.map(|v| v.to_owned_scalar()))
+            .collect_vec();
+
+        assert_eq!(
+            actual,
+            vec![Some(Int256::from(
+                numbers.into_iter().unique().sum::<i64>()
+            ))]
+        );
+
+        Ok(())
+    }
+
+    async fn sum(input_chunk: &DataChunk, distinct: bool) -> Result<Int256Array> {
+        let mut builder = ArrayBuilderImpl::Int256(Int256ArrayBuilder::new(0));
+
+        let mut agg_state = Int256Sum::new(0, distinct);
+
+        agg_state
+            .update_multi(input_chunk, 0, input_chunk.cardinality() - 1)
+            .await?;
+
+        agg_state
+            .update_single(input_chunk, input_chunk.cardinality() - 1)
+            .await?;
+
+        agg_state.output(&mut builder)?;
+
+        Ok(builder.finish().into())
     }
 }
