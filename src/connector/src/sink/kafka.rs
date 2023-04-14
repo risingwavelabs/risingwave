@@ -110,7 +110,7 @@ pub struct KafkaConfig {
     /// We have parsed the primary key for an upsert kafka sink into a `usize` vector representing
     /// the indices of the pk columns in the frontend, so we simply store the primary key here
     /// as a string.
-    pub primary_key: String,
+    pub primary_key: Option<String>,
 }
 
 impl KafkaConfig {
