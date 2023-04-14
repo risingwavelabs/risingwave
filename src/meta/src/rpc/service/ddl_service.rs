@@ -21,6 +21,8 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::common::AwsPrivateLinkItem;
 use risingwave_connector::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
 use risingwave_connector::source::KAFKA_CONNECTOR;
+use risingwave_pb::catalog::connection::private_link_service::PbPrivateLinkProvider;
+use risingwave_pb::catalog::connection::PbPrivateLinkService;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{connection, Connection};
@@ -604,56 +606,67 @@ where
         }
 
         match req.payload.unwrap() {
-            create_connection_request::Payload::MockConnection(_) => {
-                let id = self.gen_unique_id::<{ IdCategory::Connection }>().await?;
-                let connection = Connection {
-                    id,
-                    schema_id: req.schema_id,
-                    database_id: req.database_id,
-                    name: req.name,
-                    info: Some(connection::Info::MockConnection(
-                        connection::MockConnection {},
-                    )),
-                };
-                let version = self
-                    .ddl_controller
-                    .run_command(DdlCommand::CreateConnection(connection))
-                    .await?;
-                Ok(Response::new(CreateConnectionResponse {
-                    connection_id: id,
-                    version,
-                }))
-            }
             create_connection_request::Payload::PrivateLink(link) => {
-                if self.aws_client.is_none() {
-                    return Err(Status::from(MetaError::unavailable(
-                        "AWS client is not configured".into(),
-                    )));
+                match link.get_provider()? {
+                    PbPrivateLinkProvider::Mock => {
+                        let id = self.gen_unique_id::<{ IdCategory::Connection }>().await?;
+                        let private_link_svc = PbPrivateLinkService {
+                            provider: link.provider,
+                            service_name: String::new(),
+                            endpoint_id: String::new(),
+                            dns_entries: HashMap::new(),
+                        };
+                        let connection = Connection {
+                            id,
+                            schema_id: req.schema_id,
+                            database_id: req.database_id,
+                            name: req.name,
+                            info: Some(connection::Info::PrivateLinkService(private_link_svc)),
+                        };
+
+                        // save private link info to catalog
+                        let version = self
+                            .ddl_controller
+                            .run_command(DdlCommand::CreateConnection(connection))
+                            .await?;
+
+                        Ok(Response::new(CreateConnectionResponse {
+                            connection_id: id,
+                            version,
+                        }))
+                    }
+                    PbPrivateLinkProvider::Aws => {
+                        if self.aws_client.is_none() {
+                            return Err(Status::from(MetaError::unavailable(
+                                "AWS client is not configured".into(),
+                            )));
+                        }
+                        let cli = self.aws_client.as_ref().unwrap();
+                        let private_link_svc = cli
+                            .create_aws_private_link(&link.service_name, &link.availability_zones)
+                            .await?;
+
+                        let id = self.gen_unique_id::<{ IdCategory::Connection }>().await?;
+                        let connection = Connection {
+                            id,
+                            schema_id: req.schema_id,
+                            database_id: req.database_id,
+                            name: req.name,
+                            info: Some(connection::Info::PrivateLinkService(private_link_svc)),
+                        };
+
+                        // save private link info to catalog
+                        let version = self
+                            .ddl_controller
+                            .run_command(DdlCommand::CreateConnection(connection))
+                            .await?;
+
+                        Ok(Response::new(CreateConnectionResponse {
+                            connection_id: id,
+                            version,
+                        }))
+                    }
                 }
-                let cli = self.aws_client.as_ref().unwrap();
-                let private_link_svc = cli
-                    .create_aws_private_link(&link.service_name, &link.availability_zones)
-                    .await?;
-
-                let id = self.gen_unique_id::<{ IdCategory::Connection }>().await?;
-                let connection = Connection {
-                    id,
-                    schema_id: req.schema_id,
-                    database_id: req.database_id,
-                    name: req.name,
-                    info: Some(connection::Info::PrivateLinkService(private_link_svc)),
-                };
-
-                // save private link info to catalog
-                let version = self
-                    .ddl_controller
-                    .run_command(DdlCommand::CreateConnection(connection))
-                    .await?;
-
-                Ok(Response::new(CreateConnectionResponse {
-                    connection_id: id,
-                    version,
-                }))
             }
         }
     }

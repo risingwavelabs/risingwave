@@ -26,7 +26,6 @@ pub async fn list_connections(context: &CtlContext) -> anyhow::Result<()> {
             conn.id,
             conn.name,
             match conn.info {
-                Some(Info::MockConnection(_)) => "MockConnection: no info available".to_string(),
                 Some(Info::PrivateLinkService(svc)) => format!(
                     "PrivateLink: service_name: {}, endpoint_id: {}, dns_entries: {:?}",
                     svc.service_name, svc.endpoint_id, svc.dns_entries,

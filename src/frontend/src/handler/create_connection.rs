@@ -17,7 +17,8 @@ use std::collections::HashMap;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_connector::source::kafka::{MOCK_CONNECTION, PRIVATELINK_CONNECTION};
+use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
+use risingwave_pb::catalog::connection::private_link_service::PrivateLinkProvider;
 use risingwave_pb::ddl_service::create_connection_request;
 use risingwave_sqlparser::ast::CreateConnectionStatement;
 use serde_json;
@@ -30,6 +31,9 @@ pub(crate) const CONNECTION_TYPE_PROP: &str = "type";
 pub(crate) const CONNECTION_PROVIDER_PROP: &str = "provider";
 pub(crate) const CONNECTION_SERVICE_NAME_PROP: &str = "service.name";
 pub(crate) const CONNECTION_AVAIL_ZONE_PROP: &str = "availability.zones";
+
+pub(crate) const CLOUD_PROVIDER_MOCK: &str = "mock"; // fake privatelink provider for testing
+pub(crate) const CLOUD_PROVIDER_AWS: &str = "aws";
 
 #[inline(always)]
 fn get_connection_property_required(
@@ -47,7 +51,19 @@ fn get_connection_property_required(
 fn resolve_private_link_properties(
     with_properties: &HashMap<String, String>,
 ) -> Result<create_connection_request::PrivateLink> {
-    let provider = get_connection_property_required(with_properties, CONNECTION_PROVIDER_PROP)?;
+    let provider =
+        match get_connection_property_required(with_properties, CONNECTION_PROVIDER_PROP)?.as_str()
+        {
+            CLOUD_PROVIDER_MOCK => PrivateLinkProvider::Mock,
+            CLOUD_PROVIDER_AWS => PrivateLinkProvider::Aws,
+            provider => {
+                return Err(RwError::from(ProtocolError(format!(
+                    "Unsupported privatelink provider {}",
+                    provider
+                ))));
+            }
+        }
+        .into();
     let service_name =
         get_connection_property_required(with_properties, CONNECTION_SERVICE_NAME_PROP)?;
     let availability_zones_str =
@@ -71,9 +87,6 @@ fn resolve_create_connection_payload(
 ) -> Result<create_connection_request::Payload> {
     let connection_type = get_connection_property_required(with_properties, CONNECTION_TYPE_PROP)?;
     let create_connection_payload = match connection_type.as_str() {
-        MOCK_CONNECTION => create_connection_request::Payload::MockConnection(
-            create_connection_request::MockConnection {},
-        ),
         PRIVATELINK_CONNECTION => create_connection_request::Payload::PrivateLink(
             resolve_private_link_properties(with_properties)?,
         ),

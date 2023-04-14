@@ -92,10 +92,12 @@ message Sink {
 }
 
 message Connection {
-  message MockConnection {}
-
   message PrivateLinkService {
-    string provider = 1;
+    enum PrivateLinkProvider {
+      MOCK = 0;
+      AWS = 1;
+    }
+    PrivateLinkProvider provider = 1;
     string service_name = 2;
     string endpoint_id = 3;
     map<string, string> dns_entries = 4;
@@ -106,8 +108,7 @@ message Connection {
   uint32 database_id = 3;
   string name = 4;
   oneof info {
-    MockConnection mock_connection = 5;
-    PrivateLinkService private_link_service = 6;
+    PrivateLinkService private_link_service = 5;
   }
 }
 

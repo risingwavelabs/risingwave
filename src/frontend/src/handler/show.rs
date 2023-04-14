@@ -19,7 +19,7 @@ use pgwire::types::Row;
 use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_connector::source::kafka::{MOCK_CONNECTION, PRIVATELINK_CONNECTION};
+use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
 use risingwave_pb::catalog::connection;
 use risingwave_sqlparser::ast::{Ident, ObjectName, ShowCreateType, ShowObject};
 use serde_json;
@@ -127,21 +127,15 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
                 .map(|c| {
                     let name = c.name.clone();
                     let conn_type = match &c.info {
-                        connection::Info::MockConnection(_) => {
-                            MOCK_CONNECTION.to_string()
-                        },
                         connection::Info::PrivateLinkService(_) => {
                             PRIVATELINK_CONNECTION.to_string()
                         },
                     };
                     let properties = match &c.info {
-                        connection::Info::MockConnection(_) => {
-                            "mock connection: no info available".to_string()
-                        }
                         connection::Info::PrivateLinkService(i) => {
                             format!(
                                 "provider: {}\nservice_name: {}\nendpoint_id: {}\navailability_zones: {}",
-                                i.provider,
+                                i.get_provider().unwrap().as_str_name(),
                                 i.service_name,
                                 i.endpoint_id,
                                 serde_json::to_string(&i.dns_entries.keys().collect_vec()).unwrap()
