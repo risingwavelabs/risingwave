@@ -13,28 +13,30 @@
 // limitations under the License.
 
 use std::fmt;
+use std::rc::Rc;
 
-use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SourceNode;
 
+use super::generic::GenericPlanNode;
 use super::{
-    ExprRewritable, LogicalSource, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, ToLocalBatch,
+    generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::property::{Distribution, Order};
 
 /// [`BatchSource`] represents a table/connector source at the very beginning of the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSource {
     pub base: PlanBase,
-    logical: LogicalSource,
+    logical: generic::Source,
 }
 
 impl BatchSource {
-    pub fn new(logical: LogicalSource) -> Self {
+    pub fn new(logical: generic::Source) -> Self {
         let base = PlanBase::new_batch(
-            logical.ctx(),
+            logical.ctx.clone(),
             logical.schema().clone(),
             // Use `Single` by default, will be updated later with `clone_with_dist`.
             Distribution::Single,
@@ -52,8 +54,8 @@ impl BatchSource {
             .collect()
     }
 
-    pub fn logical(&self) -> &LogicalSource {
-        &self.logical
+    pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
+        self.logical.catalog.clone()
     }
 
     pub fn clone_with_dist(&self) -> Self {
@@ -72,7 +74,7 @@ impl fmt::Display for BatchSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("BatchSource");
         builder
-            .field("source", &self.logical.source_catalog().unwrap().name)
+            .field("source", &self.source_catalog().unwrap().name)
             .field("columns", &self.column_names())
             .field("filter", &self.logical.kafka_timestamp_range_value())
             .finish()
@@ -93,17 +95,16 @@ impl ToDistributedBatch for BatchSource {
 
 impl ToBatchPb for BatchSource {
     fn to_batch_prost_body(&self) -> NodeBody {
-        let source_catalog = self.logical.source_catalog().unwrap();
+        let source_catalog = self.source_catalog().unwrap();
         NodeBody::Source(SourceNode {
             source_id: source_catalog.id,
             info: Some(source_catalog.info.clone()),
             columns: self
                 .logical
-                .core
                 .column_catalog
                 .iter()
                 .map(|c| c.to_protobuf())
-                .collect_vec(),
+                .collect(),
             properties: source_catalog.properties.clone().into_iter().collect(),
             split: vec![],
         })
