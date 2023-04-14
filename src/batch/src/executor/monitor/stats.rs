@@ -173,7 +173,7 @@ impl BatchTaskMetrics {
     }
 
     pub fn local_for_task(self: Arc<Self>, task_id: TaskId) -> BatchTaskLocalMetrics {
-        Arc::new(BatchTaskMetricsWithTaskLabels {
+        Arc::new(BatchTaskLocalMetricsInner {
             metrics: self,
             task_labels: vec![
                 task_id.query_id.clone(),
@@ -216,19 +216,19 @@ impl Collector for BatchTaskMetrics {
     }
 }
 
-/// A wrapper of `BatchTaskMetrics` to serve the following purposes:
+/// A wrapper of `BatchTaskMetrics` that is local to a task. It serves to:
 ///
 /// - Store the labels derived from a `TaskId` to avoid generating it repeatedly.
 /// - Remove labels values after the corresponding task finishes.
-pub type BatchTaskLocalMetrics = Arc<BatchTaskMetricsWithTaskLabels>;
+pub type BatchTaskLocalMetrics = Arc<BatchTaskLocalMetricsInner>;
 
-pub struct BatchTaskMetricsWithTaskLabels {
+pub struct BatchTaskLocalMetricsInner {
     metrics: Arc<BatchTaskMetrics>,
     task_id: TaskId,
     task_labels: Vec<String>,
 }
 
-impl BatchTaskMetricsWithTaskLabels {
+impl BatchTaskLocalMetricsInner {
     pub fn task_labels(&self) -> Vec<&str> {
         self.task_labels.iter().map(AsRef::as_ref).collect()
     }
@@ -254,7 +254,7 @@ impl BatchTaskMetricsWithTaskLabels {
     }
 }
 
-impl Deref for BatchTaskMetricsWithTaskLabels {
+impl Deref for BatchTaskLocalMetricsInner {
     type Target = Arc<BatchTaskMetrics>;
 
     fn deref(&self) -> &Self::Target {
@@ -262,7 +262,7 @@ impl Deref for BatchTaskMetricsWithTaskLabels {
     }
 }
 
-impl Drop for BatchTaskMetricsWithTaskLabels {
+impl Drop for BatchTaskLocalMetricsInner {
     fn drop(&mut self) {
         self.metrics
             .finished_tasks
