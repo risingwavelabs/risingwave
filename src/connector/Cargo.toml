@@ -100,6 +100,11 @@ urlencoding = "2"
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
+criterion = { version = "0.4", features = ["async_tokio", "async"] }
 rand = "0.8"
 tempfile = "3"
 wiremock = "0.5"
+
+[[bench]]
+name = "parser"
+harness = false
