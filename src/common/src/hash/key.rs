@@ -26,8 +26,10 @@ use std::default::Default;
 use std::fmt::Debug;
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::io::{Cursor, Read};
+use std::marker::PhantomData;
 
 use chrono::{Datelike, Timelike};
+use derivative::Derivative;
 use fixedbitset::FixedBitSet;
 use smallbitset::Set64;
 use static_assertions::const_assert_eq;
@@ -41,7 +43,7 @@ use crate::collection::estimate_size::EstimateSize;
 use crate::row::{OwnedRow, RowDeserializer};
 use crate::types::num256::Int256Ref;
 use crate::types::{DataType, Date, Decimal, ScalarRef, Time, Timestamp, F32, F64};
-use crate::util::hash_util::Crc32FastBuilder;
+use crate::util::hash_util::{Crc32FastBuilder, XxHash64Builder};
 use crate::util::iter_util::ZipEqFast;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum_into};
 
@@ -208,25 +210,38 @@ impl<T: AsRef<[bool]> + IntoIterator<Item = bool>> From<T> for HeapNullBitmap {
     }
 }
 
-/// A wrapper for u64 hash result.
-#[derive(Default, Clone, Copy, Debug, PartialEq)]
-pub struct HashCode(pub u64);
+/// A wrapper for u64 hash result. Generic over the hasher.
+#[derive(Derivative)]
+#[derivative(Default, Clone, Copy, Debug, PartialEq)]
+pub struct HashCode<T: 'static + BuildHasher> {
+    value: u64,
+    #[derivative(Debug = "ignore")]
+    _phantom: PhantomData<&'static T>,
+}
 
-impl From<u64> for HashCode {
+impl<T: BuildHasher> From<u64> for HashCode<T> {
     fn from(hash_code: u64) -> Self {
-        Self(hash_code)
+        Self {
+            value: hash_code,
+            _phantom: PhantomData,
+        }
     }
 }
 
-impl HashCode {
-    pub fn hash_code(self) -> u64 {
-        self.0
+impl<T: BuildHasher> HashCode<T> {
+    pub fn value(self) -> u64 {
+        self.value
     }
 }
+
+/// Hash code from the `Crc32` hasher. Used for hash-shuffle exchange.
+pub type Crc32HashCode = HashCode<Crc32FastBuilder>;
+/// Hash code from the `XxHash64` hasher. Used for in-memory hash map cache.
+pub type XxHash64HashCode = HashCode<XxHash64Builder>;
 
 pub trait HashKeySerializer {
     type K: HashKey;
-    fn from_hash_code(hash_code: HashCode, estimated_key_size: usize) -> Self;
+    fn from_hash_code(hash_code: XxHash64HashCode, estimated_key_size: usize) -> Self;
     fn append<'a, D: HashKeySerDe<'a>>(&mut self, data: Option<D>);
     fn into_hash_key(self) -> Self::K;
 }
@@ -268,7 +283,7 @@ pub trait HashKey:
     type S: HashKeySerializer<K = Self>;
 
     fn build(column_idxes: &[usize], data_chunk: &DataChunk) -> ArrayResult<Vec<Self>> {
-        let hash_codes = data_chunk.get_hash_values(column_idxes, Crc32FastBuilder);
+        let hash_codes = data_chunk.get_hash_values(column_idxes, XxHash64Builder);
         Ok(Self::build_from_hash_code(
             column_idxes,
             data_chunk,
@@ -279,7 +294,7 @@ pub trait HashKey:
     fn build_from_hash_code(
         column_idxes: &[usize],
         data_chunk: &DataChunk,
-        hash_codes: Vec<HashCode>,
+        hash_codes: Vec<XxHash64HashCode>,
     ) -> Vec<Self> {
         let estimated_key_size = data_chunk.estimate_value_encoding_size(column_idxes);
         // Construct serializers for each row.
@@ -394,13 +409,13 @@ impl Hasher for PrecomputedHasher {
         self.hash_code
     }
 
-    fn write(&mut self, bytes: &[u8]) {
+    fn write_u64(&mut self, i: u64) {
         assert_eq!(self.hash_code, 0);
-        self.hash_code = u64::from_ne_bytes(
-            bytes
-                .try_into()
-                .expect("must writes from HashKey with write_u64"),
-        );
+        self.hash_code = i;
+    }
+
+    fn write(&mut self, _bytes: &[u8]) {
+        unreachable!("must writes from HashKey with write_u64")
     }
 }
 
@@ -687,13 +702,13 @@ impl<const N: usize, B: NullBitmap> HashKeySerializer for FixedSizeKeySerializer
 
     /// We already know the estimated key size statically, no need
     /// to use runtime parameter: `estimated_key_size`.
-    fn from_hash_code(hash_code: HashCode, _estimated_key_size: usize) -> Self {
+    fn from_hash_code(hash_code: XxHash64HashCode, _estimated_key_size: usize) -> Self {
         Self {
             buffer: [0u8; N],
             null_bitmap: NullBitmap::empty(),
             null_bitmap_idx: 0,
             data_len: 0,
-            hash_code: hash_code.0,
+            hash_code: hash_code.value(),
         }
     }
 
@@ -763,10 +778,10 @@ pub struct SerializedKeySerializer<B: NullBitmap> {
 impl<B: NullBitmap> HashKeySerializer for SerializedKeySerializer<B> {
     type K = SerializedKey<B>;
 
-    fn from_hash_code(hash_code: HashCode, estimated_value_encoding_size: usize) -> Self {
+    fn from_hash_code(hash_code: XxHash64HashCode, estimated_value_encoding_size: usize) -> Self {
         Self {
             buffer: Vec::with_capacity(estimated_value_encoding_size),
-            hash_code: hash_code.0,
+            hash_code: hash_code.value(),
             null_bitmap: NullBitmap::empty(),
             null_bitmap_idx: 0,
         }

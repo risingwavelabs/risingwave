@@ -257,7 +257,6 @@ message CreateConnectionRequest {
   message PrivateLink {
     string provider = 1;
     string service_name = 2;
-    repeated string availability_zones = 3;
   }
   string name = 1;
   oneof payload {
