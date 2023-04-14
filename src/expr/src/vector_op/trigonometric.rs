@@ -128,6 +128,81 @@ pub fn cosd_f64(input: F64) -> F64 {
     result.into()
 }
 
+// Radians per degree, a.k.a. PI / 180
+static RADIANS_PER_DEGREE: f64 = 0.017_453_292_519_943_295;
+
+// Constants we use to get more accurate results.
+// See PSQL: https://github.com/postgres/postgres/blob/78ec02d612a9b69039ec2610740f738968fe144d/src/backend/utils/adt/float.c#L2024
+static SIN_30: f64 = 0.499_999_999_999_999_94;
+static ONE_MINUS_COS_60: f64 = 0.499_999_999_999_999_9;
+
+// returns the cosine of an angle that lies between 0 and 60 degrees. This will return exactly 1
+// when xi s 0, and exactly 0.5 when x is 60 degrees.
+fn cosd_0_to_60(x: f64) -> f64 {
+    // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c
+    let one_minus_cos_x: f64 = 1.0 - f64::cos(x * RADIANS_PER_DEGREE);
+    1.0 - (one_minus_cos_x / ONE_MINUS_COS_60) / 2.0
+}
+
+// returns the sine of an angle that lies between 0 and 30 degrees. This will return exactly 0 when
+// x is 0, and exactly 0.5 when x is 30 degrees.
+fn sind_0_to_30(x: f64) -> f64 {
+    // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c
+    let sin_x = f64::sin(x * RADIANS_PER_DEGREE);
+    (sin_x / SIN_30) / 2.0
+}
+
+// Returns the sine of an angle in the first quadrant (0 to 90 degrees).
+fn sind_q1(input: f64) -> f64 {
+    // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c
+
+    //  Stitch together the sine and cosine functions for the ranges [0, 30]
+    //  and (30, 90].  These guarantee to return exact answers at their
+    //  endpoints, so the overall result is a continuous monotonic function
+    //  that gives exact results when x = 0, 30 and 90 degrees.
+
+    if input <= 30.0 {
+        sind_0_to_30(input)
+    } else {
+        cosd_0_to_60(90.0 - input)
+    }
+}
+
+#[function("sind(float64) -> float64")]
+pub fn sind_f64(input: F64) -> F64 {
+    // PSQL implementation: https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c#L2444
+
+    // Returns NaN if input is NaN or infinite. Different from PSQL implementation.
+    if input.0.is_nan() || input.0.is_infinite() {
+        return f64::NAN.into();
+    }
+
+    let arg1 = input.0 % 360.0;
+    let sign = 1.0;
+
+    let (arg1, sign) = if arg1 < 0.0 {
+        // sind(-x) = -sind(x)
+        (-arg1, -sign)
+    } else if arg1 > 180.0 {
+        //  sind(360-x) = -sind(x)
+        (360.0 - arg1, -sign)
+    } else if arg1 > 90.0 {
+        //  sind(180-x) = sind(x)
+        (180.0 - arg1, sign)
+    } else {
+        (arg1, sign)
+    };
+
+    let result = sign * sind_q1(arg1);
+
+    if result.is_infinite() {
+        // Different from PSQL implementation.
+        f64::NAN.into()
+    } else {
+        result.into()
+    }
+}
+
 #[function("degrees(float64) -> float64")]
 pub fn degrees_f64(input: F64) -> F64 {
     input.0.to_degrees().into()
@@ -174,6 +249,25 @@ mod tests {
         // exact matches
         assert_eq!(cosd_f64(F64::from(0)).0, 1.0);
         assert_eq!(cosd_f64(F64::from(90)).0, 0.0);
+        assert_similar(
+            sin_f64(F64::from(50).to_radians().into()),
+            sind_f64(F64::from(50)),
+        );
+        assert_similar(
+            sin_f64(F64::from(100).to_radians().into()),
+            sind_f64(F64::from(100)),
+        );
+        assert_similar(
+            sin_f64(F64::from(250).to_radians().into()),
+            sind_f64(F64::from(250)),
+        );
+        assert_similar(sin_f64(pi), sind_f64(d));
+
+        // exact matches
+        assert_eq!(sind_f64(F64::from(30)).0, 0.5);
+        assert_eq!(sind_f64(F64::from(90)).0, 1.0);
+        assert_eq!(sind_f64(F64::from(180)).0, 0.0);
+        assert_eq!(sind_f64(F64::from(270)).0, -1.0);
     }
 
     #[test]
@@ -205,6 +299,7 @@ mod tests {
         assert_similar(x, sin_f64(asin_f64(x)));
         assert_similar(x, cos_f64(acos_f64(x)));
         assert_similar(x, tan_f64(atan_f64(x)));
+
         // https://en.wikipedia.org/wiki/Inverse_trigonometric_functions#Two-argument_variant_of_arctangent
         assert_similar(
             atan2_f64(y, x),

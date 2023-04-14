@@ -154,6 +154,110 @@ SELECT abs(atan2(pi(), -3.8) - 2.4507611878363194) < 0.000000000000001
 t
 
 query R
+SELECT abs(sind(1) - 0.01745240643728351) < 0.000000000000001
+----
+t
+
+query R
+SELECT sind(0)
+----
+0
+
+query R
+SELECT abs(abs(sind(-1)) - 0.01745240643728351) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(abs(sind(0)) - 0) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(abs(sind(30)) - 0.5) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(abs(sind(45)) - 0.707106781186548) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(abs(sind(60)) - 0.866025403784439) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(abs(sind(90)) - 1) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(abs(sind(120)) - 0.8660254037844386) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(abs(sind(135)) - 0.7071067811865475) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(abs(sind(150)) - 0.5) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(abs(sind(180)) - 0) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(abs(sind(360)) - 0) < 0.000000000000001
+----
+t
+
+query R
+SELECT sind(('Inf'))
+----
+NaN
+
+query R
+SELECT sind(('-Inf'))
+----
+NaN
+
+query R
+SELECT sind('NaN')
+----
+NaN
+
+query R
+SELECT sind('-NaN')
+----
+NaN
+
+query R
+SELECT degrees(pi())
+----
+180
+
+query R
+SELECT degrees(pi()/2)
+----
+90
+
+query R
+SELECT abs(radians(180) - pi()) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(radians(90) - pi()/2) < 0.000000000000001
+----
+t
+
 SELECT abs(cosd(1) - 0.9998476951563913) < 0.000000000000001
 ----
 t
@@ -227,24 +331,3 @@ query R
 SELECT cosd('-NaN')
 ----
 NaN
-
-
-query R 
-SELECT degrees(pi())
-----
-180
-
-query R
-SELECT degrees(pi()/2)
-----
-90
-
-query R
-SELECT abs(radians(180) - pi()) < 0.000000000000001
-----
-t
-
-query R 
-SELECT abs(radians(90) - pi()/2) < 0.000000000000001
-----
-t

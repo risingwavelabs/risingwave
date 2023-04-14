@@ -770,8 +770,8 @@ mod tests {
                     * Int256::from(i64::MAX)
                     * Int256::from(i64::MAX),
             ),
-            Some(Int256::min()),
-            Some(Int256::max()),
+            Some(Int256::min_value()),
+            Some(Int256::max_value()),
         ];
 
         let array =
