@@ -165,6 +165,7 @@ impl CompactStatus {
             gc_delete_keys: target_level_id == self.level_handlers.len() - 1,
             task_status: TaskStatus::Pending as i32,
             compaction_group_id: group.group_id,
+            group_table_ids: vec![],
             existing_table_ids: vec![],
             compression_algorithm,
             target_file_size: ret.target_file_size,

@@ -267,7 +267,9 @@ message CompactTask {
   bool gc_delete_keys = 7;
   TaskStatus task_status = 9;
   // compaction group the task belongs to
-  uint64 compaction_group_id = 12;
+  uint64 compaction_group_id = 11;
+  // table ids in the compaction group when the task is generated
+  repeated uint32 group_table_ids = 12;
   // existing_table_ids for compaction drop key
   repeated uint32 existing_table_ids = 13;
   uint32 compression_algorithm = 14;

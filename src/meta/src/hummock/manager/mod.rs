@@ -14,7 +14,7 @@
 
 use core::panic;
 use std::borrow::{Borrow, BorrowMut};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ops::DerefMut;
 use std::sync::{Arc, LazyLock};
 use std::time::Instant;
@@ -837,12 +837,26 @@ where
             Some(task) => task,
         };
         compact_task.watermark = watermark;
-        compact_task.existing_table_ids = current_version
+
+        compact_task.group_table_ids = current_version
             .levels
             .get(&compaction_group_id)
             .unwrap()
             .member_table_ids
             .clone();
+        let mut compaction_group_all_table_ids =
+            BTreeSet::from_iter(compact_task.group_table_ids.iter().cloned());
+        let mut existing_table_ids = vec![];
+        for input_level in compact_task.get_input_ssts() {
+            for table_info in input_level.get_table_infos() {
+                for table_id in table_info.get_table_ids() {
+                    if compaction_group_all_table_ids.remove(table_id) {
+                        existing_table_ids.push(*table_id);
+                    }
+                }
+            }
+        }
+        compact_task.existing_table_ids = existing_table_ids;
 
         if CompactStatus::is_trivial_move_task(&compact_task) && can_trivial_move {
             compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
@@ -1160,7 +1174,7 @@ where
                 let is_expired = current_version
                     .levels
                     .get(&compact_task.compaction_group_id)
-                    .map(|group| group.member_table_ids != compact_task.existing_table_ids)
+                    .map(|group| group.member_table_ids != compact_task.group_table_ids)
                     .unwrap_or(true)
                     || Self::is_compact_task_expired(compact_task, &versioning.branched_ssts);
                 if is_expired {
