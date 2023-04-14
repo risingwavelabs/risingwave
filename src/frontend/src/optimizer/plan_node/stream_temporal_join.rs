@@ -53,7 +53,7 @@ impl StreamTemporalJoin {
         let scan: &StreamTableScan = exchange_input
             .as_stream_table_scan()
             .expect("should be a stream table scan");
-        assert!(scan.logical().for_system_time_as_of_now());
+        assert!(scan.logical().for_system_time_as_of_proctime());
 
         let base = PlanBase::new_logical_with_core(&logical);
         let ctx = base.ctx;

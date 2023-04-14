@@ -405,7 +405,7 @@ impl DataType {
             DataType::Int16 => ScalarImpl::Int16(i16::MIN),
             DataType::Int32 => ScalarImpl::Int32(i32::MIN),
             DataType::Int64 => ScalarImpl::Int64(i64::MIN),
-            DataType::Int256 => ScalarImpl::Int256(Int256::min()),
+            DataType::Int256 => ScalarImpl::Int256(Int256::min_value()),
             DataType::Serial => ScalarImpl::Serial(Serial::from(i64::MIN)),
             DataType::Float32 => ScalarImpl::Float32(F32::neg_infinity()),
             DataType::Float64 => ScalarImpl::Float64(F64::neg_infinity()),
