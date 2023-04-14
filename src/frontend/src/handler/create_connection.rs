@@ -21,7 +21,6 @@ use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
 use risingwave_pb::catalog::connection::private_link_service::PrivateLinkProvider;
 use risingwave_pb::ddl_service::create_connection_request;
 use risingwave_sqlparser::ast::CreateConnectionStatement;
-use serde_json;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
@@ -30,7 +29,6 @@ use crate::handler::HandlerArgs;
 pub(crate) const CONNECTION_TYPE_PROP: &str = "type";
 pub(crate) const CONNECTION_PROVIDER_PROP: &str = "provider";
 pub(crate) const CONNECTION_SERVICE_NAME_PROP: &str = "service.name";
-pub(crate) const CONNECTION_AVAIL_ZONE_PROP: &str = "availability.zones";
 
 pub(crate) const CLOUD_PROVIDER_MOCK: &str = "mock"; // fake privatelink provider for testing
 pub(crate) const CLOUD_PROVIDER_AWS: &str = "aws";
@@ -67,24 +65,13 @@ fn resolve_private_link_properties(
         PrivateLinkProvider::Mock => Ok(create_connection_request::PrivateLink {
             provider: provider.into(),
             service_name: String::new(),
-            availability_zones: Vec::new(),
         }),
         PrivateLinkProvider::Aws => {
             let service_name =
                 get_connection_property_required(with_properties, CONNECTION_SERVICE_NAME_PROP)?;
-            let availability_zones_str =
-                get_connection_property_required(with_properties, CONNECTION_AVAIL_ZONE_PROP)?;
-            let availability_zones: Vec<String> = serde_json::from_str(&availability_zones_str)
-                .map_err(|e| {
-                    RwError::from(ProtocolError(format!(
-                        "Can not parse {}: {}",
-                        CONNECTION_AVAIL_ZONE_PROP, e
-                    )))
-                })?;
             Ok(create_connection_request::PrivateLink {
                 provider: provider.into(),
                 service_name,
-                availability_zones,
             })
         }
         PrivateLinkProvider::Unspecified => Err(RwError::from(ProtocolError(

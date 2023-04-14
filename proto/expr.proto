@@ -114,9 +114,11 @@ message ExprNode {
     ACOS = 250;
     ATAN = 251;
     ATAN2 = 252;
-    SQRT = 253;
-    DEGREES = 254;
-    RADIANS = 255;
+    SIND = 253;
+    SQRT = 254;
+    DEGREES = 255;
+    RADIANS = 256;
+
     // Boolean comparison
     IS_TRUE = 301;
     IS_NOT_TRUE = 302;
@@ -144,6 +146,9 @@ message ExprNode {
     ARRAY_LENGTH = 536;
     CARDINALITY = 537;
     ARRAY_REMOVE = 538;
+
+    // Int256 functions
+    HEX_TO_INT256 = 540;
 
     // Jsonb functions
 

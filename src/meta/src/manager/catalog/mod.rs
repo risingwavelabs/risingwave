@@ -555,6 +555,7 @@ where
         let user_core = &mut core.user;
         database_core.ensure_database_id(function.database_id)?;
         database_core.ensure_schema_id(function.schema_id)?;
+        database_core.check_function_duplicated(function)?;
 
         #[cfg(not(test))]
         user_core.ensure_user_id(function.owner)?;

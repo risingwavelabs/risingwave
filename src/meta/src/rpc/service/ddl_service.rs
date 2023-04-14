@@ -607,6 +607,7 @@ where
 
         match req.payload.unwrap() {
             create_connection_request::Payload::PrivateLink(link) => {
+                // currently we only support AWS
                 match link.get_provider()? {
                     PbPrivateLinkProvider::Mock => {
                         let id = self.gen_unique_id::<{ IdCategory::Connection }>().await?;
@@ -614,6 +615,7 @@ where
                             provider: link.provider,
                             service_name: String::new(),
                             endpoint_id: String::new(),
+                            endpoint_dns_name: String::new(),
                             dns_entries: HashMap::new(),
                         };
                         let connection = Connection {
@@ -642,9 +644,8 @@ where
                             )));
                         }
                         let cli = self.aws_client.as_ref().unwrap();
-                        let private_link_svc = cli
-                            .create_aws_private_link(&link.service_name, &link.availability_zones)
-                            .await?;
+                        let private_link_svc =
+                            cli.create_aws_private_link(&link.service_name).await?;
 
                         let id = self.gen_unique_id::<{ IdCategory::Connection }>().await?;
                         let connection = Connection {
@@ -717,8 +718,8 @@ where
         properties: &mut HashMap<String, String>,
     ) -> MetaResult<()> {
         let mut broker_rewrite_map = HashMap::new();
-        const UPSTREAM_SOURCE_PRIVATE_LINK_KEY: &str = "privatelink.targets";
-        if let Some(prop) = properties.get(UPSTREAM_SOURCE_PRIVATE_LINK_KEY) {
+        const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
+        if let Some(link_target_value) = properties.get(PRIVATE_LINK_TARGETS_KEY) {
             if !is_kafka_connector(properties) {
                 return Err(MetaError::from(anyhow!(
                     "Private link is only supported for Kafka connector",
@@ -729,40 +730,56 @@ where
                 .get(kafka_props_broker_key(properties))
                 .cloned()
                 .ok_or(MetaError::from(anyhow!(
-                    "Must specify brokers property in WITH clause",
+                    "Must specify \"{KAFKA_PROPS_BROKER_KEY}\" property in WITH clause",
                 )))?;
 
             let broker_addrs = servers.split(',').collect_vec();
-            let link_info: Vec<AwsPrivateLinkItem> =
-                serde_json::from_str(prop).map_err(|e| anyhow!(e))?;
-            // construct the rewrite mapping for brokers
-            for (link, broker) in link_info.iter().zip_eq_fast(broker_addrs.into_iter()) {
-                let conn = self
-                    .catalog_manager
-                    .get_connection_by_id(connection_id)
-                    .await?;
+            let link_targets: Vec<AwsPrivateLinkItem> =
+                serde_json::from_str(link_target_value).map_err(|e| anyhow!(e))?;
 
-                if let Some(connection::Info::PrivateLinkService(svc)) = conn.info {
+            if broker_addrs.len() != link_targets.len() {
+                return Err(MetaError::from(anyhow!(
+                    "The number of broker addrs {} does not match the number of private link targets {}",
+                    broker_addrs.len(),
+                    link_targets.len()
+                )));
+            }
+
+            let conn = self
+                .catalog_manager
+                .get_connection_by_id(connection_id)
+                .await?;
+
+            if let Some(connection::Info::PrivateLinkService(svc)) = &conn.info {
+                // check whether the VPC endpoint is ready
+                let cli = self.aws_client.as_ref().unwrap();
+                if !cli.is_vpc_endpoint_ready(&svc.endpoint_id).await? {
+                    return Err(MetaError::from(anyhow!(
+                        "Private link endpoint {} is not ready",
+                        svc.endpoint_id
+                    )));
+                }
+            } else {
+                return Err(MetaError::from(anyhow!(
+                    "Connection is not a private link service"
+                )));
+            }
+
+            // construct the rewrite mapping for brokers
+            for (link, broker) in link_targets.iter().zip_eq_fast(broker_addrs.into_iter()) {
+                if let Some(connection::Info::PrivateLinkService(svc)) = &conn.info {
                     if svc.dns_entries.is_empty() {
                         return Err(MetaError::from(anyhow!(
                             "No available private link endpoints for Kafka broker {}",
                             broker
                         )));
                     }
-                    let default_dns = svc.dns_entries.values().next().unwrap();
-                    let target_dns = svc.dns_entries.get(&link.az);
-                    match target_dns {
-                        None => {
-                            broker_rewrite_map.insert(
-                                broker.to_string(),
-                                format!("{}:{}", default_dns, link.port),
-                            );
-                        }
-                        Some(dns_name) => {
-                            broker_rewrite_map
-                                .insert(broker.to_string(), format!("{}:{}", dns_name, link.port));
-                        }
-                    }
+                    // rewrite the broker address to the dns name w/o az
+                    // requires the NLB has enabled the cross-zone load balancing
+                    broker_rewrite_map.insert(
+                        broker.to_string(),
+                        format!("{}:{}", &svc.endpoint_dns_name, link.port),
+                    );
                 }
             }
 

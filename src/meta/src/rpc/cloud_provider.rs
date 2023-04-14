@@ -14,13 +14,14 @@
 
 use std::collections::HashMap;
 
+use anyhow::anyhow;
 use aws_config::retry::RetryConfig;
-use aws_sdk_ec2::model::{Filter, VpcEndpointType};
+use aws_sdk_ec2::model::{Filter, State, VpcEndpointType};
 use itertools::Itertools;
 use risingwave_pb::catalog::connection::private_link_service::PrivateLinkProvider;
 use risingwave_pb::catalog::connection::PrivateLinkService;
 
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 #[derive(Clone)]
 pub struct AwsEc2Client {
@@ -49,9 +50,10 @@ impl AwsEc2Client {
     pub async fn create_aws_private_link(
         &self,
         service_name: &str,
-        az_ids: &[String],
     ) -> MetaResult<PrivateLinkService> {
-        let subnet_and_azs = self.describe_subnets(&self.vpc_id, az_ids).await?;
+        // fetch the AZs of the endpoint service
+        let service_azs = self.get_endpoint_service_az_names(service_name).await?;
+        let subnet_and_azs = self.describe_subnets(&self.vpc_id, &service_azs).await?;
 
         let subnet_ids: Vec<String> = subnet_and_azs.iter().map(|(id, _, _)| id.clone()).collect();
         let az_to_azid_map: HashMap<String, String> = subnet_and_azs
@@ -71,6 +73,14 @@ impl AwsEc2Client {
         // The number of returned DNS names may not equal to the input AZs,
         // because some AZs may not have a subnet in the RW VPC
         let mut azid_to_dns_map = HashMap::new();
+        if endpoint_dns_names.first().is_none() {
+            return Err(MetaError::from(anyhow!(
+                "No DNS name returned for the endpoint"
+            )));
+        }
+
+        // The first dns name doesn't has AZ info
+        let endpoint_dns_name = endpoint_dns_names.first().unwrap().clone();
         for dns_name in &endpoint_dns_names {
             for az in az_to_azid_map.keys() {
                 if dns_name.contains(az) {
@@ -86,18 +96,89 @@ impl AwsEc2Client {
             service_name: service_name.to_string(),
             endpoint_id,
             dns_entries: azid_to_dns_map,
+            endpoint_dns_name,
         })
+    }
+
+    pub async fn is_vpc_endpoint_ready(&self, vpc_endpoint_id: &str) -> MetaResult<bool> {
+        let mut is_ready = false;
+        let filter = Filter::builder()
+            .name("vpc-endpoint-id")
+            .values(vpc_endpoint_id)
+            .build();
+        let output = self
+            .client
+            .describe_vpc_endpoints()
+            .set_filters(Some(vec![filter]))
+            .send()
+            .await?;
+
+        match output.vpc_endpoints {
+            Some(endpoints) => {
+                let endpoint = endpoints.into_iter().exactly_one().map_err(|_| {
+                    MetaError::from(anyhow!("More than one VPC endpoint found with the same ID"))
+                })?;
+                if let Some(state) = endpoint.state {
+                    match state {
+                        State::Available => {
+                            is_ready = true;
+                        }
+                        // forward-compatible with protocol change
+                        other => {
+                            is_ready = other.as_str().eq_ignore_ascii_case("available");
+                        }
+                    }
+                }
+            }
+            None => {
+                return Err(MetaError::from(anyhow!(
+                    "No VPC endpoint found with the ID {}",
+                    vpc_endpoint_id
+                )));
+            }
+        }
+        Ok(is_ready)
+    }
+
+    async fn get_endpoint_service_az_names(&self, service_name: &str) -> MetaResult<Vec<String>> {
+        let mut service_azs = Vec::new();
+        let output = self
+            .client
+            .describe_vpc_endpoint_services()
+            .set_service_names(Some(vec![service_name.to_string()]))
+            .send()
+            .await?;
+
+        match output.service_details {
+            Some(details) => {
+                let detail = details.into_iter().exactly_one().map_err(|_| {
+                    MetaError::from(anyhow!(
+                        "More than one VPC endpoint service found with the same name"
+                    ))
+                })?;
+                if let Some(azs) = detail.availability_zones {
+                    service_azs.extend(azs.into_iter());
+                }
+            }
+            None => {
+                return Err(MetaError::from(anyhow!(
+                    "No VPC endpoint service found with the name {}",
+                    service_name
+                )));
+            }
+        }
+        Ok(service_azs)
     }
 
     async fn describe_subnets(
         &self,
         vpc_id: &str,
-        az_ids: &[String],
+        az_names: &[String],
     ) -> MetaResult<Vec<(String, String, String)>> {
         let vpc_filter = Filter::builder().name("vpc-id").values(vpc_id).build();
         let az_filter = Filter::builder()
-            .name("availability-zone-id")
-            .set_values(Some(Vec::from(az_ids)))
+            .name("availability-zone")
+            .set_values(Some(Vec::from(az_names)))
             .build();
         let output = self
             .client
@@ -142,6 +223,7 @@ impl AwsEc2Client {
 
         let endpoint = output.vpc_endpoint().unwrap();
         let mut dns_names = Vec::new();
+
         if let Some(dns_entries) = endpoint.dns_entries() {
             dns_entries.iter().for_each(|e| {
                 if let Some(dns_name) = e.dns_name() {
