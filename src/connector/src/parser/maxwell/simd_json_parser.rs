@@ -21,7 +21,7 @@ use simd_json::{BorrowedValue, ValueAccess};
 
 use super::operators::*;
 use crate::impl_common_parser_logic;
-use crate::parser::common::simd_json_parse_value;
+use crate::parser::common::{json_object_smart_get_value, simd_json_parse_value};
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{SourceColumnDesc, SourceContextRef};
 
@@ -68,8 +68,11 @@ impl MaxwellParser {
                     ))
                 })?;
                 writer.insert(|column| {
-                    simd_json_parse_value(&column.data_type, after.get(column.name.as_str()))
-                        .map_err(Into::into)
+                    simd_json_parse_value(
+                        &column.data_type,
+                        json_object_smart_get_value(after, column.name.as_str().into()),
+                    )
+                    .map_err(Into::into)
                 })
             }
             MAXWELL_UPDATE_OP => {
@@ -87,9 +90,13 @@ impl MaxwellParser {
                 writer.update(|column| {
                     // old only contains the changed columns but data contains all columns.
                     let col_name_lc = column.name.as_str();
-                    let before_value = before.get(col_name_lc).or_else(|| after.get(col_name_lc));
+                    let before_value = json_object_smart_get_value(before, col_name_lc.into())
+                        .or_else(|| json_object_smart_get_value(after, col_name_lc.into()));
                     let before = simd_json_parse_value(&column.data_type, before_value)?;
-                    let after = simd_json_parse_value(&column.data_type, after.get(col_name_lc))?;
+                    let after = simd_json_parse_value(
+                        &column.data_type,
+                        json_object_smart_get_value(after, col_name_lc.into()),
+                    )?;
                     Ok((before, after))
                 })
             }
@@ -98,8 +105,11 @@ impl MaxwellParser {
                     RwError::from(ProtocolError("old is missing for delete event".to_string()))
                 })?;
                 writer.delete(|column| {
-                    simd_json_parse_value(&column.data_type, before.get(column.name.as_str()))
-                        .map_err(Into::into)
+                    simd_json_parse_value(
+                        &column.data_type,
+                        json_object_smart_get_value(before, column.name.as_str().into()),
+                    )
+                    .map_err(Into::into)
                 })
             }
             other => Err(RwError::from(ProtocolError(format!(
@@ -122,8 +132,8 @@ mod tests {
     #[tokio::test]
     async fn test_json_parser() {
         let descs = vec![
-            SourceColumnDesc::simple("id", DataType::Int32, 0.into()),
-            SourceColumnDesc::simple("name", DataType::Varchar, 1.into()),
+            SourceColumnDesc::simple("ID", DataType::Int32, 0.into()),
+            SourceColumnDesc::simple("NAME", DataType::Varchar, 1.into()),
             SourceColumnDesc::simple("is_adult", DataType::Int16, 2.into()),
             SourceColumnDesc::simple("birthday", DataType::Timestamp, 3.into()),
         ];
