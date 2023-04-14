@@ -203,15 +203,6 @@ impl LogicalAgg {
         })
     }
 
-    /// Generally used by two phase hash agg.
-    /// If input dist already satisfies hash agg distribution,
-    /// it will be more expensive to do two phase agg, should just do shuffle agg.
-    pub(crate) fn hash_agg_dist_satisfied_by_input_dist(&self, input_dist: &Distribution) -> bool {
-        let required_dist =
-            RequiredDist::shard_by_key(self.input().schema().len(), self.group_key());
-        input_dist.satisfies(&required_dist)
-    }
-
     /// Generates distributed stream plan.
     fn gen_dist_stream_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         let input_dist = stream_input.distribution();
@@ -220,20 +211,20 @@ impl LogicalAgg {
         // Shuffle agg
         // If we have group key, and we won't try two phase agg optimization at all,
         // we will always choose shuffle agg over single agg.
-        if !self.group_key().is_empty() && !self.must_try_two_phase_agg() {
+        if !self.group_key().is_empty() && !self.core.must_try_two_phase_agg() {
             return self.gen_shuffle_plan(stream_input);
         }
 
         // Standalone agg
         // If no group key, and cannot two phase agg, we have to use single plan.
-        if self.group_key().is_empty() && !self.can_two_phase_agg() {
+        if self.group_key().is_empty() && !self.core.can_two_phase_agg() {
             return self.gen_single_plan(stream_input);
         }
 
         debug_assert!(if !self.group_key().is_empty() {
-            self.must_try_two_phase_agg()
+            self.core.must_try_two_phase_agg()
         } else {
-            self.can_two_phase_agg()
+            self.core.can_two_phase_agg()
         });
 
         // Stateless 2-phase simple agg
@@ -251,7 +242,7 @@ impl LogicalAgg {
         // We shall first distribute it by PK,
         // so it obeys consistent hash strategy via [`Distribution::HashShard`].
         let stream_input =
-            if *input_dist == Distribution::SomeShard && self.must_try_two_phase_agg() {
+            if *input_dist == Distribution::SomeShard && self.core.must_try_two_phase_agg() {
                 RequiredDist::shard_by_key(stream_input.schema().len(), stream_input.logical_pk())
                     .enforce_if_not_satisfies(stream_input, &Order::any())?
             } else {
@@ -264,7 +255,7 @@ impl LogicalAgg {
         // with input distributed by dist_key.
         match input_dist {
             Distribution::HashShard(dist_key) | Distribution::UpstreamHashShard(dist_key, _)
-                if (!self.hash_agg_dist_satisfied_by_input_dist(input_dist)
+                if (!self.core.hash_agg_dist_satisfied_by_input_dist(input_dist)
                     || self.group_key().is_empty()) =>
             {
                 let dist_key = dist_key.clone();
@@ -279,31 +270,6 @@ impl LogicalAgg {
         } else {
             self.gen_single_plan(stream_input)
         }
-    }
-
-    pub(crate) fn two_phase_agg_forced(&self) -> bool {
-        self.base
-            .ctx()
-            .session_ctx()
-            .config()
-            .get_force_two_phase_agg()
-    }
-
-    fn two_phase_agg_enabled(&self) -> bool {
-        self.base
-            .ctx()
-            .session_ctx()
-            .config()
-            .get_enable_two_phase_agg()
-    }
-
-    /// Must try two phase agg iff we are forced to, and we satisfy the constraints.
-    fn must_try_two_phase_agg(&self) -> bool {
-        self.two_phase_agg_forced() && self.can_two_phase_agg()
-    }
-
-    pub(crate) fn can_two_phase_agg(&self) -> bool {
-        self.core.can_two_phase_agg() && self.two_phase_agg_enabled()
     }
 
     // Check if the output of the aggregation needs to be sorted and return ordering req by group
@@ -337,16 +303,15 @@ impl LogicalAgg {
     // Check if the input is already sorted, and hence sort merge aggregation can be used
     // It can only be used, if the input is sorted on all group key indices and the
     // datatype of the column is int32
-    fn input_provides_order_on_group_keys(&self, new_logical: &LogicalAgg) -> bool {
+    fn input_provides_order_on_group_keys(&self, new_logical: &generic::Agg<PlanRef>) -> bool {
         self.group_key().iter().all(|group_by_idx| {
-            new_logical
-                .input()
+            let input = &new_logical.input;
+            input
                 .order()
                 .column_orders
                 .iter()
                 .any(|order| order.column_index == *group_by_idx)
-                && new_logical
-                    .input()
+                && input
                     .schema()
                     .fields()
                     .get(*group_by_idx)
@@ -1133,7 +1098,8 @@ impl ToBatch for LogicalAgg {
                     .rewrite_provided_order(&group_key_order);
             }
             let new_input = self.input().to_batch_with_order_required(&input_order)?;
-            let new_logical = self.clone_with_input(new_input);
+            let mut new_logical = self.core.clone();
+            new_logical.input = new_input;
             if self
                 .ctx()
                 .session_ctx()

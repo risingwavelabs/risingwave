@@ -27,7 +27,7 @@ use super::super::utils::TableCatalogBuilder;
 use super::{stream, GenericPlanNode, GenericPlanRef};
 use crate::expr::{Expr, ExprRewriter, InputRef, InputRefDisplay};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::property::{Distribution, FunctionalDependencySet, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{
     ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay, IndexRewriter,
@@ -74,7 +74,30 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     }
 
     pub(crate) fn can_two_phase_agg(&self) -> bool {
-        self.call_support_two_phase() && !self.is_agg_result_affected_by_order()
+        self.call_support_two_phase()
+            && !self.is_agg_result_affected_by_order()
+            && self.two_phase_agg_enabled()
+    }
+
+    /// Must try two phase agg iff we are forced to, and we satisfy the constraints.
+    pub(crate) fn must_try_two_phase_agg(&self) -> bool {
+        self.two_phase_agg_forced() && self.can_two_phase_agg()
+    }
+
+    fn two_phase_agg_forced(&self) -> bool {
+        self.ctx().session_ctx().config().get_force_two_phase_agg()
+    }
+
+    fn two_phase_agg_enabled(&self) -> bool {
+        self.ctx().session_ctx().config().get_enable_two_phase_agg()
+    }
+
+    /// Generally used by two phase hash agg.
+    /// If input dist already satisfies hash agg distribution,
+    /// it will be more expensive to do two phase agg, should just do shuffle agg.
+    pub(crate) fn hash_agg_dist_satisfied_by_input_dist(&self, input_dist: &Distribution) -> bool {
+        let required_dist = RequiredDist::shard_by_key(self.input.schema().len(), &self.group_key);
+        input_dist.satisfies(&required_dist)
     }
 
     fn call_support_two_phase(&self) -> bool {
