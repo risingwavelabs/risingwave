@@ -6061,6 +6061,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "chrono",
+ "criterion",
  "csv",
  "duration-str",
  "enum-as-inner",
