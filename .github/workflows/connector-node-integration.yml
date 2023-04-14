@@ -14,7 +14,7 @@ jobs:
     strategy:
       matrix:
         java: [ '11', '17' ]
-
+    name: Java ${{ matrix.java }}
     steps:
       - uses: actions/checkout@v3
       - name: Set up JDK ${{ matrix.java }}
