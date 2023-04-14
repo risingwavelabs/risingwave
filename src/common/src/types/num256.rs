@@ -21,7 +21,7 @@ use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 use std::str::FromStr;
 
 use bytes::{BufMut, Bytes};
-use ethnum::{i256, AsI256};
+use ethnum::{i256, u256, AsI256};
 use num_traits::{
     CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Signed, Zero,
 };
@@ -78,12 +78,12 @@ macro_rules! impl_common_for_num256 {
 
         impl $scalar {
             #[inline]
-            pub fn min() -> Self {
+            pub fn min_value() -> Self {
                 Self::from(<$inner>::MIN)
             }
 
             #[inline]
-            pub fn max() -> Self {
+            pub fn max_value() -> Self {
                 Self::from(<$inner>::MAX)
             }
 
@@ -189,16 +189,16 @@ impl Int256 {
     // `from_str_prefixed` function accepts string inputs that start with "0x". If the parsing
     // fails, it will attempt to parse the input as a decimal value.
     pub fn from_str_prefixed(src: &str) -> Result<Self, ParseIntError> {
-        i256::from_str_prefixed(src)
-            .or_else(|_| i256::from_str_prefixed(&src.to_lowercase()))
-            .map(Into::into)
+        u256::from_str_prefixed(src)
+            .or_else(|_| u256::from_str_prefixed(&src.to_lowercase()))
+            .map(|u| u.as_i256().into())
     }
 
     // `from_str_hex` function only accepts string inputs that start with "0x".
     pub fn from_str_hex(src: &str) -> Result<Self, ParseIntError> {
-        i256::from_str_hex(src)
-            .or_else(|_| i256::from_str_hex(&src.to_lowercase()))
-            .map(Into::into)
+        u256::from_str_hex(src)
+            .or_else(|_| u256::from_str_hex(&src.to_lowercase()))
+            .map(|u| u.as_i256().into())
     }
 }
 
@@ -455,11 +455,25 @@ mod tests {
     fn hex_to_int256() {
         assert_eq!(Int256::from_str_hex("0x0").unwrap(), Int256::from(0));
         assert_eq!(Int256::from_str_hex("0x1").unwrap(), Int256::from(1));
-        assert_eq!(Int256::from_str_hex("-0x1").unwrap(), Int256::from(-1));
+        assert_eq!(
+            Int256::from_str_hex(
+                "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            )
+            .unwrap(),
+            Int256::from(-1)
+        );
         assert_eq!(Int256::from_str_hex("0xa").unwrap(), Int256::from(10));
         assert_eq!(Int256::from_str_hex("0xA").unwrap(), Int256::from(10));
-        assert_eq!(Int256::from_str_hex("-0Xff").unwrap(), Int256::from(-255));
         assert_eq!(Int256::from_str_hex("0Xff").unwrap(), Int256::from(255));
+
+        assert_eq!(
+            Int256::from_str_hex(
+                "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff01"
+            )
+            .unwrap(),
+            Int256::from(-255)
+        );
+
         assert_eq!(
             Int256::from_str_hex("0xf").unwrap(),
             Int256::from_str("15").unwrap()
@@ -542,16 +556,16 @@ mod tests {
                 "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
             )
             .unwrap(),
-            Int256::max(),
+            Int256::max_value(),
         );
 
         // int256 min
         assert_eq!(
             Int256::from_str_hex(
-                "-0x8000000000000000000000000000000000000000000000000000000000000000"
+                "0x8000000000000000000000000000000000000000000000000000000000000000"
             )
             .unwrap(),
-            Int256::min(),
+            Int256::min_value(),
         );
     }
 }
