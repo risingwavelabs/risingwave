@@ -429,9 +429,17 @@ impl_fold_agg! { F64Array, Float64, F32Array }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::I64Array;
+    extern crate test;
+
+    use itertools::Itertools;
+    use rand::seq::SliceRandom;
+    use rand::Rng;
+    use risingwave_common::array::stream_chunk::Op;
+    use risingwave_common::array::{Array, ArrayBuilder, I64Array, I64ArrayBuilder};
+    use risingwave_common::buffer::{Bitmap, BitmapBuilder};
     use risingwave_common::types::F64;
     use risingwave_common::{array, array_nonnull};
+    use test::Bencher;
 
     use super::*;
 
@@ -648,5 +656,145 @@ mod tests {
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &100);
+    }
+
+    fn gen_rand_bitmap(num_bits: usize, count_ones: usize) -> Bitmap {
+        let mut builder = BitmapBuilder::zeroed(num_bits);
+        let mut range = (0..num_bits).into_iter().collect_vec();
+        range.shuffle(&mut rand::thread_rng());
+        let shuffled = range.into_iter().collect_vec();
+        for i in 0..count_ones {
+            builder.set(shuffled[i], true);
+        }
+        builder.finish()
+    }
+
+    fn bench_i64(
+        b: &mut Bencher,
+        mut agg: Box<dyn StreamingAggImpl>,
+        agg_desc: &str,
+        chunk_size: usize,
+        vis_rate: f64,
+        iter_count: usize,
+        append_only: bool,
+    ) {
+        println!(
+            "benching {} agg, chunk_size {}, vis_rate {}, iter_count {}",
+            agg_desc, chunk_size, vis_rate, iter_count
+        );
+        let mut rng = rand::thread_rng();
+        let mut ops: Vec<Op> = vec![];
+        let mut data_builder = I64ArrayBuilder::new(chunk_size);
+        let mut cur_data: Vec<i64> = vec![];
+        let bitmap = if vis_rate < 1.0 {
+            Some(gen_rand_bitmap(
+                chunk_size,
+                (chunk_size as f64 * vis_rate) as usize,
+            ))
+        } else {
+            None
+        };
+
+        if let Some(bitmap) = bitmap.as_ref() {
+            for i in 0..chunk_size {
+                // SAFETY(value_at_unchecked): the idx is always in bound.
+                unsafe {
+                    if bitmap.is_set_unchecked(i) {
+                        let op = if append_only || cur_data.len() == 0 {
+                            Op::Insert
+                        } else {
+                            if rng.gen() {
+                                Op::Delete
+                            } else {
+                                Op::Insert
+                            }
+                        };
+                        ops.push(op);
+                        if op == Op::Insert {
+                            let value = rng.gen::<i32>() as i64;
+                            data_builder.append_n(1, Some(value));
+                            cur_data.push(value);
+                        } else {
+                            let idx = rng.gen_range(0..cur_data.len());
+                            data_builder.append_n(1, Some(cur_data[idx]));
+                            cur_data.remove(idx);
+                        }
+                    } else {
+                        ops.push(Op::Insert);
+                        data_builder.append_n(1, Some(1234567890));
+                    }
+                }
+            }
+        } else {
+            for _ in 0..chunk_size {
+                let op = if append_only || cur_data.len() == 0 {
+                    Op::Insert
+                } else {
+                    if rng.gen() {
+                        Op::Delete
+                    } else {
+                        Op::Insert
+                    }
+                };
+                ops.push(op);
+                if op == Op::Insert {
+                    let value = rng.gen::<i32>() as i64;
+                    data_builder.append_n(1, Some(value));
+                    cur_data.push(value);
+                } else {
+                    let idx = rng.gen_range(0..cur_data.len());
+                    data_builder.append_n(1, Some(cur_data[idx]));
+                    cur_data.remove(idx);
+                }
+            }
+        }
+        let data: ArrayImpl = data_builder.finish().into();
+        b.iter(|| {
+            for _ in 0..iter_count {
+                agg.apply_batch(&ops, bitmap.as_ref(), &[&data]).unwrap();
+            }
+        });
+    }
+
+    #[bench]
+    fn bench_foldable_aggregator(b: &mut Bencher) {
+        for vis_rate in [1.0, 0.75, 0.5, 0.25, 0.05] {
+            bench_i64(
+                b,
+                Box::<TestStreamingSumAgg<I64Array>>::default(),
+                "sum",
+                1024,
+                vis_rate,
+                100,
+                false,
+            );
+            bench_i64(
+                b,
+                Box::<TestStreamingCountAgg<I64Array>>::default(),
+                "count",
+                1024,
+                vis_rate,
+                100,
+                false,
+            );
+            bench_i64(
+                b,
+                Box::<TestStreamingMinAgg<I64Array>>::default(),
+                "min",
+                1024,
+                vis_rate,
+                100,
+                true,
+            );
+            bench_i64(
+                b,
+                Box::<TestStreamingMaxAgg<I64Array>>::default(),
+                "max",
+                1024,
+                vis_rate,
+                100,
+                true,
+            );
+        }
     }
 }
