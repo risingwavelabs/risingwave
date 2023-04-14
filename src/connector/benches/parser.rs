@@ -113,7 +113,7 @@ fn bench_parse_not_match_case(c: &mut Criterion) {
 
     for chunk_size in &[32, 128, 512, 1024, 2048, 4096] {
         c.bench_with_input(
-            BenchmarkId::new("ParseMatchCase", chunk_size),
+            BenchmarkId::new("ParseMisMatchCase", chunk_size),
             chunk_size,
             |b, &chunk_size| {
                 let chunk_num = TOTAL_SIZE / chunk_size;
