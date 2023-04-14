@@ -364,10 +364,11 @@ impl Binder {
                 ("asin", raw_call(ExprType::Asin)), 
                 ("acos", raw_call(ExprType::Acos)), 
                 ("atan", raw_call(ExprType::Atan)), 
-                ("atan2", raw_call(ExprType::Atan2)),
-                ("sqrt", raw_call(ExprType::Sqrt)),
+                ("atan2", raw_call(ExprType::Atan2)),   
                 ("degrees", raw_call(ExprType::Degrees)),
                 ("radians", raw_call(ExprType::Radians)),
+                ("sind", raw_call(ExprType::Sind)),     
+                ("sqrt", raw_call(ExprType::Sqrt)),     
 
                 (
                     "to_timestamp",
