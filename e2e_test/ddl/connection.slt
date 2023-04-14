@@ -1,18 +1,18 @@
 # Create a connection.
 statement ok
-CREATE CONNECTION conn0 WITH (type = 'mock');
+CREATE CONNECTION conn0 WITH (type = 'privatelink', provider = 'mock');
 
 # Create another user with duplicate name.
 statement error
-CREATE CONNECTION conn0 WITH (type = 'mock');
+CREATE CONNECTION conn0 WITH (type = 'privatelink', provider = 'mock');
 
 # Create if not exists.
 statement ok
-CREATE CONNECTION IF NOT EXISTS conn0 WITH (type = 'mock');
+CREATE CONNECTION IF NOT EXISTS conn0 WITH (type = 'privatelink', provider = 'mock');
 
 # Test quoting.
 statement ok
-CREATE CONNECTION "conn1" WITH (type = 'mock');
+CREATE CONNECTION "conn1" WITH (type = 'privatelink', provider = 'mock');
 
 # Drop connections.
 statement ok
