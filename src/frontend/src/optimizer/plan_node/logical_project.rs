@@ -19,8 +19,8 @@ use itertools::Itertools;
 use risingwave_common::error::Result;
 
 use super::{
-    gen_filter_and_pushdown, generic, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamProject, ToBatch, ToStream, PlanNodeType,
+    gen_filter_and_pushdown, generic, BatchProject, ColPrunable, ExprRewritable, PlanBase,
+    PlanNodeType, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;

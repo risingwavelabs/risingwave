@@ -142,7 +142,7 @@ impl Binder {
 
         let returning_list;
         let fields;
-        // since the input values column layout may differ from the target table's column layout, 
+        // since the input value's column layout may differ from the target table's column layout,
         // we mock a column layout that aligns with the insert values when binding return_lists.
         {
             let original_ctx = self.context.clone();

@@ -346,20 +346,20 @@ impl BindContext {
         self.columns[idx].index = idx;
     }
 
-    /// arrange the BindContext's column layout with the given col_indices.
-    /// the index of col_indices represents the original column's index and the values of
-    /// col_indices represents this column's index after shuffling. 
-    pub fn arrange_column_layout(&mut self, col_indices: &Vec<usize>) {
-        let tmp_columns= self.columns.clone();
-        for i in 0..col_indices.len() {
-            self.set_column(tmp_columns[i].clone(), col_indices[i]);
+    /// arrange the `BindContext`'s column layout with the given `col_indices`.
+    /// the index of `col_indices` represents the original column's index and the values of
+    /// `col_indices` represents this column's index after arranging.
+    pub fn arrange_column_layout(&mut self, col_indices: &[usize]) {
+        let tmp_columns = self.columns.clone();
+        for (i, col_idx) in col_indices.iter().enumerate() {
+            self.set_column(tmp_columns[i].clone(), *col_idx);
         }
         let tmp_indices_of = self.indices_of.clone();
-        for i in 0..col_indices.len() {
-            for (key, indices) in tmp_indices_of.iter() {
-                for j in 0..indices.len() {
-                    if indices[j] == i {
-                        self.indices_of.get_mut(key).unwrap()[j] = col_indices[i];
+        for (old_idx, new_idx) in col_indices.iter().enumerate() {
+            for (key, indices) in &tmp_indices_of {
+                for (j, old_idx_in_map) in indices.iter().enumerate() {
+                    if *old_idx_in_map == old_idx {
+                        self.indices_of.get_mut(key).unwrap()[j] = *new_idx;
                     }
                 }
             }
