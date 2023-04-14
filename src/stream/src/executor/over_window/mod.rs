@@ -595,7 +595,13 @@ mod tests {
                 + 4 p2 200 20",
             ));
             let chunk = over_window.expect_chunk().await;
-            println!("{}", chunk.to_pretty_string());
+            assert_eq!(
+                chunk,
+                StreamChunk::from_pretty(
+                    " T  I I   i  i
+                    + p1 1 100 .  16"
+                )
+            );
             let watermark = over_window.expect_watermark().await;
             assert_eq!(watermark.val.into_int64(), 1);
 
@@ -608,7 +614,14 @@ mod tests {
                 + 8 p3 300 33",
             ));
             let chunk = over_window.expect_chunk().await;
-            println!("{}", chunk.to_pretty_string());
+            assert_eq!(
+                chunk,
+                StreamChunk::from_pretty(
+                    " T  I I   i  i
+                    + p1 2 101 10 18
+                    + p2 4 200 .  22"
+                )
+            );
             let watermark = over_window.expect_watermark().await;
             assert_eq!(watermark.val.into_int64(), 4);
 
@@ -630,7 +643,15 @@ mod tests {
                 + 13 p3 301 39",
             ));
             let chunk = over_window.expect_chunk().await;
-            println!("{}", chunk.to_pretty_string());
+            assert_eq!(
+                chunk,
+                StreamChunk::from_pretty(
+                    " T  I I   i  i
+                    + p1 5 102 16 13
+                    + p2 7 201 20 28
+                    + p3 8 300 .  39"
+                )
+            );
 
             tx.push_barrier(4, false);
             over_window.expect_barrier().await;
