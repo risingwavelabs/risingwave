@@ -63,7 +63,7 @@ jobs:
         
           echo "--- prepare integration tests"
           cd ${RISINGWAVE_ROOT}/java/connector-node
-          pip3 install grpcio grpcio-tools psycopg2 psycopg2-binary pyspark
+          pip3 install grpcio grpcio-tools psycopg2 psycopg2-binary pyspark==3.3
           cd python-client && bash gen-stub.sh
 
           echo "--- running jdbc integration tests"
