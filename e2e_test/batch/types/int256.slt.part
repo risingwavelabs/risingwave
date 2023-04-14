@@ -77,7 +77,7 @@ select hex_to_int256('0x11');
 17
 
 query I
-select hex_to_int256('-0x11');
+select hex_to_int256('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffef');
 ----
 -17
 
@@ -86,6 +86,10 @@ select hex_to_int256('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 ----
 7237005577332262213973186563042994240829374041602535252466099000494570602495
 
+query I
+select hex_to_int256('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff01');
+----
+-255
 
 statement ok
 create table t (v rw_int256)
