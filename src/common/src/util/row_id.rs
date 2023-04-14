@@ -105,7 +105,7 @@ impl RowIdGenerator {
                 current_timestamp_ms = get_current_timestamp_ms();
 
                 #[cfg(madsim)]
-                madsim::time::advance(std::time::Duration::from_micros(10));
+                tokio::time::advance(std::time::Duration::from_micros(10));
                 #[cfg(not(madsim))]
                 std::hint::spin_loop();
             }
