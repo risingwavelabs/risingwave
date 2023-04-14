@@ -94,8 +94,9 @@ message Sink {
 message Connection {
   message PrivateLinkService {
     enum PrivateLinkProvider {
-      MOCK = 0;
-      AWS = 1;
+      UNSPECIFIED = 0;
+      MOCK = 1;
+      AWS = 2;
     }
     PrivateLinkProvider provider = 1;
     string service_name = 2;
