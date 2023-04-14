@@ -14,6 +14,7 @@
 
 #![expect(dead_code)]
 
+use std::collections::VecDeque;
 use std::marker::PhantomData;
 
 use futures::StreamExt;
@@ -24,7 +25,7 @@ use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{DataType, ToDatumRef};
+use risingwave_common::types::{DataType, ScalarImpl, ToDatumRef};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::sort_util::OrderType;
@@ -37,7 +38,7 @@ use self::partition::Partition;
 use self::state::StateKey;
 use super::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, PkIndices, StreamExecutorError, StreamExecutorResult,
+    ExecutorInfo, Message, PkIndices, StreamExecutorError, StreamExecutorResult, Watermark,
 };
 use crate::cache::{new_unbounded, ExecutorCache};
 use crate::common::table::state_table::StateTable;
@@ -103,8 +104,24 @@ struct ExecutorInner<S: StateStore> {
     watermark_epoch: AtomicU64Ref,
 }
 
+impl<S: StateStore> ExecutorInner<S> {
+    fn output_partition_key_index(&self) -> usize {
+        0
+    }
+
+    fn output_order_key_index(&self) -> usize {
+        self.output_partition_key_index() + self.partition_key_indices.len()
+    }
+
+    fn _output_pk_index(&self) -> usize {
+        self.output_order_key_index() + 1
+    }
+}
+
 struct ExecutionVars<S: StateStore> {
     partitions: PartitionCache,
+    pending_watermarks: VecDeque<Watermark>,
+    last_outputted_order_key: Option<ScalarImpl>,
     _phantom: PhantomData<S>,
 }
 
@@ -271,7 +288,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         this: &mut ExecutorInner<S>,
         vars: &mut ExecutionVars<S>,
         chunk: StreamChunk,
-    ) -> StreamExecutorResult<StreamChunk> {
+    ) -> StreamExecutorResult<Option<StreamChunk>> {
         let mut builders = this.info.schema.create_array_builders(chunk.capacity()); // just an estimate
 
         // We assume that the input is sorted by order key.
@@ -365,11 +382,27 @@ impl<S: StateStore> OverWindowExecutor<S> {
             .map(|b| b.finish().into())
             .collect_vec();
         let chunk_size = columns[0].len();
-        Ok(StreamChunk::new(
-            vec![Op::Insert; chunk_size],
-            columns,
-            None,
-        ))
+        Ok(if chunk_size > 0 {
+            Some(StreamChunk::new(
+                vec![Op::Insert; chunk_size],
+                columns,
+                None,
+            ))
+        } else {
+            None
+        })
+    }
+
+    #[try_stream(ok = Watermark, error = StreamExecutorError)]
+    async fn emit_watermarks<'a>(_this: &'a mut ExecutorInner<S>, vars: &'a mut ExecutionVars<S>) {
+        if let Some(last_outputed) = vars.last_outputted_order_key.as_ref() {
+            while let Some(watermark) = vars.pending_watermarks.front() {
+                if &watermark.val > last_outputed {
+                    break;
+                }
+                yield vars.pending_watermarks.pop_front().unwrap();
+            }
+        }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -381,6 +414,8 @@ impl<S: StateStore> OverWindowExecutor<S> {
 
         let mut vars = ExecutionVars {
             partitions: ExecutorCache::new(new_unbounded(this.watermark_epoch.clone())),
+            pending_watermarks: VecDeque::new(),
+            last_outputted_order_key: None,
             _phantom: PhantomData::<S>,
         };
 
@@ -396,11 +431,38 @@ impl<S: StateStore> OverWindowExecutor<S> {
             let msg = msg?;
             match msg {
                 Message::Watermark(watermark) => {
-                    // TODO()
+                    if watermark.col_idx != this.order_key_index {
+                        // Ignore watermark from other columns.
+                        continue;
+                    }
+                    // Note: We may receive many watermarks before we are ready to output rows below
+                    // theme.
+                    vars.pending_watermarks
+                        .push_back(watermark.with_idx(this.output_order_key_index()));
+                    #[for_await]
+                    for wtmk in Self::emit_watermarks(&mut this, &mut vars) {
+                        yield Message::Watermark(wtmk?);
+                    }
                 }
                 Message::Chunk(chunk) => {
                     let output_chunk = Self::apply_chunk(&mut this, &mut vars, chunk).await?;
-                    yield Message::Chunk(output_chunk);
+                    if let Some(chunk) = output_chunk {
+                        let last_order_key = chunk.columns()[this.output_order_key_index()]
+                            .array_ref()
+                            .iter()
+                            .last()
+                            .expect("chunk must not be empty")
+                            .expect("order key must not be NULL")
+                            .into_scalar_impl();
+                        vars.last_outputted_order_key = Some(last_order_key);
+
+                        yield Message::Chunk(chunk);
+
+                        #[for_await]
+                        for wtmk in Self::emit_watermarks(&mut this, &mut vars) {
+                            yield Message::Watermark(wtmk?);
+                        }
+                    }
                 }
                 Message::Barrier(barrier) => {
                     this.state_table.commit(barrier.epoch).await?;
@@ -450,7 +512,7 @@ mod tests {
         store: S,
     ) -> (MessageSender, BoxedMessageStream) {
         let input_schema = Schema::new(vec![
-            Field::unnamed(DataType::Int32),   // order key
+            Field::unnamed(DataType::Int64),   // order key
             Field::unnamed(DataType::Varchar), // partition key
             Field::unnamed(DataType::Int64),   // pk
             Field::unnamed(DataType::Int32),   // x
@@ -461,7 +523,7 @@ mod tests {
 
         let table_columns = vec![
             ColumnDesc::unnamed(ColumnId::new(0), DataType::Varchar), // partition key
-            ColumnDesc::unnamed(ColumnId::new(1), DataType::Int32),   // order key
+            ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),   // order key
             ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64),   // pk
             ColumnDesc::unnamed(ColumnId::new(3), DataType::Int32),   // x
         ];
@@ -525,17 +587,30 @@ mod tests {
             tx.push_barrier(1, false);
             over_window.expect_barrier().await;
 
+            tx.push_int64_watermark(0, 1); // will be emitted after the output chunk
             tx.push_chunk(StreamChunk::from_pretty(
-                " i T  I   i
+                " I T  I   i
                 + 1 p1 100 10
-                + 1 p1 101 16
-                + 4 p2 200 20
+                + 2 p1 101 16
+                + 4 p2 200 20",
+            ));
+            let chunk = over_window.expect_chunk().await;
+            println!("{}", chunk.to_pretty_string());
+            let watermark = over_window.expect_watermark().await;
+            assert_eq!(watermark.val.into_int64(), 1);
+
+            tx.push_int64_watermark(0, 4); // will be emitted after the output chunk
+            tx.push_int64_watermark(0, 5); // will be delayed
+            tx.push_chunk(StreamChunk::from_pretty(
+                " I T  I   i
                 + 5 p1 102 18
                 + 7 p2 201 22
                 + 8 p3 300 33",
             ));
             let chunk = over_window.expect_chunk().await;
             println!("{}", chunk.to_pretty_string());
+            let watermark = over_window.expect_watermark().await;
+            assert_eq!(watermark.val.into_int64(), 4);
 
             tx.push_barrier(2, false);
             over_window.expect_barrier().await;
@@ -549,7 +624,7 @@ mod tests {
             over_window.expect_barrier().await;
 
             tx.push_chunk(StreamChunk::from_pretty(
-                " i  T  I   i
+                " I  T  I   i
                 + 10 p1 103 13
                 + 12 p2 202 28
                 + 13 p3 301 39",
