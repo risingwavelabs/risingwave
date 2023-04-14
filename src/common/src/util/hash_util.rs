@@ -39,6 +39,6 @@ impl BuildHasher for XxHash64Builder {
     type Hasher = twox_hash::XxHash64;
 
     fn build_hasher(&self) -> Self::Hasher {
-        twox_hash::XxHash64::with_seed(0)
+        twox_hash::XxHash64::with_seed(0x20210401)
     }
 }
