@@ -130,9 +130,6 @@ impl Binder {
             }
         };
 
-        let (returning_list, fields) = self.bind_returning_list(returning_items)?;
-        let is_returning = !returning_list.is_empty();
-
         let col_indices_to_insert = get_col_indices_to_insert(
             &cols_to_insert_in_table,
             &cols_to_insert_by_user,
@@ -143,6 +140,17 @@ impl Binder {
             .map(|idx| cols_to_insert_in_table[*idx].data_type().clone())
             .collect();
 
+        let returning_list;
+        let fields;
+        // since the input values column layout may differ from the target table's column layout, 
+        // we mock a column layout that aligns with the insert values when binding return_lists.
+        {
+            let original_ctx = self.context.clone();
+            self.context.arrange_column_layout(&col_indices_to_insert);
+            (returning_list, fields) = self.bind_returning_list(returning_items)?;
+            self.context = original_ctx;
+        }
+        let is_returning = !returning_list.is_empty();
         // When the column types of `source` query do not match `expected_types`,
         // casting is needed.
         //
