@@ -62,24 +62,32 @@ fn resolve_private_link_properties(
                     provider
                 ))));
             }
+        };
+    match provider {
+        PrivateLinkProvider::Mock => Ok(create_connection_request::PrivateLink {
+            provider: provider.into(),
+            service_name: String::new(),
+            availability_zones: Vec::new(),
+        }),
+        PrivateLinkProvider::Aws => {
+            let service_name =
+                get_connection_property_required(with_properties, CONNECTION_SERVICE_NAME_PROP)?;
+            let availability_zones_str =
+                get_connection_property_required(with_properties, CONNECTION_AVAIL_ZONE_PROP)?;
+            let availability_zones: Vec<String> = serde_json::from_str(&availability_zones_str)
+                .map_err(|e| {
+                    RwError::from(ProtocolError(format!(
+                        "Can not parse {}: {}",
+                        CONNECTION_AVAIL_ZONE_PROP, e
+                    )))
+                })?;
+            Ok(create_connection_request::PrivateLink {
+                provider: provider.into(),
+                service_name,
+                availability_zones,
+            })
         }
-        .into();
-    let service_name =
-        get_connection_property_required(with_properties, CONNECTION_SERVICE_NAME_PROP)?;
-    let availability_zones_str =
-        get_connection_property_required(with_properties, CONNECTION_AVAIL_ZONE_PROP)?;
-    let availability_zones: Vec<String> =
-        serde_json::from_str(&availability_zones_str).map_err(|e| {
-            RwError::from(ProtocolError(format!(
-                "Can not parse {}: {}",
-                CONNECTION_AVAIL_ZONE_PROP, e
-            )))
-        })?;
-    Ok(create_connection_request::PrivateLink {
-        provider,
-        service_name,
-        availability_zones,
-    })
+    }
 }
 
 fn resolve_create_connection_payload(
