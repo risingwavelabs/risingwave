@@ -349,10 +349,10 @@ mod tests {
         let expect_exec = MockExecutor::with_chunk(
             DataChunk::from_pretty(
                 "i i I
-                 0 1 3
+                 1 0 1
                  0 0 3
-                 1 1 6
-                 1 0 1",
+                 0 1 3
+                 1 1 6",
             ),
             schema,
         );
