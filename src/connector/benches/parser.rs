@@ -68,7 +68,7 @@ fn create_parser(
         SourceColumnDesc::simple("alpha", DataType::Int16, 0.into()),
         SourceColumnDesc::simple("bravo", DataType::Int32, 1.into()),
         SourceColumnDesc::simple("charlie", DataType::Int64, 2.into()),
-        SourceColumnDesc::simple("delta", DataType::Int256, 3.into()),
+        SourceColumnDesc::simple("delta", DataType::Int64, 3.into()),
     ];
     let parser = JsonParser::new(desc.clone(), Default::default()).unwrap();
     let input = gen_input(mode, chunk_size, chunk_num);
@@ -87,7 +87,7 @@ async fn parse(parser: JsonParser, column_desc: Vec<SourceColumnDesc>, input: Ve
     }
 }
 
-fn bench_parse_match_case(c: &mut Criterion) {
+fn do_bench(c: &mut Criterion, mode: &str) {
     const TOTAL_SIZE: usize = 1024 * 1024usize;
     let rt = Runtime::new().unwrap();
 
@@ -98,7 +98,7 @@ fn bench_parse_match_case(c: &mut Criterion) {
             |b, &chunk_size| {
                 let chunk_num = TOTAL_SIZE / chunk_size;
                 b.to_async(&rt).iter_batched(
-                    || create_parser(chunk_size, chunk_num, "match"),
+                    || create_parser(chunk_size, chunk_num, mode),
                     |(parser, column_desc, input)| parse(parser, column_desc, input),
                     BatchSize::SmallInput,
                 );
@@ -107,25 +107,13 @@ fn bench_parse_match_case(c: &mut Criterion) {
     }
 }
 
-fn bench_parse_not_match_case(c: &mut Criterion) {
-    const TOTAL_SIZE: usize = 1024 * 1024usize;
-    let rt = Runtime::new().unwrap();
-
-    for chunk_size in &[32, 128, 512, 1024, 2048, 4096] {
-        c.bench_with_input(
-            BenchmarkId::new("ParseMisMatchCase", chunk_size),
-            chunk_size,
-            |b, &chunk_size| {
-                let chunk_num = TOTAL_SIZE / chunk_size;
-                b.to_async(&rt).iter_batched(
-                    || create_parser(chunk_size, chunk_num, "mismatch"),
-                    |(parser, column_desc, input)| parse(parser, column_desc, input),
-                    BatchSize::SmallInput,
-                );
-            },
-        );
-    }
+fn bench_parse_match_case(c: &mut Criterion) {
+    do_bench(c, "match");
 }
 
-criterion_group!(benches, bench_parse_match_case, bench_parse_not_match_case);
+fn bench_parse_mismatch_case(c: &mut Criterion) {
+    do_bench(c, "mismatch");
+}
+
+criterion_group!(benches, bench_parse_match_case, bench_parse_mismatch_case);
 criterion_main!(benches);
