@@ -364,7 +364,7 @@ def section_network(outer_panels):
                     ],
                 ),
                 panels.timeseries_row(
-                    "Batch Exchange Recv (Rows/s)",
+                    "Batch Exchange Recv",
                     "",
                     [
                         panels.target(
