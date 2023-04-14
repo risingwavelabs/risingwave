@@ -26,8 +26,7 @@ use num_traits::{
     CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Signed, Zero,
 };
 use risingwave_pb::data::ArrayType;
-use serde::de::{Error, Visitor};
-use serde::{Deserializer, Serializer};
+use serde::{Deserialize, Serialize};
 use to_text::ToText;
 
 use crate::array::ArrayResult;
@@ -208,41 +207,19 @@ impl<'a> Int256Ref<'a> {
         &self,
         serializer: &mut memcomparable::Serializer<impl bytes::BufMut>,
     ) -> memcomparable::Result<()> {
-        let unsigned: i256 = self.0 ^ (i256::from(1) << (i256::BITS - 1));
-        serializer.serialize_bytes(&unsigned.to_be_bytes())
-    }
-}
-
-struct FormattedInt256Visitor;
-
-impl<'de> Visitor<'de> for FormattedInt256Visitor {
-    type Value = [u8; 32];
-
-    fn expecting(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str("a formatted 256-bit integer")
-    }
-
-    fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
-    where
-        E: Error,
-    {
-        if v.len() != 32 {
-            return Err(Error::invalid_length(v.len(), &self));
-        }
-
-        let mut buf = [0u8; 32];
-        buf.copy_from_slice(v);
-        Ok(buf)
+        let (hi, lo) = self.0.into_words();
+        (hi, lo as u128).serialize(serializer)
     }
 }
 
 impl Int256 {
+    pub const MEMCMP_ENCODED_SIZE: usize = 32;
+
     pub fn memcmp_deserialize(
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
-        let buf = deserializer.deserialize_bytes(FormattedInt256Visitor)?;
-        let unsigned = i256::from_be_bytes(buf);
-        let signed = unsigned ^ (i256::from(1) << (i256::BITS - 1));
+        let (hi, lo) = <(i128, u128)>::deserialize(deserializer)?;
+        let signed = i256::from_words(hi, lo as i128);
         Ok(Int256::from(signed))
     }
 }
