@@ -32,7 +32,7 @@ use crate::executor::ExecutorBuilder;
 use crate::task::{BatchTaskContext, TaskId};
 
 pub type ExchangeExecutor<C> = GenericExchangeExecutor<DefaultCreateSource, C>;
-use super::BatchTaskMetricsWithTaskLabels;
+use super::BatchTaskLocalMetrics;
 use crate::executor::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor};
 
 pub struct GenericExchangeExecutor<CS, C> {
@@ -47,7 +47,7 @@ pub struct GenericExchangeExecutor<CS, C> {
 
     /// Batch metrics.
     /// None: Local mode don't record mertics.
-    metrics: Option<BatchTaskMetricsWithTaskLabels>,
+    metrics: Option<BatchTaskLocalMetrics>,
 }
 
 /// `CreateSource` determines the right type of `ExchangeSource` to create.
@@ -192,7 +192,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> GenericExchangeExec
         prost_source: PbExchangeSource,
         source_creator: CS,
         context: C,
-        metrics: Option<BatchTaskMetricsWithTaskLabels>,
+        metrics: Option<BatchTaskLocalMetrics>,
         identity: String,
     ) {
         let mut source = source_creator
@@ -210,7 +210,8 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> GenericExchangeExec
                 source_stage_id.as_str(),
                 source_task_id.as_str(),
             ]);
-            metrics.remove_labels(metrics.task_exchange_recv_row_number.clone(), &labels);
+            metrics
+                .remove_labels_after_finish(metrics.task_exchange_recv_row_number.clone(), &labels);
             Some(
                 metrics
                     .task_exchange_recv_row_number

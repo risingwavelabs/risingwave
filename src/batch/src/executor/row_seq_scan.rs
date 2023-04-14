@@ -37,7 +37,7 @@ use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, StateStore};
 
-use super::BatchTaskMetricsWithTaskLabels;
+use super::BatchTaskLocalMetrics;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -50,7 +50,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
 
     /// Batch metrics.
     /// None: Local mode don't record mertics.
-    metrics: Option<BatchTaskMetricsWithTaskLabels>,
+    metrics: Option<BatchTaskLocalMetrics>,
 
     table: StorageTable<S>,
     scan_ranges: Vec<ScanRange>,
@@ -138,7 +138,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         epoch: BatchQueryEpoch,
         chunk_size: usize,
         identity: String,
-        metrics: Option<BatchTaskMetricsWithTaskLabels>,
+        metrics: Option<BatchTaskLocalMetrics>,
     ) -> Self {
         Self {
             chunk_size,
@@ -313,7 +313,10 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         let histogram = if let Some(ref metrics) = metrics {
             let mut labels = metrics.task_labels();
             labels.push(identity.as_str());
-            metrics.remove_labels(metrics.task_row_seq_scan_next_duration.clone(), &labels);
+            metrics.remove_labels_after_finish(
+                metrics.task_row_seq_scan_next_duration.clone(),
+                &labels,
+            );
             Some(
                 metrics
                     .task_row_seq_scan_next_duration

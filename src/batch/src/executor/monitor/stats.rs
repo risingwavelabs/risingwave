@@ -171,6 +171,18 @@ impl BatchTaskMetrics {
     pub fn for_test() -> Self {
         Self::new(prometheus::Registry::new())
     }
+
+    pub fn local_for_task(self: Arc<Self>, task_id: TaskId) -> BatchTaskLocalMetrics {
+        Arc::new(BatchTaskMetricsWithTaskLabels {
+            metrics: self,
+            task_labels: vec![
+                task_id.query_id.clone(),
+                task_id.stage_id.to_string(),
+                task_id.task_id.to_string(),
+            ],
+            task_id,
+        })
+    }
 }
 
 impl Collector for BatchTaskMetrics {
@@ -181,17 +193,14 @@ impl Collector for BatchTaskMetrics {
     fn collect(&self) -> Vec<proto::MetricFamily> {
         let mut mfs = Vec::with_capacity(8);
 
-        // The collected data will be cleared immediately to avoid unbounded memory usage.
-        // Note that if data is inserted between `collect` and `reset`, it will be lost, though the
-        // probability is extremely low.
-        macro_rules! collect_and_clear {
+        macro_rules! collect_metric {
             ($({ $metric:ident, $type:ty },)*) => {
                 $(
                     mfs.extend(self.$metric.collect());
                 )*
             };
         }
-        for_all_task_metrics!(collect_and_clear);
+        for_all_task_metrics!(collect_metric);
 
         // Clean up metrics for finished tasks.
         let mut guard = self.labels_to_remove.lock();
@@ -207,10 +216,12 @@ impl Collector for BatchTaskMetrics {
     }
 }
 
-/// A wrapper of `BatchTaskMetrics` that contains the labels derived from a `TaskId`. This is passed
-/// to the execution of batch tasks instead of `BatchTaskMetrics` so that we don't have to pass
-/// `task_id` around and repeatedly generate the same labels.
-#[derive(Clone)]
+/// A wrapper of `BatchTaskMetrics` to serve the following purposes:
+///
+/// - Store the labels derived from a `TaskId` to avoid generating it repeatedly.
+/// - Remove labels values after the corresponding task finishes.
+pub type BatchTaskLocalMetrics = Arc<BatchTaskMetricsWithTaskLabels>;
+
 pub struct BatchTaskMetricsWithTaskLabels {
     metrics: Arc<BatchTaskMetrics>,
     task_id: TaskId,
@@ -218,25 +229,13 @@ pub struct BatchTaskMetricsWithTaskLabels {
 }
 
 impl BatchTaskMetricsWithTaskLabels {
-    pub fn new(metrics: Arc<BatchTaskMetrics>, task_id: TaskId) -> Self {
-        Self {
-            metrics,
-            task_labels: vec![
-                task_id.query_id.clone(),
-                task_id.stage_id.to_string(),
-                task_id.task_id.to_string(),
-            ],
-            task_id,
-        }
-    }
-
     pub fn task_labels(&self) -> Vec<&str> {
         self.task_labels.iter().map(AsRef::as_ref).collect()
     }
 
     /// Schedule values associated with `labels` on `metric` to be removed after the task owning
     /// these metrics finishes.
-    pub fn remove_labels<T: MetricVecBuilder + 'static>(
+    pub fn remove_labels_after_finish<T: MetricVecBuilder + 'static>(
         &self,
         metric: MetricVec<T>,
         labels: &[&str],
