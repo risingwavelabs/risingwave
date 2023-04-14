@@ -210,12 +210,11 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> GenericExchangeExec
                 source_stage_id.as_str(),
                 source_task_id.as_str(),
             ]);
-
+            metrics.remove_labels(metrics.task_exchange_recv_row_number.clone(), &labels);
             Some(
                 metrics
-                    .metrics
                     .task_exchange_recv_row_number
-                    .with_label_values(&labels[..]),
+                    .with_label_values(&labels),
             )
         } else {
             // no metrics to collect, no counter

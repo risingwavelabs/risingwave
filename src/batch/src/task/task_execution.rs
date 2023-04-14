@@ -400,7 +400,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 }
                 let cumulative = monitor.cumulative();
                 let labels = &task_metrics.task_labels();
-                let task_metrics = &task_metrics.metrics;
                 task_metrics
                     .task_first_poll_delay
                     .with_label_values(labels)
@@ -430,6 +429,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     .task_slow_poll_duration
                     .with_label_values(labels)
                     .set(cumulative.total_slow_poll_duration.as_secs_f64());
+                task_metrics.remove_labels(task_metrics.task_slow_poll_duration.clone(), labels);
             } else if let Err(error) = AssertUnwindSafe(task(task_id.clone())).catch_unwind().await
             {
                 error!("Batch task {:?} panic: {:?}", task_id, error);

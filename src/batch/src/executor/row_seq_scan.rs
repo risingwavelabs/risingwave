@@ -313,9 +313,9 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         let histogram = if let Some(ref metrics) = metrics {
             let mut labels = metrics.task_labels();
             labels.push(identity.as_str());
+            metrics.remove_labels(metrics.task_row_seq_scan_next_duration.clone(), &labels);
             Some(
                 metrics
-                    .metrics
                     .task_row_seq_scan_next_duration
                     .with_label_values(&labels),
             )

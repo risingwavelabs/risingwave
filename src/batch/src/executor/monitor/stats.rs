@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -48,7 +50,8 @@ macro_rules! def_task_metrics {
             descs: Vec<Desc>,
             $( pub $metric: $type, )*
             /// Labels to remove after each `collect`.
-            labels_to_remove: Arc<Mutex<Vec<Box<dyn Fn() + Send>>>>,
+            labels_to_remove: Arc<Mutex<HashMap<TaskId, Vec<Box<dyn Fn() + Send>>>>>,
+            finished_tasks: Arc<Mutex<Vec<TaskId>>>,
         }
     };
 }
@@ -157,7 +160,8 @@ impl BatchTaskMetrics {
             task_slow_poll_duration,
             task_exchange_recv_row_number,
             task_row_seq_scan_next_duration,
-            labels_to_remove: Arc::new(Mutex::new(Vec::new())),
+            labels_to_remove: Arc::new(Mutex::new(HashMap::new())),
+            finished_tasks: Arc::new(Mutex::new(Vec::new())),
         };
         registry.register(Box::new(metrics.clone())).unwrap();
         metrics
@@ -166,21 +170,6 @@ impl BatchTaskMetrics {
     /// Create a new `BatchTaskMetrics` instance used in tests or other places.
     pub fn for_test() -> Self {
         Self::new(prometheus::Registry::new())
-    }
-
-    pub fn remove_labels<T: MetricVecBuilder + 'static>(
-        &self,
-        metric: MetricVec<T>,
-        labels: &[&str],
-    ) {
-        let owned_labels = labels
-            .into_iter()
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>();
-        self.labels_to_remove.lock().push(Box::new(move || {
-            let _ = metric
-                .remove_label_values(&owned_labels.iter().map(|s| s.as_str()).collect::<Vec<_>>());
-        }));
     }
 }
 
@@ -203,9 +192,17 @@ impl Collector for BatchTaskMetrics {
             };
         }
         for_all_task_metrics!(collect_and_clear);
-        for callback in self.labels_to_remove.lock().drain(..) {
-            callback();
+
+        // Clean up metrics for finished tasks.
+        let mut guard = self.labels_to_remove.lock();
+        for task_id in self.finished_tasks.lock().drain(..) {
+            if let Some(callbacks) = guard.remove(&task_id) {
+                for callback in callbacks {
+                    callback();
+                }
+            }
         }
+
         mfs
     }
 }
@@ -215,20 +212,63 @@ impl Collector for BatchTaskMetrics {
 /// `task_id` around and repeatedly generate the same labels.
 #[derive(Clone)]
 pub struct BatchTaskMetricsWithTaskLabels {
-    pub metrics: Arc<BatchTaskMetrics>,
+    metrics: Arc<BatchTaskMetrics>,
+    task_id: TaskId,
     task_labels: Vec<String>,
 }
 
 impl BatchTaskMetricsWithTaskLabels {
-    pub fn new(metrics: Arc<BatchTaskMetrics>, id: TaskId) -> Self {
+    pub fn new(metrics: Arc<BatchTaskMetrics>, task_id: TaskId) -> Self {
         Self {
             metrics,
-            task_labels: vec![id.query_id, id.stage_id.to_string(), id.task_id.to_string()],
+            task_labels: vec![
+                task_id.query_id.clone(),
+                task_id.stage_id.to_string(),
+                task_id.task_id.to_string(),
+            ],
+            task_id,
         }
     }
 
     pub fn task_labels(&self) -> Vec<&str> {
         self.task_labels.iter().map(AsRef::as_ref).collect()
+    }
+
+    /// Schedule values associated with `labels` on `metric` to be removed after the task owning
+    /// these metrics finishes.
+    pub fn remove_labels<T: MetricVecBuilder + 'static>(
+        &self,
+        metric: MetricVec<T>,
+        labels: &[&str],
+    ) {
+        let owned_labels = labels.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        self.metrics
+            .labels_to_remove
+            .lock()
+            .entry(self.task_id.clone())
+            .or_default()
+            .push(Box::new(move || {
+                let _ = metric.remove_label_values(
+                    &owned_labels.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                );
+            }));
+    }
+}
+
+impl Deref for BatchTaskMetricsWithTaskLabels {
+    type Target = Arc<BatchTaskMetrics>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.metrics
+    }
+}
+
+impl Drop for BatchTaskMetricsWithTaskLabels {
+    fn drop(&mut self) {
+        self.metrics
+            .finished_tasks
+            .lock()
+            .push(self.task_id.clone());
     }
 }
 
