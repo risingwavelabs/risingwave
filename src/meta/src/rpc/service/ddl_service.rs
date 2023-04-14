@@ -712,6 +712,14 @@ where
             let link_targets: Vec<AwsPrivateLinkItem> =
                 serde_json::from_str(link_target_value).map_err(|e| anyhow!(e))?;
 
+            if broker_addrs.len() != link_targets.len() {
+                return Err(MetaError::from(anyhow!(
+                    "The number of broker addrs {} does not match the number of private link targets {}",
+                    broker_addrs.len(),
+                    link_targets.len()
+                )));
+            }
+
             let conn = self
                 .catalog_manager
                 .get_connection_by_name(&private_link_name)
