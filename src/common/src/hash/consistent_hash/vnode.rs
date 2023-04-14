@@ -16,7 +16,7 @@ use itertools::Itertools;
 use parse_display::Display;
 
 use crate::array::{Array, ArrayImpl, DataChunk};
-use crate::hash::HashCode;
+use crate::hash::Crc32HashCode;
 use crate::row::{Row, RowExt};
 use crate::types::ScalarRefImpl;
 use crate::util::hash_util::Crc32FastBuilder;
@@ -37,11 +37,11 @@ pub struct VirtualNode(VirtualNodeInner);
 type VirtualNodeInner = u16;
 static_assertions::const_assert!(VirtualNodeInner::BITS >= VirtualNode::BITS as u32);
 
-impl From<HashCode> for VirtualNode {
-    fn from(hash_code: HashCode) -> Self {
+impl From<Crc32HashCode> for VirtualNode {
+    fn from(hash_code: Crc32HashCode) -> Self {
         // Take the least significant bits of the hash code.
         // TODO: should we use the most significant bits?
-        let inner = (hash_code.0 % Self::COUNT as u64) as VirtualNodeInner;
+        let inner = (hash_code.value() % Self::COUNT as u64) as VirtualNodeInner;
         VirtualNode(inner)
     }
 }

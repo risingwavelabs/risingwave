@@ -106,6 +106,7 @@ pub fn min_compatible_type(types: &[impl AsRef<str>]) -> &str {
         ("int256", "int16") => "int256",
         ("int256", "int32") => "int256",
         ("int256", "int64") => "int256",
+        ("int256", "float64") => "float64",
 
         ("float32", "int16") => "float64",
         ("float32", "int32") => "float64",
@@ -117,6 +118,7 @@ pub fn min_compatible_type(types: &[impl AsRef<str>]) -> &str {
         ("float64", "int16") => "float64",
         ("float64", "int32") => "float64",
         ("float64", "int64") => "float64",
+        ("float64", "int256") => "float64",
         ("float64", "float32") => "float64",
         ("float64", "float64") => "float64",
         ("float64", "decimal") => "float64",
