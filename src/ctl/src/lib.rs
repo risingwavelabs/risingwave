@@ -355,16 +355,10 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             connection_name,
             provider,
             service_name,
-            availability_zones,
+            ..
         }) => {
-            cmd_impl::meta::create_connection(
-                context,
-                connection_name,
-                provider,
-                service_name,
-                availability_zones,
-            )
-            .await?
+            cmd_impl::meta::create_connection(context, connection_name, provider, service_name)
+                .await?
         }
         Commands::Meta(MetaCommands::ListConnections) => {
             cmd_impl::meta::list_connections(context).await?
