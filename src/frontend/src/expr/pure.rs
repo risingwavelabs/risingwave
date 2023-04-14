@@ -145,7 +145,16 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::JsonbAccessStr
             | expr_node::Type::JsonbTypeof
             | expr_node::Type::JsonbArrayLength
-            | expr_node::Type::Pi => false,
+            | expr_node::Type::Pi => {
+                let x = func_call
+                    .inputs()
+                    .iter()
+                    .map(|expr| self.visit_expr(expr))
+                    .reduce(Self::merge)
+                    .unwrap_or_default();
+                dbg!(x.clone());
+                x
+            }
             expr_node::Type::Vnode
             | expr_node::Type::Now
             | expr_node::Type::Proctime

@@ -672,7 +672,7 @@ fn derive_predicate_from_eq_condition(
     col_num: usize,
     expr_is_left: bool,
 ) -> Option<ExprImpl> {
-    if !expr.is_pure() {
+    if expr.is_impure() {
         return None;
     }
     let eq_indices = if expr_is_left {
