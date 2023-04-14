@@ -666,6 +666,9 @@ where
                             version,
                         }))
                     }
+                    PbPrivateLinkProvider::Unspecified => {
+                        return Err(Status::invalid_argument("Privatelink provider unspecified"));
+                    }
                 }
             }
         }

@@ -87,6 +87,9 @@ fn resolve_private_link_properties(
                 availability_zones,
             })
         }
+        PrivateLinkProvider::Unspecified => Err(RwError::from(ProtocolError(
+            "Privatelink provider unspecified".to_string(),
+        ))),
     }
 }
 
