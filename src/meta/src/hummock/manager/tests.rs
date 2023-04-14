@@ -1951,7 +1951,7 @@ async fn test_move_tables_between_compaction_group() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(compaction_task.existing_table_ids, vec![101, 102]);
+    assert_eq!(compaction_task.group_table_ids, vec![101, 102]);
     assert_eq!(compaction_task.input_ssts[0].table_infos.len(), 1);
     assert_eq!(compaction_task.input_ssts[0].table_infos[0].object_id, 12);
     compaction_task.sorted_output_ssts = vec![gen_sstable_info(20, 2, vec![101])];
