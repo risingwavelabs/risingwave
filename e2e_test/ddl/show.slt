@@ -146,4 +146,7 @@ matviewgraph varchar
 query TT
 show connections;
 ----
-conn mock mock connection: no info available
+conn privatelink provider: MOCK
+service_name: 
+endpoint_id: 
+availability_zones: []
