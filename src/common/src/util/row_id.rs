@@ -104,13 +104,11 @@ impl RowIdGenerator {
                 }
                 current_timestamp_ms = get_current_timestamp_ms();
 
-                #[cfg(madsim)]
-                tokio::task::block_in_place(move || {
-                    tokio::runtime::Handle::current()
-                        .block_on(tokio::time::sleep(std::time::Duration::from_micros(10)));
-                });
-                #[cfg(not(madsim))]
-                std::hint::spin_loop();
+                if cfg!(madsim) {
+                    panic!("spin loop does not increase time in madsim");
+                } else {
+                    std::hint::spin_loop();
+                }
             }
 
             // Reset states. We do not reset the `vnode_index` to make all vnodes are evenly used.
