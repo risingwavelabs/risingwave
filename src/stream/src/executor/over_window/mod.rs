@@ -355,12 +355,14 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     &vec![OrderType::ascending(); this.input_pk_indices.len()],
                 )?;
 
+                // Get all outputs.
                 let outputs = partition
                     .states
                     .iter_mut()
                     .map(|state| state.slide())
                     .collect_vec();
 
+                // Append to output builders.
                 let key_part = (&partition_key)
                     .chain(row::once(Some(key.order_key)))
                     .chain(pk);
@@ -591,7 +593,7 @@ mod tests {
             tx.push_chunk(StreamChunk::from_pretty(
                 " I T  I   i
                 + 1 p1 100 10
-                + 2 p1 101 16
+                + 1 p1 101 16
                 + 4 p2 200 20",
             ));
             let chunk = over_window.expect_chunk().await;
@@ -618,7 +620,7 @@ mod tests {
                 chunk,
                 StreamChunk::from_pretty(
                     " T  I I   i  i
-                    + p1 2 101 10 18
+                    + p1 1 101 10 18
                     + p2 4 200 .  22"
                 )
             );
