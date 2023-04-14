@@ -257,3 +257,78 @@ query R
 SELECT abs(radians(90) - pi()/2) < 0.000000000000001
 ----
 t
+
+query R
+SELECT abs(cosd(1) - 0.9998476951563913) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(cosd(10) - 0.984807753012208) < 0.000000000000001;
+----
+t
+
+query R
+SELECT abs(cosd(20) - 0.9396926207859084) < 0.000000000000001;
+----
+t
+
+query R
+SELECT abs(cosd(30) - 0.8660254037844387) < 0.000000000000001;
+----
+t
+
+query R
+SELECT abs(cosd(40) - 0.766044443118978) < 0.000000000000001;
+----
+t
+
+query R
+SELECT abs(cosd(50) - 0.6427876096865394) < 0.000000000000001;
+----
+t
+
+query R
+SELECT abs(cosd(60) - 0.5000000000000001) < 0.000000000000001;
+----
+t
+
+query R
+SELECT abs(cosd(70) - 0.34202014332566877) < 0.000000000000001;
+----
+t
+
+query R
+SELECT abs(cosd(80) - 0.17364817766693047) < 0.000000000000001;
+----
+t
+
+query R
+SELECT abs(cosd(85) - 0.08715574274765817) < 0.000000000000001;
+----
+t 
+
+query R
+SELECT abs(cosd(90) - 0.0) < 0.000000000000001;
+----
+t 
+
+query R
+SELECT cosd(('Inf'))
+----
+NaN
+
+query R
+SELECT cosd(('-Inf'))
+----
+NaN
+
+query R
+SELECT cosd('NaN')
+----
+NaN
+
+query R
+SELECT cosd('-NaN')
+----
+NaN
