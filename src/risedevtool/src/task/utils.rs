@@ -137,7 +137,5 @@ pub fn add_hummock_backend(
         }
     };
 
-    cmd.arg("--data-directory").arg("hummock_001");
-
     Ok(is_shared_backend)
 }
