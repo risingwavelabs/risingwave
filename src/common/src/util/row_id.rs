@@ -104,11 +104,10 @@ impl RowIdGenerator {
                 }
                 current_timestamp_ms = get_current_timestamp_ms();
 
-                if cfg!(madsim) {
-                    panic!("spin loop does not increase time in madsim");
-                } else {
-                    std::hint::spin_loop();
-                }
+                #[cfg(madsim)]
+                madsim::time::advance(std::time::Duration::from_micros(10));
+                #[cfg(not(madsim))]
+                std::hint::spin_loop();
             }
 
             // Reset states. We do not reset the `vnode_index` to make all vnodes are evenly used.
@@ -180,7 +179,7 @@ impl RowIdGenerator {
     }
 }
 
-#[cfg(all(test, not(madsim)))]
+#[cfg(test)]
 mod tests {
     use std::time::Duration;
 
