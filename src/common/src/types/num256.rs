@@ -21,7 +21,7 @@ use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 use std::str::FromStr;
 
 use bytes::{BufMut, Bytes};
-use ethnum::{i256, AsI256};
+use ethnum::{i256, u256, AsI256};
 use num_traits::{
     CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Signed, Zero,
 };
@@ -197,9 +197,12 @@ impl Int256 {
 
     // `from_str_hex` function only accepts string inputs that start with "0x".
     pub fn from_str_hex(src: &str) -> Result<Self, ParseIntError> {
-        i256::from_str_hex(src)
-            .or_else(|_| i256::from_str_hex(&src.to_lowercase()))
-            .map(Into::into)
+        u256::from_str_hex(src)
+            .or_else(|_| u256::from_str_hex(&src.to_lowercase()))
+            .map(|u| {
+                println!("u is {}", u);
+                u.as_i256().into()
+            })
     }
 }
 
