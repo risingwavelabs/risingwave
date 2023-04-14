@@ -46,12 +46,12 @@ statement ok
 drop table t;
 
 statement ok
-create t (v1 int, v2 real);
+create table t (v1 int, v2 real);
 
 query II 
 insert into t (v2) values (1) returning *;
 ----
-NULL  1
+1 NULL
 
 query II
 insert into t (v2) values (1) returning v2+1, v1;
