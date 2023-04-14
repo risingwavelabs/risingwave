@@ -55,12 +55,26 @@ pub fn atan_f64(input: F64) -> F64 {
 pub fn atan2_f64(input_x: F64, input_y: F64) -> F64 {
     input_x.0.atan2(input_y.0).into()
 }
+
+#[function("degrees(float64) -> float64")]
+pub fn degrees_f64(input: F64) -> F64 {
+    input.0.to_degrees().into()
+}
+
+#[function("radians(float64) -> float64")]
+pub fn radians_f64(input: F64) -> F64 {
+    input.0.to_radians().into()
+}
+
 // Radians per degree, a.k.a. PI / 180
 static RADIANS_PER_DEGREE: f64 = 0.017_453_292_519_943_295;
 // Constants we use to get more accurate results.
 // See PSQL: https://github.com/postgres/postgres/blob/78ec02d612a9b69039ec2610740f738968fe144d/src/backend/utils/adt/float.c#L2024
 static SIN_30: f64 = 0.499_999_999_999_999_94;
 static ONE_MINUS_COS_60: f64 = 0.499_999_999_999_999_9;
+static TAN_45: f64 = 1.0;
+// TODO: Are these constants really always the same? Do we have to calculate them or can I leave
+// them as constants?
 
 // returns the cosine of an angle that lies between 0 and 60 degrees. This will return exactly 1
 // when xi s 0, and exactly 0.5 when x is 60 degrees.
@@ -106,6 +120,7 @@ pub fn cosd_f64(input: F64) -> F64 {
     let sign = 1.0;
     let arg1 = arg1 % 360.0;
 
+    // TODO: Do not do this with if else
     let (arg1, sign) = if arg1 < 0.0 {
         // cosd(-x) = cosd(x)
         (-arg1, sign)
@@ -156,6 +171,7 @@ pub fn sind_f64(input: F64) -> F64 {
     let arg1 = input.0 % 360.0;
     let sign = 1.0;
 
+    // TODO: Do not do this with if else
     let (arg1, sign) = if arg1 < 0.0 {
         // sind(-x) = -sind(x)
         (-arg1, -sign)
@@ -179,14 +195,49 @@ pub fn sind_f64(input: F64) -> F64 {
     }
 }
 
-#[function("degrees(float64) -> float64")]
-pub fn degrees_f64(input: F64) -> F64 {
-    input.0.to_degrees().into()
-}
+#[function("tand(float64) -> float64")]
+pub fn tand_f64(input: F64) -> F64 {
+    // PSQL implementation: https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c
 
-#[function("radians(float64) -> float64")]
-pub fn radians_f64(input: F64) -> F64 {
-    input.0.to_radians().into()
+    // Returns NaN if input is NaN or infinite. Different from PSQL implementation.
+    if input.0.is_nan() || input.0.is_infinite() {
+        return f64::NAN.into();
+    }
+
+    let mut arg1 = input.0 % 360.0;
+    let mut sign = 1.0;
+
+    if arg1 < 0.0 {
+        // tand(-x) = -tand(x)
+        arg1 = -arg1;
+        sign = -sign;
+    }
+
+    if arg1 > 180.0 {
+        // tand(360-x) = -tand(x)
+        arg1 = 360.0 - arg1;
+        sign = -sign;
+    }
+
+    if arg1 > 90.0 {
+        // tand(180-x) = -tand(x)
+        arg1 = 180.0 - arg1;
+        sign = -sign;
+    }
+
+    let tan_arg1 = sind_q1(arg1) / cosd_q1(arg1);
+    let result = sign * (tan_arg1 / TAN_45);
+
+    // On some machines we get tand(180) = minus zero, but this isn't always
+    // true. For portability, and because the user constituency for this
+    // function probably doesn't want minus zero, force it to plain zero.
+    let result = if result == 0.0 { 0.0 } else { result };
+
+    // Not checking for overflow because tand(90) == Inf
+
+    // TODO: Does not return Inf for 90 degrees 
+
+    result.into()
 }
 
 #[cfg(test)]
@@ -201,30 +252,15 @@ mod tests {
     /// numbers are equal within a rounding error
     fn assert_similar(lhs: F64, rhs: F64) {
         let x = F64::from(lhs.abs() - rhs.abs()).abs() <= 0.000000000000001;
-        assert!(x);
+        assert!(x, "{:?} != {:?}", lhs.0, rhs.0);
     }
 
     #[test]
     fn test_degrees() {
         let d = F64::from(180);
         let pi = F64::from(PI);
-        assert_eq!(cos_f64(pi), cosd_f64(d));
-        assert_similar(
-            cos_f64(F64::from(50).to_radians().into()),
-            cosd_f64(F64::from(50)),
-        );
-        assert_similar(
-            cos_f64(F64::from(100).to_radians().into()),
-            cosd_f64(F64::from(100)),
-        );
-        assert_similar(
-            cos_f64(F64::from(250).to_radians().into()),
-            cosd_f64(F64::from(250)),
-        );
 
-        // exact matches
-        assert_eq!(cosd_f64(F64::from(0)).0, 1.0);
-        assert_eq!(cosd_f64(F64::from(90)).0, 0.0);
+        // sind
         assert_similar(
             sin_f64(F64::from(50).to_radians().into()),
             sind_f64(F64::from(50)),
@@ -244,6 +280,47 @@ mod tests {
         assert_eq!(sind_f64(F64::from(90)).0, 1.0);
         assert_eq!(sind_f64(F64::from(180)).0, 0.0);
         assert_eq!(sind_f64(F64::from(270)).0, -1.0);
+
+        // cosd
+        assert_eq!(cos_f64(pi), cosd_f64(d));
+        assert_similar(
+            cos_f64(F64::from(50).to_radians().into()),
+            cosd_f64(F64::from(50)),
+        );
+        assert_similar(
+            cos_f64(F64::from(100).to_radians().into()),
+            cosd_f64(F64::from(100)),
+        );
+        assert_similar(
+            cos_f64(F64::from(250).to_radians().into()),
+            cosd_f64(F64::from(250)),
+        );
+
+        // exact matches
+        assert_eq!(cosd_f64(F64::from(0)).0, 1.0);
+        assert_eq!(cosd_f64(F64::from(90)).0, 0.0);
+
+        // tand
+        assert_similar(
+            tan_f64(F64::from(-10).to_radians().into()),
+            tand_f64(F64::from(-10)),
+        );
+        assert_similar(
+            tan_f64(F64::from(50).to_radians().into()),
+            tand_f64(F64::from(50)),
+        );
+        assert_similar(
+            tan_f64(F64::from(90).to_radians().into()),
+            tand_f64(F64::from(90)),
+        );
+        assert_similar(
+            tan_f64(F64::from(100).to_radians().into()),
+            tand_f64(F64::from(100)),
+        );
+        assert_similar(
+            tan_f64(F64::from(250).to_radians().into()),
+            tand_f64(F64::from(250)),
+        );
     }
 
     #[test]
