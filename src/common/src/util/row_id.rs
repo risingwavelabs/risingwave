@@ -180,7 +180,7 @@ impl RowIdGenerator {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(madsim)))]
 mod tests {
     use std::time::Duration;
 
