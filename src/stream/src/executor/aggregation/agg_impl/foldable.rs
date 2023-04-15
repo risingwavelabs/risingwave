@@ -708,11 +708,11 @@ mod tests {
                         ops.push(op);
                         if op == Op::Insert {
                             let value = rng.gen::<i32>() as i64;
-                            data_builder.append_n(1, Some(value));
+                            data_builder.append(Some(value));
                             cur_data.push(value);
                         } else {
                             let idx = rng.gen_range(0..cur_data.len());
-                            data_builder.append_n(1, Some(cur_data[idx]));
+                            data_builder.append(Some(cur_data[idx]));
                             cur_data.remove(idx);
                         }
                     } else {
