@@ -58,6 +58,10 @@ impl BatchSource {
         self.logical.catalog.clone()
     }
 
+    pub fn kafka_timestamp_range_value(&self) -> (Option<i64>, Option<i64>) {
+        self.logical.kafka_timestamp_range_value()
+    }
+
     pub fn clone_with_dist(&self) -> Self {
         let mut base = self.base.clone();
         base.dist = Distribution::SomeShard;
@@ -76,7 +80,7 @@ impl fmt::Display for BatchSource {
         builder
             .field("source", &self.source_catalog().unwrap().name)
             .field("columns", &self.column_names())
-            .field("filter", &self.logical.kafka_timestamp_range_value())
+            .field("filter", &self.kafka_timestamp_range_value())
             .finish()
     }
 }
