@@ -36,7 +36,7 @@ impl StreamSource {
     pub fn new(logical: generic::Source) -> Self {
         let base = PlanBase::new_logical_with_core(&logical);
         let mut watermark_columns = FixedBitSet::with_capacity(base.schema.len());
-        if let Some(catalog) = logical.catalog {
+        if let Some(catalog) = &logical.catalog {
             catalog
                 .watermark_descs
                 .iter()
