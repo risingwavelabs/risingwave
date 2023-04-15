@@ -50,7 +50,7 @@ impl Rule for DistinctAggRule {
             Self::build_expand(input, &mut agg_group_keys, &mut agg_calls)?;
         let mid_agg = Self::build_middle_agg(node, agg_group_keys, agg_calls.clone(), has_expand);
         Some(Self::build_final_agg(
-            mid_agg,
+            mid_agg.into(),
             original_group_keys_len,
             agg_calls,
             flag_values,
@@ -184,7 +184,7 @@ impl DistinctAggRule {
         mut group_keys: Vec<usize>,
         agg_calls: Vec<PlanAggCall>,
         has_expand: bool,
-    ) -> LogicalAgg {
+    ) -> Agg<PlanRef> {
         // The middle `LogicalAgg` groups by (`agg_group_keys` + arguments of distinct aggregates +
         // `flag`).
         let agg_calls = agg_calls
@@ -208,18 +208,18 @@ impl DistinctAggRule {
             // append `flag`.
             group_keys.push(project.schema().len() - 1);
         }
-        Agg::new(agg_calls, group_keys, project).into()
+        Agg::new(agg_calls, group_keys, project)
     }
 
     fn build_final_agg(
-        mid_agg: LogicalAgg,
+        mid_agg: Agg<PlanRef>,
         original_group_keys_len: usize,
         mut agg_calls: Vec<PlanAggCall>,
         flag_values: Vec<usize>,
         has_expand: bool,
     ) -> PlanRef {
         // the index of `flag` in schema of the middle `LogicalAgg`, if has `Expand`.
-        let pos_of_flag = mid_agg.group_key().len() - 1;
+        let pos_of_flag = mid_agg.group_key.len() - 1;
         let mut flag_values = flag_values.into_iter();
 
         // ```ignore
@@ -231,7 +231,7 @@ impl DistinctAggRule {
         // scan through `distinct agg arguments`.
         let mut index_of_distinct_agg_argument = original_group_keys_len;
         // scan through `count_star_with_filter` or `non-distinct agg`.
-        let mut index_of_middle_agg = mid_agg.group_key().len();
+        let mut index_of_middle_agg = mid_agg.group_key.len();
         agg_calls.iter_mut().for_each(|agg_call| {
             let flag_value = if agg_call.distinct {
                 agg_call.distinct = false;
