@@ -22,6 +22,7 @@ use risingwave_expr::expr::AggKind;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{ExprType, FunctionCall, InputRef, Literal};
+use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{
     CollectInputRef, LogicalAgg, LogicalExpand, LogicalProject, PlanAggCall,
 };
@@ -207,7 +208,7 @@ impl DistinctAggRule {
             // append `flag`.
             group_keys.push(project.schema().len() - 1);
         }
-        LogicalAgg::new(agg_calls, group_keys, project)
+        Agg::new(agg_calls, group_keys, project).into()
     }
 
     fn build_final_agg(
@@ -313,7 +314,7 @@ impl DistinctAggRule {
             }
         });
 
-        LogicalAgg::new(
+        Agg::new(
             agg_calls,
             (0..original_group_keys_len).collect_vec(),
             mid_agg.into(),

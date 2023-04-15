@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::optimizer::plan_node::generic::Agg;
+
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
 
@@ -41,7 +43,7 @@ impl Rule for AggProjectMergeRule {
             .iter_mut()
             .for_each(|x| x.rewrite_input_index(proj_o2i.clone()));
 
-        Some(LogicalAgg::new(agg_calls, agg_group_keys, new_input).into())
+        Some(Agg::new(agg_calls, agg_group_keys, new_input).into())
     }
 }
 
