@@ -611,7 +611,7 @@ mod test {
         };
         let config = KafkaConfig::from_hashmap(properties).unwrap();
         assert!(!config.force_append_only);
-        assert!(config.use_transaction);
+        assert!(!config.use_transaction);
         assert_eq!(config.timeout, Duration::from_secs(5));
         assert_eq!(config.max_retry_num, 3);
         assert_eq!(config.retry_interval, Duration::from_millis(100));
