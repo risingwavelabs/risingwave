@@ -20,6 +20,8 @@ import org.apache.hudi.io.CreateHandleFactory;
 
 public class RisingWaveCreateHandleFactory extends CreateHandleFactory {
     protected String getNextFileId(String idPfx) {
+        // This is used for the first insert operation that create the new file group with the
+        // predefined RisingWave file id.
         return HoodieRisingWaveWriter.RISINGWAVE_FILE_ID;
     }
 }

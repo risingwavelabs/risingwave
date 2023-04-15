@@ -47,6 +47,9 @@ public class RisingWaveInsertCommitActionExecutor
         if (!recordItr.hasNext()) {
             return Collections.singletonList((List<WriteStatus>) Collections.EMPTY_LIST).iterator();
         }
+
+        // We override this method to set the InsertIterable to use RisingWaveCreateHandleFactory to
+        // set the predefined file id for the first insert operation
         return new JavaLazyInsertIterable<>(
                 recordItr,
                 true,

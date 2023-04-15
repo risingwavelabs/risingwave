@@ -26,6 +26,12 @@ public class HudiSinkConfig extends S3Config {
     @JsonProperty(value = "table.name")
     private String tableName;
 
+    @JsonProperty(value = "type")
+    String sinkType;
+
+    @JsonProperty(value = "primary_key")
+    String primaryKey;
+
     public String getBasePath() {
         return basePath;
     }

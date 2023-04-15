@@ -41,6 +41,7 @@
         <jackson.version>2.13.5</jackson.version>
         <spark_sql.version>3.3.1</spark_sql.version>
         <hadoop.version>3.3.2</hadoop.version>
+        <avro.version>1.8.2</avro.version>
     </properties>
 
     <dependencyManagement>
@@ -83,6 +84,11 @@
             <dependency>
                 <groupId>com.fasterxml.jackson.core</groupId>
                 <artifactId>jackson-core</artifactId>
+                <version>${jackson.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-databind</artifactId>
                 <version>${jackson.version}</version>
             </dependency>
 
@@ -162,6 +168,11 @@
                 <groupId>org.apache.hadoop</groupId>
                 <artifactId>hadoop-aws</artifactId>
                 <version>${hadoop.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.avro</groupId>
+                <artifactId>avro</artifactId>
+                <version>${avro.version}</version>
             </dependency>
             <dependency>
                 <groupId>junit</groupId>
