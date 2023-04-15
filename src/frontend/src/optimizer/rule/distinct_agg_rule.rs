@@ -50,7 +50,7 @@ impl Rule for DistinctAggRule {
             Self::build_expand(input, &mut agg_group_keys, &mut agg_calls)?;
         let mid_agg = Self::build_middle_agg(node, agg_group_keys, agg_calls.clone(), has_expand);
         Some(Self::build_final_agg(
-            mid_agg.into(),
+            mid_agg,
             original_group_keys_len,
             agg_calls,
             flag_values,
