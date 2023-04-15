@@ -54,7 +54,7 @@ const fn _default_retry_backoff() -> Duration {
 }
 
 const fn _default_use_transaction() -> bool {
-    true
+    false
 }
 
 const fn _default_force_append_only() -> bool {
@@ -500,12 +500,13 @@ pub struct KafkaTransactionConductor {
 }
 
 impl KafkaTransactionConductor {
-    async fn new(config: KafkaConfig) -> Result<Self> {
+    async fn new(mut config: KafkaConfig) -> Result<Self> {
         let inner: ThreadedProducer<DefaultProducerContext> = {
             let mut c = ClientConfig::new();
             config.common.set_security_properties(&mut c);
             c.set("bootstrap.servers", &config.common.brokers)
                 .set("message.timeout.ms", "5000");
+            config.use_transaction = false;
             if config.use_transaction {
                 c.set("transactional.id", &config.identifier); // required by kafka transaction
             }
