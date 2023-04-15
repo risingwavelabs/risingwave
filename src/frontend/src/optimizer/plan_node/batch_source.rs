@@ -37,7 +37,7 @@ impl BatchSource {
     pub fn new(logical: generic::Source) -> Self {
         let base = PlanBase::new_batch(
             logical.ctx.clone(),
-            logical.schema().clone(),
+            logical.schema(),
             // Use `Single` by default, will be updated later with `clone_with_dist`.
             Distribution::Single,
             Order::any(),
