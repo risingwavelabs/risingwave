@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::optimizer::plan_node::generic::Agg;
-
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
+use crate::optimizer::plan_node::generic::Agg;
 
 /// Merge [`LogicalAgg`] <- [`LogicalProject`] to [`LogicalAgg`].
 pub struct AggProjectMergeRule {}

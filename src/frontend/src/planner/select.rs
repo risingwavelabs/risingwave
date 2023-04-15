@@ -28,7 +28,7 @@ use crate::expr::{
     CorrelatedId, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Subquery,
     SubqueryKind,
 };
-use crate::optimizer::plan_node::generic::{Project, ProjectBuilder, Agg};
+use crate::optimizer::plan_node::generic::{Agg, Project, ProjectBuilder};
 pub use crate::optimizer::plan_node::LogicalFilter;
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalApply, LogicalOverAgg, LogicalProject, LogicalProjectSet, LogicalTopN,
