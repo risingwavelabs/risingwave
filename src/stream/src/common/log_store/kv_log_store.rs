@@ -353,11 +353,11 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
 mod tests {
     use risingwave_common::array::{Op, StreamChunk};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-    use risingwave_common::hash::VirtualNode;
-    use risingwave_common::row::OwnedRow;
+    use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::{DataType, ScalarImpl, ScalarRef};
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_storage::table::DEFAULT_VNODE;
 
     use crate::common::log_store::kv_log_store::{LogStoreRowOp, LogStoreRowSerde};
     use crate::common::table::test_utils::gen_prost_table;
@@ -387,7 +387,7 @@ mod tests {
 
         let serde = LogStoreRowSerde::new(&table, None);
 
-        let ops = vec![Op::Insert, Op::Delete, Op::UpdateInsert, Op::UpdateDelete];
+        let ops = vec![Op::Insert, Op::Delete, Op::UpdateDelete, Op::UpdateInsert];
         let rows = vec![
             OwnedRow::new(vec![
                 Some(ScalarImpl::Int64(1)),
@@ -402,7 +402,7 @@ mod tests {
                 Some(ScalarImpl::Utf8("name3".to_owned_scalar())),
             ]),
             OwnedRow::new(vec![
-                Some(ScalarImpl::Int64(4)),
+                Some(ScalarImpl::Int64(3)),
                 Some(ScalarImpl::Utf8("name4".to_owned_scalar())),
             ]),
         ];
@@ -413,42 +413,66 @@ mod tests {
         let data_chunk = builder.consume_all().unwrap();
         let stream_chunk = StreamChunk::from_parts(ops.clone(), data_chunk);
 
-        const TEST_EPOCH: u64 = 233u64;
+        let mut epoch = 233u64;
 
-        let mut serialized_bytes = vec![];
+        let mut serialized_keys = vec![];
         let mut seq_id = 1;
         for (op, row) in stream_chunk.rows() {
-            serialized_bytes.push(serde.serialize_data_row(TEST_EPOCH, seq_id, op, row));
-            seq_id += 1;
-        }
-
-        for (i, _) in stream_chunk.rows().enumerate() {
-            let row_op = serde.deserialize(serialized_bytes[i].1.clone());
+            let (key, value) = serde.serialize_data_row(epoch, seq_id, op, row);
+            serialized_keys.push(key);
+            let row_op = serde.deserialize(value);
             match row_op {
-                LogStoreRowOp::Row { op, row } => {
-                    assert_eq!(&op, &ops[i]);
-                    assert_eq!(&row, &rows[i]);
+                LogStoreRowOp::Row {
+                    op: deserialized_op,
+                    row: deserialized_row,
+                } => {
+                    assert_eq!(&op, &deserialized_op);
+                    assert_eq!(row.to_owned_row(), deserialized_row);
                 }
                 LogStoreRowOp::Barrier { .. } => unreachable!(),
             }
+            seq_id += 1;
         }
 
-        let (_, encoded_barrier) =
-            serde.serialize_barrier(TEST_EPOCH, VirtualNode::from_index(1), false);
+        let (key, encoded_barrier) = serde.serialize_barrier(epoch, DEFAULT_VNODE, false);
         match serde.deserialize(encoded_barrier) {
             LogStoreRowOp::Row { .. } => unreachable!(),
             LogStoreRowOp::Barrier { is_checkpoint } => {
                 assert!(!is_checkpoint);
             }
         }
+        serialized_keys.push(key);
 
-        let (_, encoded_checkpoint_barrier) =
-            serde.serialize_barrier(TEST_EPOCH, VirtualNode::from_index(1), true);
+        seq_id = 1;
+
+        epoch += 1;
+        for (op, row) in stream_chunk.rows() {
+            let (key, value) = serde.serialize_data_row(epoch, seq_id, op, row);
+            serialized_keys.push(key);
+            let row_op = serde.deserialize(value);
+            match row_op {
+                LogStoreRowOp::Row {
+                    op: deserialized_op,
+                    row: deserialized_row,
+                } => {
+                    assert_eq!(&op, &deserialized_op);
+                    assert_eq!(row.to_owned_row(), deserialized_row);
+                }
+                LogStoreRowOp::Barrier { .. } => unreachable!(),
+            }
+            seq_id += 1;
+        }
+
+        let (key, encoded_checkpoint_barrier) = serde.serialize_barrier(epoch, DEFAULT_VNODE, true);
         match serde.deserialize(encoded_checkpoint_barrier) {
             LogStoreRowOp::Row { .. } => unreachable!(),
             LogStoreRowOp::Barrier { is_checkpoint } => {
                 assert!(is_checkpoint);
             }
         }
+        serialized_keys.push(key);
+
+        assert_eq!(serialized_keys.len(), 2 * rows.len() + 2);
+        assert!(serialized_keys.is_sorted());
     }
 }
