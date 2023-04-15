@@ -41,6 +41,7 @@ pub struct LogicalInsert {
     table_version_id: TableVersionId,
     input: PlanRef,
     column_indices: Vec<usize>, // columns in which to insert
+    default_column_indices: Option<Vec<usize>>, // columns to be set to default
     row_id_index: Option<usize>,
     returning: bool,
 }
@@ -53,6 +54,7 @@ impl LogicalInsert {
         table_id: TableId,
         table_version_id: TableVersionId,
         column_indices: Vec<usize>,
+        default_column_indices: Option<Vec<usize>>,
         row_id_index: Option<usize>,
         returning: bool,
     ) -> Self {
@@ -71,6 +73,7 @@ impl LogicalInsert {
             table_version_id,
             input,
             column_indices,
+            default_column_indices,
             row_id_index,
             returning,
         }
@@ -83,6 +86,7 @@ impl LogicalInsert {
         table_id: TableId,
         table_version_id: TableVersionId,
         column_indices: Vec<usize>,
+        default_column_indices: Option<Vec<usize>>,
         row_id_index: Option<usize>,
         returning: bool,
     ) -> Result<Self> {
@@ -92,6 +96,7 @@ impl LogicalInsert {
             table_id,
             table_version_id,
             column_indices,
+            default_column_indices,
             row_id_index,
             returning,
         ))
@@ -115,6 +120,11 @@ impl LogicalInsert {
     #[must_use]
     pub fn column_indices(&self) -> Vec<usize> {
         self.column_indices.clone()
+    }
+
+    #[must_use]
+    pub fn default_column_indices(&self) -> Option<Vec<usize>> {
+        self.default_column_indices.clone()
     }
 
     #[must_use]
@@ -148,6 +158,7 @@ impl PlanTreeNodeUnary for LogicalInsert {
             self.table_id,
             self.table_version_id,
             self.column_indices.clone(),
+            self.default_column_indices.clone(),
             self.row_id_index,
             self.returning,
         )

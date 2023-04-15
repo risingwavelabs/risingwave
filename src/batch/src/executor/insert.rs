@@ -17,6 +17,7 @@ use std::iter::repeat;
 use anyhow::Context;
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::array::serial_array::SerialArray;
 use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
@@ -43,6 +44,7 @@ pub struct InsertExecutor {
     schema: Schema,
     identity: String,
     column_indices: Vec<usize>,
+    sorted_default_column_indices: Vec<usize>,
 
     row_id_index: Option<usize>,
     returning: bool,
@@ -58,6 +60,7 @@ impl InsertExecutor {
         chunk_size: usize,
         identity: String,
         column_indices: Vec<usize>,
+        sorted_default_column_indices: Vec<usize>,
         row_id_index: Option<usize>,
         returning: bool,
     ) -> Self {
@@ -77,6 +80,7 @@ impl InsertExecutor {
             },
             identity,
             column_indices,
+            sorted_default_column_indices,
             row_id_index,
             returning,
         }
@@ -118,6 +122,11 @@ impl InsertExecutor {
                 }
                 columns = ordered_cols
             }
+
+            let default_col = SerialArray::from_iter(repeat(None).take(cap));
+            self.sorted_default_column_indices
+                .iter()
+                .for_each(|idx| columns.insert(*idx, default_col.clone().into()));
 
             // If the user does not specify the primary key, then we need to add a column as the
             // primary key.
@@ -188,6 +197,18 @@ impl BoxedExecutorBuilder for InsertExecutor {
             .iter()
             .map(|&i| i as usize)
             .collect();
+        let sorted_default_column_indices =
+            if let Some(default_column_indices) = &insert_node.default_column_indices {
+                let mut default_column_indices = default_column_indices
+                    .get_default_column_indices()
+                    .iter()
+                    .map(|&i| i as usize)
+                    .collect_vec();
+                default_column_indices.sort_unstable();
+                default_column_indices
+            } else {
+                vec![]
+            };
 
         Ok(Box::new(Self::new(
             table_id,
@@ -197,6 +218,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             source.context.get_config().developer.chunk_size,
             source.plan_node().get_identity().clone(),
             column_indices,
+            sorted_default_column_indices,
             insert_node.row_id_index.as_ref().map(|index| *index as _),
             insert_node.returning,
         )))
@@ -290,6 +312,7 @@ mod tests {
             1024,
             "InsertExecutor".to_string(),
             vec![], // Ignoring insertion order
+            vec![],
             row_id_index,
             false,
         ));

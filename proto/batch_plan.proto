@@ -83,6 +83,10 @@ message InsertNode {
   // An optional field and will be `None` for tables without user-defined pk.
   // The `BatchInsertExecutor` should add a column with NULL value which will
   // be filled in streaming.
+  message DefaultColumnIndices {
+    repeated uint32 default_column_indices = 1;
+  }
+  optional DefaultColumnIndices default_column_indices = 6;
   optional uint32 row_id_index = 3;
   bool returning = 4;
 }

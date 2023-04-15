@@ -34,6 +34,7 @@ impl Planner {
             insert.table_id,
             insert.table_version_id,
             insert.column_indices,
+            insert.default_column_indices,
             insert.row_id_index,
             returning,
         )?

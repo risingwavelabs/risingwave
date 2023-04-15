@@ -20,6 +20,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SelectItem};
+use tracing::debug;
 
 use super::statement::RewriteExprsRecursive;
 use super::BoundQuery;
@@ -51,6 +52,10 @@ pub struct BoundInsert {
     /// create table t1 (v1 int, v2 int, v3 int); insert into t1 (v1, v3, v2) values (5, 6, 7);
     /// Empty if user does not define insert columns
     pub column_indices: Vec<usize>,
+
+    /// Columns that user fails to specify
+    /// Will set to default value (current null)
+    pub default_column_indices: Option<Vec<usize>>,
 
     pub source: BoundQuery,
 
@@ -133,7 +138,7 @@ impl Binder {
         let (returning_list, fields) = self.bind_returning_list(returning_items)?;
         let is_returning = !returning_list.is_empty();
 
-        let col_indices_to_insert = get_col_indices_to_insert(
+        let (mut col_indices_to_insert, default_column_indices) = get_col_indices_to_insert(
             &cols_to_insert_in_table,
             &cols_to_insert_by_user,
             &table_name,
@@ -172,7 +177,7 @@ impl Binder {
         let bound_query;
         let cast_exprs;
 
-        match source.as_simple_values() {
+        let bounded_column_nums = match source.as_simple_values() {
             None => {
                 bound_query = self.bind_query(source)?;
                 let actual_types = bound_query.data_types();
@@ -187,46 +192,63 @@ impl Binder {
                             .collect(),
                     )?,
                 };
+                bound_query.schema().len()
             }
             Some(values) => {
-                assert!(!values.0.is_empty());
-                let num_value_cols = values.0[0].len();
-                let has_user_specified_columns = !cols_to_insert_by_user.is_empty();
-                let num_target_cols = if has_user_specified_columns {
-                    cols_to_insert_by_user.len()
-                } else {
-                    cols_to_insert_in_table.len()
-                };
-                let err_msg = match num_target_cols.cmp(&num_value_cols) {
-                    std::cmp::Ordering::Equal => None,
-                    std::cmp::Ordering::Greater => {
-                        if has_user_specified_columns {
-                            // e.g. insert into t (v1, v2) values (7)
-                            Some("INSERT has more target columns than expressions")
-                        } else {
-                            // e.g. create table t (a int, b real)
-                            //      insert into t values (7)
-                            // this kind of usage is fine, null values will be provided
-                            // implicitly.
-                            None
-                        }
-                    }
-                    std::cmp::Ordering::Less => {
-                        // e.g. create table t (a int, b real)
-                        //      insert into t (v1) values (7, 13)
-                        // or   insert into t values (7, 13, 17)
-                        Some("INSERT has more expressions than target columns")
-                    }
-                };
-                if let Some(msg) = err_msg {
-                    return Err(RwError::from(ErrorCode::BindError(msg.to_string())));
-                }
-
+                let values_len = values.0.first().expect("values list should not be empty").len();
                 let values = self.bind_values(values.clone(), Some(expected_types))?;
                 bound_query = BoundQuery::with_values(values);
                 cast_exprs = vec![];
+                values_len
             }
+        };
+
+        let has_user_specified_columns = !cols_to_insert_by_user.is_empty();
+        let num_target_cols = if has_user_specified_columns {
+            cols_to_insert_by_user.len()
+        } else {
+            cols_to_insert_in_table.len()
+        };
+
+        let (err_msg, default_column_indices) = match num_target_cols.cmp(&bounded_column_nums) {
+            std::cmp::Ordering::Equal => (None, default_column_indices),
+            std::cmp::Ordering::Greater => {
+                if has_user_specified_columns {
+                    // e.g. insert into t (v1, v2) values (7)
+                    (
+                        Some("INSERT has more target columns than expressions"),
+                        None,
+                    )
+                } else {
+                    // e.g. create table t (a int, b real)
+                    //      insert into t values (7)
+                    // this kind of usage is fine, null values will be provided
+                    // implicitly.
+                    let mut new_default_column_indices =
+                        col_indices_to_insert.split_off(bounded_column_nums);
+                    new_default_column_indices.extend(default_column_indices.unwrap_or_default());
+                    (None, Some(new_default_column_indices))
+                }
+            }
+            std::cmp::Ordering::Less => {
+                // e.g. create table t (a int, b real)
+                //      insert into t (v1) values (7, 13)
+                // or   insert into t values (7, 13, 17)
+                (
+                    Some("INSERT has more expressions than target columns"),
+                    None,
+                )
+            }
+        };
+        if let Some(msg) = err_msg {
+            return Err(RwError::from(ErrorCode::BindError(msg.to_string())));
         }
+
+        println!(
+            "col_indices_to_insert: {:?}, default_column_indices: {:?}",
+            col_indices_to_insert.clone(),
+            default_column_indices.clone().unwrap_or_default()
+        );
 
         let insert = BoundInsert {
             table_id,
@@ -235,6 +257,7 @@ impl Binder {
             owner,
             row_id_index,
             column_indices: col_indices_to_insert,
+            default_column_indices,
             source: bound_query,
             cast_exprs,
             returning_list,
@@ -254,15 +277,14 @@ impl Binder {
         exprs: Vec<ExprImpl>,
     ) -> Result<Vec<ExprImpl>> {
         let msg = match expected_types.len().cmp(&exprs.len()) {
-            std::cmp::Ordering::Equal => {
+            std::cmp::Ordering::Less => "INSERT has more expressions than target columns",
+            _ => {
                 return exprs
                     .into_iter()
-                    .zip_eq_fast(expected_types)
+                    .zip(expected_types)
                     .map(|(e, t)| e.cast_assign(t.clone()).map_err(Into::into))
                     .try_collect();
             }
-            std::cmp::Ordering::Less => "INSERT has more expressions than target columns",
-            std::cmp::Ordering::Greater => "INSERT has more target columns than expressions",
         };
         Err(ErrorCode::BindError(msg.into()).into())
     }
@@ -277,9 +299,9 @@ fn get_col_indices_to_insert(
     cols_to_insert_in_table: &[ColumnCatalog],
     cols_to_insert_by_user: &[Ident],
     table_name: &str,
-) -> Result<Vec<usize>> {
+) -> Result<(Vec<usize>, Option<Vec<usize>>)> {
     if cols_to_insert_by_user.is_empty() {
-        return Ok((0..cols_to_insert_in_table.len()).collect());
+        return Ok(((0..cols_to_insert_in_table.len()).collect(), None));
     }
 
     let mut col_indices_to_insert: Vec<usize> = Vec::new();
@@ -313,17 +335,21 @@ fn get_col_indices_to_insert(
     }
 
     // columns that are in the target table but not in the provided target columns
-    if col_indices_to_insert.len() != cols_to_insert_in_table.len() {
+    let default_column_indices = if col_indices_to_insert.len() != cols_to_insert_in_table.len() {
+        let mut cols = vec![];
         for col in cols_to_insert_in_table {
             if let Some(col_to_insert_idx) = col_name_to_idx.get(col.name()) {
                 if *col_to_insert_idx != usize::MAX {
-                    col_indices_to_insert.push(*col_to_insert_idx);
+                    cols.push(*col_to_insert_idx);
                 }
             } else {
                 unreachable!();
             }
         }
-    }
+        Some(cols)
+    } else {
+        None
+    };
 
-    Ok(col_indices_to_insert)
+    Ok((col_indices_to_insert, default_column_indices))
 }

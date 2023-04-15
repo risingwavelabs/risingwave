@@ -14,7 +14,9 @@
 
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::error::Result;
+use risingwave_pb::batch_plan::insert_node::DefaultColumnIndices;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::InsertNode;
 
@@ -79,10 +81,22 @@ impl ToBatchPb for BatchInsert {
             .iter()
             .map(|&i| i as u32)
             .collect();
+        let default_column_indices =
+            if let Some(default_column_indices) = self.logical.default_column_indices() {
+                Some(DefaultColumnIndices {
+                    default_column_indices: default_column_indices
+                        .iter()
+                        .map(|&i| i as u32)
+                        .collect_vec(),
+                })
+            } else {
+                None
+            };
         NodeBody::Insert(InsertNode {
             table_id: self.logical.table_id().table_id(),
             table_version_id: self.logical.table_version_id(),
             column_indices,
+            default_column_indices,
             row_id_index: self.logical.row_id_index().map(|index| index as _),
             returning: self.logical.has_returning(),
         })
