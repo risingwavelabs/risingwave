@@ -19,6 +19,8 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::insert_node::DefaultColumnIndices;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::InsertNode;
+use risingwave_pb::batch_plan::insert_node::DefaultColumns;
+use risingwave_pb::batch_plan::insert_node::default_columns::IndexAndExpr;
 
 use super::{
     ExprRewritable, LogicalInsert, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
@@ -81,12 +83,12 @@ impl ToBatchPb for BatchInsert {
             .iter()
             .map(|&i| i as u32)
             .collect();
-        let default_column_indices =
-            if let Some(default_column_indices) = self.logical.default_column_indices() {
-                Some(DefaultColumnIndices {
-                    default_column_indices: default_column_indices
+        let default_columns =
+            if let Some(default_columns) = self.logical.default_columns() {
+                Some(DefaultColumns {
+                    default_column: default_columns
                         .iter()
-                        .map(|&i| i as u32)
+                        .map(|(i, expr)| (i as u32, ExprImpl::to_expr_proto(expr)))
                         .collect_vec(),
                 })
             } else {
@@ -96,7 +98,7 @@ impl ToBatchPb for BatchInsert {
             table_id: self.logical.table_id().table_id(),
             table_version_id: self.logical.table_version_id(),
             column_indices,
-            default_column_indices,
+            default_columns,
             row_id_index: self.logical.row_id_index().map(|index| index as _),
             returning: self.logical.has_returning(),
         })

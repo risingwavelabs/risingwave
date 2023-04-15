@@ -24,6 +24,8 @@ use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_expr::expr::{build_from_prost, BoxedExpression};
+use risingwave_pb::batch_plan::insert_node::default_columns::IndexAndExpr;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::dml_manager::DmlManagerRef;
 
@@ -44,7 +46,7 @@ pub struct InsertExecutor {
     schema: Schema,
     identity: String,
     column_indices: Vec<usize>,
-    sorted_default_column_indices: Vec<usize>,
+    sorted_default_columns: Vec<(usize, BoxedExpression)>,
 
     row_id_index: Option<usize>,
     returning: bool,
@@ -60,7 +62,7 @@ impl InsertExecutor {
         chunk_size: usize,
         identity: String,
         column_indices: Vec<usize>,
-        sorted_default_column_indices: Vec<usize>,
+        sorted_default_columns: Vec<(usize, BoxedExpression)>,
         row_id_index: Option<usize>,
         returning: bool,
     ) -> Self {
@@ -80,7 +82,7 @@ impl InsertExecutor {
             },
             identity,
             column_indices,
-            sorted_default_column_indices,
+            sorted_default_columns,
             row_id_index,
             returning,
         }
@@ -123,10 +125,12 @@ impl InsertExecutor {
                 columns = ordered_cols
             }
 
-            let default_col = SerialArray::from_iter(repeat(None).take(cap));
-            self.sorted_default_column_indices
-                .iter()
-                .for_each(|idx| columns.insert(*idx, default_col.clone().into()));
+            let one_row_chunk = DataChunk::new_dummy(1);
+
+            for (idx, expr) in &self.sorted_default_columns {
+                let column = expr.eval(&one_row_chunk).await?;
+                columns.insert(idx, column.);
+            }
 
             // If the user does not specify the primary key, then we need to add a column as the
             // primary key.
@@ -197,18 +201,22 @@ impl BoxedExecutorBuilder for InsertExecutor {
             .iter()
             .map(|&i| i as usize)
             .collect();
-        let sorted_default_column_indices =
-            if let Some(default_column_indices) = &insert_node.default_column_indices {
-                let mut default_column_indices = default_column_indices
-                    .get_default_column_indices()
-                    .iter()
-                    .map(|&i| i as usize)
-                    .collect_vec();
-                default_column_indices.sort_unstable();
-                default_column_indices
-            } else {
-                vec![]
-            };
+        let sorted_default_columns = if let Some(default_columns) = &insert_node.default_columns {
+            let mut default_columns = default_columns
+                .get_default_column()
+                .iter()
+                .map(|IndexAndExpr { index: i, expr: e }| {
+                    (
+                        *i as usize,
+                        build_from_prost(&e.expect("expr should be Some")).expect("expr corrputed"),
+                    )
+                })
+                .collect_vec();
+            default_columns.sort_unstable_by_key(|(i, e)| i);
+            default_columns
+        } else {
+            vec![]
+        };
 
         Ok(Box::new(Self::new(
             table_id,
@@ -218,7 +226,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             source.context.get_config().developer.chunk_size,
             source.plan_node().get_identity().clone(),
             column_indices,
-            sorted_default_column_indices,
+            sorted_default_columns,
             insert_node.row_id_index.as_ref().map(|index| *index as _),
             insert_node.returning,
         )))

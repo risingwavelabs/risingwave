@@ -18,9 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, Schema, TableVersionId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SelectItem};
-use tracing::debug;
 
 use super::statement::RewriteExprsRecursive;
 use super::BoundQuery;
@@ -55,7 +53,7 @@ pub struct BoundInsert {
 
     /// Columns that user fails to specify
     /// Will set to default value (current null)
-    pub default_column_indices: Option<Vec<usize>>,
+    pub default_columns: Option<Vec<(usize, ExprImpl)>>,
 
     pub source: BoundQuery,
 
@@ -195,7 +193,11 @@ impl Binder {
                 bound_query.schema().len()
             }
             Some(values) => {
-                let values_len = values.0.first().expect("values list should not be empty").len();
+                let values_len = values
+                    .0
+                    .first()
+                    .expect("values list should not be empty")
+                    .len();
                 let values = self.bind_values(values.clone(), Some(expected_types))?;
                 bound_query = BoundQuery::with_values(values);
                 cast_exprs = vec![];
@@ -244,6 +246,22 @@ impl Binder {
             return Err(RwError::from(ErrorCode::BindError(msg.to_string())));
         }
 
+        let default_columns = if let Some(default_column_indices) = default_column_indices {
+            Some(
+                default_column_indices
+                    .into_iter()
+                    .map(|i| {
+                        (
+                            i,
+                            ExprImpl::literal_null(cols_to_insert_in_table[i].data_type().clone()),
+                        )
+                    })
+                    .collect_vec(),
+            )
+        } else {
+            None
+        };
+
         println!(
             "col_indices_to_insert: {:?}, default_column_indices: {:?}",
             col_indices_to_insert.clone(),
@@ -257,7 +275,7 @@ impl Binder {
             owner,
             row_id_index,
             column_indices: col_indices_to_insert,
-            default_column_indices,
+            default_columns,
             source: bound_query,
             cast_exprs,
             returning_list,
