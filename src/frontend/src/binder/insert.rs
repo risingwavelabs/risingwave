@@ -265,7 +265,7 @@ impl Binder {
         println!(
             "col_indices_to_insert: {:?}, default_column_indices: {:?}",
             col_indices_to_insert.clone(),
-            default_column_indices.clone().unwrap_or_default()
+            default_columns.clone().unwrap_or_default()
         );
 
         let insert = BoundInsert {

@@ -18,6 +18,7 @@ use anyhow::Context;
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use risingwave_common::array::column::Column;
 use risingwave_common::array::serial_array::SerialArray;
 use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
@@ -125,11 +126,11 @@ impl InsertExecutor {
                 columns = ordered_cols
             }
 
-            let one_row_chunk = DataChunk::new_dummy(1);
+            let one_row_chunk = DataChunk::new_dummy(cap);
 
             for (idx, expr) in &self.sorted_default_columns {
-                let column = expr.eval(&one_row_chunk).await?;
-                columns.insert(idx, column.);
+                let column = Column::new(expr.eval(&one_row_chunk).await?);
+                columns.insert(*idx, column);
             }
 
             // If the user does not specify the primary key, then we need to add a column as the
@@ -205,14 +206,15 @@ impl BoxedExecutorBuilder for InsertExecutor {
             let mut default_columns = default_columns
                 .get_default_column()
                 .iter()
+                .cloned()
                 .map(|IndexAndExpr { index: i, expr: e }| {
                     (
-                        *i as usize,
-                        build_from_prost(&e.expect("expr should be Some")).expect("expr corrputed"),
+                        i as usize,
+                        build_from_prost(&(e.expect("expr should be Some"))).expect("expr corrputed"),
                     )
                 })
                 .collect_vec();
-            default_columns.sort_unstable_by_key(|(i, e)| i);
+            default_columns.sort_unstable_by_key(|(i, _)| *i);
             default_columns
         } else {
             vec![]
