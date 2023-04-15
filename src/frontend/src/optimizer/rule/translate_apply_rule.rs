@@ -22,7 +22,7 @@ use super::{BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef};
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalApply, LogicalJoin, LogicalProject, LogicalScan, LogicalShare,
+    LogicalApply, LogicalJoin, LogicalProject, LogicalScan, LogicalShare,
     PlanTreeNodeBinary, PlanTreeNodeUnary,
 };
 use crate::optimizer::PlanRef;

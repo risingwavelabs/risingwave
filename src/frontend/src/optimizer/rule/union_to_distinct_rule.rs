@@ -16,7 +16,7 @@ use itertools::Itertools;
 
 use super::{BoxedRule, Rule};
 use crate::optimizer::plan_node::generic::Agg;
-use crate::optimizer::plan_node::{LogicalAgg, LogicalUnion, PlanTreeNode};
+use crate::optimizer::plan_node::{LogicalUnion, PlanTreeNode};
 use crate::optimizer::PlanRef;
 
 /// Convert union to distinct + union all
