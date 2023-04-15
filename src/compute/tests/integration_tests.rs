@@ -231,7 +231,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         1024,
         "InsertExecutor".to_string(),
         vec![], // ignore insertion order
-        vec![], 
+        vec![],
         Some(row_id_index),
         false,
     ));

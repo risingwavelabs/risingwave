@@ -246,27 +246,17 @@ impl Binder {
             return Err(RwError::from(ErrorCode::BindError(msg.to_string())));
         }
 
-        let default_columns = if let Some(default_column_indices) = default_column_indices {
-            Some(
-                default_column_indices
-                    .into_iter()
-                    .map(|i| {
-                        (
-                            i,
-                            ExprImpl::literal_null(cols_to_insert_in_table[i].data_type().clone()),
-                        )
-                    })
-                    .collect_vec(),
-            )
-        } else {
-            None
-        };
-
-        println!(
-            "col_indices_to_insert: {:?}, default_column_indices: {:?}",
-            col_indices_to_insert.clone(),
-            default_columns.clone().unwrap_or_default()
-        );
+        let default_columns = default_column_indices.map(|default_column_indices| {
+            default_column_indices
+                .into_iter()
+                .map(|i| {
+                    (
+                        i,
+                        ExprImpl::literal_null(cols_to_insert_in_table[i].data_type().clone()),
+                    )
+                })
+                .collect_vec()
+        });
 
         let insert = BoundInsert {
             table_id,
@@ -290,10 +280,12 @@ impl Binder {
 
     /// Cast a list of `exprs` to corresponding `expected_types` IN ASSIGNMENT CONTEXT. Make sure
     /// you understand the difference of implicit, assignment and explicit cast before reusing it.
+
     pub(super) fn cast_on_insert(
         expected_types: &Vec<DataType>,
         exprs: Vec<ExprImpl>,
     ) -> Result<Vec<ExprImpl>> {
+        #[expect(clippy::disallowed_methods)]
         let msg = match expected_types.len().cmp(&exprs.len()) {
             std::cmp::Ordering::Less => "INSERT has more expressions than target columns",
             _ => {

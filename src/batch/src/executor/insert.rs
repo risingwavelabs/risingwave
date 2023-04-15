@@ -210,7 +210,8 @@ impl BoxedExecutorBuilder for InsertExecutor {
                 .map(|IndexAndExpr { index: i, expr: e }| {
                     (
                         i as usize,
-                        build_from_prost(&(e.expect("expr should be Some"))).expect("expr corrputed"),
+                        build_from_prost(&(e.expect("expr should be Some")))
+                            .expect("expr corrputed"),
                     )
                 })
                 .collect_vec();

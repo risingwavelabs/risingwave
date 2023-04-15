@@ -27,7 +27,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t }
-      └─BatchValues { rows: [[1:Float32, 2:Int32, null:Varchar]] }
+      └─BatchValues { rows: [[1:Float32, 2:Int32]] }
 - name: insert values with implicit null (multiple rows)
   sql: |
     create table t (v1 real, v2 int, v3 varchar);
@@ -35,7 +35,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t }
-      └─BatchValues { rows: [[1:Float32, 2:Int32, null:Varchar], [3:Float32, 4:Int32, null:Varchar]] }
+      └─BatchValues { rows: [[1:Float32, 2:Int32], [3:Float32, 4:Int32]] }
 - name: implicit null user defined columns 1
   sql: |
     create table t (v1 int, v2 int);
@@ -43,7 +43,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t }
-      └─BatchValues { rows: [[5:Int32, null:Int32]] }
+      └─BatchValues { rows: [[5:Int32]] }
 - name: implicit null user defined columns 2
   sql: |
     create table t (v1 int, v2 int);
@@ -51,7 +51,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t }
-      └─BatchValues { rows: [[6:Int32, null:Int32]] }
+      └─BatchValues { rows: [[6:Int32]] }
 - name: implicit null user defined columns 3
   sql: |
     create table t (v1 int, v2 int, v3 int);
@@ -59,7 +59,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t }
-      └─BatchValues { rows: [[6:Int32, null:Int32, null:Int32]] }
+      └─BatchValues { rows: [[6:Int32]] }
 - name: implicit null user defined columns 4
   sql: |
     create table t (v1 int, v2 int, v3 int);
@@ -67,7 +67,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t }
-      └─BatchValues { rows: [[6:Int32, null:Int32, null:Int32]] }
+      └─BatchValues { rows: [[6:Int32]] }
 - name: implicit null user defined columns 5
   sql: |
     create table t (v1 int, v2 int, v3 int);
@@ -75,7 +75,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t }
-      └─BatchValues { rows: [[6:Int32, null:Int32, null:Int32]] }
+      └─BatchValues { rows: [[6:Int32]] }
 - name: insert values on non-assign-castable types
   sql: |
     create table t (v1 real, v2 int);
@@ -234,3 +234,86 @@
     create table t (a int, b int);
     insert into t values (0,1), (1,2) returning sum(a);
   binder_error: 'Bind error: should not have agg/window in the `RETURNING` list'
+- name: insert and specify all columns with values
+  sql: |
+    create table t (a int, b int);
+    insert into t (b, a) values (1, 2);
+  logical_plan: |
+    LogicalInsert { table: t }
+    └─LogicalValues { rows: [[1:Int32, 2:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32] } }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchInsert { table: t }
+      └─BatchValues { rows: [[1:Int32, 2:Int32]] }
+- name: insert and specify all columns with query
+  sql: |
+    create table t (a int, b int);
+    insert into t (b, a) select * from t;
+  logical_plan: |
+    LogicalInsert { table: t }
+    └─LogicalProject { exprs: [t.a, t.b] }
+      └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchInsert { table: t }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
+- name: insert and specify some columns with values
+  sql: |
+    create table t (a int, b int);
+    insert into t (a) values (1), (2);
+  logical_plan: |
+    LogicalInsert { table: t }
+    └─LogicalValues { rows: [[1:Int32], [2:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32] } }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchInsert { table: t }
+      └─BatchValues { rows: [[1:Int32], [2:Int32]] }
+- name: insert and specify some columns with query
+  sql: |
+    create table t (a int, b int);
+    insert into t (a) select b from t;
+  logical_plan: |
+    LogicalInsert { table: t }
+    └─LogicalProject { exprs: [t.b] }
+      └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchInsert { table: t }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchScan { table: t, columns: [t.b], distribution: SomeShard }
+- name: insert with less source columns from values
+  sql: |
+    create table t (a int, b int);
+    insert into t values (1);
+  logical_plan: |
+    LogicalInsert { table: t }
+    └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32] } }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchInsert { table: t }
+      └─BatchValues { rows: [[1:Int32]] }
+- name: insert with less source columns from query
+  sql: |
+    create table t (a int, b int);
+    insert into t select a from t;
+  logical_plan: |
+    LogicalInsert { table: t }
+    └─LogicalProject { exprs: [t.a] }
+      └─LogicalProject { exprs: [t.a] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchInsert { table: t }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchScan { table: t, columns: [t.a], distribution: SomeShard }
+- name: insert with more source columns, reject
+  sql: |
+    create table t (a int, b int);
+    insert into t values (1, 2, 3);
+  binder_error: 'Bind error: INSERT has more expressions than target columns'
+- name: insert with more source columns than target, reject
+  sql: |
+    create table t (a int, b int);
+    insert into t (a) select * from t;
+  binder_error: 'Bind error: INSERT has more expressions than target columns'

@@ -49,6 +49,7 @@ pub struct LogicalInsert {
 
 impl LogicalInsert {
     /// Create a [`LogicalInsert`] node. Used internally by optimizer.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         input: PlanRef,
         table_name: String,
@@ -81,6 +82,7 @@ impl LogicalInsert {
     }
 
     /// Create a [`LogicalInsert`] node. Used by planner.
+    #[allow(clippy::too_many_arguments)]
     pub fn create(
         input: PlanRef,
         table_name: String,

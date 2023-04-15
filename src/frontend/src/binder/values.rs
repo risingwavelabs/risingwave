@@ -16,7 +16,6 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::Values;
 
 use super::bind_context::Clause;
@@ -125,6 +124,7 @@ impl Binder {
         };
 
         let values_id = self.next_values_id();
+        #[expect(clippy::disallowed_methods)]
         let schema = Schema::new(
             types
                 .into_iter()
@@ -158,7 +158,7 @@ impl Binder {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::util::iter_util::zip_eq_fast;
+    use risingwave_common::util::iter_util::{zip_eq_fast, ZipEqFast};
     use risingwave_sqlparser::ast::{Expr, Value};
 
     use super::*;
