@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeSet;
+
 use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_expr::expr::WindowFuncKind;
 use smallvec::SmallVec;
@@ -29,6 +31,7 @@ pub(super) struct StateKey {
     pub encoded_pk: MemcmpEncoded,
 }
 
+#[derive(Debug)]
 pub(super) struct StatePos<'a> {
     /// Only 2 cases in which the `key` is `None`:
     /// 1. The state is empty.
@@ -37,9 +40,54 @@ pub(super) struct StatePos<'a> {
     pub is_ready: bool,
 }
 
+#[derive(Debug)]
 pub(super) struct StateOutput {
+    /// Window function return value for the current ready window frame.
     pub return_value: Datum,
-    pub last_evicted_key: Option<StateKey>,
+    /// Hint for the executor to evict unneeded rows from the state table.
+    pub evict_hint: StateEvictHint,
+}
+
+#[derive(Debug)]
+pub(super) enum StateEvictHint {
+    /// Use a set instead of a single key to avoid state table iter or too many range delete.
+    /// Shouldn't be empty set.
+    CanEvict(BTreeSet<StateKey>),
+    /// State keys from the specified key are still required, so must be kept in the state table.
+    CannotEvict(StateKey),
+}
+
+impl StateEvictHint {
+    pub fn intersect(self, other: StateEvictHint) -> StateEvictHint {
+        use StateEvictHint::*;
+        match (self, other) {
+            (CanEvict(a), CanEvict(b)) => {
+                // Example:
+                // a = CanEvict({1, 2, 3})
+                // b = CanEvict({2, 3, 4})
+                // a.intersect(b) = CanEvict({1, 2, 3})
+                let a_last = a.last().unwrap();
+                let b_last = b.last().unwrap();
+                let last = std::cmp::min(a_last, b_last).clone();
+                CanEvict(a.into_iter().chain(b).filter(|k| k <= &last).collect())
+            }
+            (CannotEvict(a), CannotEvict(b)) => {
+                // Example:
+                // a = CannotEvict(2), meaning keys < 2 can be evicted
+                // b = CannotEvict(3), meaning keys < 3 can be evicted
+                // a.intersect(b) = CannotEvict(2)
+                CannotEvict(std::cmp::min(a, b))
+            }
+            (CanEvict(keys), CannotEvict(still_required))
+            | (CannotEvict(still_required), CanEvict(keys)) => {
+                // Example:
+                // a = CanEvict({1, 2, 3})
+                // b = CannotEvict(3)
+                // a.intersect(b) = CanEvict({1, 2})
+                CanEvict(keys.into_iter().filter(|k| k < &still_required).collect())
+            }
+        }
+    }
 }
 
 pub(super) trait WindowState {

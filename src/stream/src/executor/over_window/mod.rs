@@ -43,6 +43,7 @@ use super::{
 use crate::cache::{new_unbounded, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
+use crate::executor::over_window::state::StateEvictHint;
 use crate::task::AtomicU64Ref;
 
 mod call;
@@ -356,26 +357,45 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 )?;
 
                 // Get all outputs.
-                let outputs = partition
+                let (ret_values, evict_hints): (Vec<_>, Vec<_>) = partition
                     .states
                     .iter_mut()
                     .map(|state| state.slide())
-                    .collect_vec();
+                    .map(|o| (o.return_value, o.evict_hint))
+                    .unzip();
 
                 // Append to output builders.
                 let key_part = (&partition_key)
                     .chain(row::once(Some(key.order_key)))
                     .chain(pk);
                 for (builder, datum) in builders.iter_mut().zip_eq_debug(
-                    key_part.iter().chain(
-                        outputs
-                            .iter()
-                            .map(|output| output.return_value.to_datum_ref()),
-                    ),
+                    key_part
+                        .iter()
+                        .chain(ret_values.iter().map(|v| v.to_datum_ref())),
                 ) {
                     builder.append_datum(datum);
                 }
-                // TODO(): evict unneeded rows from state table
+
+                // Evict unneeded rows from state table.
+                let evict_hint = evict_hints
+                    .into_iter()
+                    .reduce(StateEvictHint::intersect)
+                    .expect("# of evict hints = # of window func calls");
+                if let StateEvictHint::CanEvict(keys_to_evict) = evict_hint {
+                    for key in keys_to_evict {
+                        let pk = memcmp_encoding::decode_row(
+                            &key.encoded_pk,
+                            &this.pk_data_types,
+                            &vec![OrderType::ascending(); this.input_pk_indices.len()],
+                        )?;
+                        let state_row_pk = (&partition_key)
+                            .chain(row::once(Some(key.order_key)))
+                            .chain(pk);
+                        // NOTE: We don't know the value of the row here, so the table must allow
+                        // inconsistent ops.
+                        this.state_table.delete(state_row_pk);
+                    }
+                }
             }
         }
 
@@ -539,7 +559,7 @@ mod tests {
 
         let output_pk_indices = vec![2];
 
-        let state_table = StateTable::new_without_distribution(
+        let state_table = StateTable::new_without_distribution_inconsistent_op(
             store,
             TableId::new(1),
             table_columns,

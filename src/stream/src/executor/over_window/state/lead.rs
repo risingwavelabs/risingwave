@@ -20,6 +20,7 @@ use smallvec::SmallVec;
 
 use super::{StateKey, StateOutput, StatePos, WindowState};
 use crate::executor::over_window::call::Frame;
+use crate::executor::over_window::state::StateEvictHint;
 
 struct BufferEntry(StateKey, Datum);
 
@@ -58,7 +59,7 @@ impl WindowState for LeadState {
         let BufferEntry(key, _) = self.buffer.pop_front().unwrap();
         StateOutput {
             return_value: lead_value,
-            last_evicted_key: Some(key),
+            evict_hint: StateEvictHint::CanEvict(std::iter::once(key).collect()),
         }
     }
 }

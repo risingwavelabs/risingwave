@@ -20,6 +20,7 @@ use smallvec::SmallVec;
 
 use super::{StateKey, StateOutput, StatePos, WindowState};
 use crate::executor::over_window::call::Frame;
+use crate::executor::over_window::state::StateEvictHint;
 
 struct BufferEntry(StateKey, Datum);
 
@@ -68,15 +69,15 @@ impl WindowState for LagState {
             self.curr_idx += 1;
             StateOutput {
                 return_value: None,
-                last_evicted_key: None,
+                evict_hint: StateEvictHint::CannotEvict(self.buffer.front().unwrap().0.clone()),
             }
         } else {
-            // in the other case, the first item in buffer is always the `LAG(offset)` row
+            // in the other case, the first entry in buffer is always the `lag(offset)` row
             assert_eq!(self.curr_idx, self.offset);
             let BufferEntry(key, value) = self.buffer.pop_front().unwrap();
             StateOutput {
                 return_value: value,
-                last_evicted_key: Some(key),
+                evict_hint: StateEvictHint::CanEvict(std::iter::once(key).collect()),
             }
         }
     }
