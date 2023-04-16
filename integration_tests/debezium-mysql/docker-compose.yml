@@ -1,6 +1,14 @@
 ---
 version: "3"
 services:
+  risingwave:
+    image: ghcr.io/risingwavelabs/risingwave:latest
+    ports:
+      - 4566:4566
+      - 5691:5691
+    command:
+      - playground
+    container_name: risingwave
   mysql:
     image: mysql:8.0
     ports:
