@@ -49,7 +49,6 @@ impl Partition {
         debug_assert!(self.is_aligned());
         self.states
             .first()
-            .map(|state| state.curr_window().key)
-            .flatten()
+            .and_then(|state| state.curr_window().key)
     }
 }
