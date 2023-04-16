@@ -417,9 +417,9 @@ impl<S: StateStore> OverWindowExecutor<S> {
 
     #[try_stream(ok = Watermark, error = StreamExecutorError)]
     async fn emit_watermarks<'a>(_this: &'a mut ExecutorInner<S>, vars: &'a mut ExecutionVars<S>) {
-        if let Some(last_outputed) = vars.last_outputted_order_key.as_ref() {
+        if let Some(last_outputted) = vars.last_outputted_order_key.as_ref() {
             while let Some(watermark) = vars.pending_watermarks.front() {
-                if &watermark.val > last_outputed {
+                if &watermark.val > last_outputted {
                     break;
                 }
                 yield vars.pending_watermarks.pop_front().unwrap();
