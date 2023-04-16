@@ -181,7 +181,10 @@ pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompact
     multi_filter
 }
 
-pub async fn generate_splits(compact_task: &mut CompactTask, context: Arc<CompactorContext>) {
+pub async fn generate_splits(
+    compact_task: &mut CompactTask,
+    context: Arc<CompactorContext>,
+) -> HummockResult<()> {
     let sstable_infos = compact_task
         .input_ssts
         .iter()
@@ -204,8 +207,7 @@ pub async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Compac
                 context
                     .sstable_store
                     .sstable(sstable_info, &mut StoreLocalStatistic::default())
-                    .await
-                    .unwrap()
+                    .await?
                     .value()
                     .meta
                     .block_metas
@@ -254,4 +256,6 @@ pub async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Compac
             compact_task.splits = splits;
         }
     }
+
+    Ok(())
 }

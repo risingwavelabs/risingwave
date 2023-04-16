@@ -25,6 +25,7 @@ use crate::{ExprError, Result};
 
 #[function("add(*number, *number) -> auto")]
 #[function("add(interval, interval) -> interval")]
+#[function("add(int256, int256) -> int256")]
 pub fn general_add<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -38,6 +39,7 @@ where
 
 #[function("subtract(*number, *number) -> auto")]
 #[function("subtract(interval, interval) -> interval")]
+#[function("subtract(int256, int256) -> int256")]
 pub fn general_sub<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -50,6 +52,7 @@ where
 }
 
 #[function("multiply(*number, *number) -> auto")]
+#[function("multiply(int256, int256) -> int256")]
 pub fn general_mul<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -62,6 +65,8 @@ where
 }
 
 #[function("divide(*number, *number) -> auto")]
+#[function("divide(int256, int256) -> int256")]
+#[function("divide(int256, float64) -> float64")]
 pub fn general_div<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -80,6 +85,7 @@ where
 }
 
 #[function("modulus(*number, *number) -> auto")]
+#[function("modulus(int256, int256) -> int256")]
 pub fn general_mod<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -101,6 +107,17 @@ pub fn general_neg<T1: CheckedNeg>(expr: T1) -> Result<T1> {
     expr.checked_neg().ok_or(ExprError::NumericOutOfRange)
 }
 
+#[function("neg(int256) -> int256")]
+pub fn int256_neg<TRef, T>(expr: TRef) -> Result<T>
+where
+    TRef: Into<T> + Debug,
+    T: CheckedNeg + Debug,
+{
+    expr.into()
+        .checked_neg()
+        .ok_or(ExprError::NumericOutOfRange)
+}
+
 #[function("abs(int16) -> int16")]
 #[function("abs(int32) -> int32")]
 #[function("abs(int64) -> int64")]
@@ -109,6 +126,20 @@ pub fn general_neg<T1: CheckedNeg>(expr: T1) -> Result<T1> {
 pub fn general_abs<T1: Signed + CheckedNeg>(expr: T1) -> Result<T1> {
     if expr.is_negative() {
         general_neg(expr)
+    } else {
+        Ok(expr)
+    }
+}
+
+#[function("abs(int256) -> int256")]
+pub fn int256_abs<TRef, T>(expr: TRef) -> Result<T>
+where
+    TRef: Into<T> + Debug,
+    T: Signed + CheckedNeg + Debug,
+{
+    let expr = expr.into();
+    if expr.is_negative() {
+        int256_neg(expr)
     } else {
         Ok(expr)
     }
@@ -364,8 +395,9 @@ pub fn sqrt_decimal(expr: Decimal) -> Result<Decimal> {
 mod tests {
     use std::str::FromStr;
 
+    use risingwave_common::types::num256::{Int256, Int256Ref};
     use risingwave_common::types::test_utils::IntervalTestExt;
-    use risingwave_common::types::{Date, Decimal, Interval, Timestamp, F32, F64};
+    use risingwave_common::types::{Date, Decimal, Interval, Scalar, Timestamp, F32, F64};
 
     use super::*;
 
@@ -496,6 +528,29 @@ mod tests {
         assert_eq!(sqrt_decimal(dec("inf")).unwrap(), dec("inf"));
         assert_eq!(sqrt_decimal(dec("-0")).unwrap(), dec("-0"));
         assert!(sqrt_decimal(dec("-inf")).is_err());
+    }
+
+    #[test]
+    fn test_arithmetic_int256() {
+        let tuples = vec![
+            (0, 1, "0"),
+            (0, -1, "0"),
+            (1, 1, "1"),
+            (1, -1, "-1"),
+            (1, 2, "0.5"),
+            (1, -2, "-0.5"),
+            (9007199254740991i64, 2, "4503599627370495.5"),
+        ];
+
+        for (i, j, k) in tuples {
+            let lhs = Int256::from(i);
+            let rhs = F64::from(j);
+            let res = F64::from_str(k).unwrap();
+            assert_eq!(
+                general_div::<Int256Ref<'_>, F64, F64>(lhs.as_scalar_ref(), rhs).unwrap(),
+                res,
+            );
+        }
     }
 
     fn dec(s: &str) -> Decimal {

@@ -35,7 +35,7 @@
 #![feature(is_sorted)]
 #![feature(btree_drain_filter)]
 #![feature(exact_size_is_empty)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![cfg_attr(coverage, feature(no_coverage))]
 #![recursion_limit = "256"]
 #![feature(error_generic_member_access)]

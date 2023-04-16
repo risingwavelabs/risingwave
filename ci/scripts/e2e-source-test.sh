@@ -54,6 +54,7 @@ node_port=50051
 node_timeout=10
 
 echo "--- starting risingwave cluster with connector node"
+RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-1cn-1fe-with-recovery
 ./connector-node/start-service.sh -p $node_port > .risingwave/log/connector-node.log 2>&1 &
 
@@ -93,6 +94,7 @@ mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cd
 psql -h db -U postgres -d cdc_test < ./e2e_test/source/cdc/postgres_cdc_insert.sql
 
 # start cluster w/o clean-data
+RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make dev ci-1cn-1fe-with-recovery
 echo "wait for recovery finish"
 sleep 20
@@ -104,14 +106,8 @@ echo "--- Kill cluster"
 cargo make ci-kill
 pkill -f connector-node
 
-echo "--- e2e, ci-1cn-1fe, nexmark endless"
-cargo make ci-start ci-1cn-1fe
-sqllogictest -p 4566 -d dev './e2e_test/source/nexmark_endless/*.slt'
-
-echo "--- Kill cluster"
-cargo make ci-kill
-
 echo "--- e2e, ci-kafka-plus-pubsub, kafka and pubsub source"
+RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-kafka-plus-pubsub
 ./scripts/source/prepare_ci_kafka.sh
 cargo run --bin prepare_ci_pubsub
