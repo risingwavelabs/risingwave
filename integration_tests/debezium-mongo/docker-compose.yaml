@@ -1,0 +1,121 @@
+version: '3.1'
+
+services:
+  mongodb:
+    image: mongo:4.4
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin123
+    command: --replSet rs0 --oplogSize 128 --keyFile /data/keyfile/mongodb-keyfile
+    restart: always
+    healthcheck:
+      test: "echo 'db.runCommand({ping: 1})' | mongo -u admin -p admin123 --authenticationDatabase admin"
+      interval: 5s
+      timeout: 10s
+      retries: 3
+    volumes:
+      - ./mongodb-keyfile:/data/keyfile/mongodb-keyfile:ro
+
+  mongodb-setup:
+    image: mongo:4.4
+    container_name: mongodb-setup
+    depends_on:
+      - mongodb
+    entrypoint:
+      [
+        "bash",
+        "-c",
+        "sleep 10 && mongo -u admin -p admin123 --host mongodb:27017 /config-replica.js && sleep 10",
+      ]
+    restart: "no"
+    volumes:
+      - ./config-replica.js:/config-replica.js
+
+  debezium:
+    image: debezium/connect:1.9
+    container_name: debezium
+    depends_on:
+      - message_queue
+      - mongodb
+    ports:
+      - "8083:8083"
+    healthcheck:
+      test: curl -f localhost:8083
+      interval: 1s
+      start_period: 120s
+    environment:
+      BOOTSTRAP_SERVERS: message_queue:29092
+      GROUP_ID: 1
+      CONFIG_STORAGE_TOPIC: debezium_mongodb_config
+      OFFSET_STORAGE_TOPIC: debezium_mongodb_offset
+      STATUS_STORAGE_TOPIC: debezium_mongodb_status
+      CONNECT_VALUE_CONVERTER: io.confluent.connect.avro.AvroConverter
+      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://message_queue:8081
+
+  random_data_generator:
+    build:
+      context: .
+      dockerfile: Dockerfile.generator
+    container_name: random_data_generator
+    depends_on:
+      - mongodb
+    environment:
+      MONGO_HOST: mongodb
+      MONGO_PORT: 27017
+      MONGO_DB_NAME: random_data
+      MONGO_USERNAME: admin
+      MONGO_PASSWORD: admin123
+
+  message_queue:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: message_queue
+
+  register-mongodb-connector:
+    image: curlimages/curl:7.79.1
+    container_name: register-mongodb-connector
+    depends_on:
+      debezium: { condition: service_healthy }
+    command: >
+      /bin/sh -c "
+      echo 'Waiting for Kafka Connect to start...' &&
+      while ! curl -s http://debezium:8083/ | grep -q 'version'; do
+        sleep 5;
+      done &&
+      echo 'Kafka Connect started.' &&
+      echo 'Registering MongoDB connector...' &&
+      curl -X POST -H 'Content-Type: application/json' --data '{
+        \"name\": \"mongodb-connector\",
+        \"config\": {
+          \"connector.class\": \"io.debezium.connector.mongodb.MongoDbConnector\",
+          \"tasks.max\": \"1\",
+          \"mongodb.hosts\": \"mongodb:27017\",
+          \"mongodb.name\": \"dbserver1\",
+          \"mongodb.user\": \"admin\",
+          \"mongodb.password\": \"admin123\",
+          \"database.history.kafka.bootstrap.servers\": \"message_queue:29092\",
+          \"database.include.list\" : \"random_data\"
+        }
+      }' http://debezium:8083/connectors &&
+      echo 'MongoDB connector registered.'"
+    restart: always
+
+  kafka-connect-ui:
+    image: landoop/kafka-connect-ui:0.9.7
+    container_name: kafka-connect-ui
+    depends_on:
+      debezium: { condition: service_healthy }
+    ports:
+      - "8000:8000"
+    environment:
+      CONNECT_URL: http://debezium:8083
+
+volumes:
+  mongodb_data:
+  message_queue:
+    external: false
+  debezium:
+    external: false
