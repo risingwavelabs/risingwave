@@ -20,7 +20,7 @@ use crate::catalog::SourceId;
 use crate::optimizer::plan_node::{
     LogicalShare, LogicalSource, PlanNodeId, PlanTreeNode, StreamShare,
 };
-use crate::optimizer::plan_visitor::{DefaultBehavior, DefaultValue};
+use crate::optimizer::plan_visitor::{DefaultBehavior, Merge};
 use crate::optimizer::{PlanRewriter, PlanVisitor};
 use crate::PlanRef;
 
@@ -111,7 +111,7 @@ impl PlanRewriter for ShareSourceRewriter {
 
 impl PlanVisitor<()> for SourceCounter {
     fn default_behavior() -> impl DefaultBehavior<()> {
-        DefaultValue
+        Merge(|_, _| ())
     }
 
     fn visit_logical_source(&mut self, source: &LogicalSource) {

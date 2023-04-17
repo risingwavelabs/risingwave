@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use super::{DefaultBehavior, DefaultValue};
+use super::{DefaultBehavior, Merge};
 use crate::optimizer::plan_node::{LogicalShare, PlanNodeId, PlanTreeNodeUnary};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
@@ -35,7 +35,7 @@ impl ShareParentCounter {
 
 impl PlanVisitor<()> for ShareParentCounter {
     fn default_behavior() -> impl DefaultBehavior<()> {
-        DefaultValue
+        Merge(|_, _| ())
     }
 
     fn visit_logical_share(&mut self, share: &LogicalShare) {
