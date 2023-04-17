@@ -67,7 +67,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 params.actor_context,
                 BoundedInMemLogStoreFactory::new(1),
             )
-            .await,
+            .await?,
         ))
     }
 }

@@ -60,18 +60,18 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
     fn init(&mut self) -> Self::InitFuture<'_> {
         async move {
             let first_write_epoch = self.rx.init().await;
-            let stream = self
-                .state_store
-                .iter(
-                    (Unbounded, Unbounded),
-                    first_write_epoch,
-                    ReadOptions::default(),
-                )
-                .await?;
-            let mut peek_stream = stream.peekable();
-            pin_mut!(peek_stream);
-            let result: &(FullKey<Bytes>, Bytes) =
-                peek_stream.peek().await.unwrap().as_ref().unwrap();
+            // let stream = self
+            //     .state_store
+            //     .iter(
+            //         (Unbounded, Unbounded),
+            //         first_write_epoch,
+            //         ReadOptions::default(),
+            //     )
+            //     .await?;
+            // let mut peek_stream = stream.peekable();
+            // pin_mut!(peek_stream);
+            // let result: &(FullKey<Bytes>, Bytes) =
+            //     peek_stream.peek().await.unwrap().as_ref().unwrap();
             todo!()
         }
     }

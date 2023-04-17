@@ -26,20 +26,20 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_connector::sink::catalog::SinkType;
 use risingwave_connector::sink::{Sink, SinkConfig, SinkImpl};
-use risingwave_connector::ConnectorParams;
+use risingwave_connector::{dispatch_sink, ConnectorParams};
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, Message};
 use crate::common::log_store::{LogReader, LogStoreFactory, LogStoreReadItem, LogWriter};
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{expect_first_barrier, ActorContextRef, PkIndices};
+use crate::executor::{expect_first_barrier, ActorContextRef, BoxedMessageStream, PkIndices};
 
 pub struct SinkExecutor<F: LogStoreFactory> {
     input: BoxedExecutor,
     metrics: Arc<StreamingMetrics>,
+    sink: SinkImpl,
     config: SinkConfig,
     identity: String,
-    connector_params: ConnectorParams,
     schema: Schema,
     pk_indices: Vec<usize>,
     sink_type: SinkType,
@@ -86,40 +86,36 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         sink_type: SinkType,
         actor_context: ActorContextRef,
         log_store_factory: F,
-    ) -> Self {
+    ) -> StreamExecutorResult<Self> {
         let (log_reader, log_writer) = log_store_factory.build().await;
-        Self {
-            input: materialize_executor,
-            metrics,
-            config,
-            identity: format!("SinkExecutor {:X?}", executor_id),
-            pk_indices,
-            schema,
+        let sink = build_sink(
+            config.clone(),
+            schema.clone(),
+            pk_indices.clone(),
             connector_params,
             sink_type,
+        )
+        .await?;
+        Ok(Self {
+            input: materialize_executor,
+            metrics,
+            sink,
+            config,
+            identity: format!("SinkExecutor {:X?}", executor_id),
+            schema,
+            sink_type,
+            pk_indices,
             actor_context,
             log_reader,
             log_writer,
-        }
+        })
     }
 
-    fn execute_inner(self) -> impl Stream<Item = StreamExecutorResult<Message>> {
-        let config = self.config.clone();
-        let schema = self.schema.clone();
-
+    fn execute_inner(self) -> BoxedMessageStream {
         let metrics = self
             .metrics
             .sink_commit_duration
             .with_label_values(&[self.identity.as_str(), self.config.get_connector()]);
-        let consume_log_stream = Self::execute_consume_log(
-            config,
-            schema,
-            self.pk_indices,
-            self.connector_params,
-            self.sink_type,
-            self.log_reader,
-            metrics,
-        );
 
         let write_log_stream = Self::execute_write_log(
             self.input,
@@ -129,7 +125,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             self.actor_context,
         );
 
-        select(consume_log_stream.into_stream(), write_log_stream)
+        dispatch_sink!(self.sink, sink, {
+            let consume_log_stream = Self::execute_consume_log(sink, self.log_reader, metrics);
+            select(consume_log_stream.into_stream(), write_log_stream).boxed()
+        })
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -190,17 +189,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         }
     }
 
-    async fn execute_consume_log<R: LogReader>(
-        config: SinkConfig,
-        schema: Schema,
-        pk_indices: Vec<usize>,
-        connector_params: ConnectorParams,
-        sink_type: SinkType,
+    async fn execute_consume_log<S: Sink, R: LogReader>(
+        mut sink: S,
         mut log_reader: R,
         sink_commit_duration_metrics: Histogram,
     ) -> StreamExecutorResult<Message> {
-        let mut sink = build_sink(config, schema, pk_indices, connector_params, sink_type).await?;
-
         let mut epoch = log_reader.init().await?;
 
         // the flag is required because kafka transaction requires at least one
@@ -260,9 +253,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 }
 
 impl<F: LogStoreFactory> Executor for SinkExecutor<F> {
-    fn execute(self: Box<Self>) -> super::BoxedMessageStream {
-        // TODO: dispatch in enum
-        self.execute_inner().boxed()
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        self.execute_inner()
     }
 
     fn schema(&self) -> &Schema {
@@ -341,7 +333,8 @@ mod test {
             ActorContext::create(0),
             BoundedInMemLogStoreFactory::new(1),
         )
-        .await;
+        .await
+        .unwrap();
 
         let mut executor = SinkExecutor::execute(Box::new(sink_executor));
 
