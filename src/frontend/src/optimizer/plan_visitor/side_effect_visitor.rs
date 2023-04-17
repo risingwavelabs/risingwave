@@ -16,7 +16,7 @@ use super::PlanVisitor;
 use crate::optimizer::plan_node;
 
 /// Recursively visit the **logical** plan and decide whether it has side effect and cannot be
-/// eliminated trivally.
+/// eliminated trivially.
 pub struct SideEffectVisitor;
 
 impl PlanVisitor<bool> for SideEffectVisitor {
