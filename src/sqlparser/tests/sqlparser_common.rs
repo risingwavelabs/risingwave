@@ -1715,9 +1715,7 @@ fn parse_explain_analyze_with_simple_select() {
     run_explain_analyze(
         "EXPLAIN SELECT sqrt(id) FROM foo",
         false,
-        ExplainOptions {
-            ..Default::default()
-        },
+        ExplainOptions::default(),
     );
     run_explain_analyze(
         "EXPLAIN (VERBOSE) SELECT sqrt(id) FROM foo",
@@ -1730,9 +1728,7 @@ fn parse_explain_analyze_with_simple_select() {
     run_explain_analyze(
         "EXPLAIN ANALYZE SELECT sqrt(id) FROM foo",
         true,
-        ExplainOptions {
-            ..Default::default()
-        },
+        ExplainOptions::default(),
     );
     run_explain_analyze(
         "EXPLAIN (TRACE) SELECT sqrt(id) FROM foo",
@@ -2157,14 +2153,14 @@ fn parse_delimited_identifiers() {
         TableFactor::Table {
             name,
             alias,
-            for_system_time_as_of_now,
+            for_system_time_as_of_proctime,
         } => {
             assert_eq!(vec![Ident::with_quote_unchecked('"', "a table")], name.0);
             assert_eq!(
                 Ident::with_quote_unchecked('"', "alias"),
                 alias.unwrap().name
             );
-            assert!(!for_system_time_as_of_now);
+            assert!(!for_system_time_as_of_proctime);
         }
         _ => panic!("Expecting TableFactor::Table"),
     }
@@ -2291,7 +2287,7 @@ fn parse_implicit_join() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t1".into()]),
                     alias: None,
-                    for_system_time_as_of_now: false,
+                    for_system_time_as_of_proctime: false,
                 },
                 joins: vec![],
             },
@@ -2299,7 +2295,7 @@ fn parse_implicit_join() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t2".into()]),
                     alias: None,
-                    for_system_time_as_of_now: false,
+                    for_system_time_as_of_proctime: false,
                 },
                 joins: vec![],
             }
@@ -2315,13 +2311,13 @@ fn parse_implicit_join() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t1a".into()]),
                     alias: None,
-                    for_system_time_as_of_now: false,
+                    for_system_time_as_of_proctime: false,
                 },
                 joins: vec![Join {
                     relation: TableFactor::Table {
                         name: ObjectName(vec!["t1b".into()]),
                         alias: None,
-                        for_system_time_as_of_now: false,
+                        for_system_time_as_of_proctime: false,
                     },
                     join_operator: JoinOperator::Inner(JoinConstraint::Natural),
                 }]
@@ -2330,13 +2326,13 @@ fn parse_implicit_join() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t2a".into()]),
                     alias: None,
-                    for_system_time_as_of_now: false,
+                    for_system_time_as_of_proctime: false,
                 },
                 joins: vec![Join {
                     relation: TableFactor::Table {
                         name: ObjectName(vec!["t2b".into()]),
                         alias: None,
-                        for_system_time_as_of_now: false,
+                        for_system_time_as_of_proctime: false,
                     },
                     join_operator: JoinOperator::Inner(JoinConstraint::Natural),
                 }]
@@ -2355,7 +2351,7 @@ fn parse_cross_join() {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new_unchecked("t2")]),
                 alias: None,
-                for_system_time_as_of_now: false,
+                for_system_time_as_of_proctime: false,
             },
             join_operator: JoinOperator::CrossJoin
         },
@@ -2365,14 +2361,14 @@ fn parse_cross_join() {
 
 #[test]
 fn parse_temporal_join() {
-    let sql = "SELECT * FROM t1 JOIN t2 FOR SYSTEM_TIME AS OF NOW() ON c1 = c2";
+    let sql = "SELECT * FROM t1 JOIN t2 FOR SYSTEM_TIME AS OF PROCTIME() ON c1 = c2";
     let select = verified_only_select(sql);
     assert_eq!(
         Join {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new_unchecked("t2")]),
                 alias: None,
-                for_system_time_as_of_now: true,
+                for_system_time_as_of_proctime: true,
             },
             join_operator: Inner(JoinConstraint::On(Expr::BinaryOp {
                 left: Box::new(Expr::Identifier("c1".into())),
@@ -2395,7 +2391,7 @@ fn parse_joins_on() {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new_unchecked(relation.into())]),
                 alias,
-                for_system_time_as_of_now: false,
+                for_system_time_as_of_proctime: false,
             },
             join_operator: f(JoinConstraint::On(Expr::BinaryOp {
                 left: Box::new(Expr::Identifier("c1".into())),
@@ -2447,7 +2443,7 @@ fn parse_joins_using() {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new_unchecked(relation.into())]),
                 alias,
-                for_system_time_as_of_now: false,
+                for_system_time_as_of_proctime: false,
             },
             join_operator: f(JoinConstraint::Using(vec!["c1".into()])),
         }
@@ -2491,7 +2487,7 @@ fn parse_natural_join() {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new_unchecked("t2")]),
                 alias: None,
-                for_system_time_as_of_now: false,
+                for_system_time_as_of_proctime: false,
             },
             join_operator: f(JoinConstraint::Natural),
         }
@@ -2718,7 +2714,7 @@ fn parse_derived_tables() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t2".into()]),
                     alias: None,
-                    for_system_time_as_of_now: false,
+                    for_system_time_as_of_proctime: false,
                 },
                 join_operator: JoinOperator::Inner(JoinConstraint::Natural),
             }],

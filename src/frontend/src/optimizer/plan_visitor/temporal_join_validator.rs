@@ -34,15 +34,15 @@ impl PlanVisitor<bool> for TemporalJoinValidator {
     }
 
     fn visit_stream_table_scan(&mut self, stream_table_scan: &StreamTableScan) -> bool {
-        stream_table_scan.logical().for_system_time_as_of_now()
+        stream_table_scan.logical().for_system_time_as_of_proctime()
     }
 
     fn visit_batch_seq_scan(&mut self, batch_seq_scan: &BatchSeqScan) -> bool {
-        batch_seq_scan.logical().for_system_time_as_of_now()
+        batch_seq_scan.logical().for_system_time_as_of_proctime()
     }
 
     fn visit_logical_scan(&mut self, logical_scan: &LogicalScan) -> bool {
-        logical_scan.for_system_time_as_of_now()
+        logical_scan.for_system_time_as_of_proctime()
     }
 
     fn visit_stream_temporal_join(&mut self, stream_temporal_join: &StreamTemporalJoin) -> bool {

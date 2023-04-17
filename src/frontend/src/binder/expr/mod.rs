@@ -224,6 +224,7 @@ impl Binder {
             UnaryOperator::Plus => {
                 return self.rewrite_positive(expr);
             }
+            UnaryOperator::PGSquareRoot => ExprType::Sqrt,
             _ => {
                 return Err(ErrorCode::NotImplemented(
                     format!("unsupported unary expression: {:?}", op),
@@ -529,6 +530,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 "int2" => DataType::Int16,
                 "int4" => DataType::Int32,
                 "int8" => DataType::Int64,
+                "rw_int256" => DataType::Int256,
                 "float4" => DataType::Float32,
                 "float8" => DataType::Float64,
                 "timestamptz" => DataType::Timestamptz,

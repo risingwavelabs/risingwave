@@ -39,7 +39,7 @@ pub fn gen_sink_query_from_name(from_name: ObjectName) -> Result<Query> {
     let table_factor = TableFactor::Table {
         name: from_name,
         alias: None,
-        for_system_time_as_of_now: false,
+        for_system_time_as_of_proctime: false,
     };
     let from = vec![TableWithJoins {
         relation: table_factor,
@@ -81,7 +81,7 @@ pub fn gen_sink_plan(
     let definition = context.normalized_sql().to_owned();
 
     let (dependent_relations, bound) = {
-        let mut binder = Binder::new(session, vec![]);
+        let mut binder = Binder::new_for_stream(session);
         let bound = binder.bind_query(*query)?;
         (binder.included_relations(), bound)
     };
