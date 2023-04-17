@@ -41,11 +41,11 @@ use crate::optimizer::plan_node::*;
 
 /// The behavior for the default implementations of `visit_xxx`.
 pub trait DefaultBehavior<R> {
-    /// Apply this behavior to the plan node with the given `inputs` and `visit` function.
-    fn apply(&self, plan: &dyn PlanNode, visit: impl FnMut(PlanRef) -> R) -> R;
+    /// Apply this behavior to the plan node with the given results.
+    fn apply(&self, results: impl IntoIterator<Item = R>) -> R;
 }
 
-/// Merge the `visit` result of all input nodes with a function.
+/// Visit all input nodes, merge the results with a function.
 /// - If there's no input node, return the default value of the result type.
 /// - If there's only a single input node, directly return its result.
 pub struct Merge<F>(F);
@@ -55,23 +55,20 @@ where
     F: Fn(R, R) -> R,
     R: Default,
 {
-    fn apply(&self, plan: &dyn PlanNode, visit: impl FnMut(PlanRef) -> R) -> R {
-        plan.inputs()
-            .into_iter()
-            .map(visit)
-            .reduce(&self.0)
-            .unwrap_or_default()
+    fn apply(&self, results: impl IntoIterator<Item = R>) -> R {
+        results.into_iter().reduce(&self.0).unwrap_or_default()
     }
 }
 
-/// Returns the default value of the result type.
+/// Visit all input nodes, return the default value of the result type.
 pub struct DefaultValue;
 
 impl<R> DefaultBehavior<R> for DefaultValue
 where
     R: Default,
 {
-    fn apply(&self, _plan: &dyn PlanNode, _visit: impl FnMut(PlanRef) -> R) -> R {
+    fn apply(&self, results: impl IntoIterator<Item = R>) -> R {
+        let _ = results.into_iter().count(); // consume the iterator
         R::default()
     }
 }
@@ -97,7 +94,8 @@ macro_rules! def_visitor {
                 $(
                     #[doc = "Visit [`" [<$convention $name>] "`] , the function should visit the inputs."]
                     fn [<visit_ $convention:snake _ $name:snake>](&mut self, plan: &[<$convention $name>]) -> R {
-                        Self::default_behavior().apply(plan, |p| self.visit(p))
+                        let results = plan.inputs().into_iter().map(|input| self.visit(input));
+                        Self::default_behavior().apply(results)
                     }
                 )*
             }
