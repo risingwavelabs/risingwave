@@ -199,7 +199,10 @@ impl PlanVisitor<Count> for CountRowsVisitor {
 #[easy_ext::ext(LogicalCountRows)]
 pub impl PlanRef {
     fn max_one_row(&self) -> bool {
-        CountRowsVisitor.visit(self.clone()).hi() <= Some(1)
+        CountRowsVisitor
+            .visit(self.clone())
+            .hi()
+            .is_some_and(|hi| hi <= 1)
     }
 
     fn row_count(&self) -> Option<usize> {
