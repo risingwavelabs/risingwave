@@ -86,7 +86,7 @@ drop table s
 
 # Test create source with connection
 statement ok 
-create connection mock with (type = 'mock');
+CREATE CONNECTION mock WITH (type = 'privatelink', provider = 'mock');
 
 # Reference to non-existant connection
 statement error
