@@ -16,6 +16,7 @@ use risingwave_common::array::{ListRef, ListValue};
 use risingwave_common::types::{ScalarImpl, ScalarRef};
 use risingwave_expr_macro::function;
 
+use crate::error::ExprError;
 use crate::Result;
 
 /// Returns an array of the subscripts of all occurrences of the second argument in the array
@@ -76,17 +77,20 @@ fn array_positions<'a, T: ScalarRef<'a>>(
     match array {
         Some(left) => {
             let values = left.values_ref();
-            Ok(Some(
-                ListValue::new(
-                    values
-                        .into_iter()
-                        .enumerate()
-                        .filter(|(_, item)| item == &element.map(|x| x.into()))
-                        .map(|(idx, _)| Some(ScalarImpl::Int32((idx + 1) as _)))
-                        .collect(),
-                )
-                .into(),
-            ))
+            match TryInto::<i32>::try_into(values.len()) {
+                Ok(_) => Ok(Some(
+                    ListValue::new(
+                        values
+                            .into_iter()
+                            .enumerate()
+                            .filter(|(_, item)| item == &element.map(|x| x.into()))
+                            .map(|(idx, _)| Some(ScalarImpl::Int32((idx + 1) as _)))
+                            .collect(),
+                    )
+                    .into(),
+                )),
+                Err(_) => Err(ExprError::CastOutOfRange("invalid array length")),
+            }
         }
         _ => Ok(None),
     }
