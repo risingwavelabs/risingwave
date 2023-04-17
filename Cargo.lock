@@ -8047,8 +8047,8 @@ dependencies = [
 
 [[package]]
 name = "tokio-stream"
-version = "0.1.11"
-source = "git+https://github.com/madsim-rs/tokio.git?rev=0c25710#0c25710a9d4e415a47820a4bdff11bd30e377572"
+version = "0.1.12"
+source = "git+https://github.com/madsim-rs/tokio.git?rev=ab251ad#ab251ad1fae8e16d9a1df74e301dbf3ed9d4d3af"
 dependencies = [
  "futures-core",
  "madsim-tokio",
