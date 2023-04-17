@@ -156,19 +156,12 @@ message ListTableFragmentsResponse {
   map<uint32, TableFragmentInfo> table_fragments = 1;
 }
 
-message ListTablesRequest {
-  repeated uint32 table_ids = 1;
-}
 
-message ListTablesResponse {
-  map<uint32, catalog.Table> tables = 1;
-}
 
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
   rpc CancelCreatingJobs(CancelCreatingJobsRequest) returns (CancelCreatingJobsResponse);
   rpc ListTableFragments(ListTableFragmentsRequest) returns (ListTableFragmentsResponse);
-  rpc ListTables(ListTablesRequest) returns (ListTablesResponse);
 }
 
 // Below for cluster service.
