@@ -13,6 +13,10 @@
     <version>1.0-SNAPSHOT</version>
     <name>risingwave-sink-jdbc</name>
 
+    <properties>
+        <testcontainers.version>1.17.6</testcontainers.version>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>com.risingwave.java</groupId>
@@ -52,8 +56,21 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.apache.derby</groupId>
-            <artifactId>derby</artifactId>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>mysql</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
 
