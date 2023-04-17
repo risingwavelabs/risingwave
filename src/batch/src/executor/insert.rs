@@ -117,21 +117,25 @@ impl InsertExecutor {
             let cap = chunk.capacity();
             let (mut columns, vis) = chunk.into_parts();
 
-            // No need to check for duplicate columns. This is already validated in binder.
-            if !&self.column_indices.is_sorted() {
-                let mut ordered_cols = columns.clone();
-                for (i, idx) in self.column_indices.iter().enumerate() {
-                    ordered_cols[*idx] = columns[i].clone()
-                }
-                columns = ordered_cols
-            }
+            let dummy_chunk = DataChunk::new_dummy(cap);
 
-            let one_row_chunk = DataChunk::new_dummy(cap);
+            let mut ordered_columns = self
+                .column_indices
+                .iter()
+                .enumerate()
+                .map(|(i, idx)| (*idx, columns[i].clone()))
+                .collect_vec();
 
             for (idx, expr) in &self.sorted_default_columns {
-                let column = Column::new(expr.eval(&one_row_chunk).await?);
-                columns.insert(*idx, column);
+                let column = Column::new(expr.eval(&dummy_chunk).await?);
+                ordered_columns.push((*idx, column));
             }
+
+            ordered_columns.sort_unstable_by_key(|(idx, _)| *idx);
+            columns = ordered_columns
+                .into_iter()
+                .map(|(_, column)| column)
+                .collect_vec();
 
             // If the user does not specify the primary key, then we need to add a column as the
             // primary key.

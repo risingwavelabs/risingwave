@@ -226,9 +226,8 @@ impl Binder {
                     //      insert into t values (7)
                     // this kind of usage is fine, null values will be provided
                     // implicitly.
-                    let mut new_default_column_indices =
+                    let new_default_column_indices =
                         col_indices_to_insert.split_off(bounded_column_nums);
-                    new_default_column_indices.extend(default_column_indices.unwrap_or_default());
                     (None, Some(new_default_column_indices))
                 }
             }

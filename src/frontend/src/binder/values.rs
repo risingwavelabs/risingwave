@@ -99,8 +99,6 @@ impl Binder {
             .collect::<Result<Vec<Vec<_>>>>()?;
         self.context.clause = None;
 
-        // Adding Null values in case user did not specify all columns. E.g.
-        // create table t1 (v1 int, v2 int); insert into t1 (v2) values (5);
         let num_columns = bound[0].len();
         if bound.iter().any(|row| row.len() != num_columns) {
             return Err(
