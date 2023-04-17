@@ -118,19 +118,19 @@ pub fn cosd_f64(input: F64) -> F64 {
     let mut sign = 1.0;
     let mut arg1 = arg1 % 360.0;
 
-     if arg1 < 0.0 {
+    if arg1 < 0.0 {
         // cosd(-x) = cosd(x)
         arg1 = -arg1;
-    } 
-     if arg1 > 180.0 {
-        // cosd(360-x) = cosd(x)
-        arg1 = 360.0 - arg1; 
     }
-     if arg1 > 90.0 {
+    if arg1 > 180.0 {
+        // cosd(360-x) = cosd(x)
+        arg1 = 360.0 - arg1;
+    }
+    if arg1 > 90.0 {
         // cosd(180-x) = -cosd(x)
-        arg1 = 180.0 - arg1; 
-        sign =  -sign;
-    } 
+        arg1 = 180.0 - arg1;
+        sign = -sign;
+    }
 
     let result: f64 = sign * cosd_q1(arg1);
 
@@ -171,17 +171,17 @@ pub fn sind_f64(input: F64) -> F64 {
 
     if arg1 < 0.0 {
         // sind(-x) = -sind(x)
-        arg1 = -arg1; 
-        sign =  -sign;
+        arg1 = -arg1;
+        sign = -sign;
     }
-     if arg1 > 180.0 {
+    if arg1 > 180.0 {
         //  sind(360-x) = -sind(x)
-        arg1 = 360.0 - arg1; 
-        sign =  -sign;
+        arg1 = 360.0 - arg1;
+        sign = -sign;
     }
-     if arg1 > 90.0 {
+    if arg1 > 90.0 {
         //  sind(180-x) = sind(x)
-        arg1 = 180.0 - arg1; 
+        arg1 = 180.0 - arg1;
     }
 
     let result = sign * sind_q1(arg1);
@@ -332,7 +332,7 @@ mod tests {
         assert!(tand_f64(F64::from(-90)).is_infinite());
         assert!(tand_f64(F64::from(270)).is_infinite());
         assert!(tand_f64(F64::from(450)).is_infinite());
-        assert!(tand_f64(F64::from(90)).is_infinite());       
+        assert!(tand_f64(F64::from(90)).is_infinite());
     }
 
     #[test]
