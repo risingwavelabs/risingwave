@@ -56,16 +56,6 @@ pub fn atan2_f64(input_x: F64, input_y: F64) -> F64 {
     input_x.0.atan2(input_y.0).into()
 }
 
-#[function("degrees(float64) -> float64")]
-pub fn degrees_f64(input: F64) -> F64 {
-    input.0.to_degrees().into()
-}
-
-#[function("radians(float64) -> float64")]
-pub fn radians_f64(input: F64) -> F64 {
-    input.0.to_radians().into()
-}
-
 // Radians per degree, a.k.a. PI / 180
 static RADIANS_PER_DEGREE: f64 = 0.017_453_292_519_943_295;
 // Constants we use to get more accurate results.
@@ -229,14 +219,12 @@ pub fn tand_f64(input: F64) -> F64 {
     }
 
     let tan_arg1 = sind_q1(arg1) / cosd_q1(arg1);
-    let result = sign * (tan_arg1 / TAN_45); // F64::from(45).to_radians().into()).0
+    let result = sign * (tan_arg1 / TAN_45);
 
     // On some machines we get tand(180) = minus zero, but this isn't always
     // true. For portability, and because the user constituency for this
     // function probably doesn't want minus zero, force it to plain zero.
     let result = if result == 0.0 { 0.0 } else { result };
-
-    // Not checking for overflow because tand(90) == Inf
     result.into()
 }
 
@@ -373,27 +361,5 @@ mod tests {
             atan2_f64(y, x),
             two * atan_f64(y / (F64::from(F64::from(x.powi(2) + y.powi(2)).sqrt()) + x)),
         )
-    }
-
-    #[test]
-    fn test_degrees_and_radians() {
-        let full_angle = F64::from(360);
-        let tau = F64::from(std::f64::consts::TAU);
-        assert_similar(degrees_f64(tau), full_angle);
-        assert_similar(radians_f64(full_angle), tau);
-
-        let straight_angle = F64::from(180);
-        let pi = F64::from(std::f64::consts::PI);
-        assert_similar(degrees_f64(pi), straight_angle);
-        assert_similar(radians_f64(straight_angle), pi);
-
-        let right_angle = F64::from(90);
-        let half_pi = F64::from(std::f64::consts::PI / 2.);
-        assert_similar(degrees_f64(half_pi), right_angle);
-        assert_similar(radians_f64(right_angle), half_pi);
-
-        let zero = F64::from(0);
-        assert_similar(degrees_f64(zero), zero);
-        assert_similar(radians_f64(zero), zero);
     }
 }
