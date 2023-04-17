@@ -28,18 +28,14 @@ def do_test(config):
     sleep(5)
 
     # Do test with slt
-    ret = os.popen(
-        "sqllogictest -p 4566 -d dev './e2e_test/source/pulsar/pulsar.slt'").read()
-    print("astra-streaming test result: ", ret)
-    result = re.match(
-        'e2e_test/source/pulsar/pulsar.slt +.. \[OK\] in [0-9]+ ms', ret)
-
+    ret = os.system(
+        "sqllogictest -p 4566 -d dev './e2e_test/source/pulsar/pulsar.slt'")
     # Clean up
     cur.execute('drop table t')
 
     cur.close()
     conn.close()
-    assert result != None
+    assert ret == 0
 
 
 if __name__ == "__main__":
