@@ -20,6 +20,7 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::test_utils::{rand_bitmap, rand_stream_chunk};
 use risingwave_common::types::{Datum, Scalar, ScalarRef};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::ExprError;
@@ -431,12 +432,8 @@ impl_fold_agg! { F64Array, Float64, F32Array }
 mod tests {
     extern crate test;
 
-    use itertools::Itertools;
-    use rand::seq::SliceRandom;
-    use rand::Rng;
     use risingwave_common::array::stream_chunk::Op;
-    use risingwave_common::array::{Array, ArrayBuilder, I64Array, I64ArrayBuilder};
-    use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+    use risingwave_common::array::{Array, I64Array};
     use risingwave_common::types::F64;
     use risingwave_common::{array, array_nonnull};
     use test::Bencher;
@@ -658,74 +655,6 @@ mod tests {
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &100);
     }
 
-    fn gen_rand_bitmap(num_bits: usize, count_ones: usize) -> Bitmap {
-        let mut builder = BitmapBuilder::zeroed(num_bits);
-        let mut range = (0..num_bits).collect_vec();
-        range.shuffle(&mut rand::thread_rng());
-        let shuffled = range.into_iter().collect_vec();
-        for item in shuffled.iter().take(count_ones) {
-            builder.set(*item, true);
-        }
-        builder.finish()
-    }
-
-    fn gen_stream_chunk(
-        bitmap: Option<&Bitmap>,
-        chunk_size: usize,
-        append_only: bool,
-    ) -> (Vec<Op>, ArrayImpl) {
-        let mut data_builder = I64ArrayBuilder::new(chunk_size);
-        let mut ops: Vec<Op> = vec![];
-        let mut cur_data: Vec<i64> = vec![];
-        let mut rng = rand::thread_rng();
-        if let Some(bitmap) = bitmap {
-            for i in 0..chunk_size {
-                // SAFETY(value_at_unchecked): the idx is always in bound.
-                unsafe {
-                    if bitmap.is_set_unchecked(i) {
-                        let op = if append_only || cur_data.is_empty() || rng.gen() {
-                            Op::Insert
-                        } else {
-                            Op::Delete
-                        };
-                        ops.push(op);
-                        if op == Op::Insert {
-                            let value = rng.gen::<i32>() as i64;
-                            data_builder.append(Some(value));
-                            cur_data.push(value);
-                        } else {
-                            let idx = rng.gen_range(0..cur_data.len());
-                            data_builder.append(Some(cur_data[idx]));
-                            cur_data.remove(idx);
-                        }
-                    } else {
-                        ops.push(Op::Insert);
-                        data_builder.append(Some(1234567890));
-                    }
-                }
-            }
-        } else {
-            for _ in 0..chunk_size {
-                let op = if append_only || cur_data.is_empty() || rng.gen() {
-                    Op::Insert
-                } else {
-                    Op::Delete
-                };
-                ops.push(op);
-                if op == Op::Insert {
-                    let value = rng.gen::<i32>() as i64;
-                    data_builder.append(Some(value));
-                    cur_data.push(value);
-                } else {
-                    let idx = rng.gen_range(0..cur_data.len());
-                    data_builder.append(Some(cur_data[idx]));
-                    cur_data.remove(idx);
-                }
-            }
-        }
-        (ops, data_builder.finish().into())
-    }
-
     fn bench_i64(
         b: &mut Bencher,
         mut agg: Box<dyn StreamingAggImpl>,
@@ -740,14 +669,15 @@ mod tests {
             agg_desc, chunk_size, vis_rate, iter_count
         );
         let bitmap = if vis_rate < 1.0 {
-            Some(gen_rand_bitmap(
+            Some(rand_bitmap::gen_rand_bitmap(
                 chunk_size,
                 (chunk_size as f64 * vis_rate) as usize,
             ))
         } else {
             None
         };
-        let (ops, data) = gen_stream_chunk(bitmap.as_ref(), chunk_size, append_only);
+        let (ops, data) =
+            rand_stream_chunk::gen_legal_stream_chunk(bitmap.as_ref(), chunk_size, append_only);
         b.iter(|| {
             for _ in 0..iter_count {
                 agg.apply_batch(&ops, bitmap.as_ref(), &[&data]).unwrap();
