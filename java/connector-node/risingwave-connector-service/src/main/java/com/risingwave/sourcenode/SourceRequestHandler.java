@@ -85,10 +85,20 @@ public class SourceRequestHandler {
         }
     }
 
+    private void ensureArgNotNull(Map<String, String> props, String key) {
+        if (!props.containsKey(key)) {
+            throw new RuntimeException(String.format("'%s' not found", key));
+        }
+    }
+
     private void validateProperties(
             ConnectorServiceProto.GetEventStreamRequest.ValidateProperties validate)
             throws Exception {
         var props = validate.getPropertiesMap();
+
+        ensureArgNotNull(props, DbzConnectorConfig.HOST);
+        ensureArgNotNull(props, DbzConnectorConfig.PORT);
+        ensureArgNotNull(props, DbzConnectorConfig.DB_NAME);
         String jdbcUrl =
                 getJdbcPrefix(validate.getSourceType())
                         + "://"
@@ -108,6 +118,8 @@ public class SourceRequestHandler {
             throw new RuntimeException(e);
         }
 
+        ensureArgNotNull(props, DbzConnectorConfig.USER);
+        ensureArgNotNull(props, DbzConnectorConfig.PASSWORD);
         String dbUser = props.get(DbzConnectorConfig.USER);
         String dbPassword = props.get(DbzConnectorConfig.PASSWORD);
         switch (validate.getSourceType()) {
@@ -137,6 +149,7 @@ public class SourceRequestHandler {
                     coordinatorValidator.validateTableSchema();
                 }
 
+                ensureArgNotNull(props, DbzConnectorConfig.DB_SERVERS);
                 var servers = props.get(DbzConnectorConfig.DB_SERVERS);
                 var workerAddrs = StringUtils.split(servers, ',');
                 var jdbcPrefix = getJdbcPrefix(validate.getSourceType());
@@ -262,8 +275,8 @@ public class SourceRequestHandler {
                 }
                 break;
             default:
-                LOG.error("unknown source type");
-                break;
+                LOG.warn("unknown source type");
+                throw new RuntimeException("Unknown source type");
         }
     }
 
