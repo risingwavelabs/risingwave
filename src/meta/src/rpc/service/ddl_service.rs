@@ -21,7 +21,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::common::AwsPrivateLinkItem;
 use risingwave_connector::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
 use risingwave_connector::source::KAFKA_CONNECTOR;
-use risingwave_pb::catalog::connection::private_link_service::PbPrivateLinkProvider;
+use risingwave_pb::catalog::connection::private_link_service::{PbPrivateLinkProvider, PrivateLinkProvider};
 use risingwave_pb::catalog::connection::PbPrivateLinkService;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -718,6 +718,10 @@ where
                 return Err(MetaError::from(anyhow!(
                     "Private link is only supported for Kafka connector",
                 )));
+            }
+            // skip all checks for mock connection
+            if svc.get_provider()? == PrivateLinkProvider::Mock {
+                return Ok(());
             }
             let link_target_value = get_property_required(properties, PRIVATE_LINK_TARGETS_KEY)?;
             let servers = get_property_required(properties, kafka_props_broker_key(properties))?;
