@@ -4,6 +4,7 @@ import pyarrow.flight
 import pyarrow.parquet
 import inspect
 import traceback
+import json
 
 
 class UserDefinedFunction:
@@ -34,10 +35,33 @@ class ScalarFunction(UserDefinedFunction):
         pass
 
     def eval_batch(self, batch: pa.RecordBatch) -> pa.RecordBatch:
-        column = [self.eval(*[col[i].as_py() for col in batch])
+        # parse value from json string for jsonb columns
+        inputs = [[v.as_py() for v in array] for array in batch]
+        inputs = [
+            _process_input_array(array, type)
+            for array, type in zip(inputs, self._input_schema.types)]
+
+        # evaluate the function for each row
+        column = [self.eval(*[col[i] for col in inputs])
                   for i in range(batch.num_rows)]
+
+        # convert value to json for jsonb columns
+        if self._result_schema.types[0] == pa.large_string():
+            column = [(json.dumps(v) if v is not None else None)
+                      for v in column]
         array = pa.array(column, type=self._result_schema.types[0])
         return pa.RecordBatch.from_arrays([array], schema=self._result_schema)
+
+
+def _process_input_array(array: list, type: pa.DataType) -> list:
+    if pa.types.is_list(type):
+        return [(_process_input_array(v, type.value_type)
+                if v is not None else None)
+                for v in array]
+    if pa.types.is_large_string(type):
+        return [(json.loads(v) if v is not None else None)
+                for v in array]
+    return array
 
 
 class TableFunction(UserDefinedFunction):
@@ -262,6 +286,8 @@ def _string_to_data_type(type_str: str):
         return pa.duration('us')
     elif type_str in ('VARCHAR'):
         return pa.string()
+    elif type_str in ('JSONB'):
+        return pa.large_string()
     elif type_str in ('BYTEA'):
         return pa.binary()
     elif type_str.endswith('[]'):

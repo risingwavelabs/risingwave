@@ -35,7 +35,7 @@ pub fn get_columns_from_table(
     session: &SessionImpl,
     table_name: ObjectName,
 ) -> Result<Vec<ColumnDesc>> {
-    let mut binder = Binder::new(session, vec![]);
+    let mut binder = Binder::new_for_system(session);
     let relation = binder.bind_relation_by_name(table_name.clone(), None, false)?;
     let catalogs = match relation {
         Relation::Source(s) => s.catalog.columns,
@@ -120,22 +120,22 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
                 ],
             ));
         }
-        ShowObject::Connection => {
-            let connections = catalog_reader.get_all_connections();
-            let rows = connections
-                .into_iter()
+        ShowObject::Connection { schema } => {
+            let rows = catalog_reader
+                .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+                .iter_connections()
                 .map(|c| {
-                    let name = c.name;
-                    let conn_type = match c.info {
+                    let name = c.name.clone();
+                    let conn_type = match &c.info {
                         connection::Info::PrivateLinkService(_) => {
                             PRIVATELINK_CONNECTION.to_string()
-                        }
+                        },
                     };
-                    let properties = match c.info {
+                    let properties = match &c.info {
                         connection::Info::PrivateLinkService(i) => {
                             format!(
                                 "provider: {}\nservice_name: {}\nendpoint_id: {}\navailability_zones: {}",
-                                i.provider,
+                                i.get_provider().unwrap().as_str_name(),
                                 i.service_name,
                                 i.endpoint_id,
                                 serde_json::to_string(&i.dns_entries.keys().collect_vec()).unwrap()
@@ -222,6 +222,19 @@ pub fn handle_show_create_object(
                 .filter(|t| t.is_table())
                 .ok_or_else(|| CatalogError::NotFound("table", name.to_string()))?;
             table.create_sql()
+        }
+        ShowCreateType::Sink => {
+            let sink = schema
+                .get_sink_by_name(&object_name)
+                .ok_or_else(|| CatalogError::NotFound("sink", name.to_string()))?;
+            sink.create_sql()
+        }
+        ShowCreateType::Source => {
+            let source = schema
+                .get_source_by_name(&object_name)
+                .filter(|s| s.associated_table_id.is_none())
+                .ok_or_else(|| CatalogError::NotFound("source", name.to_string()))?;
+            source.create_sql()
         }
         _ => {
             return Err(ErrorCode::NotImplemented(

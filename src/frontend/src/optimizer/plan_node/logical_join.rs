@@ -393,11 +393,16 @@ impl LogicalJoin {
         // Reorder the join equal predicate to match the order key.
         let mut reorder_idx = Vec::with_capacity(at_least_prefix_len);
         for order_col_id in order_col_ids {
+            let mut found = false;
             for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
                 if order_col_id == output_column_ids[eq_idx] {
                     reorder_idx.push(i);
+                    found = true;
                     break;
                 }
+            }
+            if !found {
+                break;
             }
         }
         if reorder_idx.len() < at_least_prefix_len {
@@ -923,7 +928,11 @@ impl LogicalJoin {
         // For inner joins, pull non-equal conditions to a filter operator on top of it
         // We do so as the filter operator can apply the non-equal condition batch-wise (vectorized)
         // as opposed to the HashJoin, which applies the condition row-wise.
-        let pull_filter = self.join_type() == JoinType::Inner && predicate.has_non_eq();
+
+        let stream_hash_join = StreamHashJoin::new(logical_join.core.clone(), predicate.clone());
+        let pull_filter = self.join_type() == JoinType::Inner
+            && stream_hash_join.eq_join_predicate().has_non_eq()
+            && stream_hash_join.inequality_pairs().is_empty();
         if pull_filter {
             let default_indices = (0..self.internal_column_num()).collect::<Vec<_>>();
 
@@ -952,14 +961,14 @@ impl LogicalJoin {
                 Ok(plan)
             }
         } else {
-            Ok(StreamHashJoin::new(logical_join.core, predicate).into())
+            Ok(stream_hash_join.into())
         }
     }
 
     fn should_be_temporal_join(&self) -> bool {
         let right = self.right();
         if let Some(logical_scan) = right.as_logical_scan() {
-            logical_scan.for_system_time_as_of_now()
+            logical_scan.for_system_time_as_of_proctime()
         } else {
             false
         }
@@ -992,10 +1001,10 @@ impl LogicalJoin {
             )));
         };
 
-        if !logical_scan.for_system_time_as_of_now() {
+        if !logical_scan.for_system_time_as_of_proctime() {
             return Err(RwError::from(ErrorCode::NotSupported(
                 "Temporal join requires a table defined as temporal table".into(),
-                "Please use FOR SYSTEM_TIME AS OF NOW() syntax".into(),
+                "Please use FOR SYSTEM_TIME AS OF PROCTIME() syntax".into(),
             )));
         }
 

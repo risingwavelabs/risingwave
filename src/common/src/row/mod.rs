@@ -117,12 +117,12 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
 
     /// Returns the hash code of the row.
     #[inline]
-    fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode {
+    fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode<H> {
         let mut hasher = hash_builder.build_hasher();
         for datum in self.iter() {
             hash_datum(datum, &mut hasher);
         }
-        HashCode(hasher.finish())
+        hasher.finish().into()
     }
 
     /// Determines whether the datums of this row are equal to those of another.
@@ -226,7 +226,7 @@ macro_rules! deref_forward_row {
             (**self).memcmp_serialize(serde)
         }
 
-        fn hash<H: std::hash::BuildHasher>(&self, hash_builder: H) -> $crate::hash::HashCode {
+        fn hash<H: std::hash::BuildHasher>(&self, hash_builder: H) -> $crate::hash::HashCode<H> {
             (**self).hash(hash_builder)
         }
 

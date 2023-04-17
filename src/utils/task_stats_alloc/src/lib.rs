@@ -14,7 +14,6 @@
 
 #![feature(allocator_api)]
 #![feature(lint_reasons)]
-#![feature(atomic_mut_ptr)]
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::future::Future;

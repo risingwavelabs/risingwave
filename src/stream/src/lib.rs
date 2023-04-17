@@ -15,7 +15,6 @@
 #![allow(rustdoc::private_intra_doc_links)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![allow(incomplete_features)] // for feature(return_position_impl_trait_in_trait)
-#![feature(binary_heap_retain)]
 #![feature(iterator_try_collect)]
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
@@ -34,7 +33,7 @@
 #![feature(result_option_inspect)]
 #![feature(never_type)]
 #![feature(btreemap_alloc)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
 #![feature(btree_drain_filter)]
@@ -42,6 +41,7 @@
 #![feature(iter_order_by)]
 #![feature(exact_size_is_empty)]
 #![feature(return_position_impl_trait_in_trait)]
+#![feature(test)]
 
 #[macro_use]
 extern crate tracing;

@@ -13,7 +13,7 @@ pbjson = "0.5"
 prost = "0.11"
 prost-helpers = { path = "helpers" }
 serde = { version = "1", features = ["derive"] }
-tonic = { version = "0.2.18", package = "madsim-tonic" }
+tonic = { version = "0.2.21", package = "madsim-tonic" }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

@@ -292,7 +292,7 @@ macro_rules! impl_has_variant {
 impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery, TableFunction, WindowFunction}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct InequalityInputPair {
+pub struct InequalityInputPair {
     /// Input index of greater side of inequality.
     pub(crate) key_required_larger: usize,
     /// Input index of less side of inequality.

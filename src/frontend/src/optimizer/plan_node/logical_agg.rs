@@ -18,7 +18,7 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
-use risingwave_common::types::{DataType, Datum, ScalarImpl, F64};
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::expr::AggKind;
 
@@ -203,15 +203,6 @@ impl LogicalAgg {
         })
     }
 
-    /// Generally used by two phase hash agg.
-    /// If input dist already satisfies hash agg distribution,
-    /// it will be more expensive to do two phase agg, should just do shuffle agg.
-    pub(crate) fn hash_agg_dist_satisfied_by_input_dist(&self, input_dist: &Distribution) -> bool {
-        let required_dist =
-            RequiredDist::shard_by_key(self.input().schema().len(), self.group_key());
-        input_dist.satisfies(&required_dist)
-    }
-
     /// Generates distributed stream plan.
     fn gen_dist_stream_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         let input_dist = stream_input.distribution();
@@ -220,20 +211,20 @@ impl LogicalAgg {
         // Shuffle agg
         // If we have group key, and we won't try two phase agg optimization at all,
         // we will always choose shuffle agg over single agg.
-        if !self.group_key().is_empty() && !self.must_try_two_phase_agg() {
+        if !self.group_key().is_empty() && !self.core.must_try_two_phase_agg() {
             return self.gen_shuffle_plan(stream_input);
         }
 
         // Standalone agg
         // If no group key, and cannot two phase agg, we have to use single plan.
-        if self.group_key().is_empty() && !self.can_two_phase_agg() {
+        if self.group_key().is_empty() && !self.core.can_two_phase_agg() {
             return self.gen_single_plan(stream_input);
         }
 
         debug_assert!(if !self.group_key().is_empty() {
-            self.must_try_two_phase_agg()
+            self.core.must_try_two_phase_agg()
         } else {
-            self.can_two_phase_agg()
+            self.core.can_two_phase_agg()
         });
 
         // Stateless 2-phase simple agg
@@ -251,7 +242,7 @@ impl LogicalAgg {
         // We shall first distribute it by PK,
         // so it obeys consistent hash strategy via [`Distribution::HashShard`].
         let stream_input =
-            if *input_dist == Distribution::SomeShard && self.must_try_two_phase_agg() {
+            if *input_dist == Distribution::SomeShard && self.core.must_try_two_phase_agg() {
                 RequiredDist::shard_by_key(stream_input.schema().len(), stream_input.logical_pk())
                     .enforce_if_not_satisfies(stream_input, &Order::any())?
             } else {
@@ -264,7 +255,7 @@ impl LogicalAgg {
         // with input distributed by dist_key.
         match input_dist {
             Distribution::HashShard(dist_key) | Distribution::UpstreamHashShard(dist_key, _)
-                if (!self.hash_agg_dist_satisfied_by_input_dist(input_dist)
+                if (!self.core.hash_agg_dist_satisfied_by_input_dist(input_dist)
                     || self.group_key().is_empty()) =>
             {
                 let dist_key = dist_key.clone();
@@ -279,31 +270,6 @@ impl LogicalAgg {
         } else {
             self.gen_single_plan(stream_input)
         }
-    }
-
-    pub(crate) fn two_phase_agg_forced(&self) -> bool {
-        self.base
-            .ctx()
-            .session_ctx()
-            .config()
-            .get_force_two_phase_agg()
-    }
-
-    fn two_phase_agg_enabled(&self) -> bool {
-        self.base
-            .ctx()
-            .session_ctx()
-            .config()
-            .get_enable_two_phase_agg()
-    }
-
-    /// Must try two phase agg iff we are forced to, and we satisfy the constraints.
-    fn must_try_two_phase_agg(&self) -> bool {
-        self.two_phase_agg_forced() && self.can_two_phase_agg()
-    }
-
-    pub(crate) fn can_two_phase_agg(&self) -> bool {
-        self.core.can_two_phase_agg() && self.two_phase_agg_enabled()
     }
 
     // Check if the output of the aggregation needs to be sorted and return ordering req by group
@@ -337,16 +303,15 @@ impl LogicalAgg {
     // Check if the input is already sorted, and hence sort merge aggregation can be used
     // It can only be used, if the input is sorted on all group key indices and the
     // datatype of the column is int32
-    fn input_provides_order_on_group_keys(&self, new_logical: &LogicalAgg) -> bool {
+    fn input_provides_order_on_group_keys(&self, new_logical: &generic::Agg<PlanRef>) -> bool {
         self.group_key().iter().all(|group_by_idx| {
-            new_logical
-                .input()
+            let input = &new_logical.input;
+            input
                 .order()
                 .column_orders
                 .iter()
                 .any(|order| order.column_index == *group_by_idx)
-                && new_logical
-                    .input()
+                && input
                     .schema()
                     .fields()
                     .get(*group_by_idx)
@@ -588,7 +553,7 @@ impl LogicalAggBuilder {
                     order_by: order_by.clone(),
                     filter: filter.clone(),
                 });
-                let left = ExprImpl::from(left_ref).cast_implicit(return_type).unwrap();
+                let left = ExprImpl::from(left_ref).cast_explicit(return_type).unwrap();
 
                 let right_return_type =
                     AggCall::infer_return_type(&AggKind::Count, &[inputs[0].return_type()])
@@ -617,12 +582,13 @@ impl LogicalAggBuilder {
             // use pow(x, 0.5) to simulate
             AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp => {
                 let input = inputs.iter().exactly_one().unwrap();
+                let pre_proj_input = self.input_proj_builder.get_expr(input.index).unwrap();
 
                 // first, we compute sum of squared as sum_sq
                 let squared_input_expr = ExprImpl::from(
                     FunctionCall::new(
                         ExprType::Multiply,
-                        vec![ExprImpl::from(input.clone()), ExprImpl::from(input.clone())],
+                        vec![pre_proj_input.clone(), pre_proj_input.clone()],
                     )
                     .unwrap(),
                 );
@@ -647,7 +613,7 @@ impl LogicalAggBuilder {
                     order_by: order_by.clone(),
                     filter: filter.clone(),
                 }))
-                .cast_implicit(return_type.clone())
+                .cast_explicit(return_type.clone())
                 .unwrap();
 
                 // after that, we compute sum
@@ -662,7 +628,7 @@ impl LogicalAggBuilder {
                     order_by: order_by.clone(),
                     filter: filter.clone(),
                 }))
-                .cast_implicit(return_type.clone())
+                .cast_explicit(return_type.clone())
                 .unwrap();
 
                 // then, we compute count
@@ -731,19 +697,7 @@ impl LogicalAggBuilder {
                 // stddev = sqrt(variance)
                 if matches!(agg_kind, AggKind::StddevPop | AggKind::StddevSamp) {
                     target_expr = ExprImpl::from(
-                        FunctionCall::new(
-                            ExprType::Pow,
-                            vec![
-                                target_expr.clone(),
-                                // TODO: The decimal implementation now still relies on float64, so
-                                // float64 is still used here
-                                ExprImpl::from(Literal::new(
-                                    Datum::from(ScalarImpl::Float64(F64::from(0.5))),
-                                    DataType::Float64,
-                                )),
-                            ],
-                        )
-                        .unwrap(),
+                        FunctionCall::new(ExprType::Sqrt, vec![target_expr]).unwrap(),
                     );
                 }
 
@@ -1144,7 +1098,8 @@ impl ToBatch for LogicalAgg {
                     .rewrite_provided_order(&group_key_order);
             }
             let new_input = self.input().to_batch_with_order_required(&input_order)?;
-            let new_logical = self.clone_with_input(new_input);
+            let mut new_logical = self.core.clone();
+            new_logical.input = new_input;
             if self
                 .ctx()
                 .session_ctx()
