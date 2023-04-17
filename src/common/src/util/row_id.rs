@@ -187,8 +187,8 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn test_generator() {
+    #[tokio::test] // `async` in favor of `madsim::time::advance`
+    async fn test_generator() {
         let mut generator = RowIdGenerator::new([VirtualNode::from_index(0)]);
 
         let mut last_row_id = generator.next();
@@ -219,8 +219,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_generator_multiple_vnodes() {
+    #[tokio::test] // `async` in favor of `madsim::time::advance`
+    async fn test_generator_multiple_vnodes() {
         let mut generator = RowIdGenerator::new((0..10).map(VirtualNode::from_index));
 
         let row_ids = generator.next_batch((SEQUENCE_UPPER_BOUND as usize) * 10 + 1);
