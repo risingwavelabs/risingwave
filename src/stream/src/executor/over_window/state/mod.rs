@@ -107,9 +107,5 @@ pub(super) fn create_window_state(call: &WindowFuncCall) -> Box<dyn WindowState 
     match call.kind {
         Lag => Box::new(lag::LagState::new(&call.frame)),
         Lead => Box::new(lead::LeadState::new(&call.frame)),
-        FirstValue => todo!(),
-        LastValue => todo!(),
-        NthValue => todo!(),
-        Aggregate(_) => todo!(),
     }
 }

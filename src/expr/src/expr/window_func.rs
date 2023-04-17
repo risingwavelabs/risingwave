@@ -14,8 +14,6 @@
 
 use parse_display::{Display, FromStr};
 
-use super::AggKind;
-
 /// Kind of window functions.
 #[derive(Debug, Display, FromStr, Copy, Clone, PartialEq, Eq, Hash)]
 #[display(style = "snake_case")]
@@ -23,11 +21,11 @@ pub enum WindowFuncKind {
     // General-purpose window functions.
     Lag,
     Lead,
-    FirstValue,
-    LastValue,
-    NthValue,
+    // FirstValue,
+    // LastValue,
+    // NthValue,
 
-    // Aggregate functions that are used with `OVER`.
-    #[display("{0}")]
-    Aggregate(AggKind),
+    // // Aggregate functions that are used with `OVER`.
+    // #[display("{0}")]
+    // Aggregate(AggKind),
 }

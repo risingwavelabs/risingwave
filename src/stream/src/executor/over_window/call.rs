@@ -12,19 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound;
-
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::DataType;
 use risingwave_expr::expr::WindowFuncKind;
 
 use crate::executor::aggregation::AggArgs;
 
 #[derive(Clone)]
 pub enum Frame {
-    Offset(isize), // for `lag` and `lead`
-    Rows(Bound<usize>, Bound<usize>),
-    Groups(Bound<usize>, Bound<usize>),
-    Range(Bound<ScalarImpl>, Bound<ScalarImpl>),
+    /// Frame by row offset, for `lag` and `lead`.
+    Offset(isize),
+    // Rows(Bound<usize>, Bound<usize>),
+    // Groups(Bound<usize>, Bound<usize>),
+    // Range(Bound<ScalarImpl>, Bound<ScalarImpl>),
 }
 
 #[derive(Clone)]
