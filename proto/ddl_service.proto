@@ -255,12 +255,14 @@ message GetDdlProgressResponse {
 
 message CreateConnectionRequest {
   message PrivateLink {
-    string provider = 1;
+    catalog.Connection.PrivateLinkService.PrivateLinkProvider provider = 1;
     string service_name = 2;
   }
   string name = 1;
+  uint32 database_id = 2;
+  uint32 schema_id = 3;
   oneof payload {
-    PrivateLink private_link = 2;
+    PrivateLink private_link = 4;
   }
 }
 
@@ -277,7 +279,7 @@ message ListConnectionsResponse {
 }
 
 message DropConnectionRequest {
-  string connection_name = 1;
+  uint32 connection_id = 1;
 }
 
 message DropConnectionResponse {
