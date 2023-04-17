@@ -12,22 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(rustdoc::private_intra_doc_links)]
-#![feature(let_chains)]
-#![feature(fn_traits)]
-#![feature(assert_matches)]
-#![feature(lint_reasons)]
-#![feature(iterator_try_collect)]
-#![feature(exclusive_range_pattern)]
-#![feature(lazy_cell)]
-#![feature(try_blocks)]
+use risingwave_common::types::DataType;
 
-mod error;
-pub mod expr;
-pub mod function;
-pub mod sig;
-pub mod table_function;
-pub mod vector_op;
+use super::WindowFuncKind;
+use crate::function::args::FuncArgs;
 
-pub use error::{ExprError, Result};
-use risingwave_common::{bail, ensure};
+#[derive(Clone)]
+pub enum Frame {
+    /// Frame by row offset, for `lag` and `lead`.
+    Offset(isize),
+    // Rows(Bound<usize>, Bound<usize>),
+    // Groups(Bound<usize>, Bound<usize>),
+    // Range(Bound<ScalarImpl>, Bound<ScalarImpl>),
+}
+
+#[derive(Clone)]
+pub struct WindowFuncCall {
+    pub kind: WindowFuncKind,
+    pub args: FuncArgs,
+    pub return_type: DataType,
+    pub frame: Frame,
+}

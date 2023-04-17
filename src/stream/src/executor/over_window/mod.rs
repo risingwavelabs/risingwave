@@ -45,7 +45,6 @@ use crate::common::StateTableColumnMapping;
 use crate::executor::over_window::state::StateEvictHint;
 use crate::task::AtomicU64Ref;
 
-mod call;
 mod partition;
 mod state;
 

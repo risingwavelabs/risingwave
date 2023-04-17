@@ -12,22 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(rustdoc::private_intra_doc_links)]
-#![feature(let_chains)]
-#![feature(fn_traits)]
-#![feature(assert_matches)]
-#![feature(lint_reasons)]
-#![feature(iterator_try_collect)]
-#![feature(exclusive_range_pattern)]
-#![feature(lazy_cell)]
-#![feature(try_blocks)]
-
-mod error;
-pub mod expr;
-pub mod function;
-pub mod sig;
-pub mod table_function;
-pub mod vector_op;
-
-pub use error::{ExprError, Result};
-use risingwave_common::{bail, ensure};
+pub mod aggregate;
+pub mod args;
+pub mod window;

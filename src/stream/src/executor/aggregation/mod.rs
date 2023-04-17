@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use agg_call::*;
 pub use agg_group::*;
 pub use agg_state::*;
 pub use distinct::*;
@@ -30,7 +29,6 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::Executor;
 
-mod agg_call;
 mod agg_group;
 pub mod agg_impl;
 mod agg_state;

@@ -12,24 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::DataType;
-use risingwave_expr::expr::WindowFuncKind;
+mod kind;
+pub use kind::*;
 
-use crate::executor::aggregation::AggArgs;
-
-#[derive(Clone)]
-pub enum Frame {
-    /// Frame by row offset, for `lag` and `lead`.
-    Offset(isize),
-    // Rows(Bound<usize>, Bound<usize>),
-    // Groups(Bound<usize>, Bound<usize>),
-    // Range(Bound<ScalarImpl>, Bound<ScalarImpl>),
-}
-
-#[derive(Clone)]
-pub struct WindowFuncCall {
-    pub kind: WindowFuncKind,
-    pub args: AggArgs, // TODO(rc): give `AggArgs` a more general name
-    pub return_type: DataType,
-    pub frame: Frame,
-}
+mod call;
+pub use call::*;

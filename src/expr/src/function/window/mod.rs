@@ -12,20 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use parse_display::{Display, FromStr};
+mod kind;
+pub use kind::*;
 
-/// Kind of window functions.
-#[derive(Debug, Display, FromStr, Copy, Clone, PartialEq, Eq, Hash)]
-#[display(style = "snake_case")]
-pub enum WindowFuncKind {
-    // General-purpose window functions.
-    Lag,
-    Lead,
-    // FirstValue,
-    // LastValue,
-    // NthValue,
-
-    // // Aggregate functions that are used with `OVER`.
-    // #[display("{0}")]
-    // Aggregate(AggKind),
-}
+mod call;
+pub use call::*;
