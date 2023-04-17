@@ -67,6 +67,7 @@ use self::group_top_n::GroupTopNExecutorBuilder;
 use self::group_top_n_appendonly::AppendOnlyGroupTopNExecutorBuilder;
 use self::hash_agg::*;
 use self::hash_join::*;
+pub(crate) use self::hash_join::{BandJoinCondition, HalfBandJoinCondition};
 use self::hop_window::*;
 use self::local_simple_agg::*;
 use self::lookup::*;

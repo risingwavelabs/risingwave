@@ -921,6 +921,7 @@ impl LogicalJoin {
         let stream_hash_join = StreamHashJoin::new(logical_join.core.clone(), predicate.clone());
         let pull_filter = self.join_type() == JoinType::Inner
             && stream_hash_join.eq_join_predicate().has_non_eq()
+            && stream_hash_join.band_condition().is_none()
             && stream_hash_join.inequality_pairs().is_empty();
         if pull_filter {
             let default_indices = (0..self.internal_column_num()).collect::<Vec<_>>();

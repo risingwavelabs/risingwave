@@ -259,6 +259,13 @@ message GroupTopNNode {
   bool with_ties = 6;
 }
 
+message BandJoinCondition {
+  uint32 left_column_idx = 1;
+  uint32 right_column_idx = 2;
+  expr.ExprNode left_greater_conjunction = 3;
+  expr.ExprNode right_greater_conjunction = 4;
+}
+
 message DeltaExpression {
   expr.ExprNode.Type delta_type = 1;
   expr.ExprNode delta = 2;
@@ -306,6 +313,7 @@ message HashJoinNode {
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 14;
+  BandJoinCondition band_condition = 15;
 }
 
 message TemporalJoinNode {

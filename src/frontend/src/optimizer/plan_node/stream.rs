@@ -235,6 +235,7 @@ impl HashJoin {
         input: &impl StreamPlanRef,
         join_key_indices: Vec<usize>,
         dk_indices_in_jk: Vec<usize>,
+        band_key_index: Option<usize>,
     ) -> (TableCatalog, TableCatalog, Vec<usize>) {
         let schema = input.schema();
 
@@ -245,13 +246,13 @@ impl HashJoin {
 
         let degree_table_dist_keys = dk_indices_in_jk.clone();
 
-        // The pk of hash join internal and degree table should be join_key + input_pk.
+        // The pk of hash join internal and degree table should be join_key + input_pk [+ band_key].
         let join_key_len = join_key_indices.len();
         let mut pk_indices = join_key_indices;
 
         // dedup the pk in dist key..
         let mut deduped_input_pk_indices = vec![];
-        for input_pk_idx in input.logical_pk() {
+        for input_pk_idx in band_key_index.iter().chain(input.logical_pk()) {
             if !pk_indices.contains(input_pk_idx)
                 && !deduped_input_pk_indices.contains(input_pk_idx)
             {

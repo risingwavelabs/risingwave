@@ -46,6 +46,7 @@ use crate::common::table::state_table::StateTable;
 use crate::common::StreamChunkBuilder;
 use crate::executor::expect_first_barrier_from_aligned_stream;
 use crate::executor::JoinType::LeftAnti;
+use crate::from_proto::{BandJoinCondition, HalfBandJoinCondition};
 use crate::task::AtomicU64Ref;
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
@@ -185,6 +186,9 @@ struct JoinSide<K: HashKey, S: StateStore> {
     state_clean_columns: Vec<(usize, usize)>,
     /// Whether degree table is needed for this side.
     need_degree_table: bool,
+    /// The band conjunction in which this side('s value) is required to be greater, and the column
+    /// idx of this side in the band condition.
+    half_band_condition: Option<HalfBandJoinCondition>,
 }
 
 impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
@@ -195,6 +199,7 @@ impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
             .field("start_pos", &self.start_pos)
             .field("i2o_mapping", &self.i2o_mapping)
             .field("need_degree_table", &self.need_degree_table)
+            .field("half_band_condition", &self.half_band_condition)
             .finish()
     }
 }
@@ -435,6 +440,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         pk_indices: PkIndices,
         output_indices: Vec<usize>,
         executor_id: u64,
+        band_cond: Option<BandJoinCondition>,
         cond: Option<BoxedExpression>,
         inequality_pairs: Vec<(usize, usize, bool, Option<BoxedExpression>)>,
         op_info: String,
@@ -598,11 +604,25 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
         let mut l_non_null_fields = l2inequality_index
             .iter()
-            .positions(|inequalities| !inequalities.is_empty())
+            .enumerate()
+            .filter(|(field_idx, inequalities)| {
+                band_cond
+                    .as_ref()
+                    .map_or(false, |band_cond| band_cond.left.column_idx == *field_idx)
+                    || !inequalities.is_empty()
+            })
+            .map(|(field_idx, _)| field_idx)
             .collect_vec();
         let mut r_non_null_fields = r2inequality_index
             .iter()
-            .positions(|inequalities| !inequalities.is_empty())
+            .enumerate()
+            .filter(|(field_idx, inequalities)| {
+                band_cond
+                    .as_ref()
+                    .map_or(false, |band_cond| band_cond.right.column_idx == *field_idx)
+                    || !inequalities.is_empty()
+            })
+            .map(|(field_idx, _)| field_idx)
             .collect_vec();
 
         if append_only_optimize {
@@ -614,6 +634,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
         let inequality_watermarks = vec![None; inequality_pairs.len()];
         let watermark_buffers = BTreeMap::new();
+
+        let (band_cond_l, band_cond_r) = match band_cond {
+            Some(band_cond) => (Some(band_cond.left), Some(band_cond.right)),
+            None => (None, None),
+        };
 
         Self {
             ctx: ctx.clone(),
@@ -647,6 +672,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 state_clean_columns: l_state_clean_columns,
                 start_pos: 0,
                 need_degree_table: need_degree_table_l,
+                half_band_condition: band_cond_l,
             },
             side_r: JoinSide {
                 ht: JoinHashMap::new(
@@ -674,6 +700,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 non_null_fields: r_non_null_fields,
                 state_clean_columns: r_state_clean_columns,
                 need_degree_table: need_degree_table_r,
+                half_band_condition: band_cond_r,
             },
             pk_indices,
             cond,
@@ -1012,6 +1039,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         };
 
         let keys = K::build(&side_update.join_key_indices, chunk.data_chunk())?;
+        let need_check_join_condition = side_update.half_band_condition.is_some() || cond.is_some();
         for ((op, row), key) in chunk.rows().zip_eq_debug(keys.iter()) {
             Self::evict_cache(side_update, side_match, cnt_rows_received);
 
@@ -1030,6 +1058,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     let mut append_only_matched_row = None;
                     if let Some(mut matched_rows) = matched_rows {
                         let mut matched_rows_to_clean = vec![];
+                        let mut match_band_res = side_match.half_band_condition.is_none();
                         for (matched_row_ref, matched_row) in
                             matched_rows.values_mut(&side_match.all_data_types)
                         {
@@ -1037,20 +1066,57 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             // TODO(yuhao-su): We should find a better way to eval the expression
                             // without concat two rows.
                             // if there are non-equi expressions
-                            let check_join_condition = if let Some(ref mut cond) = cond {
+                            let check_join_condition = if need_check_join_condition {
                                 let new_row = Self::row_concat(
                                     &row,
                                     side_update.start_pos,
                                     &matched_row.row,
                                     side_match.start_pos,
                                 );
-
-                                cond.eval_row_infallible(&new_row, |err| {
-                                    ctx.on_compute_error(err, identity)
-                                })
-                                .await
-                                .map(|s| *s.as_bool())
-                                .unwrap_or(false)
+                                if !match_band_res {
+                                    match_band_res = side_match
+                                        .half_band_condition
+                                        .as_ref()
+                                        .unwrap()
+                                        .band_conjunction
+                                        .eval_row_infallible(&new_row, |err| {
+                                            ctx.on_compute_error(err, identity)
+                                        })
+                                        .await
+                                        .map(|s| *s.as_bool())
+                                        .unwrap_or(false);
+                                }
+                                match_band_res && {
+                                    let update_band_res = if let Some(update_band) =
+                                        side_update.half_band_condition.as_ref()
+                                    {
+                                        let eval_res = update_band
+                                            .band_conjunction
+                                            .eval_row_infallible(&new_row, |err| {
+                                                ctx.on_compute_error(err, identity)
+                                            })
+                                            .await
+                                            .map(|s| *s.as_bool());
+                                        if eval_res == Some(false) {
+                                            break;
+                                        }
+                                        eval_res.unwrap_or(false)
+                                    } else {
+                                        true
+                                    };
+                                    update_band_res && {
+                                        if let Some(ref mut cond) = cond {
+                                            cond.eval_row_infallible(&new_row, |err| {
+                                                ctx.on_compute_error(err, identity)
+                                            })
+                                            .await
+                                            .map(|s| *s.as_bool())
+                                            .unwrap_or(false)
+                                        } else {
+                                            true
+                                        }
+                                    }
+                                }
                             } else {
                                 true
                             };
@@ -1137,6 +1203,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     let mut degree = 0;
                     if let Some(mut matched_rows) = matched_rows {
                         let mut matched_rows_to_clean = vec![];
+                        let mut match_band_res = side_match.half_band_condition.is_none();
                         for (matched_row_ref, matched_row) in
                             matched_rows.values_mut(&side_match.all_data_types)
                         {
@@ -1144,20 +1211,57 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             // TODO(yuhao-su): We should find a better way to eval the expression
                             // without concat two rows.
                             // if there are non-equi expressions
-                            let check_join_condition = if let Some(ref mut cond) = cond {
+                            let check_join_condition = if need_check_join_condition {
                                 let new_row = Self::row_concat(
                                     &row,
                                     side_update.start_pos,
                                     &matched_row.row,
                                     side_match.start_pos,
                                 );
-
-                                cond.eval_row_infallible(&new_row, |err| {
-                                    ctx.on_compute_error(err, identity)
-                                })
-                                .await
-                                .map(|s| *s.as_bool())
-                                .unwrap_or(false)
+                                if !match_band_res {
+                                    match_band_res = side_match
+                                        .half_band_condition
+                                        .as_ref()
+                                        .unwrap()
+                                        .band_conjunction
+                                        .eval_row_infallible(&new_row, |err| {
+                                            ctx.on_compute_error(err, identity)
+                                        })
+                                        .await
+                                        .map(|s| *s.as_bool())
+                                        .unwrap_or(false);
+                                }
+                                match_band_res && {
+                                    let update_band_res = if let Some(update_band) =
+                                        side_update.half_band_condition.as_ref()
+                                    {
+                                        let eval_res = update_band
+                                            .band_conjunction
+                                            .eval_row_infallible(&new_row, |err| {
+                                                ctx.on_compute_error(err, identity)
+                                            })
+                                            .await
+                                            .map(|s| *s.as_bool());
+                                        if eval_res == Some(false) {
+                                            break;
+                                        }
+                                        eval_res.unwrap_or(false)
+                                    } else {
+                                        true
+                                    };
+                                    update_band_res && {
+                                        if let Some(ref mut cond) = cond {
+                                            cond.eval_row_infallible(&new_row, |err| {
+                                                ctx.on_compute_error(err, identity)
+                                            })
+                                            .await
+                                            .map(|s| *s.as_bool())
+                                            .unwrap_or(false)
+                                        } else {
+                                            true
+                                        }
+                                    }
+                                }
                             } else {
                                 true
                             };
@@ -1361,6 +1465,7 @@ mod tests {
             vec![1],
             (0..schema_len).collect_vec(),
             1,
+            None,
             cond,
             inequality_pairs,
             "HashJoinExecutor".to_string(),
@@ -1443,6 +1548,7 @@ mod tests {
             vec![1],
             (0..schema_len).collect_vec(),
             1,
+            None,
             cond,
             vec![],
             "HashJoinExecutor".to_string(),

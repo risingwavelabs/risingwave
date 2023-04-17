@@ -79,11 +79,32 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             .map(|&x| x as usize)
             .collect_vec();
 
+        let band_condition = match node.band_condition.as_ref() {
+            Some(band_condition) => Some(BandJoinCondition {
+                left: HalfBandJoinCondition {
+                    column_idx: band_condition.left_column_idx as usize,
+                    band_conjunction: build_from_prost(
+                        band_condition.left_greater_conjunction.as_ref().unwrap(),
+                    )?,
+                },
+                right: HalfBandJoinCondition {
+                    column_idx: band_condition.right_column_idx as usize,
+                    band_conjunction: build_from_prost(
+                        band_condition.right_greater_conjunction.as_ref().unwrap(),
+                    )?,
+                },
+            }),
+            None => None,
+        };
+        trace!("Join band condition: {:?}", band_condition);
         let condition = match node.get_condition() {
             Ok(cond_prost) => Some(build_from_prost(cond_prost)?),
             Err(_) => None,
         };
-        trace!("Join non-equi condition: {:?}", condition);
+        trace!(
+            "Join non-equi condition (except the band condition above, if exists): {:?}",
+            condition
+        );
         let mut inequality_pairs = Vec::with_capacity(node.get_inequality_pairs().len());
         for inequality_pair in node.get_inequality_pairs() {
             let key_required_larger = inequality_pair.get_key_required_larger() as usize;
@@ -137,6 +158,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             pk_indices: params.pk_indices,
             output_indices,
             executor_id: params.executor_id,
+            band_cond: band_condition,
             cond: condition,
             inequality_pairs,
             op_info: params.op_info,
@@ -156,6 +178,20 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
     }
 }
 
+#[derive(Debug)]
+pub struct HalfBandJoinCondition {
+    /// The column idx of this side in the band condition below.
+    pub column_idx: usize,
+    /// The band conjunction in which this side('s value) is required to be greater.
+    pub band_conjunction: BoxedExpression,
+}
+
+#[derive(Debug)]
+pub struct BandJoinCondition {
+    pub left: HalfBandJoinCondition,
+    pub right: HalfBandJoinCondition,
+}
+
 struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     ctx: ActorContextRef,
     source_l: Box<dyn Executor>,
@@ -166,6 +202,7 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     pk_indices: PkIndices,
     output_indices: Vec<usize>,
     executor_id: u64,
+    band_cond: Option<BandJoinCondition>,
     cond: Option<BoxedExpression>,
     inequality_pairs: Vec<(usize, usize, bool, Option<BoxedExpression>)>,
     op_info: String,
@@ -199,6 +236,7 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
                         self.pk_indices,
                         self.output_indices,
                         self.executor_id,
+                        self.band_cond,
                         self.cond,
                         self.inequality_pairs,
                         self.op_info,
