@@ -152,7 +152,6 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
                     .map(|expr| self.visit_expr(expr))
                     .reduce(Self::merge)
                     .unwrap_or_default();
-                dbg!(x.clone());
                 x
             }
             expr_node::Type::Vnode
@@ -169,4 +168,46 @@ pub fn is_pure(expr: &ExprImpl) -> bool {
 pub fn is_impure(expr: &ExprImpl) -> bool {
     let mut a = ImpureAnalyzer {};
     a.visit_expr(expr)
+}
+#[cfg(test)]
+mod tests {
+    use risingwave_common::types::DataType;
+    use risingwave_pb::expr::expr_node::Type;
+
+    use crate::expr::{is_impure, is_pure, ExprImpl, FunctionCall, InputRef};
+
+    fn expect_pure(expr: &ExprImpl) {
+        assert!(is_pure(expr));
+        assert!(!is_impure(expr));
+    }
+
+    fn expect_impure(expr: &ExprImpl) {
+        assert!(!is_pure(expr));
+        assert!(is_impure(expr));
+    }
+
+    #[test]
+    fn test_pure_funcs() {
+        let e: ExprImpl = FunctionCall::new(
+            Type::Add,
+            vec![
+                InputRef::new(0, DataType::Int16).into(),
+                InputRef::new(0, DataType::Int16).into(),
+            ],
+        )
+        .unwrap()
+        .into();
+        expect_pure(&e);
+
+        let e: ExprImpl = FunctionCall::new(
+            Type::GreaterThan,
+            vec![
+                InputRef::new(0, DataType::Timestamptz).into(),
+                FunctionCall::new(Type::Now, vec![]).unwrap().into(),
+            ],
+        )
+        .unwrap()
+        .into();
+        expect_impure(&e);
+    }
 }
