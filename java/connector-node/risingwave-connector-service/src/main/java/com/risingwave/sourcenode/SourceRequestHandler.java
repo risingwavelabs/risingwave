@@ -85,9 +85,10 @@ public class SourceRequestHandler {
         }
     }
 
-    private void ensureArgNotNull(Map<String, String> props, String key) {
-        if (!props.containsKey(key)) {
-            throw new RuntimeException(String.format("'%s' not found", key));
+    private void ensurePropNotNull(Map<String, String> props, String name) {
+        if (!props.containsKey(name)) {
+            throw new RuntimeException(
+                    String.format("'%s' not found, please check the WITH properties", name));
         }
     }
 
@@ -96,9 +97,10 @@ public class SourceRequestHandler {
             throws Exception {
         var props = validate.getPropertiesMap();
 
-        ensureArgNotNull(props, DbzConnectorConfig.HOST);
-        ensureArgNotNull(props, DbzConnectorConfig.PORT);
-        ensureArgNotNull(props, DbzConnectorConfig.DB_NAME);
+        ensurePropNotNull(props, DbzConnectorConfig.HOST);
+        ensurePropNotNull(props, DbzConnectorConfig.PORT);
+        ensurePropNotNull(props, DbzConnectorConfig.DB_NAME);
+        ensurePropNotNull(props, DbzConnectorConfig.TABLE_NAME);
         String jdbcUrl =
                 getJdbcPrefix(validate.getSourceType())
                         + "://"
@@ -118,12 +120,13 @@ public class SourceRequestHandler {
             throw new RuntimeException(e);
         }
 
-        ensureArgNotNull(props, DbzConnectorConfig.USER);
-        ensureArgNotNull(props, DbzConnectorConfig.PASSWORD);
+        ensurePropNotNull(props, DbzConnectorConfig.USER);
+        ensurePropNotNull(props, DbzConnectorConfig.PASSWORD);
         String dbUser = props.get(DbzConnectorConfig.USER);
         String dbPassword = props.get(DbzConnectorConfig.PASSWORD);
         switch (validate.getSourceType()) {
             case POSTGRES:
+                ensurePropNotNull(props, DbzConnectorConfig.PG_SCHEMA_NAME);
                 try (var validator =
                         new PostgresValidator(
                                 jdbcUrl,
@@ -137,6 +140,7 @@ public class SourceRequestHandler {
                 break;
 
             case CITUS:
+                ensurePropNotNull(props, DbzConnectorConfig.PG_SCHEMA_NAME);
                 try (var coordinatorValidator =
                         new PostgresValidator(
                                 jdbcUrl,
@@ -149,7 +153,7 @@ public class SourceRequestHandler {
                     coordinatorValidator.validateTableSchema();
                 }
 
-                ensureArgNotNull(props, DbzConnectorConfig.DB_SERVERS);
+                ensurePropNotNull(props, DbzConnectorConfig.DB_SERVERS);
                 var servers = props.get(DbzConnectorConfig.DB_SERVERS);
                 var workerAddrs = StringUtils.split(servers, ',');
                 var jdbcPrefix = getJdbcPrefix(validate.getSourceType());
