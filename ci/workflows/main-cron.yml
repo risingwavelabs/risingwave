@@ -240,7 +240,6 @@ steps:
           environment:
             - S3_SOURCE_TEST_CONF
     timeout_in_minutes: 20
-    retry: *auto-retry  
 
   - label: "pulsar source check"
     command: "ci/scripts/pulsar-source-test.sh -p ci-release"
@@ -260,4 +259,3 @@ steps:
             - ASTRA_STREAMING_TEST_TOKEN
             - STREAMNATIVE_CLOUD_TEST_CONF
     timeout_in_minutes: 20
-    retry: *auto-retry 
