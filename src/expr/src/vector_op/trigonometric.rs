@@ -55,10 +55,8 @@ pub fn atan_f64(input: F64) -> F64 {
 pub fn atan2_f64(input_x: F64, input_y: F64) -> F64 {
     input_x.0.atan2(input_y.0).into()
 }
-
 // Radians per degree, a.k.a. PI / 180
 static RADIANS_PER_DEGREE: f64 = 0.017_453_292_519_943_295;
-
 // Constants we use to get more accurate results.
 // See PSQL: https://github.com/postgres/postgres/blob/78ec02d612a9b69039ec2610740f738968fe144d/src/backend/utils/adt/float.c#L2024
 static SIN_30: f64 = 0.499_999_999_999_999_94;
@@ -78,6 +76,56 @@ fn sind_0_to_30(x: f64) -> f64 {
     // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c
     let sin_x = f64::sin(x * RADIANS_PER_DEGREE);
     (sin_x / SIN_30) / 2.0
+}
+
+// returns the cosine of an angle in the first quadrant (0 to 90 degrees).
+fn cosd_q1(x: f64) -> f64 {
+    // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c
+    // Stitch together the sine and cosine functions for the ranges [0, 60]
+    // and (60, 90].  These guarantee to return exact answers at their
+    // endpoints, so the overall result is a continuous monotonic function
+    // that gives exact results when x = 0, 60 and 90 degrees.
+    if x <= 60.0 {
+        cosd_0_to_60(x)
+    } else {
+        sind_0_to_30(90.0 - x)
+    }
+}
+
+#[function("cosd(float64) -> float64")]
+pub fn cosd_f64(input: F64) -> F64 {
+    // See PSQL implementation: https://github.com/postgres/postgres/blob/78ec02d612a9b69039ec2610740f738968fe144d/src/backend/utils/adt/float.c
+    let arg1 = input.0;
+
+    // Return NaN if input is NaN or Infinite. Slightly different from PSQL implementation
+    if input.0.is_nan() || input.0.is_infinite() {
+        return F64::from(f64::NAN);
+    }
+
+    // Reduce the range of the input to [0,90] degrees
+    let sign = 1.0;
+    let arg1 = arg1 % 360.0;
+
+    let (arg1, sign) = if arg1 < 0.0 {
+        // cosd(-x) = cosd(x)
+        (-arg1, sign)
+    } else if arg1 > 180.0 {
+        // cosd(360-x) = cosd(x)
+        (360.0 - arg1, sign)
+    } else if arg1 > 90.0 {
+        // cosd(180-x) = -cosd(x)
+        (180.0 - arg1, -sign)
+    } else {
+        (arg1, sign)
+    };
+
+    let result: f64 = sign * cosd_q1(arg1);
+
+    if result.is_infinite() {
+        return F64::from(f64::NAN);
+    }
+
+    result.into()
 }
 
 // Returns the sine of an angle in the first quadrant (0 to 90 degrees).
@@ -160,6 +208,23 @@ mod tests {
     fn test_degrees() {
         let d = F64::from(180);
         let pi = F64::from(PI);
+        assert_eq!(cos_f64(pi), cosd_f64(d));
+        assert_similar(
+            cos_f64(F64::from(50).to_radians().into()),
+            cosd_f64(F64::from(50)),
+        );
+        assert_similar(
+            cos_f64(F64::from(100).to_radians().into()),
+            cosd_f64(F64::from(100)),
+        );
+        assert_similar(
+            cos_f64(F64::from(250).to_radians().into()),
+            cosd_f64(F64::from(250)),
+        );
+
+        // exact matches
+        assert_eq!(cosd_f64(F64::from(0)).0, 1.0);
+        assert_eq!(cosd_f64(F64::from(90)).0, 0.0);
         assert_similar(
             sin_f64(F64::from(50).to_radians().into()),
             sind_f64(F64::from(50)),

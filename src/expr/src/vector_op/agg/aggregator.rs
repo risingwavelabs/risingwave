@@ -29,6 +29,7 @@ use crate::vector_op::agg::filter::*;
 use crate::vector_op::agg::functions::*;
 use crate::vector_op::agg::general_agg::*;
 use crate::vector_op::agg::general_distinct_agg::*;
+use crate::vector_op::agg::non_primitive_sum::Int256Sum;
 use crate::vector_op::agg::string_agg::create_string_agg_state;
 use crate::Result;
 
@@ -99,6 +100,18 @@ impl AggStateFactory {
                 let agg_col_idx = agg_arg.get_index() as usize;
                 let delim_col_idx = delim_arg.get_index() as usize;
                 create_string_agg_state(agg_col_idx, delim_col_idx, column_orders)?
+            }
+            (AggKind::Sum, [arg])
+                if matches!(DataType::from(arg.get_type()?), DataType::Int256) =>
+            {
+                // Special handling of the `sum` function for `Int256`, when the
+                // `GeneralAgg` is applied to `sum`, it needs `sum` to return a temporary
+                // `ScalarRef` for intermediate variable. However, this is not feasible
+                // for non-primitive `Int256` types. Therefore, we have added a separate handling
+                // here. It is important to note that this is a temporary and rough imitation of the
+                // `GeneralAgg` solution and will need to be considered and fixed
+                // when refactoring the code related to aggregation in the future.
+                Box::new(Int256Sum::new(arg.get_index() as usize, distinct))
             }
             (AggKind::ArrayAgg, [arg]) => {
                 let agg_col_idx = arg.get_index() as usize;
