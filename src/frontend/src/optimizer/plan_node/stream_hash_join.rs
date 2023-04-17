@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::{max, min};
+use std::collections::btree_map::OccupiedError;
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -26,7 +28,8 @@ use risingwave_pb::stream_plan::{
 };
 
 use super::{
-    generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode,
+    generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, PlanTreeNodeUnary,
+    StreamDeltaJoin, StreamExchange, StreamNode, StreamProject,
 };
 use crate::expr::{Expr, ExprDisplay, ExprRewriter, InequalityInputPair};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -42,6 +45,26 @@ pub struct BandCondition {
     right_column_idx: usize,
     left_greater_conjunction_idx: usize,
     right_greater_conjunction_idx: usize,
+}
+
+fn find_equivalence_classes(mut input: PlanRef) -> Vec<usize> {
+    let len = input.schema().len();
+    while let Some(exchange) = input.downcast_ref::<StreamExchange>() {
+        input = exchange.input();
+    }
+    if let Some(project) = input.downcast_ref::<StreamProject>() {
+        project
+            .exprs()
+            .iter()
+            .enumerate()
+            .map(|(expr_idx, expr)| match expr.recursively_input_offset() {
+                Some(input_index) => len + input_index,
+                None => expr_idx,
+            })
+            .collect_vec()
+    } else {
+        (0..len).collect_vec()
+    }
 }
 
 /// [`StreamHashJoin`] implements [`super::LogicalJoin`] with hash table. It builds a hash table
@@ -115,14 +138,18 @@ impl StreamHashJoin {
             let l2i = logical.l2i_col_mapping();
             let r2i = logical.r2i_col_mapping();
             let (left_cols_num, original_inequality_pairs) = eq_join_predicate.inequality_pairs();
+            let left_equivalence_classes = find_equivalence_classes(logical.left.clone());
+            let right_equivalence_classes = find_equivalence_classes(logical.right.clone());
 
             let mut equal_condition_clean_state = false;
-            let mut join_key_indices_in_all_columns =
-                Vec::with_capacity(eq_join_predicate.eq_indexes().len() * 2);
+            let mut left_join_key_classes =
+                Vec::with_capacity(eq_join_predicate.eq_indexes().len());
+            let mut right_join_key_classes =
+                Vec::with_capacity(eq_join_predicate.eq_indexes().len());
             let mut watermark_columns = FixedBitSet::with_capacity(logical.internal_column_num());
             for (left_key, right_key) in eq_join_predicate.eq_indexes() {
-                join_key_indices_in_all_columns.push(left_key);
-                join_key_indices_in_all_columns.push(right_key + left_cols_num);
+                left_join_key_classes.push(left_equivalence_classes[left_key]);
+                right_join_key_classes.push(right_equivalence_classes[right_key]);
                 if logical.left.watermark_columns().contains(left_key)
                     && logical.right.watermark_columns().contains(right_key)
                 {
@@ -135,13 +162,15 @@ impl StreamHashJoin {
                     }
                 }
             }
-            join_key_indices_in_all_columns.sort();
-            join_key_indices_in_all_columns.dedup();
+            left_join_key_classes.sort();
+            left_join_key_classes.dedup();
+            right_join_key_classes.sort();
+            right_join_key_classes.dedup();
 
             let mut both_pk_in_jk = true;
             for left_pk in logical.left.logical_pk() {
-                if join_key_indices_in_all_columns
-                    .binary_search(left_pk)
+                if left_join_key_classes
+                    .binary_search(&left_equivalence_classes[*left_pk])
                     .is_err()
                 {
                     both_pk_in_jk = false;
@@ -150,8 +179,8 @@ impl StreamHashJoin {
             }
             if both_pk_in_jk {
                 for right_pk in logical.right.logical_pk() {
-                    if join_key_indices_in_all_columns
-                        .binary_search(&(right_pk + left_cols_num))
+                    if right_join_key_classes
+                        .binary_search(&right_equivalence_classes[*right_pk])
                         .is_err()
                     {
                         both_pk_in_jk = false;
@@ -161,7 +190,6 @@ impl StreamHashJoin {
             }
 
             if !both_pk_in_jk {
-                println!("{eq_join_predicate:?}");
                 let mut pair2conjunction_idx = BTreeMap::new();
                 for (
                     conjunction_idx,
@@ -172,41 +200,46 @@ impl StreamHashJoin {
                     },
                 ) in &original_inequality_pairs
                 {
-                    println!("{key_required_larger:?}, {key_required_smaller:}");
-                    if join_key_indices_in_all_columns
-                        .binary_search(key_required_larger)
-                        .is_err()
-                        && join_key_indices_in_all_columns
-                            .binary_search(key_required_smaller)
-                            .is_err()
+                    let left_class =
+                        left_equivalence_classes[min(*key_required_larger, *key_required_smaller)];
+                    let right_class = right_equivalence_classes
+                        [max(key_required_larger, key_required_smaller) - left_cols_num];
+
+                    if left_join_key_classes.binary_search(&left_class).is_err()
+                        && right_join_key_classes.binary_search(&right_class).is_err()
                     {
-                        if let Some(record_conjunction_idx) =
-                            pair2conjunction_idx.get(&(*key_required_smaller, *key_required_larger))
-                        {
-                            band_condition = Some(if key_required_larger < key_required_smaller {
-                                BandCondition {
-                                    left_column_idx: *key_required_larger,
-                                    right_column_idx: key_required_smaller - left_cols_num,
-                                    left_greater_conjunction_idx: *conjunction_idx,
-                                    right_greater_conjunction_idx: *record_conjunction_idx,
+                        if let Err(OccupiedError { entry, .. }) = pair2conjunction_idx.try_insert(
+                            (left_class, right_class),
+                            (
+                                *conjunction_idx,
+                                *key_required_larger,
+                                *key_required_smaller,
+                            ),
+                        ) {
+                            let former = entry.get();
+                            if former.1 < former.2 {
+                                if key_required_larger > key_required_smaller {
+                                    band_condition = Some(BandCondition {
+                                        left_column_idx: former.1,
+                                        right_column_idx: former.2 - left_cols_num,
+                                        left_greater_conjunction_idx: former.0,
+                                        right_greater_conjunction_idx: *conjunction_idx,
+                                    });
+                                    break;
                                 }
                             } else {
-                                BandCondition {
-                                    left_column_idx: *key_required_smaller,
-                                    right_column_idx: key_required_larger - left_cols_num,
-                                    left_greater_conjunction_idx: *record_conjunction_idx,
-                                    right_greater_conjunction_idx: *conjunction_idx,
+                                // former.1 > former.2
+                                if key_required_larger < key_required_smaller {
+                                    band_condition = Some(BandCondition {
+                                        left_column_idx: former.2,
+                                        right_column_idx: former.1 - left_cols_num,
+                                        left_greater_conjunction_idx: *conjunction_idx,
+                                        right_greater_conjunction_idx: former.0,
+                                    });
+                                    break;
                                 }
-                            });
-                            break;
+                            }
                         }
-
-                        pair2conjunction_idx
-                            .try_insert(
-                                (*key_required_larger, *key_required_smaller),
-                                *conjunction_idx,
-                            )
-                            .ok();
                     }
                 }
             }

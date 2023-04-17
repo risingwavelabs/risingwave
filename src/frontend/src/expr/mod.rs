@@ -725,7 +725,10 @@ impl ExprImpl {
                 let expr_type = function_call.get_expr_type();
                 match expr_type {
                     ExprType::Add | ExprType::Subtract => {
-                        let (_, lhs, rhs) = function_call.clone().decompose_as_binary();
+                        let (_, mut lhs, mut rhs) = function_call.clone().decompose_as_binary();
+                        if expr_type == ExprType::Add && lhs.is_const() {
+                            std::mem::swap(&mut lhs, &mut rhs);
+                        }
                         if let ExprImpl::InputRef(input_ref) = &lhs && rhs.is_const() {
                             Some((input_ref.index(), Some((expr_type, rhs))))
                         } else {
@@ -736,6 +739,33 @@ impl ExprImpl {
                 }
             }
             _ => None,
+        }
+    }
+
+    pub fn recursively_input_offset(&self) -> Option<usize> {
+        let mut cur = self.clone();
+        loop {
+            match cur {
+                ExprImpl::InputRef(input_ref) => return Some(input_ref.index()),
+                ExprImpl::FunctionCall(function_call) => {
+                    let expr_type = function_call.get_expr_type();
+                    match expr_type {
+                        ExprType::Add | ExprType::Subtract | ExprType::AtTimeZone => {
+                            let (_, mut lhs, mut rhs) = function_call.clone().decompose_as_binary();
+                            if expr_type == ExprType::Add && lhs.is_const() {
+                                std::mem::swap(&mut lhs, &mut rhs);
+                            }
+                            if rhs.is_const() {
+                                cur = lhs;
+                            } else {
+                                return None;
+                            }
+                        }
+                        _ => return None,
+                    }
+                }
+                _ => return None,
+            }
         }
     }
 
