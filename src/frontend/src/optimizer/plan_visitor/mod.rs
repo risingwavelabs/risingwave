@@ -48,7 +48,7 @@ pub trait DefaultBehavior<R> {
 /// Merge the `visit` result of all input nodes with a function.
 /// - If there's no input node, return the default value of the result type.
 /// - If there's only a single input node, directly return its result.
-pub struct Merge<F>(pub F);
+pub struct Merge<F>(F);
 
 impl<F, R> DefaultBehavior<R> for Merge<F>
 where
@@ -64,7 +64,7 @@ where
     }
 }
 
-/// Returns the default value of the result type, **without** calling `visit` on input nodes.
+/// Returns the default value of the result type.
 pub struct DefaultValue;
 
 impl<R> DefaultBehavior<R> for DefaultValue

@@ -16,7 +16,7 @@ use std::collections::HashSet;
 
 use risingwave_common::catalog::TableId;
 
-use super::{DefaultBehavior, Merge};
+use super::{DefaultBehavior, DefaultValue};
 use crate::optimizer::plan_node::{BatchSource, LogicalScan, StreamSource, StreamTableScan};
 use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::PlanRef;
@@ -44,7 +44,7 @@ impl RelationCollectorVisitor {
 
 impl PlanVisitor<()> for RelationCollectorVisitor {
     fn default_behavior() -> impl DefaultBehavior<()> {
-        Merge(|_, _| ())
+        DefaultValue
     }
 
     fn visit_batch_seq_scan(&mut self, plan: &crate::optimizer::plan_node::BatchSeqScan) {
