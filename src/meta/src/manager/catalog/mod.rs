@@ -1285,8 +1285,12 @@ where
             database_core.mark_creating(&key);
             user_core.increase_ref(source.owner);
             if let Some(connection_id) = source.connection_id {
-                // TODO(weili): wait for yezizp to refactor ref cnt
-                database_core.increase_ref_count(connection_id);
+                if let Some(_conn) = database_core.get_connection(connection_id) {
+                    // TODO(weili): wait for yezizp to refactor ref cnt
+                    database_core.increase_ref_count(connection_id);
+                } else {
+                    bail!("connection not found");
+                }
             }
             Ok(())
         }
