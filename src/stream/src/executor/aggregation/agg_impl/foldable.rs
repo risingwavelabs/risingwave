@@ -20,7 +20,6 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::test_utils::{rand_bitmap, rand_stream_chunk};
 use risingwave_common::types::{Datum, Scalar, ScalarRef};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::ExprError;
@@ -434,6 +433,7 @@ mod tests {
 
     use risingwave_common::array::stream_chunk::Op;
     use risingwave_common::array::{Array, I64Array};
+    use risingwave_common::test_utils::{rand_bitmap, rand_stream_chunk};
     use risingwave_common::types::F64;
     use risingwave_common::{array, array_nonnull};
     use test::Bencher;
@@ -685,6 +685,7 @@ mod tests {
         });
     }
 
+    // TODO: refactor with macro
     #[bench]
     fn bench_foldable_sum_agg_without_vis(b: &mut Bencher) {
         bench_i64(
