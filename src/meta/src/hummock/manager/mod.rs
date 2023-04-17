@@ -1164,7 +1164,7 @@ where
                     .unwrap_or(true)
                     || Self::is_compact_task_expired(compact_task, &versioning.branched_ssts);
                 if is_expired {
-                    compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
+                    compact_task.set_task_status(TaskStatus::InputOutdatedCanceled);
                     false
                 } else {
                     true
