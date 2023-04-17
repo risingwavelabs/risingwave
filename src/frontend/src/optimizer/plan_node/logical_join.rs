@@ -393,11 +393,16 @@ impl LogicalJoin {
         // Reorder the join equal predicate to match the order key.
         let mut reorder_idx = Vec::with_capacity(at_least_prefix_len);
         for order_col_id in order_col_ids {
+            let mut found = false;
             for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
                 if order_col_id == output_column_ids[eq_idx] {
                     reorder_idx.push(i);
+                    found = true;
                     break;
                 }
+            }
+            if !found {
+                break;
             }
         }
         if reorder_idx.len() < at_least_prefix_len {
@@ -952,7 +957,7 @@ impl LogicalJoin {
     fn should_be_temporal_join(&self) -> bool {
         let right = self.right();
         if let Some(logical_scan) = right.as_logical_scan() {
-            logical_scan.for_system_time_as_of_now()
+            logical_scan.for_system_time_as_of_proctime()
         } else {
             false
         }
@@ -985,10 +990,10 @@ impl LogicalJoin {
             )));
         };
 
-        if !logical_scan.for_system_time_as_of_now() {
+        if !logical_scan.for_system_time_as_of_proctime() {
             return Err(RwError::from(ErrorCode::NotSupported(
                 "Temporal join requires a table defined as temporal table".into(),
-                "Please use FOR SYSTEM_TIME AS OF NOW() syntax".into(),
+                "Please use FOR SYSTEM_TIME AS OF PROCTIME() syntax".into(),
             )));
         }
 

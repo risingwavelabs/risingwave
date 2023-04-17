@@ -83,6 +83,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 toml = "0.7"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
+twox-hash = "1"
 url = "2"
 uuid = "1.2.2"
 
@@ -103,7 +104,6 @@ criterion = "0.4"
 more-asserts = "0.3"
 rand = "0.8"
 tempfile = "3"
-twox-hash = "1"
 
 [[bench]]
 name = "bench_encoding"

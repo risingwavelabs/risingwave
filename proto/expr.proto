@@ -111,9 +111,12 @@ message ExprNode {
     ACOS = 250;
     ATAN = 251;
     ATAN2 = 252;
-    SQRT = 253;
-    DEGREES = 254;
-    RADIANS = 255;
+    SIND = 253;
+    COSD = 254;
+    SQRT = 255;
+    DEGREES = 256;
+    RADIANS = 257;
+
     // Boolean comparison
     IS_TRUE = 301;
     IS_NOT_TRUE = 302;

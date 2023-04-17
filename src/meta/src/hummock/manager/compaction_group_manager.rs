@@ -91,7 +91,8 @@ impl<S: MetaStore> HummockManager<S> {
     /// Registers `table_fragments` to compaction groups.
     pub async fn register_table_fragments(
         &self,
-        table_fragments: &TableFragments,
+        mv_table: Option<u32>,
+        mut internal_tables: Vec<u32>,
         table_properties: &HashMap<String, String>,
     ) -> Result<Vec<StateTableId>> {
         let is_independent_compaction_group = table_properties
@@ -99,18 +100,22 @@ impl<S: MetaStore> HummockManager<S> {
             .map(|s| s == "1")
             == Some(true);
         let mut pairs = vec![];
-        // materialized_view
-        pairs.push((
-            table_fragments.table_id().table_id,
-            if is_independent_compaction_group {
-                CompactionGroupId::from(StaticCompactionGroupId::NewCompactionGroup)
-            } else {
-                CompactionGroupId::from(StaticCompactionGroupId::MaterializedView)
-            },
-        ));
+        if let Some(mv_table) = mv_table {
+            if internal_tables.drain_filter(|t| *t == mv_table).count() > 0 {
+                tracing::warn!("`mv_table` {} found in `internal_tables`", mv_table);
+            }
+            // materialized_view
+            pairs.push((
+                mv_table,
+                if is_independent_compaction_group {
+                    CompactionGroupId::from(StaticCompactionGroupId::NewCompactionGroup)
+                } else {
+                    CompactionGroupId::from(StaticCompactionGroupId::MaterializedView)
+                },
+            ));
+        }
         // internal states
-        for table_id in table_fragments.internal_table_ids() {
-            assert_ne!(table_id, table_fragments.table_id().table_id);
+        for table_id in internal_tables {
             pairs.push((
                 table_id,
                 if is_independent_compaction_group {
@@ -920,12 +925,20 @@ mod tests {
         )]);
 
         compaction_group_manager
-            .register_table_fragments(&table_fragment_1, &table_properties)
+            .register_table_fragments(
+                Some(table_fragment_1.table_id().table_id),
+                table_fragment_1.internal_table_ids(),
+                &table_properties,
+            )
             .await
             .unwrap();
         assert_eq!(registered_number().await, 4);
         compaction_group_manager
-            .register_table_fragments(&table_fragment_2, &table_properties)
+            .register_table_fragments(
+                Some(table_fragment_2.table_id().table_id),
+                table_fragment_2.internal_table_ids(),
+                &table_properties,
+            )
             .await
             .unwrap();
         assert_eq!(registered_number().await, 8);
@@ -953,7 +966,11 @@ mod tests {
             String::from("1"),
         );
         compaction_group_manager
-            .register_table_fragments(&table_fragment_1, &table_properties)
+            .register_table_fragments(
+                Some(table_fragment_1.table_id().table_id),
+                table_fragment_1.internal_table_ids(),
+                &table_properties,
+            )
             .await
             .unwrap();
         assert_eq!(registered_number().await, 4);

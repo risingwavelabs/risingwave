@@ -3008,14 +3008,17 @@ impl Parser {
         }
     }
 
-    pub fn parse_for_system_time_as_of_now(&mut self) -> Result<bool, ParserError> {
+    /// syntax `FOR SYSTEM_TIME AS OF PROCTIME()` is used for temporal join.
+    pub fn parse_for_system_time_as_of_proctime(&mut self) -> Result<bool, ParserError> {
         let after_for = self.parse_keyword(Keyword::FOR);
         if after_for {
             self.expect_keywords(&[Keyword::SYSTEM_TIME, Keyword::AS, Keyword::OF])?;
             let ident = self.parse_identifier()?;
-            if ident.real_value() != "now" {
-                return parser_err!(format!("Expected now, found: {}", ident.real_value()));
+            // Backward compatibility for now.
+            if ident.real_value() != "proctime" && ident.real_value() != "now" {
+                return parser_err!(format!("Expected proctime, found: {}", ident.real_value()));
             }
+
             self.expect_token(&Token::LParen)?;
             self.expect_token(&Token::RParen)?;
             Ok(true)
@@ -3621,7 +3624,9 @@ impl Parser {
                     }
                 }
                 Keyword::CONNECTIONS => {
-                    return Ok(Statement::ShowObjects(ShowObject::Connection));
+                    return Ok(Statement::ShowObjects(ShowObject::Connection {
+                        schema: self.parse_from_and_identifier()?,
+                    }));
                 }
                 _ => {}
             }
@@ -3826,12 +3831,12 @@ impl Parser {
                 let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
                 Ok(TableFactor::TableFunction { name, alias, args })
             } else {
-                let for_system_time_as_of_now = self.parse_for_system_time_as_of_now()?;
+                let for_system_time_as_of_proctime = self.parse_for_system_time_as_of_proctime()?;
                 let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
                 Ok(TableFactor::Table {
                     name,
                     alias,
-                    for_system_time_as_of_now,
+                    for_system_time_as_of_proctime,
                 })
             }
         }
