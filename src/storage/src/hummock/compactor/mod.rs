@@ -177,17 +177,31 @@ impl Compactor {
 
         let mut multi_filter = build_multi_compaction_filter(&compact_task);
 
+        let existing_table_ids = HashSet::from_iter(compact_task.existing_table_ids.clone());
         let multi_filter_key_extractor = match context
             .filter_key_extractor_manager
-            .acquire(HashSet::from_iter(compact_task.existing_table_ids.clone()))
+            .acquire(existing_table_ids.clone())
             .await
         {
             Err(e) => {
-                tracing::warn!("Failed to fetch filter key extractor tables [{:?}], some of tables may be removed because of {:?}", compact_task.existing_table_ids, e);
+                tracing::error!("Failed to fetch filter key extractor tables [{:?}], it may caused by some RPC error {:?}", compact_task.existing_table_ids, e);
                 return TaskStatus::ExecuteFailed;
             }
             Ok(extractor) => extractor,
         };
+
+        if let FilterKeyExtractorImpl::Multi(multi) = &multi_filter_key_extractor {
+            let found_tables = multi.get_exsting_table_ids();
+            let removed_tables = existing_table_ids
+                .iter()
+                .filter(|table_id| !found_tables.contains(table_id))
+                .collect_vec();
+            if !removed_tables.is_empty() {
+                tracing::error!("Failed to fetch filter key extractor tables [{:?}. [{:?}] may be removed by meta-service. ", existing_table_ids, removed_tables);
+                return TaskStatus::ExecuteFailed;
+            }
+        }
+
         let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
 
         let mut task_status = TaskStatus::Success;
