@@ -251,7 +251,10 @@ where
         let fragment_graph = req.get_fragment_graph()?.clone();
 
         // resolve private links before starting the DDL procedure
-        self.resolve_private_link_info(&mut sink.properties).await?;
+        if let Some(connection_id) = sink.connection_id {
+            self.resolve_private_link_info(connection_id, &mut sink.properties)
+                .await?;
+        }
 
         let mut stream_job = StreamingJob::Sink(sink);
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;

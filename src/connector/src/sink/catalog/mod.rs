@@ -168,6 +168,7 @@ impl SinkCatalog {
             owner: self.owner.into(),
             properties: self.properties.clone(),
             sink_type: self.sink_type.to_proto() as i32,
+            connection_id: None,
         }
     }
 

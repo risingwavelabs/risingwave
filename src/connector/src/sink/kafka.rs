@@ -68,9 +68,8 @@ pub struct KafkaConfig {
     #[serde(skip_serializing)]
     pub connector: String, // Must be "kafka" here.
 
-    #[serde(rename = "connection.name")]
-    pub connection: String,
-
+    // #[serde(rename = "connection.name")]
+    // pub connection: String,
     #[serde(flatten)]
     pub common: KafkaCommon,
 

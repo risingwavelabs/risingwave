@@ -89,7 +89,7 @@ message Sink {
   uint32 owner = 11;
   map<string, string> properties = 12;
   string definition = 13;
-  uint32 connection_id = 14;
+  optional uint32 connection_id = 14;
 }
 
 message Connection {
