@@ -18,9 +18,12 @@ use std::fmt::Debug;
 use std::future::Future;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::error::anyhow_error;
 use risingwave_common::util::epoch::INVALID_EPOCH;
+use risingwave_storage::error::StorageError;
 use tokio::sync::mpsc::{
     channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
 };
@@ -32,6 +35,12 @@ use crate::common::log_store::LogReaderEpochProgress::{AwaitingTruncate, Consumi
 pub enum LogStoreError {
     #[error("EndOfLogStream")]
     EndOfLogStream,
+
+    #[error("Storage error: {0}")]
+    StorageError(#[from] StorageError),
+
+    #[error(transparent)]
+    Internal(#[from] anyhow::Error),
 }
 
 pub type LogStoreResult<T> = Result<T, LogStoreError>;
@@ -197,8 +206,9 @@ impl LogReader for BoundedInMemLogStoreReader {
                 .init_epoch_rx
                 .take()
                 .expect("should not init for twice");
-            // TODO: should return the error
-            let epoch = init_epoch_rx.await.expect("should be able to init");
+            let epoch = init_epoch_rx
+                .await
+                .map_err(|e| anyhow!("unable to get init epoch"))?;
             assert_eq!(self.epoch_progress, UNINITIALIZED);
             self.epoch_progress = LogReaderEpochProgress::Consuming(epoch);
             Ok(epoch)
@@ -249,10 +259,9 @@ impl LogReader for BoundedInMemLogStoreReader {
                     sealed_epoch
                 }
             };
-            // TODO: should return error
             self.truncated_epoch_tx
                 .send(sealed_epoch)
-                .expect("should not error");
+                .map_err(|_| anyhow!("unable to send sealed epoch"))?;
             Ok(())
         }
     }
@@ -264,20 +273,22 @@ impl LogWriter for BoundedInMemLogStoreWriter {
     type WriteChunkFuture<'a> = impl Future<Output = LogStoreResult<()>> + 'a;
 
     fn init(&mut self, epoch: u64) -> Self::InitFuture<'_> {
-        let init_epoch_tx = self.init_epoch_tx.take().expect("cannot be init for twice");
-        // TODO: return the error
-        init_epoch_tx.send(epoch).unwrap();
-        self.curr_epoch = Some(epoch);
-        async { Ok(()) }
+        async move {
+            let init_epoch_tx = self.init_epoch_tx.take().expect("cannot be init for twice");
+            init_epoch_tx
+                .send(epoch)
+                .map_err(|_| anyhow!("unable to send init epoch"))?;
+            self.curr_epoch = Some(epoch);
+            Ok(())
+        }
     }
 
     fn write_chunk(&mut self, chunk: StreamChunk) -> Self::WriteChunkFuture<'_> {
         async {
-            // TODO: return the sender error
             self.item_tx
                 .send(LogStoreReadItem::StreamChunk(chunk))
                 .await
-                .expect("should be able to send");
+                .map_err(|_| anyhow!("unable to send stream chunk"))?;
             Ok(())
         }
     }
@@ -288,14 +299,13 @@ impl LogWriter for BoundedInMemLogStoreWriter {
         is_checkpoint: bool,
     ) -> Self::FlushCurrentEpoch<'_> {
         async move {
-            // TODO: return the sender error
             self.item_tx
                 .send(LogStoreReadItem::Barrier {
                     next_epoch,
                     is_checkpoint,
                 })
                 .await
-                .expect("should be able to send");
+                .map_err(|_| anyhow!("unable to send barrier"))?;
 
             let prev_epoch = self
                 .curr_epoch
@@ -303,8 +313,11 @@ impl LogWriter for BoundedInMemLogStoreWriter {
                 .expect("should have epoch");
 
             if is_checkpoint {
-                // TODO: return err at None
-                let truncated_epoch = self.truncated_epoch_rx.recv().await.unwrap();
+                let truncated_epoch = self
+                    .truncated_epoch_rx
+                    .recv()
+                    .await
+                    .ok_or(anyhow!("cannot get truncated epoch"))?;
                 assert_eq!(truncated_epoch, prev_epoch);
             }
 

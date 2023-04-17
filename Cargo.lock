@@ -6755,6 +6755,7 @@ dependencies = [
  "risingwave_storage",
  "serde_json",
  "smallvec",
+ "spin 0.9.8",
  "static_assertions",
  "task_stats_alloc",
  "thiserror",
