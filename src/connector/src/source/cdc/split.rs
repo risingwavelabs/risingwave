@@ -22,13 +22,15 @@ use crate::source::{SplitId, SplitMetaData};
 /// CDC source only has single split, so we use the `source_id` to identify the split.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct CdcSplit {
-    pub source_id: u32,
+    pub split_id: u32,
+    // the hostname and port of a node that holding shard tables
+    pub server_addr: Option<String>,
     pub start_offset: Option<String>,
 }
 
 impl SplitMetaData for CdcSplit {
     fn id(&self) -> SplitId {
-        format!("{}", self.source_id).into()
+        format!("{}", self.split_id).into()
     }
 
     fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
@@ -41,14 +43,19 @@ impl SplitMetaData for CdcSplit {
 }
 
 impl CdcSplit {
-    pub fn new(source_id: u32, start_offset: String) -> CdcSplit {
+    pub fn new(split_id: u32, start_offset: String) -> CdcSplit {
         Self {
-            source_id,
+            split_id,
+            server_addr: None,
             start_offset: Some(start_offset),
         }
     }
 
     pub fn copy_with_offset(&self, start_offset: String) -> Self {
-        Self::new(self.source_id, start_offset)
+        Self {
+            split_id: self.split_id,
+            server_addr: self.server_addr.clone(),
+            start_offset: Some(start_offset),
+        }
     }
 }
