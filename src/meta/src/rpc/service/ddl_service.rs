@@ -21,7 +21,9 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::common::AwsPrivateLinkItem;
 use risingwave_connector::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
 use risingwave_connector::source::KAFKA_CONNECTOR;
-use risingwave_pb::catalog::connection::private_link_service::{PbPrivateLinkProvider, PrivateLinkProvider};
+use risingwave_pb::catalog::connection::private_link_service::{
+    PbPrivateLinkProvider, PrivateLinkProvider,
+};
 use risingwave_pb::catalog::connection::PbPrivateLinkService;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
