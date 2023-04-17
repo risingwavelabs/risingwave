@@ -59,7 +59,7 @@ impl LogicalScan {
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
-        for_system_time_as_of_now: bool,
+        for_system_time_as_of_proctime: bool,
     ) -> Self {
         // here we have 3 concepts
         // 1. column_id: ColumnId, stored in catalog and a ID to access data from storage.
@@ -89,7 +89,7 @@ impl LogicalScan {
             indexes,
             predicate,
             chunk_size: None,
-            for_system_time_as_of_now,
+            for_system_time_as_of_proctime,
             ctx,
         };
 
@@ -105,7 +105,7 @@ impl LogicalScan {
         table_desc: Rc<TableDesc>,
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
-        for_system_time_as_of_now: bool,
+        for_system_time_as_of_proctime: bool,
     ) -> Self {
         Self::new(
             table_name,
@@ -115,7 +115,7 @@ impl LogicalScan {
             indexes,
             ctx,
             Condition::true_cond(),
-            for_system_time_as_of_now,
+            for_system_time_as_of_proctime,
         )
     }
 
@@ -169,8 +169,8 @@ impl LogicalScan {
         self.core.is_sys_table
     }
 
-    pub fn for_system_time_as_of_now(&self) -> bool {
-        self.core.for_system_time_as_of_now
+    pub fn for_system_time_as_of_proctime(&self) -> bool {
+        self.core.for_system_time_as_of_proctime
     }
 
     /// Get a reference to the logical scan's table desc.
@@ -382,7 +382,7 @@ impl LogicalScan {
             vec![],
             self.ctx(),
             new_predicate,
-            self.for_system_time_as_of_now(),
+            self.for_system_time_as_of_proctime(),
         )
     }
 
@@ -433,7 +433,7 @@ impl LogicalScan {
             self.indexes().to_vec(),
             self.ctx(),
             Condition::true_cond(),
-            self.for_system_time_as_of_now(),
+            self.for_system_time_as_of_proctime(),
         );
         let project_expr = if self.required_col_idx() != self.output_col_idx() {
             Some(self.output_idx_to_input_ref())
@@ -452,7 +452,7 @@ impl LogicalScan {
             self.indexes().to_vec(),
             self.base.ctx.clone(),
             predicate,
-            self.for_system_time_as_of_now(),
+            self.for_system_time_as_of_proctime(),
         )
     }
 
@@ -465,7 +465,7 @@ impl LogicalScan {
             self.indexes().to_vec(),
             self.base.ctx.clone(),
             self.predicate().clone(),
-            self.for_system_time_as_of_now(),
+            self.for_system_time_as_of_proctime(),
         )
     }
 

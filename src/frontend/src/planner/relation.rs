@@ -71,7 +71,7 @@ impl Planner {
                 .map(|x| x.as_ref().clone().into())
                 .collect(),
             self.ctx(),
-            base_table.for_system_time_as_of_now,
+            base_table.for_system_time_as_of_proctime,
         )
         .into())
     }
