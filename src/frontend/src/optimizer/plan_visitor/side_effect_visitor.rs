@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{PlanVisitor, DefaultBehavior, Merge};
+use super::{DefaultBehavior, Merge, PlanVisitor};
 use crate::optimizer::plan_node;
 
 /// Recursively visit the **logical** plan and decide whether it has side effect and cannot be

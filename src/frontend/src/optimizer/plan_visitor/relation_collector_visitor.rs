@@ -16,11 +16,10 @@ use std::collections::HashSet;
 
 use risingwave_common::catalog::TableId;
 
+use super::{DefaultBehavior, DefaultValue};
 use crate::optimizer::plan_node::{BatchSource, LogicalScan, StreamSource, StreamTableScan};
 use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::PlanRef;
-
-use super::{DefaultBehavior, DefaultValue};
 
 #[derive(Debug, Clone, Default)]
 pub struct RelationCollectorVisitor {

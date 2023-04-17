@@ -39,14 +39,15 @@ pub use side_effect_visitor::*;
 use crate::for_all_plan_nodes;
 use crate::optimizer::plan_node::*;
 
+/// The behavior for the default implementations of `visit_xxx`.
 pub trait DefaultBehavior<R> {
-    fn apply(
-        &self,
-        inputs: impl IntoIterator<Item = PlanRef>,
-        visit: impl FnMut(PlanRef) -> R,
-    ) -> R;
+    /// Apply this behavior to the plan node with the given `inputs` and `visit` function.
+    fn apply(&self, plan: &dyn PlanNode, visit: impl FnMut(PlanRef) -> R) -> R;
 }
 
+/// Merge the `visit` result of all input nodes with a function.
+/// - If there's no input node, return the default value of the result type.
+/// - If there's only a single input node, directly return its result.
 pub struct Merge<F>(F);
 
 impl<F, R> DefaultBehavior<R> for Merge<F>
@@ -54,12 +55,8 @@ where
     F: Fn(R, R) -> R,
     R: Default,
 {
-    fn apply(
-        &self,
-        inputs: impl IntoIterator<Item = PlanRef>,
-        visit: impl FnMut(PlanRef) -> R,
-    ) -> R {
-        inputs
+    fn apply(&self, plan: &dyn PlanNode, visit: impl FnMut(PlanRef) -> R) -> R {
+        plan.inputs()
             .into_iter()
             .map(visit)
             .reduce(&self.0)
@@ -67,17 +64,14 @@ where
     }
 }
 
+/// Returns the default value of the result type.
 pub struct DefaultValue;
 
 impl<R> DefaultBehavior<R> for DefaultValue
 where
     R: Default,
 {
-    fn apply(
-        &self,
-        _inputs: impl IntoIterator<Item = PlanRef>,
-        _visit: impl FnMut(PlanRef) -> R,
-    ) -> R {
+    fn apply(&self, _plan: &dyn PlanNode, _visit: impl FnMut(PlanRef) -> R) -> R {
         R::default()
     }
 }
@@ -103,7 +97,7 @@ macro_rules! def_visitor {
                 $(
                     #[doc = "Visit [`" [<$convention $name>] "`] , the function should visit the inputs."]
                     fn [<visit_ $convention:snake _ $name:snake>](&mut self, plan: &[<$convention $name>]) -> R {
-                        Self::default_behavior().apply(plan.inputs(), |p| self.visit(p))
+                        Self::default_behavior().apply(plan, |p| self.visit(p))
                     }
                 )*
             }

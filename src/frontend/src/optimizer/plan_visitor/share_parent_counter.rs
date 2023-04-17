@@ -14,10 +14,9 @@
 
 use std::collections::HashMap;
 
+use super::{DefaultBehavior, DefaultValue};
 use crate::optimizer::plan_node::{LogicalShare, PlanNodeId, PlanTreeNodeUnary};
 use crate::optimizer::plan_visitor::PlanVisitor;
-
-use super::{DefaultBehavior, DefaultValue};
 
 #[derive(Debug, Clone, Default)]
 pub struct ShareParentCounter {
