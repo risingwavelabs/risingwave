@@ -418,13 +418,10 @@ where
                 .map(|version_delta| (version_delta.id, version_delta))
                 .collect();
 
-        let mut need_init = self.need_init().await?;
-        let mut redo_state = if need_init {
+        let mut redo_state = if self.need_init().await? {
             // For backward compatibility, try to read checkpoint from meta store.
             let versions = HummockVersion::list(self.env.meta_store()).await?;
             let checkpoint_version = if !versions.is_empty() {
-                // Reject further init op.
-                need_init = false;
                 let checkpoint = versions.into_iter().next().unwrap();
                 tracing::warn!(
                     "read hummock version checkpoint from meta store: {:#?}",
@@ -435,6 +432,9 @@ where
                 // As no record found in stores, create a initial version.
                 let checkpoint = create_init_version();
                 tracing::info!("init hummock version checkpoint");
+                HummockVersionStats::default()
+                    .insert(self.env.meta_store())
+                    .await?;
                 checkpoint
             };
             versioning_guard.checkpoint = HummockVersionCheckpoint {
@@ -454,19 +454,11 @@ where
                 .cloned()
                 .unwrap()
         };
-        if need_init {
-            versioning_guard.version_stats = HummockVersionStats::default();
-            versioning_guard
-                .version_stats
-                .insert(self.env.meta_store())
-                .await?;
-        } else {
-            versioning_guard.version_stats = HummockVersionStats::list(self.env.meta_store())
-                .await?
-                .into_iter()
-                .next()
-                .expect("should contain exact one item");
-        }
+        versioning_guard.version_stats = HummockVersionStats::list(self.env.meta_store())
+            .await?
+            .into_iter()
+            .next()
+            .expect("should contain exact one item");
         for version_delta in hummock_version_deltas.values() {
             if version_delta.prev_id == redo_state.id {
                 redo_state.apply_version_delta(version_delta);
