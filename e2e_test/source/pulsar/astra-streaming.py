@@ -4,6 +4,7 @@ from time import sleep
 import psycopg2
 import re
 
+
 def do_test(config):
     conn = psycopg2.connect(
         host="localhost",
@@ -29,6 +30,7 @@ def do_test(config):
     # Do test with slt
     ret = os.popen(
         "sqllogictest -p 4566 -d dev './e2e_test/source/pulsar/pulsar.slt'").read()
+    print("astra-streaming test result: ", ret)
     result = re.match(
         'e2e_test/source/pulsar/pulsar.slt +.. \[OK\] in [0-9]+ ms', ret)
 

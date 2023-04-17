@@ -34,6 +34,7 @@ def do_test(config):
     # Do test with slt
     ret = os.popen(
         "sqllogictest -p 4566 -d dev './e2e_test/source/pulsar/pulsar.slt'").read()
+    print("streamnative-cloud test result: ", ret)
     result = re.match(
         'e2e_test/source/pulsar/pulsar.slt +.. \[OK\] in [0-9]+ ms', ret)
 
