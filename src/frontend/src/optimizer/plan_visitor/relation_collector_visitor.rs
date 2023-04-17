@@ -20,6 +20,8 @@ use crate::optimizer::plan_node::{BatchSource, LogicalScan, StreamSource, Stream
 use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::PlanRef;
 
+use super::{DefaultBehavior, DefaultValue};
+
 #[derive(Debug, Clone, Default)]
 pub struct RelationCollectorVisitor {
     relations: HashSet<TableId>,
@@ -42,7 +44,9 @@ impl RelationCollectorVisitor {
 }
 
 impl PlanVisitor<()> for RelationCollectorVisitor {
-    fn merge(_: (), _: ()) {}
+    fn default_behavior() -> impl DefaultBehavior<()> {
+        DefaultValue
+    }
 
     fn visit_batch_seq_scan(&mut self, plan: &crate::optimizer::plan_node::BatchSeqScan) {
         if !plan.logical().is_sys_table() {

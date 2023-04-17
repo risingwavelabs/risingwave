@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::PlanVisitor;
+use super::{PlanVisitor, DefaultBehavior, Merge};
 use crate::optimizer::plan_node;
 
 /// Recursively visit the **logical** plan and decide whether it has side effect and cannot be
@@ -20,8 +20,8 @@ use crate::optimizer::plan_node;
 pub struct SideEffectVisitor;
 
 impl PlanVisitor<bool> for SideEffectVisitor {
-    fn merge(a: bool, b: bool) -> bool {
-        a || b
+    fn default_behavior() -> impl DefaultBehavior<bool> {
+        Merge(|a, b| a | b)
     }
 
     fn visit_logical_insert(&mut self, _plan: &plan_node::LogicalInsert) -> bool {

@@ -39,19 +39,57 @@ pub use side_effect_visitor::*;
 use crate::for_all_plan_nodes;
 use crate::optimizer::plan_node::*;
 
+pub trait DefaultBehavior<R> {
+    fn apply(
+        &self,
+        inputs: impl IntoIterator<Item = PlanRef>,
+        visit: impl FnMut(PlanRef) -> R,
+    ) -> R;
+}
+
+pub struct Merge<F>(F);
+
+impl<F, R> DefaultBehavior<R> for Merge<F>
+where
+    F: Fn(R, R) -> R,
+    R: Default,
+{
+    fn apply(
+        &self,
+        inputs: impl IntoIterator<Item = PlanRef>,
+        visit: impl FnMut(PlanRef) -> R,
+    ) -> R {
+        inputs
+            .into_iter()
+            .map(visit)
+            .reduce(&self.0)
+            .unwrap_or_default()
+    }
+}
+
+pub struct DefaultValue;
+
+impl<R> DefaultBehavior<R> for DefaultValue
+where
+    R: Default,
+{
+    fn apply(
+        &self,
+        _inputs: impl IntoIterator<Item = PlanRef>,
+        _visit: impl FnMut(PlanRef) -> R,
+    ) -> R {
+        R::default()
+    }
+}
+
 /// Define `PlanVisitor` trait.
 macro_rules! def_visitor {
     ($({ $convention:ident, $name:ident }),*) => {
         /// The visitor for plan nodes. visit all inputs and return the ret value of the left most input,
         /// and leaf node returns `R::default()`
-        pub trait PlanVisitor<R:Default> {
-            fn check_convention(&self, _convention: Convention) -> bool {
-                return true;
-            }
-
-            /// This merge function is used to reduce results of plan inputs.
-            /// In order to always remind users to implement themselves, we don't provide an default implementation.
-            fn merge(a: R, b: R) -> R;
+        pub trait PlanVisitor<R: Default> {
+            /// The behavior for the default implementations of `visit_xxx`.
+            fn default_behavior() -> impl DefaultBehavior<R>;
 
             paste! {
                 fn visit(&mut self, plan: PlanRef) -> R{
@@ -65,11 +103,7 @@ macro_rules! def_visitor {
                 $(
                     #[doc = "Visit [`" [<$convention $name>] "`] , the function should visit the inputs."]
                     fn [<visit_ $convention:snake _ $name:snake>](&mut self, plan: &[<$convention $name>]) -> R {
-                        plan.inputs()
-                            .into_iter()
-                            .map(|input| self.visit(input))
-                            .reduce(Self::merge)
-                            .unwrap_or_default()
+                        Self::default_behavior().apply(plan.inputs(), |p| self.visit(p))
                     }
                 )*
             }
@@ -95,8 +129,8 @@ macro_rules! impl_has_variant {
                     where
                         P: FnMut(&$variant) -> bool,
                     {
-                        fn merge(a: bool, b: bool) -> bool {
-                            a | b
+                        fn default_behavior() -> impl DefaultBehavior<bool> {
+                            Merge(|a, b| a | b)
                         }
 
                         fn [<visit_ $variant:snake>](&mut self, node: &$variant) -> bool {

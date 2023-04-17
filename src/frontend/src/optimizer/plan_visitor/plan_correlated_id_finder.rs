@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 
+use super::{DefaultBehavior, DefaultValue};
 use crate::expr::{CorrelatedId, CorrelatedInputRef, ExprVisitor};
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalFilter, LogicalJoin, LogicalProject, PlanTreeNode,
@@ -42,7 +43,9 @@ impl PlanVisitor<()> for PlanCorrelatedIdFinder {
     /// `correlated_input_ref` can only appear in `LogicalProject`, `LogicalFilter`,
     /// `LogicalJoin` or the `filter` clause of `PlanAggCall` of `LogicalAgg` now.
 
-    fn merge(_: (), _: ()) {}
+    fn default_behavior() -> impl DefaultBehavior<()> {
+        DefaultValue
+    }
 
     fn visit_logical_join(&mut self, plan: &LogicalJoin) {
         let mut finder = ExprCorrelatedIdFinder::default();

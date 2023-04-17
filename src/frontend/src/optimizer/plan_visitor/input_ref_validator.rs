@@ -15,6 +15,7 @@
 use paste::paste;
 use risingwave_common::catalog::{Field, Schema};
 
+use super::{DefaultBehavior, Merge};
 use crate::expr::ExprVisitor;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{Explain, PlanRef, PlanTreeNodeUnary};
@@ -124,7 +125,7 @@ impl PlanVisitor<Option<String>> for InputRefValidator {
 
     // TODO: add more checks
 
-    fn merge(a: Option<String>, b: Option<String>) -> Option<String> {
-        a.or(b)
+    fn default_behavior() -> impl DefaultBehavior<Option<String>> {
+        Merge(|a: Option<String>, b| a.or(b))
     }
 }

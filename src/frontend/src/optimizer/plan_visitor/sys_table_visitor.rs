@@ -16,6 +16,8 @@ use crate::optimizer::plan_node::{BatchSeqScan, LogicalScan, StreamTableScan};
 use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::PlanRef;
 
+use super::{Merge, DefaultBehavior};
+
 #[derive(Debug, Clone, Default)]
 pub struct SysTableVisitor {}
 
@@ -27,8 +29,8 @@ impl SysTableVisitor {
 }
 
 impl PlanVisitor<bool> for SysTableVisitor {
-    fn merge(a: bool, b: bool) -> bool {
-        a | b
+    fn default_behavior() -> impl DefaultBehavior<bool> {
+        Merge(|a, b| a | b)
     }
 
     fn visit_batch_seq_scan(&mut self, batch_seq_scan: &BatchSeqScan) -> bool {
