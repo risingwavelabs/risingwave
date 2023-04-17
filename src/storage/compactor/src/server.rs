@@ -158,7 +158,6 @@ pub async fn compactor_serve(
     // use half of limit because any memory which would hold in meta-cache will be allocate by
     // limited at first.
     let observer_join_handle = observer_manager.start().await;
-    // let input_limit_mb = storage_opts.compactor_memory_limit_mb as u64 / 2;
     let input_limit_bytes = compactor_memory_limit_bytes / 2;
 
     // In a compact operation, the size of the output files will not be larger than the input files.
