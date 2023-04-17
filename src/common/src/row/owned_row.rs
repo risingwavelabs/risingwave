@@ -89,75 +89,6 @@ impl OwnedRow {
     }
 }
 
-impl OwnedRow {
-    pub fn is_null(&self, idx: usize) -> bool {
-        self[idx].is_none()
-    }
-
-    pub fn get_int16(&self, idx: usize) -> i16 {
-        match self[idx].as_ref().unwrap() {
-            ScalarImpl::Int16(num) => *num,
-            _ => unreachable!("type is not int16 at index: {}", idx),
-        }
-    }
-
-    pub fn get_int32(&self, idx: usize) -> i32 {
-        match self[idx].as_ref().unwrap() {
-            ScalarImpl::Int32(num) => *num,
-            _ => unreachable!("type is not int32 at index: {}", idx),
-        }
-    }
-
-    pub fn get_int64(&self, idx: usize) -> i64 {
-        match self[idx].as_ref().unwrap() {
-            ScalarImpl::Int64(num) => *num,
-            _ => unreachable!("type is not int64 at index: {}", idx),
-        }
-    }
-
-    pub fn get_f32(&self, idx: usize) -> f32 {
-        match self[idx].as_ref().unwrap() {
-            ScalarImpl::Float32(num) => num.into_inner(),
-            _ => unreachable!("type is not float32 at index: {}", idx),
-        }
-    }
-
-    pub fn get_f64(&self, idx: usize) -> f64 {
-        match self[idx].as_ref().unwrap() {
-            ScalarImpl::Float64(num) => num.into_inner(),
-            _ => unreachable!("type is not float64 at index: {}", idx),
-        }
-    }
-
-    pub fn get_bool(&self, idx: usize) -> bool {
-        match self[idx].as_ref().unwrap() {
-            ScalarImpl::Bool(num) => *num,
-            _ => unreachable!("type is not boolean at index: {}", idx),
-        }
-    }
-
-    pub fn get_utf8(&self, idx: usize) -> &str {
-        match self[idx].as_ref().unwrap() {
-            ScalarImpl::Utf8(s) => s.as_ref(),
-            _ => unreachable!("type is not utf8 at index: {}", idx),
-        }
-    }
-
-    pub fn get_datetime(&self, idx: usize) -> &Timestamp {
-        match self[idx].as_ref().unwrap() {
-            ScalarImpl::Timestamp(dt) => dt,
-            _ => unreachable!("type is not NaiveDateTime at index: {}", idx),
-        }
-    }
-
-    pub fn get_decimal(&self, idx: usize) -> &Decimal {
-        match self[idx].as_ref().unwrap() {
-            ScalarImpl::Decimal(d) => d,
-            _ => unreachable!("type is not NaiveDateTime at index: {}", idx),
-        }
-    }
-}
-
 impl EstimateSize for OwnedRow {
     fn estimated_heap_size(&self) -> usize {
         // FIXME(bugen): this is not accurate now as the heap size of some `Scalar` is not counted.
@@ -296,6 +227,6 @@ mod tests {
         assert_ne!(row1.hash(hash_builder), row2.hash(hash_builder));
 
         let row_default = OwnedRow::default();
-        assert_eq!(row_default.hash(hash_builder).0, 0);
+        assert_eq!(row_default.hash(hash_builder).value(), 0);
     }
 }

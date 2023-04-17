@@ -583,14 +583,20 @@ pub fn to_stream_prost_body(
             })
         }
         Node::GroupTopN(me) => {
+            let input = &me.core.input.0;
             let table = me
                 .core
-                .infer_internal_table_catalog(base, me.vnode_col_idx)
+                .infer_internal_table_catalog(
+                    input.schema(),
+                    input.ctx(),
+                    input.logical_pk(),
+                    me.vnode_col_idx,
+                )
                 .with_id(state.gen_table_id_wrapped());
             let group_topn_node = GroupTopNNode {
-                limit: me.core.limit,
+                limit: me.core.limit_attr.limit(),
                 offset: me.core.offset,
-                with_ties: me.core.with_ties,
+                with_ties: me.core.limit_attr.with_ties(),
                 group_key: me.core.group_key.iter().map(|idx| *idx as u32).collect(),
                 table: Some(table.to_internal_table_prost()),
                 order_by: me.core.order.to_protobuf(),
@@ -723,21 +729,25 @@ pub fn to_stream_prost_body(
             PbNodeBody::Source(SourceNode { source_inner })
         }
         Node::TopN(me) => {
+            let input = &me.core.input.0;
             let me = &me.core;
             let topn_node = TopNNode {
-                limit: me.limit,
+                limit: me.limit_attr.limit(),
                 offset: me.offset,
-                with_ties: me.with_ties,
+                with_ties: me.limit_attr.with_ties(),
                 table: Some(
-                    me.infer_internal_table_catalog(base, None)
-                        .with_id(state.gen_table_id_wrapped())
-                        .to_internal_table_prost(),
+                    me.infer_internal_table_catalog(
+                        input.schema(),
+                        input.ctx(),
+                        input.logical_pk(),
+                        None,
+                    )
+                    .with_id(state.gen_table_id_wrapped())
+                    .to_internal_table_prost(),
                 ),
                 order_by: me.order.to_protobuf(),
             };
-            // TODO: support with ties for append only TopN
-            // <https://github.com/risingwavelabs/risingwave/issues/5642>
-            if me.input.0.append_only && !me.with_ties {
+            if me.input.0.append_only {
                 PbNodeBody::AppendOnlyTopN(topn_node)
             } else {
                 PbNodeBody::TopN(topn_node)

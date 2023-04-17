@@ -145,8 +145,8 @@ pub fn handle_bind(
         }
         PrepareStatement::PureStatement(stmt) => {
             assert!(
-                params.is_empty() && param_formats.is_empty(),
-                "params and param_formats should be empty for pure statement"
+                params.is_empty(),
+                "params should be empty for pure statement"
             );
             Ok(Portal::PureStatement(stmt))
         }

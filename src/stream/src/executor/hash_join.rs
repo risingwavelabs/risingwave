@@ -163,8 +163,6 @@ struct JoinSide<K: HashKey, S: StateStore> {
     ht: JoinHashMap<K, S>,
     /// Indices of the join key columns
     join_key_indices: Vec<usize>,
-    /// The primary key indices of state table on this side after dedup
-    deduped_pk_indices: Vec<usize>,
     /// The data type of all columns without degree.
     all_data_types: Vec<DataType>,
     /// The start position for the side in output new columns
@@ -191,7 +189,6 @@ impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JoinSide")
             .field("join_key_indices", &self.join_key_indices)
-            .field("deduped_pk_indices", &self.deduped_pk_indices)
             .field("col_types", &self.all_data_types)
             .field("start_pos", &self.start_pos)
             .field("i2o_mapping", &self.i2o_mapping)
@@ -493,17 +490,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let join_key_indices_r = params_r.join_key_indices;
 
         let degree_pk_indices_l = (join_key_indices_l.len()
-            ..join_key_indices_l.len() + state_pk_indices_l.len())
+            ..join_key_indices_l.len() + params_l.deduped_pk_indices.len())
             .collect_vec();
         let degree_pk_indices_r = (join_key_indices_r.len()
-            ..join_key_indices_r.len() + state_pk_indices_r.len())
+            ..join_key_indices_r.len() + params_r.deduped_pk_indices.len())
             .collect_vec();
 
         // If pk is contained in join key.
-        let pk_contained_in_jk_l =
-            is_subset(state_pk_indices_l.clone(), join_key_indices_l.clone());
-        let pk_contained_in_jk_r =
-            is_subset(state_pk_indices_r.clone(), join_key_indices_r.clone());
+        let pk_contained_in_jk_l = is_subset(state_pk_indices_l, join_key_indices_l.clone());
+        let pk_contained_in_jk_r = is_subset(state_pk_indices_r, join_key_indices_r.clone());
 
         // check whether join key contains pk in both side
         let append_only_optimize = is_append_only && pk_contained_in_jk_l && pk_contained_in_jk_r;
@@ -537,7 +532,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .map(|&idx| original_schema[idx].clone())
             .collect();
 
-        let null_matched: NullBitmap = null_safe.into();
+        let null_matched = K::Bitmap::from_bool_vec(null_safe);
 
         let need_degree_table_l = need_left_degree(T) && !pk_contained_in_jk_r;
         let need_degree_table_r = need_right_degree(T) && !pk_contained_in_jk_l;
@@ -619,7 +614,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     join_key_data_types_l,
                     state_all_data_types_l.clone(),
                     state_table_l,
-                    state_pk_indices_l.clone(),
+                    params_l.deduped_pk_indices,
                     degree_all_data_types_l,
                     degree_state_table_l,
                     degree_pk_indices_l,
@@ -636,7 +631,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 i2o_mapping_indexed: l2o_indexed,
                 input2inequality_index: l2inequality_index,
                 state_clean_columns: l_state_clean_columns,
-                deduped_pk_indices: state_pk_indices_l,
                 start_pos: 0,
                 need_degree_table: need_degree_table_l,
             },
@@ -646,7 +640,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     join_key_data_types_r,
                     state_all_data_types_r.clone(),
                     state_table_r,
-                    state_pk_indices_r.clone(),
+                    params_r.deduped_pk_indices,
                     degree_all_data_types_r,
                     degree_state_table_r,
                     degree_pk_indices_r,
@@ -659,7 +653,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 ),
                 join_key_indices: join_key_indices_r,
                 all_data_types: state_all_data_types_r,
-                deduped_pk_indices: state_pk_indices_r,
                 start_pos: side_l_column_n,
                 i2o_mapping: right_to_output,
                 i2o_mapping_indexed: r2o_indexed,

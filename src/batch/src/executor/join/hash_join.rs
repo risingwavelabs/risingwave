@@ -36,6 +36,7 @@ use super::{ChunkedData, JoinType, RowId};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
+use crate::risingwave_common::hash::NullBitmap;
 use crate::task::BatchTaskContext;
 
 /// Hash Join Executor
@@ -232,7 +233,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         let mut next_build_row_with_same_key =
             ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
 
-        let null_matched = self.null_matched.into();
+        let null_matched = K::Bitmap::from_bool_vec(self.null_matched);
 
         // Build hash map
         for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {

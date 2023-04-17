@@ -186,7 +186,7 @@ impl<K: HashKey> GroupTopNExecutor<K> {
             let chunk = Arc::new(chunk?.compact());
             let keys = K::build(self.group_key.as_slice(), &chunk)?;
 
-            for (row_id, (encoded_row, key)) in encode_chunk(&chunk, &self.column_orders)
+            for (row_id, (encoded_row, key)) in encode_chunk(&chunk, &self.column_orders)?
                 .into_iter()
                 .zip_eq_fast(keys.into_iter())
                 .enumerate()

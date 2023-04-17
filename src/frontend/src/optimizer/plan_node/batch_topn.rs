@@ -18,6 +18,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::TopNNode;
 
+use super::generic::Limit;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
@@ -47,15 +48,13 @@ impl BatchTopN {
     }
 
     fn two_phase_topn(&self, input: PlanRef) -> Result<PlanRef> {
-        let new_limit = self.logical.limit + self.logical.offset;
-        let new_offset = 0;
-        let logical_partial_topn = generic::TopN::without_group(
-            input,
-            new_limit,
-            new_offset,
-            self.logical.with_ties,
-            self.logical.order.clone(),
+        let new_limit = Limit::new(
+            self.logical.limit_attr.limit() + self.logical.offset,
+            self.logical.limit_attr.with_ties(),
         );
+        let new_offset = 0;
+        let logical_partial_topn =
+            generic::TopN::without_group(input, new_limit, new_offset, self.logical.order.clone());
         let batch_partial_topn = Self::new(logical_partial_topn);
         let ensure_single_dist = RequiredDist::single()
             .enforce_if_not_satisfies(batch_partial_topn.into(), &Order::any())?;
@@ -94,10 +93,10 @@ impl ToBatchPb for BatchTopN {
     fn to_batch_prost_body(&self) -> NodeBody {
         let column_orders = self.logical.order.to_protobuf();
         NodeBody::TopN(TopNNode {
-            limit: self.logical.limit,
+            limit: self.logical.limit_attr.limit(),
             offset: self.logical.offset,
             column_orders,
-            with_ties: self.logical.with_ties,
+            with_ties: self.logical.limit_attr.with_ties(),
         })
     }
 }

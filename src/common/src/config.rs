@@ -17,10 +17,11 @@
 //! [`RwConfig`] corresponds to the whole config file and each other config struct corresponds to a
 //! section in `risingwave.toml`.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs;
 
 use clap::ValueEnum;
+use derivative::Derivative;
 use risingwave_pb::meta::SystemParams;
 use serde::{Deserialize, Serialize};
 use serde_default::DefaultFromSerde;
@@ -35,35 +36,52 @@ pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
 /// For non-user-facing components where the CLI arguments do not override the config file.
 pub const NO_OVERRIDE: Option<NoOverride> = None;
 
-macro_rules! for_all_config_sections {
-    ($macro:ident) => {
-        $macro! {
-            { server },
-            { meta },
-            { batch },
-            { streaming },
-            { storage },
-            { storage.file_cache },
-        }
-    };
+/// Unrecognized fields in a config section. Generic over the config section type to provide better
+/// error messages.
+///
+/// The current implementation will log warnings if there are unrecognized fields.
+#[derive(Derivative)]
+#[derivative(Clone, Debug, Default)]
+pub struct Unrecognized<T: 'static> {
+    inner: BTreeMap<String, Value>,
+    _marker: std::marker::PhantomData<&'static T>,
 }
 
-macro_rules! impl_warn_unrecognized_fields {
-    ($({ $($field_path:ident).+ },)*) => {
-        fn warn_unrecognized_fields(config: &RwConfig) {
-            if !config.unrecognized.is_empty() {
-                tracing::warn!("unrecognized fields in config: {:?}", config.unrecognized.keys());
-            }
-            $(
-                if !config.$($field_path).+.unrecognized.is_empty() {
-                    tracing::warn!("unrecognized fields in config section [{}]: {:?}", stringify!($($field_path).+), config.$($field_path).+.unrecognized.keys());
-                }
-            )*
-        }
-    };
+impl<T> Unrecognized<T> {
+    /// Returns all unrecognized fields as a map.
+    pub fn into_inner(self) -> BTreeMap<String, Value> {
+        self.inner
+    }
 }
 
-for_all_config_sections!(impl_warn_unrecognized_fields);
+impl<'de, T> Deserialize<'de> for Unrecognized<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let inner = BTreeMap::deserialize(deserializer)?;
+        if !inner.is_empty() {
+            tracing::warn!(
+                "unrecognized fields in `{}`: {:?}",
+                std::any::type_name::<T>(),
+                inner.keys()
+            );
+        }
+        Ok(Unrecognized {
+            inner,
+            _marker: std::marker::PhantomData,
+        })
+    }
+}
+
+impl<T> Serialize for Unrecognized<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.inner.serialize(serializer)
+    }
+}
 
 pub fn load_config(path: &str, cli_override: Option<impl OverrideConfig>) -> RwConfig
 where
@@ -79,7 +97,6 @@ where
     if let Some(cli_override) = cli_override {
         cli_override.r#override(&mut config);
     }
-    warn_unrecognized_fields(&config);
     config
 }
 
@@ -97,7 +114,8 @@ impl OverrideConfig for NoOverride {
 
 /// [`RwConfig`] corresponds to the whole config file `risingwave.toml`. Each field corresponds to a
 /// section.
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[derive(Derivative, Clone, Serialize, Deserialize, Default)]
+#[derivative(Debug)]
 pub struct RwConfig {
     #[serde(default)]
     pub server: ServerConfig,
@@ -115,10 +133,11 @@ pub struct RwConfig {
     pub storage: StorageConfig,
 
     #[serde(default)]
+    #[derivative(Debug = "ignore")]
     pub system: SystemConfig,
 
     #[serde(flatten)]
-    pub unrecognized: HashMap<String, Value>,
+    pub unrecognized: Unrecognized<Self>,
 }
 
 #[derive(Copy, Clone, Debug, Default, ValueEnum, Serialize, Deserialize)]
@@ -204,7 +223,7 @@ pub struct MetaConfig {
     pub max_compactor_task_multiplier: u32,
 
     #[serde(default, flatten)]
-    pub unrecognized: HashMap<String, Value>,
+    pub unrecognized: Unrecognized<Self>,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -231,7 +250,7 @@ pub struct ServerConfig {
     pub telemetry_enabled: bool,
 
     #[serde(default, flatten)]
-    pub unrecognized: HashMap<String, Value>,
+    pub unrecognized: Unrecognized<Self>,
 }
 
 /// The section `[batch]` in `risingwave.toml`.
@@ -249,7 +268,7 @@ pub struct BatchConfig {
     pub distributed_query_limit: Option<u64>,
 
     #[serde(default, flatten)]
-    pub unrecognized: HashMap<String, Value>,
+    pub unrecognized: Unrecognized<Self>,
 }
 
 /// The section `[streaming]` in `risingwave.toml`.
@@ -280,7 +299,7 @@ pub struct StreamingConfig {
     pub unique_user_stream_errors: usize,
 
     #[serde(default, flatten)]
-    pub unrecognized: HashMap<String, Value>,
+    pub unrecognized: Unrecognized<Self>,
 }
 
 /// The section `[storage]` in `risingwave.toml`.
@@ -299,6 +318,10 @@ pub struct StorageConfig {
     /// is enough space.
     #[serde(default)]
     pub shared_buffer_capacity_mb: Option<usize>,
+
+    /// The threshold for the number of immutable memtables to merge to a new imm.
+    #[serde(default = "default::storage::imm_merge_threshold")]
+    pub imm_merge_threshold: usize,
 
     /// Whether to enable write conflict detection
     #[serde(default = "default::storage::write_conflict_detection_enabled")]
@@ -351,8 +374,11 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::max_concurrent_compaction_task_number")]
     pub max_concurrent_compaction_task_number: u64,
 
+    #[serde(default = "default::storage::max_preload_wait_time_mill")]
+    pub max_preload_wait_time_mill: u64,
+
     #[serde(default, flatten)]
-    pub unrecognized: HashMap<String, Value>,
+    pub unrecognized: Unrecognized<Self>,
 }
 
 /// The subsection `[storage.file_cache]` in `risingwave.toml`.
@@ -379,7 +405,7 @@ pub struct FileCacheConfig {
     pub cache_file_max_write_size_mb: usize,
 
     #[serde(default, flatten)]
-    pub unrecognized: HashMap<String, Value>,
+    pub unrecognized: Unrecognized<Self>,
 }
 
 #[derive(Debug, Default, Clone, ValueEnum, Serialize, Deserialize)]
@@ -600,6 +626,10 @@ mod default {
             1024
         }
 
+        pub fn imm_merge_threshold() -> usize {
+            4
+        }
+
         pub fn write_conflict_detection_enabled() -> bool {
             cfg!(debug_assertions)
         }
@@ -651,6 +681,10 @@ mod default {
 
         pub fn max_concurrent_compaction_task_number() -> u64 {
             16
+        }
+
+        pub fn max_preload_wait_time_mill() -> u64 {
+            10
         }
     }
 

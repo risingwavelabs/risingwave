@@ -13,15 +13,17 @@
 // limitations under the License.
 
 use std::io::{Cursor, Read};
+use std::mem::size_of;
 
-use ethnum::{I256, U256};
+use ethnum::I256;
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::PbArray;
 
 use crate::array::{Array, ArrayBuilder, ArrayImpl, ArrayResult};
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::types::num256::{Int256, Int256Ref, Uint256, Uint256Ref};
+use crate::collection::estimate_size::EstimateSize;
+use crate::types::num256::{Int256, Int256Ref};
 use crate::types::Scalar;
 
 #[derive(Debug)]
@@ -30,22 +32,10 @@ pub struct Int256ArrayBuilder {
     data: Vec<I256>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Int256Array {
     bitmap: Bitmap,
     data: Vec<I256>,
-}
-
-#[derive(Debug)]
-pub struct Uint256ArrayBuilder {
-    bitmap: BitmapBuilder,
-    data: Vec<U256>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Uint256Array {
-    bitmap: Bitmap,
-    data: Vec<U256>,
 }
 
 #[rustfmt::skip]
@@ -157,8 +147,19 @@ macro_rules! impl_array_for_num256 {
             }
         }
 
+        impl<$gen> FromIterator<Option<$scalar_ref<$gen>>> for $array {
+            fn from_iter<T: IntoIterator<Item = Option<$scalar_ref<$gen>>>>(iter: T) -> Self {
+                let iter = iter.into_iter();
+                let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
+                for i in iter {
+                    builder.append(i);
+                }
+                builder.finish()
+            }
+        }
+
         impl $array {
-            pub fn from_protobuf(array: &PbArray, cardinality:usize) -> ArrayResult<ArrayImpl> {
+            pub fn from_protobuf(array: &PbArray, cardinality: usize) -> ArrayResult<ArrayImpl> {
                 ensure!(
                     array.get_values().len() == 1,
                     "Must have only 1 buffer in array"
@@ -185,17 +186,8 @@ macro_rules! impl_array_for_num256 {
                 Ok(arr.into())
             }
         }
-
     };
 }
-
-impl_array_for_num256!(
-    Uint256Array,
-    Uint256ArrayBuilder,
-    Uint256,
-    Uint256Ref<'a>,
-    Uint256
-);
 
 impl_array_for_num256!(
     Int256Array,
@@ -204,3 +196,9 @@ impl_array_for_num256!(
     Int256Ref<'a>,
     Int256
 );
+
+impl EstimateSize for Int256Array {
+    fn estimated_heap_size(&self) -> usize {
+        self.bitmap.estimated_heap_size() + self.data.capacity() * size_of::<I256>()
+    }
+}
