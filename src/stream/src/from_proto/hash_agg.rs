@@ -22,8 +22,7 @@ use risingwave_expr::function::aggregate::AggCall;
 use risingwave_pb::stream_plan::HashAggNode;
 
 use super::agg_common::{
-    build_agg_call_from_prost, build_agg_state_storages_from_proto,
-    build_distinct_dedup_table_from_proto,
+    build_agg_state_storages_from_proto, build_distinct_dedup_table_from_proto,
 };
 use super::*;
 use crate::common::table::state_table::StateTable;
@@ -73,7 +72,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()
             .iter()
-            .map(|agg_call| build_agg_call_from_prost(node.is_append_only, agg_call))
+            .map(|agg_call| AggCall::from_protobuf(agg_call, node.is_append_only))
             .try_collect()?;
 
         let vnodes = Some(Arc::new(
