@@ -4,7 +4,7 @@
     select v1 from (select * from t) where v2 > 1;
   logical_plan: |
     LogicalProject { exprs: [t.v1] }
-    └─LogicalFilter { predicate: (t.v2 > 1:Int32) }
+    └─LogicalFilter { predicate: (t.v2 > 1:Int32::Float64) }
       └─LogicalProject { exprs: [t.v1, t.v2] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - name: merge and then eliminate
@@ -26,7 +26,7 @@
     select v3 from (select v2, v1 as v3 from t) where v2 > 1;
   logical_plan: |
     LogicalProject { exprs: [t.v1] }
-    └─LogicalFilter { predicate: (t.v2 > 1:Int32) }
+    └─LogicalFilter { predicate: (t.v2 > 1:Int32::Float64) }
       └─LogicalProject { exprs: [t.v2, t.v1] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - name: consecutive projects are merged
