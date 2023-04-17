@@ -227,6 +227,6 @@ mod tests {
         assert_ne!(row1.hash(hash_builder), row2.hash(hash_builder));
 
         let row_default = OwnedRow::default();
-        assert_eq!(row_default.hash(hash_builder).0, 0);
+        assert_eq!(row_default.hash(hash_builder).value(), 0);
     }
 }

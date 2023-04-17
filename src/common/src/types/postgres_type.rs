@@ -127,9 +127,8 @@ impl DataType {
             DataType::Timestamp => 1114,
             DataType::Timestamptz => 1184,
             DataType::Interval => 1186,
-            // NOTE: Struct type don't have oid in postgres, here we use varchar oid so that struct
-            // will be considered as a varchar.
-            DataType::Struct(_) => 1043,
+            // TODO: Support to give a new oid for custom struct type.
+            DataType::Struct(_) => -1,
             DataType::Jsonb => 3802,
             DataType::Bytea => 17,
             DataType::List { datatype } => match unnested_list_type(datatype.as_ref().clone()) {
@@ -150,7 +149,7 @@ impl DataType {
                 DataType::Timestamptz => 1185,
                 DataType::Interval => 1187,
                 DataType::Jsonb => 3807,
-                DataType::Struct(_) => 1015,
+                DataType::Struct(_) => -1,
                 DataType::List { .. } => unreachable!("Never reach here!"),
             },
         }

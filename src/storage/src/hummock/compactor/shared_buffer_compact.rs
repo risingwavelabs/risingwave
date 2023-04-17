@@ -260,7 +260,10 @@ pub async fn merge_imms_in_memory(
 
     let mut imm_iters = Vec::with_capacity(imms.len());
     for imm in imms {
-        assert!(imm.kv_count() > 0, "imm should not be empty");
+        assert!(
+            imm.kv_count() > 0 || imm.has_range_tombstone(),
+            "imm should not be empty"
+        );
         assert_eq!(
             table_id,
             imm.table_id(),

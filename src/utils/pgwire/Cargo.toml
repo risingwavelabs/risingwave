@@ -24,7 +24,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
 openssl = "0.10.48"
 pg_interval = "0.4"
-postgres-types = { version = "0.2.4", features = ["derive","with-chrono-0_4"] }
+postgres-types = { version = "0.2.5", features = ["derive","with-chrono-0_4"] }
 regex = "1.5"
 risingwave_common = { path = "../../common" }
 risingwave_sqlparser = { path = "../../sqlparser" }
@@ -37,4 +37,4 @@ tracing = "0.1"
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
-tokio-postgres = "0.7.7"
+tokio-postgres = "0.7"

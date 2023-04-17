@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,9 +30,10 @@ use risingwave_pb::common::WorkerType;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use crate::manager::ClusterManagerRef;
+use crate::manager::{ClusterManagerRef, FragmentManagerRef};
 use crate::rpc::server::ElectionClientRef;
 use crate::storage::MetaStore;
+use crate::stream::visit_stream_node_internal_tables;
 
 pub struct MetaMetrics {
     pub registry: Registry,
@@ -127,8 +129,15 @@ pub struct MetaMetrics {
     // Object store related metrics (for backup/restore and version checkpoint)
     pub object_store_metric: Arc<ObjectStoreMetrics>,
 
+    /// ********************************** Source ************************************
     /// supervisor for which source is still up.
     pub source_is_up: IntGaugeVec,
+
+    /// ********************************** Fragment ************************************
+    /// A dummpy gauge metrics with its label to be the mapping from actor id to fragment id
+    pub actor_info: IntGaugeVec,
+    /// A dummpy gauge metrics with its label to be the mapping from table id to actor id
+    pub table_info: IntGaugeVec,
 }
 
 impl MetaMetrics {
@@ -414,6 +423,22 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let actor_info = register_int_gauge_vec_with_registry!(
+            "actor_info",
+            "Mapping from actor id to (fragment id, compute node",
+            &["actor_id", "fragment_id", "compute_node"],
+            registry
+        )
+        .unwrap();
+
+        let table_info = register_int_gauge_vec_with_registry!(
+            "table_info",
+            "Mapping from table id to (actor id, table name)",
+            &["table_id", "actor_id", "table_name"],
+            registry
+        )
+        .unwrap();
+
         Self {
             registry,
             grpc_latency,
@@ -458,6 +483,8 @@ impl MetaMetrics {
             level_compact_task_cnt,
             object_store_metric,
             source_is_up,
+            actor_info,
+            table_info,
         }
     }
 
@@ -507,6 +534,93 @@ pub async fn start_worker_info_monitor<S: MetaStore>(
                     let role = if m.is_leader {"leader"} else {"follower"};
                     meta_metrics.meta_type.with_label_values(&[&m.id, role]).set(1);
                 });
+            }
+        }
+    });
+
+    (join_handle, shutdown_tx)
+}
+
+pub async fn start_fragment_info_monitor<S: MetaStore>(
+    cluster_manager: ClusterManagerRef<S>,
+    fragment_manager: FragmentManagerRef<S>,
+    meta_metrics: Arc<MetaMetrics>,
+) -> (JoinHandle<()>, Sender<()>) {
+    const COLLECT_INTERVAL_SECONDS: u64 = 60;
+
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+    let join_handle = tokio::spawn(async move {
+        let mut monitor_interval =
+            tokio::time::interval(Duration::from_secs(COLLECT_INTERVAL_SECONDS));
+        monitor_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                // Wait for interval
+                _ = monitor_interval.tick() => {},
+                // Shutdown monitor
+                _ = &mut shutdown_rx => {
+                    tracing::info!("Fragment info monitor is stopped");
+                    return;
+                }
+            }
+
+            // Start fresh with a reset to clear all outdated labels. This is safe since we always
+            // report full info on each interval.
+            meta_metrics.actor_info.reset();
+            meta_metrics.table_info.reset();
+            let fragments = match fragment_manager.list_table_fragments().await {
+                Ok(f) => f,
+                Err(e) => {
+                    tracing::error!("Error when in list_table_fragments: {:?}", e);
+                    continue;
+                }
+            };
+            let workers: HashMap<u32, String> = cluster_manager
+                .list_worker_node(WorkerType::ComputeNode, None)
+                .await
+                .into_iter()
+                .map(|worker_node| match worker_node.host {
+                    Some(host) => (worker_node.id, format!("{}:{}", host.host, host.port)),
+                    None => (worker_node.id, "".to_owned()),
+                })
+                .collect();
+            for table_fragments in fragments {
+                for (fragment_id, fragment) in table_fragments.fragments {
+                    let frament_id_str = fragment_id.to_string();
+                    for actor in fragment.actors {
+                        let actor_id_str = actor.actor_id.to_string();
+                        // Report a dummay gauge metrics with (table id, actor id, table
+                        // name) as its label
+                        if let Some(actor_status) =
+                            table_fragments.actor_status.get(&actor.actor_id)
+                        {
+                            if let Some(pu) = &actor_status.parallel_unit {
+                                if let Some(address) = workers.get(&pu.worker_node_id) {
+                                    meta_metrics
+                                        .actor_info
+                                        .with_label_values(&[
+                                            &actor_id_str,
+                                            &frament_id_str,
+                                            address,
+                                        ])
+                                        .set(1);
+                                }
+                            }
+                        }
+
+                        // Report a dummay gauge metrics with (table id, actor id, table
+                        // name) as its label
+                        if let Some(mut node) = actor.nodes {
+                            visit_stream_node_internal_tables(&mut node, |table, _| {
+                                let table_id_str = table.id.to_string();
+                                meta_metrics
+                                    .table_info
+                                    .with_label_values(&[&table_id_str, &actor_id_str, &table.name])
+                                    .set(1);
+                            });
+                        }
+                    }
+                }
             }
         }
     });

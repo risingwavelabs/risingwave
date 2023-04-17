@@ -29,6 +29,7 @@ use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
 use super::schema_resolver::*;
+use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::impl_common_parser_logic;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::util::get_kafka_topic;
