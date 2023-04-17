@@ -326,7 +326,7 @@ mod tests {
             Box::new(mock_executor),
             1024,
             "InsertExecutor".to_string(),
-            vec![], // Ignoring insertion order
+            vec![0, 1, 2], // Ignoring insertion order
             vec![],
             row_id_index,
             false,
