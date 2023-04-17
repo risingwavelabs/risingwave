@@ -1073,6 +1073,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                     &matched_row.row,
                                     side_match.start_pos,
                                 );
+                                // TODO: We can use binary search to start matching with
+                                // `match_band_res==true`.
                                 if !match_band_res {
                                     match_band_res = side_match
                                         .half_band_condition
