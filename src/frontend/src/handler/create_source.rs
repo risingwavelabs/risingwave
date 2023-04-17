@@ -55,6 +55,7 @@ use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
 use crate::session::SessionImpl;
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
+pub(crate) const CONNECTION_NAME_KEY: &str = "connection.name";
 
 /// Map an Avro schema to a relational schema.
 async fn extract_avro_table_schema(
@@ -176,6 +177,13 @@ async fn extract_protobuf_table_schema(
 fn get_connector(with_properties: &HashMap<String, String>) -> Option<String> {
     with_properties
         .get(UPSTREAM_SOURCE_KEY)
+        .map(|s| s.to_lowercase())
+}
+
+#[inline(always)]
+fn get_connection_name(with_properties: &HashMap<String, String>) -> Option<String> {
+    with_properties
+        .get(CONNECTION_NAME_KEY)
         .map(|s| s.to_lowercase())
 }
 
@@ -642,7 +650,8 @@ pub async fn handle_create_source(
 
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, stmt.source_name)?;
-    let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
+    let (database_id, schema_id) =
+        session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
     if handler_args.with_options.is_empty() {
         return Err(RwError::from(InvalidInputSyntax(
@@ -700,6 +709,22 @@ pub async fn handle_create_source(
 
     let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
 
+    let connection_name = get_connection_name(&with_properties);
+    let connection_id = match connection_name {
+        Some(connection_name) => {
+            let connection_id = session
+                .get_connection_id_for_create(schema_name, connection_name.as_str())
+                .map_err(|_| ErrorCode::ItemNotFound(connection_name))?;
+            if !is_kafka_source(&with_properties) {
+                return Err(RwError::from(ErrorCode::ProtocolError(
+                    "Create source with connection is only supported for kafka connectors."
+                        .to_string(),
+                )));
+            }
+            Some(connection_id)
+        }
+        None => None,
+    };
     let definition = handler_args.normalized_sql;
 
     let source = PbSource {
@@ -715,6 +740,7 @@ pub async fn handle_create_source(
         owner: session.user_id(),
         watermark_descs,
         definition,
+        connection_id,
         optional_associated_table_id: None,
     };
 
