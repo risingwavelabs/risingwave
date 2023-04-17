@@ -19,6 +19,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
+use risingwave_expr::function::aggregate::AggCall;
 use risingwave_expr::vector_op::agg::{
     create_sorted_grouper, AggStateFactory, BoxedAggState, BoxedSortedGrouper, EqGroups,
 };
@@ -62,7 +63,11 @@ impl BoxedExecutorBuilder for SortAggExecutor {
         let agg_states: Vec<_> = sort_agg_node
             .get_agg_calls()
             .iter()
-            .map(|x| AggStateFactory::new(x).map(|fac| fac.create_agg_state()))
+            .map(|agg_call| {
+                AggCall::from_protobuf(agg_call, false)
+                    .and_then(AggStateFactory::new)
+                    .map(|fac| fac.create_agg_state())
+            })
             .try_collect()?;
 
         let group_key: Vec<_> = sort_agg_node
@@ -291,7 +296,7 @@ mod tests {
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::PbDataType;
     use risingwave_pb::expr::agg_call::Type;
-    use risingwave_pb::expr::{AggCall, PbInputRef};
+    use risingwave_pb::expr::{PbAggCall, PbInputRef};
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -329,7 +334,7 @@ mod tests {
              4 5 9",
         ));
 
-        let prost = AggCall {
+        let prost = PbAggCall {
             r#type: Type::Count as i32,
             args: vec![],
             return_type: Some(risingwave_pb::data::DataType {
@@ -341,7 +346,8 @@ mod tests {
             filter: None,
         };
 
-        let count_star = AggStateFactory::new(&prost)?.create_agg_state();
+        let count_star =
+            AggStateFactory::new(AggCall::from_protobuf(&prost, false)?)?.create_agg_state();
         let group_exprs: Vec<BoxedExpression> = vec![];
         let sorted_groupers = vec![];
         let agg_states = vec![count_star];
@@ -423,10 +429,10 @@ mod tests {
              5 8 9",
         ));
 
-        let prost = AggCall {
+        let prost = PbAggCall {
             r#type: Type::Count as i32,
             args: vec![],
-            return_type: Some(risingwave_pb::data::DataType {
+            return_type: Some(PbDataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
@@ -435,7 +441,8 @@ mod tests {
             filter: None,
         };
 
-        let count_star = AggStateFactory::new(&prost)?.create_agg_state();
+        let count_star =
+            AggStateFactory::new(AggCall::from_protobuf(&prost, false)?)?.create_agg_state();
         let group_exprs: Vec<_> = (1..=2)
             .map(|idx| build_from_pretty(format!("${idx}:int4")))
             .collect();
@@ -537,7 +544,7 @@ mod tests {
              10",
         ));
 
-        let prost = AggCall {
+        let prost = PbAggCall {
             r#type: Type::Sum as i32,
             args: vec![PbInputRef {
                 index: 0,
@@ -555,7 +562,8 @@ mod tests {
             filter: None,
         };
 
-        let sum_agg = AggStateFactory::new(&prost)?.create_agg_state();
+        let sum_agg =
+            AggStateFactory::new(AggCall::from_protobuf(&prost, false)?)?.create_agg_state();
 
         let group_exprs: Vec<BoxedExpression> = vec![];
         let agg_states = vec![sum_agg];
@@ -622,7 +630,7 @@ mod tests {
              4 5 9",
         ));
 
-        let prost = AggCall {
+        let prost = PbAggCall {
             r#type: Type::Sum as i32,
             args: vec![PbInputRef {
                 index: 0,
@@ -640,7 +648,8 @@ mod tests {
             filter: None,
         };
 
-        let sum_agg = AggStateFactory::new(&prost)?.create_agg_state();
+        let sum_agg =
+            AggStateFactory::new(AggCall::from_protobuf(&prost, false)?)?.create_agg_state();
         let group_exprs: Vec<_> = (1..=2)
             .map(|idx| build_from_pretty(format!("${idx}:int4")))
             .collect();
@@ -737,7 +746,7 @@ mod tests {
               2  7 12",
         ));
 
-        let prost = AggCall {
+        let prost = PbAggCall {
             r#type: Type::Sum as i32,
             args: vec![PbInputRef {
                 index: 0,
@@ -755,7 +764,8 @@ mod tests {
             filter: None,
         };
 
-        let sum_agg = AggStateFactory::new(&prost)?.create_agg_state();
+        let sum_agg =
+            AggStateFactory::new(AggCall::from_protobuf(&prost, false)?)?.create_agg_state();
         let group_exprs: Vec<_> = (1..=2)
             .map(|idx| build_from_pretty(format!("${idx}:int4")))
             .collect();
