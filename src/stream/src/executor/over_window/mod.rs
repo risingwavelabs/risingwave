@@ -53,8 +53,13 @@ mod state;
 type MemcmpEncoded = Box<[u8]>;
 type PartitionCache = ExecutorCache<MemcmpEncoded, Partition>; // TODO(rc): use `K: HashKey` as key like in hash agg?
 
-/// [`OverWindowExecutor`] consumes ordered input and outputs window function results.
-/// One [`OverWindowExecutor`] can handle one combination of partition key and order key.
+/// [`OverWindowExecutor`] consumes ordered input (on watermark column) and outputs window function
+/// results. One [`OverWindowExecutor`] can handle one combination of partition key and order key.
+///
+/// The reason not to use [`SortBuffer`] is that the table schemas of [`OverWindowExecutor`] and
+/// [`SortBuffer`] are different, since we don't have something like a _grouped_ sort buffer.
+///
+/// [`SortBuffer`]: crate::executor::sort_buffer::SortBuffer
 ///
 /// State table schema:
 ///
@@ -66,7 +71,6 @@ type PartitionCache = ExecutorCache<MemcmpEncoded, Partition>; // TODO(rc): use 
 ///
 /// Basic idea:
 ///
-/// ```
 /// ──────────────┬────────────────────────────────────────────────────── curr evict row
 ///               │ROWS BETWEEN 5 PRECEDING AND 1 PRECEDING
 ///        (1)    │ ─┬─
@@ -80,7 +84,6 @@ type PartitionCache = ExecutorCache<MemcmpEncoded, Partition>; // TODO(rc): use 
 /// ─────────────────┴─────────────────────────────────────────────────── curr input row
 /// (1): additional buffered input (unneeded) for some window
 /// (2): additional delay (already able to output) for some window
-/// ```
 ///
 /// - Rows in range (`curr evict row`, `curr input row`] are in `state_table`.
 /// - `curr evict row` <= min(last evict rows of all `WindowState`s).
