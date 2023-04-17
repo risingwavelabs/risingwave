@@ -12,8 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod rand_array;
-pub mod rand_bitmap;
-pub mod rand_chunk;
-pub mod rand_stream_chunk;
-pub mod test_stream_chunk;
+use itertools::Itertools;
+use rand::seq::SliceRandom;
+
+use crate::buffer::{Bitmap, BitmapBuilder};
+
+pub fn gen_rand_bitmap(num_bits: usize, count_ones: usize) -> Bitmap {
+    let mut builder = BitmapBuilder::zeroed(num_bits);
+    let mut range = (0..num_bits).collect_vec();
+    range.shuffle(&mut rand::thread_rng());
+    let shuffled = range.into_iter().collect_vec();
+    for item in shuffled.iter().take(count_ones) {
+        builder.set(*item, true);
+    }
+    builder.finish()
+}
