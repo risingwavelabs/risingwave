@@ -60,7 +60,8 @@ use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{HummockResult, SstableBuilderOptions, XorFilterBuilder};
 use crate::hummock::compactor::compaction_utils::{
-    build_multi_compaction_filter, estimate_state_for_compaction, generate_splits,
+    build_multi_compaction_filter, estimate_state_for_compaction, estimate_task_memory_capacity,
+    generate_splits,
 };
 use crate::hummock::compactor::compactor_runner::CompactorRunner;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
@@ -213,54 +214,77 @@ impl Compactor {
             }
         };
 
-        context.compactor_metrics.compact_task_pending_num.inc();
-        for (split_index, _) in compact_task.splits.iter().enumerate() {
-            let filter = multi_filter.clone();
-            let multi_filter_key_extractor = multi_filter_key_extractor.clone();
-            let compactor_runner =
-                CompactorRunner::new(split_index, compactor_context.clone(), compact_task.clone());
-            let del_agg = delete_range_agg.clone();
-            let task_progress = task_progress_guard.progress.clone();
-            let handle = tokio::spawn(async move {
-                compactor_runner
-                    .run(filter, multi_filter_key_extractor, del_agg, task_progress)
-                    .await
-            });
-            compaction_futures.push(handle);
-        }
+        let task_memory_capacity_with_parallelism =
+            estimate_task_memory_capacity(context.clone(), &compact_task) * parallelism;
 
-        let mut buffered = stream::iter(compaction_futures).buffer_unordered(parallelism);
-        loop {
-            tokio::select! {
-                _ = &mut shutdown_rx => {
-                    tracing::warn!("Compaction task cancelled externally:\n{}", compact_task_to_string(&compact_task));
-                    task_status = TaskStatus::ManualCanceled;
-                    break;
-                }
-                future_result = buffered.next() => {
-                    match future_result {
-                        Some(Ok(Ok((split_index, ssts, compact_stat)))) => {
-                            output_ssts.push((split_index, ssts, compact_stat));
+        // If the task does not have enough memory, it should cancel the task and let the meta
+        // reschedule it, so that it does not occupy the compactor's resources.
+        let memory_detector = context
+            .read_memory_limiter
+            .try_require_memory(task_memory_capacity_with_parallelism as u64);
+        if memory_detector.is_none() {
+            tracing::warn!(
+                "Not enough memory to serve the task {} task_memory_capacity_with_parallelism {}  memory_usage {} memory_quota {}",
+                compact_task.task_id,
+                task_memory_capacity_with_parallelism,
+                context.read_memory_limiter.get_memory_usage(),
+                context.read_memory_limiter.quota()
+            );
+            task_status = TaskStatus::ManualCanceled;
+        } else {
+            drop(memory_detector);
+            context.compactor_metrics.compact_task_pending_num.inc();
+            for (split_index, _) in compact_task.splits.iter().enumerate() {
+                let filter = multi_filter.clone();
+                let multi_filter_key_extractor = multi_filter_key_extractor.clone();
+                let compactor_runner = CompactorRunner::new(
+                    split_index,
+                    compactor_context.clone(),
+                    compact_task.clone(),
+                );
+                let del_agg = delete_range_agg.clone();
+                let task_progress = task_progress_guard.progress.clone();
+                let handle = tokio::spawn(async move {
+                    compactor_runner
+                        .run(filter, multi_filter_key_extractor, del_agg, task_progress)
+                        .await
+                });
+                compaction_futures.push(handle);
+            }
+
+            let mut buffered = stream::iter(compaction_futures).buffer_unordered(parallelism);
+            loop {
+                tokio::select! {
+                    _ = &mut shutdown_rx => {
+                        tracing::warn!("Compaction task cancelled externally:\n{}", compact_task_to_string(&compact_task));
+                        task_status = TaskStatus::ManualCanceled;
+                        break;
+                    }
+                    future_result = buffered.next() => {
+                        match future_result {
+                            Some(Ok(Ok((split_index, ssts, compact_stat)))) => {
+                                output_ssts.push((split_index, ssts, compact_stat));
+                            }
+                            Some(Ok(Err(e))) => {
+                                task_status = TaskStatus::ExecuteFailed;
+                                tracing::warn!(
+                                    "Compaction task {} failed with error: {:#?}",
+                                    compact_task.task_id,
+                                    e
+                                );
+                                break;
+                            }
+                            Some(Err(e)) => {
+                                task_status = TaskStatus::JoinHandleFailed;
+                                tracing::warn!(
+                                    "Compaction task {} failed with join handle error: {:#?}",
+                                    compact_task.task_id,
+                                    e
+                                );
+                                break;
+                            }
+                            None => break,
                         }
-                        Some(Ok(Err(e))) => {
-                            task_status = TaskStatus::ExecuteFailed;
-                            tracing::warn!(
-                                "Compaction task {} failed with error: {:#?}",
-                                compact_task.task_id,
-                                e
-                            );
-                            break;
-                        }
-                        Some(Err(e)) => {
-                            task_status = TaskStatus::JoinHandleFailed;
-                            tracing::warn!(
-                                "Compaction task {} failed with join handle error: {:#?}",
-                                compact_task.task_id,
-                                e
-                            );
-                            break;
-                        }
-                        None => break,
                     }
                 }
             }
