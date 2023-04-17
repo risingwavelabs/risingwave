@@ -302,6 +302,7 @@ impl FilterKeyExtractorManagerInner {
             let guard = self.table_id_to_filter_key_extractor.read();
             table_id_set.drain_filter(|table_id| match guard.get(table_id) {
                 Some(filter_key_extractor) => {
+                    println!("register {}", table_id);
                     multi_filter_key_extractor.register(*table_id, filter_key_extractor.clone());
                     true
                 }
@@ -310,6 +311,7 @@ impl FilterKeyExtractorManagerInner {
             });
         }
 
+        println!("rest {:?}", table_id_set);
         if !table_id_set.is_empty() {
             let table_ids = table_id_set.iter().cloned().collect_vec();
             let mut state_tables =
@@ -393,7 +395,6 @@ mod tests {
     use std::collections::{HashMap, HashSet};
     use std::mem;
     use std::sync::Arc;
-    use std::time::Duration;
 
     use bytes::{BufMut, BytesMut};
     use itertools::Itertools;
@@ -410,7 +411,6 @@ mod tests {
     use risingwave_pb::catalog::PbTable;
     use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
     use risingwave_pb::plan_common::PbColumnCatalog;
-    use tokio::task;
 
     use super::{DummyFilterKeyExtractor, FilterKeyExtractor, SchemaFilterKeyExtractor};
     use crate::filter_key_extractor::{
@@ -618,21 +618,16 @@ mod tests {
     #[tokio::test]
     async fn test_filter_key_extractor_manager() {
         let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
-        let filter_key_extractor_manager_ref = filter_key_extractor_manager.clone();
-        let filter_key_extractor_manager_ref2 = filter_key_extractor_manager_ref.clone();
 
-        task::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            filter_key_extractor_manager_ref.update(
-                1,
-                Arc::new(FilterKeyExtractorImpl::Dummy(
-                    DummyFilterKeyExtractor::default(),
-                )),
-            );
-        });
+        filter_key_extractor_manager.update(
+            1,
+            Arc::new(FilterKeyExtractorImpl::Dummy(
+                DummyFilterKeyExtractor::default(),
+            )),
+        );
 
         let remaining_table_id_set = HashSet::from([1]);
-        let multi_filter_key_extractor = filter_key_extractor_manager_ref2
+        let multi_filter_key_extractor = filter_key_extractor_manager
             .acquire(remaining_table_id_set)
             .await
             .unwrap();
