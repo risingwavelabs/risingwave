@@ -558,7 +558,7 @@ fn infer_type_for_special(
             let common_type = align_array_and_element(0, 1, inputs);
             match common_type {
                 Ok(_) => Ok(Some(DataType::List {
-                    datatype: Box::new(DataType::Int64),
+                    datatype: Box::new(DataType::Int32),
                 })),
                 Err(_) => Err(ErrorCode::BindError(format!(
                     "Cannot get position of {} in {}",

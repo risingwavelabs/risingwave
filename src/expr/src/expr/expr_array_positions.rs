@@ -12,168 +12,82 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
+use risingwave_common::array::{ListRef, ListValue};
+use risingwave_common::types::{ScalarImpl, ScalarRef};
+use risingwave_expr_macro::function;
 
-use num_traits::ToPrimitive;
-use risingwave_common::array::{ArrayRef, DataChunk, ListValue};
-use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Datum, DatumRef, ScalarImpl, ScalarRefImpl, ToDatumRef};
-use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_pb::expr::expr_node::RexNode;
-use risingwave_pb::expr::ExprNode;
+use crate::Result;
 
-use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression, Expression};
-use crate::{bail, ensure, ExprError, Result};
-
-pub struct ArrayPositionsExpression {
-    return_type: DataType,
-    left: BoxedExpression,
-    right: BoxedExpression,
-}
-
-impl std::fmt::Debug for ArrayPositionsExpression {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ArrayPositionsExpression")
-            .field("return_type", &self.return_type)
-            .field("left", &self.left)
-            .field("right", &self.right)
-            .finish()
-    }
-}
-
-impl ArrayPositionsExpression {
-    fn new(return_type: DataType, left: BoxedExpression, right: BoxedExpression) -> Self {
-        Self {
-            return_type,
-            left,
-            right,
+/// Returns an array of the subscripts of all occurrences of the second argument in the array
+/// given as first argument. Note the behavior is slightly different from PG.
+///
+/// Examples:
+///
+/// ```slt
+/// query T
+/// select array_positions(array[array[1],array[2],array[3],array[2],null::int[]], array[1]);
+/// ----
+/// {1}
+///
+/// query T
+/// select array_positions(array[array[1],array[2],array[3],array[2],null::int[]], array[2]);
+/// ----
+/// {2,4}
+///
+/// query T
+/// select array_positions(array[array[1],array[2],array[3],array[2],null::int[]], null::int[]);
+/// ----
+/// {5}
+///
+/// query T
+/// select array_positions(array[array[1],array[2],array[3],array[2],null::int[]], array[4]);
+/// ----
+/// {}
+///
+/// query T
+/// select array_positions(null::int[], 1);
+/// ----
+/// NULL
+///
+/// query T
+/// select array_positions(ARRAY[array[1],array[2],array[3],array[2],null::int[]], array[3.14]);
+/// ----
+/// {}
+///
+/// query T
+/// select array_positions(array[1,NULL,NULL,3], NULL::int);
+/// ----
+/// {2,3}
+///
+/// statement error
+/// select array_positions(array[array[1],array[2],array[3],array[2],null::int[]], 1);
+///
+/// statement error
+/// select array_positions(array[array[1],array[2],array[3],array[2],null::int[]], array[array[3]]);
+///
+/// statement error
+/// select array_positions(ARRAY[array[1],array[2],array[3],array[2],null::int[]], array[true]);
+/// ```
+#[function("array_positions(list, *) -> list")]
+fn array_positions<'a, T: ScalarRef<'a>>(
+    array: Option<ListRef<'_>>,
+    element: Option<T>,
+) -> Result<Option<ListValue>> {
+    match array {
+        Some(left) => {
+            let values = left.values_ref();
+            Ok(Some(
+                ListValue::new(
+                    values
+                        .into_iter()
+                        .enumerate()
+                        .filter(|(_, item)| item == &element.map(|x| x.into()))
+                        .map(|(idx, _)| Some(ScalarImpl::Int32((idx + 1) as _)))
+                        .collect(),
+                )
+                .into(),
+            ))
         }
-    }
-
-    /// Returns an array of the subscripts of all occurrences of the second argument in the array
-    /// given as first argument. Note the behavior is slightly different from PG.
-    ///
-    /// Examples:
-    ///
-    /// ```slt
-    /// query T
-    /// select array_positions(array[array[1],array[2],array[3],array[2],null::int[]], array[1]);
-    /// ----
-    /// {1}
-    ///
-    /// query T
-    /// select array_positions(array[array[1],array[2],array[3],array[2],null::int[]], array[2]);
-    /// ----
-    /// {2,4}
-    ///
-    /// query T
-    /// select array_positions(array[array[1],array[2],array[3],array[2],null::int[]], null::int[]);
-    /// ----
-    /// {5}
-    ///
-    /// query T
-    /// select array_positions(array[array[1],array[2],array[3],array[2],null::int[]], array[4]);
-    /// ----
-    /// {}
-    ///
-    /// query T
-    /// select array_positions(null::int[], 1);
-    /// ----
-    /// NULL
-    ///
-    /// query T
-    /// select array_positions(ARRAY[array[1],array[2],array[3],array[2],null::int[]], array[3.14]);
-    /// ----
-    /// {}
-    ///
-    /// query T
-    /// select array_positions(array[1,NULL,NULL,3], NULL::int);
-    /// ----
-    /// {2,3}
-    ///
-    /// statement error
-    /// select array_positions(array[array[1],array[2],array[3],array[2],null::int[]], 1);
-    ///
-    /// statement error
-    /// select array_positions(array[array[1],array[2],array[3],array[2],null::int[]], array[array[3]]);
-    ///
-    /// statement error
-    /// select array_positions(ARRAY[array[1],array[2],array[3],array[2],null::int[]], array[true]);
-    /// ```
-    fn evaluate(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
-        match left {
-            Some(ScalarRefImpl::List(left)) => {
-                if left.values_ref().len().to_i64().is_some() {
-                    Some(
-                        ListValue::new(
-                            left.values_ref()
-                                .into_iter()
-                                .enumerate()
-                                .filter(|(_, x)| x == &right)
-                                .map(|(idx, _)| {
-                                    Some(ScalarImpl::Int64((idx + 1).to_i64().unwrap()))
-                                })
-                                .collect(),
-                        )
-                        .into(),
-                    )
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl Expression for ArrayPositionsExpression {
-    fn return_type(&self) -> DataType {
-        self.return_type.clone()
-    }
-
-    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let left_array = self.left.eval_checked(input).await?;
-        let right_array = self.right.eval_checked(input).await?;
-        let mut builder = self
-            .return_type
-            .create_array_builder(left_array.len() + right_array.len());
-        for (vis, (left, right)) in input
-            .vis()
-            .iter()
-            .zip_eq_fast(left_array.iter().zip_eq_fast(right_array.iter()))
-        {
-            if !vis {
-                builder.append_null();
-            } else {
-                builder.append_datum(&Self::evaluate(left, right));
-            }
-        }
-        Ok(Arc::new(builder.finish()))
-    }
-
-    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        let left_data = self.left.eval_row(input).await?;
-        let right_data = self.right.eval_row(input).await?;
-        Ok(Self::evaluate(
-            left_data.to_datum_ref(),
-            right_data.to_datum_ref(),
-        ))
-    }
-}
-
-impl<'a> TryFrom<&'a ExprNode> for ArrayPositionsExpression {
-    type Error = ExprError;
-
-    fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        let RexNode::FuncCall(func_call_node) = prost.get_rex_node()? else {
-            bail!("expects a RexNode::FuncCall");
-        };
-        let children = func_call_node.get_children();
-        ensure!(children.len() == 2);
-        let left = expr_build_from_prost(&children[0])?;
-        let right = expr_build_from_prost(&children[1])?;
-        let ret_type = DataType::from(prost.get_return_type()?);
-        Ok(Self::new(ret_type, left, right))
+        _ => Ok(None),
     }
 }
