@@ -64,14 +64,19 @@ type PartitionCache = ExecutorCache<MemcmpEncoded, Partition>; // TODO(rc): use 
 ///
 /// State table schema:
 ///
-///     partition key | order key | pk | window function arguments
+/// ```ignore
+/// partition key | order key | pk | window function arguments
+/// ```
 ///
 /// Output schema:
 ///
-///     partition key | order key | pk | window function results
+/// ```ignore
+/// partition key | order key | pk | window function results
+/// ```
 ///
 /// Basic idea:
 ///
+/// ```ignore
 /// ──────────────┬────────────────────────────────────────────────────── curr evict row
 ///               │ROWS BETWEEN 5 PRECEDING AND 1 PRECEDING
 ///        (1)    │ ─┬─
@@ -85,6 +90,7 @@ type PartitionCache = ExecutorCache<MemcmpEncoded, Partition>; // TODO(rc): use 
 /// ─────────────────┴─────────────────────────────────────────────────── curr input row
 /// (1): additional buffered input (unneeded) for some window
 /// (2): additional delay (already able to output) for some window
+/// ```
 ///
 /// - Rows in range (`curr evict row`, `curr input row`] are in `state_table`.
 /// - `curr evict row` <= min(last evict rows of all `WindowState`s).
