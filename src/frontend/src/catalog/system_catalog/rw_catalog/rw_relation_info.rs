@@ -27,5 +27,5 @@ pub const RW_RELATION_INFO_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "relationid"),
     (DataType::Varchar, "relationtimezone"), /* The timezone used to interpret ambiguous
                                               * dates/timestamps as tstz */
-    (DataType::Varchar, "fragments"), // graph is json encoded fragment infos.
+    (DataType::Varchar, "fragments"), // fragments is json encoded fragment infos.
 ];
