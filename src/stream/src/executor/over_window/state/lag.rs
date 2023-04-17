@@ -26,6 +26,7 @@ struct BufferEntry(StateKey, Datum);
 
 pub(super) struct LagState {
     offset: usize,
+    // TODO(rc): may move buffer maintanence to a common structure.
     buffer: VecDeque<BufferEntry>,
     curr_idx: usize,
 }
