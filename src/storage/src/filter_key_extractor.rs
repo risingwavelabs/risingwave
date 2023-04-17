@@ -322,12 +322,6 @@ impl FilterKeyExtractorManagerInner {
                             e
                         ))
                     })?;
-            tracing::warn!(
-                "filter_key_extractor acquire timeout missing {} table_catalog table_id_set {:?}",
-                table_id_set.len(),
-                table_id_set
-            );
-
             let mut guard = self.table_id_to_filter_key_extractor.write();
             for table_id in table_ids {
                 if let Some(table) = state_tables.remove(&table_id) {
@@ -350,7 +344,7 @@ pub struct FilterKeyExtractorManager {
 
 impl Default for FilterKeyExtractorManager {
     fn default() -> Self {
-        Self::new(Box::new(FakeRemoteTableAccessor::default()))
+        Self::new(Box::<FakeRemoteTableAccessor>::default())
     }
 }
 

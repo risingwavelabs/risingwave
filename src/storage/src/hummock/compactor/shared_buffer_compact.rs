@@ -26,6 +26,7 @@ use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
+use tracing::error;
 
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
@@ -124,7 +125,16 @@ async fn compact_shared_buffer(
     let mut size_and_start_user_keys = vec![];
     let mut compact_data_size = 0;
     let mut builder = DeleteRangeAggregatorBuilder::default();
-    payload.retain(|imm| existing_table_ids.contains(&imm.table_id.table_id));
+    payload.retain(|imm| {
+        let ret = existing_table_ids.contains(&imm.table_id.table_id);
+        if !ret {
+            error!(
+                "can not find table {:?}, it may be removed by meta-service",
+                imm.table_id
+            );
+        }
+        ret
+    });
     for imm in &payload {
         let data_size = {
             let tombstones = imm.get_delete_range_tombstones();
