@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![expect(dead_code)]
+#![allow(dead_code)]
 
 use std::collections::VecDeque;
 use std::marker::PhantomData;
