@@ -62,12 +62,14 @@ impl TopNOnIndexRule {
         for index in order_satisfied_index {
             if let Some(mut index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
                 index_scan.set_chunk_size(
-                    ((u32::MAX as u64).min(logical_top_n.limit() + logical_top_n.offset())) as u32,
+                    ((u32::MAX as u64)
+                        .min(logical_top_n.limit_attr().limit() + logical_top_n.offset()))
+                        as u32,
                 );
 
                 let logical_limit = LogicalLimit::create(
                     index_scan.into(),
-                    logical_top_n.limit(),
+                    logical_top_n.limit_attr().limit(),
                     logical_top_n.offset(),
                 );
                 return Some(logical_limit);
@@ -107,11 +109,12 @@ impl TopNOnIndexRule {
         };
         if primary_key_order.satisfies(order) {
             logical_scan.set_chunk_size(
-                ((u32::MAX as u64).min(logical_top_n.limit() + logical_top_n.offset())) as u32,
+                ((u32::MAX as u64).min(logical_top_n.limit_attr().limit() + logical_top_n.offset()))
+                    as u32,
             );
             let logical_limit = LogicalLimit::create(
                 logical_scan.into(),
-                logical_top_n.limit(),
+                logical_top_n.limit_attr().limit(),
                 logical_top_n.offset(),
             );
             Some(logical_limit)

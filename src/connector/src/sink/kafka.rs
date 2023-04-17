@@ -54,7 +54,7 @@ const fn _default_retry_backoff() -> Duration {
 }
 
 const fn _default_use_transaction() -> bool {
-    true
+    false
 }
 
 const fn _default_force_append_only() -> bool {
@@ -439,6 +439,7 @@ fn fields_to_json(fields: &[Field]) -> Value {
             risingwave_common::types::DataType::Int16 => "int16",
             risingwave_common::types::DataType::Int32 => "int32",
             risingwave_common::types::DataType::Int64 => "int64",
+            risingwave_common::types::DataType::Int256 => "string",
             risingwave_common::types::DataType::Float32 => "float32",
             risingwave_common::types::DataType::Float64 => "float64",
             // currently, we only support handling decimal as string.
@@ -499,12 +500,13 @@ pub struct KafkaTransactionConductor {
 }
 
 impl KafkaTransactionConductor {
-    async fn new(config: KafkaConfig) -> Result<Self> {
+    async fn new(mut config: KafkaConfig) -> Result<Self> {
         let inner: ThreadedProducer<DefaultProducerContext> = {
             let mut c = ClientConfig::new();
             config.common.set_security_properties(&mut c);
             c.set("bootstrap.servers", &config.common.brokers)
                 .set("message.timeout.ms", "5000");
+            config.use_transaction = false;
             if config.use_transaction {
                 c.set("transactional.id", &config.identifier); // required by kafka transaction
             }
@@ -609,7 +611,7 @@ mod test {
         };
         let config = KafkaConfig::from_hashmap(properties).unwrap();
         assert!(!config.force_append_only);
-        assert!(config.use_transaction);
+        assert!(!config.use_transaction);
         assert_eq!(config.timeout, Duration::from_secs(5));
         assert_eq!(config.max_retry_num, 3);
         assert_eq!(config.retry_interval, Duration::from_millis(100));

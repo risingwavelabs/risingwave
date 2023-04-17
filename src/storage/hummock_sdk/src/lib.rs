@@ -21,9 +21,6 @@
 
 mod key_cmp;
 
-#[macro_use]
-extern crate num_derive;
-
 use std::cmp::Ordering;
 
 pub use key_cmp::*;

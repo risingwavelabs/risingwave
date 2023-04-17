@@ -1,7 +1,7 @@
 import socket
 import struct
 import sys
-from typing import Iterator, List, Optional, Tuple
+from typing import Iterator, List, Optional, Tuple, Any
 from decimal import Decimal
 sys.path.append('src/udf/python')  # noqa
 
@@ -20,7 +20,7 @@ def gcd(x: int, y: int) -> int:
     return x
 
 
-@udf(input_types=['INT', 'INT', 'INT'], result_type='INT')
+@udf(name='gcd3', input_types=['INT', 'INT', 'INT'], result_type='INT')
 def gcd3(x: int, y: int, z: int) -> int:
     return gcd(gcd(x, y), z)
 
@@ -69,8 +69,22 @@ def array_access(list: List[str], idx: int) -> Optional[str]:
     return list[idx - 1]
 
 
+@udf(input_types=['JSONB', 'INT'], result_type='JSONB')
+def jsonb_access(json: Any, i: int) -> Any:
+    if not json:
+        return None
+    return json[i]
+
+
+@udf(input_types=['JSONB[]'], result_type='JSONB')
+def jsonb_concat(list: List[Any]) -> Any:
+    if not list:
+        return None
+    return list
+
+
 if __name__ == '__main__':
-    server = UdfServer()
+    server = UdfServer(location="0.0.0.0:8815")
     server.add_function(int_42)
     server.add_function(gcd)
     server.add_function(gcd3)
@@ -79,4 +93,6 @@ if __name__ == '__main__':
     server.add_function(extract_tcp_info)
     server.add_function(hex_to_dec)
     server.add_function(array_access)
+    server.add_function(jsonb_access)
+    server.add_function(jsonb_concat)
     server.serve()

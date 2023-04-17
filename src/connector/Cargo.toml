@@ -15,18 +15,26 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
-apache-avro = { git = "https://github.com/risingwavelabs/avro", branch = "waruto/modify-decimal", features = ["snappy", "zstandard", "bzip", "xz"] }
+apache-avro = { git = "https://github.com/risingwavelabs/avro", branch = "waruto/modify-decimal", features = [
+    "snappy",
+    "zstandard",
+    "bzip",
+    "xz",
+] }
 async-trait = "0.1"
 aws-config = { workspace = true }
 aws-sdk-ec2 = { workspace = true }
-aws-sdk-kinesis = { workspace = true } 
+aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-smithy-http = { workspace = true }
 aws-types = { workspace = true }
 bincode = "1"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4", default-features = false, features = [
+    "clock",
+    "std",
+] }
 csv = "1.2"
 duration-str = "0.5.0"
 enum-as-inner = "0.5"
@@ -49,8 +57,16 @@ prometheus = { version = "0.13", features = ["process"] }
 prost = { version = "0.11.0", features = ["no-recursion-limit"] }
 prost-reflect = "0.9.2"
 protobuf-native = "0.2.1"
-pulsar = { version = "4.2", default-features = false, features = ["tokio-runtime", "telemetry", "auth-oauth2"] }
-rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = ["cmake-build", "ssl-vendored", "gssapi"] }
+pulsar = { version = "4.2", default-features = false, features = [
+    "tokio-runtime",
+    "telemetry",
+    "auth-oauth2",
+] }
+rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = [
+    "cmake-build",
+    "ssl-vendored",
+    "gssapi",
+] }
 reqwest = { version = "0.11", features = ["json"] }
 risingwave_common = { path = "../common" }
 risingwave_expr = { path = "../expr" }
@@ -61,9 +77,18 @@ serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
 serde_json = "1"
 serde_with = { version = "2", features = ["json"] }
-simd-json = "0.7"
+simd-json = "0.8"
+tempfile = "3"
 thiserror = "1"
-tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+    "fs",
+] }
 tokio-retry = "0.3"
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
@@ -75,6 +100,11 @@ urlencoding = "2"
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
+criterion = { version = "0.4", features = ["async_tokio", "async"] }
 rand = "0.8"
 tempfile = "3"
 wiremock = "0.5"
+
+[[bench]]
+name = "parser"
+harness = false
