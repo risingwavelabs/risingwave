@@ -28,14 +28,14 @@ use risingwave_common::error::ErrorCode::InvalidParameterValue;
 use risingwave_common::error::RwError;
 use serde::Deserialize;
 pub use split::*;
-<<<<<<< HEAD
-use tempfile::{tempfile, NamedTempFile, TempPath};
+use tempfile::NamedTempFile;
 use url::Url;
 
->>>>>>> origin/main
+use crate::aws_utils::load_file_descriptor_from_s3;
 
 pub const PULSAR_CONNECTOR: &str = "pulsar";
 
+#[derive(Clone, Debug, Deserialize)]
 pub struct PulsarOauth {
     #[serde(rename = "oauth.issuer.url")]
     pub issuer_url: String,
@@ -118,7 +118,11 @@ impl PulsarProperties {
                 scope: oauth.scope.clone(),
             };
 
+            pulsar_builder = pulsar_builder
+                .with_auth_provider(OAuth2Authentication::client_credentials(auth_params));
+        } else if let Some(auth_token) = &self.auth_token {
             pulsar_builder = pulsar_builder.with_auth(Authentication {
+                name: "token".to_string(),
                 data: Vec::from(auth_token.as_str()),
             });
         }
