@@ -45,6 +45,15 @@ create sink si_kafka_upsert from t_kafka with (
 );
 
 statement ok
+create sink si_kafka_debezium from t_kafka with (
+    connector = 'kafka',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    topic = 'test-rw-sink-debezium',
+    type = 'debezium',
+    primary_key = 'id',
+);
+
+statement ok
 insert into t_kafka values
     (1, '8DfUFencLe', 31031, 1872, 1872, 26261.416, 23956.39329760601, '2023-04-14 06:27:14.104742'),
     (2, 'sIo1XXVeHZ', 22690, 4598, 4598, 27031.225, 31923.077305746086, '2023-04-13 23:44:04.869742'),

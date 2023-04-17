@@ -5,4 +5,7 @@ statement ok
 drop sink si_kafka_upsert;
 
 statement ok
+drop sink si_kafka_debezium;
+
+statement ok
 drop table t_kafka;
