@@ -23,6 +23,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::expr::build_from_prost;
 use risingwave_expr::function::aggregate::{AggCall, AggKind};
 use risingwave_expr::function::args::FuncArgs;
+use risingwave_pb::expr::PbAggCall;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
@@ -31,9 +32,9 @@ use crate::executor::aggregation::AggStateStorage;
 
 pub fn build_agg_call_from_prost(
     append_only: bool,
-    agg_call_proto: &risingwave_pb::expr::AggCall,
+    agg_call_proto: &PbAggCall,
 ) -> StreamResult<AggCall> {
-    let agg_kind = AggKind::try_from(agg_call_proto.get_type()?)?;
+    let agg_kind = AggKind::from_protobuf(agg_call_proto.get_type()?)?;
     let args = match &agg_call_proto.get_args()[..] {
         [] => FuncArgs::None,
         [arg] if agg_kind != AggKind::StringAgg => {

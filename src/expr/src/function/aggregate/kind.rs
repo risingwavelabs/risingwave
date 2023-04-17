@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::convert::TryFrom;
-
 use parse_display::{Display, FromStr};
 use risingwave_common::bail;
 use risingwave_pb::expr::agg_call::PbType;
 
-use crate::{ExprError, Result};
+use crate::Result;
 
 /// Kind of aggregation function
 #[derive(Debug, Display, FromStr, Copy, Clone, PartialEq, Eq, Hash)]
@@ -78,13 +76,5 @@ impl AggKind {
             Self::VarPop => PbType::VarPop,
             Self::VarSamp => PbType::VarSamp,
         }
-    }
-}
-
-impl TryFrom<PbType> for AggKind {
-    type Error = ExprError;
-
-    fn try_from(pb_type: PbType) -> Result<Self> {
-        AggKind::from_protobuf(pb_type)
     }
 }

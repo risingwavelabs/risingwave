@@ -19,7 +19,7 @@ use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::types::*;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_pb::expr::AggCall;
+use risingwave_pb::expr::PbAggCall;
 
 use crate::expr::build_from_prost;
 use crate::function::aggregate::AggKind;
@@ -67,11 +67,11 @@ pub struct AggStateFactory {
 }
 
 impl AggStateFactory {
-    pub fn new(prost: &AggCall) -> Result<Self> {
+    pub fn new(prost: &PbAggCall) -> Result<Self> {
         // NOTE: The function signature is checked by `AggCall::infer_return_type` in the frontend.
 
         let return_type = DataType::from(prost.get_return_type()?);
-        let agg_kind = AggKind::try_from(prost.get_type()?)?;
+        let agg_kind = AggKind::from_protobuf(prost.get_type()?)?;
         let distinct = prost.distinct;
         let column_orders = prost
             .get_order_by()
