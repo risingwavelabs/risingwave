@@ -92,7 +92,6 @@ mod tests {
             args: FuncArgs::Unary(DataType::Int64, 0),
             return_type: DataType::Int64,
             column_orders: vec![],
-            append_only: false,
             filter: None,
             distinct: false,
         }
@@ -135,7 +134,6 @@ mod tests {
             args: FuncArgs::Unary(DataType::Int64, 0),
             return_type: DataType::Int64,
             column_orders: vec![],
-            append_only: true,
             filter: None,
             distinct: false,
         }

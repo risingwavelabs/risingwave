@@ -74,7 +74,7 @@ fn create_hash_agg_executor(
 
     let agg_factories: Vec<_> = agg_calls
         .iter()
-        .map(|agg_call| AggCall::from_protobuf(agg_call, false).and_then(AggStateFactory::new))
+        .map(|agg_call| AggCall::from_protobuf(agg_call).and_then(AggStateFactory::new))
         .try_collect()
         .unwrap();
 

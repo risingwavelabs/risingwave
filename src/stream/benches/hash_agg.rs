@@ -82,15 +82,12 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
 
     let group_key_indices = vec![0, 1];
 
-    let append_only = false;
-
     let agg_calls = vec![
          AggCall {
             kind: AggKind::Count,
             args: FuncArgs::None,
             return_type: DataType::Int64,
             column_orders: vec![],
-            append_only,
             filter: None,
             distinct: false,
          },
@@ -99,7 +96,6 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
             args: FuncArgs::None,
             return_type: DataType::Int64,
             column_orders: vec![],
-            append_only,
             filter: Some(build_from_pretty("(less_than:boolean $2:int8 10000:int8)").into()),
             distinct: false,
          },
@@ -108,7 +104,6 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
             args: FuncArgs::None,
             return_type: DataType::Int64,
             column_orders: vec![],
-            append_only,
             filter: Some(build_from_pretty("(and:boolean (greater_than_or_equal:boolean $2:int8 10000:int8) (less_than:boolean $2:int8 100000:int8))").into()),
             distinct: false,
          },
@@ -117,7 +112,6 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
             args: FuncArgs::None,
             return_type: DataType::Int64,
             column_orders: vec![],
-            append_only,
             filter: Some(build_from_pretty("(greater_than_or_equal:boolean $2:int8 100000:int8)").into()),
             distinct: false,
         },
@@ -128,7 +122,6 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
         //     args: FuncArgs::Unary(DataType::Int64, 2),
         //     return_type: DataType::Int64,
         //     column_orders: vec![],
-        //     append_only,
         //     filter: None,
         //     distinct: false,
         // },
@@ -137,7 +130,6 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
         //     args: FuncArgs::Unary(DataType::Int64, 2),
         //     return_type: DataType::Int64,
         //     column_orders: vec![],
-        //     append_only,
         //     filter: None,
         //     distinct: false,
         // },
@@ -147,7 +139,6 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
         //     args: FuncArgs::Unary(DataType::Int64, 2),
         //     return_type: DataType::Int64,
         //     column_orders: vec![],
-        //     append_only,
         //     filter: None,
         //     distinct: false,
         // },
@@ -157,7 +148,6 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
             args: FuncArgs::Unary(DataType::Int64, 2),
             return_type: DataType::Int64,
             column_orders: vec![],
-            append_only,
             filter: None,
             distinct: false,
         },
@@ -167,7 +157,6 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
             args: FuncArgs::Unary(DataType::Int64, 2),
             return_type: DataType::Int64,
             column_orders: vec![],
-            append_only,
             filter: None,
             distinct: false,
         },
@@ -176,7 +165,6 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
             args: FuncArgs::Unary(DataType::Int64, 2),
             return_type: DataType::Int64,
             column_orders: vec![],
-            append_only,
             filter: None,
             distinct: false,
         },
@@ -205,6 +193,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
     block_on(new_boxed_hash_agg_executor(
         store,
         Box::new(source),
+        false,
         agg_calls,
         row_count_index,
         group_key_indices,

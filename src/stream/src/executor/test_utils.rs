@@ -279,9 +279,10 @@ pub mod agg_executor {
         group_key_indices: &[usize],
         pk_indices: &[usize],
         input_ref: &dyn Executor,
+        is_append_only: bool,
     ) -> AggStateStorage<S> {
         match agg_call.kind {
-            AggKind::Min | AggKind::Max if !agg_call.append_only => {
+            AggKind::Min | AggKind::Max if !is_append_only => {
                 let input_fields = input_ref.schema().fields();
 
                 let mut column_descs = Vec::new();
@@ -384,6 +385,7 @@ pub mod agg_executor {
     pub async fn new_boxed_hash_agg_executor<S: StateStore>(
         store: S,
         input: Box<dyn Executor>,
+        is_append_only: bool,
         agg_calls: Vec<AggCall>,
         row_count_index: usize,
         group_key_indices: Vec<usize>,
@@ -402,6 +404,7 @@ pub mod agg_executor {
                     &group_key_indices,
                     &pk_indices,
                     input.as_ref(),
+                    is_append_only,
                 )
                 .await,
             )
@@ -442,10 +445,12 @@ pub mod agg_executor {
         .boxed()
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn new_boxed_simple_agg_executor<S: StateStore>(
         actor_ctx: ActorContextRef,
         store: S,
         input: BoxedExecutor,
+        is_append_only: bool,
         agg_calls: Vec<AggCall>,
         row_count_index: usize,
         pk_indices: PkIndices,
@@ -461,6 +466,7 @@ pub mod agg_executor {
                     &[],
                     &pk_indices,
                     input.as_ref(),
+                    is_append_only,
                 )
                 .await,
             )

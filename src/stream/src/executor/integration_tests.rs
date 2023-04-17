@@ -49,7 +49,6 @@ async fn test_merger_sum_aggr() {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
         let input = ReceiverExecutor::for_test(input_rx);
-        let append_only = false;
         // for the local aggregator, we need two states: row count and sum
         let aggregator = LocalSimpleAggExecutor::new(
             actor_ctx.clone(),
@@ -60,7 +59,6 @@ async fn test_merger_sum_aggr() {
                     args: FuncArgs::None,
                     return_type: DataType::Int64,
                     column_orders: vec![],
-                    append_only,
                     filter: None,
                     distinct: false,
                 },
@@ -69,7 +67,6 @@ async fn test_merger_sum_aggr() {
                     args: FuncArgs::Unary(DataType::Int64, 0),
                     return_type: DataType::Int64,
                     column_orders: vec![],
-                    append_only,
                     filter: None,
                     distinct: false,
                 },
@@ -147,18 +144,18 @@ async fn test_merger_sum_aggr() {
     let merger = MergeExecutor::for_test(outputs, schema);
 
     // for global aggregator, we need to sum data and sum row count
-    let append_only = false;
+    let is_append_only = false;
     let aggregator = new_boxed_simple_agg_executor(
         actor_ctx.clone(),
         MemoryStateStore::new(),
         merger.boxed(),
+        is_append_only,
         vec![
             AggCall {
                 kind: AggKind::Sum0,
                 args: FuncArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -167,7 +164,6 @@ async fn test_merger_sum_aggr() {
                 args: FuncArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -176,7 +172,6 @@ async fn test_merger_sum_aggr() {
                 args: FuncArgs::None,
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },

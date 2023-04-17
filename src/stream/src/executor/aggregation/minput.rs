@@ -291,7 +291,6 @@ mod tests {
             args: FuncArgs::Unary(arg_type.clone(), arg_idx),
             return_type: arg_type,
             column_orders: vec![],
-            append_only: false,
             filter: None,
             distinct: false,
         }
@@ -988,7 +987,6 @@ mod tests {
                 ColumnOrder::new(2, OrderType::ascending()),  // b ASC
                 ColumnOrder::new(0, OrderType::descending()), // a DESC
             ],
-            append_only: false,
             filter: None,
             distinct: false,
         };
@@ -1090,7 +1088,6 @@ mod tests {
                 ColumnOrder::new(2, OrderType::ascending()),  // c ASC
                 ColumnOrder::new(0, OrderType::descending()), // a DESC
             ],
-            append_only: false,
             filter: None,
             distinct: false,
         };

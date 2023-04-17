@@ -41,7 +41,7 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()
             .iter()
-            .map(|agg_call| AggCall::from_protobuf(agg_call, node.is_append_only))
+            .map(AggCall::from_protobuf)
             .try_collect()?;
         let storages =
             build_agg_state_storages_from_proto(node.get_agg_call_states(), store.clone(), None)

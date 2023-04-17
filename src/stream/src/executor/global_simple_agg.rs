@@ -379,14 +379,12 @@ mod tests {
         tx.push_barrier(4, false);
 
         // This is local simple aggregation, so we add another row count state
-        let append_only = false;
         let agg_calls = vec![
             AggCall {
                 kind: AggKind::Count, // as row count, index: 0
                 args: FuncArgs::None,
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -395,7 +393,6 @@ mod tests {
                 args: FuncArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -404,7 +401,6 @@ mod tests {
                 args: FuncArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -413,7 +409,6 @@ mod tests {
                 args: FuncArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -423,6 +418,7 @@ mod tests {
             ActorContext::create(123),
             store,
             Box::new(source),
+            false,
             agg_calls,
             0,
             vec![2],

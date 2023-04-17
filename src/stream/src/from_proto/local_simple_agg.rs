@@ -34,7 +34,7 @@ impl ExecutorBuilder for LocalSimpleAggExecutorBuilder {
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()
             .iter()
-            .map(|agg_call| AggCall::from_protobuf(agg_call, node.is_append_only))
+            .map(AggCall::from_protobuf)
             .try_collect()?;
 
         Ok(LocalSimpleAggExecutor::new(

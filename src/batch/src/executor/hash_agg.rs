@@ -78,7 +78,7 @@ impl HashAggExecutorBuilder {
         let agg_factories: Vec<_> = hash_agg_node
             .get_agg_calls()
             .iter()
-            .map(|agg_call| AggCall::from_protobuf(agg_call, false).and_then(AggStateFactory::new))
+            .map(|agg_call| AggCall::from_protobuf(agg_call).and_then(AggStateFactory::new))
             .try_collect()?;
 
         let group_key_columns = hash_agg_node

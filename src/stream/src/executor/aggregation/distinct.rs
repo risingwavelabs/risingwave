@@ -277,7 +277,6 @@ mod tests {
             distinct,
 
             column_orders: vec![],
-            append_only: false,
             filter: None,
         }
     }
