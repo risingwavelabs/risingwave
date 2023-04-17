@@ -255,7 +255,7 @@ pub mod agg_executor {
     use risingwave_common::hash::SerializedKey;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::expr::AggKind;
+    use risingwave_expr::function::aggregate::{AggCall, AggKind};
     use risingwave_storage::StateStore;
 
     use crate::common::table::state_table::StateTable;
@@ -263,7 +263,7 @@ pub mod agg_executor {
     use crate::executor::agg_common::{
         AggExecutorArgs, GroupAggExecutorExtraArgs, SimpleAggExecutorExtraArgs,
     };
-    use crate::executor::aggregation::{AggCall, AggStateStorage};
+    use crate::executor::aggregation::AggStateStorage;
     use crate::executor::monitor::StreamingMetrics;
     use crate::executor::{
         ActorContext, ActorContextRef, BoxedExecutor, Executor, GlobalSimpleAggExecutor,

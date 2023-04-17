@@ -18,9 +18,10 @@ use futures::StreamExt;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::*;
+use risingwave_expr::function::aggregate::{AggCall, AggKind};
+use risingwave_expr::function::args::FuncArgs;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::StateStore;
-use risingwave_stream::executor::aggregation::{AggArgs, AggCall};
 use risingwave_stream::executor::test_utils::agg_executor::new_boxed_hash_agg_executor;
 use risingwave_stream::executor::test_utils::*;
 use risingwave_stream::executor::{BoxedExecutor, PkIndices};
@@ -86,7 +87,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
     let agg_calls = vec![
          AggCall {
             kind: AggKind::Count,
-            args: AggArgs::None,
+            args: FuncArgs::None,
             return_type: DataType::Int64,
             column_orders: vec![],
             append_only,
@@ -95,7 +96,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
          },
          AggCall {
             kind: AggKind::Count,
-            args: AggArgs::None,
+            args: FuncArgs::None,
             return_type: DataType::Int64,
             column_orders: vec![],
             append_only,
@@ -104,7 +105,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
          },
          AggCall {
             kind: AggKind::Count,
-            args: AggArgs::None,
+            args: FuncArgs::None,
             return_type: DataType::Int64,
             column_orders: vec![],
             append_only,
@@ -113,7 +114,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
          },
          AggCall {
             kind: AggKind::Count,
-            args: AggArgs::None,
+            args: FuncArgs::None,
             return_type: DataType::Int64,
             column_orders: vec![],
             append_only,
@@ -124,7 +125,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
         // It does not work can't diagnose root cause yet.
         // AggCall {
         //     kind: AggKind::Min,
-        //     args: AggArgs::Unary(DataType::Int64, 2),
+        //     args: FuncArgs::Unary(DataType::Int64, 2),
         //     return_type: DataType::Int64,
         //     column_orders: vec![],
         //     append_only,
@@ -133,7 +134,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
         // },
         // AggCall {
         //     kind: AggKind::Max,
-        //     args: AggArgs::Unary(DataType::Int64, 2),
+        //     args: FuncArgs::Unary(DataType::Int64, 2),
         //     return_type: DataType::Int64,
         //     column_orders: vec![],
         //     append_only,
@@ -143,7 +144,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
         // Not supported, just use extra sum + count
         // AggCall {
         //     kind: AggKind::Avg,
-        //     args: AggArgs::Unary(DataType::Int64, 2),
+        //     args: FuncArgs::Unary(DataType::Int64, 2),
         //     return_type: DataType::Int64,
         //     column_orders: vec![],
         //     append_only,
@@ -153,7 +154,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
         // avg (sum)
         AggCall {
             kind: AggKind::Sum,
-            args: AggArgs::Unary(DataType::Int64, 2),
+            args: FuncArgs::Unary(DataType::Int64, 2),
             return_type: DataType::Int64,
             column_orders: vec![],
             append_only,
@@ -163,7 +164,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
         // avg (count)
         AggCall {
             kind: AggKind::Count,
-            args: AggArgs::Unary(DataType::Int64, 2),
+            args: FuncArgs::Unary(DataType::Int64, 2),
             return_type: DataType::Int64,
             column_orders: vec![],
             append_only,
@@ -172,7 +173,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
         },
         AggCall {
             kind: AggKind::Sum,
-            args: AggArgs::Unary(DataType::Int64, 2),
+            args: FuncArgs::Unary(DataType::Int64, 2),
             return_type: DataType::Int64,
             column_orders: vec![],
             append_only,

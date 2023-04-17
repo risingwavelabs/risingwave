@@ -21,7 +21,8 @@ use risingwave_common::types::*;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::expr::AggCall;
 
-use crate::expr::{build_from_prost, AggKind};
+use crate::expr::build_from_prost;
+use crate::function::aggregate::AggKind;
 use crate::vector_op::agg::approx_count_distinct::ApproxCountDistinct;
 use crate::vector_op::agg::array_agg::create_array_agg_state;
 use crate::vector_op::agg::count_star::CountStar;

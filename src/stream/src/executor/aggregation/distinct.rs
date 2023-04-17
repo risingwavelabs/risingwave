@@ -263,15 +263,16 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_expr::function::aggregate::AggKind;
+    use risingwave_expr::function::args::FuncArgs;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
-    use crate::executor::aggregation::{AggArgs, AggCall, AggKind};
 
     fn count_agg_call(kind: AggKind, col_idx: usize, distinct: bool) -> AggCall {
         AggCall {
             kind,
-            args: AggArgs::Unary(DataType::Int64, col_idx),
+            args: FuncArgs::Unary(DataType::Int64, col_idx),
             return_type: DataType::Int64,
             distinct,
 

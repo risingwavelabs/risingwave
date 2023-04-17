@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_expr::function::window::WindowFuncCall;
 
-use super::call::WindowFuncCall;
 use super::state::{create_window_state, StateKey, WindowState};
 
 pub(super) struct Partition {

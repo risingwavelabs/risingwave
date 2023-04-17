@@ -198,7 +198,7 @@ mod tests {
     use risingwave_common::types::Decimal;
 
     use super::*;
-    use crate::expr::AggKind;
+    use crate::function::aggregate::AggKind;
     use crate::vector_op::agg::aggregator::create_agg_state_unary;
 
     async fn eval_agg(

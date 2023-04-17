@@ -22,12 +22,13 @@ use risingwave_common::array::*;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::*;
 use risingwave_expr::expr::*;
+use risingwave_expr::function::aggregate::{AggCall, AggKind};
+use risingwave_expr::function::args::FuncArgs;
 use risingwave_storage::memory::MemoryStateStore;
 
 use super::exchange::permit::channel_for_test;
 use super::*;
 use crate::executor::actor::ActorContext;
-use crate::executor::aggregation::{AggArgs, AggCall};
 use crate::executor::dispatch::*;
 use crate::executor::exchange::output::{BoxedOutput, LocalOutput};
 use crate::executor::monitor::StreamingMetrics;
@@ -56,7 +57,7 @@ async fn test_merger_sum_aggr() {
             vec![
                 AggCall {
                     kind: AggKind::Count,
-                    args: AggArgs::None,
+                    args: FuncArgs::None,
                     return_type: DataType::Int64,
                     column_orders: vec![],
                     append_only,
@@ -65,7 +66,7 @@ async fn test_merger_sum_aggr() {
                 },
                 AggCall {
                     kind: AggKind::Sum,
-                    args: AggArgs::Unary(DataType::Int64, 0),
+                    args: FuncArgs::Unary(DataType::Int64, 0),
                     return_type: DataType::Int64,
                     column_orders: vec![],
                     append_only,
@@ -154,7 +155,7 @@ async fn test_merger_sum_aggr() {
         vec![
             AggCall {
                 kind: AggKind::Sum0,
-                args: AggArgs::Unary(DataType::Int64, 0),
+                args: FuncArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 column_orders: vec![],
                 append_only,
@@ -163,7 +164,7 @@ async fn test_merger_sum_aggr() {
             },
             AggCall {
                 kind: AggKind::Sum,
-                args: AggArgs::Unary(DataType::Int64, 1),
+                args: FuncArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
                 column_orders: vec![],
                 append_only,
@@ -172,7 +173,7 @@ async fn test_merger_sum_aggr() {
             },
             AggCall {
                 kind: AggKind::Count, // as row count, index: 2
-                args: AggArgs::None,
+                args: FuncArgs::None,
                 return_type: DataType::Int64,
                 column_orders: vec![],
                 append_only,

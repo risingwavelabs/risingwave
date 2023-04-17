@@ -17,6 +17,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::function::aggregate::AggCall;
 use risingwave_storage::StateStore;
 
 use super::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
@@ -26,7 +27,7 @@ use super::aggregation::{
 use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
-use crate::executor::aggregation::{generate_agg_schema, AggCall, AggGroup};
+use crate::executor::aggregation::{generate_agg_schema, AggGroup};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message};
 use crate::task::AtomicU64Ref;
@@ -335,11 +336,11 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::Field;
     use risingwave_common::types::*;
-    use risingwave_expr::expr::*;
+    use risingwave_expr::function::aggregate::{AggCall, AggKind};
+    use risingwave_expr::function::args::FuncArgs;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
-    use crate::executor::aggregation::{AggArgs, AggCall};
     use crate::executor::test_utils::agg_executor::new_boxed_simple_agg_executor;
     use crate::executor::test_utils::*;
     use crate::executor::*;
@@ -382,7 +383,7 @@ mod tests {
         let agg_calls = vec![
             AggCall {
                 kind: AggKind::Count, // as row count, index: 0
-                args: AggArgs::None,
+                args: FuncArgs::None,
                 return_type: DataType::Int64,
                 column_orders: vec![],
                 append_only,
@@ -391,7 +392,7 @@ mod tests {
             },
             AggCall {
                 kind: AggKind::Sum,
-                args: AggArgs::Unary(DataType::Int64, 0),
+                args: FuncArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 column_orders: vec![],
                 append_only,
@@ -400,7 +401,7 @@ mod tests {
             },
             AggCall {
                 kind: AggKind::Sum,
-                args: AggArgs::Unary(DataType::Int64, 1),
+                args: FuncArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
                 column_orders: vec![],
                 append_only,
@@ -409,7 +410,7 @@ mod tests {
             },
             AggCall {
                 kind: AggKind::Min,
-                args: AggArgs::Unary(DataType::Int64, 0),
+                args: FuncArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 column_orders: vec![],
                 append_only,

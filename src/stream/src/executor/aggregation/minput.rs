@@ -25,7 +25,7 @@ use risingwave_common::row::{OwnedRow, RowExt};
 use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::function::aggregate::{AggCall, AggKind};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
@@ -33,7 +33,6 @@ use super::agg_state_cache::{AggStateCache, GenericAggStateCache, StateCacheInpu
 use super::minput_agg_impl::array_agg::ArrayAgg;
 use super::minput_agg_impl::extreme::ExtremeAgg;
 use super::minput_agg_impl::string_agg::StringAgg;
-use super::AggCall;
 use crate::common::cache::{OrderedStateCache, TopNStateCache};
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
@@ -232,14 +231,14 @@ mod tests {
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::iter_util::ZipEqFast;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-    use risingwave_expr::expr::AggKind;
+    use risingwave_expr::function::aggregate::{AggCall, AggKind};
+    use risingwave_expr::function::args::FuncArgs;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
     use super::MaterializedInputState;
     use crate::common::table::state_table::StateTable;
     use crate::common::StateTableColumnMapping;
-    use crate::executor::aggregation::{AggArgs, AggCall};
     use crate::executor::StreamExecutorResult;
 
     fn create_chunk<S: StateStore>(
@@ -289,7 +288,7 @@ mod tests {
     fn create_extreme_agg_call(kind: AggKind, arg_type: DataType, arg_idx: usize) -> AggCall {
         AggCall {
             kind,
-            args: AggArgs::Unary(arg_type.clone(), arg_idx),
+            args: FuncArgs::Unary(arg_type.clone(), arg_idx),
             return_type: arg_type,
             column_orders: vec![],
             append_only: false,
@@ -983,7 +982,7 @@ mod tests {
 
         let agg_call = AggCall {
             kind: AggKind::StringAgg,
-            args: AggArgs::Binary([DataType::Varchar, DataType::Varchar], [0, 1]),
+            args: FuncArgs::Binary([DataType::Varchar, DataType::Varchar], [0, 1]),
             return_type: DataType::Varchar,
             column_orders: vec![
                 ColumnOrder::new(2, OrderType::ascending()),  // b ASC
@@ -1085,7 +1084,7 @@ mod tests {
 
         let agg_call = AggCall {
             kind: AggKind::ArrayAgg,
-            args: AggArgs::Unary(DataType::Int32, 1), // array_agg(b)
+            args: FuncArgs::Unary(DataType::Int32, 1), // array_agg(b)
             return_type: DataType::Int32,
             column_orders: vec![
                 ColumnOrder::new(2, OrderType::ascending()),  // c ASC

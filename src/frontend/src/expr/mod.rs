@@ -19,7 +19,8 @@ use paste::paste;
 use risingwave_common::array::ListValue;
 use risingwave_common::error::Result as RwResult;
 use risingwave_common::types::{DataType, Datum, Scalar};
-use risingwave_expr::expr::{build_from_prost, AggKind};
+use risingwave_expr::expr::build_from_prost;
+use risingwave_expr::function::aggregate::AggKind;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{ExprNode, ProjectSetSelectItem};
 

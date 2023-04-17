@@ -20,12 +20,14 @@ use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_expr::expr::{build_from_prost, AggKind};
+use risingwave_expr::expr::build_from_prost;
+use risingwave_expr::function::aggregate::{AggCall, AggKind};
+use risingwave_expr::function::args::FuncArgs;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
-use crate::executor::aggregation::{AggArgs, AggCall, AggStateStorage};
+use crate::executor::aggregation::AggStateStorage;
 
 pub fn build_agg_call_from_prost(
     append_only: bool,
@@ -33,11 +35,11 @@ pub fn build_agg_call_from_prost(
 ) -> StreamResult<AggCall> {
     let agg_kind = AggKind::try_from(agg_call_proto.get_type()?)?;
     let args = match &agg_call_proto.get_args()[..] {
-        [] => AggArgs::None,
+        [] => FuncArgs::None,
         [arg] if agg_kind != AggKind::StringAgg => {
-            AggArgs::Unary(DataType::from(arg.get_type()?), arg.get_index() as usize)
+            FuncArgs::Unary(DataType::from(arg.get_type()?), arg.get_index() as usize)
         }
-        [agg_arg, extra_arg] if agg_kind == AggKind::StringAgg => AggArgs::Binary(
+        [agg_arg, extra_arg] if agg_kind == AggKind::StringAgg => FuncArgs::Binary(
             [
                 DataType::from(agg_arg.get_type()?),
                 DataType::from(extra_arg.get_type()?),

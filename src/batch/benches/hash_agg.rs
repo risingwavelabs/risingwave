@@ -19,7 +19,7 @@ use risingwave_batch::executor::{BoxedExecutor, HashAggExecutor};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::{enable_jemalloc_on_unix, hash};
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::function::aggregate::AggKind;
 use risingwave_expr::vector_op::agg::AggStateFactory;
 use risingwave_pb::expr::{AggCall, InputRef};
 use tokio::runtime::Runtime;
@@ -34,7 +34,7 @@ fn create_agg_call(
     return_type: DataType,
 ) -> AggCall {
     AggCall {
-        r#type: agg_kind.to_prost() as i32,
+        r#type: agg_kind.to_protobuf() as i32,
         args: args
             .into_iter()
             .map(|col_idx| InputRef {

@@ -21,7 +21,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::function::aggregate::{AggCall, AggKind};
 use risingwave_storage::StateStore;
 
 use super::ActorContextRef;

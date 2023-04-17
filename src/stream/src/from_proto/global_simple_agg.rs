@@ -14,6 +14,7 @@
 
 //! Streaming Aggregators
 
+use risingwave_expr::function::aggregate::AggCall;
 use risingwave_pb::stream_plan::SimpleAggNode;
 
 use super::agg_common::{
@@ -23,7 +24,6 @@ use super::agg_common::{
 use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::executor::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
-use crate::executor::aggregation::AggCall;
 use crate::executor::GlobalSimpleAggExecutor;
 
 pub struct GlobalSimpleAggExecutorBuilder;

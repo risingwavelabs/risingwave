@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
+use risingwave_expr::function::aggregate::AggCall;
 use risingwave_pb::stream_plan::HashAggNode;
 
 use super::agg_common::{
@@ -27,7 +28,6 @@ use super::agg_common::{
 use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::executor::agg_common::{AggExecutorArgs, GroupAggExecutorExtraArgs};
-use crate::executor::aggregation::AggCall;
 use crate::executor::HashAggExecutor;
 
 pub struct HashAggExecutorDispatcherArgs<S: StateStore> {

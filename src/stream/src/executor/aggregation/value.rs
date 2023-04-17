@@ -17,9 +17,9 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::Datum;
+use risingwave_expr::function::aggregate::AggCall;
 
 use crate::executor::aggregation::agg_impl::{create_streaming_agg_impl, StreamingAggImpl};
-use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
 
 /// A wrapper around [`StreamingAggImpl`], which maintains aggregation result as a value in memory.
@@ -81,14 +81,15 @@ impl ValueState {
 mod tests {
     use risingwave_common::array::{I64Array, Op};
     use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_expr::function::aggregate::AggKind;
+    use risingwave_expr::function::args::FuncArgs;
 
     use super::*;
-    use crate::executor::aggregation::AggArgs;
 
     fn create_test_count_agg() -> AggCall {
         AggCall {
-            kind: risingwave_expr::expr::AggKind::Count,
-            args: AggArgs::Unary(DataType::Int64, 0),
+            kind: AggKind::Count,
+            args: FuncArgs::Unary(DataType::Int64, 0),
             return_type: DataType::Int64,
             column_orders: vec![],
             append_only: false,
@@ -130,8 +131,8 @@ mod tests {
 
     fn create_test_max_agg_append_only() -> AggCall {
         AggCall {
-            kind: risingwave_expr::expr::AggKind::Max,
-            args: AggArgs::Unary(DataType::Int64, 0),
+            kind: AggKind::Max,
+            args: FuncArgs::Unary(DataType::Int64, 0),
             return_type: DataType::Int64,
             column_orders: vec![],
             append_only: true,

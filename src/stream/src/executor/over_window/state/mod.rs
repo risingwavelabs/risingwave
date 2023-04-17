@@ -15,10 +15,9 @@
 use std::collections::BTreeSet;
 
 use risingwave_common::types::{Datum, ScalarImpl};
-use risingwave_expr::expr::WindowFuncKind;
+use risingwave_expr::function::window::{WindowFuncCall, WindowFuncKind};
 use smallvec::SmallVec;
 
-use super::call::WindowFuncCall;
 use super::MemcmpEncoded;
 
 mod lag;
