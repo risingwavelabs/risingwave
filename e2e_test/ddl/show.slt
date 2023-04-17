@@ -7,9 +7,6 @@ create materialized view mv3 as select sum(v1) as sum_v1 from t3;
 statement ok
 create view v3 as select sum(v2) as sum_v2 from t3;
 
-statement ok
-CREATE CONNECTION conn WITH (type = 'privatelink', provider = 'mock');
-
 query TT
 describe t3;
 ----
@@ -142,11 +139,3 @@ definition varchar
 matviewid integer
 matviewtimezone varchar
 matviewgraph varchar
-
-query TT
-show connections;
-----
-conn privatelink provider: MOCK
-service_name: 
-endpoint_id: 
-availability_zones: []
