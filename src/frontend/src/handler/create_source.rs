@@ -27,7 +27,9 @@ use risingwave_common::types::DataType;
 use risingwave_connector::parser::{
     AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
 };
-use risingwave_connector::source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR};
+use risingwave_connector::source::cdc::{
+    CITUS_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
+};
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::filesystem::S3_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
@@ -515,6 +517,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, Vec<RowFormatType
                 S3_CONNECTOR => vec![RowFormatType::Csv, RowFormatType::Json],
                 MYSQL_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson],
                 POSTGRES_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson],
+                CITUS_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson],
         ))
     },
 );
