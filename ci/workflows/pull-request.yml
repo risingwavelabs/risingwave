@@ -300,3 +300,9 @@ steps:
       - shellcheck#v1.2.0:
           files: ./**/*.sh
     timeout_in_minutes: 5
+
+  # Generates cpu flamegraph if label `cpu_flamegraph` is added to PR.
+  - label: "Generate CPU flamegraph"
+    command: "ci/scripts/gen-flamegraph.sh"
+    if:
+      "build.pull_request.labels includes cpu_flamegraph"
