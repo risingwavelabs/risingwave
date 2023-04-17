@@ -148,15 +148,15 @@ mod tests {
     use crate::types::ScalarImpl;
     use crate::util::row_id::RowIdGenerator;
 
-    #[tokio::test]
-    async fn test_serial_key_chunk() {
-        let mut gen = RowIdGenerator::new(100);
+    #[test]
+    fn test_serial_key_chunk() {
+        let mut gen = RowIdGenerator::new([VirtualNode::from_index(100)]);
         let chunk = format!(
             "SRL I
              {} 1
              {} 2",
-            gen.next().await,
-            gen.next().await,
+            gen.next(),
+            gen.next(),
         );
 
         let chunk = DataChunk::from_pretty(chunk.as_str());
@@ -168,16 +168,45 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_serial_key_row() {
-        let mut gen = RowIdGenerator::new(100);
+    #[test]
+    fn test_serial_key_row() {
+        let mut gen = RowIdGenerator::new([VirtualNode::from_index(100)]);
         let row = OwnedRow::new(vec![
-            Some(ScalarImpl::Serial(gen.next().await.into())),
+            Some(ScalarImpl::Serial(gen.next().into())),
             Some(ScalarImpl::Int64(12345)),
         ]);
 
         let vnode = VirtualNode::compute_row(&row, &[0]);
 
         assert_eq!(vnode, VirtualNode::from_index(100));
+    }
+
+    #[test]
+    fn test_serial_key_chunk_multiple_vnodes() {
+        let mut gen = RowIdGenerator::new([100, 200].map(VirtualNode::from_index));
+        let chunk = format!(
+            "SRL I
+             {} 1
+             {} 2
+             {} 3
+             {} 4",
+            gen.next(),
+            gen.next(),
+            gen.next(),
+            gen.next(),
+        );
+
+        let chunk = DataChunk::from_pretty(chunk.as_str());
+        let vnodes = VirtualNode::compute_chunk(&chunk, &[0]);
+
+        assert_eq!(
+            vnodes.as_slice(),
+            &[
+                VirtualNode::from_index(100),
+                VirtualNode::from_index(200),
+                VirtualNode::from_index(100),
+                VirtualNode::from_index(200),
+            ]
+        );
     }
 }

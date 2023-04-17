@@ -553,7 +553,7 @@ impl LogicalAggBuilder {
                     order_by: order_by.clone(),
                     filter: filter.clone(),
                 });
-                let left = ExprImpl::from(left_ref).cast_implicit(return_type).unwrap();
+                let left = ExprImpl::from(left_ref).cast_explicit(return_type).unwrap();
 
                 let right_return_type =
                     AggCall::infer_return_type(&AggKind::Count, &[inputs[0].return_type()])
@@ -613,7 +613,7 @@ impl LogicalAggBuilder {
                     order_by: order_by.clone(),
                     filter: filter.clone(),
                 }))
-                .cast_implicit(return_type.clone())
+                .cast_explicit(return_type.clone())
                 .unwrap();
 
                 // after that, we compute sum
@@ -628,7 +628,7 @@ impl LogicalAggBuilder {
                     order_by: order_by.clone(),
                     filter: filter.clone(),
                 }))
-                .cast_implicit(return_type.clone())
+                .cast_explicit(return_type.clone())
                 .unwrap();
 
                 // then, we compute count

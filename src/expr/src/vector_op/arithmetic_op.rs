@@ -67,6 +67,7 @@ where
 #[function("divide(*number, *number) -> auto")]
 #[function("divide(int256, int256) -> int256")]
 #[function("divide(int256, float64) -> float64")]
+#[function("divide(int256, *int) -> int256")]
 pub fn general_div<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,

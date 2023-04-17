@@ -18,12 +18,10 @@ use anyhow::anyhow;
 use aws_config::retry::RetryConfig;
 use aws_sdk_ec2::model::{Filter, State, VpcEndpointType};
 use itertools::Itertools;
+use risingwave_pb::catalog::connection::private_link_service::PrivateLinkProvider;
 use risingwave_pb::catalog::connection::PrivateLinkService;
-use tracing::info;
 
 use crate::{MetaError, MetaResult};
-
-pub const CLOUD_PROVIDER_AWS: &str = "aws";
 
 #[derive(Clone)]
 pub struct AwsEc2Client {
@@ -94,7 +92,7 @@ impl AwsEc2Client {
         }
 
         Ok(PrivateLinkService {
-            provider: CLOUD_PROVIDER_AWS.to_string(),
+            provider: PrivateLinkProvider::Aws.into(),
             service_name: service_name.to_string(),
             endpoint_id,
             dns_entries: azid_to_dns_map,
@@ -225,12 +223,6 @@ impl AwsEc2Client {
 
         let endpoint = output.vpc_endpoint().unwrap();
         let mut dns_names = Vec::new();
-
-        if let Some(dns_entries) = endpoint.dns_entries() {
-            dns_entries.iter().for_each(|e| {
-                info!("endpoint dns name {}", e.dns_name().unwrap_or_default());
-            });
-        }
 
         if let Some(dns_entries) = endpoint.dns_entries() {
             dns_entries.iter().for_each(|e| {
