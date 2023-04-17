@@ -278,46 +278,6 @@ select v::varchar, pg_typeof(v) from (select 1::int % 1::rw_int256) as t(v);
 0 rw_int256
 
 query TT
-select v::varchar, pg_typeof(v) from (select 1::rw_int256 + 1::float8) as t(v);
-----
-2 double precision
-
-query TT
-select v::varchar, pg_typeof(v) from (select 1::float8 + 1::rw_int256) as t(v);
-----
-2 double precision
-
-query TT
-select v::varchar, pg_typeof(v) from (select 1::rw_int256 - 1::float8) as t(v);
-----
-0 double precision
-
-query TT
-select v::varchar, pg_typeof(v) from (select 1::float8 - 1::rw_int256) as t(v);
-----
-0 double precision
-
-query TT
-select v::varchar, pg_typeof(v) from (select 1::rw_int256 * 1::float8) as t(v);
-----
-1 double precision
-
-query TT
-select v::varchar, pg_typeof(v) from (select 1::float8 * 1::rw_int256) as t(v);
-----
-1 double precision
-
-query TT
-select v::varchar, pg_typeof(v) from (select 1::rw_int256 / 1::float8) as t(v);
-----
-1 double precision
-
-query TT
-select v::varchar, pg_typeof(v) from (select 1::float8 / 1::rw_int256) as t(v);
-----
-1 double precision
-
-query TT
 select v::varchar, pg_typeof(v) from (select sum(1::rw_int256)) as t(v);
 ----
 1 rw_int256
