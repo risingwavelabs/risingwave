@@ -113,7 +113,7 @@ fn get_property_required(
         .get(property)
         .map(|s| s.to_lowercase())
         .ok_or(MetaError::from(anyhow!(
-            "Required property \"{property}\" was not provided"
+            "Required property \"{property}\" is not provided"
         )))
 }
 

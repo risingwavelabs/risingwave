@@ -42,7 +42,7 @@ fn get_connection_property_required(
         .get(property)
         .map(|s| s.to_lowercase())
         .ok_or(RwError::from(ProtocolError(format!(
-            "Required property \"{property}\" was not provided"
+            "Required property \"{property}\" is not provided"
         ))))
 }
 
