@@ -344,6 +344,17 @@ SELECT tand(-90)
 Inf
 
 query R
+SELECT tand(270)
+----
+Inf
+
+query R
+SELECT tand(-270)
+----
+Inf
+
+
+query R
 SELECT tand(0)
 ----
 0

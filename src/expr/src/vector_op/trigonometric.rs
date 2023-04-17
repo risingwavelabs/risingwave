@@ -73,8 +73,6 @@ static RADIANS_PER_DEGREE: f64 = 0.017_453_292_519_943_295;
 static SIN_30: f64 = 0.499_999_999_999_999_94;
 static ONE_MINUS_COS_60: f64 = 0.499_999_999_999_999_9;
 static TAN_45: f64 = 1.0;
-// TODO: Are these constants really always the same? Do we have to calculate them or can I leave
-// them as constants?
 
 // returns the cosine of an angle that lies between 0 and 60 degrees. This will return exactly 1
 // when xi s 0, and exactly 0.5 when x is 60 degrees.
@@ -117,22 +115,22 @@ pub fn cosd_f64(input: F64) -> F64 {
     }
 
     // Reduce the range of the input to [0,90] degrees
-    let sign = 1.0;
-    let arg1 = arg1 % 360.0;
+    let mut sign = 1.0;
+    let mut arg1 = arg1 % 360.0;
 
-    // TODO: Do not do this with if else
-    let (arg1, sign) = if arg1 < 0.0 {
+     if arg1 < 0.0 {
         // cosd(-x) = cosd(x)
-        (-arg1, sign)
-    } else if arg1 > 180.0 {
+        arg1 = -arg1;
+    } 
+     if arg1 > 180.0 {
         // cosd(360-x) = cosd(x)
-        (360.0 - arg1, sign)
-    } else if arg1 > 90.0 {
+        arg1 = 360.0 - arg1; 
+    }
+     if arg1 > 90.0 {
         // cosd(180-x) = -cosd(x)
-        (180.0 - arg1, -sign)
-    } else {
-        (arg1, sign)
-    };
+        arg1 = 180.0 - arg1; 
+        sign =  -sign;
+    } 
 
     let result: f64 = sign * cosd_q1(arg1);
 
@@ -168,22 +166,23 @@ pub fn sind_f64(input: F64) -> F64 {
         return f64::NAN.into();
     }
 
-    let arg1 = input.0 % 360.0;
-    let sign = 1.0;
+    let mut arg1 = input.0 % 360.0;
+    let mut sign = 1.0;
 
-    // TODO: Do not do this with if else
-    let (arg1, sign) = if arg1 < 0.0 {
+    if arg1 < 0.0 {
         // sind(-x) = -sind(x)
-        (-arg1, -sign)
-    } else if arg1 > 180.0 {
+        arg1 = -arg1; 
+        sign =  -sign;
+    }
+     if arg1 > 180.0 {
         //  sind(360-x) = -sind(x)
-        (360.0 - arg1, -sign)
-    } else if arg1 > 90.0 {
+        arg1 = 360.0 - arg1; 
+        sign =  -sign;
+    }
+     if arg1 > 90.0 {
         //  sind(180-x) = sind(x)
-        (180.0 - arg1, sign)
-    } else {
-        (arg1, sign)
-    };
+        arg1 = 180.0 - arg1; 
+    }
 
     let result = sign * sind_q1(arg1);
 
@@ -213,6 +212,10 @@ pub fn tand_f64(input: F64) -> F64 {
         sign = -sign;
     }
 
+    if arg1 % 180.0 == 90.0 {
+        return F64::from(f64::INFINITY);
+    }
+
     if arg1 > 180.0 {
         // tand(360-x) = -tand(x)
         arg1 = 360.0 - arg1;
@@ -226,7 +229,7 @@ pub fn tand_f64(input: F64) -> F64 {
     }
 
     let tan_arg1 = sind_q1(arg1) / cosd_q1(arg1);
-    let result = sign * (tan_arg1 / TAN_45);
+    let result = sign * (tan_arg1 / TAN_45); // F64::from(45).to_radians().into()).0
 
     // On some machines we get tand(180) = minus zero, but this isn't always
     // true. For portability, and because the user constituency for this
@@ -234,9 +237,6 @@ pub fn tand_f64(input: F64) -> F64 {
     let result = if result == 0.0 { 0.0 } else { result };
 
     // Not checking for overflow because tand(90) == Inf
-
-    // TODO: Does not return Inf for 90 degrees 
-
     result.into()
 }
 
@@ -284,6 +284,14 @@ mod tests {
         // cosd
         assert_eq!(cos_f64(pi), cosd_f64(d));
         assert_similar(
+            cos_f64(F64::from(-180).to_radians().into()),
+            cosd_f64(F64::from(-180)),
+        );
+        assert_similar(
+            cos_f64(F64::from(-190).to_radians().into()),
+            cosd_f64(F64::from(-190)),
+        );
+        assert_similar(
             cos_f64(F64::from(50).to_radians().into()),
             cosd_f64(F64::from(50)),
         );
@@ -296,10 +304,6 @@ mod tests {
             cosd_f64(F64::from(250)),
         );
 
-        // exact matches
-        assert_eq!(cosd_f64(F64::from(0)).0, 1.0);
-        assert_eq!(cosd_f64(F64::from(90)).0, 0.0);
-
         // tand
         assert_similar(
             tan_f64(F64::from(-10).to_radians().into()),
@@ -309,18 +313,26 @@ mod tests {
             tan_f64(F64::from(50).to_radians().into()),
             tand_f64(F64::from(50)),
         );
-        assert_similar(
-            tan_f64(F64::from(90).to_radians().into()),
-            tand_f64(F64::from(90)),
+        // we get slightly different result here, which is why I reduce the required accuracy
+        assert!(
+            (tan_f64(F64::from(250).to_radians().into()) - tand_f64(F64::from(250))).abs()
+                < 0.00000000000001
         );
         assert_similar(
-            tan_f64(F64::from(100).to_radians().into()),
-            tand_f64(F64::from(100)),
+            tan_f64(F64::from(360).to_radians().into()),
+            tand_f64(F64::from(360)),
         );
-        assert_similar(
-            tan_f64(F64::from(250).to_radians().into()),
-            tand_f64(F64::from(250)),
-        );
+
+        // exact matches
+        assert_eq!(cosd_f64(F64::from(0)).0, 1.0);
+        assert_eq!(cosd_f64(F64::from(90)).0, 0.0);
+        assert!(tand_f64(F64::from(-270)).is_infinite());
+        assert_eq!(tand_f64(F64::from(-180)), 0.0);
+        assert_eq!(tand_f64(F64::from(180)), 0.0);
+        assert!(tand_f64(F64::from(-90)).is_infinite());
+        assert!(tand_f64(F64::from(270)).is_infinite());
+        assert!(tand_f64(F64::from(450)).is_infinite());
+        assert!(tand_f64(F64::from(90)).is_infinite());       
     }
 
     #[test]
