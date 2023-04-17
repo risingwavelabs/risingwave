@@ -69,6 +69,9 @@ pub enum ExprError {
 
     #[error("not a constant")]
     NotConstant,
+
+    #[error("Context not found")]
+    Context,
 }
 
 impl From<ExprError> for RwError {

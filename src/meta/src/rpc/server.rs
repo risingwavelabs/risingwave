@@ -19,6 +19,7 @@ use std::time::Duration;
 use either::Either;
 use etcd_client::ConnectOptions;
 use futures::future::join_all;
+use itertools::Itertools;
 use risingwave_common::config::MetaBackend;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
@@ -59,7 +60,7 @@ use crate::manager::{
 };
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
-use crate::rpc::metrics::{start_worker_info_monitor, MetaMetrics};
+use crate::rpc::metrics::{start_fragment_info_monitor, start_worker_info_monitor, MetaMetrics};
 use crate::rpc::service::backup_service::BackupServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
@@ -435,10 +436,12 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     hummock_manager
         .purge(
-            &fragment_manager
-                .list_table_fragments()
+            &catalog_manager
+                .list_tables()
                 .await
-                .expect("list_table_fragments"),
+                .into_iter()
+                .map(|t| t.id)
+                .collect_vec(),
         )
         .await?;
 
@@ -537,6 +540,14 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             cluster_manager.clone(),
             election_client.clone(),
             Duration::from_secs(env.opts.node_num_monitor_interval_sec),
+            meta_metrics.clone(),
+        )
+        .await,
+    );
+    sub_tasks.push(
+        start_fragment_info_monitor(
+            cluster_manager.clone(),
+            fragment_manager.clone(),
             meta_metrics.clone(),
         )
         .await,

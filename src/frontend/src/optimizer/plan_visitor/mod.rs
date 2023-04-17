@@ -33,6 +33,8 @@ mod relation_collector_visitor;
 mod sys_table_visitor;
 pub use relation_collector_visitor::*;
 pub use sys_table_visitor::*;
+mod side_effect_visitor;
+pub use side_effect_visitor::*;
 
 use crate::for_all_plan_nodes;
 use crate::optimizer::plan_node::*;

@@ -70,13 +70,21 @@ where
 
     async fn get_catalog_snapshot(&self) -> (Catalog, Vec<UserInfo>, NotificationVersion) {
         let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
-        let (databases, schemas, tables, sources, sinks, indexes, views, functions) =
+        let (databases, schemas, tables, sources, sinks, indexes, views, functions, connections) =
             catalog_guard.database.get_catalog();
         let users = catalog_guard.user.list_users();
         let notification_version = self.env.notification_manager().current_version().await;
         (
             (
-                databases, schemas, tables, sources, sinks, indexes, views, functions,
+                databases,
+                schemas,
+                tables,
+                sources,
+                sinks,
+                indexes,
+                views,
+                functions,
+                connections,
             ),
             users,
             notification_version,
@@ -122,7 +130,7 @@ where
 
     async fn frontend_subscribe(&self) -> MetaSnapshot {
         let (
-            (databases, schemas, tables, sources, sinks, indexes, views, functions),
+            (databases, schemas, tables, sources, sinks, indexes, views, functions, connections),
             users,
             catalog_version,
         ) = self.get_catalog_snapshot().await;
@@ -141,6 +149,7 @@ where
             indexes,
             views,
             functions,
+            connections,
             users,
             parallel_unit_mappings,
             nodes,

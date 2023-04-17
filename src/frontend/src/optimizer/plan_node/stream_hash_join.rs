@@ -83,6 +83,17 @@ impl StreamHashJoin {
         let mut clean_left_state_conjunction_idx = None;
         let mut clean_right_state_conjunction_idx = None;
 
+        // Reorder `eq_join_predicate` by placing the watermark column at the beginning.
+        let mut reorder_idx = vec![];
+        for (i, (left_key, right_key)) in eq_join_predicate.eq_indexes().iter().enumerate() {
+            if logical.left.watermark_columns().contains(*left_key)
+                && logical.right.watermark_columns().contains(*right_key)
+            {
+                reorder_idx.push(i);
+            }
+        }
+        let eq_join_predicate = eq_join_predicate.reorder(&reorder_idx);
+
         let watermark_columns = {
             let l2i = logical.l2i_col_mapping();
             let r2i = logical.r2i_col_mapping();
