@@ -286,3 +286,8 @@ query TT
 select v::varchar, pg_typeof(v) from (select avg(1::rw_int256)) as t(v);
 ----
 1 double precision
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::rw_int256 + 1::rw_int256) as t(v);
+----
+2 rw_int256
