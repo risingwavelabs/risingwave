@@ -156,8 +156,6 @@ message ListTableFragmentsResponse {
   map<uint32, TableFragmentInfo> table_fragments = 1;
 }
 
-
-
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
   rpc CancelCreatingJobs(CancelCreatingJobsRequest) returns (CancelCreatingJobsResponse);
