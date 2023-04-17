@@ -15,7 +15,7 @@
 use bytes::Bytes;
 
 use super::{OwnedRow, Row, RowDeserializer};
-use crate::collection::estimate_size::EstimateSize;
+use crate::estimate_size::EstimateSize;
 use crate::types::DataType;
 use crate::util::value_encoding;
 

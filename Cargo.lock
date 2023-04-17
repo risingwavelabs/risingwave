@@ -5881,6 +5881,7 @@ dependencies = [
  "itertools",
  "itoa",
  "libc",
+ "lru 0.7.6",
  "mach2",
  "madsim-tokio",
  "madsim-tonic",

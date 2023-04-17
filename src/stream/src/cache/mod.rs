@@ -12,103 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::alloc::{Allocator, Global};
-use std::borrow::Borrow;
-use std::hash::{BuildHasher, Hash};
-
-use lru::{DefaultHasher, KeyRef};
-
 mod managed_lru;
 pub use managed_lru::*;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::collection::estimate_size::EstimateSize;
 use risingwave_common::util::iter_util::ZipEqFast;
-
-pub struct ExecutorCache<
-    K: EstimateSize,
-    V: EstimateSize,
-    S = DefaultHasher,
-    A: Clone + Allocator = Global,
-> {
-    /// An managed cache. Eviction depends on the node memory usage.
-    cache: ManagedLruCache<K, V, S, A>,
-}
-
-impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Allocator>
-    ExecutorCache<K, V, S, A>
-{
-    pub fn new(cache: ManagedLruCache<K, V, S, A>) -> Self {
-        Self { cache }
-    }
-
-    /// Evict epochs lower than the watermark
-    pub fn evict(&mut self) {
-        self.cache.evict()
-    }
-
-    /// Update the current epoch for cache. Only effective when using [`ManagedLruCache`]
-    pub fn update_epoch(&mut self, epoch: u64) {
-        self.cache.update_epoch(epoch)
-    }
-
-    /// An iterator visiting all values in most-recently used order. The iterator element type is
-    /// &V.
-    pub fn values(&self) -> impl Iterator<Item = &V> {
-        let get_val = |(_k, v)| v;
-        self.cache.iter().map(get_val)
-    }
-
-    /// An iterator visiting all values mutably in most-recently used order. The iterator element
-    /// type is &mut V.
-    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut V> {
-        let get_val = |(_k, v)| v;
-        self.cache.iter_mut().map(get_val)
-    }
-
-    pub fn put(&mut self, k: K, v: V) -> Option<V> {
-        self.cache.put(k, v)
-    }
-
-    pub fn get_mut(&mut self, k: &K) -> Option<&mut V> {
-        self.cache.get_mut(k)
-    }
-
-    pub fn get<Q>(&mut self, k: &Q) -> Option<&V>
-    where
-        KeyRef<K>: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
-    {
-        self.cache.get(k)
-    }
-
-    pub fn peek_mut(&mut self, k: &K) -> Option<&mut V> {
-        self.cache.peek_mut(k)
-    }
-
-    pub fn push(&mut self, k: K, v: V) -> Option<(K, V)> {
-        self.cache.push(k, v)
-    }
-
-    pub fn contains<Q>(&self, k: &Q) -> bool
-    where
-        KeyRef<K>: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
-    {
-        self.cache.contains(k)
-    }
-
-    pub fn len(&self) -> usize {
-        self.cache.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.cache.len() == 0
-    }
-
-    pub fn clear(&mut self) {
-        self.cache.clear();
-    }
-}
 
 /// Returns whether we're unsure about the fressness of the cache after the scaling from the
 /// previous partition to the current one, denoted by vnode bitmaps. If the value is `true`, we must
@@ -146,16 +53,16 @@ pub(super) fn cache_may_stale(
     !current_is_subset
 }
 
-impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Allocator>
-    ExecutorCache<K, V, S, A>
-{
-    #[expect(dead_code)]
-    fn estimated_heap_size(&self) -> usize {
-        // FIXME: implement a correct size.
-        // https://github.com/risingwavelabs/risingwave/issues/8957
-        0
-    }
-}
+// impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Allocator>
+//     ExecutorCache<K, V, S, A>
+// {
+//     #[expect(dead_code)]
+//     fn estimated_heap_size(&self) -> usize {
+//         // FIXME: implement a correct size.
+//         // https://github.com/risingwavelabs/risingwave/issues/8957
+//         0
+//     }
+// }
 
 #[cfg(test)]
 mod tests {

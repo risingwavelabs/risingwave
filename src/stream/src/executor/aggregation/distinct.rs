@@ -27,11 +27,11 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
 use super::AggCall;
-use crate::cache::ExecutorCache;
+use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::table::state_table::StateTable;
 use crate::executor::StreamExecutorResult;
 
-type DedupCache = ExecutorCache<CompactedRow, Box<[i64]>>;
+type DedupCache = ManagedLruCache<CompactedRow, Box<[i64]>>;
 
 /// Deduplicater for one distinct column.
 struct ColumnDeduplicater<S: StateStore> {
@@ -42,7 +42,7 @@ struct ColumnDeduplicater<S: StateStore> {
 impl<S: StateStore> ColumnDeduplicater<S> {
     fn new(watermark_epoch: &Arc<AtomicU64>) -> Self {
         Self {
-            cache: DedupCache::new(crate::cache::new_unbounded(watermark_epoch.clone())),
+            cache: new_unbounded(watermark_epoch.clone()),
             _phantom: PhantomData,
         }
     }
@@ -74,8 +74,11 @@ impl<S: StateStore> ColumnDeduplicater<S> {
             // get counts of the distinct key of all agg calls that distinct on this column
             let key = group_key.chain(row::once(datum));
             let compacted_key = CompactedRow::from(&key); // TODO(rc): is it necessary to avoid recomputing here?
-            let counts = if let Some(counts) = self.cache.get_mut(&compacted_key) {
-                counts
+
+            // TODO(yuhao): avoid this `contains`.
+            // https://github.com/risingwavelabs/risingwave/issues/9233
+            let mut counts = if self.cache.contains(&compacted_key) {
+                self.cache.get_mut(&compacted_key).unwrap()
             } else {
                 // load from table into the cache
                 let counts = if let Some(counts_row) =

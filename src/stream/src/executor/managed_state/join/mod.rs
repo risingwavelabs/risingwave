@@ -24,7 +24,7 @@ use futures_async_stream::for_await;
 pub(super) use join_entry_state::JoinEntryState;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::collection::estimate_size::EstimateSize;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::row;
 use risingwave_common::row::{CompactedRow, OwnedRow, Row, RowExt};
@@ -35,7 +35,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
-use crate::cache::{new_with_hasher_in, ExecutorCache};
+use crate::cache::{new_with_hasher_in, ManagedLruCache};
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
@@ -153,7 +153,7 @@ impl DerefMut for HashValueWrapper {
 }
 
 type JoinHashMapInner<K> =
-    ExecutorCache<K, HashValueWrapper, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
+    ManagedLruCache<K, HashValueWrapper, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
 
 pub struct JoinHashMapMetrics {
     /// Metrics used by join executor
@@ -312,11 +312,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             table: degree_table,
         };
 
-        let cache = ExecutorCache::new(new_with_hasher_in(
-            watermark_epoch,
-            PrecomputedBuildHasher,
-            alloc,
-        ));
+        let cache = new_with_hasher_in(watermark_epoch, PrecomputedBuildHasher, alloc);
 
         Self {
             inner: cache,
@@ -376,16 +372,17 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     ///
     /// Note: This will NOT remove anything from remote storage.
     pub async fn take_state<'a>(&mut self, key: &K) -> StreamExecutorResult<HashValueType> {
-        // Do not update the LRU statistics here with `peek_mut` since we will put the state back.
-        let state = self.inner.peek_mut(key);
         self.metrics.total_lookup_count += 1;
-        Ok(match state {
-            Some(state) => state.take(),
-            None => {
-                self.metrics.lookup_miss_count += 1;
-                self.fetch_cached_state(key).await?.into()
-            }
-        })
+        let state = if self.inner.contains(key) {
+            // Do not update the LRU statistics here with `peek_mut` since we will put the state
+            // back.
+            let mut state = self.inner.peek_mut(key).unwrap();
+            state.take()
+        } else {
+            self.metrics.lookup_miss_count += 1;
+            self.fetch_cached_state(key).await?.into()
+        };
+        Ok(state)
     }
 
     /// Fetch cache from the state store. Should only be called if the key does not exist in memory.
@@ -462,8 +459,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let pk = (&value.row)
             .project(&self.state.pk_indices)
             .memcmp_serialize(&self.pk_serializer);
-        if let Some(entry) = self.inner.get_mut(key) {
+
+        // TODO(yuhao): avoid this `contains`.
+        // https://github.com/risingwavelabs/risingwave/issues/9233
+        if self.inner.contains(key) {
             // Update cache
+            let mut entry = self.inner.get_mut(key).unwrap();
             entry.insert(pk, value.encode());
         } else if self.pk_contained_in_jk {
             // Refill cache when the join key exist in neither cache or storage.
@@ -488,8 +489,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let pk = (&value)
             .project(&self.state.pk_indices)
             .memcmp_serialize(&self.pk_serializer);
-        if let Some(entry) = self.inner.get_mut(key) {
+
+        // TODO(yuhao): avoid this `contains`.
+        // https://github.com/risingwavelabs/risingwave/issues/9233
+        if self.inner.contains(key) {
             // Update cache
+            let mut entry = self.inner.get_mut(key).unwrap();
             entry.insert(pk, join_row.encode());
         } else if self.pk_contained_in_jk {
             // Refill cache when the join key exist in neither cache or storage.
@@ -506,7 +511,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Delete a join row
     pub fn delete(&mut self, key: &K, value: JoinRow<impl Row>) {
-        if let Some(entry) = self.inner.get_mut(key) {
+        if let Some(mut entry) = self.inner.get_mut(key) {
             let pk = (&value.row)
                 .project(&self.state.pk_indices)
                 .memcmp_serialize(&self.pk_serializer);
@@ -522,7 +527,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Delete a row
     /// Used when the side does not need to update degree.
     pub fn delete_row(&mut self, key: &K, value: impl Row) {
-        if let Some(entry) = self.inner.get_mut(key) {
+        if let Some(mut entry) = self.inner.get_mut(key) {
             let pk = (&value)
                 .project(&self.state.pk_indices)
                 .memcmp_serialize(&self.pk_serializer);
@@ -587,12 +592,6 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Evict the cache.
     pub fn evict(&mut self) {
         self.inner.evict();
-    }
-
-    /// Cached rows for this hash table.
-    #[expect(dead_code)]
-    pub fn cached_rows(&self) -> usize {
-        self.inner.values().map(|e| e.len()).sum()
     }
 
     /// Cached entry count for this hash table.

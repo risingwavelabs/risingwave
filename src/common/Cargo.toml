@@ -44,6 +44,7 @@ hex = "0.4.3"
 humantime = "2.1"
 itertools = "0.10"
 itoa = "1.0"
+lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "769fe6e" }
 memcomparable = { version = "0.1", features = ["decimal"] }
 num-traits = "0.2"
 parking_lot = "0.12"
