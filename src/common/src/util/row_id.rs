@@ -197,7 +197,13 @@ mod tests {
             assert!(row_id > last_row_id);
             last_row_id = row_id;
         }
-        std::thread::sleep(Duration::from_millis(10));
+
+        let dur = Duration::from_millis(10);
+        #[cfg(madsim)]
+        tokio::time::advance(dur);
+        #[cfg(not(madsim))]
+        std::thread::sleep(dur);
+
         let row_id = generator.next();
         assert!(row_id > last_row_id);
         assert_ne!(
