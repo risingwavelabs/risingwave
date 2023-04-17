@@ -127,17 +127,6 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         let degree_state_table_r =
             StateTable::from_table_catalog(degree_table_r, store, Some(vnodes)).await;
 
-        let left_deduped_input_pk_indices = node
-            .left_deduped_input_pk_indices
-            .iter()
-            .map(|&x| x as usize)
-            .collect_vec();
-        let right_deduped_input_pk_indices = node
-            .right_deduped_input_pk_indices
-            .iter()
-            .map(|&x| x as usize)
-            .collect_vec();
-
         let args = HashJoinExecutorDispatcherArgs {
             ctx: params.actor_context,
             source_l,
@@ -155,8 +144,6 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             degree_state_table_l,
             state_table_r,
             degree_state_table_r,
-            left_deduped_input_pk_indices,
-            right_deduped_input_pk_indices,
             lru_manager: stream.get_watermark_epoch(),
             is_append_only,
             metrics: params.executor_stats,
@@ -186,8 +173,6 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     degree_state_table_l: StateTable<S>,
     state_table_r: StateTable<S>,
     degree_state_table_r: StateTable<S>,
-    left_deduped_input_pk_indices: Vec<usize>,
-    right_deduped_input_pk_indices: Vec<usize>,
     lru_manager: AtomicU64Ref,
     is_append_only: bool,
     metrics: Arc<StreamingMetrics>,
@@ -221,8 +206,6 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
                         self.degree_state_table_l,
                         self.state_table_r,
                         self.degree_state_table_r,
-                        self.left_deduped_input_pk_indices,
-                        self.right_deduped_input_pk_indices,
                         self.lru_manager,
                         self.is_append_only,
                         self.metrics,
