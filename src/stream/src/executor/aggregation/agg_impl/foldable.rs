@@ -669,33 +669,16 @@ mod tests {
         builder.finish()
     }
 
-    fn bench_i64(
-        b: &mut Bencher,
-        mut agg: Box<dyn StreamingAggImpl>,
-        agg_desc: &str,
+    fn gen_stream_chunk(
+        bitmap: Option<&Bitmap>,
         chunk_size: usize,
-        vis_rate: f64,
-        iter_count: usize,
         append_only: bool,
-    ) {
-        println!(
-            "benching {} agg, chunk_size {}, vis_rate {}, iter_count {}",
-            agg_desc, chunk_size, vis_rate, iter_count
-        );
-        let mut rng = rand::thread_rng();
-        let mut ops: Vec<Op> = vec![];
+    ) -> (Vec<Op>, ArrayImpl) {
         let mut data_builder = I64ArrayBuilder::new(chunk_size);
+        let mut ops: Vec<Op> = vec![];
         let mut cur_data: Vec<i64> = vec![];
-        let bitmap = if vis_rate < 1.0 {
-            Some(gen_rand_bitmap(
-                chunk_size,
-                (chunk_size as f64 * vis_rate) as usize,
-            ))
-        } else {
-            None
-        };
-
-        if let Some(bitmap) = bitmap.as_ref() {
+        let mut rng = rand::thread_rng();
+        if let Some(bitmap) = bitmap {
             for i in 0..chunk_size {
                 // SAFETY(value_at_unchecked): the idx is always in bound.
                 unsafe {
@@ -717,7 +700,7 @@ mod tests {
                         }
                     } else {
                         ops.push(Op::Insert);
-                        data_builder.append_n(1, Some(1234567890));
+                        data_builder.append(Some(1234567890));
                     }
                 }
             }
@@ -731,16 +714,40 @@ mod tests {
                 ops.push(op);
                 if op == Op::Insert {
                     let value = rng.gen::<i32>() as i64;
-                    data_builder.append_n(1, Some(value));
+                    data_builder.append(Some(value));
                     cur_data.push(value);
                 } else {
                     let idx = rng.gen_range(0..cur_data.len());
-                    data_builder.append_n(1, Some(cur_data[idx]));
+                    data_builder.append(Some(cur_data[idx]));
                     cur_data.remove(idx);
                 }
             }
         }
-        let data: ArrayImpl = data_builder.finish().into();
+        (ops, data_builder.finish().into())
+    }
+
+    fn bench_i64(
+        b: &mut Bencher,
+        mut agg: Box<dyn StreamingAggImpl>,
+        agg_desc: &str,
+        chunk_size: usize,
+        vis_rate: f64,
+        iter_count: usize,
+        append_only: bool,
+    ) {
+        println!(
+            "benching {} agg, chunk_size {}, vis_rate {}, iter_count {}",
+            agg_desc, chunk_size, vis_rate, iter_count
+        );
+        let bitmap = if vis_rate < 1.0 {
+            Some(gen_rand_bitmap(
+                chunk_size,
+                (chunk_size as f64 * vis_rate) as usize,
+            ))
+        } else {
+            None
+        };
+        let (ops, data) = gen_stream_chunk(bitmap.as_ref(), chunk_size, append_only);
         b.iter(|| {
             for _ in 0..iter_count {
                 agg.apply_batch(&ops, bitmap.as_ref(), &[&data]).unwrap();
