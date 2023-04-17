@@ -37,11 +37,6 @@ pub struct AggCall {
     /// Order requirements specified in order by clause of agg call
     pub column_orders: Vec<ColumnOrder>,
 
-    /// Whether the stream is append-only.
-    /// Specific streaming aggregator may optimize its implementation
-    /// based on this knowledge.
-    pub append_only: bool,
-
     /// Filter of aggregation.
     pub filter: Option<ExpressionRef>,
 
@@ -50,7 +45,7 @@ pub struct AggCall {
 }
 
 impl AggCall {
-    pub fn from_protobuf(agg_call: &PbAggCall, append_only: bool) -> Result<Self> {
+    pub fn from_protobuf(agg_call: &PbAggCall) -> Result<Self> {
         let agg_kind = AggKind::from_protobuf(agg_call.get_type()?)?;
         let args = match &agg_call.get_args()[..] {
             [] => FuncArgs::None,
@@ -84,7 +79,6 @@ impl AggCall {
             args,
             return_type: DataType::from(agg_call.get_return_type()?),
             column_orders,
-            append_only,
             filter,
             distinct: agg_call.distinct,
         })
