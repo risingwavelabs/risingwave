@@ -578,7 +578,6 @@ async fn test_hummock_manager_basic() {
             init_version_id + commit_log_count + register_log_count - 2,
         );
     }
-
     // objects_to_delete is always empty because no compaction is ever invoked.
     assert!(hummock_manager.get_objects_to_delete().await.is_empty());
     assert_eq!(
@@ -589,8 +588,8 @@ async fn test_hummock_manager_basic() {
         (0, 0)
     );
     assert_eq!(
-        hummock_manager.proceed_version_checkpoint().await.unwrap(),
-        commit_log_count + register_log_count - 2
+        hummock_manager.create_version_checkpoint(1).await.unwrap(),
+        commit_log_count + register_log_count
     );
     assert!(hummock_manager.get_objects_to_delete().await.is_empty());
     assert_eq!(
@@ -598,9 +597,8 @@ async fn test_hummock_manager_basic() {
             .delete_version_deltas(usize::MAX)
             .await
             .unwrap(),
-        ((commit_log_count + register_log_count - 2) as usize, 0)
+        ((commit_log_count + register_log_count) as usize, 0)
     );
-
     hummock_manager
         .unpin_version_before(context_id_1, u64::MAX)
         .await
@@ -609,27 +607,6 @@ async fn test_hummock_manager_basic() {
         hummock_manager.get_min_pinned_version_id().await,
         init_version_id + commit_log_count + register_log_count
     );
-    assert!(hummock_manager.get_objects_to_delete().await.is_empty());
-    assert_eq!(
-        hummock_manager
-            .delete_version_deltas(usize::MAX)
-            .await
-            .unwrap(),
-        (0, 0)
-    );
-    assert_eq!(
-        hummock_manager.proceed_version_checkpoint().await.unwrap(),
-        2
-    );
-    assert!(hummock_manager.get_objects_to_delete().await.is_empty());
-    assert_eq!(
-        hummock_manager
-            .delete_version_deltas(usize::MAX)
-            .await
-            .unwrap(),
-        (2, 0)
-    );
-
     hummock_manager
         .unpin_version_before(context_id_2, u64::MAX)
         .await
@@ -637,11 +614,6 @@ async fn test_hummock_manager_basic() {
     assert_eq!(
         hummock_manager.get_min_pinned_version_id().await,
         HummockVersionId::MAX
-    );
-
-    assert_eq!(
-        hummock_manager.proceed_version_checkpoint().await.unwrap(),
-        0
     );
 }
 
@@ -875,9 +847,7 @@ async fn test_trigger_manual_compaction() {
     {
         let option = ManualCompactionOption {
             level: 6,
-            key_range: KeyRange {
-                ..Default::default()
-            },
+            key_range: KeyRange::default(),
             ..Default::default()
         };
 
@@ -1198,7 +1168,7 @@ async fn test_extend_objects_to_delete() {
 
     // Checkpoint
     assert_eq!(
-        hummock_manager.proceed_version_checkpoint().await.unwrap(),
+        hummock_manager.create_version_checkpoint(1).await.unwrap(),
         6
     );
     assert_eq!(
@@ -2024,4 +1994,65 @@ async fn test_move_tables_between_compaction_group() {
         info.keys().cloned().sorted().collect_vec(),
         vec![2, new_group_id]
     );
+}
+
+#[tokio::test]
+async fn test_gc_stats() {
+    let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+    let assert_eq_gc_stats = |stale_object_size,
+                              stale_object_count,
+                              old_version_object_size,
+                              old_version_object_count,
+                              current_version_object_count,
+                              current_version_object_size| {
+        assert_eq!(
+            hummock_manager.metrics.stale_object_size.get(),
+            stale_object_size
+        );
+        assert_eq!(
+            hummock_manager.metrics.stale_object_count.get(),
+            stale_object_count
+        );
+        assert_eq!(
+            hummock_manager.metrics.old_version_object_size.get(),
+            old_version_object_size
+        );
+        assert_eq!(
+            hummock_manager.metrics.old_version_object_count.get(),
+            old_version_object_count
+        );
+        assert_eq!(
+            hummock_manager.metrics.current_version_object_count.get(),
+            current_version_object_count
+        );
+        assert_eq!(
+            hummock_manager.metrics.current_version_object_size.get(),
+            current_version_object_size
+        );
+    };
+    assert_eq_gc_stats(0, 0, 0, 0, 0, 0);
+    assert_eq!(
+        hummock_manager.create_version_checkpoint(0).await.unwrap(),
+        0
+    );
+
+    hummock_manager.pin_version(context_id).await.unwrap();
+    let _ = add_test_tables(&hummock_manager, context_id).await;
+    assert_eq_gc_stats(0, 0, 0, 0, 0, 0);
+    assert_ne!(
+        hummock_manager.create_version_checkpoint(0).await.unwrap(),
+        0
+    );
+    assert_eq_gc_stats(0, 0, 6, 3, 2, 4);
+    hummock_manager
+        .unpin_version_before(context_id, HummockVersionId::MAX)
+        .await
+        .unwrap();
+    assert_eq_gc_stats(0, 0, 6, 3, 2, 4);
+    assert_eq!(
+        hummock_manager.create_version_checkpoint(0).await.unwrap(),
+        0
+    );
+    assert_eq_gc_stats(6, 3, 0, 0, 2, 4);
 }

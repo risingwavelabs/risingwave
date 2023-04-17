@@ -15,7 +15,6 @@
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
 #![feature(binary_heap_drain_sorted)]
-#![feature(option_result_contains)]
 #![feature(type_alias_impl_trait)]
 #![feature(drain_filter)]
 #![feature(custom_test_frameworks)]
@@ -25,7 +24,7 @@
 #![feature(is_some_and)]
 #![feature(btree_drain_filter)]
 #![feature(result_option_inspect)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![feature(let_chains)]
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
@@ -34,6 +33,7 @@
 #![cfg_attr(coverage, feature(no_coverage))]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 #![feature(is_sorted)]
+#![feature(string_leak)]
 
 pub mod backup_restore;
 mod barrier;
@@ -229,6 +229,12 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 max_idle_ms,
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,
                 vacuum_interval_sec: config.meta.vacuum_interval_sec,
+                hummock_version_checkpoint_interval_sec: config
+                    .meta
+                    .hummock_version_checkpoint_interval_sec,
+                min_delta_log_num_for_hummock_version_checkpoint: config
+                    .meta
+                    .min_delta_log_num_for_hummock_version_checkpoint,
                 min_sst_retention_time_sec: config.meta.min_sst_retention_time_sec,
                 collect_gc_watermark_spin_interval_sec: config
                     .meta

@@ -52,14 +52,14 @@ impl ArrowFlightUdfClient {
         let actual_result_types: Vec<_> = return_fields.iter().map(|f| f.data_type()).collect();
         let expect_input_types: Vec<_> = args.fields.iter().map(|f| f.data_type()).collect();
         let expect_result_types: Vec<_> = returns.fields.iter().map(|f| f.data_type()).collect();
-        if expect_input_types != actual_input_types {
+        if !data_types_match(&expect_input_types, &actual_input_types) {
             return Err(Error::ArgumentMismatch {
                 function_id: id.into(),
                 expected: format!("{:?}", expect_input_types),
                 actual: format!("{:?}", actual_input_types),
             });
         }
-        if expect_result_types != actual_result_types {
+        if !data_types_match(&expect_result_types, &actual_result_types) {
             return Err(Error::ReturnTypeMismatch {
                 function_id: id.into(),
                 expected: format!("{:?}", expect_result_types),
@@ -72,7 +72,20 @@ impl ArrowFlightUdfClient {
     /// Call a function.
     pub async fn call(&self, id: &str, input: RecordBatch) -> Result<RecordBatch> {
         let mut output_stream = self.call_stream(id, stream::once(async { input })).await?;
-        output_stream.next().await.ok_or(Error::NoReturned)?
+        // TODO: support no output
+        let head = output_stream.next().await.ok_or(Error::NoReturned)??;
+        let mut remaining = vec![];
+        while let Some(batch) = output_stream.next().await {
+            remaining.push(batch?);
+        }
+        if remaining.is_empty() {
+            Ok(head)
+        } else {
+            Ok(arrow_select::concat::concat_batches(
+                &head.schema(),
+                std::iter::once(&head).chain(remaining.iter()),
+            )?)
+        }
     }
 
     /// Call a function with streaming input and output.
@@ -82,14 +95,17 @@ impl ArrowFlightUdfClient {
         inputs: impl Stream<Item = RecordBatch> + Send + 'static,
     ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + 'static> {
         let descriptor = FlightDescriptor::new_path(vec![id.into()]);
-        let flight_data_stream =
-            FlightDataEncoderBuilder::new()
-                .build(inputs.map(Ok))
-                .map(move |res| FlightData {
-                    // TODO: fill descriptor only for the first message
-                    flight_descriptor: Some(descriptor.clone()),
-                    ..res.unwrap()
-                });
+        let flight_data_stream = FlightDataEncoderBuilder::new()
+            // XXX(wrj): unlimit the size of flight data to avoid splitting batch
+            //           there's a bug in arrow-flight when splitting batch with list type array
+            // FIXME: remove this when the bug is fixed in arrow-flight
+            .with_max_flight_data_size(usize::MAX)
+            .build(inputs.map(Ok))
+            .map(move |res| FlightData {
+                // TODO: fill descriptor only for the first message
+                flight_descriptor: Some(descriptor.clone()),
+                ..res.unwrap()
+            });
 
         // call `do_exchange` on Flight server
         let response = self.client.clone().do_exchange(flight_data_stream).await?;
@@ -157,8 +173,17 @@ pub enum Error {
         expected: String,
         actual: String,
     },
+    #[error("arrow error: {0}")]
+    Arrow(#[from] arrow_schema::ArrowError),
     #[error("UDF service returned no data")]
     NoReturned,
-    #[error("UDF service returned a batch with no column")]
-    NoColumn,
+}
+
+/// Check if two list of data types match, ignoring field names.
+fn data_types_match(a: &[&arrow_schema::DataType], b: &[&arrow_schema::DataType]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    #[allow(clippy::disallowed_methods)]
+    a.iter().zip(b.iter()).all(|(a, b)| a.equals_datatype(b))
 }

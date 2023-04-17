@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use itertools::Itertools;
 use risingwave_common::buffer::{Bitmap, BitmapIter};
 
@@ -23,7 +23,27 @@ fn bench_bitmap(c: &mut Criterion) {
     let i = 0x123;
     c.bench_function("zeros", |b| b.iter(|| Bitmap::zeros(CHUNK_SIZE)));
     c.bench_function("ones", |b| b.iter(|| Bitmap::ones(CHUNK_SIZE)));
-    c.bench_function("get", |b| b.iter(|| x.is_set(i)));
+    c.bench_function("get", |b| {
+        b.iter(|| {
+            for _ in 0..1000 {
+                black_box(x.is_set(i));
+            }
+        })
+    });
+    c.bench_function("get_1000", |b| {
+        b.iter(|| {
+            for _ in 0..1000 {
+                black_box(x.is_set(i));
+            }
+        })
+    });
+    c.bench_function("get_1000_000", |b| {
+        b.iter(|| {
+            for _ in 0..1_000_000 {
+                black_box(x.is_set(i));
+            }
+        })
+    });
     c.bench_function("and", |b| b.iter(|| &x & &y));
     c.bench_function("or", |b| b.iter(|| &x | &y));
     c.bench_function("not", |b| b.iter(|| !&x));
@@ -36,17 +56,16 @@ fn bench_bitmap_iter(c: &mut Criterion) {
     fn make_iterators(bitmaps: &[Bitmap]) -> Vec<BitmapIter<'_>> {
         bitmaps.iter().map(|bitmap| bitmap.iter()).collect_vec()
     }
-    fn bench_bitmap_iter(bench_id: &str, bitmap: Bitmap, c: &mut Criterion) {
+    fn bench_bitmap_iter_inner(bench_id: &str, bitmap: Bitmap, c: &mut Criterion) {
         let bitmaps = vec![bitmap; N_CHUNKS];
         let make_iters = || make_iterators(&bitmaps);
-        let mut result = vec![true; CHUNK_SIZE];
         c.bench_function(bench_id, |b| {
             b.iter_batched(
                 make_iters,
                 |iters| {
                     for iter in iters {
-                        for (i, bit_flag) in iter.enumerate() {
-                            result[i] = bit_flag;
+                        for bit_flag in iter {
+                            black_box(bit_flag);
                         }
                     }
                 },
@@ -55,9 +74,9 @@ fn bench_bitmap_iter(c: &mut Criterion) {
         });
     }
     let zeros = Bitmap::zeros(CHUNK_SIZE);
-    bench_bitmap_iter("zeros_iter", zeros, c);
+    bench_bitmap_iter_inner("zeros_iter", zeros, c);
     let ones = Bitmap::ones(CHUNK_SIZE);
-    bench_bitmap_iter("ones_iter", ones, c);
+    bench_bitmap_iter_inner("ones_iter", ones, c);
 }
 
 criterion_group!(benches, bench_bitmap, bench_bitmap_iter);

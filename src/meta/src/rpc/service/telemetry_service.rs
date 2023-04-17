@@ -14,15 +14,13 @@
 
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use risingwave_common::config::MetaBackend;
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoService;
 use risingwave_pb::meta::{GetTelemetryInfoRequest, TelemetryInfoResponse};
 use tonic::{Request, Response, Status};
-use uuid::Uuid;
 
 use crate::storage::MetaStore;
-use crate::telemetry::{TELEMETRY_CF, TELEMETRY_KEY};
+use crate::telemetry::TrackingId;
 
 pub struct TelemetryInfoServiceImpl<S: MetaStore> {
     meta_store: Arc<S>,
@@ -33,15 +31,9 @@ impl<S: MetaStore> TelemetryInfoServiceImpl<S> {
         Self { meta_store }
     }
 
-    async fn get_tracking_id(&self) -> Option<String> {
+    async fn get_tracking_id(&self) -> Option<TrackingId> {
         match self.meta_store.meta_store_type() {
-            MetaBackend::Etcd => match self.meta_store.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await {
-                Ok(id) => Uuid::from_slice_le(&id)
-                    .map_err(|e| anyhow!("failed to parse uuid, {}", e))
-                    .ok()
-                    .map(|uuid| uuid.to_string()),
-                Err(_) => None,
-            },
+            MetaBackend::Etcd => TrackingId::from_meta_store(&self.meta_store).await.ok(),
             MetaBackend::Mem => None,
         }
     }
@@ -55,7 +47,7 @@ impl<S: MetaStore> TelemetryInfoService for TelemetryInfoServiceImpl<S> {
     ) -> Result<Response<TelemetryInfoResponse>, Status> {
         match self.get_tracking_id().await {
             Some(tracking_id) => Ok(Response::new(TelemetryInfoResponse {
-                tracking_id: Some(tracking_id),
+                tracking_id: Some(tracking_id.into()),
             })),
             None => Ok(Response::new(TelemetryInfoResponse { tracking_id: None })),
         }

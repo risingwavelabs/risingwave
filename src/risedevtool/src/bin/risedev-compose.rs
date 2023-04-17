@@ -13,13 +13,13 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::fs::{self, File};
 use std::io::Read;
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use console::style;
+use fs_err::{self, File};
 use itertools::Itertools;
 use risedev::{
     compose_deploy, compute_risectl_env, Compose, ComposeConfig, ComposeDeployConfig, ComposeFile,
@@ -92,7 +92,7 @@ fn main() -> Result<()> {
 
     let compose_config = ComposeConfig {
         image: load_docker_image_config(
-            &std::fs::read_to_string(RISEDEV_CONFIG_FILE)?,
+            &fs_err::read_to_string(RISEDEV_CONFIG_FILE)?,
             compose_deploy_config
                 .as_ref()
                 .and_then(|x| x.risingwave_image_override.as_ref()),
@@ -164,7 +164,7 @@ fn main() -> Result<()> {
                         .green(),
                         style(&arg).green()
                     )?;
-                    fs::write(
+                    fs_err::write(
                         Path::new(&opts.directory).join("tpch-bench-args-frontend"),
                         arg,
                     )?;
@@ -213,7 +213,7 @@ fn main() -> Result<()> {
                         "-- Redpanda --\ntpch-bench: {}\n",
                         style(&arg).green()
                     )?;
-                    fs::write(
+                    fs_err::write(
                         Path::new(&opts.directory).join("tpch-bench-args-kafka"),
                         arg,
                     )?;
@@ -271,7 +271,7 @@ fn main() -> Result<()> {
                 )?;
             }
 
-            fs::write(
+            fs_err::write(
                 Path::new(&opts.directory).join(format!("{}.yml", node)),
                 yaml,
             )?;
@@ -290,7 +290,7 @@ fn main() -> Result<()> {
 
         println!("\n{}", log_buffer);
 
-        std::fs::write(
+        fs_err::write(
             Path::new(&opts.directory).join("_message.partial.sh"),
             log_buffer,
         )?;
@@ -310,7 +310,7 @@ fn main() -> Result<()> {
 
         let yaml = serde_yaml::to_string(&compose_file)?;
 
-        fs::write(Path::new(&opts.directory).join("docker-compose.yml"), yaml)?;
+        fs_err::write(Path::new(&opts.directory).join("docker-compose.yml"), yaml)?;
     }
 
     Ok(())

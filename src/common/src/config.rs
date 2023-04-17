@@ -17,12 +17,14 @@
 //! [`RwConfig`] corresponds to the whole config file and each other config struct corresponds to a
 //! section in `risingwave.toml`.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs;
 
 use clap::ValueEnum;
+use derivative::Derivative;
 use risingwave_pb::meta::SystemParams;
 use serde::{Deserialize, Serialize};
+use serde_default::DefaultFromSerde;
 use serde_json::Value;
 
 /// Use the maximum value for HTTP/2 connection window size to avoid deadlock among multiplexed
@@ -34,35 +36,52 @@ pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
 /// For non-user-facing components where the CLI arguments do not override the config file.
 pub const NO_OVERRIDE: Option<NoOverride> = None;
 
-macro_rules! for_all_config_sections {
-    ($macro:ident) => {
-        $macro! {
-            { server },
-            { meta },
-            { batch },
-            { streaming },
-            { storage },
-            { storage.file_cache },
-        }
-    };
+/// Unrecognized fields in a config section. Generic over the config section type to provide better
+/// error messages.
+///
+/// The current implementation will log warnings if there are unrecognized fields.
+#[derive(Derivative)]
+#[derivative(Clone, Debug, Default)]
+pub struct Unrecognized<T: 'static> {
+    inner: BTreeMap<String, Value>,
+    _marker: std::marker::PhantomData<&'static T>,
 }
 
-macro_rules! impl_warn_unrecognized_fields {
-    ($({ $($field_path:ident).+ },)*) => {
-        fn warn_unrecognized_fields(config: &RwConfig) {
-            if !config.unrecognized.is_empty() {
-                tracing::warn!("unrecognized fields in config: {:?}", config.unrecognized.keys());
-            }
-            $(
-                if !config.$($field_path).+.unrecognized.is_empty() {
-                    tracing::warn!("unrecognized fields in config section [{}]: {:?}", stringify!($($field_path).+), config.$($field_path).+.unrecognized.keys());
-                }
-            )*
-        }
-    };
+impl<T> Unrecognized<T> {
+    /// Returns all unrecognized fields as a map.
+    pub fn into_inner(self) -> BTreeMap<String, Value> {
+        self.inner
+    }
 }
 
-for_all_config_sections!(impl_warn_unrecognized_fields);
+impl<'de, T> Deserialize<'de> for Unrecognized<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let inner = BTreeMap::deserialize(deserializer)?;
+        if !inner.is_empty() {
+            tracing::warn!(
+                "unrecognized fields in `{}`: {:?}",
+                std::any::type_name::<T>(),
+                inner.keys()
+            );
+        }
+        Ok(Unrecognized {
+            inner,
+            _marker: std::marker::PhantomData,
+        })
+    }
+}
+
+impl<T> Serialize for Unrecognized<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.inner.serialize(serializer)
+    }
+}
 
 pub fn load_config(path: &str, cli_override: Option<impl OverrideConfig>) -> RwConfig
 where
@@ -78,7 +97,6 @@ where
     if let Some(cli_override) = cli_override {
         cli_override.r#override(&mut config);
     }
-    warn_unrecognized_fields(&config);
     config
 }
 
@@ -96,7 +114,8 @@ impl OverrideConfig for NoOverride {
 
 /// [`RwConfig`] corresponds to the whole config file `risingwave.toml`. Each field corresponds to a
 /// section.
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[derive(Derivative, Clone, Serialize, Deserialize, Default)]
+#[derivative(Debug)]
 pub struct RwConfig {
     #[serde(default)]
     pub server: ServerConfig,
@@ -114,10 +133,11 @@ pub struct RwConfig {
     pub storage: StorageConfig,
 
     #[serde(default)]
+    #[derivative(Debug = "ignore")]
     pub system: SystemConfig,
 
     #[serde(flatten)]
-    pub unrecognized: HashMap<String, Value>,
+    pub unrecognized: Unrecognized<Self>,
 }
 
 #[derive(Copy, Clone, Debug, Default, ValueEnum, Serialize, Deserialize)]
@@ -128,7 +148,7 @@ pub enum MetaBackend {
 }
 
 /// The section `[meta]` in `risingwave.toml`.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct MetaConfig {
     /// Threshold used by worker node to filter out new SSTs when scanning object store, during
     /// full SST GC.
@@ -147,6 +167,15 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::vacuum_interval_sec")]
     pub vacuum_interval_sec: u64,
 
+    /// Interval of hummock version checkpoint.
+    #[serde(default = "default::meta::hummock_version_checkpoint_interval_sec")]
+    pub hummock_version_checkpoint_interval_sec: u64,
+
+    /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
+    /// attempt is rejected.
+    #[serde(default = "default::meta::min_delta_log_num_for_hummock_version_checkpoint")]
+    pub min_delta_log_num_for_hummock_version_checkpoint: u64,
+
     /// Maximum allowed heartbeat interval in seconds.
     #[serde(default = "default::meta::max_heartbeat_interval_sec")]
     pub max_heartbeat_interval_secs: u32,
@@ -160,6 +189,7 @@ pub struct MetaConfig {
 
     /// After specified seconds of idle (no mview or flush), the process will be exited.
     /// It is mainly useful for playgrounds.
+    #[serde(default)]
     pub dangerous_max_idle_secs: Option<u64>,
 
     /// Whether to enable deterministic compaction scheduling, which
@@ -192,18 +222,12 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::max_compactor_task_multiplier")]
     pub max_compactor_task_multiplier: u32,
 
-    #[serde(flatten)]
-    pub unrecognized: HashMap<String, Value>,
-}
-
-impl Default for MetaConfig {
-    fn default() -> Self {
-        toml::from_str("").unwrap()
-    }
+    #[serde(default, flatten)]
+    pub unrecognized: Unrecognized<Self>,
 }
 
 /// The section `[server]` in `risingwave.toml`.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct ServerConfig {
     /// The interval for periodic heartbeat from worker to the meta service.
     #[serde(default = "default::server::heartbeat_interval_ms")]
@@ -225,42 +249,30 @@ pub struct ServerConfig {
     #[serde(default = "default::server::telemetry_enabled")]
     pub telemetry_enabled: bool,
 
-    #[serde(flatten)]
-    pub unrecognized: HashMap<String, Value>,
-}
-
-impl Default for ServerConfig {
-    fn default() -> Self {
-        toml::from_str("").unwrap()
-    }
+    #[serde(default, flatten)]
+    pub unrecognized: Unrecognized<Self>,
 }
 
 /// The section `[batch]` in `risingwave.toml`.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct BatchConfig {
     /// The thread number of the batch task runtime in the compute node. The default value is
     /// decided by `tokio`.
     #[serde(default)]
     pub worker_threads_num: Option<usize>,
 
-    #[serde(default)]
-    pub developer: DeveloperConfig,
+    #[serde(default, with = "batch_prefix")]
+    pub developer: BatchDeveloperConfig,
 
     #[serde(default)]
     pub distributed_query_limit: Option<u64>,
 
-    #[serde(flatten)]
-    pub unrecognized: HashMap<String, Value>,
-}
-
-impl Default for BatchConfig {
-    fn default() -> Self {
-        toml::from_str("").unwrap()
-    }
+    #[serde(default, flatten)]
+    pub unrecognized: Unrecognized<Self>,
 }
 
 /// The section `[streaming]` in `risingwave.toml`.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct StreamingConfig {
     /// The maximum number of barriers in-flight in the compute nodes.
     #[serde(default = "default::streaming::in_flight_barrier_nums")]
@@ -279,25 +291,19 @@ pub struct StreamingConfig {
     #[serde(default = "default::streaming::async_stack_trace")]
     pub async_stack_trace: AsyncStackTraceOption,
 
-    #[serde(default)]
-    pub developer: DeveloperConfig,
+    #[serde(default, with = "streaming_prefix")]
+    pub developer: StreamingDeveloperConfig,
 
     /// Max unique user stream errors per actor
     #[serde(default = "default::streaming::unique_user_stream_errors")]
     pub unique_user_stream_errors: usize,
 
-    #[serde(flatten)]
-    pub unrecognized: HashMap<String, Value>,
-}
-
-impl Default for StreamingConfig {
-    fn default() -> Self {
-        toml::from_str("").unwrap()
-    }
+    #[serde(default, flatten)]
+    pub unrecognized: Unrecognized<Self>,
 }
 
 /// The section `[storage]` in `risingwave.toml`.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct StorageConfig {
     /// parallelism while syncing share buffers into L0 SST. Should NOT be 0.
     #[serde(default = "default::storage::share_buffers_sync_parallelism")]
@@ -312,6 +318,10 @@ pub struct StorageConfig {
     /// is enough space.
     #[serde(default)]
     pub shared_buffer_capacity_mb: Option<usize>,
+
+    /// The threshold for the number of immutable memtables to merge to a new imm.
+    #[serde(default = "default::storage::imm_merge_threshold")]
+    pub imm_merge_threshold: usize,
 
     /// Whether to enable write conflict detection
     #[serde(default = "default::storage::write_conflict_detection_enabled")]
@@ -364,20 +374,17 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::max_concurrent_compaction_task_number")]
     pub max_concurrent_compaction_task_number: u64,
 
-    #[serde(flatten)]
-    pub unrecognized: HashMap<String, Value>,
-}
+    #[serde(default = "default::storage::max_preload_wait_time_mill")]
+    pub max_preload_wait_time_mill: u64,
 
-impl Default for StorageConfig {
-    fn default() -> Self {
-        toml::from_str("").unwrap()
-    }
+    #[serde(default, flatten)]
+    pub unrecognized: Unrecognized<Self>,
 }
 
 /// The subsection `[storage.file_cache]` in `risingwave.toml`.
 ///
 /// It's put at [`StorageConfig::file_cache`].
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::dir")]
     pub dir: String,
@@ -397,14 +404,8 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::cache_file_max_write_size_mb")]
     pub cache_file_max_write_size_mb: usize,
 
-    #[serde(flatten)]
-    pub unrecognized: HashMap<String, Value>,
-}
-
-impl Default for FileCacheConfig {
-    fn default() -> Self {
-        toml::from_str("").unwrap()
-    }
+    #[serde(default, flatten)]
+    pub unrecognized: Unrecognized<Self>,
 }
 
 #[derive(Debug, Default, Clone, ValueEnum, Serialize, Deserialize)]
@@ -415,60 +416,65 @@ pub enum AsyncStackTraceOption {
     Verbose,
 }
 
-/// The subsections `[batch.developer]` and `[streaming.developer]`.
+serde_with::with_prefix!(streaming_prefix "stream_");
+serde_with::with_prefix!(batch_prefix "batch_");
+
+/// The subsections `[streaming.developer]`.
 ///
-/// It is put at [`BatchConfig::developer`] and [`StreamingConfig::developer`].
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DeveloperConfig {
-    /// The size of the channel used for output to exchange/shuffle.
-    #[serde(default = "default::developer::batch_output_channel_size")]
-    pub batch_output_channel_size: usize,
-
-    /// The size of a chunk produced by `RowSeqScanExecutor`
-    #[serde(default = "default::developer::batch_chunk_size")]
-    pub batch_chunk_size: usize,
-
+/// It is put at [`StreamingConfig::developer`].
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+pub struct StreamingDeveloperConfig {
     /// Set to true to enable per-executor row count metrics. This will produce a lot of timeseries
     /// and might affect the prometheus performance. If you only need actor input and output
     /// rows data, see `stream_actor_in_record_cnt` and `stream_actor_out_record_cnt` instead.
     #[serde(default = "default::developer::stream_enable_executor_row_count")]
-    pub stream_enable_executor_row_count: bool,
+    pub enable_executor_row_count: bool,
 
     /// The capacity of the chunks in the channel that connects between `ConnectorSource` and
     /// `SourceExecutor`.
-    #[serde(default = "default::developer::stream_connector_message_buffer_size")]
-    pub stream_connector_message_buffer_size: usize,
+    #[serde(default = "default::developer::connector_message_buffer_size")]
+    pub connector_message_buffer_size: usize,
 
     /// Limit number of the cached entries in an extreme aggregation call.
     #[serde(default = "default::developer::unsafe_stream_extreme_cache_size")]
-    pub unsafe_stream_extreme_cache_size: usize,
+    pub unsafe_extreme_cache_size: usize,
 
     /// The maximum size of the chunk produced by executor at a time.
     #[serde(default = "default::developer::stream_chunk_size")]
-    pub stream_chunk_size: usize,
+    pub chunk_size: usize,
 
     /// The initial permits that a channel holds, i.e., the maximum row count can be buffered in
     /// the channel.
     #[serde(default = "default::developer::stream_exchange_initial_permits")]
-    pub stream_exchange_initial_permits: usize,
+    pub exchange_initial_permits: usize,
 
     /// The permits that are batched to add back, for reducing the backward `AddPermits` messages
     /// in remote exchange.
     #[serde(default = "default::developer::stream_exchange_batched_permits")]
-    pub stream_exchange_batched_permits: usize,
-
-    #[serde(flatten)]
-    pub unrecognized: HashMap<String, Value>,
+    pub exchange_batched_permits: usize,
 }
 
-impl Default for DeveloperConfig {
-    fn default() -> Self {
-        toml::from_str("").unwrap()
-    }
+/// The subsections `[batch.developer]`.
+///
+/// It is put at [`BatchConfig::developer`].
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+pub struct BatchDeveloperConfig {
+    /// The capacity of the chunks in the channel that connects between `ConnectorSource` and
+    /// `SourceExecutor`.
+    #[serde(default = "default::developer::connector_message_buffer_size")]
+    pub connector_message_buffer_size: usize,
+
+    /// The size of the channel used for output to exchange/shuffle.
+    #[serde(default = "default::developer::batch_output_channel_size")]
+    pub output_channel_size: usize,
+
+    /// The size of a chunk produced by `RowSeqScanExecutor`
+    #[serde(default = "default::developer::batch_chunk_size")]
+    pub chunk_size: usize,
 }
 
 /// The section `[system]` in `risingwave.toml`.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct SystemConfig {
     /// The interval of periodic barrier.
     #[serde(default = "default::system::barrier_interval_ms")]
@@ -509,12 +515,6 @@ pub struct SystemConfig {
     pub telemetry_enabled: bool,
 }
 
-impl Default for SystemConfig {
-    fn default() -> Self {
-        toml::from_str("").unwrap()
-    }
-}
-
 impl SystemConfig {
     pub fn into_init_system_params(self) -> SystemParams {
         SystemParams {
@@ -550,6 +550,14 @@ mod default {
 
         pub fn vacuum_interval_sec() -> u64 {
             30
+        }
+
+        pub fn hummock_version_checkpoint_interval_sec() -> u64 {
+            30
+        }
+
+        pub fn min_delta_log_num_for_hummock_version_checkpoint() -> u64 {
+            10
         }
 
         pub fn max_heartbeat_interval_sec() -> u32 {
@@ -618,6 +626,10 @@ mod default {
             1024
         }
 
+        pub fn imm_merge_threshold() -> usize {
+            4
+        }
+
         pub fn write_conflict_detection_enabled() -> bool {
             cfg!(debug_assertions)
         }
@@ -669,6 +681,10 @@ mod default {
 
         pub fn max_concurrent_compaction_task_number() -> u64 {
             16
+        }
+
+        pub fn max_preload_wait_time_mill() -> u64 {
+            10
         }
     }
 
@@ -735,7 +751,7 @@ mod default {
             false
         }
 
-        pub fn stream_connector_message_buffer_size() -> usize {
+        pub fn connector_message_buffer_size() -> usize {
             16
         }
 

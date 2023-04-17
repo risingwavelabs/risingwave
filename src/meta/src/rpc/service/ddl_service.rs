@@ -18,9 +18,10 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector::common::AwsPrivateLinks;
+use risingwave_connector::common::AwsPrivateLinkItem;
 use risingwave_connector::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
 use risingwave_connector::source::KAFKA_CONNECTOR;
+use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{connection, Connection};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
@@ -34,7 +35,7 @@ use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, IdCategoryType,
     MetaSrvEnv, StreamingJob,
 };
-use crate::rpc::cloud_provider::AwsEc2Client;
+use crate::rpc::cloud_provider::{AwsEc2Client, CLOUD_PROVIDER_AWS};
 use crate::rpc::ddl_controller::{DdlCommand, DdlController, StreamingJobId};
 use crate::storage::MetaStore;
 use crate::stream::{visit_fragment, GlobalStreamManagerRef, SourceManagerRef};
@@ -403,7 +404,7 @@ where
         let mut source = request.source;
         let mut mview = request.materialized_view.unwrap();
         let mut fragment_graph = request.fragment_graph.unwrap();
-
+        let table_id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         // If we're creating a table with connector, we should additionally fill its ID first.
         if let Some(source) = &mut source {
             // Generate source id.
@@ -425,14 +426,18 @@ where
                 "require exactly 1 external stream source when creating table with a connector"
             );
 
+            // Fill in the correct table id for source.
+            source.optional_associated_table_id =
+                Some(OptionalAssociatedTableId::AssociatedTableId(table_id));
+
             // Fill in the correct source id for mview.
             mview.optional_associated_source_id =
                 Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
         }
 
         let mut stream_job = StreamingJob::Table(source, mview);
-        let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
-        stream_job.set_id(id);
+
+        stream_job.set_id(table_id);
 
         let version = self
             .ddl_controller
@@ -441,7 +446,7 @@ where
 
         Ok(Response::new(CreateTableResponse {
             status: None,
-            table_id: id,
+            table_id,
             version,
         }))
     }
@@ -603,17 +608,25 @@ where
         }
 
         match req.payload.unwrap() {
-            create_connection_request::Payload::PrivateLink(link) => {
-                let cli = self.aws_client.as_ref().unwrap();
-                let private_link_svc = cli
-                    .create_aws_private_link(&link.service_name, &link.availability_zones)
-                    .await?;
+            create_connection_request::Payload::PrivateLink(info) => {
+                // currently we only support AWS
+                let private_link_conn = match info.provider.to_lowercase().as_str() {
+                    CLOUD_PROVIDER_AWS => {
+                        let cli = self.aws_client.as_ref().unwrap();
+                        let private_link_svc =
+                            cli.create_aws_private_link(&info.service_name).await?;
+                        connection::Info::PrivateLinkService(private_link_svc)
+                    }
+                    _ => {
+                        return Err(Status::invalid_argument("unsupported cloud provider"));
+                    }
+                };
 
                 let id = self.gen_unique_id::<{ IdCategory::Connection }>().await?;
                 let connection = Connection {
                     id,
-                    name: link.service_name.clone(),
-                    info: Some(connection::Info::PrivateLinkService(private_link_svc)),
+                    name: req.name,
+                    info: Some(private_link_conn),
                 };
 
                 // save private link info to catalog
@@ -645,11 +658,15 @@ where
     ) -> Result<Response<DropConnectionResponse>, Status> {
         let req = request.into_inner();
 
-        self.ddl_controller
+        let version = self
+            .ddl_controller
             .run_command(DdlCommand::DropConnection(req.connection_name))
             .await?;
 
-        Ok(Response::new(DropConnectionResponse {}))
+        Ok(Response::new(DropConnectionResponse {
+            status: None,
+            version,
+        }))
     }
 }
 
@@ -667,8 +684,9 @@ where
         properties: &mut HashMap<String, String>,
     ) -> MetaResult<()> {
         let mut broker_rewrite_map = HashMap::new();
-        const UPSTREAM_SOURCE_PRIVATE_LINK_KEY: &str = "private.links";
-        if let Some(prop) = properties.get(UPSTREAM_SOURCE_PRIVATE_LINK_KEY) {
+        const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
+        const PRIVATE_LINK_NAME_KEY: &str = "connection.name";
+        if let Some(link_target_value) = properties.get(PRIVATE_LINK_TARGETS_KEY) {
             if !is_kafka_connector(properties) {
                 return Err(MetaError::from(anyhow!(
                     "Private link is only supported for Kafka connector",
@@ -679,45 +697,65 @@ where
                 .get(kafka_props_broker_key(properties))
                 .cloned()
                 .ok_or(MetaError::from(anyhow!(
-                    "Must specify brokers in WITH clause",
+                    "Must specify \"{KAFKA_PROPS_BROKER_KEY}\" property in WITH clause",
                 )))?;
 
-            let broker_addrs = servers.split(',').collect_vec();
-            let link_info: AwsPrivateLinks = serde_json::from_str(prop).map_err(|e| anyhow!(e))?;
-            // construct the rewrite mapping for brokers
-            for (link, broker) in link_info.infos.iter().zip_eq_fast(broker_addrs.into_iter()) {
-                let conn = self
-                    .catalog_manager
-                    .get_connection_by_name(&link.service_name)
-                    .await?;
+            let private_link_name =
+                properties
+                    .get(PRIVATE_LINK_NAME_KEY)
+                    .cloned()
+                    .ok_or(MetaError::from(anyhow!(
+                        "Must specify \"{PRIVATE_LINK_NAME_KEY}\" property in WITH clause",
+                    )))?;
 
-                if let Some(info) = conn.info {
-                    match info {
-                        connection::Info::PrivateLinkService(svc) => {
-                            if svc.dns_entries.is_empty() {
-                                return Err(MetaError::from(anyhow!(
-                                    "No available private link endpoints for Kafka broker {}",
-                                    broker
-                                )));
-                            }
-                            let default_dns = svc.dns_entries.values().next().unwrap();
-                            let target_dns = svc.dns_entries.get(&link.availability_zone);
-                            match target_dns {
-                                None => {
-                                    broker_rewrite_map.insert(
-                                        broker.to_string(),
-                                        format!("{}:{}", default_dns, link.port),
-                                    );
-                                }
-                                Some(dns_name) => {
-                                    broker_rewrite_map.insert(
-                                        broker.to_string(),
-                                        format!("{}:{}", dns_name, link.port),
-                                    );
-                                }
-                            }
-                        }
+            let broker_addrs = servers.split(',').collect_vec();
+            let link_targets: Vec<AwsPrivateLinkItem> =
+                serde_json::from_str(link_target_value).map_err(|e| anyhow!(e))?;
+
+            if broker_addrs.len() != link_targets.len() {
+                return Err(MetaError::from(anyhow!(
+                    "The number of broker addrs {} does not match the number of private link targets {}",
+                    broker_addrs.len(),
+                    link_targets.len()
+                )));
+            }
+
+            let conn = self
+                .catalog_manager
+                .get_connection_by_name(&private_link_name)
+                .await?;
+
+            if let Some(connection::Info::PrivateLinkService(svc)) = &conn.info {
+                // check whether the VPC endpoint is ready
+                let cli = self.aws_client.as_ref().unwrap();
+                if !cli.is_vpc_endpoint_ready(&svc.endpoint_id).await? {
+                    return Err(MetaError::from(anyhow!(
+                        "Private link endpoint {} is not ready",
+                        svc.endpoint_id
+                    )));
+                }
+            } else {
+                return Err(MetaError::from(anyhow!(
+                    "Connection {} is not a private link service",
+                    private_link_name
+                )));
+            }
+
+            // construct the rewrite mapping for brokers
+            for (link, broker) in link_targets.iter().zip_eq_fast(broker_addrs.into_iter()) {
+                if let Some(connection::Info::PrivateLinkService(svc)) = &conn.info {
+                    if svc.dns_entries.is_empty() {
+                        return Err(MetaError::from(anyhow!(
+                            "No available private link endpoints for Kafka broker {}",
+                            broker
+                        )));
                     }
+                    // rewrite the broker address to the dns name w/o az
+                    // requires the NLB has enabled the cross-zone load balancing
+                    broker_rewrite_map.insert(
+                        broker.to_string(),
+                        format!("{}:{}", &svc.endpoint_dns_name, link.port),
+                    );
                 }
             }
 

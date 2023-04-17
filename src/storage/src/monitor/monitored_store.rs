@@ -78,7 +78,7 @@ impl<S> MonitoredStateStore<S> {
             .inspect_err(|e| error!("Failed in iter: {:?}", e))?;
 
         self.storage_metrics
-            .iter_duration
+            .iter_init_duration
             .with_label_values(&[table_id_label.as_str()])
             .observe(start_time.elapsed().as_secs_f64());
         // statistics of iter in process count to estimate the read ops in the same time
@@ -355,6 +355,7 @@ impl<S: StateStoreIterItemStream> MonitoredStateStoreIter<S> {
             stats.total_size += key.encoded_len() + value.len();
             yield (key, value);
         }
+        drop(stats);
     }
 
     fn into_stream(self) -> impl StateStoreIterItemStream {

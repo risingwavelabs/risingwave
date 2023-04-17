@@ -17,7 +17,8 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::{ExprRewritable, LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::generic::Limit;
+use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Distribution, Order};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -25,17 +26,18 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamTopN {
     pub base: PlanBase,
-    logical: LogicalTopN,
+    logical: generic::TopN<PlanRef>,
 }
 
 impl StreamTopN {
-    pub fn new(logical: LogicalTopN) -> Self {
-        assert!(logical.group_key().is_empty());
-        assert!(logical.limit() > 0);
-        let ctx = logical.base.ctx.clone();
-        let input = logical.input();
-        let schema = input.schema().clone();
-        let dist = match logical.input().distribution() {
+    pub fn new(logical: generic::TopN<PlanRef>) -> Self {
+        assert!(logical.group_key.is_empty());
+        assert!(logical.limit_attr.limit() > 0);
+        let base = PlanBase::new_logical_with_core(&logical);
+        let ctx = base.ctx;
+        let input = &logical.input;
+        let schema = base.schema;
+        let dist = match input.distribution() {
             Distribution::Single => Distribution::Single,
             _ => panic!(),
         };
@@ -45,7 +47,7 @@ impl StreamTopN {
             ctx,
             schema,
             input.logical_pk().to_vec(),
-            logical.functional_dependency().clone(),
+            base.functional_dependency,
             dist,
             false,
             watermark_columns,
@@ -53,20 +55,16 @@ impl StreamTopN {
         StreamTopN { base, logical }
     }
 
-    pub fn limit(&self) -> u64 {
-        self.logical.limit()
+    pub fn limit_attr(&self) -> Limit {
+        self.logical.limit_attr
     }
 
     pub fn offset(&self) -> u64 {
-        self.logical.offset()
-    }
-
-    pub fn with_ties(&self) -> bool {
-        self.logical.with_ties()
+        self.logical.offset
     }
 
     pub fn topn_order(&self) -> &Order {
-        self.logical.topn_order()
+        &self.logical.order
     }
 }
 
@@ -82,11 +80,13 @@ impl fmt::Display for StreamTopN {
 
 impl PlanTreeNodeUnary for StreamTopN {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let mut logical = self.logical.clone();
+        logical.input = input;
+        Self::new(logical)
     }
 }
 
@@ -95,13 +95,20 @@ impl_plan_tree_node_for_unary! { StreamTopN }
 impl StreamNode for StreamTopN {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
+
+        let input = self.input();
         let topn_node = TopNNode {
-            limit: self.limit(),
+            limit: self.limit_attr().limit(),
             offset: self.offset(),
-            with_ties: self.with_ties(),
+            with_ties: self.limit_attr().with_ties(),
             table: Some(
                 self.logical
-                    .infer_internal_table_catalog(None)
+                    .infer_internal_table_catalog(
+                        input.schema(),
+                        input.ctx(),
+                        input.logical_pk(),
+                        None,
+                    )
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),

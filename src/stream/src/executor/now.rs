@@ -19,7 +19,6 @@ use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row;
 use risingwave_common::types::{DataType, ScalarImpl, ToDatumRef};
-use risingwave_common::util::epoch::Epoch;
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -96,7 +95,7 @@ impl<S: StateStore> NowExecutor<S> {
 
         while let Some(barrier) = barrier_receiver.recv().await {
             if !is_pausing {
-                let time_millis = Epoch::from(barrier.epoch.curr).as_unix_millis();
+                let time_millis = barrier.get_curr_epoch().as_unix_millis();
                 let timestamp = Some(ScalarImpl::Int64((time_millis * 1000) as i64));
 
                 let stream_chunk = if last_timestamp.is_some() {

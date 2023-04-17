@@ -124,7 +124,7 @@ impl BoxedExecutorBuilder for GroupTopNExecutorBuilder {
             group_key_types,
             with_ties: top_n_node.get_with_ties(),
             identity: source.plan_node().get_identity().clone(),
-            chunk_size: source.context.get_config().developer.batch_chunk_size,
+            chunk_size: source.context.get_config().developer.chunk_size,
         };
 
         Ok(builder.dispatch())
@@ -186,7 +186,7 @@ impl<K: HashKey> GroupTopNExecutor<K> {
             let chunk = Arc::new(chunk?.compact());
             let keys = K::build(self.group_key.as_slice(), &chunk)?;
 
-            for (row_id, (encoded_row, key)) in encode_chunk(&chunk, &self.column_orders)
+            for (row_id, (encoded_row, key)) in encode_chunk(&chunk, &self.column_orders)?
                 .into_iter()
                 .zip_eq_fast(keys.into_iter())
                 .enumerate()

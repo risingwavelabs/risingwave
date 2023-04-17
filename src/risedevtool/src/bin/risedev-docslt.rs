@@ -130,9 +130,9 @@ fn generate_slt_files(package_name: &str) -> Result<()> {
         }
     }
 
-    let rustdoc: JsonValue = serde_json::from_reader(std::io::BufReader::new(
-        std::fs::File::open(format!("target/doc/{}.json", package_name))?,
-    ))?;
+    let rustdoc: JsonValue = serde_json::from_reader(std::io::BufReader::new(fs_err::File::open(
+        format!("target/doc/{}.json", package_name),
+    )?))?;
     let index = rustdoc["index"]
         .as_object()
         .ok_or_else(|| anyhow!("failed to access `index` field as object"))?;
@@ -174,9 +174,9 @@ fn generate_slt_files(package_name: &str) -> Result<()> {
     }
 
     let slt_dir = PathBuf::from(format!("e2e_test/generated/docslt/{}", package_name));
-    std::fs::remove_dir_all(&slt_dir).ok();
+    fs_err::remove_dir_all(&slt_dir).ok();
     if !slt_blocks_per_file.is_empty() {
-        std::fs::create_dir_all(&slt_dir)?;
+        fs_err::create_dir_all(&slt_dir)?;
     }
 
     for filename in slt_blocks_per_file.keys() {
@@ -186,7 +186,7 @@ fn generate_slt_files(package_name: &str) -> Result<()> {
             .components()
             .filter_map(|comp| comp.as_os_str().to_str().filter(|s| *s != "src"))
             .join("__");
-        let mut slt_file = std::fs::File::create(slt_dir.join(slt_filename))?;
+        let mut slt_file = fs_err::File::create(slt_dir.join(slt_filename))?;
         write!(
             slt_file,
             "\

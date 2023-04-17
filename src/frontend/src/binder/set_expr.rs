@@ -108,30 +108,13 @@ impl BoundSetExpr {
             }
         }
     }
-
-    pub fn contains_sys_table(&self) -> bool {
-        match self {
-            BoundSetExpr::Select(s) => {
-                if let Some(relation) = &s.from {
-                    relation.contains_sys_table()
-                } else {
-                    false
-                }
-            }
-            BoundSetExpr::Values(_) => false,
-            BoundSetExpr::Query(q) => q.contains_sys_table(),
-            BoundSetExpr::SetOperation { left, right, .. } => {
-                left.contains_sys_table() || right.contains_sys_table()
-            }
-        }
-    }
 }
 
 impl Binder {
     pub(super) fn bind_set_expr(&mut self, set_expr: SetExpr) -> Result<BoundSetExpr> {
         match set_expr {
             SetExpr::Select(s) => Ok(BoundSetExpr::Select(Box::new(self.bind_select(*s)?))),
-            SetExpr::Values(v) => Ok(BoundSetExpr::Values(Box::new(self.bind_values(v, None)?.0))),
+            SetExpr::Values(v) => Ok(BoundSetExpr::Values(Box::new(self.bind_values(v, None)?))),
             SetExpr::Query(q) => Ok(BoundSetExpr::Query(Box::new(self.bind_query(*q)?))),
             SetExpr::SetOperation {
                 op,
@@ -144,7 +127,7 @@ impl Binder {
                         let left = Box::new(self.bind_set_expr(*left)?);
                         // Reset context for right side, but keep `cte_to_relation`.
                         let new_context = std::mem::take(&mut self.context);
-                        self.context.cte_to_relation = new_context.cte_to_relation;
+                        self.context.cte_to_relation = new_context.cte_to_relation.clone();
                         let right = Box::new(self.bind_set_expr(*right)?);
 
                         if left.schema().fields.len() != right.schema().fields.len() {
@@ -177,6 +160,7 @@ impl Binder {
                         // select a from t2 union all select b from t2 order by a+1; should throw an
                         // error.
                         self.context = BindContext::default();
+                        self.context.cte_to_relation = new_context.cte_to_relation;
                         Ok(BoundSetExpr::SetOperation {
                             op: BoundSetOperation::Union,
                             all,

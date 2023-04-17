@@ -29,6 +29,7 @@ use crate::vector_op::agg::filter::*;
 use crate::vector_op::agg::functions::*;
 use crate::vector_op::agg::general_agg::*;
 use crate::vector_op::agg::general_distinct_agg::*;
+use crate::vector_op::agg::non_primitive_sum::Int256Sum;
 use crate::vector_op::agg::string_agg::create_string_agg_state;
 use crate::Result;
 
@@ -99,6 +100,18 @@ impl AggStateFactory {
                 let agg_col_idx = agg_arg.get_index() as usize;
                 let delim_col_idx = delim_arg.get_index() as usize;
                 create_string_agg_state(agg_col_idx, delim_col_idx, column_orders)?
+            }
+            (AggKind::Sum, [arg])
+                if matches!(DataType::from(arg.get_type()?), DataType::Int256) =>
+            {
+                // Special handling of the `sum` function for `Int256`, when the
+                // `GeneralAgg` is applied to `sum`, it needs `sum` to return a temporary
+                // `ScalarRef` for intermediate variable. However, this is not feasible
+                // for non-primitive `Int256` types. Therefore, we have added a separate handling
+                // here. It is important to note that this is a temporary and rough imitation of the
+                // `GeneralAgg` solution and will need to be considered and fixed
+                // when refactoring the code related to aggregation in the future.
+                Box::new(Int256Sum::new(arg.get_index() as usize, distinct))
             }
             (AggKind::ArrayAgg, [arg]) => {
                 let agg_col_idx = arg.get_index() as usize;
@@ -200,6 +213,8 @@ pub fn create_agg_state_unary(
         (Count, count, date, int64, Some(0)),
         (Count, count, timestamp, int64, Some(0)),
         (Count, count, time, int64, Some(0)),
+        (Count, count, timestamptz, int64, Some(0)),
+        (Count, count_int256, int256, int64, Some(0)),
         (Count, count_struct, struct_type, int64, Some(0)),
         (Count, count_list, list, int64, Some(0)),
         (Sum0, sum, int64, int64, Some(0)),
@@ -213,6 +228,7 @@ pub fn create_agg_state_unary(
         (Min, min, int16, int16, None),
         (Min, min, int32, int32, None),
         (Min, min, int64, int64, None),
+        (Min, min_int256, int256, int256, None),
         (Min, min, float32, float32, None),
         (Min, min, float64, float64, None),
         (Min, min, decimal, decimal, None),
@@ -221,12 +237,14 @@ pub fn create_agg_state_unary(
         (Min, min, date, date, None),
         (Min, min, timestamp, timestamp, None),
         (Min, min, time, time, None),
+        (Min, min, timestamptz, timestamptz, None),
         (Min, min_struct, struct_type, struct_type, None),
         (Min, min_str, varchar, varchar, None),
         (Min, min_list, list, list, None),
         (Max, max, int16, int16, None),
         (Max, max, int32, int32, None),
         (Max, max, int64, int64, None),
+        (Max, max_int256, int256, int256, None),
         (Max, max, float32, float32, None),
         (Max, max, float64, float64, None),
         (Max, max, decimal, decimal, None),
@@ -235,12 +253,14 @@ pub fn create_agg_state_unary(
         (Max, max, date, date, None),
         (Max, max, timestamp, timestamp, None),
         (Max, max, time, time, None),
+        (Max, max, timestamptz, timestamptz, None),
         (Max, max_struct, struct_type, struct_type, None),
         (Max, max_str, varchar, varchar, None),
         (Max, max_list, list, list, None),
         (FirstValue, first, int16, int16, None),
         (FirstValue, first, int32, int32, None),
         (FirstValue, first, int64, int64, None),
+        (FirstValue, first_int256, int256, int256, None),
         (FirstValue, first, float32, float32, None),
         (FirstValue, first, float64, float64, None),
         (FirstValue, first, decimal, decimal, None),

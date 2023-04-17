@@ -134,7 +134,7 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
             child,
             source.task_id.clone(),
             identity,
-            source.context.get_config().developer.batch_chunk_size,
+            source.context.get_config().developer.chunk_size,
         )
     }
 }
@@ -345,14 +345,14 @@ mod tests {
             ],
         };
 
-        // TODO: currently the order is fixed
+        // TODO: currently the order is fixed unless the hasher is changed
         let expect_exec = MockExecutor::with_chunk(
             DataChunk::from_pretty(
                 "i i I
+                 1 0 1
                  0 0 3
-                 1 1 6
                  0 1 3
-                 1 0 1",
+                 1 1 6",
             ),
             schema,
         );

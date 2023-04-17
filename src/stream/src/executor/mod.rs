@@ -29,7 +29,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
 use risingwave_connector::source::SplitImpl;
 use risingwave_expr::expr::BoxedExpression;
@@ -59,6 +59,7 @@ pub mod aggregation;
 mod barrier_recv;
 mod batch_query;
 mod chain;
+mod dedup;
 mod dispatch;
 pub mod dml;
 mod dynamic_filter;
@@ -84,12 +85,15 @@ pub mod row_id_gen;
 mod sink;
 mod sort;
 mod sort_buffer;
+mod sort_buffer_v0;
+mod sort_v0;
 pub mod source;
 mod stream_reader;
 pub mod subtask;
 mod temporal_join;
 mod top_n;
 mod union;
+mod values;
 mod watermark;
 mod watermark_filter;
 mod wrapper;
@@ -97,8 +101,7 @@ mod wrapper;
 mod backfill;
 #[cfg(test)]
 mod integration_tests;
-#[cfg(test)]
-mod test_utils;
+pub mod test_utils;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
@@ -106,6 +109,7 @@ pub use backfill::*;
 pub use barrier_recv::BarrierRecvExecutor;
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
+pub use dedup::AppendOnlyDedupExecutor;
 pub use dispatch::{DispatchExecutor, DispatcherImpl};
 pub use dynamic_filter::DynamicFilterExecutor;
 pub use error::{StreamExecutorError, StreamExecutorResult};
@@ -127,13 +131,14 @@ pub use rearranged_chain::RearrangedChainExecutor;
 pub use receiver::ReceiverExecutor;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 pub use sink::SinkExecutor;
-pub use sort::SortExecutor;
+pub use sort::*;
 pub use source::*;
 pub use temporal_join::*;
 pub use top_n::{
     AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,
 };
 pub use union::UnionExecutor;
+pub use values::ValuesExecutor;
 pub use watermark_filter::WatermarkFilterExecutor;
 pub use wrapper::WrapperExecutor;
 
@@ -347,6 +352,10 @@ impl Barrier {
                 Mutation::Update { vnode_bitmaps, .. } => vnode_bitmaps.get(&actor_id).cloned(),
                 _ => None,
             })
+    }
+
+    pub fn get_curr_epoch(&self) -> Epoch {
+        Epoch(self.epoch.curr)
     }
 }
 

@@ -26,7 +26,7 @@ use aws_smithy_http::endpoint::Endpoint;
 use aws_types::credentials::SharedCredentialsProvider;
 use aws_types::region::Region;
 use http::Uri;
-use risingwave_common::error::ErrorCode::{InternalError, InvalidConfigValue, ProtocolError};
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use serde::{Deserialize, Serialize};
 use url::Url;

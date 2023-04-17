@@ -19,8 +19,8 @@ use await_tree::InstrumentAwait;
 use bytes::{Buf, BufMut, Bytes};
 use fail::fail_point;
 use itertools::Itertools;
-use risingwave_common::cache::{CachePriority, LruCacheEventListener};
-use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_common::cache::{CachePriority, LookupResponse, LruCacheEventListener};
+use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_object_store::object::{
     BlockLocation, MonitoredStreamingReader, ObjectError, ObjectMetadata, ObjectStoreRef,
     ObjectStreamingUploader,
@@ -108,6 +108,12 @@ pub enum CachePolicy {
     Fill(CachePriority),
     /// Read the cache but not fill the cache afterwards.
     NotFill,
+}
+
+impl Default for CachePolicy {
+    fn default() -> Self {
+        CachePolicy::Fill(CachePriority::High)
+    }
 }
 
 pub struct SstableStore {
@@ -311,13 +317,16 @@ impl SstableStore {
 
     pub fn get_sst_data_path(&self, object_id: HummockSstableObjectId) -> String {
         let obj_prefix = self.store.get_object_prefix(object_id, true);
-        format!("{}/{}{}.data", self.path, obj_prefix, object_id)
+        format!(
+            "{}/{}{}.{}",
+            self.path, obj_prefix, object_id, OBJECT_SUFFIX
+        )
     }
 
     pub fn get_object_id_from_path(&self, path: &str) -> HummockSstableObjectId {
         let split = path.split(&['/', '.']).collect_vec();
-        debug_assert!(split.len() > 2);
-        debug_assert!(split[split.len() - 1] == "meta" || split[split.len() - 1] == "data");
+        assert!(split.len() > 2);
+        assert_eq!(split[split.len() - 1], OBJECT_SUFFIX);
         split[split.len() - 2]
             .parse::<HummockSstableObjectId>()
             .expect("valid sst id")
@@ -345,14 +354,17 @@ impl SstableStore {
         self.meta_cache.clear();
     }
 
+    /// Returns `table_holder`, `local_cache_meta_block_miss` (1 if cache miss) and
+    /// `local_cache_meta_block_unhit` (1 if not cache hit).
     pub async fn sstable_syncable(
         &self,
         sst: &SstableInfo,
         stats: &StoreLocalStatistic,
-    ) -> HummockResult<(TableHolder, u64)> {
+    ) -> HummockResult<(TableHolder, u64, u64)> {
         let mut local_cache_meta_block_miss = 0;
+        let mut local_cache_meta_block_unhit = 0;
         let object_id = sst.get_object_id();
-        let result = self
+        let lookup_response = self
             .meta_cache
             .lookup_with_request_dedup::<_, HummockError, _>(
                 object_id,
@@ -381,10 +393,20 @@ impl SstableStore {
                         Ok((Box::new(sst), charge))
                     }
                 },
-            )
+            );
+        if !matches!(lookup_response, LookupResponse::Cached(..)) {
+            local_cache_meta_block_unhit += 1;
+        }
+        let result = lookup_response
             .verbose_instrument_await("meta_cache_lookup")
             .await;
-        result.map(|table_holder| (table_holder, local_cache_meta_block_miss))
+        result.map(|table_holder| {
+            (
+                table_holder,
+                local_cache_meta_block_miss,
+                local_cache_meta_block_unhit,
+            )
+        })
     }
 
     pub async fn sstable(
@@ -393,7 +415,7 @@ impl SstableStore {
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<TableHolder> {
         self.sstable_syncable(sst, stats).await.map(
-            |(table_holder, local_cache_meta_block_miss)| {
+            |(table_holder, local_cache_meta_block_miss, ..)| {
                 stats.apply_meta_fetch(local_cache_meta_block_miss);
                 table_holder
             },
@@ -404,6 +426,11 @@ impl SstableStore {
         self.store
             .list(&format!("{}/", self.path))
             .await
+            .map(|v| {
+                v.into_iter()
+                    .filter(|m| m.key.ends_with(&format!(".{}", OBJECT_SUFFIX)))
+                    .collect()
+            })
             .map_err(HummockError::object_io_error)
     }
 

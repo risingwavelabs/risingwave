@@ -12,19 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use itertools::{enumerate, Itertools};
 use prost::Message;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
+    object_size_map, HummockVersionExt,
+};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockEpoch, HummockVersionId};
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
     CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion,
-    HummockVersionStats,
+    HummockVersionCheckpoint, HummockVersionStats,
 };
 
 use super::compaction::{get_compression_algorithm, DynamicLevelSelectorCore};
@@ -89,9 +91,10 @@ pub fn trigger_sst_stat(
         level_sst_size / 1024
     };
 
+    let mut compacting_task_stat: BTreeMap<(usize, usize), usize> = BTreeMap::default();
     for idx in 0..current_version.num_levels(compaction_group_id) {
         let sst_num = level_sst_cnt(idx);
-        let level_label = format!("{}_{}", idx, compaction_group_id);
+        let level_label = format!("cg{}_L{}", compaction_group_id, idx);
         metrics
             .level_sst_num
             .with_label_values(&[&level_label])
@@ -106,7 +109,34 @@ pub fn trigger_sst_stat(
                 .level_compact_cnt
                 .with_label_values(&[&level_label])
                 .set(compact_cnt as i64);
+
+            let compacting_task = compact_status.level_handlers[idx].get_pending_tasks();
+            let mut pending_task_ids: HashSet<u64> = HashSet::default();
+            for task in compacting_task {
+                if pending_task_ids.contains(&task.task_id) {
+                    continue;
+                }
+
+                if idx != 0 && idx == task.target_level as usize {
+                    continue;
+                }
+
+                let key = (idx, task.target_level as usize);
+                let count = compacting_task_stat.entry(key).or_insert(0);
+                *count += 1;
+
+                pending_task_ids.insert(task.task_id);
+            }
         }
+    }
+
+    tracing::debug!("LSM Compacting STAT {:?}", compacting_task_stat);
+    for ((select, target), compacting_task_count) in compacting_task_stat {
+        let label_str = format!("cg{} L{} -> L{}", compaction_group_id, select, target);
+        metrics
+            .level_compact_task_cnt
+            .with_label_values(&[&label_str])
+            .set(compacting_task_count as _);
     }
 
     let level_label = format!("cg{}_l0_sub", compaction_group_id);
@@ -223,8 +253,45 @@ pub fn trigger_safepoint_stat(metrics: &MetaMetrics, safepoints: &[HummockVersio
     }
 }
 
-pub fn trigger_stale_ssts_stat(metrics: &MetaMetrics, total_number: usize) {
-    metrics.stale_ssts_count.set(total_number as _);
+pub fn trigger_gc_stat(
+    metrics: &MetaMetrics,
+    checkpoint: &HummockVersionCheckpoint,
+    min_pinned_version_id: HummockVersionId,
+) {
+    let current_version_object_size_map = object_size_map(checkpoint.version.as_ref().unwrap());
+    let current_version_object_size = current_version_object_size_map.values().sum::<u64>();
+    let current_version_object_count = current_version_object_size_map.len();
+    let mut old_version_object_size = 0;
+    let mut old_version_object_count = 0;
+    let mut stale_object_size = 0;
+    let mut stale_object_count = 0;
+    checkpoint.stale_objects.iter().for_each(|(id, objects)| {
+        if *id <= min_pinned_version_id {
+            stale_object_size += objects.total_file_size;
+            stale_object_count += objects.id.len() as u64;
+        } else {
+            old_version_object_size += objects.total_file_size;
+            old_version_object_count += objects.id.len() as u64;
+        }
+    });
+    metrics
+        .current_version_object_size
+        .set(current_version_object_size as _);
+    metrics
+        .current_version_object_count
+        .set(current_version_object_count as _);
+    metrics
+        .old_version_object_size
+        .set(old_version_object_size as _);
+    metrics
+        .old_version_object_count
+        .set(old_version_object_count as _);
+    metrics.stale_object_size.set(stale_object_size as _);
+    metrics.stale_object_count.set(stale_object_count as _);
+}
+
+pub fn trigger_delta_log_stats(metrics: &MetaMetrics, total_number: usize) {
+    metrics.delta_log_count.set(total_number as _);
 }
 
 // Triggers a report on compact_pending_bytes_needed

@@ -26,7 +26,7 @@ use super::create_table::{
     check_create_table_with_source, gen_create_table_plan, gen_create_table_plan_with_source,
     ColumnIdGenerator,
 };
-use super::query::gen_batch_query_plan;
+use super::query::gen_batch_plan_by_statement;
 use super::RwPgResponse;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{Convention, Explain};
@@ -120,7 +120,7 @@ pub async fn handle_explain(
                 .0
             }
 
-            stmt => gen_batch_query_plan(&session, context.into(), stmt)?.0,
+            stmt => gen_batch_plan_by_statement(&session, context.into(), stmt)?.plan,
         };
 
         let ctx = plan.plan_base().ctx.clone();

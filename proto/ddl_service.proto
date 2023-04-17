@@ -257,11 +257,10 @@ message CreateConnectionRequest {
   message PrivateLink {
     string provider = 1;
     string service_name = 2;
-    repeated string availability_zones = 3;
   }
-
+  string name = 1;
   oneof payload {
-    PrivateLink private_link = 1;
+    PrivateLink private_link = 2;
   }
 }
 
@@ -281,7 +280,10 @@ message DropConnectionRequest {
   string connection_name = 1;
 }
 
-message DropConnectionResponse {}
+message DropConnectionResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
 
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);

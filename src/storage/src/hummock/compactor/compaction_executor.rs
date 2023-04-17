@@ -14,12 +14,13 @@
 
 use std::future::Future;
 
+use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use tokio::task::JoinHandle;
 
 /// `CompactionExecutor` is a dedicated runtime for compaction's CPU intensive jobs.
 pub struct CompactionExecutor {
     /// Runtime for compaction tasks.
-    runtime: &'static tokio::runtime::Runtime,
+    runtime: BackgroundShutdownRuntime,
 }
 
 impl CompactionExecutor {
@@ -34,9 +35,7 @@ impl CompactionExecutor {
         };
 
         Self {
-            // Leak the runtime to avoid runtime shutting-down in the main async context.
-            // TODO: may manually shutdown the runtime gracefully.
-            runtime: Box::leak(Box::new(runtime)),
+            runtime: runtime.into(),
         }
     }
 

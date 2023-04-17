@@ -109,6 +109,11 @@ pub fn lpad(s: &str, length: i32, writer: &mut dyn Write) {
 /// select lpad('hi', 5, 'xy');
 /// ----
 /// xyxhi
+///
+/// query T
+/// select lpad('hi', 5, '');
+/// ----
+/// hi
 /// ```
 #[function("lpad(varchar, int32, varchar) -> varchar")]
 pub fn lpad_fill(s: &str, length: i32, fill: &str, writer: &mut dyn Write) {
@@ -122,6 +127,8 @@ pub fn lpad_fill(s: &str, length: i32, fill: &str, writer: &mut dyn Write) {
         for c in s.chars().take(length as usize) {
             write!(writer, "{c}").unwrap();
         }
+    } else if fill_len == 0 {
+        write!(writer, "{s}").unwrap();
     } else {
         let mut remaining_length = length as usize - s_len;
         while remaining_length >= fill_len {
@@ -177,6 +184,12 @@ pub fn rpad(s: &str, length: i32, writer: &mut dyn Write) {
 /// select rpad('abcdef', 3, '0');
 /// ----
 /// abc
+///
+/// query T
+/// select rpad('hi', 5, '');
+/// ----
+/// hi
+/// ```
 #[function("rpad(varchar, int32, varchar) -> varchar")]
 pub fn rpad_fill(s: &str, length: i32, fill: &str, writer: &mut dyn Write) {
     let s_len = s.chars().count();
@@ -190,6 +203,8 @@ pub fn rpad_fill(s: &str, length: i32, fill: &str, writer: &mut dyn Write) {
         for c in s.chars().take(length as usize) {
             write!(writer, "{c}").unwrap();
         }
+    } else if fill_len == 0 {
+        write!(writer, "{s}").unwrap();
     } else {
         write!(writer, "{s}").unwrap();
         let mut remaining_length = length as usize - s_len;
@@ -217,36 +232,6 @@ pub fn rpad_fill(s: &str, length: i32, fill: &str, writer: &mut dyn Write) {
 pub fn reverse(s: &str, writer: &mut dyn Write) {
     for c in s.chars().rev() {
         write!(writer, "{}", c).unwrap();
-    }
-}
-
-/// Returns the index of the first occurrence of the specified substring in the input string,
-/// or zero if the substring is not present.
-///
-/// # Example
-///
-/// ```slt
-/// query T
-/// select strpos('hello, world', 'lo');
-/// ----
-/// 4
-///
-/// query T
-/// select strpos('high', 'ig');
-/// ----
-/// 2
-///
-/// query T
-/// select strpos('abc', 'def');
-/// ----
-/// 0
-/// ```
-#[function("strpos(varchar, varchar) -> int32")]
-pub fn strpos(s: &str, substr: &str) -> i32 {
-    if let Some(pos) = s.find(substr) {
-        pos as i32 + 1
-    } else {
-        0
     }
 }
 
@@ -332,4 +317,57 @@ pub fn to_hex_i32(n: i32, writer: &mut dyn Write) {
 #[function("to_hex(int64) -> varchar")]
 pub fn to_hex_i64(n: i64, writer: &mut dyn Write) {
     write!(writer, "{:x}", n).unwrap();
+}
+
+/// Returns the given string suitably quoted to be used as an identifier in an SQL statement string.
+/// Quotes are added only if necessary (i.e., if the string contains non-identifier characters or
+/// would be case-folded). Embedded quotes are properly doubled.
+///
+/// Refer to <https://github.com/postgres/postgres/blob/90189eefc1e11822794e3386d9bafafd3ba3a6e8/src/backend/utils/adt/ruleutils.c#L11506>
+///
+/// # Example
+///
+/// ```slt
+/// query T
+/// select quote_ident('foo bar')
+/// ----
+/// "foo bar"
+///
+/// query T
+/// select quote_ident('FooBar')
+/// ----
+/// "FooBar"
+///
+/// query T
+/// select quote_ident('foo_bar')
+/// ----
+/// foo_bar
+///
+/// query T
+/// select quote_ident('foo"bar')
+/// ----
+/// "foo""bar"
+///
+/// # FIXME: quote SQL keywords is not supported yet
+/// query T
+/// select quote_ident('select')
+/// ----
+/// select
+/// ```
+#[function("quote_ident(varchar) -> varchar")]
+pub fn quote_ident(s: &str, writer: &mut dyn Write) {
+    let needs_quotes = s.chars().any(|c| !matches!(c, 'a'..='z' | '0'..='9' | '_'));
+    if !needs_quotes {
+        write!(writer, "{}", s).unwrap();
+        return;
+    }
+    write!(writer, "\"").unwrap();
+    for c in s.chars() {
+        if c == '"' {
+            write!(writer, "\"\"").unwrap();
+        } else {
+            write!(writer, "{c}").unwrap();
+        }
+    }
+    write!(writer, "\"").unwrap();
 }

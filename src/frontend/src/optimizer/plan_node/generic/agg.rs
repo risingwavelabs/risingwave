@@ -27,7 +27,7 @@ use super::super::utils::TableCatalogBuilder;
 use super::{stream, GenericPlanNode, GenericPlanRef};
 use crate::expr::{Expr, ExprRewriter, InputRef, InputRefDisplay};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::property::{Distribution, FunctionalDependencySet, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{
     ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay, IndexRewriter,
@@ -71,6 +71,58 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     /// get the Mapping of columnIndex from input column index to out column index
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
         self.o2i_col_mapping().inverse()
+    }
+
+    pub(crate) fn can_two_phase_agg(&self) -> bool {
+        self.call_support_two_phase()
+            && !self.is_agg_result_affected_by_order()
+            && self.two_phase_agg_enabled()
+    }
+
+    /// Must try two phase agg iff we are forced to, and we satisfy the constraints.
+    pub(crate) fn must_try_two_phase_agg(&self) -> bool {
+        self.two_phase_agg_forced() && self.can_two_phase_agg()
+    }
+
+    fn two_phase_agg_forced(&self) -> bool {
+        self.ctx().session_ctx().config().get_force_two_phase_agg()
+    }
+
+    fn two_phase_agg_enabled(&self) -> bool {
+        self.ctx().session_ctx().config().get_enable_two_phase_agg()
+    }
+
+    /// Generally used by two phase hash agg.
+    /// If input dist already satisfies hash agg distribution,
+    /// it will be more expensive to do two phase agg, should just do shuffle agg.
+    pub(crate) fn hash_agg_dist_satisfied_by_input_dist(&self, input_dist: &Distribution) -> bool {
+        let required_dist = RequiredDist::shard_by_key(self.input.schema().len(), &self.group_key);
+        input_dist.satisfies(&required_dist)
+    }
+
+    fn call_support_two_phase(&self) -> bool {
+        !self.agg_calls.is_empty()
+            && self.agg_calls.iter().all(|call| {
+                matches!(
+                    call.agg_kind,
+                    AggKind::Min | AggKind::Max | AggKind::Sum | AggKind::Count
+                ) && !call.distinct
+            })
+    }
+
+    /// Check if the aggregation result will be affected by order by clause, if any.
+    pub(crate) fn is_agg_result_affected_by_order(&self) -> bool {
+        self.agg_calls
+            .iter()
+            .any(|call| matches!(call.agg_kind, AggKind::StringAgg | AggKind::ArrayAgg))
+    }
+
+    pub fn new(agg_calls: Vec<PlanAggCall>, group_key: Vec<usize>, input: PlanRef) -> Self {
+        Self {
+            agg_calls,
+            group_key,
+            input,
+        }
     }
 }
 
@@ -176,6 +228,22 @@ pub struct MaterializedInputState {
 }
 
 impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
+    pub fn infer_tables(
+        &self,
+        me: &impl stream::StreamPlanRef,
+        vnode_col_idx: Option<usize>,
+    ) -> (
+        TableCatalog,
+        Vec<AggCallState>,
+        HashMap<usize, TableCatalog>,
+    ) {
+        (
+            self.infer_result_table(me, vnode_col_idx),
+            self.infer_stream_agg_state(me, vnode_col_idx),
+            self.infer_distinct_dedup_tables(me, vnode_col_idx),
+        )
+    }
+
     /// Infer `AggCallState`s for streaming agg.
     pub fn infer_stream_agg_state(
         &self,

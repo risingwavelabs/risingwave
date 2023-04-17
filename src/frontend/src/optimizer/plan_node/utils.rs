@@ -17,7 +17,7 @@ use std::{fmt, vec};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field, Schema};
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ConflictBehavior, Field, Schema};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use crate::catalog::table_catalog::TableType;
@@ -146,7 +146,7 @@ impl TableCatalogBuilder {
                 .value_indices
                 .unwrap_or_else(|| (0..self.columns.len()).collect_vec()),
             definition: "".into(),
-            conflict_behavior_type: 0,
+            conflict_behavior: ConflictBehavior::NoCheck,
             read_prefix_len_hint,
             version: None, // the internal table is not versioned and can't be schema changed
             watermark_columns,

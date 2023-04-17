@@ -123,6 +123,18 @@ macro_rules! int64 {
 pub(crate) use int64;
 
 #[macro_export]
+macro_rules! int256 {
+    ($macro:ident) => {
+        $macro! {
+            risingwave_common::types::DataType::Int256,
+            risingwave_common::array::Int256Array
+        }
+    };
+}
+
+pub(crate) use int256;
+
+#[macro_export]
 macro_rules! float32 {
     ($macro:ident) => {
         $macro! {

@@ -14,8 +14,7 @@
 
 //! Handle creation of logical (non-materialized) views.
 
-use std::collections::HashSet;
-
+use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -25,7 +24,7 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, Query, Statement};
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::handler::HandlerArgs;
-use crate::optimizer::{OptimizerContext, PlanVisitor};
+use crate::optimizer::OptimizerContext;
 
 pub async fn handle_create_view(
     handler_args: HandlerArgs,
@@ -46,17 +45,17 @@ pub async fn handle_create_view(
     // plan the query to validate it and resolve dependencies
     let (dependent_relations, schema) = {
         let context = OptimizerContext::from_handler_args(handler_args);
-        let (plan, _mode, schema) = super::query::gen_batch_query_plan(
+        let super::query::BatchQueryPlanResult {
+            schema,
+            dependent_relations,
+            ..
+        } = super::query::gen_batch_plan_by_statement(
             &session,
             context.into(),
             Statement::Query(Box::new(query.clone())),
         )?;
 
-        let mut visitor = CollectTableIds {
-            table_ids: HashSet::new(),
-        };
-        visitor.visit(plan);
-        (visitor.table_ids.into_iter().collect(), schema)
+        (dependent_relations, schema)
     };
 
     let columns = if columns.is_empty() {
@@ -87,7 +86,10 @@ pub async fn handle_create_view(
         name: view_name,
         properties: properties.inner().clone().into_iter().collect(),
         owner: session.user_id(),
-        dependent_relations,
+        dependent_relations: dependent_relations
+            .into_iter()
+            .map(|t| t.table_id)
+            .collect_vec(),
         sql: format!("{}", query),
         columns: columns.into_iter().map(|f| f.to_prost()).collect(),
     };
@@ -96,17 +98,4 @@ pub async fn handle_create_view(
     catalog_writer.create_view(view).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_VIEW))
-}
-
-struct CollectTableIds {
-    table_ids: HashSet<u32>,
-}
-
-impl PlanVisitor<()> for CollectTableIds {
-    fn merge(_: (), _: ()) {}
-
-    fn visit_batch_seq_scan(&mut self, plan: &crate::optimizer::plan_node::BatchSeqScan) {
-        self.table_ids
-            .insert(plan.logical().table_desc().table_id.table_id);
-    }
 }

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
 use itertools::Itertools;
@@ -55,10 +55,22 @@ pub use update::BoundUpdate;
 pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;
-use crate::catalog::ViewId;
+use crate::catalog::{TableId, ViewId};
 use crate::session::{AuthContext, SessionImpl};
 
 pub type ShareId = usize;
+
+/// The type of binding statement.
+enum BindFor {
+    /// Binding MV/SINK
+    Stream,
+    /// Binding a batch query
+    Batch,
+    /// Binding a DDL (e.g. CREATE TABLE/SOURCE)
+    Ddl,
+    /// Binding a system query (e.g. SHOW)
+    System,
+}
 
 /// `Binder` binds the identifiers in AST to columns in relations
 pub struct Binder {
@@ -89,11 +101,14 @@ pub struct Binder {
     next_share_id: ShareId,
 
     search_path: SearchPath,
-    /// Whether the Binder is binding an MV/SINK.
-    in_streaming: bool,
+    /// The type of binding statement.
+    bind_for: BindFor,
 
     /// `ShareId`s identifying shared views.
     shared_views: HashMap<ViewId, ShareId>,
+
+    /// The included relations while binding a query.
+    included_relations: HashSet<TableId>,
 
     param_types: ParameterTypes,
 }
@@ -181,7 +196,7 @@ impl ParameterTypes {
 }
 
 impl Binder {
-    fn new_inner(session: &SessionImpl, in_streaming: bool, param_types: Vec<DataType>) -> Binder {
+    fn new_inner(session: &SessionImpl, bind_for: BindFor, param_types: Vec<DataType>) -> Binder {
         let now_ms = session
             .env()
             .hummock_snapshot_manager()
@@ -200,22 +215,50 @@ impl Binder {
             next_values_id: 0,
             next_share_id: 0,
             search_path: session.config().get_search_path(),
-            in_streaming,
+            bind_for,
             shared_views: HashMap::new(),
+            included_relations: HashSet::new(),
             param_types: ParameterTypes::new(param_types),
         }
     }
 
     pub fn new(session: &SessionImpl) -> Binder {
-        Self::new_inner(session, false, vec![])
+        Self::new_inner(session, BindFor::Batch, vec![])
     }
 
     pub fn new_with_param_types(session: &SessionImpl, param_types: Vec<DataType>) -> Binder {
-        Self::new_inner(session, false, param_types)
+        Self::new_inner(session, BindFor::Batch, param_types)
     }
 
     pub fn new_for_stream(session: &SessionImpl) -> Binder {
-        Self::new_inner(session, true, vec![])
+        Self::new_inner(session, BindFor::Stream, vec![])
+    }
+
+    pub fn new_for_ddl(session: &SessionImpl) -> Binder {
+        Self::new_inner(session, BindFor::Ddl, vec![])
+    }
+
+    pub fn new_for_system(session: &SessionImpl) -> Binder {
+        Self::new_inner(session, BindFor::System, vec![])
+    }
+
+    pub fn new_for_stream_with_param_types(
+        session: &SessionImpl,
+        param_types: Vec<DataType>,
+    ) -> Binder {
+        Self::new_inner(session, BindFor::Stream, param_types)
+    }
+
+    fn is_for_stream(&self) -> bool {
+        matches!(self.bind_for, BindFor::Stream)
+    }
+
+    fn is_for_batch(&self) -> bool {
+        matches!(self.bind_for, BindFor::Batch)
+    }
+
+    fn is_for_ddl(&self) -> bool {
+        matches!(self.bind_for, BindFor::Ddl)
     }
 
     /// Bind a [`Statement`].
@@ -227,8 +270,13 @@ impl Binder {
         self.param_types.export()
     }
 
-    pub fn shared_views(&self) -> &HashMap<ViewId, ShareId> {
-        &self.shared_views
+    /// Returns included relations in the query after binding. This is used for resolving relation
+    /// dependencies. Note that it only contains referenced relations discovered during binding.
+    /// After the plan is built, the referenced relations may be changed. We cannot rely on the
+    /// collection result of plan, because we still need to record the dependencies that have been
+    /// optimised away.
+    pub fn included_relations(&self) -> HashSet<TableId> {
+        self.included_relations.clone()
     }
 
     fn push_context(&mut self) {

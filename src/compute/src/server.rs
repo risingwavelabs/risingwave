@@ -104,6 +104,7 @@ pub async fn compute_node_serve(
         WorkerType::ComputeNode,
         &advertise_addr,
         opts.parallelism,
+        &config.meta,
     )
     .await
     .unwrap();
@@ -273,8 +274,16 @@ pub async fn compute_node_serve(
     // Spawn LRU Manager that have access to collect memory from batch mgr and stream mgr.
     let batch_mgr_clone = batch_mgr.clone();
     let stream_mgr_clone = stream_mgr.clone();
+
+    // NOTE: Due to some limits, we use `total_memory_bytes` as `total_compute_memory_bytes` for
+    // memory control. This is just a workaround for some memory control issues and should be
+    // modified as soon as we figure out a better solution.
+    //
+    // Related issues:
+    // - https://github.com/risingwavelabs/risingwave/issues/8696
+    // - https://github.com/risingwavelabs/risingwave/issues/8822
     let memory_mgr = GlobalMemoryManager::new(
-        compute_memory_bytes,
+        opts.total_memory_bytes,
         system_params.barrier_interval_ms(),
         streaming_metrics.clone(),
         memory_control_policy,

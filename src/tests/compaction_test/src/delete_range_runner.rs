@@ -23,6 +23,7 @@ use bytes::Bytes;
 use futures::StreamExt;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
+use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
@@ -46,7 +47,7 @@ use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::{
-    HummockStorage, MemoryLimiter, SstableObjectIdManager, SstableStore, TieredCache,
+    CachePolicy, HummockStorage, MemoryLimiter, SstableObjectIdManager, SstableStore, TieredCache,
 };
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
@@ -400,6 +401,7 @@ impl NormalState {
                     table_id: self.table_id,
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await
@@ -426,6 +428,7 @@ impl NormalState {
                         table_id: self.table_id,
                         read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                        cache_policy: CachePolicy::Fill(CachePriority::High),
                     },
                 )
                 .await
@@ -458,6 +461,7 @@ impl CheckState for NormalState {
                         table_id: self.table_id,
                         read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                        cache_policy: CachePolicy::Fill(CachePriority::High),
                     },
                 )
                 .await

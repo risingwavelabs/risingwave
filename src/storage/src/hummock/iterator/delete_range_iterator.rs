@@ -241,12 +241,13 @@ impl DeleteRangeIterator for ForwardMergeRangeIterator {
 
     fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
         self.unused_iters.extend(self.heap.drain());
-        for mut node in self.unused_iters.drain(..) {
-            node.seek(target_user_key);
-            if node.is_valid() {
-                self.heap.push(node);
-            }
-        }
+        self.heap = self
+            .unused_iters
+            .drain_filter(|node| {
+                node.seek(target_user_key);
+                node.is_valid()
+            })
+            .collect();
     }
 
     fn is_valid(&self) -> bool {

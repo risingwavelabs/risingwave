@@ -174,12 +174,19 @@ impl DatabaseManager {
                 && x.name.eq(&relation_key.2)
         }) {
             Err(MetaError::catalog_duplicated("view", &relation_key.2))
-        } else if self.functions.values().any(|x| {
-            x.database_id == relation_key.0
-                && x.schema_id == relation_key.1
-                && x.name.eq(&relation_key.2)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn check_function_duplicated(&self, function: &Function) -> MetaResult<()> {
+        if self.functions.values().any(|x| {
+            x.database_id == function.database_id
+                && x.schema_id == function.schema_id
+                && x.name.eq(&function.name)
+                && x.arg_types == function.arg_types
         }) {
-            Err(MetaError::catalog_duplicated("function", &relation_key.2))
+            Err(MetaError::catalog_duplicated("function", &function.name))
         } else {
             Ok(())
         }
@@ -283,6 +290,18 @@ impl DatabaseManager {
         }
     }
 
+    pub fn has_creation_in_database(&self, database_id: DatabaseId) -> bool {
+        self.in_progress_creation_tracker
+            .iter()
+            .any(|relation_key| relation_key.0 == database_id)
+    }
+
+    pub fn has_creation_in_schema(&self, schema_id: SchemaId) -> bool {
+        self.in_progress_creation_tracker
+            .iter()
+            .any(|relation_key| relation_key.1 == schema_id)
+    }
+
     pub fn has_in_progress_creation(&self, relation: &RelationKey) -> bool {
         self.in_progress_creation_tracker
             .contains(&relation.clone())
@@ -384,12 +403,15 @@ impl DatabaseManager {
     }
 
     // TODO(zehua): refactor when using SourceId.
-    pub fn ensure_table_or_source_id(&self, table_id: &TableId) -> MetaResult<()> {
-        if self.tables.contains_key(table_id) || self.sources.contains_key(table_id) {
+    pub fn ensure_table_view_or_source_id(&self, table_id: &TableId) -> MetaResult<()> {
+        if self.tables.contains_key(table_id)
+            || self.sources.contains_key(table_id)
+            || self.views.contains_key(table_id)
+        {
             Ok(())
         } else {
             Err(MetaError::catalog_id_not_found(
-                "table or source",
+                "table, view or source",
                 *table_id,
             ))
         }

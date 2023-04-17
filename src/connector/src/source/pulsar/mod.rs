@@ -18,7 +18,6 @@ pub mod split;
 pub mod topic;
 
 use std::collections::HashMap;
-use std::fs::File;
 use std::io::Write;
 
 use anyhow::{anyhow, Result};
@@ -29,14 +28,14 @@ use risingwave_common::error::ErrorCode::InvalidParameterValue;
 use risingwave_common::error::RwError;
 use serde::Deserialize;
 pub use split::*;
+<<<<<<< HEAD
 use tempfile::{tempfile, NamedTempFile, TempPath};
 use url::Url;
 
-use crate::aws_utils::{load_file_descriptor_from_s3, AWS_DEFAULT_CONFIG};
+>>>>>>> origin/main
 
 pub const PULSAR_CONNECTOR: &str = "pulsar";
 
-#[derive(Clone, Debug, Deserialize)]
 pub struct PulsarOauth {
     #[serde(rename = "oauth.issuer.url")]
     pub issuer_url: String,
@@ -112,18 +111,14 @@ impl PulsarProperties {
                         .to_str()
                         .unwrap()
                         .to_string();
-                    raw_path.insert_str(0, "file:");
+                    raw_path.insert_str(0, "file://");
                     raw_path
                 },
                 audience: Some(oauth.audience.clone()),
                 scope: oauth.scope.clone(),
             };
 
-            pulsar_builder = pulsar_builder
-                .with_auth_provider(OAuth2Authentication::client_credentials(auth_params));
-        } else if let Some(auth_token) = &self.auth_token {
             pulsar_builder = pulsar_builder.with_auth(Authentication {
-                name: "token".to_string(),
                 data: Vec::from(auth_token.as_str()),
             });
         }

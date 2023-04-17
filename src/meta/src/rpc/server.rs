@@ -59,7 +59,7 @@ use crate::manager::{
 };
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
-use crate::rpc::metrics::{start_worker_info_monitor, MetaMetrics};
+use crate::rpc::metrics::{start_fragment_info_monitor, start_worker_info_monitor, MetaMetrics};
 use crate::rpc::service::backup_service::BackupServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
@@ -71,7 +71,7 @@ use crate::rpc::service::telemetry_service::TelemetryInfoServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
 use crate::stream::{GlobalStreamManager, SourceManager};
-use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
+use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher, TrackingId};
 use crate::{hummock, MetaResult};
 
 #[derive(Debug)]
@@ -387,6 +387,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     let (barrier_scheduler, scheduled_barriers) = BarrierScheduler::new_pair(
         hummock_manager.clone(),
+        meta_metrics.clone(),
         system_params_reader.checkpoint_frequency() as usize,
     );
 
@@ -396,6 +397,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             barrier_scheduler.clone(),
             catalog_manager.clone(),
             fragment_manager.clone(),
+            meta_metrics.clone(),
         )
         .await
         .unwrap(),
@@ -444,7 +446,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let backup_manager = BackupManager::new(
         env.clone(),
         hummock_manager.clone(),
-        meta_metrics.registry().clone(),
+        meta_metrics.clone(),
         system_params_reader.backup_storage_url(),
         system_params_reader.backup_storage_directory(),
     )
@@ -524,13 +526,25 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     ));
 
     // sub_tasks executed concurrently. Can be shutdown via shutdown_all
-    let mut sub_tasks =
-        hummock::start_hummock_workers(vacuum_manager, compaction_scheduler, &env.opts);
+    let mut sub_tasks = hummock::start_hummock_workers(
+        hummock_manager.clone(),
+        vacuum_manager,
+        compaction_scheduler,
+        &env.opts,
+    );
     sub_tasks.push(
         start_worker_info_monitor(
             cluster_manager.clone(),
             election_client.clone(),
             Duration::from_secs(env.opts.node_num_monitor_interval_sec),
+            meta_metrics.clone(),
+        )
+        .await,
+    );
+    sub_tasks.push(
+        start_fragment_info_monitor(
+            cluster_manager.clone(),
+            fragment_manager.clone(),
             meta_metrics.clone(),
         )
         .await,
@@ -568,6 +582,15 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         Arc::new(MetaReportCreator::new()),
     );
 
+    {
+        // always create a tracking_id for a cluster
+        // if it's persistent in etcd, won't create a new one
+        let tracking_id: String = TrackingId::get_or_create_meta_store(&meta_store)
+            .await?
+            .into();
+        tracing::info!("Launching Meta {}", tracking_id);
+    }
+
     // May start telemetry reporting
     if let MetaBackend::Etcd = meta_store.meta_store_type() && env.opts.telemetry_enabled && telemetry_env_enabled(){
         if system_params_reader.telemetry_enabled(){
@@ -604,6 +627,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             }
         }
     };
+
+    tracing::info!("Starting meta services");
 
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))
