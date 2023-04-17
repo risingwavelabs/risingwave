@@ -104,6 +104,19 @@ fn kafka_props_broker_key(with_properties: &HashMap<String, String>) -> &str {
     }
 }
 
+#[inline(always)]
+fn get_property_required(
+    with_properties: &HashMap<String, String>,
+    property: &str,
+) -> MetaResult<String> {
+    with_properties
+        .get(property)
+        .map(|s| s.to_lowercase())
+        .ok_or(MetaError::from(anyhow!(
+            "Required property \"{property}\" was not provided"
+        )))
+}
+
 #[async_trait::async_trait]
 impl<S> DdlService for DdlServiceImpl<S>
 where
@@ -696,24 +709,21 @@ where
     ) -> MetaResult<()> {
         let mut broker_rewrite_map = HashMap::new();
         const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
-        if let Some(link_target_value) = properties.get(PRIVATE_LINK_TARGETS_KEY) {
+        let conn = self
+            .catalog_manager
+            .get_connection_by_id(connection_id)
+            .await?;
+        if let Some(connection::Info::PrivateLinkService(svc)) = &conn.info {
             if !is_kafka_connector(properties) {
                 return Err(MetaError::from(anyhow!(
                     "Private link is only supported for Kafka connector",
                 )));
             }
-
-            let servers = properties
-                .get(kafka_props_broker_key(properties))
-                .cloned()
-                .ok_or(MetaError::from(anyhow!(
-                    "Must specify \"{KAFKA_PROPS_BROKER_KEY}\" property in WITH clause",
-                )))?;
-
+            let link_target_value = get_property_required(properties, PRIVATE_LINK_TARGETS_KEY)?;
+            let servers = get_property_required(properties, kafka_props_broker_key(properties))?;
             let broker_addrs = servers.split(',').collect_vec();
             let link_targets: Vec<AwsPrivateLinkItem> =
-                serde_json::from_str(link_target_value).map_err(|e| anyhow!(e))?;
-
+                serde_json::from_str(link_target_value.as_str()).map_err(|e| anyhow!(e))?;
             if broker_addrs.len() != link_targets.len() {
                 return Err(MetaError::from(anyhow!(
                     "The number of broker addrs {} does not match the number of private link targets {}",
@@ -721,28 +731,15 @@ where
                     link_targets.len()
                 )));
             }
-
-            let conn = self
-                .catalog_manager
-                .get_connection_by_id(connection_id)
-                .await?;
-
-            if let Some(connection::Info::PrivateLinkService(svc)) = &conn.info {
-                // check whether the VPC endpoint is ready
-                let cli = self.aws_client.as_ref().unwrap();
-                if !cli.is_vpc_endpoint_ready(&svc.endpoint_id).await? {
-                    return Err(MetaError::from(anyhow!(
-                        "Private link endpoint {} is not ready",
-                        svc.endpoint_id
-                    )));
-                }
-            } else {
+            // check whether private link is ready
+            let cli = self.aws_client.as_ref().unwrap();
+            if !cli.is_vpc_endpoint_ready(&svc.endpoint_id).await? {
                 return Err(MetaError::from(anyhow!(
-                    "Connection is not a private link service"
+                    "Private link endpoint {} is not ready",
+                    svc.endpoint_id
                 )));
             }
 
-            // construct the rewrite mapping for brokers
             for (link, broker) in link_targets.iter().zip_eq_fast(broker_addrs.into_iter()) {
                 if let Some(connection::Info::PrivateLinkService(svc)) = &conn.info {
                     if svc.dns_entries.is_empty() {
