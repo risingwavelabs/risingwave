@@ -228,6 +228,16 @@ pub fn tand_f64(input: F64) -> F64 {
     result.into()
 }
 
+#[function("degrees(float64) -> float64")]
+pub fn degrees_f64(input: F64) -> F64 {
+    input.0.to_degrees().into()
+}
+
+#[function("radians(float64) -> float64")]
+pub fn radians_f64(input: F64) -> F64 {
+    input.0.to_radians().into()
+}
+
 #[cfg(test)]
 mod tests {
 
