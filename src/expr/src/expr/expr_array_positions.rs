@@ -78,17 +78,14 @@ fn array_positions<'a, T: ScalarRef<'a>>(
         Some(left) => {
             let values = left.values_ref();
             match TryInto::<i32>::try_into(values.len()) {
-                Ok(_) => Ok(Some(
-                    ListValue::new(
-                        values
-                            .into_iter()
-                            .enumerate()
-                            .filter(|(_, item)| item == &element.map(|x| x.into()))
-                            .map(|(idx, _)| Some(ScalarImpl::Int32((idx + 1) as _)))
-                            .collect(),
-                    )
-                    .into(),
-                )),
+                Ok(_) => Ok(Some(ListValue::new(
+                    values
+                        .into_iter()
+                        .enumerate()
+                        .filter(|(_, item)| item == &element.map(|x| x.into()))
+                        .map(|(idx, _)| Some(ScalarImpl::Int32((idx + 1) as _)))
+                        .collect(),
+                ))),
                 Err(_) => Err(ExprError::CastOutOfRange("invalid array length")),
             }
         }
