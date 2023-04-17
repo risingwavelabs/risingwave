@@ -409,6 +409,7 @@ where
             existing_locations,
             table_properties: stream_job.properties(),
             definition: stream_job.mview_definition(),
+            mv_table_id: stream_job.mv_table(),
         };
 
         // 4. Mark creating tables, including internal tables and the table of the stream job.

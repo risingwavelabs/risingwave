@@ -335,7 +335,7 @@ pub trait HashKey:
 ///
 /// See [`crate::hash::calc_hash_key_kind`]
 #[derive(Clone, Debug)]
-pub struct FixedSizeKey<const N: usize, B = StackNullBitmap> {
+pub struct FixedSizeKey<const N: usize, B: NullBitmap = StackNullBitmap> {
     key: [u8; N],
     hash_code: u64,
     null_bitmap: B,
@@ -345,7 +345,7 @@ pub struct FixedSizeKey<const N: usize, B = StackNullBitmap> {
 ///
 /// See [`crate::hash::calc_hash_key_kind`]
 #[derive(Clone, Debug)]
-pub struct SerializedKey<B = StackNullBitmap> {
+pub struct SerializedKey<B: NullBitmap = StackNullBitmap> {
     // Key encoding.
     key: Vec<u8>,
     hash_code: u64,

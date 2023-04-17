@@ -3589,9 +3589,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.20"
+version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0296e75e03fc45c2e0bd30a11eb023a6b5698c781355ae526a01478bb09dd83"
+checksum = "3d3f6f28042419b0a63a7db6a8b4f74db021453d567f76cdbfd81494eeec0b22"
 dependencies = [
  "ahash 0.7.6",
  "async-channel",
@@ -3702,9 +3702,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tonic"
-version = "0.2.20"
+version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "189f256e4ce279a6635b323d2b9652f0cd530c89916ac9b1c08228141104cddd"
+checksum = "fe20f1ea4dcec4518527299b2313c680d7f064140e026c0fa4c2857649d982f4"
 dependencies = [
  "async-stream",
  "chrono",
@@ -4086,17 +4086,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "02e0d21255c828d6f128a1e41534206671e8c3ea0c62f32291e808dc82cff17d"
 dependencies = [
  "num-traits",
-]
-
-[[package]]
-name = "num-derive"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "876a53fff98e03a936a674b29568b0e605f06b29372c2489ff4de23f1949743d"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -6061,6 +6050,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "chrono",
+ "criterion",
  "csv",
  "duration-str",
  "enum-as-inner",
@@ -6275,8 +6265,6 @@ dependencies = [
  "hex",
  "itertools",
  "madsim-tokio",
- "num-derive",
- "num-traits",
  "parking_lot 0.12.1",
  "parse-display",
  "risingwave_common",
