@@ -120,7 +120,7 @@ incremental = false
 # Patch third-party crates for deterministic simulation.
 [patch.crates-io]
 quanta = { git = "https://github.com/madsim-rs/quanta.git", rev = "948bdc3" }
-getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "cc95ee3" }
+getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "8daf97e" }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0c25710" }
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "4538cd6" }
