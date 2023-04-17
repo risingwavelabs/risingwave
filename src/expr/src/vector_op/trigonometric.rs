@@ -304,6 +304,10 @@ mod tests {
             cosd_f64(F64::from(250)),
         );
 
+        // exact matches
+        assert_eq!(cosd_f64(F64::from(0)).0, 1.0);
+        assert_eq!(cosd_f64(F64::from(90)).0, 0.0);
+
         // tand
         assert_similar(
             tan_f64(F64::from(-10).to_radians().into()),
@@ -324,12 +328,11 @@ mod tests {
         );
 
         // exact matches
-        assert_eq!(cosd_f64(F64::from(0)).0, 1.0);
-        assert_eq!(cosd_f64(F64::from(90)).0, 0.0);
         assert!(tand_f64(F64::from(-270)).is_infinite());
         assert_eq!(tand_f64(F64::from(-180)), 0.0);
         assert_eq!(tand_f64(F64::from(180)), 0.0);
         assert!(tand_f64(F64::from(-90)).is_infinite());
+        assert!(tand_f64(F64::from(90)).is_infinite());
         assert!(tand_f64(F64::from(270)).is_infinite());
         assert!(tand_f64(F64::from(450)).is_infinite());
         assert!(tand_f64(F64::from(90)).is_infinite());

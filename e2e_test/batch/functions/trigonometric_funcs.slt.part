@@ -336,22 +336,22 @@ NaN
 query R
 SELECT tand(90)
 ----
-Inf
+Infinity
 
 query R
 SELECT tand(-90)
 ----
-Inf
+Infinity
 
 query R
 SELECT tand(270)
 ----
-Inf
+Infinity
 
 query R
 SELECT tand(-270)
 ----
-Inf
+Infinity
 
 
 query R

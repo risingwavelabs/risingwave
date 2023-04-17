@@ -367,7 +367,7 @@ impl Binder {
                 ("atan2", raw_call(ExprType::Atan2)),   
                 ("sind", raw_call(ExprType::Sind)),     
                 ("cosd", raw_call(ExprType::Cosd)), 
-                ("tand", raw_call(ExprType::Cosd)), 
+                ("tand", raw_call(ExprType::Tand)), 
                 ("degrees", raw_call(ExprType::Degrees)),
                 ("radians", raw_call(ExprType::Radians)),
                 ("sqrt", raw_call(ExprType::Sqrt)),     
