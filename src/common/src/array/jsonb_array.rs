@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt;
 use std::mem::size_of;
 
 use postgres_types::{FromSql as _, ToSql as _, Type};
@@ -28,6 +29,22 @@ pub struct JsonbVal(Box<Value>); // The `Box` is just to keep `size_of::<ScalarI
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct JsonbRef<'a>(&'a Value);
+
+/// The display of `JsonbVal` is pg-compatible format which has slightly different from
+/// `serde_json::Value`.
+impl fmt::Display for JsonbVal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        crate::types::to_text::ToText::write(&self.as_scalar_ref(), f)
+    }
+}
+
+/// The display of `JsonbRef` is pg-compatible format which has slightly different from
+/// `serde_json::Value`.
+impl fmt::Display for JsonbRef<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        crate::types::to_text::ToText::write(self, f)
+    }
+}
 
 impl Scalar for JsonbVal {
     type ScalarRefType<'a> = JsonbRef<'a>;
@@ -283,7 +300,7 @@ impl FromIterator<Option<JsonbVal>> for JsonbArray {
         let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
         for i in iter {
             match i {
-                Some(x) => builder.append(Some(x.as_scalar_ref())),
+                Some(x) => builder.append_move(x),
                 None => builder.append(None),
             }
         }
@@ -303,7 +320,7 @@ pub struct JsonbArrayBuilder {
     data: Vec<Value>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsonbArray {
     bitmap: Bitmap,
     data: Vec<Value>,
@@ -354,10 +371,7 @@ impl ArrayBuilder for JsonbArrayBuilder {
 }
 
 impl JsonbArrayBuilder {
-    pub fn append_move(
-        &mut self,
-        value: <<JsonbArrayBuilder as ArrayBuilder>::ArrayType as Array>::OwnedItem,
-    ) {
+    pub fn append_move(&mut self, value: JsonbVal) {
         self.bitmap.append(true);
         self.data.push(*value.0);
     }

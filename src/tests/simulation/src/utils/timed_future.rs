@@ -40,7 +40,7 @@ where
 {
     type Output = Fut::Output;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
         let start = this.start.get_or_insert_with(Instant::now);
 

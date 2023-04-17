@@ -340,7 +340,7 @@ impl DataChunk {
         &self,
         column_idxes: &[usize],
         hasher_builder: H,
-    ) -> Vec<HashCode> {
+    ) -> Vec<HashCode<H>> {
         let mut states = Vec::with_capacity(self.capacity());
         states.resize_with(self.capacity(), || hasher_builder.build_hasher());
         // Compute hash for the specified columns.

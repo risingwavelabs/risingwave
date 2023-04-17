@@ -67,7 +67,7 @@ impl Expression for UdfExpression {
         let Some(arrow_array) = output.columns().get(0) else {
             bail!("UDF returned no columns");
         };
-        let mut array = ArrayImpl::from(arrow_array);
+        let mut array = ArrayImpl::try_from(arrow_array)?;
         array.set_bitmap(array.null_bitmap() & vis);
         Ok(Arc::new(array))
     }

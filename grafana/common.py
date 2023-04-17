@@ -1,4 +1,4 @@
-from grafanalib.core import Dashboard, TimeSeries, Target, GridPos, RowPanel, Time, Templating
+from grafanalib.core import Dashboard, TimeSeries, Target, GridPos, RowPanel, Time, Templating, Table
 import logging
 import os
 
@@ -114,6 +114,13 @@ class Panels:
                       legendFormat=legendFormat,
                       datasource=self.datasource,
                       hide=hide)
+
+    def table_target(self, expr, hide=False):
+        return Target(expr=expr,
+                      datasource=self.datasource,
+                      hide=hide,
+                      instant=True,
+                      format='table')
 
     def timeseries(self, title, description, targets):
         gridPos = self.layout.next_half_width_graph()
@@ -476,10 +483,23 @@ class Panels:
             legendPlacement="right",
         )
 
+    def table_info(self, title, description, targets, excluded_columns):
+        gridPos = self.layout.next_half_width_graph()
+        excludedByName = dict.fromkeys(excluded_columns, True)
+        transformations = [{"id": "organize", "options": {
+            "excludeByName": excludedByName}}]
+        return Table(
+            title=title,
+            description=description,
+            targets=targets,
+            gridPos=gridPos,
+            showHeader=True,
+            filterable=True,
+            transformations=transformations
+        )
+
     def sub_panel(self):
         return Panels(self.datasource)
-
-
 
 
 def metric(name, filter=None):
