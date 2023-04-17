@@ -40,7 +40,6 @@ pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
 use risingwave_common::util::resource_util;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::LocalSstableInfo;
@@ -59,6 +58,7 @@ pub use self::compaction_utils::{CompactionStatistics, RemoteBuilderFactory, Tas
 use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{HummockResult, SstableBuilderOptions, XorFilterBuilder};
+use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_state_for_compaction, generate_splits,
 };
@@ -177,10 +177,17 @@ impl Compactor {
 
         let mut multi_filter = build_multi_compaction_filter(&compact_task);
 
-        let multi_filter_key_extractor = context
+        let multi_filter_key_extractor = match context
             .filter_key_extractor_manager
             .acquire(HashSet::from_iter(compact_task.existing_table_ids.clone()))
-            .await;
+            .await
+        {
+            Err(e) => {
+                tracing::warn!("Failed to fetch filter key extractor tables [{:?}], some of tables may be removed because of {:?}", compact_task.existing_table_ids, e);
+                return TaskStatus::ExecuteFailed;
+            }
+            Ok(extractor) => extractor,
+        };
         let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
 
         let mut task_status = TaskStatus::Success;

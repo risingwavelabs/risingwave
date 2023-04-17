@@ -2080,6 +2080,19 @@ where
             .notify_frontend_relation_info(operation, relation_info)
             .await
     }
+
+    pub async fn get_tables(&self, table_ids: &[TableId]) -> Vec<Table> {
+        let mut tables = vec![];
+        let guard = self.core.lock().await;
+        for table_id in table_ids {
+            if let Some(table) = guard.database.in_progress_creating_tables.get(table_id) {
+                tables.push(table.clone());
+            } else if let Some(table) = guard.database.tables.get(table_id) {
+                tables.push(table.clone());
+            }
+        }
+        tables
+    }
 }
 
 // User related methods

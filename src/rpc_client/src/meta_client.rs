@@ -41,7 +41,7 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
 use risingwave_pb::catalog::{
-    Connection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
+    Connection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
@@ -877,6 +877,14 @@ impl MetaClient {
         let resp = self.inner.split_compaction_group(req).await?;
         Ok(resp.new_group_id)
     }
+
+    pub async fn list_tables(&self, table_ids: &[u32]) -> Result<HashMap<u32, Table>> {
+        let req = ListTablesRequest {
+            table_ids: table_ids.to_vec(),
+        };
+        let resp = self.inner.list_tables(req).await?;
+        Ok(resp.tables)
+    }
 }
 
 #[async_trait]
@@ -1427,6 +1435,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
+            ,{ stream_client, list_tables, ListTablesRequest, ListTablesResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
              ,{ ddl_client, alter_relation_name, AlterRelationNameRequest, AlterRelationNameResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }

@@ -14,6 +14,7 @@ ignored = ["workspace-hack", "num-traits"]
 normal = ["workspace-hack"]
 
 [dependencies]
+async-trait = "0.1"
 bytes = "1"
 hex = "0.4"
 itertools = "0.10"
