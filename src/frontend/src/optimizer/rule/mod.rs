@@ -105,9 +105,10 @@ mod limit_push_down_rule;
 pub use limit_push_down_rule::*;
 mod pull_up_hop_rule;
 pub use pull_up_hop_rule::*;
-
 mod apply_offset_rewriter;
 use apply_offset_rewriter::ApplyOffsetRewriter;
+mod limit_eliminate_rule;
+pub use limit_eliminate_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -152,6 +153,7 @@ macro_rules! for_all_rules {
             , { JoinProjectTransposeRule }
             , { LimitPushDownRule }
             , { PullUpHopRule }
+            , { LimitEliminateRule }
         }
     };
 }

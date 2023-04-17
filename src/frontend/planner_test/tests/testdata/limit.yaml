@@ -75,3 +75,11 @@
   planner_error: |-
     Feature is not yet implemented: WITH TIES is not supported with OFFSET
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    select 1 limit 1
+  batch_plan: |
+    BatchValues { rows: [[1:Int32]] }
+- sql: |
+    select 1 union all select 1 limit 10
+  batch_plan: |
+    BatchValues { rows: [[1:Int32], [1:Int32]] }
