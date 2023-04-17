@@ -178,6 +178,8 @@ struct JoinSide<K: HashKey, S: StateStore> {
     /// The second field indicates that whether the column is required less than the
     /// the corresponding column in the counterpart join side in the band join condition.
     input2inequality_index: Vec<Vec<(usize, bool)>>,
+    /// Some fields which are required non null to match due to inequalities.
+    non_null_fields: Vec<usize>,
     /// (i, j) in this `Vec` means that state data in this join side can be cleaned if the value of
     /// its ith column is less than the synthetic watermark of the jth band join condition.
     state_clean_columns: Vec<(usize, usize)>,
@@ -594,9 +596,20 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             )
             .collect_vec();
 
+        let mut l_non_null_fields = l2inequality_index
+            .iter()
+            .positions(|inequalities| !inequalities.is_empty())
+            .collect_vec();
+        let mut r_non_null_fields = r2inequality_index
+            .iter()
+            .positions(|inequalities| !inequalities.is_empty())
+            .collect_vec();
+
         if append_only_optimize {
             l_state_clean_columns.clear();
             r_state_clean_columns.clear();
+            l_non_null_fields.clear();
+            r_non_null_fields.clear();
         }
 
         let inequality_watermarks = vec![None; inequality_pairs.len()];
@@ -630,6 +643,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 i2o_mapping: left_to_output,
                 i2o_mapping_indexed: l2o_indexed,
                 input2inequality_index: l2inequality_index,
+                non_null_fields: l_non_null_fields,
                 state_clean_columns: l_state_clean_columns,
                 start_pos: 0,
                 need_degree_table: need_degree_table_l,
@@ -657,6 +671,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 i2o_mapping: right_to_output,
                 i2o_mapping_indexed: r2o_indexed,
                 input2inequality_index: r2inequality_index,
+                non_null_fields: r_non_null_fields,
                 state_clean_columns: r_state_clean_columns,
                 need_degree_table: need_degree_table_r,
             },
@@ -1000,8 +1015,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         for ((op, row), key) in chunk.rows().zip_eq_debug(keys.iter()) {
             Self::evict_cache(side_update, side_match, cnt_rows_received);
 
-            let matched_rows: Option<HashValueType> =
-                Self::hash_eq_match(key, &mut side_match.ht).await?;
+            let matched_rows: Option<HashValueType> = if side_update
+                .non_null_fields
+                .iter()
+                .all(|column_idx| unsafe { row.datum_at_unchecked(*column_idx).is_some() })
+            {
+                Self::hash_eq_match(key, &mut side_match.ht).await?
+            } else {
+                None
+            };
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     let mut degree = 0;
