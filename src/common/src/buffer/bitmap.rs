@@ -631,7 +631,6 @@ unsafe impl TrustedLen for BitmapIter<'_> {}
 
 pub struct BitmapOnesIter<'a> {
     bitmap: &'a Bitmap,
-    /// `None` means finished
     idx: usize,
 }
 
@@ -639,9 +638,9 @@ impl<'a> iter::Iterator for BitmapOnesIter<'a> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let next_idx = self.bitmap.next_set_bit(self.idx + 1);
+        let next_idx = self.bitmap.next_set_bit(self.idx);
         if let Some(idx) = next_idx {
-            self.idx = idx;
+            self.idx = idx + 1;
         }
         next_idx
     }
