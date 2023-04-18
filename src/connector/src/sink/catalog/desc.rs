@@ -15,7 +15,9 @@
 use std::collections::BTreeMap;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, DatabaseId, SchemaId, TableId, UserId};
+use risingwave_common::catalog::{
+    ColumnCatalog, ConnectionId, DatabaseId, SchemaId, TableId, UserId,
+};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::plan_common::PbColumnDesc;
 use risingwave_pb::stream_plan::PbSinkDesc;
@@ -61,6 +63,7 @@ impl SinkDesc {
         schema_id: SchemaId,
         database_id: DatabaseId,
         owner: UserId,
+        connection_id: Option<ConnectionId>,
         dependent_relations: Vec<TableId>,
     ) -> SinkCatalog {
         SinkCatalog {
@@ -77,6 +80,7 @@ impl SinkDesc {
             dependent_relations,
             properties: self.properties.into_iter().collect(),
             sink_type: self.sink_type,
+            connection_id: None,
         }
     }
 

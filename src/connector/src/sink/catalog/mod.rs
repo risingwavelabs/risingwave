@@ -18,7 +18,7 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
+    ColumnCatalog, ConnectionId, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
 };
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{PbSink, PbSinkType};
@@ -138,6 +138,9 @@ pub struct SinkCatalog {
     // based on both its own derivation on the append-only attribute and other user-specified
     // options in `properties`.
     pub sink_type: SinkType,
+
+    /// Sink may use a privatelink connection to connect to the downstream system.
+    pub connection_id: Option<ConnectionId>,
 }
 
 impl SinkCatalog {
@@ -168,7 +171,7 @@ impl SinkCatalog {
             owner: self.owner.into(),
             properties: self.properties.clone(),
             sink_type: self.sink_type.to_proto() as i32,
-            connection_id: None,
+            connection_id: self.connection_id.map(|id| id.into()),
         }
     }
 
