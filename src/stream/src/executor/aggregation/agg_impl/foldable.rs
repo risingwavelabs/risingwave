@@ -288,21 +288,23 @@ where
                 }
             }
             Some(visibility) => {
-                for ((visible, op), data) in visibility
-                    .iter()
-                    .zip_eq_fast(ops.iter())
-                    .zip_eq_fast(data.iter())
-                {
-                    if visible {
-                        match op {
+                let mut cur_idx: usize = 0;
+                while let Some(idx) = visibility.next_set_bit(cur_idx) {
+                    unsafe {
+                        match ops[idx] {
                             Op::Insert | Op::UpdateInsert => {
-                                self.result = S::accumulate(self.result.as_ref(), data)?
+                                self.result = S::accumulate(
+                                    self.result.as_ref(),
+                                    data.value_at_unchecked(idx),
+                                )?
                             }
                             Op::Delete | Op::UpdateDelete => {
-                                self.result = S::retract(self.result.as_ref(), data)?
+                                self.result =
+                                    S::retract(self.result.as_ref(), data.value_at_unchecked(idx))?
                             }
                         }
                     }
+                    cur_idx = idx + 1;
                 }
             }
         }
