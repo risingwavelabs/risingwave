@@ -42,8 +42,8 @@ pub struct LogicalInsert {
     table_id: TableId,
     table_version_id: TableVersionId,
     input: PlanRef,
-    column_indices: Vec<usize>, // columns in which to insert
-    default_columns: Option<Vec<(usize, ExprImpl)>>, // columns to be set to default
+    column_indices: Vec<usize>,              // columns in which to insert
+    default_columns: Vec<(usize, ExprImpl)>, // columns to be set to default
     row_id_index: Option<usize>,
     returning: bool,
 }
@@ -57,7 +57,7 @@ impl LogicalInsert {
         table_id: TableId,
         table_version_id: TableVersionId,
         column_indices: Vec<usize>,
-        default_columns: Option<Vec<(usize, ExprImpl)>>,
+        default_columns: Vec<(usize, ExprImpl)>,
         row_id_index: Option<usize>,
         returning: bool,
     ) -> Self {
@@ -90,7 +90,7 @@ impl LogicalInsert {
         table_id: TableId,
         table_version_id: TableVersionId,
         column_indices: Vec<usize>,
-        default_columns: Option<Vec<(usize, ExprImpl)>>,
+        default_columns: Vec<(usize, ExprImpl)>,
         row_id_index: Option<usize>,
         returning: bool,
     ) -> Result<Self> {
@@ -130,11 +130,11 @@ impl LogicalInsert {
                     .map(|(k, v)| format!("{}:{}", k, v))
                     .join(", ")
             )?;
-            if let Some(default_columns) = self.default_columns().clone() {
+            if !self.default_columns.is_empty() {
                 write!(
                     f,
                     ", default columns: [{}]",
-                    default_columns
+                    self.default_columns()
                         .into_iter()
                         .map(|(k, v)| format!("{}<-{:?}", k, v))
                         .join(", ")
@@ -151,7 +151,7 @@ impl LogicalInsert {
     }
 
     #[must_use]
-    pub fn default_columns(&self) -> Option<Vec<(usize, ExprImpl)>> {
+    pub fn default_columns(&self) -> Vec<(usize, ExprImpl)> {
         self.default_columns.clone()
     }
 

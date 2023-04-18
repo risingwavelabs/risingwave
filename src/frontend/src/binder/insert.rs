@@ -54,7 +54,7 @@ pub struct BoundInsert {
 
     /// Columns that user fails to specify
     /// Will set to default value (current null)
-    pub default_columns: Option<Vec<(usize, ExprImpl)>>,
+    pub default_columns: Vec<(usize, ExprImpl)>,
 
     pub source: BoundQuery,
 
@@ -220,16 +220,14 @@ impl Binder {
                     // e.g. insert into t (v1, v2) values (7)
                     (
                         Some("INSERT has more target columns than expressions"),
-                        None,
+                        vec![],
                     )
                 } else {
                     // e.g. create table t (a int, b real)
                     //      insert into t values (7)
                     // this kind of usage is fine, null values will be provided
                     // implicitly.
-                    let new_default_column_indices =
-                        col_indices_to_insert.split_off(bounded_column_nums);
-                    (None, Some(new_default_column_indices))
+                    (None, col_indices_to_insert.split_off(bounded_column_nums))
                 }
             }
             std::cmp::Ordering::Less => {
@@ -238,7 +236,7 @@ impl Binder {
                 // or   insert into t values (7, 13, 17)
                 (
                     Some("INSERT has more expressions than target columns"),
-                    None,
+                    vec![],
                 )
             }
         };
@@ -246,17 +244,15 @@ impl Binder {
             return Err(RwError::from(ErrorCode::BindError(msg.to_string())));
         }
 
-        let default_columns = default_column_indices.map(|default_column_indices| {
-            default_column_indices
-                .into_iter()
-                .map(|i| {
-                    (
-                        i,
-                        ExprImpl::literal_null(cols_to_insert_in_table[i].data_type().clone()),
-                    )
-                })
-                .collect_vec()
-        });
+        let default_columns = default_column_indices
+            .into_iter()
+            .map(|i| {
+                (
+                    i,
+                    ExprImpl::literal_null(cols_to_insert_in_table[i].data_type().clone()),
+                )
+            })
+            .collect_vec();
 
         let insert = BoundInsert {
             table_id,
@@ -309,9 +305,9 @@ fn get_col_indices_to_insert(
     cols_to_insert_in_table: &[ColumnCatalog],
     cols_to_insert_by_user: &[Ident],
     table_name: &str,
-) -> Result<(Vec<usize>, Option<Vec<usize>>)> {
+) -> Result<(Vec<usize>, Vec<usize>)> {
     if cols_to_insert_by_user.is_empty() {
-        return Ok(((0..cols_to_insert_in_table.len()).collect(), None));
+        return Ok(((0..cols_to_insert_in_table.len()).collect(), vec![]));
     }
 
     let mut col_indices_to_insert: Vec<usize> = Vec::new();
@@ -356,9 +352,9 @@ fn get_col_indices_to_insert(
                 unreachable!();
             }
         }
-        Some(cols)
+        cols
     } else {
-        None
+        vec![]
     };
 
     Ok((col_indices_to_insert, default_column_indices))
