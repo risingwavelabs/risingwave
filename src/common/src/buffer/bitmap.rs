@@ -932,4 +932,20 @@ mod tests {
             assert!(!b.is_set(b.len() - 1));
         }
     }
+
+    #[test]
+    fn test_bitmap_iter_ones() {
+        let mut builder = BitmapBuilder::zeroed(1000);
+        builder.append_n(1000, true);
+        let bitmap = builder.finish();
+        let mut iter = bitmap.iter_ones();
+        for i in 0..1000 {
+            let item = iter.next();
+            assert!(item == Some(i + 1000));
+        }
+        for _ in 0..10000 {
+            let item = iter.next();
+            assert!(item == None);
+        }
+    }
 }
