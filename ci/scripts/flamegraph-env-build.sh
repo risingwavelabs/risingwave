@@ -5,16 +5,12 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
+# FIXME(kwannoel): Not sure if risingwave_java_binding is needed
 echo "--- Build Rust components"
 cargo build \
     -p risingwave_cmd_all \
     -p risedev \
-    -p risingwave_regress_test \
-    -p risingwave_sqlsmith \
-    -p risingwave_compaction_test \
-    -p risingwave_backup_cmd \
     -p risingwave_java_binding \
-    -p risingwave_e2e_extended_mode_test \
     --features "static-link static-log-level" --profile release
 
 # the file name suffix of artifact for risingwave_java_binding is so only for linux. It is dylib for MacOS
