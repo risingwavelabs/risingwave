@@ -42,6 +42,8 @@ pub struct Worker {
     info_version_id: u64,
     // GC watermark.
     hummock_gc_watermark: Option<HummockSstableObjectId>,
+
+    pub is_marked_for_deletion: bool,
 }
 
 impl MetadataModel for Worker {
@@ -62,6 +64,7 @@ impl MetadataModel for Worker {
             expire_at: INVALID_EXPIRE_AT,
             info_version_id: 0,
             hummock_gc_watermark: Default::default(),
+            is_marked_for_deletion: false,
         }
     }
 

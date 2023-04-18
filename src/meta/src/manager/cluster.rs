@@ -162,6 +162,15 @@ where
         Ok(())
     }
 
+    pub async fn get_worker_by_host_checked(
+        &self,
+        host_address: HostAddress,
+    ) -> MetaResult<Worker> {
+        let core = self.core.write().await;
+        let worker = core.get_worker_by_host_checked(host_address.clone())?;
+        Ok(worker)
+    }
+
     pub async fn delete_worker_node(&self, host_address: HostAddress) -> MetaResult<WorkerType> {
         let mut core = self.core.write().await;
         let worker = core.get_worker_by_host_checked(host_address.clone())?;
@@ -200,11 +209,17 @@ where
         info: Vec<heartbeat_request::extra_info::Info>,
     ) -> MetaResult<()> {
         tracing::trace!(target: "events::meta::server_heartbeat", worker_id = worker_id, "receive heartbeat");
+        // core mapps worker keys to the actual workers
         let mut core = self.core.write().await;
         for worker in core.workers.values_mut() {
             if worker.worker_id() == worker_id {
-                worker.update_ttl(self.max_heartbeat_interval);
-                worker.update_info(info);
+                if !worker.is_marked_for_deletion {
+                    // If we send signal to meta that it should delete that node, then do not update
+                    // ttl here
+                    worker.update_ttl(self.max_heartbeat_interval);
+                    // info from worker to meta. No need to update this one
+                    worker.update_info(info);
+                }
                 return Ok(());
             }
         }
