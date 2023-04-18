@@ -1060,30 +1060,6 @@ mod impl_as_primitive {
 mod impl_from {
     use super::*;
 
-    macro_rules! impl_from_for {
-        ($ty:ty) => {
-            impl<F> From<OrderedFloat<F>> for $ty
-            where
-                F: 'static + Float,
-                Self: From<F>,
-            {
-                fn from(value: OrderedFloat<F>) -> Self {
-                    From::from(value.0)
-                }
-            }
-        };
-    }
-
-    impl_from_for!(i8);
-    impl_from_for!(i16);
-    impl_from_for!(i32);
-    impl_from_for!(i64);
-
-    impl_from_for!(u8);
-    impl_from_for!(u16);
-    impl_from_for!(u32);
-    impl_from_for!(u64);
-
     impl From<OrderedFloat<f32>> for OrderedFloat<f64> {
         fn from(s: OrderedFloat<f32>) -> Self {
             Self(s.0.into())
@@ -1101,18 +1077,10 @@ mod impl_from {
         };
     }
 
-    impl_from!(i8, f32);
     impl_from!(i16, f32);
-    impl_from!(u8, f32);
-    impl_from!(u16, f32);
 
-    impl_from!(i8, f64);
     impl_from!(i16, f64);
     impl_from!(i32, f64);
-    impl_from!(u8, f64);
-    impl_from!(u16, f64);
-    impl_from!(u32, f64);
-    impl_from!(f32, f64);
 }
 
 impl From<i64> for OrderedFloat<f64> {
