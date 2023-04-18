@@ -21,7 +21,7 @@ use rand::seq::{IteratorRandom, SliceRandom};
 use risingwave_common::bail;
 use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};
 use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
-use risingwave_pb::common::WorkerNode;
+use risingwave_pb::common::{WorkerNode, WorkerType};
 
 use crate::catalog::FragmentId;
 use crate::scheduler::{SchedulerError, SchedulerResult};
@@ -69,20 +69,27 @@ impl WorkerNodeManager {
     }
 
     pub fn list_worker_nodes(&self) -> Vec<WorkerNode> {
-        self.inner.read().unwrap().worker_nodes.clone()
+        self.inner
+            .read()
+            .unwrap()
+            .worker_nodes
+            .iter()
+            .filter(|w| w.r#type() == WorkerType::ComputeNode)
+            .cloned()
+            .collect()
     }
 
     fn list_serving_worker_nodes(&self) -> Vec<WorkerNode> {
         self.list_worker_nodes()
             .into_iter()
-            .filter(|w| w.property.as_ref().unwrap().is_serving)
+            .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
             .collect()
     }
 
     fn list_streaming_worker_nodes(&self) -> Vec<WorkerNode> {
         self.list_worker_nodes()
             .into_iter()
-            .filter(|w| w.property.as_ref().unwrap().is_streaming)
+            .filter(|w| w.property.as_ref().map_or(false, |p| p.is_streaming))
             .collect()
     }
 
@@ -218,7 +225,7 @@ impl WorkerNodeManagerInner {
         let serving_pus = self
             .worker_nodes
             .iter()
-            .filter(|w| w.property.as_ref().unwrap().is_serving)
+            .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
             .flat_map(|w| w.parallel_units.clone())
             .collect_vec();
         if serving_pus.is_empty() {
@@ -318,7 +325,7 @@ mod tests {
 
     use risingwave_common::util::addr::HostAddr;
     use risingwave_pb::common::worker_node::Property;
-    use risingwave_pb::common::{worker_node, WorkerType};
+    use risingwave_pb::common::worker_node;
 
     #[test]
     fn test_worker_node_manager() {
