@@ -693,6 +693,22 @@ where
             version,
         }))
     }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn get_tables(
+        &self,
+        request: Request<GetTablesRequest>,
+    ) -> Result<Response<GetTablesResponse>, Status> {
+        let ret = self
+            .catalog_manager
+            .get_tables(&request.into_inner().table_ids)
+            .await;
+        let mut tables = HashMap::default();
+        for table in ret {
+            tables.insert(table.id, table);
+        }
+        Ok(Response::new(GetTablesResponse { tables }))
+    }
 }
 
 impl<S> DdlServiceImpl<S>

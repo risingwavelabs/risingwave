@@ -22,12 +22,13 @@ use itertools::Itertools;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
+use tracing::error;
 
+use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
 use crate::hummock::compactor::context::CompactorContext;
 use crate::hummock::compactor::{CompactOutput, Compactor};
@@ -100,12 +101,40 @@ pub async fn compact(
 /// For compaction from shared buffer to level 0, this is the only function gets called.
 async fn compact_shared_buffer(
     context: Arc<CompactorContext>,
-    payload: UploadTaskPayload,
+    mut payload: UploadTaskPayload,
 ) -> HummockResult<Vec<LocalSstableInfo>> {
     // Local memory compaction looks at all key ranges.
+
+    let mut existing_table_ids: HashSet<u32> = payload
+        .iter()
+        .map(|imm| imm.table_id.table_id)
+        .dedup()
+        .collect();
+
+    assert!(!existing_table_ids.is_empty());
+
+    let multi_filter_key_extractor = context
+        .filter_key_extractor_manager
+        .acquire(existing_table_ids.clone())
+        .await?;
+    if let FilterKeyExtractorImpl::Multi(multi) = &multi_filter_key_extractor {
+        existing_table_ids = multi.get_exsting_table_ids();
+    }
+    let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
+
     let mut size_and_start_user_keys = vec![];
     let mut compact_data_size = 0;
     let mut builder = DeleteRangeAggregatorBuilder::default();
+    payload.retain(|imm| {
+        let ret = existing_table_ids.contains(&imm.table_id.table_id);
+        if !ret {
+            error!(
+                "can not find table {:?}, it may be removed by meta-service",
+                imm.table_id
+            );
+        }
+        ret
+    });
     for imm in &payload {
         let data_size = {
             let tombstones = imm.get_delete_range_tombstones();
@@ -156,20 +185,6 @@ async fn compact_shared_buffer(
             }
         }
     }
-
-    let existing_table_ids: HashSet<u32> = payload
-        .iter()
-        .map(|imm| imm.table_id.table_id)
-        .dedup()
-        .collect();
-
-    assert!(!existing_table_ids.is_empty());
-
-    let multi_filter_key_extractor = context
-        .filter_key_extractor_manager
-        .acquire(existing_table_ids)
-        .await;
-    let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
 
     let parallelism = splits.len();
     let mut compact_success = true;
@@ -258,6 +273,10 @@ pub async fn merge_imms_in_memory(
     let mut merged_size = 0;
     let mut merged_imm_ids = Vec::with_capacity(imms.len());
 
+    let mut smallest_table_key = vec![];
+    let mut smallest_empty = true;
+    let mut largest_table_key = vec![];
+
     let mut imm_iters = Vec::with_capacity(imms.len());
     for imm in imms {
         assert!(
@@ -275,9 +294,22 @@ pub async fn merge_imms_in_memory(
         kv_count += imm.kv_count();
         merged_size += imm.size();
         range_tombstone_list.extend(imm.get_delete_range_tombstones());
+
+        if smallest_empty || smallest_table_key.gt(imm.raw_smallest_key()) {
+            smallest_table_key.clear();
+            smallest_table_key.extend_from_slice(imm.raw_smallest_key());
+            smallest_empty = false;
+        }
+        if largest_table_key.lt(imm.raw_largest_key()) {
+            largest_table_key.clear();
+            largest_table_key.extend_from_slice(imm.raw_largest_key());
+        }
+
         imm_iters.push(imm.into_forward_iter());
     }
-    range_tombstone_list.sort();
+    let mut builder = DeleteRangeAggregatorBuilder::default();
+    builder.add_tombstone(range_tombstone_list.clone());
+    let collector = builder.build(GC_WATERMARK_FOR_FLUSH, GC_DELETE_KEYS_FOR_FLUSH);
     epochs.sort();
 
     // use merge iterator to merge input imms
@@ -313,9 +345,12 @@ pub async fn merge_imms_in_memory(
         inner: Arc::new(SharedBufferBatchInner::new_with_multi_epoch_batches(
             epochs,
             merged_payload,
+            smallest_table_key,
+            largest_table_key,
             kv_count,
             merged_imm_ids,
             range_tombstone_list,
+            collector.get_all_tombstones(),
             merged_size,
             memory_tracker,
         )),

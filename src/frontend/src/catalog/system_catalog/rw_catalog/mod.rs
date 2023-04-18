@@ -14,6 +14,8 @@
 
 mod rw_ddl_progress;
 mod rw_meta_snapshot;
+mod rw_relation_info;
 
 pub use rw_ddl_progress::*;
 pub use rw_meta_snapshot::*;
+pub use rw_relation_info::*;
