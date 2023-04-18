@@ -52,6 +52,7 @@ services:
       CONFIG_STORAGE_TOPIC: debezium_mongodb_config
       OFFSET_STORAGE_TOPIC: debezium_mongodb_offset
       STATUS_STORAGE_TOPIC: debezium_mongodb_status
+      # Remove these two lines below to test the debezium json format。
       CONNECT_VALUE_CONVERTER: io.confluent.connect.avro.AvroConverter
       CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://message_queue:8081
 
