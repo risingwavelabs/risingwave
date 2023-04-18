@@ -16,10 +16,10 @@ use std::collections::VecDeque;
 
 use risingwave_common::must_match;
 use risingwave_common::types::Datum;
+use risingwave_expr::function::window::Frame;
 use smallvec::SmallVec;
 
 use super::{StateKey, StateOutput, StatePos, WindowState};
-use crate::executor::over_window::call::Frame;
 use crate::executor::over_window::state::StateEvictHint;
 
 struct BufferEntry(StateKey, Datum);

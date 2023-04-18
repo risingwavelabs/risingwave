@@ -12,22 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(rustdoc::private_intra_doc_links)]
-#![feature(let_chains)]
-#![feature(fn_traits)]
-#![feature(assert_matches)]
-#![feature(lint_reasons)]
-#![feature(iterator_try_collect)]
-#![feature(exclusive_range_pattern)]
-#![feature(lazy_cell)]
-#![feature(try_blocks)]
+use parse_display::{Display, FromStr};
 
-mod error;
-pub mod expr;
-pub mod function;
-pub mod sig;
-pub mod table_function;
-pub mod vector_op;
+/// Kind of window functions.
+#[derive(Debug, Display, FromStr, Copy, Clone, PartialEq, Eq, Hash)]
+#[display(style = "snake_case")]
+pub enum WindowFuncKind {
+    // General-purpose window functions.
+    Lag,
+    Lead,
+    // FirstValue,
+    // LastValue,
+    // NthValue,
 
-pub use error::{ExprError, Result};
-use risingwave_common::{bail, ensure};
+    // Aggregate functions that are used with `OVER`.
+    // #[display("{0}")]
+    // Aggregate(AggKind),
+}

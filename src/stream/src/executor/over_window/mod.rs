@@ -29,10 +29,10 @@ use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::{must_match, row};
+use risingwave_expr::function::window::WindowFuncCall;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
-use self::call::WindowFuncCall;
 use self::partition::Partition;
 use self::state::StateKey;
 use super::{
@@ -45,7 +45,6 @@ use crate::common::StateTableColumnMapping;
 use crate::executor::over_window::state::StateEvictHint;
 use crate::task::AtomicU64Ref;
 
-mod call;
 mod partition;
 mod state;
 
@@ -502,15 +501,14 @@ mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::expr::WindowFuncKind;
+    use risingwave_expr::function::aggregate::AggArgs;
+    use risingwave_expr::function::window::{Frame, WindowFuncCall, WindowFuncKind};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
-    use super::call::{Frame, WindowFuncCall};
     use super::{OverWindowExecutor, OverWindowExecutorArgs};
     use crate::common::table::state_table::StateTable;
     use crate::common::StateTableColumnMapping;
-    use crate::executor::aggregation::AggArgs;
     use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
     use crate::executor::{ActorContext, BoxedMessageStream, Executor};
 
