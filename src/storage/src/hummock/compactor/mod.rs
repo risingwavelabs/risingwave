@@ -230,7 +230,7 @@ impl Compactor {
                 context.output_memory_limiter.get_memory_usage(),
                 context.output_memory_limiter.quota()
             );
-            task_status = TaskStatus::ManualCanceled;
+            task_status = TaskStatus::NoAvailResourceCanceled;
             Self::compact_done(&mut compact_task, context.clone(), output_ssts, task_status).await;
             return task_status;
         }
