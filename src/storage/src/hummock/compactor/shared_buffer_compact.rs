@@ -273,6 +273,10 @@ pub async fn merge_imms_in_memory(
     let mut merged_size = 0;
     let mut merged_imm_ids = Vec::with_capacity(imms.len());
 
+    let mut smallest_table_key = vec![];
+    let mut smallest_empty = true;
+    let mut largest_table_key = vec![];
+
     let mut imm_iters = Vec::with_capacity(imms.len());
     for imm in imms {
         assert!(
@@ -290,9 +294,22 @@ pub async fn merge_imms_in_memory(
         kv_count += imm.kv_count();
         merged_size += imm.size();
         range_tombstone_list.extend(imm.get_delete_range_tombstones());
+
+        if smallest_empty || smallest_table_key.gt(imm.raw_smallest_key()) {
+            smallest_table_key.clear();
+            smallest_table_key.extend_from_slice(imm.raw_smallest_key());
+            smallest_empty = false;
+        }
+        if largest_table_key.lt(imm.raw_largest_key()) {
+            largest_table_key.clear();
+            largest_table_key.extend_from_slice(imm.raw_largest_key());
+        }
+
         imm_iters.push(imm.into_forward_iter());
     }
-    range_tombstone_list.sort();
+    let mut builder = DeleteRangeAggregatorBuilder::default();
+    builder.add_tombstone(range_tombstone_list.clone());
+    let collector = builder.build(GC_WATERMARK_FOR_FLUSH, GC_DELETE_KEYS_FOR_FLUSH);
     epochs.sort();
 
     // use merge iterator to merge input imms
@@ -328,9 +345,12 @@ pub async fn merge_imms_in_memory(
         inner: Arc::new(SharedBufferBatchInner::new_with_multi_epoch_batches(
             epochs,
             merged_payload,
+            smallest_table_key,
+            largest_table_key,
             kv_count,
             merged_imm_ids,
             range_tombstone_list,
+            collector.get_all_tombstones(),
             merged_size,
             memory_tracker,
         )),

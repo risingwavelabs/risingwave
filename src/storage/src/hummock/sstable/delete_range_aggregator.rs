@@ -134,6 +134,10 @@ impl RangeTombstonesCollector {
         }
     }
 
+    pub fn get_all_tombstones(&self) -> Vec<DeleteRangeTombstone> {
+        self.range_tombstone_list.clone()
+    }
+
     // split ranges to make sure they locate in [smallest_user_key, largest_user_key)
     pub fn get_tombstone_between(
         &self,
