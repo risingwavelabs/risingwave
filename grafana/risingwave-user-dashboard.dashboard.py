@@ -209,14 +209,6 @@ def section_memory(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum({metric('stream_total_mem_usage')}) by (instance)",
-                            "streaming @ {{instance}}",
-                        ),
-                        panels.target(
-                            f"sum({metric('batch_total_mem_usage')}) by (instance)",
-                            "batch @ {{instance}}",
-                        ),
-                        panels.target(
                             f"sum({metric('state_store_meta_cache_size')}) by (instance) + " +
                             f"sum({metric('state_store_block_cache_size')}) by (instance) + " +
                             f"sum({metric('state_store_limit_memory_size')}) by (instance)",

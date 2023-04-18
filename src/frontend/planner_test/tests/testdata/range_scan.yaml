@@ -335,7 +335,7 @@
     SELECT * FROM mv WHERE x = 3.4;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (mv.x = 3.4:Decimal) }
+    └─BatchFilter { predicate: (mv.x::Decimal = 3.4:Decimal) }
       └─BatchScan { table: mv, columns: [mv.x], distribution: UpstreamHashShard(mv.x) }
 - before:
   - create_table_and_mv

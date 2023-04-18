@@ -23,7 +23,7 @@ use super::operators::*;
 use crate::impl_common_parser_logic;
 use crate::parser::common::{json_object_smart_get_value, simd_json_parse_value};
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContextRef};
+use crate::source::{SourceColumnDesc, SourceContextRef, SourceFormat};
 
 const AFTER: &str = "data";
 const BEFORE: &str = "old";
@@ -60,6 +60,7 @@ impl MaxwellParser {
             ))
         })?;
 
+        let format = SourceFormat::Maxwell;
         match op {
             MAXWELL_INSERT_OP => {
                 let after = event.get(AFTER).ok_or_else(|| {
@@ -69,6 +70,7 @@ impl MaxwellParser {
                 })?;
                 writer.insert(|column| {
                     simd_json_parse_value(
+                        &format,
                         &column.data_type,
                         json_object_smart_get_value(after, column.name.as_str().into()),
                     )
@@ -92,8 +94,9 @@ impl MaxwellParser {
                     let col_name_lc = column.name.as_str();
                     let before_value = json_object_smart_get_value(before, col_name_lc.into())
                         .or_else(|| json_object_smart_get_value(after, col_name_lc.into()));
-                    let before = simd_json_parse_value(&column.data_type, before_value)?;
+                    let before = simd_json_parse_value(&format, &column.data_type, before_value)?;
                     let after = simd_json_parse_value(
+                        &format,
                         &column.data_type,
                         json_object_smart_get_value(after, col_name_lc.into()),
                     )?;
@@ -106,6 +109,7 @@ impl MaxwellParser {
                 })?;
                 writer.delete(|column| {
                     simd_json_parse_value(
+                        &format,
                         &column.data_type,
                         json_object_smart_get_value(before, column.name.as_str().into()),
                     )
