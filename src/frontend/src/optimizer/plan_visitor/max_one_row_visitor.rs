@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 
+use super::{DefaultBehavior, DefaultValue, Merge};
 use crate::catalog::system_catalog::pg_catalog::PG_NAMESPACE_TABLE_NAME;
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalApply, LogicalExpand, LogicalFilter, LogicalHopWindow, LogicalLimit,
@@ -27,8 +28,10 @@ pub struct MaxOneRowVisitor;
 
 /// Return true if we can determine at most one row returns by the plan, otherwise false.
 impl PlanVisitor<bool> for MaxOneRowVisitor {
-    fn merge(a: bool, b: bool) -> bool {
-        a & b
+    type DefaultBehavior = impl DefaultBehavior<bool>;
+
+    fn default_behavior() -> Self::DefaultBehavior {
+        Merge(|a, b| a & b)
     }
 
     fn visit_logical_values(&mut self, plan: &LogicalValues) -> bool {
@@ -108,8 +111,10 @@ impl PlanVisitor<bool> for MaxOneRowVisitor {
 pub struct HasMaxOneRowApply();
 
 impl PlanVisitor<bool> for HasMaxOneRowApply {
-    fn merge(a: bool, b: bool) -> bool {
-        a | b
+    type DefaultBehavior = impl DefaultBehavior<bool>;
+
+    fn default_behavior() -> Self::DefaultBehavior {
+        Merge(|a, b| a | b)
     }
 
     fn visit_logical_apply(&mut self, plan: &LogicalApply) -> bool {
@@ -120,9 +125,10 @@ impl PlanVisitor<bool> for HasMaxOneRowApply {
 pub struct CountRows;
 
 impl PlanVisitor<Option<usize>> for CountRows {
-    fn merge(_a: Option<usize>, _b: Option<usize>) -> Option<usize> {
-        // Impossible to determine count e.g. after a join
-        None
+    type DefaultBehavior = impl DefaultBehavior<Option<usize>>;
+
+    fn default_behavior() -> Self::DefaultBehavior {
+        DefaultValue
     }
 
     fn visit_logical_agg(&mut self, plan: &LogicalAgg) -> Option<usize> {

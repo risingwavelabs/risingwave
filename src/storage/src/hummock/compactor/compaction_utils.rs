@@ -20,7 +20,6 @@ use std::sync::Arc;
 use itertools::Itertools;
 use minstant::Instant;
 use risingwave_common::constants::hummock::CompactionFilterFlag;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
@@ -29,6 +28,7 @@ use risingwave_hummock_sdk::{HummockEpoch, KeyComparator};
 use risingwave_pb::hummock::{compact_task, CompactTask, KeyRange as KeyRange_vec, LevelType};
 
 pub use super::context::CompactorContext;
+use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::{
     MultiCompactionFilter, StateCleanUpCompactionFilter, TtlCompactionFilter,
 };

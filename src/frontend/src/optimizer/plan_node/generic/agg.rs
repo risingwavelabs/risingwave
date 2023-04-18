@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::function::aggregate::AggKind;
 use risingwave_pb::expr::PbAggCall;
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePb};
 
@@ -648,7 +648,7 @@ impl PlanAggCall {
 
     pub fn to_protobuf(&self) -> PbAggCall {
         PbAggCall {
-            r#type: self.agg_kind.to_prost().into(),
+            r#type: self.agg_kind.to_protobuf().into(),
             return_type: Some(self.return_type.to_protobuf()),
             args: self.inputs.iter().map(InputRef::to_proto).collect(),
             distinct: self.distinct,

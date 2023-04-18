@@ -149,7 +149,7 @@ fn build_block_data(t: u32, i: u64) -> Bytes {
                 (k_ext, v_ext) = (&DATA_LEN_SET[ext_index].0, &DATA_LEN_SET[ext_index].1);
             }
 
-            builder.add(FullKey::decode(&key(tt, ii, k_ext)), &value(ii, v_ext));
+            builder.add_for_test(FullKey::decode(&key(tt, ii, k_ext)), &value(ii, v_ext));
         }
     }
     Bytes::from(builder.build().to_vec())

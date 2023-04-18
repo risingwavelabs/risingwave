@@ -26,11 +26,11 @@ use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
 use risingwave_rpc_client::MetaClient;
+use risingwave_storage::filter_key_extractor::{FilterKeyExtractorManager, RemoteTableAccessor};
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
@@ -117,7 +117,9 @@ pub async fn compactor_serve(
 
     let telemetry_enabled = system_params_reader.telemetry_enabled();
 
-    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
+    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::new(Box::new(
+        RemoteTableAccessor::new(meta_client.clone()),
+    )));
     let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params_reader));
     let compactor_observer_node = CompactorObserverNode::new(
         filter_key_extractor_manager.clone(),
