@@ -29,7 +29,7 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
-use crate::expr::{Expr, ExprImpl, FunctionalIndexVisitor, InputRef};
+use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMaterialize};
@@ -79,17 +79,16 @@ pub(crate) fn gen_create_index_plan(
     let mut binder = Binder::new_for_stream(session);
     binder.bind_table(Some(&schema_name), &table_name, None)?;
 
-    let mut functional_index_visitor = FunctionalIndexVisitor {};
     let mut index_columns_ordered_expr = vec![];
     let mut include_columns_expr = vec![];
     let mut distributed_columns_expr = vec![];
     for column in columns {
         let order_type = OrderType::from_bools(column.asc, column.nulls_first);
         let expr_impl = binder.bind_expr(column.expr)?;
-        if let Err(reason) = functional_index_visitor.support(&expr_impl) {
+        if expr_impl.is_impure() {
             return Err(ErrorCode::NotSupported(
-                "this function is not supported for indexes".into(),
-                reason.into(),
+                "this expression is impure".into(),
+                "use a pure expression instead".into(),
             )
             .into());
         }
