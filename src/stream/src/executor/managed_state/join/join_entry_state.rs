@@ -38,9 +38,7 @@ pub struct JoinEntryState {
 
 impl EstimateSize for JoinEntryState {
     fn estimated_heap_size(&self) -> usize {
-        // FIXME: implement a correct size.
-        // https://github.com/risingwavelabs/risingwave/issues/8957
-        0
+        unimplemented!("https://github.com/risingwavelabs/risingwave/issues/8957")
     }
 }
 

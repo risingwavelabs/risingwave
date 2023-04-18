@@ -142,8 +142,7 @@ impl<S: StateStore, Strtg: Strategy> Debug for AggGroup<S, Strtg> {
 
 impl<S: StateStore, Strtg: Strategy> EstimateSize for AggGroup<S, Strtg> {
     fn estimated_heap_size(&self) -> usize {
-        // https://github.com/risingwavelabs/risingwave/issues/8957
-        0
+        unimplemented!("https://github.com/risingwavelabs/risingwave/issues/8957")
     }
 }
 

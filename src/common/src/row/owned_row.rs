@@ -92,8 +92,7 @@ impl OwnedRow {
 impl EstimateSize for OwnedRow {
     fn estimated_heap_size(&self) -> usize {
         // FIXME(bugen): this is not accurate now as the heap size of some `Scalar` is not counted.
-        // https://github.com/risingwavelabs/risingwave/issues/8957
-        self.0.capacity() * std::mem::size_of::<Datum>()
+        unimplemented!("https://github.com/risingwavelabs/risingwave/issues/8957")
     }
 }
 

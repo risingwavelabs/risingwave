@@ -52,18 +52,6 @@ pub(super) fn cache_may_stale(
 
     !current_is_subset
 }
-
-// impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Allocator>
-//     ExecutorCache<K, V, S, A>
-// {
-//     #[expect(dead_code)]
-//     fn estimated_heap_size(&self) -> usize {
-//         // FIXME: implement a correct size.
-//         // https://github.com/risingwavelabs/risingwave/issues/8957
-//         0
-//     }
-// }
-
 #[cfg(test)]
 mod tests {
     use super::*;
