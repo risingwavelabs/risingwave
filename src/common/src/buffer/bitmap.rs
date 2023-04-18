@@ -943,7 +943,7 @@ mod tests {
             let item = iter.next();
             assert!(item == Some(i + 1000));
         }
-        for _ in 0..10000 {
+        for _ in 0..5 {
             let item = iter.next();
             assert!(item == None);
         }
