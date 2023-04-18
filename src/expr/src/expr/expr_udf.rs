@@ -51,8 +51,36 @@ impl Expression for UdfExpression {
             let array = child.eval_checked(input).await?;
             columns.push(array.as_ref().into());
         }
-        let opts =
-            arrow_array::RecordBatchOptions::default().with_row_count(Some(input.capacity()));
+        self.eval_inner(columns, vis).await
+    }
+
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        let mut columns = Vec::with_capacity(self.children.len());
+        for child in &self.children {
+            let datum = child.eval_row(input).await?;
+            columns.push(datum);
+        }
+        let arg_row = OwnedRow::new(columns);
+        let chunk = DataChunk::from_rows(std::slice::from_ref(&arg_row), &self.arg_types);
+        let arg_columns = chunk
+            .columns()
+            .iter()
+            .map(|c| c.array_ref().into())
+            .collect();
+        let output_array = self
+            .eval_inner(arg_columns, chunk.vis().to_bitmap())
+            .await?;
+        Ok(output_array.to_datum())
+    }
+}
+
+impl UdfExpression {
+    async fn eval_inner(
+        &self,
+        columns: Vec<arrow_array::ArrayRef>,
+        vis: risingwave_common::buffer::Bitmap,
+    ) -> Result<ArrayRef> {
+        let opts = arrow_array::RecordBatchOptions::default().with_row_count(Some(vis.len()));
         let input =
             arrow_array::RecordBatch::try_new_with_options(self.arg_schema.clone(), columns, &opts)
                 .expect("failed to build record batch");
@@ -71,15 +99,7 @@ impl Expression for UdfExpression {
         array.set_bitmap(array.null_bitmap() & vis);
         Ok(Arc::new(array))
     }
-
-    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        let chunk = DataChunk::from_rows(std::slice::from_ref(input), &self.arg_types);
-        let output_array = self.eval(&chunk).await?;
-        Ok(output_array.to_datum())
-    }
 }
-
-impl UdfExpression {}
 
 #[cfg(not(madsim))]
 impl<'a> TryFrom<&'a ExprNode> for UdfExpression {

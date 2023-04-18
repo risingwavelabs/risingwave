@@ -539,6 +539,11 @@ message ValuesNode {
   repeated plan_common.Field fields = 2;
 }
 
+message DedupNode {
+  catalog.Table state_table = 1;
+  repeated uint32 dedup_column_indices = 2;
+}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
@@ -575,6 +580,7 @@ message StreamNode {
     TemporalJoinNode temporal_join = 131;
     BarrierRecvNode barrier_recv = 132;
     ValuesNode values = 133;
+    DedupNode append_only_dedup = 134;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

@@ -178,7 +178,7 @@ mod tests {
         let ret_type = DataType::Float32;
         // when x <= 2 then 3.1 else 4.1
         let when_clauses = vec![WhenClause {
-            when: build_from_pretty("(less_than_or_equal:boolean $0:int4 2:float4)"),
+            when: build_from_pretty("(less_than_or_equal:boolean (cast:float4 $0:int4) 2:float4)"),
             then: build_from_pretty("3.1:float4"),
         }];
         let els = build_from_pretty("4.1:float4");
@@ -204,7 +204,7 @@ mod tests {
         let ret_type = DataType::Float32;
         // when x <= 3 then 3.1
         let when_clauses = vec![WhenClause {
-            when: build_from_pretty("(less_than_or_equal:boolean $0:int4 3:float4)"),
+            when: build_from_pretty("(less_than_or_equal:boolean (cast:float4 $0:int4) 3:float4)"),
             then: build_from_pretty("3.1:float4"),
         }];
         let searched_case_expr = CaseExpression::new(ret_type, when_clauses, None);
@@ -227,7 +227,7 @@ mod tests {
         let ret_type = DataType::Float32;
         // when x <= 2 then 3.1 else 4.1
         let when_clauses = vec![WhenClause {
-            when: build_from_pretty("(less_than_or_equal:boolean $0:int4 2:float4)"),
+            when: build_from_pretty("(less_than_or_equal:boolean (cast:float4 $0:int4) 2:float4)"),
             then: build_from_pretty("3.1:float4"),
         }];
         let els = build_from_pretty("4.1:float4");
@@ -250,7 +250,7 @@ mod tests {
         let ret_type = DataType::Float32;
         // when x <= 3 then 3.1
         let when_clauses = vec![WhenClause {
-            when: build_from_pretty("(less_than_or_equal:boolean $0:int4 3:float4)"),
+            when: build_from_pretty("(less_than_or_equal:boolean (cast:float4 $0:int4) 3:float4)"),
             then: build_from_pretty("3.1:float4"),
         }];
         let searched_case_expr = CaseExpression::new(ret_type, when_clauses, None);

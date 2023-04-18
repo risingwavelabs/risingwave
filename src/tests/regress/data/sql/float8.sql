@@ -262,17 +262,17 @@ SELECT '-9223372036854780000'::float8::int8;
 
 -- test exact cases for trigonometric functions in degrees
 
---@ SELECT x,
---@        sind(x),
---@        sind(x) IN (-1,-0.5,0,0.5,1) AS sind_exact
---@ FROM (VALUES (0), (30), (90), (150), (180),
---@       (210), (270), (330), (360)) AS t(x);
+SELECT x,
+       sind(x),
+       sind(x) IN (-1,-0.5,0,0.5,1) AS sind_exact
+FROM (VALUES (0), (30), (90), (150), (180),
+      (210), (270), (330), (360)) AS t(x);
 
---@ SELECT x,
---@        cosd(x),
---@        cosd(x) IN (-1,-0.5,0,0.5,1) AS cosd_exact
---@ FROM (VALUES (0), (60), (90), (120), (180),
---@       (240), (270), (300), (360)) AS t(x);
+SELECT x,
+       cosd(x),
+       cosd(x) IN (-1,-0.5,0,0.5,1) AS cosd_exact
+FROM (VALUES (0), (60), (90), (120), (180),
+      (240), (270), (300), (360)) AS t(x);
 
 --@ SELECT x,
 --@        tand(x),

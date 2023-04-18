@@ -21,9 +21,9 @@ use simd_json::{BorrowedValue, ValueAccess};
 
 use super::operators::*;
 use crate::impl_common_parser_logic;
-use crate::parser::common::simd_json_parse_value;
+use crate::parser::common::{json_object_smart_get_value, simd_json_parse_value};
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContextRef};
+use crate::source::{SourceColumnDesc, SourceContextRef, SourceFormat};
 
 const AFTER: &str = "data";
 const BEFORE: &str = "old";
@@ -60,6 +60,7 @@ impl MaxwellParser {
             ))
         })?;
 
+        let format = SourceFormat::Maxwell;
         match op {
             MAXWELL_INSERT_OP => {
                 let after = event.get(AFTER).ok_or_else(|| {
@@ -69,8 +70,9 @@ impl MaxwellParser {
                 })?;
                 writer.insert(|column| {
                     simd_json_parse_value(
+                        &format,
                         &column.data_type,
-                        after.get(column.name_in_lower_case.as_str()),
+                        json_object_smart_get_value(after, column.name.as_str().into()),
                     )
                     .map_err(Into::into)
                 })
@@ -89,10 +91,15 @@ impl MaxwellParser {
 
                 writer.update(|column| {
                     // old only contains the changed columns but data contains all columns.
-                    let col_name_lc = column.name_in_lower_case.as_str();
-                    let before_value = before.get(col_name_lc).or_else(|| after.get(col_name_lc));
-                    let before = simd_json_parse_value(&column.data_type, before_value)?;
-                    let after = simd_json_parse_value(&column.data_type, after.get(col_name_lc))?;
+                    let col_name_lc = column.name.as_str();
+                    let before_value = json_object_smart_get_value(before, col_name_lc.into())
+                        .or_else(|| json_object_smart_get_value(after, col_name_lc.into()));
+                    let before = simd_json_parse_value(&format, &column.data_type, before_value)?;
+                    let after = simd_json_parse_value(
+                        &format,
+                        &column.data_type,
+                        json_object_smart_get_value(after, col_name_lc.into()),
+                    )?;
                     Ok((before, after))
                 })
             }
@@ -102,8 +109,9 @@ impl MaxwellParser {
                 })?;
                 writer.delete(|column| {
                     simd_json_parse_value(
+                        &format,
                         &column.data_type,
-                        before.get(column.name_in_lower_case.as_str()),
+                        json_object_smart_get_value(before, column.name.as_str().into()),
                     )
                     .map_err(Into::into)
                 })

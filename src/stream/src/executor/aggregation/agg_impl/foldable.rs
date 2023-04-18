@@ -429,9 +429,14 @@ impl_fold_agg! { F64Array, Float64, F32Array }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::I64Array;
+    extern crate test;
+
+    use risingwave_common::array::stream_chunk::Op;
+    use risingwave_common::array::{Array, I64Array};
+    use risingwave_common::test_utils::{rand_bitmap, rand_stream_chunk};
     use risingwave_common::types::F64;
     use risingwave_common::{array, array_nonnull};
+    use test::Bencher;
 
     use super::*;
 
@@ -648,5 +653,296 @@ mod tests {
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &100);
+    }
+
+    fn bench_i64(
+        b: &mut Bencher,
+        mut agg: Box<dyn StreamingAggImpl>,
+        agg_desc: &str,
+        chunk_size: usize,
+        vis_rate: f64,
+        iter_count: usize,
+        append_only: bool,
+    ) {
+        println!(
+            "benching {} agg, chunk_size {}, vis_rate {}, iter_count {}",
+            agg_desc, chunk_size, vis_rate, iter_count
+        );
+        let bitmap = if vis_rate < 1.0 {
+            Some(rand_bitmap::gen_rand_bitmap(
+                chunk_size,
+                (chunk_size as f64 * vis_rate) as usize,
+            ))
+        } else {
+            None
+        };
+        let (ops, data) =
+            rand_stream_chunk::gen_legal_stream_chunk(bitmap.as_ref(), chunk_size, append_only);
+        b.iter(|| {
+            for _ in 0..iter_count {
+                agg.apply_batch(&ops, bitmap.as_ref(), &[&data]).unwrap();
+            }
+        });
+    }
+
+    // TODO: refactor with macro
+    #[bench]
+    fn bench_foldable_sum_agg_without_vis(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingSumAgg<I64Array>>::default(),
+            "sum",
+            1024,
+            1.0,
+            100,
+            false,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_sum_agg_vis_rate_0_75(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingSumAgg<I64Array>>::default(),
+            "sum",
+            1024,
+            0.75,
+            100,
+            false,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_sum_agg_vis_rate_0_5(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingSumAgg<I64Array>>::default(),
+            "sum",
+            1024,
+            0.5,
+            100,
+            false,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_sum_agg_vis_rate_0_25(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingSumAgg<I64Array>>::default(),
+            "sum",
+            1024,
+            0.25,
+            100,
+            false,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_sum_agg_vis_rate_0_05(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingSumAgg<I64Array>>::default(),
+            "sum",
+            1024,
+            0.05,
+            100,
+            false,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_count_agg_without_vis(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingCountAgg<I64Array>>::default(),
+            "count",
+            1024,
+            1.0,
+            100,
+            false,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_count_agg_vis_rate_0_75(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingCountAgg<I64Array>>::default(),
+            "count",
+            1024,
+            0.75,
+            100,
+            false,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_count_agg_vis_rate_0_5(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingCountAgg<I64Array>>::default(),
+            "count",
+            1024,
+            0.5,
+            100,
+            false,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_count_agg_vis_rate_0_25(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingCountAgg<I64Array>>::default(),
+            "count",
+            1024,
+            0.25,
+            100,
+            false,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_count_agg_vis_rate_0_05(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingCountAgg<I64Array>>::default(),
+            "count",
+            1024,
+            0.05,
+            100,
+            false,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_min_agg_without_vis(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingMinAgg<I64Array>>::default(),
+            "min",
+            1024,
+            1.0,
+            100,
+            true,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_min_agg_vis_rate_0_75(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingMinAgg<I64Array>>::default(),
+            "min",
+            1024,
+            0.75,
+            100,
+            true,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_min_agg_vis_rate_0_5(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingMinAgg<I64Array>>::default(),
+            "min",
+            1024,
+            0.5,
+            100,
+            true,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_min_agg_vis_rate_0_25(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingMinAgg<I64Array>>::default(),
+            "min",
+            1024,
+            0.25,
+            100,
+            true,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_min_agg_vis_rate_0_05(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingMinAgg<I64Array>>::default(),
+            "min",
+            1024,
+            0.05,
+            100,
+            true,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_max_agg_without_vis(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingMaxAgg<I64Array>>::default(),
+            "max",
+            1024,
+            1.0,
+            100,
+            true,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_max_agg_vis_rate_0_75(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingMaxAgg<I64Array>>::default(),
+            "max",
+            1024,
+            0.75,
+            100,
+            true,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_max_agg_vis_rate_0_5(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingMaxAgg<I64Array>>::default(),
+            "max",
+            1024,
+            0.5,
+            100,
+            true,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_max_agg_vis_rate_0_25(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingMaxAgg<I64Array>>::default(),
+            "max",
+            1024,
+            0.25,
+            100,
+            true,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_max_agg_vis_rate_0_05(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingMaxAgg<I64Array>>::default(),
+            "max",
+            1024,
+            0.05,
+            100,
+            true,
+        );
     }
 }

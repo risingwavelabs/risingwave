@@ -16,14 +16,14 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
-use simd_json::{BorrowedValue, ValueAccess};
+use simd_json::BorrowedValue;
 
 use crate::common::UpsertMessage;
 use crate::impl_common_parser_logic;
 use crate::parser::common::{json_object_smart_get_value, simd_json_parse_value};
 use crate::parser::util::at_least_one_ok;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContextRef};
+use crate::source::{SourceColumnDesc, SourceContextRef, SourceFormat};
 
 impl_common_parser_logic!(JsonParser);
 
@@ -69,11 +69,15 @@ impl JsonParser {
         writer: &mut SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         writer.insert(|desc| {
-            simd_json_parse_value(&desc.data_type, value.get(desc.name_in_lower_case.as_str()))
-                .map_err(|e| {
-                    tracing::error!("failed to process value ({}): {}", value, e);
-                    e.into()
-                })
+            simd_json_parse_value(
+                &SourceFormat::Json,
+                &desc.data_type,
+                json_object_smart_get_value(value, desc.name.as_str().into()),
+            )
+            .map_err(|e| {
+                tracing::error!("failed to process value ({}): {}", value, e);
+                e.into()
+            })
         })
     }
 
@@ -113,6 +117,7 @@ impl JsonParser {
         } else {
             let fill_fn = |desc: &SourceColumnDesc| {
                 simd_json_parse_value(
+                    &SourceFormat::Json,
                     &desc.data_type,
                     json_object_smart_get_value(&value,desc.name.as_str().into())
                 )
@@ -169,10 +174,10 @@ mod tests {
             SourceColumnDesc::simple("i64", DataType::Int64, 4.into()),
             SourceColumnDesc::simple("f32", DataType::Float32, 5.into()),
             SourceColumnDesc::simple("f64", DataType::Float64, 6.into()),
-            SourceColumnDesc::simple("varchar", DataType::Varchar, 7.into()),
-            SourceColumnDesc::simple("date", DataType::Date, 8.into()),
-            SourceColumnDesc::simple("timestamp", DataType::Timestamp, 9.into()),
-            SourceColumnDesc::simple("decimal", DataType::Decimal, 10.into()),
+            SourceColumnDesc::simple("Varchar", DataType::Varchar, 7.into()),
+            SourceColumnDesc::simple("Date", DataType::Date, 8.into()),
+            SourceColumnDesc::simple("Timestamp", DataType::Timestamp, 9.into()),
+            SourceColumnDesc::simple("Decimal", DataType::Decimal, 10.into()),
         ];
 
         let parser = JsonParser::new(descs.clone(), Default::default()).unwrap();

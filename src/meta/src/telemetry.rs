@@ -15,13 +15,16 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use risingwave_common::config::MetaBackend;
 use risingwave_common::telemetry::report::{TelemetryInfoFetcher, TelemetryReportCreator};
 use risingwave_common::telemetry::{
     current_timestamp, SystemData, TelemetryNodeType, TelemetryReport, TelemetryReportBase,
 };
+use risingwave_pb::common::WorkerType;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::manager::ClusterManager;
 use crate::model::{MetadataModelError, MetadataModelResult};
 use crate::storage::{MetaStore, Snapshot};
 
@@ -98,6 +101,7 @@ impl From<TrackingId> for String {
         value.0
     }
 }
+
 impl From<String> for TrackingId {
     fn from(value: String) -> Self {
         Self(value)
@@ -105,24 +109,20 @@ impl From<String> for TrackingId {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+struct NodeCount {
+    meta_count: u64,
+    compute_count: u64,
+    frontend_count: u64,
+    compactor_count: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct MetaTelemetryReport {
     #[serde(flatten)]
     base: TelemetryReportBase,
-}
-
-impl MetaTelemetryReport {
-    pub(crate) fn new(tracking_id: String, session_id: String, up_time: u64) -> Self {
-        Self {
-            base: TelemetryReportBase {
-                tracking_id,
-                session_id,
-                system_data: SystemData::new(),
-                up_time,
-                time_stamp: current_timestamp(),
-                node_type: TelemetryNodeType::Meta,
-            },
-        }
-    }
+    node_count: NodeCount,
+    // At this point, it will always be etcd, but we will enable telemetry when using memory.
+    meta_backend: MetaBackend,
 }
 
 impl TelemetryReport for MetaTelemetryReport {
@@ -153,23 +153,47 @@ impl<S: MetaStore> TelemetryInfoFetcher for MetaTelemetryInfoFetcher<S> {
     }
 }
 
-#[derive(Copy, Clone)]
-pub(crate) struct MetaReportCreator {}
+#[derive(Clone)]
+pub(crate) struct MetaReportCreator<S: MetaStore> {
+    cluster_mgr: Arc<ClusterManager<S>>,
+    meta_backend: MetaBackend,
+}
 
-impl MetaReportCreator {
-    pub(crate) fn new() -> Self {
-        Self {}
+impl<S: MetaStore> MetaReportCreator<S> {
+    pub(crate) fn new(cluster_mgr: Arc<ClusterManager<S>>, meta_backend: MetaBackend) -> Self {
+        Self {
+            cluster_mgr,
+            meta_backend,
+        }
     }
 }
 
-impl TelemetryReportCreator for MetaReportCreator {
-    fn create_report(
+#[async_trait::async_trait]
+impl<S: MetaStore> TelemetryReportCreator for MetaReportCreator<S> {
+    async fn create_report(
         &self,
         tracking_id: String,
         session_id: String,
         up_time: u64,
     ) -> anyhow::Result<MetaTelemetryReport> {
-        Ok(MetaTelemetryReport::new(tracking_id, session_id, up_time))
+        let node_map = self.cluster_mgr.count_worker_node().await;
+        Ok(MetaTelemetryReport {
+            base: TelemetryReportBase {
+                tracking_id,
+                session_id,
+                system_data: SystemData::new(),
+                up_time,
+                time_stamp: current_timestamp(),
+                node_type: TelemetryNodeType::Meta,
+            },
+            node_count: NodeCount {
+                meta_count: *node_map.get(&WorkerType::Meta).unwrap_or(&0),
+                compute_count: *node_map.get(&WorkerType::ComputeNode).unwrap_or(&0),
+                frontend_count: *node_map.get(&WorkerType::Frontend).unwrap_or(&0),
+                compactor_count: *node_map.get(&WorkerType::Compactor).unwrap_or(&0),
+            },
+            meta_backend: self.meta_backend,
+        })
     }
 
     fn report_type(&self) -> &str {

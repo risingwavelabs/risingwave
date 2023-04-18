@@ -22,16 +22,31 @@ import com.risingwave.connector.api.sink.ArraySinkRow;
 import com.risingwave.proto.Data.Op;
 import java.sql.*;
 import org.junit.Test;
+import org.testcontainers.containers.JdbcDatabaseContainer;
+import org.testcontainers.containers.MySQLContainer;
+import org.testcontainers.containers.PostgreSQLContainer;
 
 public class JDBCSinkTest {
-    static String dbName = "test_db";
-    static String connectionURL = "jdbc:derby:" + dbName + ";create=true";
+    static void createMockTable(String jdbcUrl, String tableName) throws SQLException {
+        Connection conn = DriverManager.getConnection(jdbcUrl);
+        conn.setAutoCommit(false);
+        Statement stmt = conn.createStatement();
+        stmt.execute("DROP TABLE IF EXISTS " + tableName);
+        stmt.execute("create table " + tableName + " (id int primary key, name varchar(255))");
+        conn.commit();
+        conn.close();
+    }
 
-    @Test
-    public void testJDBCSync() throws SQLException {
-        Connection conn = DriverManager.getConnection(connectionURL);
-        JDBCSink sink = new JDBCSink(conn, TableSchema.getMockTableSchema(), "test", "upsert");
-        createMockTable(conn, sink.getTableName());
+    static void testJDBCSync(JdbcDatabaseContainer<?> container) throws SQLException {
+        String tableName = "test";
+        createMockTable(container.getJdbcUrl(), tableName);
+
+        JDBCSink sink =
+                new JDBCSink(
+                        new JDBCSinkConfig(container.getJdbcUrl(), tableName, "upsert"),
+                        TableSchema.getMockTableSchema());
+        assertEquals(tableName, sink.getTableName());
+        Connection conn = sink.getConn();
 
         sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 1, "Alice")));
         sink.sync();
@@ -57,29 +72,16 @@ public class JDBCSinkTest {
         sink.drop();
     }
 
-    private void createMockTable(Connection conn, String tableName) throws SQLException {
-        Statement stmt = conn.createStatement();
-        try {
-            stmt.execute("DROP TABLE " + tableName);
-        } catch (SQLException e) {
-            // Ignored. Derby does not offer "create if not exists" semantics
-        }
+    static void testJDBCWrite(JdbcDatabaseContainer<?> container) throws SQLException {
+        String tableName = "test";
+        createMockTable(container.getJdbcUrl(), tableName);
 
-        try {
-            stmt.execute("create table " + tableName + " (id int primary key, name varchar(255))");
-            conn.commit();
-        } catch (SQLException e) {
-            throw io.grpc.Status.INTERNAL.withCause(e).asRuntimeException();
-        } finally {
-            stmt.close();
-        }
-    }
-
-    @Test
-    public void testJDBCWrite() throws SQLException {
-        Connection conn = DriverManager.getConnection(connectionURL);
-        JDBCSink sink = new JDBCSink(conn, TableSchema.getMockTableSchema(), "test", "upsert");
-        createMockTable(conn, sink.getTableName());
+        JDBCSink sink =
+                new JDBCSink(
+                        new JDBCSinkConfig(container.getJdbcUrl(), tableName, "upsert"),
+                        TableSchema.getMockTableSchema());
+        assertEquals(tableName, sink.getTableName());
+        Connection conn = sink.getConn();
 
         sink.write(
                 Iterators.forArray(
@@ -103,15 +105,55 @@ public class JDBCSinkTest {
         stmt.close();
     }
 
-    @Test
-    public void testJDBCDrop() throws SQLException {
-        Connection conn = DriverManager.getConnection(connectionURL);
-        JDBCSink sink = new JDBCSink(conn, TableSchema.getMockTableSchema(), "test", "upsert");
+    static void testJDBCDrop(JdbcDatabaseContainer<?> container) throws SQLException {
+        String tableName = "test";
+        createMockTable(container.getJdbcUrl(), tableName);
+
+        JDBCSink sink =
+                new JDBCSink(
+                        new JDBCSinkConfig(container.getJdbcUrl(), tableName, "upsert"),
+                        TableSchema.getMockTableSchema());
+        assertEquals(tableName, sink.getTableName());
+        Connection conn = sink.getConn();
         sink.drop();
         try {
             assertTrue(conn.isClosed());
         } catch (SQLException e) {
             fail(String.valueOf(e));
         }
+    }
+
+    @Test
+    public void testPostgres() throws SQLException {
+        PostgreSQLContainer pg =
+                new PostgreSQLContainer<>("postgres:15-alpine")
+                        .withDatabaseName("test")
+                        .withUsername("postgres")
+                        .withPassword("password")
+                        .withDatabaseName("test_db")
+                        .withUrlParam("user", "postgres")
+                        .withUrlParam("password", "password");
+        pg.start();
+        testJDBCSync(pg);
+        testJDBCWrite(pg);
+        testJDBCDrop(pg);
+        pg.stop();
+    }
+
+    @Test
+    public void testMySQL() throws SQLException {
+        MySQLContainer mysql =
+                new MySQLContainer<>("mysql:8")
+                        .withDatabaseName("test")
+                        .withUsername("postgres")
+                        .withPassword("password")
+                        .withDatabaseName("test_db")
+                        .withUrlParam("user", "postgres")
+                        .withUrlParam("password", "password");
+        mysql.start();
+        testJDBCSync(mysql);
+        testJDBCWrite(mysql);
+        testJDBCDrop(mysql);
+        mysql.stop();
     }
 }
