@@ -945,7 +945,7 @@ mod tests {
         }
         for _ in 0..5 {
             let item = iter.next();
-            assert!(item == None);
+            assert!(item.is_none());
         }
     }
 }
