@@ -356,6 +356,49 @@ pub(crate) async fn resolve_source_schema(
                 ..Default::default()
             }
         }
+        SourceSchema::DebeziumMongoJson => {
+            // return err if user has not specified a pk
+            if row_id_index.is_some() {
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must be specified when creating source with row format debezium."
+                        .to_string(),
+                )));
+            }
+            'check_pk: {
+                if pk_column_ids.len() == 1 {
+                    let pk_column = columns
+                        .iter()
+                        .find(|col| col.column_id() == pk_column_ids[0])
+                        .unwrap();
+                    if pk_column.name() == "_id"
+                        && matches!(
+                            pk_column.data_type(),
+                            DataType::Jsonb | DataType::Varchar | DataType::Int32 | DataType::Int64
+                        )
+                    {
+                        break 'check_pk;
+                    }
+                }
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must named as `_id` with supported datatypes (Jsonb Varchar Int32 Int64)."
+                        .to_string(),
+                )));
+            }
+            let _ = columns
+            .iter()
+            .find(|col| col.name() == "payload" && matches!(
+                col.data_type(),  DataType::Jsonb | DataType::Varchar
+            ))
+            .ok_or_else(|| RwError::from(ProtocolError(
+                "A column named as `payload` with supported datatypes (Jsonb Varchar) must exist in table."
+                    .to_string(),
+            )))?;
+
+            StreamSourceInfo {
+                row_format: RowFormatType::DebeziumMongoJson as i32,
+                ..Default::default()
+            }
+        }
 
         SourceSchema::CanalJson => {
             // return err if user has not specified a pk
@@ -528,6 +571,7 @@ fn source_shema_to_row_format(source_schema: &SourceSchema) -> RowFormatType {
         SourceSchema::Protobuf(_) => RowFormatType::Protobuf,
         SourceSchema::Json => RowFormatType::Json,
         SourceSchema::DebeziumJson => RowFormatType::DebeziumJson,
+        SourceSchema::DebeziumMongoJson => RowFormatType::DebeziumMongoJson,
         SourceSchema::DebeziumAvro(_) => RowFormatType::DebeziumAvro,
         SourceSchema::UpsertJson => RowFormatType::UpsertJson,
         SourceSchema::UpsertAvro(_) => RowFormatType::UpsertAvro,
