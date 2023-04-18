@@ -58,33 +58,39 @@ pub(super) enum StateEvictHint {
 }
 
 impl StateEvictHint {
-    pub fn intersect(self, other: StateEvictHint) -> StateEvictHint {
+    pub fn merge(self, other: StateEvictHint) -> StateEvictHint {
         use StateEvictHint::*;
         match (self, other) {
             (CanEvict(a), CanEvict(b)) => {
                 // Example:
                 // a = CanEvict({1, 2, 3})
                 // b = CanEvict({2, 3, 4})
-                // a.intersect(b) = CanEvict({1, 2, 3})
+                // a.merge(b) = CanEvict({1, 2, 3})
                 let a_last = a.last().unwrap();
                 let b_last = b.last().unwrap();
                 let last = std::cmp::min(a_last, b_last).clone();
-                CanEvict(a.into_iter().chain(b).filter(|k| k <= &last).collect())
+                CanEvict(
+                    a.into_iter()
+                        .take_while(|k| k <= &last)
+                        .chain(b.into_iter().take_while(|k| k <= &last))
+                        .collect(),
+                )
             }
             (CannotEvict(a), CannotEvict(b)) => {
                 // Example:
                 // a = CannotEvict(2), meaning keys < 2 can be evicted
                 // b = CannotEvict(3), meaning keys < 3 can be evicted
-                // a.intersect(b) = CannotEvict(2)
+                // a.merge(b) = CannotEvict(2)
                 CannotEvict(std::cmp::min(a, b))
             }
-            (CanEvict(keys), CannotEvict(still_required))
-            | (CannotEvict(still_required), CanEvict(keys)) => {
+            (CanEvict(mut keys), CannotEvict(still_required))
+            | (CannotEvict(still_required), CanEvict(mut keys)) => {
                 // Example:
                 // a = CanEvict({1, 2, 3})
                 // b = CannotEvict(3)
-                // a.intersect(b) = CanEvict({1, 2})
-                CanEvict(keys.into_iter().filter(|k| k < &still_required).collect())
+                // a.merge(b) = CanEvict({1, 2})
+                keys.split_off(&still_required);
+                CanEvict(keys)
             }
         }
     }

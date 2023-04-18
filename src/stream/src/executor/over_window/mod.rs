@@ -387,7 +387,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 // Evict unneeded rows from state table.
                 let evict_hint = evict_hints
                     .into_iter()
-                    .reduce(StateEvictHint::intersect)
+                    .reduce(StateEvictHint::merge)
                     .expect("# of evict hints = # of window func calls");
                 if let StateEvictHint::CanEvict(keys_to_evict) = evict_hint {
                     for key in keys_to_evict {
