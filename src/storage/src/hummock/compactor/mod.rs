@@ -61,7 +61,8 @@ use super::value::HummockValue;
 use super::{CompactionDeleteRanges, HummockResult, SstableBuilderOptions, XorFilterBuilder};
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::compaction_utils::{
-    build_multi_compaction_filter, estimate_state_for_compaction, generate_splits,
+    build_multi_compaction_filter, estimate_state_for_compaction, estimate_task_memory_capacity,
+    generate_splits,
 };
 use crate::hummock::compactor::compactor_runner::CompactorRunner;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
@@ -239,6 +240,28 @@ impl Compactor {
             }
         };
 
+        let task_memory_capacity_with_parallelism =
+            estimate_task_memory_capacity(context.clone(), &compact_task) * parallelism;
+
+        // If the task does not have enough memory, it should cancel the task and let the meta
+        // reschedule it, so that it does not occupy the compactor's resources.
+        let memory_detector = context
+            .output_memory_limiter
+            .try_require_memory(task_memory_capacity_with_parallelism as u64);
+        if memory_detector.is_none() {
+            tracing::warn!(
+                "Not enough memory to serve the task {} task_memory_capacity_with_parallelism {}  memory_usage {} memory_quota {}",
+                compact_task.task_id,
+                task_memory_capacity_with_parallelism,
+                context.output_memory_limiter.get_memory_usage(),
+                context.output_memory_limiter.quota()
+            );
+            task_status = TaskStatus::NoAvailResourceCanceled;
+            Self::compact_done(&mut compact_task, context.clone(), output_ssts, task_status).await;
+            return task_status;
+        }
+
+        drop(memory_detector);
         context.compactor_metrics.compact_task_pending_num.inc();
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let filter = multi_filter.clone();
@@ -837,7 +860,7 @@ impl Compactor {
     ) -> HummockResult<(Vec<SplitTableOutput>, CompactionStatistics)> {
         let builder_factory = RemoteBuilderFactory::<F, XorFilterBuilder> {
             sstable_object_id_manager: self.context.sstable_object_id_manager.clone(),
-            limiter: self.context.read_memory_limiter.clone(),
+            limiter: self.context.output_memory_limiter.clone(),
             options: self.options.clone(),
             policy: self.task_config.cache_policy,
             remote_rpc_cost: self.get_id_time.clone(),

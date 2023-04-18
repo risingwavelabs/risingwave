@@ -22,6 +22,7 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_pb::hummock::{CompactTask, LevelType};
 
+use super::compaction_utils::estimate_task_memory_capacity;
 use super::task_progress::TaskProgress;
 use super::TaskConfig;
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
@@ -45,25 +46,14 @@ pub struct CompactorRunner {
 
 impl CompactorRunner {
     pub fn new(split_index: usize, context: Arc<CompactorContext>, task: CompactTask) -> Self {
-        let max_target_file_size = context.storage_opts.sstable_size_mb as usize * (1 << 20);
-        let total_file_size = task
-            .input_ssts
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
-            .map(|table| table.file_size)
-            .sum::<u64>();
-
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
-        options.capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
         options.compression_algorithm = match task.compression_algorithm {
             0 => CompressionAlgorithm::None,
             1 => CompressionAlgorithm::Lz4,
             _ => CompressionAlgorithm::Zstd,
         };
-        let total_file_size = (total_file_size as f64 * 1.2).round() as usize;
-        if options.compression_algorithm == CompressionAlgorithm::None {
-            options.capacity = std::cmp::min(options.capacity, total_file_size);
-        }
+        options.capacity = estimate_task_memory_capacity(context.clone(), &task);
+
         let key_range = KeyRange {
             left: Bytes::copy_from_slice(task.splits[split_index].get_left()),
             right: Bytes::copy_from_slice(task.splits[split_index].get_right()),
