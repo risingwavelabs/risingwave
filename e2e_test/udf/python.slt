@@ -123,6 +123,34 @@ select (extract_tcp_info(E'\\x45000034a8a8400040065b8ac0a8000ec0a80001035d20b6d9
 ----
 192.168.0.14 192.168.0.1 861 8374
 
+# error handling
+
+statement error
+select hex_to_dec('1z');
+
+statement ok
+create table t (dummy date, v varchar);
+
+statement ok
+create materialized view mv as select dummy, hex_to_dec(v) from t;
+
+statement ok
+insert into t values ('2023-01-01', '1z');
+
+statement ok
+flush;
+
+query TI
+select * from mv;
+----
+2023-01-01 NULL
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table t;
+
 # TODO: drop function without arguments
 
 # # Drop a function but ambiguous.

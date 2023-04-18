@@ -35,6 +35,8 @@
 mod expr_array_concat;
 mod expr_array_distinct;
 mod expr_array_length;
+mod expr_array_positions;
+mod expr_array_remove;
 mod expr_array_to_string;
 mod expr_binary_nonnull;
 mod expr_binary_nullable;
@@ -205,8 +207,8 @@ impl ExprContext {
         Self { curr_epoch }
     }
 
-    pub fn get_physical_time(&self) -> u64 {
-        self.curr_epoch.physical_time()
+    pub fn get_proctime(&self) -> u64 {
+        self.curr_epoch.as_unix_millis() * 1000
     }
 }
 

@@ -364,7 +364,12 @@ impl Binder {
                 ("asin", raw_call(ExprType::Asin)), 
                 ("acos", raw_call(ExprType::Acos)), 
                 ("atan", raw_call(ExprType::Atan)), 
-                ("atan2", raw_call(ExprType::Atan2)), 
+                ("atan2", raw_call(ExprType::Atan2)),   
+                ("sind", raw_call(ExprType::Sind)),     
+                ("cosd", raw_call(ExprType::Cosd)), 
+                ("tand", raw_call(ExprType::Tand)), 
+                ("degrees", raw_call(ExprType::Degrees)),
+                ("radians", raw_call(ExprType::Radians)),
                 ("sqrt", raw_call(ExprType::Sqrt)),     
 
                 (
@@ -422,6 +427,10 @@ impl Binder {
                 ("array_distinct", raw_call(ExprType::ArrayDistinct)),
                 ("array_length", raw_call(ExprType::ArrayLength)),
                 ("cardinality", raw_call(ExprType::Cardinality)),
+                ("array_remove", raw_call(ExprType::ArrayRemove)),
+                ("array_positions", raw_call(ExprType::ArrayPositions)),
+                // int256
+                ("hex_to_int256", raw_call(ExprType::HexToInt256)),
                 // jsonb
                 ("jsonb_object_field", raw_call(ExprType::JsonbAccessInner)),
                 ("jsonb_array_element", raw_call(ExprType::JsonbAccessInner)),

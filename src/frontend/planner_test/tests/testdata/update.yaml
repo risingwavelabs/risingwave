@@ -68,6 +68,20 @@
         └─BatchExchange { order: [], dist: Single }
           └─BatchFilter { predicate: (t.v1 <> t.v2) }
             └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+- name: update with returning statement, should keep `Update`
+  sql: |
+    create table t (v int);
+    update t set v = 114 returning 514;
+  logical_plan: |
+    LogicalProject { exprs: [514:Int32] }
+    └─LogicalUpdate { table: t, exprs: [114:Int32, $1], returning: true }
+      └─LogicalScan { table: t, columns: [t.v, t._row_id] }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [514:Int32] }
+      └─BatchUpdate { table: t, exprs: [114:Int32, $1], returning: true }
+        └─BatchExchange { order: [], dist: Single }
+          └─BatchScan { table: t, columns: [t.v, t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int primary key, v2 int);
     update t set (v2, v1) = (v1, v2);

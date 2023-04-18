@@ -63,6 +63,7 @@ message Source {
     uint32 associated_table_id = 12;
   }
   string definition = 13;
+  optional uint32 connection_id = 14;
 }
 
 enum SinkType {
@@ -90,19 +91,26 @@ message Sink {
   string definition = 13;
 }
 
-// TODO: add database_id and schema_id
 message Connection {
   message PrivateLinkService {
-    string provider = 1;
+    enum PrivateLinkProvider {
+      UNSPECIFIED = 0;
+      MOCK = 1;
+      AWS = 2;
+    }
+    PrivateLinkProvider provider = 1;
     string service_name = 2;
     string endpoint_id = 3;
     map<string, string> dns_entries = 4;
+    string endpoint_dns_name = 5;
   }
 
   uint32 id = 1;
-  string name = 2;
+  uint32 schema_id = 2;
+  uint32 database_id = 3;
+  string name = 4;
   oneof info {
-    PrivateLinkService private_link_service = 3;
+    PrivateLinkService private_link_service = 5;
   }
 }
 
