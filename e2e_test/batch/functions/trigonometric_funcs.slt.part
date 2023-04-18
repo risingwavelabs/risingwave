@@ -429,5 +429,72 @@ SELECT abs(tand(-120) + -1.7320508075688772) < 0.000000000000001
 ----
 t
 
+query R
+SELECT abs(cotd(45) - 1) < 0.000000000000001;
+----
+t
 
+query R
+SELECT abs(cotd(60) - 0.5773502691896257) < 0.000000000000001;
+----
+t
 
+query R
+SELECT cotd(90);
+----
+NaN
+
+query R
+SELECT abs(cotd(-45) + 1) < 0.000000000000001;
+----
+t
+
+query R
+SELECT abs(cotd(-60) + 0.5773502691896257) < 0.000000000000001;
+----
+t
+
+query R
+SELECT cotd(-90);
+----
+NaN
+
+query R
+SELECT abs(cotd(30) - 1.7320508075688772) < 0.000000000000001;
+----
+t
+
+query R
+SELECT abs(cotd(-30) + 1.7320508075688772) < 0.000000000000001;
+----
+t
+
+query R
+SELECT abs(cotd(120) + 1.7320508075688772) < 0.000000000000001;
+----
+t
+
+query R
+SELECT abs(cotd(-120) - 1.7320508075688772) < 0.000000000000001;
+----
+t
+
+query R
+SELECT cotd(('-Inf'))
+----
+NaN
+
+query R
+SELECT cotd(('Inf'))
+----
+NaN
+
+query R
+SELECT cotd('NaN')
+----
+NaN
+
+query R
+SELECT cotd('-NaN')
+----
+NaN

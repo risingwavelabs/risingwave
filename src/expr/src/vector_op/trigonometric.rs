@@ -184,6 +184,47 @@ pub fn sind_f64(input: F64) -> F64 {
     }
 }
 
+#[function("cotd(float64) -> float64")]
+pub fn cotd_f64(input: F64) -> F64 {
+    // PSQL implementation: https://github.com/postgres/postgres/blob/78ec02d612a9b69039ec2610740f738968fe144d/src/backend/utils/adt/float.c#L2378
+
+    // Returns NaN if input is NaN or infinite. Different from PSQL implementation.
+    if input.0.is_nan() || input.0.is_infinite() {
+        return f64::NAN.into();
+    }
+
+    let mut arg1 = input.0 % 360.0;
+    let mut sign = 1.0;
+
+    if arg1 < 0.0 {
+        // cotd(-x) = -cotd(x)
+        arg1 = -arg1;
+        sign = -sign;
+    }
+
+    if arg1 > 180.0 {
+        // cotd(360-x) = -cotd(x)
+        arg1 = 360.0 - arg1;
+        sign = -sign;
+    }
+
+    if arg1 > 90.0 {
+        // cotd(180-x) = -cotd(x)
+        arg1 = 180.0 - arg1;
+        sign = -sign;
+    }
+
+    cot_arg1 = cosd_q1(arg1) / sind_q1(arg1);
+    result = sign * (cot_arg1 / cot_45);
+
+    // On some machines we get cotd(270) = minus zero, but this isn't always
+    // true. For portability, and because the user constituency for this
+    // function probably doesn't want minus zero, force it to plain zero.
+    let result = if result == 0.0 { 0.0 } else { result };
+    // Not checking for overflow because cotd(0) == Inf
+    result.into()
+}
+
 #[function("tand(float64) -> float64")]
 pub fn tand_f64(input: F64) -> F64 {
     // PSQL implementation: https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c
@@ -299,6 +340,26 @@ mod tests {
         // exact matches
         assert_eq!(cosd_f64(F64::from(0)).0, 1.0);
         assert_eq!(cosd_f64(F64::from(90)).0, 0.0);
+
+        // cotd
+        assert_eq!(cot_f64(pi), cotd_f64(d));
+        assert_similar(
+            cot_f64((-180_f64).to_radians().into()),
+            cotd_f64(F64::from(-180)),
+        );
+        assert_similar(
+            cot_f64((-190_f64).to_radians().into()),
+            cotd_f64(F64::from(-190)),
+        );
+        assert_similar(cot_f64(50_f64.to_radians().into()), cotd_f64(F64::from(50)));
+        assert_similar(
+            cot_f64(100_f64.to_radians().into()),
+            cotd_f64(F64::from(100)),
+        );
+        assert_similar(
+            cot_f64(250_f64.to_radians().into()),
+            cotd_f64(F64::from(250)),
+        );
 
         // tand
         assert_similar(
