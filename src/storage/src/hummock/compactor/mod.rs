@@ -185,7 +185,9 @@ impl Compactor {
         {
             Err(e) => {
                 tracing::error!("Failed to fetch filter key extractor tables [{:?}], it may caused by some RPC error {:?}", compact_task.existing_table_ids, e);
-                return TaskStatus::ExecuteFailed;
+                let task_status = TaskStatus::ExecuteFailed;
+                Self::compact_done(&mut compact_task, context.clone(), vec![], task_status).await;
+                return task_status;
             }
             Ok(extractor) => extractor,
         };
@@ -198,7 +200,9 @@ impl Compactor {
                 .collect_vec();
             if !removed_tables.is_empty() {
                 tracing::error!("Failed to fetch filter key extractor tables [{:?}. [{:?}] may be removed by meta-service. ", existing_table_ids, removed_tables);
-                return TaskStatus::ExecuteFailed;
+                let task_status = TaskStatus::ExecuteFailed;
+                Self::compact_done(&mut compact_task, context.clone(), vec![], task_status).await;
+                return task_status;
             }
         }
 

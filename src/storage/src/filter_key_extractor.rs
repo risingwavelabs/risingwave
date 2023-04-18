@@ -302,7 +302,6 @@ impl FilterKeyExtractorManagerInner {
             let guard = self.table_id_to_filter_key_extractor.read();
             table_id_set.drain_filter(|table_id| match guard.get(table_id) {
                 Some(filter_key_extractor) => {
-                    println!("register {}", table_id);
                     multi_filter_key_extractor.register(*table_id, filter_key_extractor.clone());
                     true
                 }
@@ -311,7 +310,6 @@ impl FilterKeyExtractorManagerInner {
             });
         }
 
-        println!("rest {:?}", table_id_set);
         if !table_id_set.is_empty() {
             let table_ids = table_id_set.iter().cloned().collect_vec();
             let mut state_tables =
