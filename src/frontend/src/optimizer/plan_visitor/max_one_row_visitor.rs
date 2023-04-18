@@ -28,7 +28,9 @@ pub struct MaxOneRowVisitor;
 
 /// Return true if we can determine at most one row returns by the plan, otherwise false.
 impl PlanVisitor<bool> for MaxOneRowVisitor {
-    fn default_behavior() -> impl DefaultBehavior<bool> {
+    type DefaultBehavior = impl DefaultBehavior<bool>;
+
+    fn default_behavior() -> Self::DefaultBehavior {
         Merge(|a, b| a & b)
     }
 
@@ -109,7 +111,9 @@ impl PlanVisitor<bool> for MaxOneRowVisitor {
 pub struct HasMaxOneRowApply();
 
 impl PlanVisitor<bool> for HasMaxOneRowApply {
-    fn default_behavior() -> impl DefaultBehavior<bool> {
+    type DefaultBehavior = impl DefaultBehavior<bool>;
+
+    fn default_behavior() -> Self::DefaultBehavior {
         Merge(|a, b| a | b)
     }
 
@@ -121,7 +125,9 @@ impl PlanVisitor<bool> for HasMaxOneRowApply {
 pub struct CountRows;
 
 impl PlanVisitor<Option<usize>> for CountRows {
-    fn default_behavior() -> impl DefaultBehavior<Option<usize>> {
+    type DefaultBehavior = impl DefaultBehavior<Option<usize>>;
+
+    fn default_behavior() -> Self::DefaultBehavior {
         DefaultValue
     }
 

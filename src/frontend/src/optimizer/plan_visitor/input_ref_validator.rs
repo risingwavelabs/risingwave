@@ -125,7 +125,9 @@ impl PlanVisitor<Option<String>> for InputRefValidator {
 
     // TODO: add more checks
 
-    fn default_behavior() -> impl DefaultBehavior<Option<String>> {
+    type DefaultBehavior = impl DefaultBehavior<Option<String>>;
+
+    fn default_behavior() -> Self::DefaultBehavior {
         Merge(|a: Option<String>, b| a.or(b))
     }
 }

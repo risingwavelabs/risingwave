@@ -20,7 +20,9 @@ use crate::optimizer::plan_node;
 pub struct SideEffectVisitor;
 
 impl PlanVisitor<bool> for SideEffectVisitor {
-    fn default_behavior() -> impl DefaultBehavior<bool> {
+    type DefaultBehavior = impl DefaultBehavior<bool>;
+
+    fn default_behavior() -> Self::DefaultBehavior {
         Merge(|a, b| a | b)
     }
 

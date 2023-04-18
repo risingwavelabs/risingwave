@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![expect(incomplete_features)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![allow(rustdoc::private_intra_doc_links)]
 #![feature(map_try_insert)]
@@ -34,7 +33,6 @@
 #![feature(is_some_and)]
 #![feature(extend_one)]
 #![feature(type_alias_impl_trait)]
-#![feature(return_position_impl_trait_in_trait)]
 #![recursion_limit = "256"]
 
 #[macro_use]

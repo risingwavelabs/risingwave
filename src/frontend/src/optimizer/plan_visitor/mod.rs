@@ -79,8 +79,10 @@ macro_rules! def_visitor {
         /// The visitor for plan nodes. visit all inputs and return the ret value of the left most input,
         /// and leaf node returns `R::default()`
         pub trait PlanVisitor<R: Default> {
+            type DefaultBehavior: DefaultBehavior<R>;
+
             /// The behavior for the default implementations of `visit_xxx`.
-            fn default_behavior() -> impl DefaultBehavior<R>;
+            fn default_behavior() -> Self::DefaultBehavior;
 
             paste! {
                 fn visit(&mut self, plan: PlanRef) -> R{
@@ -121,7 +123,9 @@ macro_rules! impl_has_variant {
                     where
                         P: FnMut(&$variant) -> bool,
                     {
-                        fn default_behavior() -> impl DefaultBehavior<bool> {
+                        type DefaultBehavior = impl DefaultBehavior<bool>;
+
+                        fn default_behavior() -> Self::DefaultBehavior {
                             Merge(|a, b| a | b)
                         }
 
