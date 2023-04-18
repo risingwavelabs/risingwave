@@ -753,6 +753,20 @@ impl SysCatalogReaderImpl {
                     ]));
                 }
             });
+
+            // Sources have no fragments.
+            schema_catalog.iter_source().for_each(|t| {
+                rows.push(OwnedRow::new(vec![
+                    Some(ScalarImpl::Utf8(schema.clone().into())),
+                    Some(ScalarImpl::Utf8(t.name.clone().into())),
+                    Some(ScalarImpl::Int32(t.owner as i32)),
+                    Some(ScalarImpl::Utf8(t.definition.clone().into())),
+                    Some(ScalarImpl::Utf8("SOURCE".into())),
+                    Some(ScalarImpl::Int32(t.id as i32)),
+                    Some(ScalarImpl::Utf8("".into())),
+                    None,
+                ]));
+            });
         }
 
         Ok(rows)
