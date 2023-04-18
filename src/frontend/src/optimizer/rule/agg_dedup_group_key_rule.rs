@@ -63,7 +63,7 @@ impl Rule for AggDedupGroupKeyRule {
         }
         let deduped_group_key_num = deduped_group_key.len();
         let agg_call_num = agg_calls.len();
-        let new_agg = LogicalAgg::new(agg_calls, deduped_group_key, input);
+        let new_agg = Agg::new(agg_calls, deduped_group_key, input);
         let proj = LogicalProject::with_out_col_idx(
             new_agg.into(),
             group_key_mapping

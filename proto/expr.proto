@@ -113,9 +113,10 @@ message ExprNode {
     ATAN2 = 252;
     SIND = 253;
     COSD = 254;
-    SQRT = 255;
-    DEGREES = 256;
-    RADIANS = 257;
+    TAND = 255;
+    SQRT = 256;
+    DEGREES = 257;
+    RADIANS = 258;
 
     // Boolean comparison
     IS_TRUE = 301;
@@ -144,6 +145,7 @@ message ExprNode {
     ARRAY_LENGTH = 536;
     CARDINALITY = 537;
     ARRAY_REMOVE = 538;
+    ARRAY_POSITIONS = 539;
 
     // Int256 functions
     HEX_TO_INT256 = 540;

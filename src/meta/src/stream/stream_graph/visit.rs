@@ -143,9 +143,13 @@ where
                     always!(source.state_table, "Source");
                 }
             }
+
+            // Now
             NodeBody::Now(node) => {
                 always!(node.state_table, "Now");
             }
+
+            // Watermark filter
             NodeBody::WatermarkFilter(node) => {
                 assert!(!node.tables.is_empty());
                 repeated!(node.tables, "WatermarkFilter");
@@ -154,6 +158,11 @@ where
             // Shared arrangement
             NodeBody::Arrange(node) => {
                 always!(node.table, "Arrange");
+            }
+
+            // Dedup
+            NodeBody::AppendOnlyDedup(node) => {
+                always!(node.state_table, "AppendOnlyDedup");
             }
 
             // Note: add internal tables for new nodes here.
