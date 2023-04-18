@@ -288,8 +288,7 @@ where
                 }
             }
             Some(visibility) => {
-                let mut cur_idx: usize = 0;
-                while let Some(idx) = visibility.next_set_bit(cur_idx) {
+                for idx in visibility.iter_ones() {
                     // SAFETY(value_at_unchecked): the idx is always in bound.
                     unsafe {
                         match ops[idx] {
@@ -305,7 +304,6 @@ where
                             }
                         }
                     }
-                    cur_idx = idx + 1;
                 }
             }
         }

@@ -339,11 +339,11 @@ impl Bitmap {
     }
 
     /// Enumerates the index of each bit set to 1.
-    pub fn iter_ones(&self) -> impl Iterator<Item = usize> + '_ {
-        self.iter()
-            .enumerate()
-            .filter(|(_, bit)| *bit)
-            .map(|(pos, _)| pos)
+    pub fn iter_ones(&self) -> BitmapOnesIter<'_> {
+        BitmapOnesIter {
+            bitmap: self,
+            idx: 0,
+        }
     }
 
     /// Returns an iterator which yields the position ranges of continuous high bits.
@@ -628,6 +628,24 @@ impl<'a> iter::Iterator for BitmapIter<'a> {
 
 impl ExactSizeIterator for BitmapIter<'_> {}
 unsafe impl TrustedLen for BitmapIter<'_> {}
+
+pub struct BitmapOnesIter<'a> {
+    bitmap: &'a Bitmap,
+    /// `None` means finished
+    idx: usize,
+}
+
+impl<'a> iter::Iterator for BitmapOnesIter<'a> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next_idx = self.bitmap.next_set_bit(self.idx + 1);
+        if let Some(idx) = next_idx {
+            self.idx = idx;
+        }
+        next_idx
+    }
+}
 
 #[cfg(test)]
 mod tests {
