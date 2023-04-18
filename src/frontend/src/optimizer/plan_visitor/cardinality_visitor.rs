@@ -45,7 +45,7 @@ pub mod card {
                 (Self::Unlimited, Self::Unlimited) => Ordering::Equal,
                 (Self::Unlimited, Self::Limited(_)) => Ordering::Greater,
                 (Self::Limited(_), Self::Unlimited) => Ordering::Less,
-                (Self::Limited(lhs), Self::Limited(rhs)) => lhs.cmp(&rhs),
+                (Self::Limited(lhs), Self::Limited(rhs)) => lhs.cmp(rhs),
             }
         }
     }
