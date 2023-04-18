@@ -14,7 +14,6 @@
 
 #![allow(dead_code)]
 
-use std::collections::VecDeque;
 use std::marker::PhantomData;
 
 use futures::StreamExt;
@@ -131,8 +130,7 @@ impl<S: StateStore> ExecutorInner<S> {
 
 struct ExecutionVars<S: StateStore> {
     partitions: PartitionCache,
-    pending_watermarks: VecDeque<Watermark>,
-    last_outputted_order_key: Option<ScalarImpl>,
+    last_watermark: Option<ScalarImpl>,
     _phantom: PhantomData<S>,
 }
 
@@ -425,18 +423,6 @@ impl<S: StateStore> OverWindowExecutor<S> {
         })
     }
 
-    #[try_stream(ok = Watermark, error = StreamExecutorError)]
-    async fn emit_watermarks<'a>(_this: &'a mut ExecutorInner<S>, vars: &'a mut ExecutionVars<S>) {
-        if let Some(last_outputted) = vars.last_outputted_order_key.as_ref() {
-            while let Some(watermark) = vars.pending_watermarks.front() {
-                if &watermark.val > last_outputted {
-                    break;
-                }
-                yield vars.pending_watermarks.pop_front().unwrap();
-            }
-        }
-    }
-
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn executor_inner(self) {
         let OverWindowExecutor {
@@ -446,8 +432,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
 
         let mut vars = ExecutionVars {
             partitions: ExecutorCache::new(new_unbounded(this.watermark_epoch.clone())),
-            pending_watermarks: VecDeque::new(),
-            last_outputted_order_key: None,
+            last_watermark: None,
             _phantom: PhantomData::<S>,
         };
 
@@ -462,38 +447,32 @@ impl<S: StateStore> OverWindowExecutor<S> {
         for msg in input {
             let msg = msg?;
             match msg {
-                Message::Watermark(watermark) => {
-                    if watermark.col_idx != this.order_key_index {
-                        // Ignore watermark from other columns.
-                        continue;
-                    }
-                    // Note: We may receive many watermarks before we are ready to output rows below
-                    // theme.
-                    vars.pending_watermarks
-                        .push_back(watermark.with_idx(this.output_order_key_index()));
-                    #[for_await]
-                    for wtmk in Self::emit_watermarks(&mut this, &mut vars) {
-                        yield Message::Watermark(wtmk?);
-                    }
+                Message::Watermark(_) => {
+                    // Since we assume the input a `Sort`, we can emit watermarks by ourselves and
+                    // ignore any input watermarks.
+                    continue;
                 }
                 Message::Chunk(chunk) => {
                     let output_chunk = Self::apply_chunk(&mut this, &mut vars, chunk).await?;
                     if let Some(chunk) = output_chunk {
-                        let last_order_key = chunk.columns()[this.output_order_key_index()]
+                        let output_order_key_idx = this.output_order_key_index();
+                        let first_order_key = chunk.columns()[output_order_key_idx]
                             .array_ref()
-                            .iter()
-                            .last()
-                            .expect("chunk must not be empty")
-                            .expect("order key must not be NULL")
-                            .into_scalar_impl();
-                        vars.last_outputted_order_key = Some(last_order_key);
+                            .datum_at(0)
+                            .expect("order key must not be NULL");
+
+                        if vars.last_watermark.is_none()
+                            || vars.last_watermark.as_ref().unwrap() < &first_order_key
+                        {
+                            vars.last_watermark = Some(first_order_key.clone());
+                            yield Message::Watermark(Watermark::new(
+                                output_order_key_idx,
+                                this.info.schema.fields()[output_order_key_idx].data_type(),
+                                first_order_key,
+                            ));
+                        }
 
                         yield Message::Chunk(chunk);
-
-                        #[for_await]
-                        for wtmk in Self::emit_watermarks(&mut this, &mut vars) {
-                            yield Message::Watermark(wtmk?);
-                        }
                     }
                 }
                 Message::Barrier(barrier) => {
@@ -619,43 +598,36 @@ mod tests {
             tx.push_barrier(1, false);
             over_window.expect_barrier().await;
 
-            tx.push_int64_watermark(0, 1); // will be emitted after the output chunk
             tx.push_chunk(StreamChunk::from_pretty(
                 " I T  I   i
                 + 1 p1 100 10
                 + 1 p1 101 16
                 + 4 p2 200 20",
             ));
-            let chunk = over_window.expect_chunk().await;
+            assert_eq!(1, over_window.expect_watermark().await.val.into_int64());
             assert_eq!(
-                chunk,
+                over_window.expect_chunk().await,
                 StreamChunk::from_pretty(
                     " T  I I   i  i
                     + p1 1 100 .  16"
                 )
             );
-            let watermark = over_window.expect_watermark().await;
-            assert_eq!(watermark.val.into_int64(), 1);
 
-            tx.push_int64_watermark(0, 4); // will be emitted after the output chunk
-            tx.push_int64_watermark(0, 5); // will be delayed
             tx.push_chunk(StreamChunk::from_pretty(
                 " I T  I   i
                 + 5 p1 102 18
                 + 7 p2 201 22
                 + 8 p3 300 33",
             ));
-            let chunk = over_window.expect_chunk().await;
+            // NOTE: no watermark message here, since watermark(1) was already received
             assert_eq!(
-                chunk,
+                over_window.expect_chunk().await,
                 StreamChunk::from_pretty(
                     " T  I I   i  i
                     + p1 1 101 10 18
                     + p2 4 200 .  22"
                 )
             );
-            let watermark = over_window.expect_watermark().await;
-            assert_eq!(watermark.val.into_int64(), 4);
 
             tx.push_barrier(2, false);
             over_window.expect_barrier().await;
@@ -674,9 +646,9 @@ mod tests {
                 + 12 p2 202 28
                 + 13 p3 301 39",
             ));
-            let chunk = over_window.expect_chunk().await;
+            assert_eq!(5, over_window.expect_watermark().await.val.into_int64());
             assert_eq!(
-                chunk,
+                over_window.expect_chunk().await,
                 StreamChunk::from_pretty(
                     " T  I I   i  i
                     + p1 5 102 16 13
