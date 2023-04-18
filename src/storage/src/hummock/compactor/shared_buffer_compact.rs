@@ -292,7 +292,7 @@ pub async fn merge_imms_in_memory(
 
         imm_iters.push(imm.into_forward_iter());
     }
-    let mut builder = DeleteRangeAggregatorBuilder::default();
+    let mut builder = CompactionDeleteRangesBuilder::default();
     builder.add_tombstone(range_tombstone_list.clone());
     let compaction_delete_ranges =
         builder.build_for_compaction(GC_WATERMARK_FOR_FLUSH, GC_DELETE_KEYS_FOR_FLUSH);
