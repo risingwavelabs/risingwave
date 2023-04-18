@@ -85,12 +85,24 @@ pub(crate) fn gen_create_index_plan(
     for column in columns {
         let order_type = OrderType::from_bools(column.asc, column.nulls_first);
         let expr_impl = binder.bind_expr(column.expr)?;
-        if expr_impl.is_impure() {
-            return Err(ErrorCode::NotSupported(
-                "this expression is impure".into(),
-                "use a pure expression instead".into(),
-            )
-            .into());
+        match expr_impl {
+            ExprImpl::InputRef(_) => {}
+            ExprImpl::FunctionCall(_) => {
+                if expr_impl.is_impure() {
+                    return Err(ErrorCode::NotSupported(
+                        "this expression is impure".into(),
+                        "use a pure expression instead".into(),
+                    )
+                    .into());
+                }
+            }
+            _ => {
+                return Err(ErrorCode::NotSupported(
+                    "index columns should be columns or expressions".into(),
+                    "use columns or expressions instead".into(),
+                )
+                .into())
+            }
         }
         index_columns_ordered_expr.push((expr_impl, order_type));
     }
