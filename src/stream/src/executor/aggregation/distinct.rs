@@ -263,8 +263,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::function::aggregate::AggKind;
-    use risingwave_expr::function::args::FuncArgs;
+    use risingwave_expr::function::aggregate::{AggKind, FuncArgs};
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;

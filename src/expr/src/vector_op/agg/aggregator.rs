@@ -17,8 +17,7 @@ use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::types::*;
 
-use crate::function::aggregate::{AggCall, AggKind};
-use crate::function::args::FuncArgs;
+use crate::function::aggregate::{AggCall, AggKind, FuncArgs};
 use crate::vector_op::agg::approx_count_distinct::ApproxCountDistinct;
 use crate::vector_op::agg::array_agg::create_array_agg_state;
 use crate::vector_op::agg::count_star::CountStar;

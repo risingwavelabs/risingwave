@@ -81,8 +81,7 @@ impl ValueState {
 mod tests {
     use risingwave_common::array::{I64Array, Op};
     use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_expr::function::aggregate::AggKind;
-    use risingwave_expr::function::args::FuncArgs;
+    use risingwave_expr::function::aggregate::{AggKind, FuncArgs};
 
     use super::*;
 

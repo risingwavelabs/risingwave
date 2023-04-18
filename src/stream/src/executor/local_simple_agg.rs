@@ -186,8 +186,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::schema_test_utils;
     use risingwave_common::types::DataType;
-    use risingwave_expr::function::aggregate::AggKind;
-    use risingwave_expr::function::args::FuncArgs;
+    use risingwave_expr::function::aggregate::{AggKind, FuncArgs};
 
     use super::*;
     use crate::executor::test_utils::MockSource;

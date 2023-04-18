@@ -501,7 +501,7 @@ mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::function::args::FuncArgs;
+    use risingwave_expr::function::aggregate::FuncArgs;
     use risingwave_expr::function::window::{Frame, WindowFuncCall, WindowFuncKind};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;

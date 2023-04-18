@@ -336,8 +336,7 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::Field;
     use risingwave_common::types::*;
-    use risingwave_expr::function::aggregate::{AggCall, AggKind};
-    use risingwave_expr::function::args::FuncArgs;
+    use risingwave_expr::function::aggregate::{AggCall, AggKind, FuncArgs};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 

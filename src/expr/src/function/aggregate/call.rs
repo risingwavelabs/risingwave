@@ -21,7 +21,7 @@ use risingwave_pb::expr::PbAggCall;
 
 use super::AggKind;
 use crate::expr::{build_from_prost, ExpressionRef};
-use crate::function::args::FuncArgs;
+use crate::function::aggregate::FuncArgs;
 use crate::Result;
 
 /// Represents an aggregation function.

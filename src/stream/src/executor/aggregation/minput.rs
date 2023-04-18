@@ -231,8 +231,7 @@ mod tests {
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::iter_util::ZipEqFast;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-    use risingwave_expr::function::aggregate::{AggCall, AggKind};
-    use risingwave_expr::function::args::FuncArgs;
+    use risingwave_expr::function::aggregate::{AggCall, AggKind, FuncArgs};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
