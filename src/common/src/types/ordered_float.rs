@@ -1174,4 +1174,15 @@ mod tests {
         let ret: OrderedFloat<f64> = OrderedFloat::<f64>::from(crate::types::Decimal::from(5));
         assert_eq!(ret, OrderedFloat::<f64>::from(5_f64));
     }
+
+    #[test]
+    fn test_nan_eq() {
+        let nan_prim = f64::NAN;
+        assert_ne!(nan_prim, nan_prim);
+
+        let nan = OrderedFloat::<f64>::from(nan_prim);
+        assert_eq!(nan, nan);
+
+        assert_ne!(nan.abs(), nan.abs());
+    }
 }
