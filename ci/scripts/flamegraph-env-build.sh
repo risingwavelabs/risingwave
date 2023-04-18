@@ -17,10 +17,10 @@ cargo build \
 artifacts=(risingwave sqlsmith compaction-test backup-restore risingwave_regress_test risingwave_e2e_extended_mode_test risedev-dev delete-range-test librisingwave_java_binding.so)
 
 echo "--- Show link info"
-ldd target/"$target"/risingwave
+ldd target/release/risingwave
 
 echo "--- Upload artifacts"
-echo -n "${artifacts[*]}" | parallel -d ' ' "mv target/$target/{} ./{}-release && buildkite-agent artifact upload ./{}-release"
+echo -n "${artifacts[*]}" | parallel -d ' ' "mv target/release/{} ./{}-release && buildkite-agent artifact upload ./{}-release"
 
 echo "--- Show sccache stats"
 sccache --show-stats
