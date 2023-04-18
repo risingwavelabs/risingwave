@@ -213,7 +213,7 @@ impl LogReader for BoundedInMemLogStoreReader {
                 .expect("should not init for twice");
             let epoch = init_epoch_rx
                 .await
-                .map_err(|e| anyhow!("unable to get init epoch"))?;
+                .map_err(|e| anyhow!("unable to get init epoch: {:?}", e))?;
             assert_eq!(self.epoch_progress, UNINITIALIZED);
             self.epoch_progress = LogReaderEpochProgress::Consuming(epoch);
             Ok(())

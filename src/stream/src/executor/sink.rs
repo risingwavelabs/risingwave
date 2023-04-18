@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use futures::stream::select;
-use futures::{FutureExt, Stream, StreamExt};
+use futures::{FutureExt, StreamExt};
 use futures_async_stream::try_stream;
 use prometheus::Histogram;
 use risingwave_common::array::{Op, StreamChunk};
@@ -199,7 +199,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         enum SinkState {
             Uninitialized,
             Writing { curr_epoch: u64 },
-            Checkpoint { prev_epoch: u64 },
+            Checkpointed { prev_epoch: u64 },
         }
 
         let mut state = SinkState::Uninitialized;
@@ -227,7 +227,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             );
                             SinkState::Writing { curr_epoch: epoch }
                         }
-                        SinkState::Checkpoint { prev_epoch } => {
+                        SinkState::Checkpointed { prev_epoch } => {
                             assert!(
                                 epoch > prev_epoch,
                                 "new epoch {} should be greater than prev epoch {}",
@@ -246,7 +246,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 }
                 LogStoreReadItem::Barrier { is_checkpoint } => {
                     state = match state {
-                        SinkState::Uninitialized => SinkState::Checkpoint { prev_epoch: epoch },
+                        SinkState::Uninitialized => SinkState::Checkpointed { prev_epoch: epoch },
                         SinkState::Writing { curr_epoch } => {
                             assert!(
                                 epoch >= curr_epoch,
@@ -259,19 +259,20 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 sink.commit().await?;
                                 sink_commit_duration_metrics
                                     .observe(start_time.elapsed().as_millis() as f64);
-                                SinkState::Checkpoint { prev_epoch: epoch }
+                                log_reader.truncate().await?;
+                                SinkState::Checkpointed { prev_epoch: epoch }
                             } else {
                                 SinkState::Writing { curr_epoch: epoch }
                             }
                         }
-                        SinkState::Checkpoint { prev_epoch } => {
+                        SinkState::Checkpointed { prev_epoch } => {
                             assert!(
                                 epoch > prev_epoch,
                                 "checkpoint epoch {} should be greater than prev checkpoint epoch: {}",
                                 epoch,
                                 prev_epoch
                             );
-                            SinkState::Checkpoint { prev_epoch: epoch }
+                            SinkState::Checkpointed { prev_epoch: epoch }
                         }
                     };
                 }
