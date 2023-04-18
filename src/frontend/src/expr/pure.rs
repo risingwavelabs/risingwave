@@ -149,7 +149,9 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Sind
             | expr_node::Type::Cosd
             | expr_node::Type::Tand
-            | expr_node::Type::ArrayPositions => {
+            | expr_node::Type::ArrayPositions =>
+            // expression output is deterministic(same result for the same input)
+            {
                 let x = func_call
                     .inputs()
                     .iter()
@@ -158,6 +160,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
                     .unwrap_or_default();
                 x
             }
+            // expression output is not deterministic
             expr_node::Type::Vnode
             | expr_node::Type::Now
             | expr_node::Type::Proctime
@@ -173,6 +176,7 @@ pub fn is_impure(expr: &ExprImpl) -> bool {
     let mut a = ImpureAnalyzer {};
     a.visit_expr(expr)
 }
+
 #[cfg(test)]
 mod tests {
     use risingwave_common::types::DataType;
