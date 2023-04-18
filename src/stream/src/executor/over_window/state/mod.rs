@@ -20,6 +20,8 @@ use smallvec::SmallVec;
 
 use super::MemcmpEncoded;
 
+mod buffer;
+
 mod lag;
 mod lead;
 
