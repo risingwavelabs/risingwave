@@ -31,12 +31,10 @@ impl Partition {
         if self.states.is_empty() {
             true
         } else {
-            1 == self
-                .states
+            self.states
                 .iter()
                 .map(|state| state.curr_window().key)
-                .dedup()
-                .count()
+                .all_equal()
         }
     }
 

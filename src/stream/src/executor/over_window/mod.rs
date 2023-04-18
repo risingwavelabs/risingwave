@@ -279,11 +279,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         assert!(partition.is_aligned());
 
         // Ignore ready windows (all ready windows were outputted before).
-        while partition
-            .states
-            .iter()
-            .all(|state| state.curr_window().is_ready)
-        {
+        while partition.is_ready() {
             partition.states.iter_mut().for_each(|state| {
                 state.slide();
             });
