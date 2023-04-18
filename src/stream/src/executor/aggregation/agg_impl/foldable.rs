@@ -290,6 +290,7 @@ where
             Some(visibility) => {
                 let mut cur_idx: usize = 0;
                 while let Some(idx) = visibility.next_set_bit(cur_idx) {
+                    // SAFETY(value_at_unchecked): the idx is always in bound.
                     unsafe {
                         match ops[idx] {
                             Op::Insert | Op::UpdateInsert => {
