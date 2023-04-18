@@ -161,12 +161,12 @@ pub async fn compactor_serve(
     let input_limit_bytes = compactor_memory_limit_bytes / 2;
 
     // In a compact operation, the size of the output files will not be larger than the input files.
-    // So we can limit the output memory with the input memory limit
-    let input_memory_limiter = Arc::new(MemoryLimiter::new(input_limit_bytes));
+    // So we can limit the input memory with the output memory limit
+    let output_memory_limiter = Arc::new(MemoryLimiter::new(input_limit_bytes));
     let max_concurrent_task_number = storage_opts.max_concurrent_compaction_task_number;
     let memory_collector = Arc::new(CompactorMemoryCollector::new(
         sstable_store.clone(),
-        input_memory_limiter.clone(),
+        output_memory_limiter.clone(),
     ));
     monitor_cache(memory_collector, &registry).unwrap();
     let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
@@ -183,7 +183,7 @@ pub async fn compactor_serve(
             opts.compaction_worker_threads_number,
         )),
         filter_key_extractor_manager: filter_key_extractor_manager.clone(),
-        read_memory_limiter: input_memory_limiter,
+        output_memory_limiter,
         sstable_object_id_manager: sstable_object_id_manager.clone(),
         task_progress_manager: Default::default(),
         compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(CompactorRuntimeConfig {
