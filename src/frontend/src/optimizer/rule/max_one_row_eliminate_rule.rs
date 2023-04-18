@@ -14,7 +14,7 @@
 
 use super::{BoxedRule, Rule};
 use crate::optimizer::plan_node::LogicalApply;
-use crate::optimizer::plan_visitor::LogicalCountRows;
+use crate::optimizer::plan_visitor::LogicalCardinalityExt;
 use crate::optimizer::PlanRef;
 
 /// Eliminate max one row restriction from `LogicalApply`.

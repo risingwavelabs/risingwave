@@ -14,7 +14,7 @@
 
 use super::{BoxedRule, Rule};
 use crate::optimizer::plan_node::{LogicalValues, PlanTreeNodeUnary};
-use crate::optimizer::plan_visitor::{LogicalCountRows, SideEffectVisitor};
+use crate::optimizer::plan_visitor::{LogicalCardinalityExt, SideEffectVisitor};
 use crate::optimizer::{PlanRef, PlanVisitor};
 
 pub struct TrivialProjectToValuesRule {}

@@ -38,7 +38,7 @@ use crate::optimizer::plan_node::{
     LogicalFilter, LogicalScan, PredicatePushdownContext, RewriteStreamContext,
     StreamDynamicFilter, StreamFilter, StreamTableScan, StreamTemporalJoin, ToStreamContext,
 };
-use crate::optimizer::plan_visitor::LogicalCountRows;
+use crate::optimizer::plan_visitor::LogicalCardinalityExt;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay};
 
