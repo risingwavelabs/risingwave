@@ -51,6 +51,7 @@ pub struct SchemaCatalog {
     function_by_id: HashMap<FunctionId, Arc<FunctionCatalog>>,
     connection_by_name: HashMap<String, Arc<ConnectionCatalog>>,
     connection_by_id: HashMap<ConnectionId, Arc<ConnectionCatalog>>,
+    connection_source_ref: HashMap<ConnectionId, Vec<SourceId>>,
 
     // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
     system_table_by_name: HashMap<String, SystemCatalog>,
@@ -178,6 +179,13 @@ impl SchemaCatalog {
         let id = prost.id;
         let source = SourceCatalog::from(prost);
         let source_ref = Arc::new(source);
+
+        if let Some(connection_id) = source_ref.connection_id {
+            self.connection_source_ref
+                .entry(connection_id)
+                .and_modify(|sources| sources.push(source_ref.id))
+                .or_insert(vec![source_ref.id]);
+        }
 
         self.source_by_name
             .try_insert(name, source_ref.clone())
@@ -474,6 +482,7 @@ impl From<&PbSchema> for SchemaCatalog {
             function_by_id: HashMap::new(),
             connection_by_name: HashMap::new(),
             connection_by_id: HashMap::new(),
+            connection_source_ref: HashMap::new(),
         }
     }
 }
