@@ -238,7 +238,7 @@ impl FrontendObserverNode {
                                     // FIXME: the frontend node delete its fragment for the update
                                     // operation by itself.
                                     self.worker_node_manager
-                                        .remove_fragment_mapping(&old_fragment_id);
+                                        .remove_streaming_fragment_mapping(&old_fragment_id);
                                 }
                             }
                             _ => panic!("receive an unsupported notify {:?}", resp),
@@ -349,15 +349,15 @@ impl FrontendObserverNode {
                 match resp.operation() {
                     Operation::Add => {
                         self.worker_node_manager
-                            .insert_fragment_mapping(fragment_id, mapping());
+                            .insert_streaming_fragment_mapping(fragment_id, mapping());
                     }
                     Operation::Delete => {
                         self.worker_node_manager
-                            .remove_fragment_mapping(&fragment_id);
+                            .remove_streaming_fragment_mapping(&fragment_id);
                     }
                     Operation::Update => {
                         self.worker_node_manager
-                            .update_fragment_mapping(fragment_id, mapping());
+                            .update_streaming_fragment_mapping(fragment_id, mapping());
                     }
                     _ => panic!("receive an unsupported notify {:?}", resp),
                 }

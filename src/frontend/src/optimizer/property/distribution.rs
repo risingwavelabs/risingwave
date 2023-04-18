@@ -62,7 +62,7 @@ use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
-use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
+use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 
 /// the distribution property provided by a operator.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -114,7 +114,7 @@ impl Distribution {
         &self,
         output_count: u32,
         catalog_reader: &CatalogReader,
-        worker_node_manager: &WorkerNodeManagerRef,
+        worker_node_manager: &WorkerNodeSelector,
     ) -> Result<ExchangeInfo> {
         let exchange_info = ExchangeInfo {
             mode: match self {
@@ -147,7 +147,7 @@ impl Distribution {
                     );
 
                     let vnode_mapping = worker_node_manager
-                        .serving_vnode_mapping(Self::get_fragment_id(catalog_reader, table_id)?)?;
+                        .fragment_mapping(Self::get_fragment_id(catalog_reader, table_id)?)?;
 
                     let pu2id_map: HashMap<ParallelUnitId, u32> = vnode_mapping
                         .iter_unique()

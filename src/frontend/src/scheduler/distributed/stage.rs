@@ -57,7 +57,7 @@ use crate::scheduler::distributed::QueryMessage;
 use crate::scheduler::plan_fragmenter::{
     ExecutionPlanNode, PartitionInfo, QueryStageRef, StageId, TaskId, ROOT_TASK_ID,
 };
-use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
+use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::SchedulerError::{TaskExecutionError, TaskRunningOutOfMemory};
 use crate::scheduler::{ExecutionContextRef, SchedulerError, SchedulerResult};
 
@@ -113,7 +113,7 @@ struct TaskStatusHolder {
 pub struct StageExecution {
     epoch: BatchQueryEpoch,
     stage: QueryStageRef,
-    worker_node_manager: WorkerNodeManagerRef,
+    worker_node_manager: WorkerNodeSelector,
     tasks: Arc<HashMap<TaskId, TaskStatusHolder>>,
     state: Arc<RwLock<StageState>>,
     shutdown_tx: RwLock<Option<oneshot::Sender<StageMessage>>>,
@@ -132,7 +132,7 @@ struct StageRunner {
     epoch: BatchQueryEpoch,
     state: Arc<RwLock<StageState>>,
     stage: QueryStageRef,
-    worker_node_manager: WorkerNodeManagerRef,
+    worker_node_manager: WorkerNodeSelector,
     tasks: Arc<HashMap<TaskId, TaskStatusHolder>>,
     // Send message to `QueryRunner` to notify stage state change.
     msg_sender: Sender<QueryMessage>,
@@ -165,7 +165,7 @@ impl StageExecution {
     pub fn new(
         epoch: BatchQueryEpoch,
         stage: QueryStageRef,
-        worker_node_manager: WorkerNodeManagerRef,
+        worker_node_manager: WorkerNodeSelector,
         msg_sender: Sender<QueryMessage>,
         children: Vec<Arc<StageExecution>>,
         compute_client_pool: ComputeClientPoolRef,
@@ -333,7 +333,7 @@ impl StageRunner {
             // the task.
             // We schedule the task to the worker node that owns the data partition.
             let parallel_unit_ids = vnode_bitmaps.keys().cloned().collect_vec();
-            let workers = self.worker_node_manager.get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
+            let workers = self.worker_node_manager.manager.get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
 
             for (i, (parallel_unit_id, worker)) in parallel_unit_ids
                 .into_iter()
@@ -643,13 +643,14 @@ impl StageRunner {
     }
 
     #[inline(always)]
-    fn get_vnode_mapping(&self, table_id: &TableId) -> Option<ParallelUnitMapping> {
+    fn get_streaming_vnode_mapping(&self, table_id: &TableId) -> Option<ParallelUnitMapping> {
         self.catalog_reader
             .read_guard()
             .get_table_by_id(table_id)
             .map(|table| {
                 self.worker_node_manager
-                    .get_fragment_mapping(&table.fragment_id)
+                    .manager
+                    .get_streaming_fragment_mapping(&table.fragment_id)
             })
             .ok()
             .flatten()
@@ -663,7 +664,7 @@ impl StageRunner {
     ) -> SchedulerResult<Option<WorkerNode>> {
         let plan_node = plan_fragment.root.as_ref().expect("fail to get plan node");
         let vnode_mapping = match dml_table_id {
-            Some(table_id) => self.get_vnode_mapping(&table_id),
+            Some(table_id) => self.get_streaming_vnode_mapping(&table_id),
             None => {
                 if let Some(distributed_lookup_join_node) =
                     Self::find_distributed_lookup_join_node(plan_node)
@@ -678,13 +679,14 @@ impl StageRunner {
                     )?;
                     let id2pu_vec = self
                         .worker_node_manager
-                        .serving_vnode_mapping(fragment_id)?
+                        .fragment_mapping(fragment_id)?
                         .iter_unique()
                         .collect_vec();
 
                     let pu = id2pu_vec[task_id as usize];
                     let candidates = self
                         .worker_node_manager
+                        .manager
                         .get_workers_by_parallel_unit_ids(&[pu])?;
                     return Ok(Some(candidates[0].clone()));
                 } else {
@@ -698,6 +700,7 @@ impl StageRunner {
                 let parallel_unit_ids = mapping.iter_unique().collect_vec();
                 let candidates = self
                     .worker_node_manager
+                    .manager
                     .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
                 Some(candidates.choose(&mut rand::thread_rng()).unwrap().clone())
             }
@@ -817,7 +820,7 @@ impl StageRunner {
         worker: Option<WorkerNode>,
     ) -> SchedulerResult<Fuse<Streaming<TaskInfoResponse>>> {
         let worker_node_addr = worker
-            .unwrap_or(self.worker_node_manager.next_random_serving_worker()?)
+            .unwrap_or(self.worker_node_manager.next_random_worker()?)
             .host
             .unwrap();
 

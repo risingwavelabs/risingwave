@@ -30,7 +30,7 @@ use super::stats::DistributedQueryMetrics;
 use super::QueryExecution;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
-use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
+use crate::scheduler::worker_node_manager::{WorkerNodeManagerRef, WorkerNodeSelector};
 use crate::scheduler::{ExecutionContextRef, PinnedHummockSnapshot, SchedulerResult};
 
 pub struct DistributedQueryStream {
@@ -174,11 +174,15 @@ impl QueryManager {
             .query_manager()
             .add_query(query_id.clone(), query_execution.clone());
 
+        let worker_node_manager_reader = WorkerNodeSelector::new(
+            self.worker_node_manager.clone(),
+            !pinned_snapshot.only_checkpoint_visible(),
+        );
         // Starts the execution of the query.
         let query_result_fetcher = query_execution
             .start(
                 context.clone(),
-                self.worker_node_manager.clone(),
+                worker_node_manager_reader,
                 pinned_snapshot,
                 self.compute_client_pool.clone(),
                 self.catalog_reader.clone(),

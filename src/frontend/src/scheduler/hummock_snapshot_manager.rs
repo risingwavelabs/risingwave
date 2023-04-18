@@ -57,6 +57,13 @@ impl PinnedHummockSnapshot {
             },
         }
     }
+
+    pub fn only_checkpoint_visible(&self) -> bool {
+        match self {
+            PinnedHummockSnapshot::FrontendPinned(_, checkpoint) => *checkpoint,
+            PinnedHummockSnapshot::Other(_) => true,
+        }
+    }
 }
 
 type SnapshotRef = Arc<ArcSwap<HummockSnapshot>>;

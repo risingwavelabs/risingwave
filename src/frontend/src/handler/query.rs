@@ -43,6 +43,7 @@ use crate::optimizer::{
 };
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
+use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::{
     BatchPlanFragmenter, DistributedQueryStream, ExecutionContext, ExecutionContextRef,
     LocalQueryExecution, LocalQueryStream, PinnedHummockSnapshot,
@@ -277,8 +278,12 @@ fn gen_batch_plan_fragmenter(
         plan.explain_to_string()?,
         query_mode
     );
-    let plan_fragmenter = BatchPlanFragmenter::new(
+    let worker_node_manager_reader = WorkerNodeSelector::new(
         session.env().worker_node_manager_ref(),
+        !session.config().only_checkpoint_visible(),
+    );
+    let plan_fragmenter = BatchPlanFragmenter::new(
+        worker_node_manager_reader,
         session.env().catalog_reader().clone(),
         session.config().get_batch_parallelism(),
         plan,

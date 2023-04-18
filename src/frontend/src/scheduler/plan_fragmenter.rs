@@ -43,7 +43,7 @@ use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{PlanNodeId, PlanNodeType};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
-use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
+use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::SchedulerResult;
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
@@ -120,7 +120,7 @@ impl ExecutionPlanNode {
 pub struct BatchPlanFragmenter {
     query_id: QueryId,
     next_stage_id: StageId,
-    worker_node_manager: WorkerNodeManagerRef,
+    worker_node_manager: WorkerNodeSelector,
     catalog_reader: CatalogReader,
 
     /// if batch_parallelism is None, it means no limit, we will use the available nodes count as
@@ -143,7 +143,7 @@ impl Default for QueryId {
 
 impl BatchPlanFragmenter {
     pub fn new(
-        worker_node_manager: WorkerNodeManagerRef,
+        worker_node_manager: WorkerNodeSelector,
         catalog_reader: CatalogReader,
         batch_parallelism: Option<NonZeroU64>,
         batch_node: PlanRef,
@@ -562,7 +562,7 @@ impl StageGraph {
     async fn complete(
         self,
         catalog_reader: &CatalogReader,
-        worker_node_manager: &WorkerNodeManagerRef,
+        worker_node_manager: &WorkerNodeSelector,
     ) -> SchedulerResult<StageGraph> {
         let mut complete_stages = HashMap::new();
         self.complete_stage(
@@ -588,7 +588,7 @@ impl StageGraph {
         exchange_info: Option<ExchangeInfo>,
         complete_stages: &mut HashMap<StageId, QueryStageRef>,
         catalog_reader: &CatalogReader,
-        worker_node_manager: &WorkerNodeManagerRef,
+        worker_node_manager: &WorkerNodeSelector,
     ) -> SchedulerResult<()> {
         let parallelism = if stage.parallelism.is_some() {
             // If the stage has parallelism, it means it's a complete stage.
@@ -778,11 +778,11 @@ impl BatchPlanFragmenter {
                     // can be 0 if no available serving worker
                     min(
                         num.get() as usize,
-                        self.worker_node_manager.serving_schedule_unit_count(),
+                        self.worker_node_manager.schedule_unit_count(),
                     )
                 } else {
                     // can be 0 if no available serving worker
-                    self.worker_node_manager.serving_worker_node_count()
+                    self.worker_node_manager.worker_node_count()
                 }
             }
         };
@@ -926,7 +926,7 @@ impl BatchPlanFragmenter {
                     .map_err(RwError::from)?;
                 let vnode_mapping = self
                     .worker_node_manager
-                    .serving_vnode_mapping(table_catalog.fragment_id)?;
+                    .fragment_mapping(table_catalog.fragment_id)?;
                 let partitions =
                     derive_partitions(scan_node.scan_ranges(), table_desc, &vnode_mapping);
                 TableScanInfo::new(name, partitions)
@@ -976,7 +976,7 @@ impl BatchPlanFragmenter {
                 .map_err(RwError::from)?;
             let vnode_mapping = self
                 .worker_node_manager
-                .serving_vnode_mapping(table_catalog.fragment_id)?;
+                .fragment_mapping(table_catalog.fragment_id)?;
             let parallelism = vnode_mapping.iter().sorted().dedup().count();
             Ok(Some(parallelism))
         } else {

@@ -638,9 +638,7 @@ impl ConfigMap {
     }
 
     pub fn only_checkpoint_visible(&self) -> bool {
-        // TODO #8940: disable barrier read explicitly
-        true
-        // matches!(self.visibility_mode, VisibilityMode::Checkpoint)
+        matches!(self.visibility_mode, VisibilityMode::Checkpoint)
     }
 
     pub fn get_query_epoch(&self) -> Option<Epoch> {
