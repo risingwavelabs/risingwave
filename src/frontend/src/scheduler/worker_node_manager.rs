@@ -324,8 +324,8 @@ impl WorkerNodeSelector {
 mod tests {
 
     use risingwave_common::util::addr::HostAddr;
-    use risingwave_pb::common::worker_node::Property;
     use risingwave_pb::common::worker_node;
+    use risingwave_pb::common::worker_node::Property;
 
     #[test]
     fn test_worker_node_manager() {
