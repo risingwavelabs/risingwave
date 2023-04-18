@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt;
+use std::mem::size_of;
 
 use itertools::Itertools;
 use risingwave_pb::data::{PbOp, PbStreamChunk};
@@ -21,6 +22,7 @@ use super::{ArrayResult, DataChunkTestExt};
 use crate::array::column::Column;
 use crate::array::{DataChunk, Vis};
 use crate::buffer::Bitmap;
+use crate::collection::estimate_size::EstimateSize;
 use crate::row::{OwnedRow, Row};
 use crate::types::to_text::ToText;
 use crate::types::DataType;
@@ -288,6 +290,12 @@ impl fmt::Debug for StreamChunk {
                 .field("capacity", &self.capacity())
                 .finish_non_exhaustive()
         }
+    }
+}
+
+impl EstimateSize for StreamChunk {
+    fn estimated_heap_size(&self) -> usize {
+        self.data.estimated_heap_size() + self.ops.capacity() * size_of::<Op>()
     }
 }
 

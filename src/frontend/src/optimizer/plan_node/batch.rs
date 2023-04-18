@@ -12,30 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::catalog::Connection;
+use super::generic::GenericPlanRef;
+use crate::optimizer::property::Order;
 
-use crate::model::{MetadataModel, MetadataModelResult};
-
-/// Column family name for connection.
-const CONNECTION_CF_NAME: &str = "cf/connection";
-
-impl MetadataModel for Connection {
-    type KeyType = u32;
-    type PbType = Connection;
-
-    fn cf_name() -> String {
-        CONNECTION_CF_NAME.to_string()
-    }
-
-    fn to_protobuf(&self) -> Self::PbType {
-        self.clone()
-    }
-
-    fn from_protobuf(prost: Self::PbType) -> Self {
-        prost
-    }
-
-    fn key(&self) -> MetadataModelResult<Self::KeyType> {
-        Ok(self.id)
-    }
+pub trait BatchPlanRef: GenericPlanRef {
+    fn order(&self) -> &Order;
 }

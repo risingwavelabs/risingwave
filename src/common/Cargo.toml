@@ -17,6 +17,7 @@ normal = ["workspace-hack"]
 anyhow = "1"
 arc-swap = "1"
 arrow-array = "36"
+arrow-buffer = "36"
 arrow-schema = "36"
 async-trait = "0.1"
 auto_enums = "0.8"
@@ -59,7 +60,7 @@ rand = "0.8"
 regex = "1"
 reqwest = { version = "0.11", features = ["json"] }
 risingwave_pb = { path = "../prost" }
-rust_decimal = { version = "1", features = ["db-tokio-postgres"] }
+rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 ryu = "1.0"
 serde = { version = "1", features = ["derive"] }
 serde_default = "0.1"
@@ -82,6 +83,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 toml = "0.7"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
+twox-hash = "1"
 url = "2"
 uuid = "1.2.2"
 
@@ -102,7 +104,6 @@ criterion = "0.4"
 more-asserts = "0.3"
 rand = "0.8"
 tempfile = "3"
-twox-hash = "1"
 
 [[bench]]
 name = "bench_encoding"

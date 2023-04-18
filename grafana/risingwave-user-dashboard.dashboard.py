@@ -14,6 +14,18 @@ datasource = {"type": "prometheus", "uid": f"{source_uid}"}
 panels = Panels(datasource)
 logging.basicConfig(level=logging.WARN)
 
+def section_actor_info(panels):
+    excluded_cols = ['Time', 'Value', '__name__', 'job', 'instance']
+    return [
+        panels.row("Actor/Table Id Info"),
+        panels.table_info("Actor Id Info",
+                          "Mapping from actor id to fragment id",
+                          [panels.table_target(f"{metric('actor_info')}")], excluded_cols),
+        panels.table_info("Table Id Info",
+                          "Mapping from table id to actor id and table name",
+                          [panels.table_target(f"{metric('table_info')}")], excluded_cols),
+
+    ]
 
 def section_overview(panels):
     return [
@@ -240,20 +252,50 @@ def section_memory(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])",
-                            "Join - cache miss {{actor_id}} {{side}}",
+                            "Join - cache miss - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
                         ),
                         panels.target(
                             f"rate({metric('stream_join_lookup_total_count')}[$__rate_interval])",
-                            "Join - total lookups {{actor_id}} {{side}}",
+                            "Join - total lookups - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
                         ),
                         panels.target(
                             f"rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])",
-                            "Agg - cache miss {{actor_id}}",
+                            "Agg - cache miss - table {{table_id}} actor {{actor_id}}",
                         ),
                         panels.target(
                             f"rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])",
-                            "Agg - total lookups {{actor_id}}",
+                            "Agg - total lookups - table {{table_id}} actor {{actor_id}}",
                         ),
+                        panels.target(
+                             f"rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])",
+                            "Materialize - cache hit count - table {{table_id}} - actor {{actor_id}}  {{instance}}",
+                            ),
+                        panels.target(
+                             f"rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])",
+                            "Materialize - total cache count - table {{table_id}} - actor {{actor_id}}  {{instance}}",
+                            ),
+                    ],
+                ),
+
+                panels.timeseries_percentage(
+                    "Executor Cache Miss Ratio",
+                    "",
+                    [
+                        panels.target(
+                         f"(sum(rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id) ) / (sum(rate({metric('stream_join_lookup_total_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id))",
+                            "join executor cache miss ratio - - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
+                            ),
+
+                        panels.target(
+                         f"(sum(rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "Agg cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                            ),
+
+                        panels.target(
+                         f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "materialize executor cache miss ratio - table {{table_id}} - actor {{actor_id}}  {{instance}}",
+                            ),
+
                     ],
                 ),
                 panels.timeseries_ops(
@@ -571,6 +613,7 @@ dashboard = Dashboard(
     templating=templating,
     version=dashboard_version,
     panels=[
+        *section_actor_info(panels),
         *section_overview(panels),
         *section_cpu(panels),
         *section_memory(panels),

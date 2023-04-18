@@ -12,15 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::anyhow;
 use risingwave_common::array::{ArrayBuilder, ArrayBuilderImpl, DataChunk, ListValue, RowRef};
 use risingwave_common::bail;
-use risingwave_common::row::Row;
+use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
 use risingwave_common::util::memcmp_encoding;
-use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use crate::vector_op::agg::aggregator::Aggregator;
-use crate::Result;
+use crate::{ExprError, Result};
 
 #[derive(Clone)]
 struct ArrayAggUnordered {
@@ -97,25 +98,34 @@ type OrderKey = Vec<u8>;
 struct ArrayAggOrdered {
     return_type: DataType,
     agg_col_idx: usize,
-    column_orders: Vec<ColumnOrder>,
+    order_col_indices: Vec<usize>,
+    order_types: Vec<OrderType>,
     unordered_values: Vec<(OrderKey, Datum)>,
 }
 
 impl ArrayAggOrdered {
     fn new(return_type: DataType, agg_col_idx: usize, column_orders: Vec<ColumnOrder>) -> Self {
         assert!(matches!(return_type, DataType::List { datatype: _ }));
+        let (order_col_indices, order_types) = column_orders
+            .into_iter()
+            .map(|c| (c.column_index, c.order_type))
+            .unzip();
         ArrayAggOrdered {
             return_type,
             agg_col_idx,
-            column_orders,
+            order_col_indices,
+            order_types,
             unordered_values: vec![],
         }
     }
 
-    fn push_row(&mut self, row: RowRef<'_>) {
-        let key = memcmp_encoding::encode_row(row, &self.column_orders);
+    fn push_row(&mut self, row: RowRef<'_>) -> Result<()> {
+        let key =
+            memcmp_encoding::encode_row(row.project(&self.order_col_indices), &self.order_types)
+                .map_err(|e| ExprError::Internal(anyhow!("failed to encode row, error: {}", e)))?;
         let datum = row.datum_at(self.agg_col_idx).to_owned_datum();
         self.unordered_values.push((key, datum));
+        Ok(())
     }
 
     fn get_result_and_reset(&mut self) -> ListValue {
@@ -134,7 +144,7 @@ impl Aggregator for ArrayAggOrdered {
     async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
         let (row, vis) = input.row_at(row_id);
         assert!(vis);
-        self.push_row(row);
+        self.push_row(row)?;
         Ok(())
     }
 

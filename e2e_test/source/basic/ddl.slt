@@ -83,3 +83,34 @@ s
 
 statement ok
 drop table s
+
+# Test create source with connection
+statement ok 
+CREATE CONNECTION mock WITH (type = 'privatelink', provider = 'mock');
+
+# Reference to non-existant connection
+statement error
+create source s with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  connection.name = 'nonexist',
+) row format json;
+
+statement ok
+create source s with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  connection.name = 'mock',
+) row format json;
+
+# Drop a connection in use
+statement error
+drop connection mock;
+
+statement ok
+drop source s;
+
+statement ok
+drop connection mock;

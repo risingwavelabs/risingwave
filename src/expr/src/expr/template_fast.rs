@@ -156,7 +156,63 @@ where
     }
 }
 
-pub struct UnaryExpression<F, A, T> {
+pub struct NullaryExpression<F, T> {
+    return_type: DataType,
+    func: F,
+    _marker: PhantomData<T>,
+}
+
+impl<F, T> fmt::Debug for NullaryExpression<F, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("NullaryExpression").finish()
+    }
+}
+
+impl<F, T> NullaryExpression<F, T>
+where
+    F: Fn() -> T + Send + Sync,
+    T: PrimitiveArrayItemType,
+{
+    #[allow(dead_code)]
+    pub fn new(return_type: DataType, func: F) -> Self {
+        NullaryExpression {
+            return_type,
+            func,
+            _marker: PhantomData,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl<F, T> Expression for NullaryExpression<F, T>
+where
+    F: Fn() -> T + Send + Sync,
+    T: PrimitiveArrayItemType,
+{
+    fn return_type(&self) -> DataType {
+        self.return_type.clone()
+    }
+
+    async fn eval(&self, data_chunk: &DataChunk) -> crate::Result<ArrayRef> {
+        let bitmap = match data_chunk.visibility() {
+            Some(vis) => vis.clone(),
+            None => Bitmap::ones(data_chunk.capacity()),
+        };
+        let c = PrimitiveArray::<T>::from_iter_bitmap(
+            std::iter::repeat_with(|| (self.func)()).take(data_chunk.capacity()),
+            bitmap,
+        );
+        Ok(Arc::new(c.into()))
+    }
+
+    async fn eval_row(&self, _row: &OwnedRow) -> crate::Result<Datum> {
+        let output_scalar = (self.func)();
+        let output_datum = Some(output_scalar.to_scalar_value());
+        Ok(output_datum)
+    }
+}
+
+pub struct UnaryExpression<F, T, A> {
     child: BoxedExpression,
     return_type: DataType,
     func: F,
