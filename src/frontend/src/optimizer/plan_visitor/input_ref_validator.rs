@@ -102,9 +102,15 @@ macro_rules! visit_project {
 }
 
 impl PlanVisitor<Option<String>> for InputRefValidator {
+    type DefaultBehavior = impl DefaultBehavior<Option<String>>;
+
     visit_filter!(logical, batch, stream);
 
     visit_project!(logical, batch, stream);
+
+    fn default_behavior() -> Self::DefaultBehavior {
+        Merge(|a: Option<String>, b| a.or(b))
+    }
 
     fn visit_logical_scan(
         &mut self,
@@ -124,10 +130,4 @@ impl PlanVisitor<Option<String>> for InputRefValidator {
     }
 
     // TODO: add more checks
-
-    type DefaultBehavior = impl DefaultBehavior<Option<String>>;
-
-    fn default_behavior() -> Self::DefaultBehavior {
-        Merge(|a: Option<String>, b| a.or(b))
-    }
 }
