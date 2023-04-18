@@ -209,7 +209,6 @@ where
         info: Vec<heartbeat_request::extra_info::Info>,
     ) -> MetaResult<()> {
         tracing::trace!(target: "events::meta::server_heartbeat", worker_id = worker_id, "receive heartbeat");
-        // core mapps worker keys to the actual workers
         let mut core = self.core.write().await;
         for worker in core.workers.values_mut() {
             if worker.worker_id() == worker_id {
