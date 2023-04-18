@@ -255,7 +255,7 @@ pub mod agg_executor {
     use risingwave_common::hash::SerializedKey;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::expr::AggKind;
+    use risingwave_expr::function::aggregate::{AggCall, AggKind};
     use risingwave_storage::StateStore;
 
     use crate::common::table::state_table::StateTable;
@@ -263,7 +263,7 @@ pub mod agg_executor {
     use crate::executor::agg_common::{
         AggExecutorArgs, GroupAggExecutorExtraArgs, SimpleAggExecutorExtraArgs,
     };
-    use crate::executor::aggregation::{AggCall, AggStateStorage};
+    use crate::executor::aggregation::AggStateStorage;
     use crate::executor::monitor::StreamingMetrics;
     use crate::executor::{
         ActorContext, ActorContextRef, BoxedExecutor, Executor, GlobalSimpleAggExecutor,
@@ -279,9 +279,10 @@ pub mod agg_executor {
         group_key_indices: &[usize],
         pk_indices: &[usize],
         input_ref: &dyn Executor,
+        is_append_only: bool,
     ) -> AggStateStorage<S> {
         match agg_call.kind {
-            AggKind::Min | AggKind::Max if !agg_call.append_only => {
+            AggKind::Min | AggKind::Max if !is_append_only => {
                 let input_fields = input_ref.schema().fields();
 
                 let mut column_descs = Vec::new();
@@ -384,6 +385,7 @@ pub mod agg_executor {
     pub async fn new_boxed_hash_agg_executor<S: StateStore>(
         store: S,
         input: Box<dyn Executor>,
+        is_append_only: bool,
         agg_calls: Vec<AggCall>,
         row_count_index: usize,
         group_key_indices: Vec<usize>,
@@ -402,6 +404,7 @@ pub mod agg_executor {
                     &group_key_indices,
                     &pk_indices,
                     input.as_ref(),
+                    is_append_only,
                 )
                 .await,
             )
@@ -442,10 +445,12 @@ pub mod agg_executor {
         .boxed()
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn new_boxed_simple_agg_executor<S: StateStore>(
         actor_ctx: ActorContextRef,
         store: S,
         input: BoxedExecutor,
+        is_append_only: bool,
         agg_calls: Vec<AggCall>,
         row_count_index: usize,
         pk_indices: PkIndices,
@@ -461,6 +466,7 @@ pub mod agg_executor {
                     &[],
                     &pk_indices,
                     input.as_ref(),
+                    is_append_only,
                 )
                 .await,
             )

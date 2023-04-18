@@ -703,3 +703,10 @@
               | └─BatchScan { table: idx1, columns: [idx1.t._row_id], scan_ranges: [idx1.JSONB_ACCESS_STR = Utf8("abc")], distribution: SomeShard }
               └─BatchExchange { order: [], dist: Single }
                 └─BatchScan { table: idx2, columns: [idx2.t._row_id], scan_ranges: [idx2.JSONB_ACCESS_STR = Utf8("ABC")], distribution: SomeShard }
+- sql: |
+    create table people (first_name varchar, last_name varchar, info varchar);
+    create index people_names ON people ((first_name || ' ' || last_name));
+    select * from people where (first_name || ' ' || last_name) = 'John Smith';
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: people_names, columns: [people_names.first_name, people_names.last_name, people_names.info], scan_ranges: [people_names.CONCAT_OP = Utf8("John Smith")], distribution: SomeShard }

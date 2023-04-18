@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::types::DataType;
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::function::aggregate::AggKind;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{ApplyOffsetRewriter, BoxedRule, Rule};

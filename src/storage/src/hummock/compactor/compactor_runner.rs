@@ -18,19 +18,19 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::can_concat;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_pb::hummock::{CompactTask, LevelType};
 
 use super::task_progress::TaskProgress;
 use super::TaskConfig;
+use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::{CompactOutput, CompactionFilter, Compactor, CompactorContext};
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
-use crate::hummock::sstable::DeleteRangeAggregatorBuilder;
+use crate::hummock::sstable::CompactionDeleteRangesBuilder;
 use crate::hummock::{
-    CachePolicy, CompressionAlgorithm, HummockResult, RangeTombstonesCollector,
+    CachePolicy, CompactionDeleteRanges, CompressionAlgorithm, HummockResult,
     SstableBuilderOptions, SstableStoreRef,
 };
 use crate::monitor::StoreLocalStatistic;
@@ -97,7 +97,7 @@ impl CompactorRunner {
         &self,
         compaction_filter: impl CompactionFilter,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
-        del_agg: Arc<RangeTombstonesCollector>,
+        del_agg: Arc<CompactionDeleteRanges>,
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<CompactOutput> {
         let iter = self.build_sst_iter()?;
@@ -118,8 +118,8 @@ impl CompactorRunner {
         compact_task: &CompactTask,
         sstable_store: &SstableStoreRef,
         filter: &mut F,
-    ) -> HummockResult<Arc<RangeTombstonesCollector>> {
-        let mut builder = DeleteRangeAggregatorBuilder::default();
+    ) -> HummockResult<Arc<CompactionDeleteRanges>> {
+        let mut builder = CompactionDeleteRangesBuilder::default();
         let mut local_stats = StoreLocalStatistic::default();
         for level in &compact_task.input_ssts {
             if level.table_infos.is_empty() {
@@ -144,7 +144,8 @@ impl CompactorRunner {
                 builder.add_tombstone(range_tombstone_list);
             }
         }
-        let aggregator = builder.build(compact_task.watermark, compact_task.gc_delete_keys);
+        let aggregator =
+            builder.build_for_compaction(compact_task.watermark, compact_task.gc_delete_keys);
         Ok(aggregator)
     }
 

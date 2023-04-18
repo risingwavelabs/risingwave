@@ -15,20 +15,20 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
-use std::time::Duration;
 
+use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_hummock_sdk::info_in_release;
+use risingwave_hummock_sdk::key::{get_table_id, TABLE_PREFIX_LEN};
 use risingwave_pb::catalog::Table;
-use tokio::sync::Notify;
+use risingwave_rpc_client::error::{anyhow, Result as RpcResult, RpcError};
+use risingwave_rpc_client::MetaClient;
 
-use crate::info_in_release;
-use crate::key::{get_table_id, TABLE_PREFIX_LEN};
-
-const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(60);
+use crate::hummock::{HummockError, HummockResult};
 
 /// `FilterKeyExtractor` generally used to extract key which will store in BloomFilter
 pub trait FilterKeyExtractor: Send + Sync {
@@ -199,6 +199,10 @@ impl MultiFilterKeyExtractor {
     pub fn size(&self) -> usize {
         self.id_to_filter_key_extractor.len()
     }
+
+    pub fn get_exsting_table_ids(&self) -> HashSet<u32> {
+        self.id_to_filter_key_extractor.keys().cloned().collect()
+    }
 }
 
 impl Debug for MultiFilterKeyExtractor {
@@ -221,10 +225,43 @@ impl FilterKeyExtractor for MultiFilterKeyExtractor {
     }
 }
 
+#[async_trait::async_trait]
+pub trait StateTableAccessor: Send + Sync {
+    async fn get_tables(&self, table_ids: &[u32]) -> RpcResult<HashMap<u32, Table>>;
+}
+
 #[derive(Default)]
+pub struct FakeRemoteTableAccessor {}
+
+pub struct RemoteTableAccessor {
+    meta_client: MetaClient,
+}
+
+impl RemoteTableAccessor {
+    pub fn new(meta_client: MetaClient) -> Self {
+        Self { meta_client }
+    }
+}
+
+#[async_trait::async_trait]
+impl StateTableAccessor for RemoteTableAccessor {
+    async fn get_tables(&self, table_ids: &[u32]) -> RpcResult<HashMap<u32, Table>> {
+        self.meta_client.get_tables(table_ids).await
+    }
+}
+
+#[async_trait::async_trait]
+impl StateTableAccessor for FakeRemoteTableAccessor {
+    async fn get_tables(&self, _table_ids: &[u32]) -> RpcResult<HashMap<u32, Table>> {
+        Err(RpcError::Internal(anyhow!(
+            "fake accessor does not support fetch remote table"
+        )))
+    }
+}
+
 struct FilterKeyExtractorManagerInner {
     table_id_to_filter_key_extractor: RwLock<HashMap<u32, Arc<FilterKeyExtractorImpl>>>,
-    notify: Notify,
+    table_accessor: Box<dyn StateTableAccessor>,
 }
 
 impl FilterKeyExtractorManagerInner {
@@ -232,76 +269,95 @@ impl FilterKeyExtractorManagerInner {
         self.table_id_to_filter_key_extractor
             .write()
             .insert(table_id, filter_key_extractor);
-
-        self.notify.notify_waiters();
     }
 
     fn sync(&self, filter_key_extractor_map: HashMap<u32, Arc<FilterKeyExtractorImpl>>) {
         let mut guard = self.table_id_to_filter_key_extractor.write();
         guard.clear();
         guard.extend(filter_key_extractor_map);
-        self.notify.notify_waiters();
     }
 
     fn remove(&self, table_id: u32) {
         self.table_id_to_filter_key_extractor
             .write()
             .remove(&table_id);
-
-        self.notify.notify_waiters();
     }
 
-    async fn acquire(&self, mut table_id_set: HashSet<u32>) -> FilterKeyExtractorImpl {
+    async fn acquire(
+        &self,
+        mut table_id_set: HashSet<u32>,
+    ) -> HummockResult<FilterKeyExtractorImpl> {
         if table_id_set.is_empty() {
             // table_id_set is empty
             // the table in sst has been deleted
 
             // use full key as default
-            return FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor::default());
+            return Ok(FilterKeyExtractorImpl::FullKey(
+                FullKeyFilterKeyExtractor::default(),
+            ));
         }
 
         let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
-        while !table_id_set.is_empty() {
-            let notified = self.notify.notified();
+        {
+            let guard = self.table_id_to_filter_key_extractor.read();
+            table_id_set.drain_filter(|table_id| match guard.get(table_id) {
+                Some(filter_key_extractor) => {
+                    multi_filter_key_extractor.register(*table_id, filter_key_extractor.clone());
+                    true
+                }
 
-            {
-                let guard = self.table_id_to_filter_key_extractor.read();
-                table_id_set.drain_filter(|table_id| match guard.get(table_id) {
-                    Some(filter_key_extractor) => {
-                        multi_filter_key_extractor
-                            .register(*table_id, filter_key_extractor.clone());
-                        true
-                    }
+                None => false,
+            });
+        }
 
-                    None => false,
-                });
-            }
-
-            if !table_id_set.is_empty()
-                && tokio::time::timeout(ACQUIRE_TIMEOUT, notified)
+        if !table_id_set.is_empty() {
+            let table_ids = table_id_set.iter().cloned().collect_vec();
+            let mut state_tables =
+                self.table_accessor
+                    .get_tables(&table_ids)
                     .await
-                    .is_err()
-            {
-                tracing::warn!(
-                    "filter_key_extractor acquire timeout missing {} table_catalog table_id_set {:?}",
-                    table_id_set.len(),
-                    table_id_set
-                );
+                    .map_err(|e| {
+                        HummockError::other(format!(
+                            "request rpc list_tables for meta failed because {:?}",
+                            e
+                        ))
+                    })?;
+            let mut guard = self.table_id_to_filter_key_extractor.write();
+            for table_id in table_ids {
+                if let Some(table) = state_tables.remove(&table_id) {
+                    let key_extractor = Arc::new(FilterKeyExtractorImpl::from_table(&table));
+                    guard.insert(table_id, key_extractor.clone());
+                    multi_filter_key_extractor.register(table_id, key_extractor);
+                }
             }
         }
 
-        FilterKeyExtractorImpl::Multi(multi_filter_key_extractor)
+        Ok(FilterKeyExtractorImpl::Multi(multi_filter_key_extractor))
     }
 }
 
 /// `FilterKeyExtractorManager` is a wrapper for inner, and provide a protected read and write
 /// interface, its thread safe
-#[derive(Default)]
 pub struct FilterKeyExtractorManager {
     inner: FilterKeyExtractorManagerInner,
 }
 
+impl Default for FilterKeyExtractorManager {
+    fn default() -> Self {
+        Self::new(Box::<FakeRemoteTableAccessor>::default())
+    }
+}
+
 impl FilterKeyExtractorManager {
+    pub fn new(table_accessor: Box<dyn StateTableAccessor>) -> Self {
+        Self {
+            inner: FilterKeyExtractorManagerInner {
+                table_id_to_filter_key_extractor: Default::default(),
+                table_accessor,
+            },
+        }
+    }
+
     /// Insert (`table_id`, `filter_key_extractor`) as mapping to `HashMap` for `acquire`
     pub fn update(&self, table_id: u32, filter_key_extractor: Arc<FilterKeyExtractorImpl>) {
         info_in_release!("update key extractor of {}", table_id);
@@ -322,7 +378,10 @@ impl FilterKeyExtractorManager {
     /// Acquire a `MultiFilterKeyExtractor` by `table_id_set`
     /// Internally, try to get all `filter_key_extractor` from `hashmap`. Will block the caller if
     /// `table_id` does not util version update (notify), and retry to get
-    pub async fn acquire(&self, table_id_set: HashSet<u32>) -> FilterKeyExtractorImpl {
+    pub async fn acquire(
+        &self,
+        table_id_set: HashSet<u32>,
+    ) -> HummockResult<FilterKeyExtractorImpl> {
         self.inner.acquire(table_id_set).await
     }
 }
@@ -334,7 +393,6 @@ mod tests {
     use std::collections::{HashMap, HashSet};
     use std::mem;
     use std::sync::Arc;
-    use std::time::Duration;
 
     use bytes::{BufMut, BytesMut};
     use itertools::Itertools;
@@ -346,18 +404,17 @@ mod tests {
     use risingwave_common::types::ScalarImpl::{self};
     use risingwave_common::util::ordered::OrderedRowSerde;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_hummock_sdk::key::TABLE_PREFIX_LEN;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::PbTable;
     use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
     use risingwave_pb::plan_common::PbColumnCatalog;
-    use tokio::task;
 
     use super::{DummyFilterKeyExtractor, FilterKeyExtractor, SchemaFilterKeyExtractor};
     use crate::filter_key_extractor::{
         FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
         MultiFilterKeyExtractor,
     };
-    use crate::key::TABLE_PREFIX_LEN;
 
     const fn dummy_vnode() -> [u8; VirtualNode::SIZE] {
         VirtualNode::from_index(233).to_be_bytes()
@@ -559,23 +616,19 @@ mod tests {
     #[tokio::test]
     async fn test_filter_key_extractor_manager() {
         let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
-        let filter_key_extractor_manager_ref = filter_key_extractor_manager.clone();
-        let filter_key_extractor_manager_ref2 = filter_key_extractor_manager_ref.clone();
 
-        task::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            filter_key_extractor_manager_ref.update(
-                1,
-                Arc::new(FilterKeyExtractorImpl::Dummy(
-                    DummyFilterKeyExtractor::default(),
-                )),
-            );
-        });
+        filter_key_extractor_manager.update(
+            1,
+            Arc::new(FilterKeyExtractorImpl::Dummy(
+                DummyFilterKeyExtractor::default(),
+            )),
+        );
 
         let remaining_table_id_set = HashSet::from([1]);
-        let multi_filter_key_extractor = filter_key_extractor_manager_ref2
+        let multi_filter_key_extractor = filter_key_extractor_manager
             .acquire(remaining_table_id_set)
-            .await;
+            .await
+            .unwrap();
 
         match multi_filter_key_extractor {
             FilterKeyExtractorImpl::Multi(multi_filter_key_extractor) => {
