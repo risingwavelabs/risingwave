@@ -12,7 +12,7 @@ print_machine_debug_info() {
 echo "--- Machine Debug Info"
 print_machine_debug_info
 echo "--- Setting up RW"
-cd risingwave
+# FIXME(kwannoel): Move this into build phase.
 ENABLE_RW_RELEASE_PROFILE=true ./risedev d bench
 echo "Success!"
 echo "--- Running Benchmarks"
