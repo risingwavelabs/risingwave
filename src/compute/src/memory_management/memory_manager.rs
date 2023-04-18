@@ -113,12 +113,6 @@ impl GlobalMemoryManager {
             self.metrics
                 .jemalloc_allocated_bytes
                 .set(memory_control_stats.jemalloc_allocated_mib as i64);
-            self.metrics
-                .stream_total_mem_usage
-                .set(memory_control_stats.streaming_memory_usage as i64);
-            self.metrics
-                .batch_total_mem_usage
-                .set(memory_control_stats.batch_memory_usage as i64);
         }
     }
 }
