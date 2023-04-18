@@ -35,7 +35,7 @@ fn lookup_time_zone(time_zone: &str) -> Result<Tz> {
 #[function("to_timestamp(float64) -> timestamptz")]
 pub fn f64_sec_to_timestamptz(elem: F64) -> Result<i64> {
     // TODO(#4515): handle +/- infinity
-    (elem * 1e6)
+    (elem.0 * 1e6)
         .round() // TODO(#5576): should round to even
         .to_i64()
         .ok_or(ExprError::NumericOutOfRange)
