@@ -214,10 +214,7 @@ where
         for worker in core.workers.values_mut() {
             if worker.worker_id() == worker_id {
                 if !worker.is_marked_for_deletion {
-                    // If we send signal to meta that it should delete that node, then do not update
-                    // ttl here
                     worker.update_ttl(self.max_heartbeat_interval);
-                    // info from worker to meta. No need to update this one
                     worker.update_info(info);
                 }
                 return Ok(());
