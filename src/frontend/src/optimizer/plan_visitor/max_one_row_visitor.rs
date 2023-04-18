@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::optimizer::plan_node::{PlanTreeNodeBinary, LogicalApply};
+use super::{DefaultBehavior, Merge};
+use crate::optimizer::plan_node::{LogicalApply, PlanTreeNodeBinary};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
 pub struct HasMaxOneRowApply();

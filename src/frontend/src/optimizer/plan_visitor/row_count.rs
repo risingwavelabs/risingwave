@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use std::collections::HashSet;
+use std::ops::Sub;
 
 use self::count::Count;
-use super::PlanVisitor;
+use super::{DefaultBehavior, DefaultValue, PlanVisitor};
 use crate::catalog::system_catalog::pg_catalog::PG_NAMESPACE_TABLE_NAME;
 use crate::optimizer::plan_node::generic::Limit;
 use crate::optimizer::plan_node::{self, PlanTreeNode, PlanTreeNodeUnary};
@@ -23,8 +24,9 @@ use crate::optimizer::plan_visitor::PlanRef;
 
 pub mod count {
     use std::cmp::{min, Ordering};
+    use std::ops::{Add, Mul, Sub};
 
-    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Hi(Option<usize>);
 
     impl PartialOrd for Hi {
@@ -50,25 +52,35 @@ pub mod count {
         }
     }
 
-    #[derive(Clone, Copy, Debug, Default)]
+    impl From<usize> for Hi {
+        fn from(value: usize) -> Self {
+            Self(Some(value))
+        }
+    }
+
+    #[derive(Clone, Copy, Debug)]
     pub struct Count {
         lo: usize,
         hi: Hi,
-        _private: (),
+    }
+
+    impl Default for Count {
+        fn default() -> Self {
+            Self {
+                lo: 0,
+                hi: None.into(),
+            }
+        }
     }
 
     impl Count {
         pub fn new(lo: usize, hi: impl Into<Hi>) -> Self {
             let hi: Hi = hi.into();
             if let Some(hi) = hi.0 {
-                assert!(hi >= lo);
+                debug_assert!(hi >= lo);
             }
 
-            Self {
-                lo,
-                hi,
-                _private: (),
-            }
+            Self { lo, hi }
         }
 
         pub fn lo(self) -> usize {
@@ -83,28 +95,64 @@ pub mod count {
             Self::new(count, Some(count))
         }
 
-        pub fn at_most(count: usize) -> Self {
-            Self::new(0, Some(count))
+        pub fn at_least(count: usize) -> Self {
+            Self::new(count, None)
+        }
+
+        pub fn min(self, rhs: Self) -> Self {
+            Self::new(min(self.lo(), rhs.lo()), min(self.hi, rhs.hi))
         }
 
         pub fn limit_to(self, limit: usize) -> Self {
-            Self::new(min(limit, self.lo()), min(Hi(Some(limit)), self.hi))
+            self.min(Self::exact(limit))
         }
 
-        pub fn add(self, other: Self) -> Self {
-            let lo = self.lo() + other.lo();
-            let hi = if let (Some(lhs), Some(rhs)) = (self.hi(), other.hi()) {
+        pub fn as_low_as(self, limit: usize) -> Self {
+            self.min(Self::at_least(limit))
+        }
+    }
+
+    impl Add<Count> for Count {
+        type Output = Self;
+
+        fn add(self, rhs: Self) -> Self::Output {
+            let lo = self.lo() + rhs.lo();
+            let hi = if let (Some(lhs), Some(rhs)) = (self.hi(), rhs.hi()) {
                 lhs.checked_add(rhs)
             } else {
                 None
             };
             Self::new(lo, hi)
         }
+    }
 
-        pub fn multiply(self, m: usize) -> Self {
-            let lo = self.lo().saturating_mul(m);
-            let hi = self.hi().and_then(|hi| hi.checked_mul(m));
+    impl Sub<usize> for Count {
+        type Output = Self;
+
+        fn sub(self, rhs: usize) -> Self::Output {
+            let lo = self.lo().saturating_sub(rhs);
+            let hi = self.hi().map(|hi| hi.saturating_sub(rhs));
             Self::new(lo, hi)
+        }
+    }
+
+    impl Mul<usize> for Count {
+        type Output = Self;
+
+        fn mul(self, rhs: usize) -> Self::Output {
+            let lo = self.lo().saturating_mul(rhs);
+            let hi = self.hi().and_then(|hi| hi.checked_mul(rhs));
+            Self::new(lo, hi)
+        }
+    }
+
+    impl Count {
+        pub fn get_exact(self) -> Option<usize> {
+            self.hi().filter(|hi| *hi == self.lo())
+        }
+
+        pub fn is_at_most(self, count: usize) -> bool {
+            self.hi().is_some_and(|hi| hi <= count)
         }
     }
 }
@@ -112,8 +160,10 @@ pub mod count {
 pub struct CountRowsVisitor;
 
 impl PlanVisitor<Count> for CountRowsVisitor {
-    fn merge(_a: Count, _b: Count) -> Count {
-        Count::default()
+    type DefaultBehavior = impl DefaultBehavior<Count>;
+
+    fn default_behavior() -> Self::DefaultBehavior {
+        DefaultValue
     }
 
     fn visit_logical_values(&mut self, plan: &plan_node::LogicalValues) -> Count {
@@ -121,10 +171,12 @@ impl PlanVisitor<Count> for CountRowsVisitor {
     }
 
     fn visit_logical_agg(&mut self, plan: &plan_node::LogicalAgg) -> Count {
+        let input = self.visit(plan.input());
+
         if plan.group_key().is_empty() {
-            Count::at_most(1)
+            input.limit_to(1)
         } else {
-            Count::new(0, self.visit(plan.input()).hi())
+            input.as_low_as(1)
         }
     }
 
@@ -139,11 +191,12 @@ impl PlanVisitor<Count> for CountRowsVisitor {
     fn visit_logical_top_n(&mut self, plan: &plan_node::LogicalTopN) -> Count {
         let input = self.visit(plan.input());
 
-        // TODO: further constrain it with `offset`
-        if let Limit::Simple(limit) = plan.limit_attr() {
-            input.limit_to(limit as usize)
-        } else {
-            input
+        match plan.limit_attr() {
+            Limit::Simple(limit) => input.sub(plan.offset() as usize).limit_to(limit as usize),
+            Limit::WithTies(limit) => {
+                assert_eq!(plan.offset(), 0, "ties with offset is not supported yet");
+                input.as_low_as(limit as usize)
+            }
         }
     }
 
@@ -164,13 +217,14 @@ impl PlanVisitor<Count> for CountRowsVisitor {
             unique_keys.push([*nspname].into_iter().collect());
         }
 
+        let input = self.visit(input);
         if unique_keys
             .iter()
             .any(|unique_key| eq_set.is_superset(unique_key))
         {
-            Count::at_most(1)
+            input.limit_to(1).as_low_as(0)
         } else {
-            self.visit(input)
+            input.as_low_as(0)
         }
     }
 
@@ -179,7 +233,7 @@ impl PlanVisitor<Count> for CountRowsVisitor {
             plan.inputs()
                 .into_iter()
                 .map(|input| self.visit(input))
-                .reduce(Count::add)
+                .reduce(std::ops::Add::add)
                 .unwrap_or_default()
         } else {
             Count::default()
@@ -191,22 +245,17 @@ impl PlanVisitor<Count> for CountRowsVisitor {
     }
 
     fn visit_logical_expand(&mut self, plan: &plan_node::LogicalExpand) -> Count {
-        self.visit(plan.input())
-            .multiply(plan.column_subsets().len())
+        self.visit(plan.input()) * plan.column_subsets().len()
     }
 }
 
 #[easy_ext::ext(LogicalCountRows)]
 pub impl PlanRef {
     fn max_one_row(&self) -> bool {
-        CountRowsVisitor
-            .visit(self.clone())
-            .hi()
-            .is_some_and(|hi| hi <= 1)
+        CountRowsVisitor.visit(self.clone()).is_at_most(1)
     }
 
     fn row_count(&self) -> Option<usize> {
-        let count = CountRowsVisitor.visit(self.clone());
-        count.hi().filter(|hi| *hi == count.lo())
+        CountRowsVisitor.visit(self.clone()).get_exact()
     }
 }
