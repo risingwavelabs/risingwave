@@ -148,6 +148,7 @@ message ExprNode {
     ARRAY_LENGTH = 536;
     CARDINALITY = 537;
     ARRAY_REMOVE = 538;
+    ARRAY_POSITIONS = 539;
 
     // Int256 functions
     HEX_TO_INT256 = 540;
