@@ -672,7 +672,11 @@ impl HummockVersionReader {
                 .in_span(Span::enter_with_local_parent("get_sstable"))
                 .await?;
 
-            if !table_holder.value().meta.range_tombstone_list.is_empty()
+            if !table_holder
+                .value()
+                .meta
+                .monotonic_tombstone_events
+                .is_empty()
                 && !read_options.ignore_range_tombstone
             {
                 delete_range_iter
@@ -792,7 +796,7 @@ impl HummockVersionReader {
                         flatten_resps.pop().unwrap().unwrap();
                     assert_eq!(sstable_info.get_object_id(), sstable.value().id);
                     local_stats.apply_meta_fetch(local_cache_meta_block_miss);
-                    if !sstable.value().meta.range_tombstone_list.is_empty()
+                    if !sstable.value().meta.monotonic_tombstone_events.is_empty()
                         && !read_options.ignore_range_tombstone
                     {
                         delete_range_iter
@@ -818,7 +822,7 @@ impl HummockVersionReader {
                         flatten_resps.pop().unwrap().unwrap();
                     assert_eq!(sstable_info.get_object_id(), sstable.value().id);
                     local_stats.apply_meta_fetch(local_cache_meta_block_miss);
-                    if !sstable.value().meta.range_tombstone_list.is_empty()
+                    if !sstable.value().meta.monotonic_tombstone_events.is_empty()
                         && !read_options.ignore_range_tombstone
                     {
                         delete_range_iter
