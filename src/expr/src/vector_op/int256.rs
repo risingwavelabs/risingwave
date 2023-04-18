@@ -18,6 +18,8 @@ use risingwave_expr_macro::function;
 use crate::ExprError::Parse;
 use crate::Result;
 
+const MAX_AVAILABLE_HEX_STR_LEN: usize = 66;
+
 /// Returns the integer value of the hexadecimal string.
 ///
 /// # Example
@@ -30,7 +32,21 @@ use crate::Result;
 /// ```
 #[function("hex_to_int256(varchar) -> int256")]
 pub fn hex_to_int256(s: &str) -> Result<Int256> {
-    Int256::from_str_hex(s).map_err(|e| Parse(format!("failed to parse hex '{}', {}", s, e).into()))
+    Int256::from_str_hex(s).map_err(|e| {
+        Parse(if s.len() <= MAX_AVAILABLE_HEX_STR_LEN {
+            format!("failed to parse hex '{}', {}", s, e).into()
+        } else {
+            format!(
+                "failed to parse hex '{}...'(truncated, total {} bytes), {}",
+                s.chars()
+                    .take(MAX_AVAILABLE_HEX_STR_LEN)
+                    .collect::<String>(),
+                s.len(),
+                e
+            )
+            .into()
+        })
+    })
 }
 
 #[cfg(test)]
