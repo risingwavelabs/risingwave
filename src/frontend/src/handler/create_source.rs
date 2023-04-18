@@ -50,7 +50,7 @@ use crate::expr::Expr;
 use crate::handler::create_table::{
     bind_sql_column_constraints, bind_sql_columns, ColumnIdGenerator,
 };
-use crate::handler::util::is_kafka_connector;
+use crate::handler::util::{get_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
 use crate::session::SessionImpl;

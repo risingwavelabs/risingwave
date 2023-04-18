@@ -98,7 +98,7 @@ pub fn gen_sink_plan(
 
     let properties = context.with_options().clone();
 
-    let mut with_properties: HashMap<String, String> = properties.inner().iter().cloned().collect();
+    let with_properties: HashMap<String, String> = properties.inner().clone().into_iter().collect();
     let connectino_name = with_properties
         .get(CONNECTION_NAME_KEY)
         .map(|s| s.to_lowercase());

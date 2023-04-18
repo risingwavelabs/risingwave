@@ -80,7 +80,7 @@ impl SinkDesc {
             dependent_relations,
             properties: self.properties.into_iter().collect(),
             sink_type: self.sink_type,
-            connection_id: None,
+            connection_id,
         }
     }
 

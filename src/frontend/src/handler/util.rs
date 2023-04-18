@@ -199,7 +199,7 @@ pub fn to_pg_field(f: &Field) -> PgFieldDescriptor {
 }
 
 #[inline(always)]
-fn get_connector(with_properties: &HashMap<String, String>) -> Option<String> {
+pub fn get_connector(with_properties: &HashMap<String, String>) -> Option<String> {
     with_properties
         .get(UPSTREAM_SOURCE_KEY)
         .map(|s| s.to_lowercase())
