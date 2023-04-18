@@ -113,7 +113,7 @@ message ExprNode {
     ATAN2 = 252;
     SIND = 253;
     COSD = 254;
-    COTD = 255
+    COTD = 255;
     TAND = 256;
     SQRT = 257;
     DEGREES = 258;
