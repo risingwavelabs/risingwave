@@ -138,16 +138,3 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Allocator 
     }
 }
 
-// impl<K, V, S, A: Clone + Allocator> Deref for EstimatedLruCache<K, V, S, A> {
-//     type Target = LruCache<K, V, S, A>;
-
-//     fn deref(&self) -> &Self::Target {
-//         &self.inner
-//     }
-// }
-
-// impl<K, V, S, A: Clone + Allocator> DerefMut for EstimatedLruCache<K, V, S, A> {
-//     fn deref_mut(&mut self) -> &mut Self::Target {
-//         &mut self.inner
-//     }
-// }
