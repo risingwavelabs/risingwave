@@ -19,11 +19,28 @@ use crate::function::aggregate::AggArgs;
 
 #[derive(Clone)]
 pub enum Frame {
-    /// Frame by row offset, for `lag` and `lead`.
-    Offset(isize),
-    // Rows(Bound<usize>, Bound<usize>),
-    // Groups(Bound<usize>, Bound<usize>),
-    // Range(Bound<ScalarImpl>, Bound<ScalarImpl>),
+    Rows(FrameBound<usize>, FrameBound<usize>),
+    // Groups(FrameBound<usize>, FrameBound<usize>),
+    // Range(FrameBound<ScalarImpl>, FrameBound<ScalarImpl>),
+}
+
+#[derive(Clone)]
+pub enum FrameBound<T> {
+    Unbounded,
+    CurrentRow,
+    Preceding(T),
+    Following(T),
+}
+
+impl FrameBound<usize> {
+    pub fn to_offset(&self) -> Option<isize> {
+        match self {
+            FrameBound::Unbounded => None,
+            FrameBound::CurrentRow => Some(0),
+            FrameBound::Preceding(n) => Some(-(*n as isize)),
+            FrameBound::Following(n) => Some(*n as isize),
+        }
+    }
 }
 
 #[derive(Clone)]

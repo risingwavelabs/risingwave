@@ -280,7 +280,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         // Ignore ready windows (all ready windows were outputted before).
         while partition.is_ready() {
             partition.states.iter_mut().for_each(|state| {
-                state.slide();
+                state.output();
             });
         }
 
@@ -363,7 +363,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 let (ret_values, evict_hints): (Vec<_>, Vec<_>) = partition
                     .states
                     .iter_mut()
-                    .map(|state| state.slide())
+                    .map(|state| state.output())
                     .map(|o| (o.return_value, o.evict_hint))
                     .unzip();
 
@@ -502,7 +502,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::function::aggregate::AggArgs;
-    use risingwave_expr::function::window::{Frame, WindowFuncCall, WindowFuncKind};
+    use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncCall, WindowFuncKind};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
@@ -575,13 +575,13 @@ mod tests {
                 kind: WindowFuncKind::Lag,
                 args: AggArgs::Unary(DataType::Int32, 3),
                 return_type: DataType::Int32,
-                frame: Frame::Offset(-1),
+                frame: Frame::Rows(FrameBound::Preceding(1), FrameBound::CurrentRow),
             },
             WindowFuncCall {
                 kind: WindowFuncKind::Lead,
                 args: AggArgs::Unary(DataType::Int32, 3),
                 return_type: DataType::Int32,
-                frame: Frame::Offset(1),
+                frame: Frame::Rows(FrameBound::CurrentRow, FrameBound::Following(1)),
             },
         ];
 

@@ -104,7 +104,7 @@ pub(super) trait WindowState {
     fn curr_window(&self) -> StatePos<'_>;
 
     /// Return the output for the current ready window frame and push the window forward.
-    fn slide(&mut self) -> StateOutput;
+    fn output(&mut self) -> StateOutput;
 }
 
 pub(super) fn create_window_state(call: &WindowFuncCall) -> Box<dyn WindowState + Send> {
