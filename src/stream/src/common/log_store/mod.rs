@@ -48,10 +48,7 @@ pub type LogStoreResult<T> = Result<T, LogStoreError>;
 #[derive(Debug)]
 pub enum LogStoreReadItem {
     StreamChunk(StreamChunk),
-    Barrier {
-        next_epoch: u64,
-        is_checkpoint: bool,
-    },
+    Barrier { is_checkpoint: bool },
 }
 
 pub trait LogWriter {
@@ -83,10 +80,10 @@ pub trait LogWriter {
 }
 
 pub trait LogReader {
-    type InitFuture<'a>: Future<Output = LogStoreResult<u64>> + Send + 'a
+    type InitFuture<'a>: Future<Output = LogStoreResult<()>> + Send + 'a
     where
         Self: 'a;
-    type NextItemFuture<'a>: Future<Output = LogStoreResult<LogStoreReadItem>> + Send + 'a
+    type NextItemFuture<'a>: Future<Output = LogStoreResult<(u64, LogStoreReadItem)>> + Send + 'a
     where
         Self: 'a;
     type TruncateFuture<'a>: Future<Output = LogStoreResult<()>> + Send + 'a
@@ -113,6 +110,14 @@ pub trait LogStoreFactory: 'static {
     fn build(self) -> Self::BuildFuture;
 }
 
+enum InMemLogStoreItem {
+    StreamChunk(StreamChunk),
+    Barrier {
+        next_epoch: u64,
+        is_checkpoint: bool,
+    },
+}
+
 /// An in-memory log store that can buffer a bounded amount of stream chunk in memory via bounded
 /// mpsc channel.
 ///
@@ -126,7 +131,7 @@ pub struct BoundedInMemLogStoreWriter {
     init_epoch_tx: Option<oneshot::Sender<u64>>,
 
     /// Sending log store item to log reader
-    item_tx: Sender<LogStoreReadItem>,
+    item_tx: Sender<InMemLogStoreItem>,
 
     /// Receiver for the epoch consumed by log reader.
     truncated_epoch_rx: UnboundedReceiver<u64>,
@@ -151,7 +156,7 @@ pub struct BoundedInMemLogStoreReader {
     init_epoch_rx: Option<oneshot::Receiver<u64>>,
 
     /// Receiver to fetch log store item
-    item_rx: Receiver<LogStoreReadItem>,
+    item_rx: Receiver<InMemLogStoreItem>,
 
     /// Sender of consumed epoch to the log writer
     truncated_epoch_tx: UnboundedSender<u64>,
@@ -196,8 +201,8 @@ impl LogStoreFactory for BoundedInMemLogStoreFactory {
 }
 
 impl LogReader for BoundedInMemLogStoreReader {
-    type InitFuture<'a> = impl Future<Output = LogStoreResult<u64>> + 'a;
-    type NextItemFuture<'a> = impl Future<Output = LogStoreResult<LogStoreReadItem>> + 'a;
+    type InitFuture<'a> = impl Future<Output = LogStoreResult<()>> + 'a;
+    type NextItemFuture<'a> = impl Future<Output = LogStoreResult<(u64, LogStoreReadItem)>> + 'a;
     type TruncateFuture<'a> = impl Future<Output = LogStoreResult<()>> + 'a;
 
     fn init(&mut self) -> Self::InitFuture<'_> {
@@ -211,37 +216,37 @@ impl LogReader for BoundedInMemLogStoreReader {
                 .map_err(|e| anyhow!("unable to get init epoch"))?;
             assert_eq!(self.epoch_progress, UNINITIALIZED);
             self.epoch_progress = LogReaderEpochProgress::Consuming(epoch);
-            Ok(epoch)
+            Ok(())
         }
     }
 
     fn next_item(&mut self) -> Self::NextItemFuture<'_> {
         async {
             match self.item_rx.recv().await {
-                Some(item) => {
-                    if let LogStoreReadItem::Barrier {
-                        next_epoch,
-                        is_checkpoint,
-                    } = &item
-                    {
-                        match self.epoch_progress {
-                            LogReaderEpochProgress::Consuming(current_epoch) => {
-                                if *is_checkpoint {
-                                    self.epoch_progress = AwaitingTruncate {
-                                        next_epoch: *next_epoch,
-                                        sealed_epoch: current_epoch,
-                                    };
-                                } else {
-                                    self.epoch_progress = Consuming(*next_epoch);
-                                }
-                            }
-                            LogReaderEpochProgress::AwaitingTruncate { .. } => {
-                                unreachable!("should not be awaiting for when barrier comes")
-                            }
+                Some(item) => match self.epoch_progress {
+                    Consuming(current_epoch) => match item {
+                        InMemLogStoreItem::StreamChunk(chunk) => {
+                            Ok((current_epoch, LogStoreReadItem::StreamChunk(chunk)))
                         }
+                        InMemLogStoreItem::Barrier {
+                            is_checkpoint,
+                            next_epoch,
+                        } => {
+                            if is_checkpoint {
+                                self.epoch_progress = AwaitingTruncate {
+                                    next_epoch,
+                                    sealed_epoch: current_epoch,
+                                };
+                            } else {
+                                self.epoch_progress = Consuming(next_epoch);
+                            }
+                            Ok((current_epoch, LogStoreReadItem::Barrier { is_checkpoint }))
+                        }
+                    },
+                    AwaitingTruncate { .. } => {
+                        unreachable!("should not be awaiting for when barrier comes")
                     }
-                    Ok(item)
-                }
+                },
                 None => Err(LogStoreError::EndOfLogStream),
             }
         }
@@ -251,7 +256,7 @@ impl LogReader for BoundedInMemLogStoreReader {
         async move {
             let sealed_epoch = match self.epoch_progress {
                 Consuming(_) => unreachable!("should be awaiting truncate"),
-                LogReaderEpochProgress::AwaitingTruncate {
+                AwaitingTruncate {
                     sealed_epoch,
                     next_epoch,
                 } => {
@@ -286,7 +291,7 @@ impl LogWriter for BoundedInMemLogStoreWriter {
     fn write_chunk(&mut self, chunk: StreamChunk) -> Self::WriteChunkFuture<'_> {
         async {
             self.item_tx
-                .send(LogStoreReadItem::StreamChunk(chunk))
+                .send(InMemLogStoreItem::StreamChunk(chunk))
                 .await
                 .map_err(|_| anyhow!("unable to send stream chunk"))?;
             Ok(())
@@ -300,7 +305,7 @@ impl LogWriter for BoundedInMemLogStoreWriter {
     ) -> Self::FlushCurrentEpoch<'_> {
         async move {
             self.item_tx
-                .send(LogStoreReadItem::Barrier {
+                .send(InMemLogStoreItem::Barrier {
                     next_epoch,
                     is_checkpoint,
                 })
@@ -375,41 +380,37 @@ mod tests {
             writer.flush_current_epoch(epoch2, true).await.unwrap();
         });
 
-        assert_eq!(init_epoch, reader.init().await.unwrap());
+        reader.init().await.unwrap();
         match reader.next_item().await.unwrap() {
-            LogStoreReadItem::StreamChunk(chunk) => {
+            (epoch, LogStoreReadItem::StreamChunk(chunk)) => {
+                assert_eq!(epoch, init_epoch);
                 assert_eq!(&chunk, &stream_chunk);
             }
-            LogStoreReadItem::Barrier { .. } => unreachable!(),
+            _ => unreachable!(),
         }
 
         match reader.next_item().await.unwrap() {
-            LogStoreReadItem::StreamChunk(_) => unreachable!(),
-            LogStoreReadItem::Barrier {
-                is_checkpoint,
-                next_epoch,
-            } => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
                 assert!(!is_checkpoint);
-                assert_eq!(next_epoch, epoch1);
+                assert_eq!(epoch, init_epoch);
             }
+            _ => unreachable!(),
         }
 
         match reader.next_item().await.unwrap() {
-            LogStoreReadItem::StreamChunk(chunk) => {
+            (epoch, LogStoreReadItem::StreamChunk(chunk)) => {
                 assert_eq!(&chunk, &stream_chunk);
+                assert_eq!(epoch, epoch1);
             }
-            LogStoreReadItem::Barrier { .. } => unreachable!(),
+            _ => unreachable!(),
         }
 
         match reader.next_item().await.unwrap() {
-            LogStoreReadItem::StreamChunk(_) => unreachable!(),
-            LogStoreReadItem::Barrier {
-                is_checkpoint,
-                next_epoch,
-            } => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
                 assert!(is_checkpoint);
-                assert_eq!(next_epoch, epoch2);
+                assert_eq!(epoch, epoch1);
             }
+            _ => unreachable!(),
         }
 
         reader.truncate().await.unwrap();

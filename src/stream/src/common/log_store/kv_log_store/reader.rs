@@ -53,8 +53,8 @@ impl<S: StateStore> KvLogStoreReader<S> {
 }
 
 impl<S: StateStore> LogReader for KvLogStoreReader<S> {
-    type InitFuture<'a> = impl Future<Output = LogStoreResult<u64>> + 'a;
-    type NextItemFuture<'a> = impl Future<Output = LogStoreResult<LogStoreReadItem>> + 'a;
+    type InitFuture<'a> = impl Future<Output = LogStoreResult<()>> + 'a;
+    type NextItemFuture<'a> = impl Future<Output = LogStoreResult<(u64, LogStoreReadItem)>> + 'a;
     type TruncateFuture<'a> = impl Future<Output = LogStoreResult<()>> + 'a;
 
     fn init(&mut self) -> Self::InitFuture<'_> {
