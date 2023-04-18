@@ -221,7 +221,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             return Ok(());
         }
 
-        let mut partition = Partition::new(&this.calls);
+        let mut partition = Partition::new(&this.calls)?;
 
         // Recover states from state table.
         let table_iter = this
