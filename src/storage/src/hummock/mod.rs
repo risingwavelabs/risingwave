@@ -70,9 +70,6 @@ pub mod write_limiter;
 pub use error::*;
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
 use risingwave_common_service::observer_manager::{NotificationClient, ObserverManager};
-use risingwave_hummock_sdk::filter_key_extractor::{
-    FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
-};
 pub use validator::*;
 use value::*;
 
@@ -80,6 +77,7 @@ use self::event_handler::ReadVersionMappingType;
 use self::iterator::HummockIterator;
 pub use self::sstable_store::*;
 use super::monitor::HummockStateStoreMetrics;
+use crate::filter_key_extractor::{FilterKeyExtractorManager, FilterKeyExtractorManagerRef};
 use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
 use crate::hummock::compactor::CompactorContext;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
@@ -146,6 +144,7 @@ impl HummockStorage {
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
+        filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         tracing: Arc<risingwave_tracing::RwTracingService>,
         compactor_metrics: Arc<CompactorMetrics>,
@@ -160,7 +159,6 @@ impl HummockStorage {
         )
         .await
         .map_err(HummockError::read_backup_error)?;
-        let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
         let write_limiter = Arc::new(WriteLimiter::default());
         let (event_tx, mut event_rx) = unbounded_channel();
 
@@ -335,6 +333,7 @@ impl HummockStorage {
             sstable_store,
             hummock_meta_client,
             notification_client,
+            Arc::new(FilterKeyExtractorManager::default()),
             Arc::new(HummockStateStoreMetrics::unused()),
             Arc::new(risingwave_tracing::RwTracingService::disabled()),
             Arc::new(CompactorMetrics::unused()),

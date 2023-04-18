@@ -15,10 +15,10 @@
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_rpc_client::HummockMetaClient;
 
 use super::task_progress::TaskProgressManagerRef;
+use crate::filter_key_extractor::FilterKeyExtractorManagerRef;
 use crate::hummock::compactor::CompactionExecutor;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{MemoryLimiter, SstableObjectIdManagerRef};

@@ -40,7 +40,6 @@ pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
 use risingwave_common::util::resource_util;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
@@ -60,6 +59,7 @@ use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::value::HummockValue;
 use super::{CompactionDeleteRanges, HummockResult, SstableBuilderOptions, XorFilterBuilder};
+use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_state_for_compaction, generate_splits,
 };
@@ -178,10 +178,35 @@ impl Compactor {
 
         let mut multi_filter = build_multi_compaction_filter(&compact_task);
 
-        let multi_filter_key_extractor = context
+        let existing_table_ids = HashSet::from_iter(compact_task.existing_table_ids.clone());
+        let multi_filter_key_extractor = match context
             .filter_key_extractor_manager
-            .acquire(HashSet::from_iter(compact_task.existing_table_ids.clone()))
-            .await;
+            .acquire(existing_table_ids.clone())
+            .await
+        {
+            Err(e) => {
+                tracing::error!("Failed to fetch filter key extractor tables [{:?}], it may caused by some RPC error {:?}", compact_task.existing_table_ids, e);
+                let task_status = TaskStatus::ExecuteFailed;
+                Self::compact_done(&mut compact_task, context.clone(), vec![], task_status).await;
+                return task_status;
+            }
+            Ok(extractor) => extractor,
+        };
+
+        if let FilterKeyExtractorImpl::Multi(multi) = &multi_filter_key_extractor {
+            let found_tables = multi.get_exsting_table_ids();
+            let removed_tables = existing_table_ids
+                .iter()
+                .filter(|table_id| !found_tables.contains(table_id))
+                .collect_vec();
+            if !removed_tables.is_empty() {
+                tracing::error!("Failed to fetch filter key extractor tables [{:?}. [{:?}] may be removed by meta-service. ", existing_table_ids, removed_tables);
+                let task_status = TaskStatus::ExecuteFailed;
+                Self::compact_done(&mut compact_task, context.clone(), vec![], task_status).await;
+                return task_status;
+            }
+        }
+
         let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
 
         let mut task_status = TaskStatus::Success;
