@@ -18,7 +18,7 @@ use risingwave_connector::sink::{SinkConfig, DOWNSTREAM_SINK_KEY};
 use risingwave_pb::stream_plan::SinkNode;
 
 use super::*;
-use crate::common::log_store::BoundedInMemLogStoreFactory;
+use crate::common::log_store::in_mem::BoundedInMemLogStoreFactory;
 use crate::executor::{SinkExecutor, StreamExecutorError};
 
 pub struct SinkExecutorBuilder;

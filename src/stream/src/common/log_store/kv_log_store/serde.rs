@@ -38,6 +38,8 @@ use crate::common::log_store::kv_log_store::{
 
 /// `epoch`, `seq_id`, `op`
 const PREDEFINED_COLUMNS_TYPES: [DataType; 3] = [DataType::Int64, DataType::Int32, DataType::Int16];
+const SEQ_ID_INDEX: usize = 1;
+const ROW_OP_INDEX: usize = 2;
 /// `epoch`, `seq_id`
 const PK_TYPES: [DataType; 2] = [DataType::Int64, DataType::Int32];
 /// epoch
@@ -227,8 +229,8 @@ impl LogStoreRowSerde {
             .deserialize(&value_bytes)
             .expect("should success");
 
-        let payload_row = OwnedRow::new(row_data[3..].to_vec());
-        let row_op_code = *row_data[2].as_ref().unwrap().as_int16();
+        let payload_row = OwnedRow::new(row_data[PREDEFINED_COLUMNS_TYPES.len()..].to_vec());
+        let row_op_code = *row_data[ROW_OP_INDEX].as_ref().unwrap().as_int16();
 
         match row_op_code {
             INSERT_OP_CODE => LogStoreRowOp::Row {
@@ -248,13 +250,13 @@ impl LogStoreRowSerde {
                 row: payload_row,
             },
             BARRIER_OP_CODE => {
-                assert!(row_data[1].is_none());
+                assert!(row_data[SEQ_ID_INDEX].is_none());
                 LogStoreRowOp::Barrier {
                     is_checkpoint: false,
                 }
             }
             CHECKPOINT_BARRIER_OP_CODE => {
-                assert!(row_data[1].is_none());
+                assert!(row_data[SEQ_ID_INDEX].is_none());
                 LogStoreRowOp::Barrier {
                     is_checkpoint: true,
                 }
@@ -268,7 +270,6 @@ impl LogStoreRowSerde {
 mod tests {
     use risingwave_common::array::{Op, StreamChunk};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-    use risingwave_common::hash::VirtualNode;
     use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::{DataType, ScalarImpl, ScalarRef};
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;

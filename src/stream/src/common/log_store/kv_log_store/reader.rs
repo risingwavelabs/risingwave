@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_storage::store::ReadOptions;
 use risingwave_storage::StateStore;
 
-use crate::common::log_store::kv_log_store::buffer::{LogStoreBufferItem, LogStoreBufferReceiver};
+use crate::common::log_store::kv_log_store::buffer::LogStoreBufferReceiver;
 use crate::common::log_store::kv_log_store::serde::LogStoreRowSerde;
 use crate::common::log_store::{LogReader, LogStoreReadItem, LogStoreResult};
 
