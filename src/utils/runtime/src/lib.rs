@@ -166,6 +166,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         #[cfg(debug_assertions)]
         let filter = filter.with_default(Level::DEBUG);
 
+        #[cfg(not(debug_assertions))]
+        let filter = filter.with_default(Level::INFO);
+
         let filter = settings
             .targets
             .into_iter()
