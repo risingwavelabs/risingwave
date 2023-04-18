@@ -147,7 +147,9 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::JsonbArrayLength
             | expr_node::Type::Pi
             | expr_node::Type::Sind
-            | expr_node::Type::Cosd => {
+            | expr_node::Type::Cosd
+            | expr_node::Type::Tand
+            | expr_node::Type::ArrayPositions => {
                 let x = func_call
                     .inputs()
                     .iter()
