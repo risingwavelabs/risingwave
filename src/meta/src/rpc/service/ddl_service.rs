@@ -695,10 +695,10 @@ where
     }
 
     #[cfg_attr(coverage, no_coverage)]
-    async fn list_tables(
+    async fn get_tables(
         &self,
-        request: Request<ListTablesRequest>,
-    ) -> Result<Response<ListTablesResponse>, Status> {
+        request: Request<GetTablesRequest>,
+    ) -> Result<Response<GetTablesResponse>, Status> {
         let ret = self
             .catalog_manager
             .get_tables(&request.into_inner().table_ids)
@@ -707,7 +707,7 @@ where
         for table in ret {
             tables.insert(table.id, table);
         }
-        Ok(Response::new(ListTablesResponse { tables }))
+        Ok(Response::new(GetTablesResponse { tables }))
     }
 }
 

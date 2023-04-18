@@ -287,11 +287,11 @@ message DropConnectionResponse {
   uint64 version = 2;
 }
 
-message ListTablesRequest {
+message GetTablesRequest {
   repeated uint32 table_ids = 1;
 }
 
-message ListTablesResponse {
+message GetTablesResponse {
   map<uint32, catalog.Table> tables = 1;
 }
 
@@ -322,5 +322,5 @@ service DdlService {
   rpc CreateConnection(CreateConnectionRequest) returns (CreateConnectionResponse);
   rpc ListConnections(ListConnectionsRequest) returns (ListConnectionsResponse);
   rpc DropConnection(DropConnectionRequest) returns (DropConnectionResponse);
-  rpc ListTables(ListTablesRequest) returns (ListTablesResponse);
+  rpc GetTables(GetTablesRequest) returns (GetTablesResponse);
 }

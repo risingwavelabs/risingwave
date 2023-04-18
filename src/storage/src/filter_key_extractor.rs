@@ -246,7 +246,7 @@ impl RemoteTableAccessor {
 #[async_trait::async_trait]
 impl StateTableAccessor for RemoteTableAccessor {
     async fn get_tables(&self, table_ids: &[u32]) -> RpcResult<HashMap<u32, Table>> {
-        self.meta_client.list_tables(table_ids).await
+        self.meta_client.get_tables(table_ids).await
     }
 }
 

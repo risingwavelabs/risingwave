@@ -880,11 +880,11 @@ impl MetaClient {
         Ok(resp.new_group_id)
     }
 
-    pub async fn list_tables(&self, table_ids: &[u32]) -> Result<HashMap<u32, Table>> {
-        let req = ListTablesRequest {
+    pub async fn get_tables(&self, table_ids: &[u32]) -> Result<HashMap<u32, Table>> {
+        let req = GetTablesRequest {
             table_ids: table_ids.to_vec(),
         };
-        let resp = self.inner.list_tables(req).await?;
+        let resp = self.inner.get_tables(req).await?;
         Ok(resp.tables)
     }
 }
@@ -1462,7 +1462,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_connection, CreateConnectionRequest, CreateConnectionResponse }
             ,{ ddl_client, list_connections, ListConnectionsRequest, ListConnectionsResponse }
             ,{ ddl_client, drop_connection, DropConnectionRequest, DropConnectionResponse }
-            ,{ ddl_client, list_tables, ListTablesRequest, ListTablesResponse }
+            ,{ ddl_client, get_tables, GetTablesRequest, GetTablesResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }
