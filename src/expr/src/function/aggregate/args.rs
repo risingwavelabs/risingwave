@@ -18,7 +18,7 @@ use risingwave_common::types::DataType;
 
 /// An aggregation function may accept 0, 1 or 2 arguments.
 #[derive(Clone, Debug)]
-pub enum FuncArgs {
+pub enum AggArgs {
     /// `None` is used for function calls that accept 0 argument, e.g. `count(*)`.
     None,
     /// `Unary` is used for function calls that accept 1 argument, e.g. `sum(x)`.
@@ -27,10 +27,10 @@ pub enum FuncArgs {
     Binary([DataType; 2], [usize; 2]),
 }
 
-impl FuncArgs {
+impl AggArgs {
     /// return the types of arguments.
     pub fn arg_types(&self) -> &[DataType] {
-        use FuncArgs::*;
+        use AggArgs::*;
         match self {
             None => Default::default(),
             Unary(typ, _) => slice::from_ref(typ),
@@ -40,7 +40,7 @@ impl FuncArgs {
 
     /// return the indices of the arguments in [`risingwave_common::array::StreamChunk`].
     pub fn val_indices(&self) -> &[usize] {
-        use FuncArgs::*;
+        use AggArgs::*;
         match self {
             None => Default::default(),
             Unary(_, val_idx) => slice::from_ref(val_idx),

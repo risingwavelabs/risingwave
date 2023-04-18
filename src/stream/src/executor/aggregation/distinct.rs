@@ -263,7 +263,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::function::aggregate::{AggKind, FuncArgs};
+    use risingwave_expr::function::aggregate::{AggArgs, AggKind};
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
@@ -271,7 +271,7 @@ mod tests {
     fn count_agg_call(kind: AggKind, col_idx: usize, distinct: bool) -> AggCall {
         AggCall {
             kind,
-            args: FuncArgs::Unary(DataType::Int64, col_idx),
+            args: AggArgs::Unary(DataType::Int64, col_idx),
             return_type: DataType::Int64,
             distinct,
 

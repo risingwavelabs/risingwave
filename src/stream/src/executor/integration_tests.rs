@@ -22,7 +22,7 @@ use risingwave_common::array::*;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::*;
 use risingwave_expr::expr::*;
-use risingwave_expr::function::aggregate::{AggCall, AggKind, FuncArgs};
+use risingwave_expr::function::aggregate::{AggArgs, AggCall, AggKind};
 use risingwave_storage::memory::MemoryStateStore;
 
 use super::exchange::permit::channel_for_test;
@@ -55,7 +55,7 @@ async fn test_merger_sum_aggr() {
             vec![
                 AggCall {
                     kind: AggKind::Count,
-                    args: FuncArgs::None,
+                    args: AggArgs::None,
                     return_type: DataType::Int64,
                     column_orders: vec![],
                     filter: None,
@@ -63,7 +63,7 @@ async fn test_merger_sum_aggr() {
                 },
                 AggCall {
                     kind: AggKind::Sum,
-                    args: FuncArgs::Unary(DataType::Int64, 0),
+                    args: AggArgs::Unary(DataType::Int64, 0),
                     return_type: DataType::Int64,
                     column_orders: vec![],
                     filter: None,
@@ -152,7 +152,7 @@ async fn test_merger_sum_aggr() {
         vec![
             AggCall {
                 kind: AggKind::Sum0,
-                args: FuncArgs::Unary(DataType::Int64, 0),
+                args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 column_orders: vec![],
                 filter: None,
@@ -160,7 +160,7 @@ async fn test_merger_sum_aggr() {
             },
             AggCall {
                 kind: AggKind::Sum,
-                args: FuncArgs::Unary(DataType::Int64, 1),
+                args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
                 column_orders: vec![],
                 filter: None,
@@ -168,7 +168,7 @@ async fn test_merger_sum_aggr() {
             },
             AggCall {
                 kind: AggKind::Count, // as row count, index: 2
-                args: FuncArgs::None,
+                args: AggArgs::None,
                 return_type: DataType::Int64,
                 column_orders: vec![],
                 filter: None,

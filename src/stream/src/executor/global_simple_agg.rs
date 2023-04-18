@@ -336,7 +336,7 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::Field;
     use risingwave_common::types::*;
-    use risingwave_expr::function::aggregate::{AggCall, AggKind, FuncArgs};
+    use risingwave_expr::function::aggregate::{AggArgs, AggCall, AggKind};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
@@ -381,7 +381,7 @@ mod tests {
         let agg_calls = vec![
             AggCall {
                 kind: AggKind::Count, // as row count, index: 0
-                args: FuncArgs::None,
+                args: AggArgs::None,
                 return_type: DataType::Int64,
                 column_orders: vec![],
                 filter: None,
@@ -389,7 +389,7 @@ mod tests {
             },
             AggCall {
                 kind: AggKind::Sum,
-                args: FuncArgs::Unary(DataType::Int64, 0),
+                args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 column_orders: vec![],
                 filter: None,
@@ -397,7 +397,7 @@ mod tests {
             },
             AggCall {
                 kind: AggKind::Sum,
-                args: FuncArgs::Unary(DataType::Int64, 1),
+                args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
                 column_orders: vec![],
                 filter: None,
@@ -405,7 +405,7 @@ mod tests {
             },
             AggCall {
                 kind: AggKind::Min,
-                args: FuncArgs::Unary(DataType::Int64, 0),
+                args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 column_orders: vec![],
                 filter: None,

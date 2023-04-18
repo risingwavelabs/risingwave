@@ -81,14 +81,14 @@ impl ValueState {
 mod tests {
     use risingwave_common::array::{I64Array, Op};
     use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_expr::function::aggregate::{AggKind, FuncArgs};
+    use risingwave_expr::function::aggregate::{AggArgs, AggKind};
 
     use super::*;
 
     fn create_test_count_agg() -> AggCall {
         AggCall {
             kind: AggKind::Count,
-            args: FuncArgs::Unary(DataType::Int64, 0),
+            args: AggArgs::Unary(DataType::Int64, 0),
             return_type: DataType::Int64,
             column_orders: vec![],
             filter: None,
@@ -130,7 +130,7 @@ mod tests {
     fn create_test_max_agg_append_only() -> AggCall {
         AggCall {
             kind: AggKind::Max,
-            args: FuncArgs::Unary(DataType::Int64, 0),
+            args: AggArgs::Unary(DataType::Int64, 0),
             return_type: DataType::Int64,
             column_orders: vec![],
             filter: None,

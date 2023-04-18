@@ -15,7 +15,7 @@
 use risingwave_common::types::DataType;
 
 use super::WindowFuncKind;
-use crate::function::aggregate::FuncArgs;
+use crate::function::aggregate::AggArgs;
 
 #[derive(Clone)]
 pub enum Frame {
@@ -29,7 +29,7 @@ pub enum Frame {
 #[derive(Clone)]
 pub struct WindowFuncCall {
     pub kind: WindowFuncKind,
-    pub args: FuncArgs,
+    pub args: AggArgs,
     pub return_type: DataType,
     pub frame: Frame,
 }

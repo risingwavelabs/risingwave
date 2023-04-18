@@ -21,7 +21,7 @@ use risingwave_pb::expr::PbAggCall;
 
 use super::AggKind;
 use crate::expr::{build_from_prost, ExpressionRef};
-use crate::function::aggregate::FuncArgs;
+use crate::function::aggregate::AggArgs;
 use crate::Result;
 
 /// Represents an aggregation function.
@@ -30,7 +30,7 @@ pub struct AggCall {
     /// Aggregation kind for constructing agg state.
     pub kind: AggKind,
     /// Arguments of aggregation function input.
-    pub args: FuncArgs,
+    pub args: AggArgs,
     /// The return type of aggregation function.
     pub return_type: DataType,
 
@@ -48,11 +48,11 @@ impl AggCall {
     pub fn from_protobuf(agg_call: &PbAggCall) -> Result<Self> {
         let agg_kind = AggKind::from_protobuf(agg_call.get_type()?)?;
         let args = match &agg_call.get_args()[..] {
-            [] => FuncArgs::None,
+            [] => AggArgs::None,
             [arg] if agg_kind != AggKind::StringAgg => {
-                FuncArgs::Unary(DataType::from(arg.get_type()?), arg.get_index() as usize)
+                AggArgs::Unary(DataType::from(arg.get_type()?), arg.get_index() as usize)
             }
-            [agg_arg, extra_arg] if agg_kind == AggKind::StringAgg => FuncArgs::Binary(
+            [agg_arg, extra_arg] if agg_kind == AggKind::StringAgg => AggArgs::Binary(
                 [
                     DataType::from(agg_arg.get_type()?),
                     DataType::from(extra_arg.get_type()?),

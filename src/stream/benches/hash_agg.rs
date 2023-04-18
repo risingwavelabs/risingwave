@@ -18,7 +18,7 @@ use futures::StreamExt;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::*;
-use risingwave_expr::function::aggregate::{AggCall, AggKind, FuncArgs};
+use risingwave_expr::function::aggregate::{AggArgs, AggCall, AggKind};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::StateStore;
 use risingwave_stream::executor::test_utils::agg_executor::new_boxed_hash_agg_executor;
@@ -84,7 +84,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
     let agg_calls = vec![
          AggCall {
             kind: AggKind::Count,
-            args: FuncArgs::None,
+            args: AggArgs::None,
             return_type: DataType::Int64,
             column_orders: vec![],
             filter: None,
@@ -92,7 +92,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
          },
          AggCall {
             kind: AggKind::Count,
-            args: FuncArgs::None,
+            args: AggArgs::None,
             return_type: DataType::Int64,
             column_orders: vec![],
             filter: Some(build_from_pretty("(less_than:boolean $2:int8 10000:int8)").into()),
@@ -100,7 +100,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
          },
          AggCall {
             kind: AggKind::Count,
-            args: FuncArgs::None,
+            args: AggArgs::None,
             return_type: DataType::Int64,
             column_orders: vec![],
             filter: Some(build_from_pretty("(and:boolean (greater_than_or_equal:boolean $2:int8 10000:int8) (less_than:boolean $2:int8 100000:int8))").into()),
@@ -108,7 +108,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
          },
          AggCall {
             kind: AggKind::Count,
-            args: FuncArgs::None,
+            args: AggArgs::None,
             return_type: DataType::Int64,
             column_orders: vec![],
             filter: Some(build_from_pretty("(greater_than_or_equal:boolean $2:int8 100000:int8)").into()),
@@ -144,7 +144,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
         // avg (sum)
         AggCall {
             kind: AggKind::Sum,
-            args: FuncArgs::Unary(DataType::Int64, 2),
+            args: AggArgs::Unary(DataType::Int64, 2),
             return_type: DataType::Int64,
             column_orders: vec![],
             filter: None,
@@ -153,7 +153,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
         // avg (count)
         AggCall {
             kind: AggKind::Count,
-            args: FuncArgs::Unary(DataType::Int64, 2),
+            args: AggArgs::Unary(DataType::Int64, 2),
             return_type: DataType::Int64,
             column_orders: vec![],
             filter: None,
@@ -161,7 +161,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
         },
         AggCall {
             kind: AggKind::Sum,
-            args: FuncArgs::Unary(DataType::Int64, 2),
+            args: AggArgs::Unary(DataType::Int64, 2),
             return_type: DataType::Int64,
             column_orders: vec![],
             filter: None,

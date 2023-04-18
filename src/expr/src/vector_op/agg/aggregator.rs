@@ -17,7 +17,7 @@ use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::types::*;
 
-use crate::function::aggregate::{AggCall, AggKind, FuncArgs};
+use crate::function::aggregate::{AggArgs, AggCall, AggKind};
 use crate::vector_op::agg::approx_count_distinct::ApproxCountDistinct;
 use crate::vector_op::agg::array_agg::create_array_agg_state;
 use crate::vector_op::agg::count_star::CountStar;
@@ -66,21 +66,21 @@ impl AggStateFactory {
         // NOTE: The function signature is checked by `AggCall::infer_return_type` in the frontend.
 
         let initial_agg_state: BoxedAggState = match (agg_call.kind, agg_call.args) {
-            (AggKind::Count, FuncArgs::None) => {
+            (AggKind::Count, AggArgs::None) => {
                 Box::new(CountStar::new(agg_call.return_type.clone()))
             }
-            (AggKind::ApproxCountDistinct, FuncArgs::Unary(_, arg_idx)) => Box::new(
+            (AggKind::ApproxCountDistinct, AggArgs::Unary(_, arg_idx)) => Box::new(
                 ApproxCountDistinct::new(agg_call.return_type.clone(), arg_idx),
             ),
             (
                 AggKind::StringAgg,
-                FuncArgs::Binary([value_type, delim_type], [value_idx, delim_idx]),
+                AggArgs::Binary([value_type, delim_type], [value_idx, delim_idx]),
             ) => {
                 assert_eq!(value_type, DataType::Varchar);
                 assert_eq!(delim_type, DataType::Varchar);
                 create_string_agg_state(value_idx, delim_idx, agg_call.column_orders.clone())
             }
-            (AggKind::Sum, FuncArgs::Unary(arg_type, arg_idx))
+            (AggKind::Sum, AggArgs::Unary(arg_type, arg_idx))
                 if matches!(arg_type, DataType::Int256) =>
             {
                 // Special handling of the `sum` function for `Int256`, when the
@@ -92,12 +92,12 @@ impl AggStateFactory {
                 // when refactoring the code related to aggregation in the future.
                 Box::new(Int256Sum::new(arg_idx, agg_call.distinct))
             }
-            (AggKind::ArrayAgg, FuncArgs::Unary(_, arg_idx)) => create_array_agg_state(
+            (AggKind::ArrayAgg, AggArgs::Unary(_, arg_idx)) => create_array_agg_state(
                 agg_call.return_type.clone(),
                 arg_idx,
                 agg_call.column_orders.clone(),
             ),
-            (agg_kind, FuncArgs::Unary(arg_type, arg_idx)) => {
+            (agg_kind, AggArgs::Unary(arg_type, arg_idx)) => {
                 // other unary agg call
                 create_agg_state_unary(
                     arg_type,

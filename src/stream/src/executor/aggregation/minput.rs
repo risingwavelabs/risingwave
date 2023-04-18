@@ -231,7 +231,7 @@ mod tests {
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::iter_util::ZipEqFast;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-    use risingwave_expr::function::aggregate::{AggCall, AggKind, FuncArgs};
+    use risingwave_expr::function::aggregate::{AggArgs, AggCall, AggKind};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
@@ -287,7 +287,7 @@ mod tests {
     fn create_extreme_agg_call(kind: AggKind, arg_type: DataType, arg_idx: usize) -> AggCall {
         AggCall {
             kind,
-            args: FuncArgs::Unary(arg_type.clone(), arg_idx),
+            args: AggArgs::Unary(arg_type.clone(), arg_idx),
             return_type: arg_type,
             column_orders: vec![],
             filter: None,
@@ -980,7 +980,7 @@ mod tests {
 
         let agg_call = AggCall {
             kind: AggKind::StringAgg,
-            args: FuncArgs::Binary([DataType::Varchar, DataType::Varchar], [0, 1]),
+            args: AggArgs::Binary([DataType::Varchar, DataType::Varchar], [0, 1]),
             return_type: DataType::Varchar,
             column_orders: vec![
                 ColumnOrder::new(2, OrderType::ascending()),  // b ASC
@@ -1081,7 +1081,7 @@ mod tests {
 
         let agg_call = AggCall {
             kind: AggKind::ArrayAgg,
-            args: FuncArgs::Unary(DataType::Int32, 1), // array_agg(b)
+            args: AggArgs::Unary(DataType::Int32, 1), // array_agg(b)
             return_type: DataType::Int32,
             column_orders: vec![
                 ColumnOrder::new(2, OrderType::ascending()),  // c ASC

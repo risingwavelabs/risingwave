@@ -501,7 +501,7 @@ mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::function::aggregate::FuncArgs;
+    use risingwave_expr::function::aggregate::AggArgs;
     use risingwave_expr::function::window::{Frame, WindowFuncCall, WindowFuncKind};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
@@ -573,13 +573,13 @@ mod tests {
         let calls = vec![
             WindowFuncCall {
                 kind: WindowFuncKind::Lag,
-                args: FuncArgs::Unary(DataType::Int32, 3),
+                args: AggArgs::Unary(DataType::Int32, 3),
                 return_type: DataType::Int32,
                 frame: Frame::Offset(-1),
             },
             WindowFuncCall {
                 kind: WindowFuncKind::Lead,
-                args: FuncArgs::Unary(DataType::Int32, 3),
+                args: AggArgs::Unary(DataType::Int32, 3),
                 return_type: DataType::Int32,
                 frame: Frame::Offset(1),
             },
