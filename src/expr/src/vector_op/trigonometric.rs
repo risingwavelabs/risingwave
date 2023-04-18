@@ -249,7 +249,7 @@ mod tests {
 
     /// numbers are equal within a rounding error
     fn assert_similar(lhs: F64, rhs: F64) {
-        let x = F64::from(lhs.abs() - rhs.abs()).abs() <= 0.000000000000001;
+        let x = (lhs.0 - rhs.0).abs() <= 0.000000000000001;
         assert!(x, "{:?} != {:?}", lhs.0, rhs.0);
     }
 
@@ -259,16 +259,13 @@ mod tests {
         let pi = F64::from(PI);
 
         // sind
+        assert_similar(sin_f64(50_f64.to_radians().into()), sind_f64(F64::from(50)));
         assert_similar(
-            sin_f64(F64::from(50).to_radians().into()),
-            sind_f64(F64::from(50)),
-        );
-        assert_similar(
-            sin_f64(F64::from(100).to_radians().into()),
+            sin_f64(100_f64.to_radians().into()),
             sind_f64(F64::from(100)),
         );
         assert_similar(
-            sin_f64(F64::from(250).to_radians().into()),
+            sin_f64(250_f64.to_radians().into()),
             sind_f64(F64::from(250)),
         );
         assert_similar(sin_f64(pi), sind_f64(d));
@@ -282,23 +279,20 @@ mod tests {
         // cosd
         assert_eq!(cos_f64(pi), cosd_f64(d));
         assert_similar(
-            cos_f64(F64::from(-180).to_radians().into()),
+            cos_f64((-180_f64).to_radians().into()),
             cosd_f64(F64::from(-180)),
         );
         assert_similar(
-            cos_f64(F64::from(-190).to_radians().into()),
+            cos_f64((-190_f64).to_radians().into()),
             cosd_f64(F64::from(-190)),
         );
+        assert_similar(cos_f64(50_f64.to_radians().into()), cosd_f64(F64::from(50)));
         assert_similar(
-            cos_f64(F64::from(50).to_radians().into()),
-            cosd_f64(F64::from(50)),
-        );
-        assert_similar(
-            cos_f64(F64::from(100).to_radians().into()),
+            cos_f64(100_f64.to_radians().into()),
             cosd_f64(F64::from(100)),
         );
         assert_similar(
-            cos_f64(F64::from(250).to_radians().into()),
+            cos_f64(250_f64.to_radians().into()),
             cosd_f64(F64::from(250)),
         );
 
@@ -308,32 +302,31 @@ mod tests {
 
         // tand
         assert_similar(
-            tan_f64(F64::from(-10).to_radians().into()),
+            tan_f64((-10_f64).to_radians().into()),
             tand_f64(F64::from(-10)),
         );
-        assert_similar(
-            tan_f64(F64::from(50).to_radians().into()),
-            tand_f64(F64::from(50)),
-        );
+        assert_similar(tan_f64(50_f64.to_radians().into()), tand_f64(F64::from(50)));
         // we get slightly different result here, which is why I reduce the required accuracy
         assert!(
-            (tan_f64(F64::from(250).to_radians().into()) - tand_f64(F64::from(250))).abs()
+            (tan_f64(250_f64.to_radians().into()) - tand_f64(F64::from(250)))
+                .0
+                .abs()
                 < 0.00000000000001
         );
         assert_similar(
-            tan_f64(F64::from(360).to_radians().into()),
+            tan_f64(360_f64.to_radians().into()),
             tand_f64(F64::from(360)),
         );
 
         // exact matches
-        assert!(tand_f64(F64::from(-270)).is_infinite());
+        assert!(tand_f64(F64::from(-270)).0.is_infinite());
         assert_eq!(tand_f64(F64::from(-180)), 0.0);
         assert_eq!(tand_f64(F64::from(180)), 0.0);
-        assert!(tand_f64(F64::from(-90)).is_infinite());
-        assert!(tand_f64(F64::from(90)).is_infinite());
-        assert!(tand_f64(F64::from(270)).is_infinite());
-        assert!(tand_f64(F64::from(450)).is_infinite());
-        assert!(tand_f64(F64::from(90)).is_infinite());
+        assert!(tand_f64(F64::from(-90)).0.is_infinite());
+        assert!(tand_f64(F64::from(90)).0.is_infinite());
+        assert!(tand_f64(F64::from(270)).0.is_infinite());
+        assert!(tand_f64(F64::from(450)).0.is_infinite());
+        assert!(tand_f64(F64::from(90)).0.is_infinite());
     }
 
     #[test]
@@ -369,7 +362,7 @@ mod tests {
         // https://en.wikipedia.org/wiki/Inverse_trigonometric_functions#Two-argument_variant_of_arctangent
         assert_similar(
             atan2_f64(y, x),
-            two * atan_f64(y / (F64::from(F64::from(x.powi(2) + y.powi(2)).sqrt()) + x)),
+            two * atan_f64(y / (F64::from((x.0.powi(2) + y.0.powi(2)).sqrt()) + x)),
         )
     }
 
