@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, Schema, TableVersionId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SelectItem};
 
 use super::statement::RewriteExprsRecursive;
@@ -284,13 +285,13 @@ impl Binder {
         expected_types: &Vec<DataType>,
         exprs: Vec<ExprImpl>,
     ) -> Result<Vec<ExprImpl>> {
-        #[expect(clippy::disallowed_methods)]
+        let expr_num = exprs.len();
         let msg = match expected_types.len().cmp(&exprs.len()) {
             std::cmp::Ordering::Less => "INSERT has more expressions than target columns",
             _ => {
                 return exprs
                     .into_iter()
-                    .zip(expected_types)
+                    .zip_eq_fast(expected_types.iter().take(expr_num))
                     .map(|(e, t)| e.cast_assign(t.clone()).map_err(Into::into))
                     .try_collect();
             }

@@ -16,6 +16,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::Values;
 
 use super::bind_context::Clause;
@@ -122,11 +123,11 @@ impl Binder {
         };
 
         let values_id = self.next_values_id();
-        #[expect(clippy::disallowed_methods)]
         let schema = Schema::new(
             types
                 .into_iter()
-                .zip(0..num_columns)
+                .take(num_columns)
+                .zip_eq_fast(0..num_columns)
                 .map(|(ty, col_id)| Field::with_name(ty, values_column_name(values_id, col_id)))
                 .collect(),
         );

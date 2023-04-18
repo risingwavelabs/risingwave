@@ -14,7 +14,7 @@
 
 use std::iter::repeat;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -26,8 +26,8 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
-use risingwave_pb::batch_plan::insert_node::default_columns::IndexAndExpr;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::IndexAndExpr;
 use risingwave_source::dml_manager::DmlManagerRef;
 
 use crate::executor::{
@@ -125,6 +125,7 @@ impl InsertExecutor {
                 .enumerate()
                 .map(|(i, idx)| (*idx, columns[i].clone()))
                 .collect_vec();
+            ordered_columns.reserve(ordered_columns.len() + self.sorted_default_columns.len());
 
             for (idx, expr) in &self.sorted_default_columns {
                 let column = Column::new(expr.eval(&dummy_chunk).await?);
@@ -212,13 +213,13 @@ impl BoxedExecutorBuilder for InsertExecutor {
                 .iter()
                 .cloned()
                 .map(|IndexAndExpr { index: i, expr: e }| {
-                    (
+                    Ok((
                         i as usize,
-                        build_from_prost(&(e.expect("expr should be Some")))
-                            .expect("expr corrputed"),
-                    )
+                        build_from_prost(&e.ok_or_else(|| anyhow!("expression is None"))?)
+                            .map_err(|e| anyhow!("failed to build expression: {}", e))?,
+                    ))
                 })
-                .collect_vec();
+                .collect::<Result<Vec<_>>>()?;
             default_columns.sort_unstable_by_key(|(i, _)| *i);
             default_columns
         } else {

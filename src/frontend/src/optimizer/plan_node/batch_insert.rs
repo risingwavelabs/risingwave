@@ -16,10 +16,9 @@ use std::fmt;
 
 use itertools::Itertools;
 use risingwave_common::error::Result;
-use risingwave_pb::batch_plan::insert_node::default_columns::IndexAndExpr;
 use risingwave_pb::batch_plan::insert_node::DefaultColumns;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::InsertNode;
+use risingwave_pb::batch_plan::{IndexAndExpr, InsertNode};
 
 use super::{
     ExprRewritable, LogicalInsert, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
