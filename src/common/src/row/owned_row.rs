@@ -92,7 +92,8 @@ impl OwnedRow {
 impl EstimateSize for OwnedRow {
     fn estimated_heap_size(&self) -> usize {
         // FIXME(bugen): this is not accurate now as the heap size of some `Scalar` is not counted.
-        unimplemented!("https://github.com/risingwavelabs/risingwave/issues/8957")
+        // https://github.com/risingwavelabs/risingwave/issues/8957
+        0
     }
 }
 

@@ -450,8 +450,9 @@ type EmptyValue = ();
 
 impl EstimateSize for CacheValue {
     fn estimated_heap_size(&self) -> usize {
-        // FIXME: implement a correct size.
-        unimplemented!("https://github.com/risingwavelabs/risingwave/issues/8957")
+        // FIXME: implement correct size
+        // https://github.com/risingwavelabs/risingwave/issues/8957
+        0
     }
 }
 

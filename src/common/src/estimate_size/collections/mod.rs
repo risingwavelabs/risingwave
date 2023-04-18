@@ -42,7 +42,7 @@ impl<'a, V: EstimateSize> Drop for MutGuard<'a, V> {
     fn drop(&mut self) {
         *self.total_size = self
             .total_size
-            .saturating_add(self.inner.estimated_heap_size())
+            .saturating_add(self.inner.estimated_size())
             .saturating_sub(self.original_val_size);
     }
 }

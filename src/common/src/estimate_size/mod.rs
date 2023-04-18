@@ -80,7 +80,9 @@ impl EstimateSize for Bytes {
 // FIXME: implement a wrapper structure for `HashSet` that impl `EstimateSize`
 impl<T: EstimateSize> EstimateSize for HashSet<T> {
     fn estimated_heap_size(&self) -> usize {
-        unimplemented!("https://github.com/risingwavelabs/risingwave/issues/8957")
+        // FIXME: implement correct size
+        // https://github.com/risingwavelabs/risingwave/issues/8957
+        0
     }
 }
 
