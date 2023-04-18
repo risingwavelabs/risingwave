@@ -1,0 +1,5 @@
+[storage]
+block_cache_capacity_mb = 2048
+meta_cache_capacity_mb = 512
+compactor_memory_limit_mb = 2560
+shared_buffer_capacity_mb = 2048
