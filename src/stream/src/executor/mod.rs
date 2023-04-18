@@ -77,6 +77,7 @@ mod managed_state;
 mod merge;
 mod mview;
 mod now;
+mod over_window;
 mod project;
 mod project_set;
 mod rearranged_chain;
