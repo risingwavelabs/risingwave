@@ -60,6 +60,7 @@ mod expr_to_timestamp_const_tmpl;
 mod expr_udf;
 mod expr_unary;
 mod expr_vnode;
+mod window_func;
 
 mod agg;
 mod build;
@@ -83,6 +84,7 @@ pub use self::build::*;
 pub use self::expr_input_ref::InputRefExpression;
 pub use self::expr_literal::LiteralExpression;
 pub use self::value::{ValueImpl, ValueRef};
+pub use self::window_func::WindowFuncKind;
 use super::{ExprError, Result};
 
 /// Interface of an expression.
