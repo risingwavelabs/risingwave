@@ -301,8 +301,13 @@ steps:
           files: ./**/*.sh
     timeout_in_minutes: 5
 
+  # Generates cpu flamegraph env
+  - label: "flamegraph-env-build"
+    command: "ci/scripts/flamegraph-env-build.sh"
+    if: build.pull_request.labels includes "cpu_flamegraph"
+
   # Generates cpu flamegraph if label `cpu_flamegraph` is added to PR.
   - label: "Generate CPU flamegraph"
     command: "ci/scripts/gen-flamegraph.sh"
-    depends_on: "build"
+    depends_on: "cpu-flamegraph-env-build"
     if: build.pull_request.labels includes "cpu_flamegraph"
