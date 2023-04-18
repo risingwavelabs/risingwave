@@ -79,8 +79,7 @@ const KILL_IGNORE_FILES: &[&str] = &[
     // TPCH queries are too slow for recovery.
     "tpch_snapshot.slt",
     "tpch_upstream.slt",
-    // We already have visibility_all cases.
-    "visibility_checkpoint.slt",
+    "visibility_all.slt",
     // This depends on session config.
     "session_timezone.slt",
 ];
