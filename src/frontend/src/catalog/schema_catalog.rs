@@ -447,6 +447,15 @@ impl SchemaCatalog {
         self.connection_by_name.get(connection_name)
     }
 
+    pub fn get_source_ids_by_connection(
+        &self,
+        connection_id: ConnectionId,
+    ) -> Option<Vec<SourceId>> {
+        self.connection_source_ref
+            .get(&connection_id)
+            .map(|c| c.to_owned())
+    }
+
     pub fn id(&self) -> SchemaId {
         self.id
     }
