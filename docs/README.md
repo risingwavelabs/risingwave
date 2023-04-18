@@ -16,10 +16,9 @@ After you learn about the basics of RisingWave, take a look at our [developer gu
 * [Checkpoint](./checkpoint.md)
 * [Design of Data Source](./data-source.md)
 * [Data Model and Encoding](./data-model-and-encoding.md)
-* Local state and cache of stateful operator
 * [Design of Batch Local Execution Mode](./batch-local-execution-mode.md)
 * [Consistent Hash](./consistent-hash.md)
-
+* [Object Storage in RisingWave](./multi-object-store.md)
 
 ## Images
 
