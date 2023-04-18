@@ -225,7 +225,7 @@ impl ColIndexMapping {
         Self::with_target_size(map, target_size)
     }
 
-    /// Inverse the mapping. If a target corresponds more than one source, return `None`.
+    /// Inverse the mapping. If a target corresponds to more than one source, return `None`.
     #[must_use]
     pub fn inverse(&self) -> Option<Self> {
         let mut map = vec![None; self.target_size()];
