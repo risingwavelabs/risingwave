@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, TableVersionId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
@@ -106,9 +107,10 @@ impl LogicalInsert {
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+        let verbose = self.ctx().is_explain_verbose();
         write!(
             f,
-            "{} {{ table: {}{} }}",
+            "{} {{ table: {}{}",
             name,
             self.table_name,
             if self.returning {
@@ -116,7 +118,30 @@ impl LogicalInsert {
             } else {
                 ""
             }
-        )
+        )?;
+        if verbose {
+            write!(
+                f,
+                ", source to insert column mapping: [{}]",
+                self.column_indices()
+                    .iter()
+                    .cloned()
+                    .enumerate()
+                    .map(|(k, v)| format!("{}:{}", k, v))
+                    .join(", ")
+            )?;
+            if let Some(default_columns) = self.default_columns().clone() {
+                write!(
+                    f,
+                    ", default columns: [{}]",
+                    default_columns
+                        .into_iter()
+                        .map(|(k, v)| format!("{}<-{:?}", k, v))
+                        .join(", ")
+                )?;
+            }
+        }
+        write!(f, " }}")
     }
 
     // Get the column indexes in which to insert to
