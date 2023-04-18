@@ -15,7 +15,8 @@
 use itertools::Itertools;
 
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalAgg, LogicalUnion, PlanTreeNode};
+use crate::optimizer::plan_node::generic::Agg;
+use crate::optimizer::plan_node::{LogicalUnion, PlanTreeNode};
 use crate::optimizer::PlanRef;
 
 /// Convert union to distinct + union all
@@ -25,7 +26,7 @@ impl Rule for UnionToDistinctRule {
         let union: &LogicalUnion = plan.as_logical_union()?;
         if !union.all() {
             let union_all = LogicalUnion::create(true, union.inputs().into_iter().collect());
-            let distinct = LogicalAgg::new(
+            let distinct = Agg::new(
                 vec![],
                 (0..union.base.schema.len()).collect_vec(),
                 union_all,

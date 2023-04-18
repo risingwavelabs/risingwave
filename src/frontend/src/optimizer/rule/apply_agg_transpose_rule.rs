@@ -18,6 +18,7 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{ApplyOffsetRewriter, BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{LogicalAgg, LogicalApply, LogicalFilter, LogicalProject};
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
@@ -145,7 +146,7 @@ impl Rule for ApplyAggTransposeRule {
             }
             let mut group_keys: Vec<usize> = (0..apply_left_len).collect();
             group_keys.extend(agg_group_key.into_iter().map(|key| key + apply_left_len));
-            LogicalAgg::new(agg_calls, group_keys, node).into()
+            Agg::new(agg_calls, group_keys, node).into()
         };
 
         let filter = LogicalFilter::create(group_agg, on);

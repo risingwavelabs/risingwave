@@ -76,8 +76,7 @@ impl GlobalMemoryManager {
         batch_manager: Arc<BatchManager>,
         stream_manager: Arc<LocalStreamManager>,
     ) {
-        let mut tick_interval =
-            tokio::time::interval(Duration::from_millis(self.barrier_interval_ms as u64));
+        let mut tick_interval = tokio::time::interval(Duration::from_millis(50));
         let mut memory_control_stats = MemoryControlStats {
             batch_memory_usage: 0,
             streaming_memory_usage: 0,
@@ -113,12 +112,6 @@ impl GlobalMemoryManager {
             self.metrics
                 .jemalloc_allocated_bytes
                 .set(memory_control_stats.jemalloc_allocated_mib as i64);
-            self.metrics
-                .stream_total_mem_usage
-                .set(memory_control_stats.streaming_memory_usage as i64);
-            self.metrics
-                .batch_total_mem_usage
-                .set(memory_control_stats.batch_memory_usage as i64);
         }
     }
 }
