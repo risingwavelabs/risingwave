@@ -58,8 +58,8 @@ main() {
   echo "--- Machine Debug Info"
   print_machine_debug_info
   echo "--- Setting up nexmark-bench"
-  setup_nexmark_bench
-
+  # setup_nexmark_bench
+  echo "Success!"
   echo "--- Spawning nexmark events"
   echo "Success!"
   echo "--- Setting up RW"
