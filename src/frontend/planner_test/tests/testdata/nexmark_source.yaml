@@ -524,7 +524,7 @@
                 └─BatchSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"], filter: (None, None) }
   stream_plan: |
     StreamMaterialize { columns: [auction, price, bidder, date_time, _row_id(hidden), $expr1(hidden)], stream_key: [_row_id, $expr1, price], pk_columns: [_row_id, $expr1, price], pk_conflict: "NoCheck" }
-    └─StreamIntervalJoin { type: Inner, predicate: price = max(price) AND (date_time >= $expr2) AND (date_time <= $expr1), band_join_condition_left_greater: (date_time >= $expr2), band_join_condition_right_greater: (date_time <= $expr1), output: [auction, price, bidder, date_time, _row_id, $expr1] }
+    └─StreamHashJoin { type: Inner, predicate: price = max(price) AND (date_time >= $expr2) AND (date_time <= $expr1), band_join_condition_left_greater: (date_time >= $expr2), band_join_condition_right_greater: (date_time <= $expr1), output: [auction, price, bidder, date_time, _row_id, $expr1] }
       ├─StreamExchange { dist: HashShard(price) }
       | └─StreamProject { exprs: [auction, bidder, price, date_time, _row_id] }
       |   └─StreamShare { id = 4 }
@@ -543,7 +543,7 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction, price, bidder, date_time, _row_id(hidden), $expr1(hidden)], stream_key: [_row_id, $expr1, price], pk_columns: [_row_id, $expr1, price], pk_conflict: "NoCheck" } { materialized table: 4294967294 }
-    └── StreamIntervalJoin { type: Inner, predicate: price = max(price) AND (date_time >= $expr2) AND (date_time <= $expr1), band_join_condition_left_greater: (date_time >= $expr2), band_join_condition_right_greater: (date_time <= $expr1), output: [auction, price, bidder, date_time, _row_id, $expr1] }
+    └── StreamHashJoin { type: Inner, predicate: price = max(price) AND (date_time >= $expr2) AND (date_time <= $expr1), band_join_condition_left_greater: (date_time >= $expr2), band_join_condition_right_greater: (date_time <= $expr1), output: [auction, price, bidder, date_time, _row_id, $expr1] }
         ├── left table: 0
         ├── right table: 2
         ├── left degree table: 1

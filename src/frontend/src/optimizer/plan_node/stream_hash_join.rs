@@ -460,7 +460,9 @@ impl fmt::Display for StreamHashJoin {
             && self.right().watermark_columns().contains(rjk)
         {
             f.debug_struct("StreamWindowJoin")
-        } else if self.band_condition.is_some() {
+        } else if self.clean_left_state_conjunction_idx.is_some()
+            && self.clean_right_state_conjunction_idx.is_some()
+        {
             f.debug_struct("StreamIntervalJoin")
         } else if self.is_append_only {
             f.debug_struct("StreamAppendOnlyHashJoin")

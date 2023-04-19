@@ -512,7 +512,7 @@
                 └─BatchScan { table: bid, columns: [bid.price, bid.date_time], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [auction, price, bidder, date_time, bid._row_id(hidden), $expr1(hidden)], stream_key: [bid._row_id, $expr1, price], pk_columns: [bid._row_id, $expr1, price], pk_conflict: "NoCheck" }
-    └─StreamIntervalJoin { type: Inner, predicate: bid.price = max(bid.price) AND (bid.date_time >= $expr2) AND (bid.date_time <= $expr1), band_join_condition_left_greater: (bid.date_time >= $expr2), band_join_condition_right_greater: (bid.date_time <= $expr1), output: [bid.auction, bid.price, bid.bidder, bid.date_time, bid._row_id, $expr1] }
+    └─StreamHashJoin { type: Inner, predicate: bid.price = max(bid.price) AND (bid.date_time >= $expr2) AND (bid.date_time <= $expr1), band_join_condition_left_greater: (bid.date_time >= $expr2), band_join_condition_right_greater: (bid.date_time <= $expr1), output: [bid.auction, bid.price, bid.bidder, bid.date_time, bid._row_id, $expr1] }
       ├─StreamExchange { dist: HashShard(bid.price) }
       | └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
       └─StreamExchange { dist: HashShard(max(bid.price)) }
@@ -524,7 +524,7 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction, price, bidder, date_time, bid._row_id(hidden), $expr1(hidden)], stream_key: [bid._row_id, $expr1, price], pk_columns: [bid._row_id, $expr1, price], pk_conflict: "NoCheck" } { materialized table: 4294967294 }
-    └── StreamIntervalJoin { type: Inner, predicate: bid.price = max(bid.price) AND (bid.date_time >= $expr2) AND (bid.date_time <= $expr1), band_join_condition_left_greater: (bid.date_time >= $expr2), band_join_condition_right_greater: (bid.date_time <= $expr1), output: [bid.auction, bid.price, bid.bidder, bid.date_time, bid._row_id, $expr1] }
+    └── StreamHashJoin { type: Inner, predicate: bid.price = max(bid.price) AND (bid.date_time >= $expr2) AND (bid.date_time <= $expr1), band_join_condition_left_greater: (bid.date_time >= $expr2), band_join_condition_right_greater: (bid.date_time <= $expr1), output: [bid.auction, bid.price, bid.bidder, bid.date_time, bid._row_id, $expr1] }
         ├── left table: 0
         ├── right table: 2
         ├── left degree table: 1
