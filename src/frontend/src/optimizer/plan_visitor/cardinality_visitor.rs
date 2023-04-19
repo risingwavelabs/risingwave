@@ -83,6 +83,25 @@ pub mod card {
         }
     }
 
+    impl<T> From<T> for Cardinality
+    where
+        T: std::ops::RangeBounds<usize>,
+    {
+        fn from(value: T) -> Self {
+            let lo = match value.start_bound() {
+                std::ops::Bound::Included(lo) => *lo,
+                std::ops::Bound::Excluded(lo) => lo.saturating_add(1),
+                std::ops::Bound::Unbounded => 0,
+            };
+            let hi = match value.end_bound() {
+                std::ops::Bound::Included(hi) => Hi::Limited(*hi),
+                std::ops::Bound::Excluded(hi) => Hi::Limited(hi.saturating_sub(1)),
+                std::ops::Bound::Unbounded => Hi::Unlimited,
+            };
+            Self::new(lo, hi)
+        }
+    }
+
     impl Cardinality {
         /// Creates a new [`Cardinality`] with the given lower and upper bounds.
         pub fn new(lo: usize, hi: impl Into<Hi>) -> Self {
@@ -107,23 +126,25 @@ pub mod card {
 
         /// Creates a new [`Cardinality`] with exactly `count` rows.
         pub fn exact(count: usize) -> Self {
-            Self::new(count, Some(count))
+            (count..=count).into()
         }
 
         /// Creates a new [`Cardinality`] with at least `count` rows.
         pub fn at_least(count: usize) -> Self {
-            Self::new(count, None)
+            (count..).into()
         }
 
         /// Returns the minimum of the two cardinalities, where the lower and upper bounds are
         /// respectively the minimum of the lower and upper bounds of the two cardinalities.
-        pub fn min(self, rhs: Self) -> Self {
+        pub fn min(self, rhs: impl Into<Self>) -> Self {
+            let rhs: Self = rhs.into();
             Self::new(min(self.lo(), rhs.lo()), min(self.hi, rhs.hi))
         }
 
         /// Returns the maximum of the two cardinalities, where the lower and upper bounds are
         /// respectively the maximum of the lower and upper bounds of the two cardinalities.
-        pub fn max(self, rhs: Self) -> Self {
+        pub fn max(self, rhs: impl Into<Self>) -> Self {
+            let rhs: Self = rhs.into();
             Self::new(max(self.lo(), rhs.lo()), max(self.hi, rhs.hi))
         }
 
@@ -339,21 +360,23 @@ impl PlanVisitor<Cardinality> for CardinalityVisitor {
             .iter()
             .any(|unique_key| eq_set.is_superset(unique_key))
         {
-            input.limit_to(1).as_low_as(0)
+            input.min(0..=1)
         } else {
             input.as_low_as(0)
         }
     }
 
     fn visit_logical_union(&mut self, plan: &plan_node::LogicalUnion) -> Cardinality {
+        let all = plan
+            .inputs()
+            .into_iter()
+            .map(|input| self.visit(input))
+            .fold(Cardinality::default(), std::ops::Add::add);
+
         if plan.all() {
-            plan.inputs()
-                .into_iter()
-                .map(|input| self.visit(input))
-                .reduce(std::ops::Add::add)
-                .unwrap_or_default()
+            all
         } else {
-            Cardinality::default()
+            all.as_low_as(1)
         }
     }
 
