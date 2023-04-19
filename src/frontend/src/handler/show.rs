@@ -132,9 +132,12 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
                             PRIVATELINK_CONNECTION.to_string()
                         },
                     };
-                    let source_ids = schema
-                        .get_source_ids_by_connection(c.id)
-                        .unwrap_or(Vec::new());
+                    let source_names = schema
+                        .get_sources_by_connection(c.id)
+                        .unwrap_or(Vec::new())
+                        .into_iter()
+                        .map(|c| c.name.clone())
+                        .collect_vec();
                     let properties = match &c.info {
                         connection::Info::PrivateLinkService(i) => {
                             format!(
@@ -143,7 +146,7 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
                                 i.service_name,
                                 i.endpoint_id,
                                 serde_json::to_string(&i.dns_entries.keys().collect_vec()).unwrap(),
-                                serde_json::to_string(&source_ids).unwrap(),
+                                serde_json::to_string(&source_names).unwrap(),
                             )
                         }
                     };

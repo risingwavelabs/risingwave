@@ -51,7 +51,7 @@ pub struct SchemaCatalog {
     function_by_id: HashMap<FunctionId, Arc<FunctionCatalog>>,
     connection_by_name: HashMap<String, Arc<ConnectionCatalog>>,
     connection_by_id: HashMap<ConnectionId, Arc<ConnectionCatalog>>,
-    connection_source_ref: HashMap<ConnectionId, Vec<SourceId>>,
+    connection_source_ref: HashMap<ConnectionId, Vec<Arc<SourceCatalog>>>,
 
     // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
     system_table_by_name: HashMap<String, SystemCatalog>,
@@ -183,8 +183,8 @@ impl SchemaCatalog {
         if let Some(connection_id) = source_ref.connection_id {
             self.connection_source_ref
                 .entry(connection_id)
-                .and_modify(|sources| sources.push(source_ref.id))
-                .or_insert(vec![source_ref.id]);
+                .and_modify(|sources| sources.push(source_ref.clone()))
+                .or_insert(vec![source_ref.clone()]);
         }
 
         self.source_by_name
@@ -447,10 +447,11 @@ impl SchemaCatalog {
         self.connection_by_name.get(connection_name)
     }
 
-    pub fn get_source_ids_by_connection(
+    /// get all sources referencing the connection
+    pub fn get_sources_by_connection(
         &self,
         connection_id: ConnectionId,
-    ) -> Option<Vec<SourceId>> {
+    ) -> Option<Vec<Arc<SourceCatalog>>> {
         self.connection_source_ref
             .get(&connection_id)
             .map(|c| c.to_owned())
