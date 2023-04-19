@@ -88,7 +88,7 @@ main() {
   echo "--- Spawning nexmark events"
   echo "Success!"
 
-  echo "--- Setting up RW"
+  echo "--- Starting up RW"
   ENABLE_RW_RELEASE_PROFILE=true ./risedev d ci-gen-cpu-flamegraph
 
   echo "--- Running Benchmarks"
@@ -104,6 +104,10 @@ main() {
   echo "Success!"
 
   echo "--- Generate flamegraph"
+  echo "Success!"
+
+  echo "--- Cleanup"
+  # TODO: cleanup s3 bucket.
   echo "Success!"
 }
 
