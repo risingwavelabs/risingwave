@@ -19,8 +19,9 @@ artifacts=(risingwave risedev-dev librisingwave_java_binding.so)
 echo "--- Show link info"
 ldd target/release/risingwave
 
+# Namespacing is required (by suffixing bench: XXX-bench), so we can upload and download buildkite artifacts.
 echo "--- Upload artifacts"
-echo -n "${artifacts[*]}" | parallel -d ' ' "mv target/release/{} ./{}-release && buildkite-agent artifact upload ./{}-release"
+echo -n "${artifacts[*]}" | parallel -d ' ' "mv target/release/{} ./{}-bench && buildkite-agent artifact upload ./{}-bench"
 
 echo "--- Show sccache stats"
 sccache --show-stats
