@@ -148,6 +148,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Pi
             | expr_node::Type::Sind
             | expr_node::Type::Cosd
+            | expr_node::Type::Cotd
             | expr_node::Type::Tand
             | expr_node::Type::ArrayPositions =>
             // expression output is deterministic(same result for the same input)
