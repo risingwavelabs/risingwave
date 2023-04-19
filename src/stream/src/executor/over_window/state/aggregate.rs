@@ -79,9 +79,8 @@ impl WindowState for AggregateState {
             factory: &self.factory,
             arg_data_types: &self.arg_data_types,
         };
-        let return_value = wrapper.aggregate(self.buffer.curr_window_values().map(
-            |val: &SmallVec<[Option<risingwave_common::types::ScalarImpl>; 2]>| val.as_slice(),
-        ))?;
+        let return_value =
+            wrapper.aggregate(self.buffer.curr_window_values().map(SmallVec::as_slice))?;
         let removed_keys: BTreeSet<_> = self.buffer.slide().collect();
         Ok(StateOutput {
             return_value,

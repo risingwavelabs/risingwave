@@ -144,9 +144,9 @@ impl<K: Ord, V> WindowBuffer<K, V> {
                 if !preceding_saturated {
                     self.curr_idx += 1;
                     self.right_idx += 1;
-                    0..=0
+                    0..0 // nothing can be removed
                 } else {
-                    0..=1
+                    0..1 // can delete the first entry
                 }
             }
         };
