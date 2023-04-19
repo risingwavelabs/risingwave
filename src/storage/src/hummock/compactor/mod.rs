@@ -216,11 +216,15 @@ impl Compactor {
                 CompactorRunner::new(split_index, compactor_context.clone(), compact_task.clone());
             let del_agg = delete_range_agg.clone();
             let task_progress = task_progress_guard.progress.clone();
-            let handle = tokio::spawn(async move {
-                compactor_runner
-                    .run(filter, multi_filter_key_extractor, del_agg, task_progress)
-                    .await
-            });
+            let handle = compactor_context.compaction_executor.spawn_with_priority(
+                compact_task.task_id,
+                compact_task.priority(),
+                async move {
+                    compactor_runner
+                        .run(filter, multi_filter_key_extractor, del_agg, task_progress)
+                        .await
+                },
+            );
             compaction_futures.push(handle);
         }
 

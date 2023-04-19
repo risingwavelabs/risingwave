@@ -43,7 +43,7 @@ pub enum TaskHandle<T> {
     Yatp(Receiver<T>),
 }
 
-impl<T: Send + 'static>  TaskHandle<T> {
+impl<T: Send + 'static> TaskHandle<T> {
     pub fn abort(&self) {
         if let TaskHandle::Tokio(handle) = self {
             handle.abort();
