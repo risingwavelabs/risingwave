@@ -210,9 +210,19 @@ impl PredicatePushdown for LogicalProject {
         let mut subst = Substitute {
             mapping: self.exprs().clone(),
         };
-        let predicate = predicate.rewrite_expr(&mut subst);
 
-        gen_filter_and_pushdown(self, Condition::true_cond(), predicate, ctx)
+        let impure_mask = {
+            let mut impure_mask = FixedBitSet::with_capacity(self.exprs().len());
+            for (i, e) in self.exprs().iter().enumerate() {
+                impure_mask.set(i, e.is_impure())
+            }
+            impure_mask
+        };
+        // (with impure input, with pure input)
+        let (remained_cond, pushed_cond) = predicate.split_disjoint(&impure_mask);
+        let pushed_cond = pushed_cond.rewrite_expr(&mut subst);
+
+        gen_filter_and_pushdown(self, remained_cond, pushed_cond, ctx)
     }
 }
 

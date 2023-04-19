@@ -35,6 +35,7 @@
 mod expr_array_concat;
 mod expr_array_distinct;
 mod expr_array_length;
+mod expr_array_positions;
 mod expr_array_remove;
 mod expr_array_to_string;
 mod expr_binary_nonnull;
@@ -60,7 +61,6 @@ mod expr_udf;
 mod expr_unary;
 mod expr_vnode;
 
-mod agg;
 mod build;
 pub(crate) mod data_types;
 pub(crate) mod template;
@@ -77,7 +77,6 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::epoch::Epoch;
 use static_assertions::const_assert;
 
-pub use self::agg::AggKind;
 pub use self::build::*;
 pub use self::expr_input_ref::InputRefExpression;
 pub use self::expr_literal::LiteralExpression;

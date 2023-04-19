@@ -20,7 +20,7 @@ use serde_json::Value;
 
 use super::{Array, ArrayBuilder};
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::collection::estimate_size::EstimateSize;
+use crate::estimate_size::EstimateSize;
 use crate::types::{Scalar, ScalarRef};
 use crate::util::iter_util::ZipEqFast;
 

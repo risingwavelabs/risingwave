@@ -14,8 +14,10 @@
 
 #![cfg_attr(coverage, feature(no_coverage))]
 
+#[cfg(enable_task_local_alloc)]
 use risingwave_common::enable_task_local_jemalloc_on_unix;
 
+#[cfg(enable_task_local_alloc)]
 enable_task_local_jemalloc_on_unix!();
 
 #[cfg_attr(coverage, no_coverage)]

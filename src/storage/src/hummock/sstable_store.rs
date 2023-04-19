@@ -782,40 +782,6 @@ impl SstableWriterFactory for StreamingSstableWriterFactory {
     }
 }
 
-pub struct CompactorMemoryCollector {
-    uploading_memory_limiter: Arc<MemoryLimiter>,
-    data_memory_limiter: Arc<MemoryLimiter>,
-    sstable_store: SstableStoreRef,
-}
-
-impl CompactorMemoryCollector {
-    pub fn new(
-        uploading_memory_limiter: Arc<MemoryLimiter>,
-        sstable_store: SstableStoreRef,
-        data_memory_limiter: Arc<MemoryLimiter>,
-    ) -> Self {
-        Self {
-            uploading_memory_limiter,
-            data_memory_limiter,
-            sstable_store,
-        }
-    }
-}
-
-impl MemoryCollector for CompactorMemoryCollector {
-    fn get_meta_memory_usage(&self) -> u64 {
-        self.sstable_store.get_meta_memory_usage()
-    }
-
-    fn get_data_memory_usage(&self) -> u64 {
-        self.data_memory_limiter.get_memory_usage()
-    }
-
-    fn get_uploading_memory_usage(&self) -> u64 {
-        self.uploading_memory_limiter.get_memory_usage()
-    }
-}
-
 /// An iterator that reads the blocks of an SST step by step from a given stream of bytes.
 pub struct BlockStream {
     /// The stream that provides raw data.

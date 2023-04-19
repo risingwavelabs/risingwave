@@ -654,17 +654,6 @@ impl ExprRewritable for LogicalJoin {
     }
 }
 
-fn is_pure_fn_except_for_input_ref(expr: &ExprImpl) -> bool {
-    match expr {
-        ExprImpl::Literal(_) => true,
-        ExprImpl::FunctionCall(inner) => {
-            inner.is_pure() && inner.inputs().iter().all(is_pure_fn_except_for_input_ref)
-        }
-        ExprImpl::InputRef(_) => true,
-        _ => false,
-    }
-}
-
 /// We are trying to derive a predicate to apply to the other side of a join if all
 /// the `InputRef`s in the predicate are eq condition columns, and can hence be substituted
 /// with the corresponding eq condition columns of the other side.
@@ -688,7 +677,7 @@ fn derive_predicate_from_eq_condition(
     col_num: usize,
     expr_is_left: bool,
 ) -> Option<ExprImpl> {
-    if !is_pure_fn_except_for_input_ref(expr) {
+    if expr.is_impure() {
         return None;
     }
     let eq_indices = if expr_is_left {

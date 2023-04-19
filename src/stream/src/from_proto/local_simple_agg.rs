@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_expr::function::aggregate::AggCall;
 use risingwave_pb::stream_plan::SimpleAggNode;
 
-use super::agg_common::build_agg_call_from_prost;
 use super::*;
-use crate::executor::aggregation::AggCall;
 use crate::executor::LocalSimpleAggExecutor;
 
 pub struct LocalSimpleAggExecutorBuilder;
@@ -35,7 +34,7 @@ impl ExecutorBuilder for LocalSimpleAggExecutorBuilder {
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()
             .iter()
-            .map(|agg_call| build_agg_call_from_prost(node.is_append_only, agg_call))
+            .map(AggCall::from_protobuf)
             .try_collect()?;
 
         Ok(LocalSimpleAggExecutor::new(
