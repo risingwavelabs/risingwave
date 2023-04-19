@@ -15,6 +15,7 @@ download_build_artifacts() {
   # Download promql
   buildkite-agent artifact download promql .
   sudo mv ./promql /usr/local/bin/promql
+  chmod +x /usr/local/bin/promql
 
   # Try to run it
   promql
