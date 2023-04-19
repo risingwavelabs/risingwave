@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use risingwave_pb::meta::cluster_service_server::ClusterService;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
@@ -81,18 +79,6 @@ where
         self.cluster_manager
             .delete_worker_node(host.clone())
             .await?;
-        let mut worker = self
-            .cluster_manager
-            .get_worker_by_host_checked(host)
-            .await
-            .unwrap(); // delete_worker_node checks for correct host already
-
-        worker.is_marked_for_deletion = true;
-
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards");
-        worker.update_ttl(now);
         Ok(Response::new(DeleteWorkerNodeResponse { status: None }))
     }
 

@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use itertools::Itertools;
 use risingwave_common::hash::ParallelUnitId;
@@ -26,6 +26,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
+use tokio::time;
 
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
 use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
@@ -90,6 +91,7 @@ where
         self.core.read().await.count_worker_node()
     }
 
+    // TODO: Who is calling this function. Who is consuming the worker-node state?
     /// A worker node will immediately register itself to meta when it bootstraps.
     /// The meta will assign it with a unique ID and set its state as `Starting`.
     /// When the worker node is fully ready to serve, it will request meta again
@@ -162,26 +164,61 @@ where
         Ok(())
     }
 
-    pub async fn get_worker_by_host_checked(
-        &self,
-        host_address: HostAddress,
-    ) -> MetaResult<Worker> {
-        let core = self.core.write().await;
-        let worker = core.get_worker_by_host_checked(host_address.clone())?;
-        Ok(worker)
+    /// Remove a 'deleting' worker node after it missed 3 heartbeats
+    async fn delete_worker_node_cleanup(&self, node_id: u32, host_address: HostAddress) {
+        let mut ticker = time::interval(Duration::from_secs(1));
+        loop {
+            tokio::select! {
+                _ = ticker.tick() => {
+                    let mut core = self.core.write().await;
+                    let worker = match core.get_worker_by_host_checked(host_address.clone()) {
+                        Ok(w) => w,
+                        Err(_) => {
+                            tracing::warn!(
+                                "Unable to retrieve deleting worker node at address {:#?}",
+                                host_address
+                            );
+                            return;
+                         }
+                    };
+
+                    if worker.worker_node.state != State::Deleting as i32 || worker.worker_node.id != node_id  {
+                        tracing::warn!(
+                            "Worker node changed. Expected state deleting, got {}. Expected ID {}, got {}", 
+                            worker.worker_node.state,
+                            node_id,
+                            worker.worker_node.id
+                        );
+                        return;
+                    }
+
+                    // delete node if we missed 3 heartbeats
+                    let latest_beat = worker.expire_at();
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .expect("Time went backwards")
+                        .as_secs();
+                    if now > latest_beat + 3 * self.max_heartbeat_interval.as_secs() {
+                        core.delete_worker_node(worker);
+                        return;
+                    }
+                }
+            }
+        }
     }
 
     pub async fn delete_worker_node(&self, host_address: HostAddress) -> MetaResult<WorkerType> {
-        let mut core = self.core.write().await;
-        let worker = core.get_worker_by_host_checked(host_address.clone())?;
+        let core = self.core.write().await;
+        let mut worker = core.get_worker_by_host_checked(host_address.clone())?;
         let worker_type = worker.worker_type();
         let worker_node = worker.to_protobuf();
+        worker.worker_node.state = State::Deleting as i32;
 
         // Persist deletion.
         Worker::delete(self.env.meta_store(), &host_address).await?;
 
-        // Update core.
-        core.delete_worker_node(worker);
+        self.delete_worker_node_cleanup(worker.worker_node.id, host_address)
+            .await;
 
         // Notify frontends to delete compute node.
         if worker_type == WorkerType::ComputeNode {
@@ -213,10 +250,10 @@ where
         let mut core = self.core.write().await;
         for worker in core.workers.values_mut() {
             if worker.worker_id() == worker_id {
-                if !worker.is_marked_for_deletion {
-                    worker.update_ttl(self.max_heartbeat_interval);
-                    worker.update_info(info);
-                }
+                // if worker.worker_node.state != State::Deleting as i32 {
+                // I think we should also update if deleting to keep track if node is still alive
+                worker.update_ttl(self.max_heartbeat_interval);
+                worker.update_info(info);
                 return Ok(());
             }
         }
@@ -432,6 +469,8 @@ impl ClusterManagerCore {
         self.workers.remove(&WorkerKey(worker.key().unwrap()));
     }
 
+    // This seems to be the only place where we filter by state
+    // maybe change this logic here to only give you nodes that are not deleting
     pub fn list_worker_node(
         &self,
         worker_type: WorkerType,

@@ -45,6 +45,7 @@ message WorkerNode {
     UNSPECIFIED = 0;
     STARTING = 1;
     RUNNING = 2;
+    DELETING = 3;
   }
   uint32 id = 1;
   WorkerType type = 2;
