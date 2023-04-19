@@ -72,14 +72,14 @@ fn trim_array(array: Option<ListRef<'_>>, n: Option<i32>) -> Result<Option<ListV
             let values = array.values_ref();
             let len = values.len();
             match TryInto::<usize>::try_into(n) {
-                Ok(_) => {
-                    if len < (n as usize) {
+                Ok(n) => {
+                    if len < n {
                         Err(ExprError::CastOutOfRange("parameter n"))
                     } else {
                         Ok(Some(ListValue::new(
                             values
                                 .into_iter()
-                                .take(len - (n as usize))
+                                .take(len - n)
                                 .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
                                 .collect(),
                         )))
