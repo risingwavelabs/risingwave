@@ -127,7 +127,7 @@ fn gen_bound(
         .map_err(|err| RwError::from(ErrorCode::InvalidInputSyntax(err)))?;
     let must_dist = must_run_in_distributed_mode(&stmt)?;
 
-    let mut binder = Binder::new(session, specific_param_types);
+    let mut binder = Binder::new_with_param_types(session, specific_param_types);
     let bound = binder.bind(stmt)?;
 
     let check_items = resolve_privileges(&bound);

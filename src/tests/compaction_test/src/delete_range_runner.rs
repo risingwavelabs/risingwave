@@ -31,9 +31,6 @@ use risingwave_common::config::{
 };
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::filter_key_extractor::{
-    FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
-};
 use risingwave_hummock_test::get_notification_client_for_test;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use risingwave_meta::hummock::test_utils::setup_compute_env_with_config;
@@ -44,6 +41,9 @@ use risingwave_pb::catalog::PbTable;
 use risingwave_pb::hummock::{CompactionConfig, CompactionGroupInfo};
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::filter_key_extractor::{
+    FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
+};
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::{
@@ -195,6 +195,7 @@ async fn compaction_test(
         sstable_store.clone(),
         meta_client.clone(),
         get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
+        Arc::new(FilterKeyExtractorManager::default()),
         state_store_metrics.clone(),
         Arc::new(risingwave_tracing::RwTracingService::disabled()),
         compactor_metrics.clone(),
@@ -556,7 +557,7 @@ fn run_compactor_thread(
         is_share_buffer_compact: false,
         compaction_executor: Arc::new(CompactionExecutor::new(None)),
         filter_key_extractor_manager,
-        read_memory_limiter: MemoryLimiter::unlimit(),
+        output_memory_limiter: MemoryLimiter::unlimit(),
         sstable_object_id_manager,
         task_progress_manager: Default::default(),
         compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(CompactorRuntimeConfig {

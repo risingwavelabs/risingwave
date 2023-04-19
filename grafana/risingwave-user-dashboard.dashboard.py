@@ -14,6 +14,18 @@ datasource = {"type": "prometheus", "uid": f"{source_uid}"}
 panels = Panels(datasource)
 logging.basicConfig(level=logging.WARN)
 
+def section_actor_info(panels):
+    excluded_cols = ['Time', 'Value', '__name__', 'job', 'instance']
+    return [
+        panels.row("Actor/Table Id Info"),
+        panels.table_info("Actor Id Info",
+                          "Mapping from actor id to fragment id",
+                          [panels.table_target(f"{metric('actor_info')}")], excluded_cols),
+        panels.table_info("Table Id Info",
+                          "Mapping from table id to actor id and table name",
+                          [panels.table_target(f"{metric('table_info')}")], excluded_cols),
+
+    ]
 
 def section_overview(panels):
     return [
@@ -196,14 +208,6 @@ def section_memory(outer_panels):
                     "Memory Usage (Total)",
                     "",
                     [
-                        panels.target(
-                            f"sum({metric('stream_total_mem_usage')}) by (instance)",
-                            "streaming @ {{instance}}",
-                        ),
-                        panels.target(
-                            f"sum({metric('batch_total_mem_usage')}) by (instance)",
-                            "batch @ {{instance}}",
-                        ),
                         panels.target(
                             f"sum({metric('state_store_meta_cache_size')}) by (instance) + " +
                             f"sum({metric('state_store_block_cache_size')}) by (instance) + " +
@@ -601,6 +605,7 @@ dashboard = Dashboard(
     templating=templating,
     version=dashboard_version,
     panels=[
+        *section_actor_info(panels),
         *section_overview(panels),
         *section_cpu(panels),
         *section_memory(panels),

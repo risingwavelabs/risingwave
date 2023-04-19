@@ -147,6 +147,7 @@ macro_rules! impl_aggregator {
 impl_aggregator! { I16Array, Int16, I16Array, Int16 }
 impl_aggregator! { I32Array, Int32, I32Array, Int32 }
 impl_aggregator! { I64Array, Int64, I64Array, Int64 }
+impl_aggregator! { Int256Array, Int256, Int256Array, Int256 } // sum
 impl_aggregator! { F32Array, Float32, F32Array, Float32 } // sum
 impl_aggregator! { F64Array, Float64, F64Array, Float64 } // sum
 impl_aggregator! { DecimalArray, Decimal, DecimalArray, Decimal } // sum
@@ -162,6 +163,7 @@ impl_aggregator! { TimestampArray, Timestamp, TimestampArray, Timestamp }
 // count
 impl_aggregator! { I16Array, Int16, I64Array, Int64 } // sum
 impl_aggregator! { I32Array, Int32, I64Array, Int64 } // sum
+impl_aggregator! { Int256Array, Int256, I64Array, Int64 }
 impl_aggregator! { F32Array, Float32, I64Array, Int64 }
 impl_aggregator! { F64Array, Float64, I64Array, Int64 }
 impl_aggregator! { DecimalArray, Decimal, I64Array, Int64 }
@@ -185,7 +187,7 @@ mod tests {
     use risingwave_common::types::Decimal;
 
     use super::*;
-    use crate::expr::AggKind;
+    use crate::function::aggregate::AggKind;
     use crate::vector_op::agg::aggregator::create_agg_state_unary;
 
     async fn eval_agg(

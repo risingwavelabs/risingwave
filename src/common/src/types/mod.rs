@@ -136,6 +136,9 @@ pub enum DataType {
     #[display("serial")]
     #[from_str(regex = "(?i)^serial$")]
     Serial,
+    #[display("rw_int256")]
+    #[from_str(regex = "(?i)^rw_int256$")]
+    Int256,
 }
 
 impl std::str::FromStr for Box<DataType> {
@@ -153,6 +156,7 @@ impl DataTypeName {
             | DataTypeName::Int16
             | DataTypeName::Int32
             | DataTypeName::Int64
+            | DataTypeName::Int256
             | DataTypeName::Serial
             | DataTypeName::Decimal
             | DataTypeName::Float32
@@ -176,6 +180,7 @@ impl DataTypeName {
             DataTypeName::Int16 => DataType::Int16,
             DataTypeName::Int32 => DataType::Int32,
             DataTypeName::Int64 => DataType::Int64,
+            DataTypeName::Int256 => DataType::Int256,
             DataTypeName::Serial => DataType::Serial,
             DataTypeName::Decimal => DataType::Decimal,
             DataTypeName::Float32 => DataType::Float32,
@@ -238,6 +243,7 @@ impl From<&PbDataType> for DataType {
                 datatype: Box::new((&proto.field_type[0]).into()),
             },
             PbTypeName::TypeUnspecified => unreachable!(),
+            PbTypeName::Int256 => DataType::Int256,
         }
     }
 }
@@ -263,6 +269,7 @@ impl From<DataTypeName> for PbTypeName {
             DataTypeName::Jsonb => PbTypeName::Jsonb,
             DataTypeName::Struct => PbTypeName::Struct,
             DataTypeName::List => PbTypeName::List,
+            DataTypeName::Int256 => PbTypeName::Int256,
         }
     }
 }
@@ -286,6 +293,7 @@ impl DataType {
             DataType::Timestamptz => PrimitiveArrayBuilder::<i64>::new(capacity).into(),
             DataType::Interval => IntervalArrayBuilder::new(capacity).into(),
             DataType::Jsonb => JsonbArrayBuilder::new(capacity).into(),
+            DataType::Int256 => Int256ArrayBuilder::new(capacity).into(),
             DataType::Struct(t) => {
                 StructArrayBuilder::with_meta(capacity, t.to_array_meta()).into()
             }
@@ -305,6 +313,7 @@ impl DataType {
             DataType::Int16 => PbTypeName::Int16,
             DataType::Int32 => PbTypeName::Int32,
             DataType::Int64 => PbTypeName::Int64,
+            DataType::Int256 => PbTypeName::Int256,
             DataType::Serial => PbTypeName::Serial,
             DataType::Float32 => PbTypeName::Float,
             DataType::Float64 => PbTypeName::Double,
@@ -396,6 +405,7 @@ impl DataType {
             DataType::Int16 => ScalarImpl::Int16(i16::MIN),
             DataType::Int32 => ScalarImpl::Int32(i32::MIN),
             DataType::Int64 => ScalarImpl::Int64(i64::MIN),
+            DataType::Int256 => ScalarImpl::Int256(Int256::min_value()),
             DataType::Serial => ScalarImpl::Serial(Serial::from(i64::MIN)),
             DataType::Float32 => ScalarImpl::Float32(F32::neg_infinity()),
             DataType::Float64 => ScalarImpl::Float64(F64::neg_infinity()),
@@ -774,6 +784,7 @@ impl ScalarImpl {
                 i64::from_sql(&Type::INT8, bytes)
                     .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?,
             ),
+
             DataType::Serial => Self::Serial(Serial::from(
                 i64::from_sql(&Type::INT8, bytes)
                     .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?,
@@ -822,6 +833,10 @@ impl ScalarImpl {
                     ErrorCode::InvalidInputSyntax("Invalid value of Jsonb".to_string())
                 })?)
             }
+            DataType::Int256 => Self::Int256(
+                Int256::from_binary(bytes)
+                    .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?,
+            ),
             DataType::Struct(_) | DataType::List { .. } => {
                 return Err(ErrorCode::NotSupported(
                     format!("param type: {}", data_type),
@@ -858,6 +873,9 @@ impl ScalarImpl {
                 ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
             })?),
             DataType::Int64 => Self::Int64(i64::from_str(str).map_err(|_| {
+                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
+            })?),
+            DataType::Int256 => Self::Int256(Int256::from_str(str).map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
             })?),
             DataType::Serial => Self::Serial(Serial::from(i64::from_str(str).map_err(|_| {
@@ -1032,7 +1050,6 @@ impl ScalarRefImpl<'_> {
             Self::Int16(v) => v.serialize(ser)?,
             Self::Int32(v) => v.serialize(ser)?,
             Self::Int64(v) => v.serialize(ser)?,
-            Self::Int256(v) => v.serialize(ser)?,
             Self::Serial(v) => v.serialize(ser)?,
             Self::Float32(v) => v.serialize(ser)?,
             Self::Float64(v) => v.serialize(ser)?,
@@ -1050,6 +1067,7 @@ impl ScalarRefImpl<'_> {
                 v.0.num_seconds_from_midnight().serialize(&mut *ser)?;
                 v.0.nanosecond().serialize(ser)?;
             }
+            Self::Int256(v) => v.memcmp_serialize(ser)?,
             Self::Jsonb(v) => v.memcmp_serialize(ser)?,
             Self::Struct(v) => v.memcmp_serialize(ser)?,
             Self::List(v) => v.memcmp_serialize(ser)?,
@@ -1077,6 +1095,7 @@ impl ScalarImpl {
             Ty::Int16 => Self::Int16(i16::deserialize(de)?),
             Ty::Int32 => Self::Int32(i32::deserialize(de)?),
             Ty::Int64 => Self::Int64(i64::deserialize(de)?),
+            Ty::Int256 => Self::Int256(Int256::memcmp_deserialize(de)?),
             Ty::Serial => Self::Serial(Serial::from(i64::deserialize(de)?)),
             Ty::Float32 => Self::Float32(f32::deserialize(de)?.into()),
             Ty::Float64 => Self::Float64(f64::deserialize(de)?.into()),
@@ -1133,6 +1152,7 @@ macro_rules! for_all_type_pairs {
             { Int16,       Int16 },
             { Int32,       Int32 },
             { Int64,       Int64 },
+            { Int256,      Int256 },
             { Float32,     Float32 },
             { Float64,     Float64 },
             { Varchar,     Utf8 },
@@ -1254,6 +1274,10 @@ mod tests {
                 DataTypeName::Int16 => (ScalarImpl::Int16(233), DataType::Int16),
                 DataTypeName::Int32 => (ScalarImpl::Int32(233333), DataType::Int32),
                 DataTypeName::Int64 => (ScalarImpl::Int64(233333333333), DataType::Int64),
+                DataTypeName::Int256 => (
+                    ScalarImpl::Int256(233333333333_i64.into()),
+                    DataType::Int256,
+                ),
                 DataTypeName::Serial => (ScalarImpl::Serial(233333333333.into()), DataType::Serial),
                 DataTypeName::Float32 => (ScalarImpl::Float32(23.33.into()), DataType::Float32),
                 DataTypeName::Float64 => (
@@ -1339,6 +1363,9 @@ mod tests {
         assert_eq!(DataType::from_str("bigint").unwrap(), DataType::Int64);
         assert_eq!(DataType::from_str("INT8").unwrap(), DataType::Int64);
         assert_eq!(DataType::from_str("BIGINT").unwrap(), DataType::Int64);
+
+        assert_eq!(DataType::from_str("rw_int256").unwrap(), DataType::Int256);
+        assert_eq!(DataType::from_str("RW_INT256").unwrap(), DataType::Int256);
 
         assert_eq!(DataType::from_str("float4").unwrap(), DataType::Float32);
         assert_eq!(DataType::from_str("real").unwrap(), DataType::Float32);

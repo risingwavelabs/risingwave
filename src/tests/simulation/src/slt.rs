@@ -106,6 +106,10 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
             .then(|| hack_kafka_test(path));
         let path = tempfile.as_ref().map(|p| p.path()).unwrap_or(path);
         for record in sqllogictest::parse_file(path).expect("failed to parse file") {
+            // uncomment to print metrics for task counts
+            // let metrics = madsim::runtime::Handle::current().metrics();
+            // println!("{:#?}", metrics);
+            // println!("{}", metrics.num_tasks_by_node_by_spawn());
             if let sqllogictest::Record::Halt { .. } = record {
                 break;
             }

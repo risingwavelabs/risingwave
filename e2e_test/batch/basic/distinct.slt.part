@@ -25,5 +25,12 @@ select distinct on(v1) v2 + v3 from t order by v1;
 5
 5
 
+# the result should be the same without `order by`
+query I
+select distinct on(v1) v2 + v3 from t;
+----
+5
+5
+
 statement ok
 drop table t

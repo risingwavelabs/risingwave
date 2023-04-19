@@ -17,7 +17,7 @@ use std::sync::LazyLock;
 
 use risingwave_common::types::{DataType, DataTypeName};
 
-use crate::expr::AggKind;
+use crate::function::aggregate::AggKind;
 
 // Same as FuncSign in func.rs except this is for aggregate function
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
@@ -127,6 +127,7 @@ pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Option<Data
                 DataType::Decimal
             }
             DataType::Float32 | DataType::Float64 => DataType::Float64,
+            DataType::Int256 => DataType::Float64,
             DataType::Interval => DataType::Interval,
             _ => return None,
         },
@@ -137,6 +138,7 @@ pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Option<Data
             DataType::Int16 => DataType::Int64,
             DataType::Int32 => DataType::Int64,
             DataType::Int64 => DataType::Decimal,
+            DataType::Int256 => DataType::Int256,
             DataType::Decimal => DataType::Decimal,
             DataType::Float32 => DataType::Float32,
             DataType::Float64 => DataType::Float64,
@@ -155,6 +157,7 @@ pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Option<Data
                 DataType::Decimal
             }
             DataType::Float32 | DataType::Float64 => DataType::Float64,
+            DataType::Int256 => DataType::Float64,
             _ => return None,
         },
 

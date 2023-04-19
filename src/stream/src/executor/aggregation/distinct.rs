@@ -263,10 +263,10 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_expr::function::aggregate::{AggArgs, AggKind};
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
-    use crate::executor::aggregation::{AggArgs, AggCall, AggKind};
 
     fn count_agg_call(kind: AggKind, col_idx: usize, distinct: bool) -> AggCall {
         AggCall {
@@ -276,7 +276,6 @@ mod tests {
             distinct,
 
             column_orders: vec![],
-            append_only: false,
             filter: None,
         }
     }

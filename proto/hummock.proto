@@ -242,14 +242,15 @@ message CompactTask {
     PENDING = 1;
     SUCCESS = 2;
     HEARTBEAT_CANCELED = 3;
-    NO_AVAIL_CANCELED = 4;
+    NO_AVAIL_RESOURCE_CANCELED = 4;
     ASSIGN_FAIL_CANCELED = 5;
     SEND_FAIL_CANCELED = 6;
     MANUAL_CANCELED = 7;
     INVALID_GROUP_CANCELED = 8;
-    EXECUTE_FAILED = 9;
-    JOIN_HANDLE_FAILED = 10;
-    TRACK_SST_OBJECT_ID_FAILED = 11;
+    INPUT_OUTDATED_CANCELED = 9;
+    EXECUTE_FAILED = 10;
+    JOIN_HANDLE_FAILED = 11;
+    TRACK_SST_OBJECT_ID_FAILED = 12;
   }
   // SSTs to be compacted, which will be removed from LSM after compaction
   repeated InputLevel input_ssts = 1;

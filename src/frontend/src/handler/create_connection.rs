@@ -18,19 +18,20 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
+use risingwave_pb::catalog::connection::private_link_service::PrivateLinkProvider;
 use risingwave_pb::ddl_service::create_connection_request;
 use risingwave_sqlparser::ast::CreateConnectionStatement;
-use serde_json;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::CatalogError;
 use crate::handler::HandlerArgs;
 
 pub(crate) const CONNECTION_TYPE_PROP: &str = "type";
 pub(crate) const CONNECTION_PROVIDER_PROP: &str = "provider";
 pub(crate) const CONNECTION_SERVICE_NAME_PROP: &str = "service.name";
-pub(crate) const CONNECTION_AVAIL_ZONE_PROP: &str = "availability.zones";
+
+pub(crate) const CLOUD_PROVIDER_MOCK: &str = "mock"; // fake privatelink provider for testing
+pub(crate) const CLOUD_PROVIDER_AWS: &str = "aws";
 
 #[inline(always)]
 fn get_connection_property_required(
@@ -41,30 +42,42 @@ fn get_connection_property_required(
         .get(property)
         .map(|s| s.to_lowercase())
         .ok_or(RwError::from(ProtocolError(format!(
-            "Required property \"{property}\" was not provided"
+            "Required property \"{property}\" is not provided"
         ))))
 }
 
 fn resolve_private_link_properties(
     with_properties: &HashMap<String, String>,
 ) -> Result<create_connection_request::PrivateLink> {
-    let provider = get_connection_property_required(with_properties, CONNECTION_PROVIDER_PROP)?;
-    let service_name =
-        get_connection_property_required(with_properties, CONNECTION_SERVICE_NAME_PROP)?;
-    let availability_zones_str =
-        get_connection_property_required(with_properties, CONNECTION_AVAIL_ZONE_PROP)?;
-    let availability_zones: Vec<String> =
-        serde_json::from_str(&availability_zones_str).map_err(|e| {
-            RwError::from(ProtocolError(format!(
-                "Can not parse {}: {}",
-                CONNECTION_AVAIL_ZONE_PROP, e
-            )))
-        })?;
-    Ok(create_connection_request::PrivateLink {
-        provider,
-        service_name,
-        availability_zones,
-    })
+    let provider =
+        match get_connection_property_required(with_properties, CONNECTION_PROVIDER_PROP)?.as_str()
+        {
+            CLOUD_PROVIDER_MOCK => PrivateLinkProvider::Mock,
+            CLOUD_PROVIDER_AWS => PrivateLinkProvider::Aws,
+            provider => {
+                return Err(RwError::from(ProtocolError(format!(
+                    "Unsupported privatelink provider {}",
+                    provider
+                ))));
+            }
+        };
+    match provider {
+        PrivateLinkProvider::Mock => Ok(create_connection_request::PrivateLink {
+            provider: provider.into(),
+            service_name: String::new(),
+        }),
+        PrivateLinkProvider::Aws => {
+            let service_name =
+                get_connection_property_required(with_properties, CONNECTION_SERVICE_NAME_PROP)?;
+            Ok(create_connection_request::PrivateLink {
+                provider: provider.into(),
+                service_name,
+            })
+        }
+        PrivateLinkProvider::Unspecified => Err(RwError::from(ProtocolError(
+            "Privatelink provider unspecified".to_string(),
+        ))),
+    }
 }
 
 fn resolve_create_connection_payload(
@@ -89,23 +102,21 @@ pub async fn handle_create_connection(
     stmt: CreateConnectionStatement,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-    let connection_name = Binder::resolve_connection_name(stmt.connection_name)?;
+    let db_name = session.database();
+    let (schema_name, connection_name) =
+        Binder::resolve_schema_qualified_name(db_name, stmt.connection_name.clone())?;
 
-    {
-        let catalog_reader = session.env().catalog_reader();
-        let reader = catalog_reader.read_guard();
-        if reader.get_connection_by_name(&connection_name).is_ok() {
-            return if stmt.if_not_exists {
-                Ok(PgResponse::empty_result_with_notice(
-                    StatementType::CREATE_CONNECTION,
-                    format!("connection \"{}\" exists, skipping", connection_name),
-                ))
-            } else {
-                Err(CatalogError::Duplicated("connection", connection_name).into())
-            };
-        }
+    if let Err(e) = session.check_connection_name_duplicated(stmt.connection_name) {
+        return if stmt.if_not_exists {
+            Ok(PgResponse::empty_result_with_notice(
+                StatementType::CREATE_CONNECTION,
+                format!("connection \"{}\" exists, skipping", connection_name),
+            ))
+        } else {
+            Err(e)
+        };
     }
-
+    let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
     let with_properties = handler_args
         .with_options
         .inner()
@@ -117,7 +128,12 @@ pub async fn handle_create_connection(
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
-        .create_connection(connection_name, create_connection_payload)
+        .create_connection(
+            connection_name,
+            database_id,
+            schema_id,
+            create_connection_payload,
+        )
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_CONNECTION))

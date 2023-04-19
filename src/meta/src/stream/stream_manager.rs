@@ -65,6 +65,8 @@ pub struct CreateStreamingJobContext {
 
     /// DDL definition.
     pub definition: String,
+
+    pub mv_table_id: Option<u32>,
 }
 
 impl CreateStreamingJobContext {
@@ -388,17 +390,23 @@ where
             building_locations,
             existing_locations,
             definition,
+            mv_table_id,
+            internal_tables,
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<()> {
         // Register to compaction group beforehand.
         let hummock_manager_ref = self.hummock_manager.clone();
         let registered_table_ids = hummock_manager_ref
-            .register_table_fragments(&table_fragments, &table_properties)
+            .register_table_fragments(
+                mv_table_id,
+                internal_tables.keys().copied().collect(),
+                &table_properties,
+            )
             .await?;
         debug_assert_eq!(
             registered_table_ids.len(),
-            table_fragments.all_table_ids().count()
+            table_fragments.internal_table_ids().len() + mv_table_id.map_or(0, |_| 1)
         );
         revert_funcs.push(Box::pin(async move {
             if let Err(e) = hummock_manager_ref.unregister_table_ids(&registered_table_ids).await {

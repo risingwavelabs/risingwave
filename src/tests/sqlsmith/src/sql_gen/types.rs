@@ -20,7 +20,7 @@ use std::sync::LazyLock;
 use itertools::Itertools;
 use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::function::aggregate::AggKind;
 use risingwave_expr::sig::agg::{agg_func_sigs, AggFuncSig as RwAggFuncSig};
 use risingwave_expr::sig::cast::{cast_sigs, CastContext, CastSig as RwCastSig};
 use risingwave_expr::sig::func::{func_sigs, FuncSign as RwFuncSig};
@@ -33,6 +33,7 @@ pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
         DataType::Int16 => AstDataType::SmallInt,
         DataType::Int32 => AstDataType::Int,
         DataType::Int64 => AstDataType::BigInt,
+        DataType::Int256 => AstDataType::Custom(vec!["rw_int256".into()].into()),
         DataType::Serial => unreachable!("serial should not be generated"),
         DataType::Decimal => AstDataType::Decimal(None, None),
         DataType::Float32 => AstDataType::Real,

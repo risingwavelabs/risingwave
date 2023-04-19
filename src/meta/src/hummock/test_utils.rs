@@ -17,14 +17,10 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::filter_key_extractor::{
-    FilterKeyExtractorImpl, FilterKeyExtractorManagerRef, FullKeyFilterKeyExtractor,
-};
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
-use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{
@@ -225,32 +221,6 @@ pub async fn unregister_table_ids_from_compaction_group<S>(
         .unregister_table_ids(table_ids)
         .await
         .unwrap();
-}
-
-pub fn update_filter_key_extractor_for_table_ids(
-    filter_key_extractor_manager_ref: &FilterKeyExtractorManagerRef,
-    table_ids: &[u32],
-) {
-    for table_id in table_ids {
-        filter_key_extractor_manager_ref.update(
-            *table_id,
-            Arc::new(FilterKeyExtractorImpl::FullKey(
-                FullKeyFilterKeyExtractor::default(),
-            )),
-        )
-    }
-}
-
-pub fn update_filter_key_extractor_for_tables(
-    filter_key_extractor_manager_ref: &FilterKeyExtractorManagerRef,
-    tables: &[PbTable],
-) {
-    for table in tables {
-        filter_key_extractor_manager_ref.update(
-            table.id,
-            Arc::new(FilterKeyExtractorImpl::from_table(table)),
-        )
-    }
 }
 
 /// Generate keys like `001_key_test_00002` with timestamp `epoch`.

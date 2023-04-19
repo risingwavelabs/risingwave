@@ -14,6 +14,18 @@ datasource = {"type": "prometheus", "uid": f"{source_uid}"}
 panels = Panels(datasource)
 logging.basicConfig(level=logging.WARN)
 
+def section_actor_info(panels):
+    excluded_cols = ['Time', 'Value', '__name__', 'job', 'instance']
+    return [
+        panels.row("Actor/Table Id Info"),
+        panels.table_info("Actor Id Info",
+                          "Mapping from actor id to fragment id",
+                          [panels.table_target(f"{metric('actor_info')}")], excluded_cols),
+        panels.table_info("Table Id Info",
+                          "Mapping from table id to actor id and table name",
+                          [panels.table_target(f"{metric('table_info')}")], excluded_cols),
+
+    ]
 
 def section_cluster_node(panels):
     return [
@@ -2336,26 +2348,6 @@ def section_memory_manager(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_memory(
-                    "The memory allocated by streaming",
-                    "",
-                    [
-                        panels.target(
-                            f"{metric('stream_total_mem_usage')}",
-                            "",
-                        ),
-                    ],
-                ),
-                panels.timeseries_memory(
-                    "The memory allocated by batch",
-                    "",
-                    [
-                        panels.target(
-                            f"{metric('batch_total_mem_usage')}",
-                            "",
-                        ),
-                    ],
-                ),
             ],
         ),
     ]
@@ -2420,6 +2412,7 @@ dashboard = Dashboard(
     templating=templating,
     version=dashboard_version,
     panels=[
+        *section_actor_info(panels),
         *section_cluster_node(panels),
         *section_recovery_node(panels),
         *section_streaming(panels),

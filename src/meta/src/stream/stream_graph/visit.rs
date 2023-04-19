@@ -44,8 +44,8 @@ where
     visit_stream_node(fragment.node.as_mut().unwrap(), f)
 }
 
-/// Visit the internal tables of a [`StreamFragment`].
-pub(super) fn visit_internal_tables<F>(fragment: &mut StreamFragment, mut f: F)
+/// Visit the internal tables of a [`StreamNode`].
+pub fn visit_stream_node_internal_tables<F>(stream_node: &mut StreamNode, mut f: F)
 where
     F: FnMut(&mut Table, &str),
 {
@@ -75,7 +75,7 @@ where
         };
     }
 
-    visit_fragment(fragment, |body| {
+    visit_stream_node(stream_node, |body| {
         match body {
             // Join
             NodeBody::HashJoin(node) => {
@@ -143,9 +143,13 @@ where
                     always!(source.state_table, "Source");
                 }
             }
+
+            // Now
             NodeBody::Now(node) => {
                 always!(node.state_table, "Now");
             }
+
+            // Watermark filter
             NodeBody::WatermarkFilter(node) => {
                 assert!(!node.tables.is_empty());
                 repeated!(node.tables, "WatermarkFilter");
@@ -156,8 +160,21 @@ where
                 always!(node.table, "Arrange");
             }
 
+            // Dedup
+            NodeBody::AppendOnlyDedup(node) => {
+                always!(node.state_table, "AppendOnlyDedup");
+            }
+
             // Note: add internal tables for new nodes here.
             _ => {}
         }
     })
+}
+
+/// Visit the internal tables of a [`StreamFragment`].
+pub(super) fn visit_internal_tables<F>(fragment: &mut StreamFragment, f: F)
+where
+    F: FnMut(&mut Table, &str),
+{
+    visit_stream_node_internal_tables(fragment.node.as_mut().unwrap(), f)
 }

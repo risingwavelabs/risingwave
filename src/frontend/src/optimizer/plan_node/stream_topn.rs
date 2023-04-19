@@ -95,13 +95,20 @@ impl_plan_tree_node_for_unary! { StreamTopN }
 impl StreamNode for StreamTopN {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
+
+        let input = self.input();
         let topn_node = TopNNode {
             limit: self.limit_attr().limit(),
             offset: self.offset(),
             with_ties: self.limit_attr().with_ties(),
             table: Some(
                 self.logical
-                    .infer_internal_table_catalog(&self.base, None)
+                    .infer_internal_table_catalog(
+                        input.schema(),
+                        input.ctx(),
+                        input.logical_pk(),
+                        None,
+                    )
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),

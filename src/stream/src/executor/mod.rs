@@ -29,7 +29,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
 use risingwave_connector::source::SplitImpl;
 use risingwave_expr::expr::BoxedExpression;
@@ -77,6 +77,7 @@ mod managed_state;
 mod merge;
 mod mview;
 mod now;
+mod over_window;
 mod project;
 mod project_set;
 mod rearranged_chain;
@@ -352,6 +353,10 @@ impl Barrier {
                 Mutation::Update { vnode_bitmaps, .. } => vnode_bitmaps.get(&actor_id).cloned(),
                 _ => None,
             })
+    }
+
+    pub fn get_curr_epoch(&self) -> Epoch {
+        Epoch(self.epoch.curr)
     }
 }
 

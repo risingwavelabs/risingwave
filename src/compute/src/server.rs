@@ -208,7 +208,7 @@ pub async fn compute_node_serve(
         extra_info_sources.push(storage.sstable_object_id_manager().clone());
         if embedded_compactor_enabled {
             tracing::info!("start embedded compactor");
-            let read_memory_limiter = Arc::new(MemoryLimiter::new(
+            let output_memory_limiter = Arc::new(MemoryLimiter::new(
                 storage_opts.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
             ));
             let compactor_context = Arc::new(CompactorContext {
@@ -219,7 +219,7 @@ pub async fn compute_node_serve(
                 is_share_buffer_compact: false,
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
                 filter_key_extractor_manager: storage.filter_key_extractor_manager().clone(),
-                read_memory_limiter,
+                output_memory_limiter,
                 sstable_object_id_manager: storage.sstable_object_id_manager().clone(),
                 task_progress_manager: Default::default(),
                 compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(
@@ -378,7 +378,7 @@ pub async fn compute_node_serve(
     if config.server.telemetry_enabled && telemetry_env_enabled() {
         // if all configs are true, start reporting
         if telemetry_enabled {
-            telemetry_manager.start_telemetry_reporting();
+            telemetry_manager.start_telemetry_reporting().await;
         }
         // if config and env are true, starting watching
         sub_tasks.push(telemetry_manager.watch_params_change());
