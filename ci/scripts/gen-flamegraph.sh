@@ -64,24 +64,32 @@ setup_nexmark_bench() {
 main() {
   echo "--- Machine Debug Info"
   print_machine_debug_info
+
   echo "--- Downloading build artifacts"
   download_build_artifacts
+
   echo "--- Setting up nexmark-bench"
   # setup_nexmark_bench
   echo "Success!"
+
   echo "--- Spawning nexmark events"
   echo "Success!"
+
   echo "--- Setting up RW"
-  # FIXME(kwannoel): Move this into build phase.
   ENABLE_RW_RELEASE_PROFILE=true ./risedev d ci-gen-cpu-flamegraph
-  echo "Success!"
+
   echo "--- Running Benchmarks"
   echo "Success!"
+
   echo "--- Start Profiling"
   echo "Success!"
+
   echo "--- Monitoring Benchmark"
   echo "Success!"
+
   echo "--- Benchmark finished"
+  echo "Success!"
+
   echo "--- Generate flamegraph"
   echo "Success!"
 }
