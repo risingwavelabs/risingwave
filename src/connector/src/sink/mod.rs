@@ -35,7 +35,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use thiserror::Error;
 pub use tracing;
-use tracing::log::info;
 
 use self::catalog::{SinkCatalog, SinkType};
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};

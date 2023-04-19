@@ -209,7 +209,7 @@ where
         self.env.idle_manager().record_activity();
 
         let req = request.into_inner();
-        let mut sink = req.get_sink()?.clone();
+        let sink = req.get_sink()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
 
         // validate connection before starting the DDL procedure
