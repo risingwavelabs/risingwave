@@ -61,6 +61,12 @@ setup_nexmark_bench() {
 
 # Install artifacts + tools, configure environment
 setup() {
+  echo "--- Installing promql cli"
+  git clone https://github.com/nalbury/promql-cli.git
+  pushd promql-cli/
+  OS=linux INSTALL_PATH=/usr/local/bin make install
+  popd
+
   echo "--- Downloading build artifacts"
   download_build_artifacts
 
