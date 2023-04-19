@@ -133,7 +133,7 @@ impl LogicalInsert {
             if !self.default_columns.is_empty() {
                 write!(
                     f,
-                    ", default columns: [{}]",
+                    ", default: [{}]",
                     self.default_columns()
                         .into_iter()
                         .map(|(k, v)| format!("{}<-{:?}", k, v))
