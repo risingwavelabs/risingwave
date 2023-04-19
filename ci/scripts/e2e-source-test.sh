@@ -106,8 +106,6 @@ echo "--- Kill cluster"
 cargo make ci-kill
 pkill -f connector-node
 
-./e2e_test/debezium/mongo-source.sh
-
 echo "--- e2e, ci-kafka-plus-pubsub, kafka and pubsub source"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-kafka-plus-pubsub
