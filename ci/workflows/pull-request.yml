@@ -302,8 +302,8 @@ steps:
     timeout_in_minutes: 5
 
   # Generates cpu flamegraph env
-  - label: "flamegraph-env-build"
-    key: "flamegraph-env-build"
+  - label: "cpu-flamegraph-env-build"
+    key: "cpu-flamegraph-env-build"
     command: "ci/scripts/flamegraph-env-build.sh"
     if: build.pull_request.labels includes "cpu_flamegraph"
     plugins:
