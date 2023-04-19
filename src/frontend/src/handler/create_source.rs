@@ -696,7 +696,6 @@ pub async fn handle_create_source(
 
     let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
 
-    // TODO: resolve connection info in frontend
     let connection_name = get_connection_name(&with_properties);
     let is_kafka_connector = is_kafka_connector(&with_properties);
     let mut with_options = WithOptions::new(with_properties);

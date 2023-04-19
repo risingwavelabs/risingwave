@@ -589,31 +589,6 @@ impl SessionImpl {
         Ok(connection.clone())
     }
 
-    pub fn get_connection_id_for_create(
-        &self,
-        schema_name: Option<String>,
-        connection_name: &str,
-    ) -> Result<ConnectionId> {
-        let db_name = self.database();
-        let search_path = self.config().get_search_path();
-        let user_name = &self.auth_context().user_name;
-
-        let catalog_reader = self.env().catalog_reader().read_guard();
-        let schema = match schema_name {
-            Some(schema_name) => catalog_reader.get_schema_by_name(db_name, &schema_name)?,
-            None => catalog_reader.first_valid_schema(db_name, &search_path, user_name)?,
-        };
-        let schema = catalog_reader.get_schema_by_name(db_name, schema.name().as_str())?;
-        let connection_id = schema
-            .get_connection_by_name(connection_name)
-            .ok_or(RwError::from(ErrorCode::ItemNotFound(format!(
-                "connection {} not found",
-                connection_name
-            ))))?
-            .id;
-        Ok(connection_id)
-    }
-
     pub fn clear_cancel_query_flag(&self) {
         let mut flag = self.current_query_cancel_flag.lock().unwrap();
         *flag = None;
