@@ -17,8 +17,7 @@ use std::str::FromStr;
 
 use rdkafka::client::BrokerAddr;
 use rdkafka::consumer::ConsumerContext;
-use rdkafka::message::DeliveryResult;
-use rdkafka::producer::ProducerContext;
+use rdkafka::producer::{DeliveryResult, ProducerContext};
 use rdkafka::ClientContext;
 use risingwave_common::util::addr::HostAddr;
 
