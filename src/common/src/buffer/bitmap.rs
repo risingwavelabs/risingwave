@@ -340,18 +340,12 @@ impl Bitmap {
 
     /// Enumerates the index of each bit set to 1.
     pub fn iter_ones(&self) -> BitmapOnesIter<'_> {
-        if self.num_bits > 0 {
-            BitmapOnesIter {
-                bitmap: self,
-                cur_idx: 0,
-                cur_bits: Some(self.bits[0]),
-            }
-        } else {
-            BitmapOnesIter {
-                bitmap: self,
-                cur_idx: 0,
-                cur_bits: None,
-            }
+        let cur_bits = if self.num_bits > 0 { Some(self.bits[0]) } else { None };
+        BitmapOnesIter {
+            bitmap: self,
+            cur_idx: 0,
+            cur_bits,
+        }
         }
     }
 
