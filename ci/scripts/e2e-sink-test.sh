@@ -55,7 +55,7 @@ node_port=50051
 node_timeout=10
 
 echo "--- starting risingwave cluster with connector node"
-cargo make ci-start ci-1cn-1fe
+cargo make ci-start ci-kafka
 ./connector-node/start-service.sh -p $node_port > .risingwave/log/connector-node.log 2>&1 &
 
 echo "waiting for connector node to start"
@@ -76,13 +76,14 @@ do
     sleep 0.1
 done
 
-
-echo "--- testing sinks"
+echo "--- testing common sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/append_only_sink.slt'
 sqllogictest -p 4566 -d dev './e2e_test/sink/create_sink_as.slt'
 sqllogictest -p 4566 -d dev './e2e_test/sink/blackhole_sink.slt'
 sqllogictest -p 4566 -d dev './e2e_test/sink/remote/types.slt'
 sleep 1
+
+echo "--- testing remote sinks"
 
 # check sink destination postgres
 sqllogictest -p 4566 -d dev './e2e_test/sink/remote/jdbc.load.slt'
@@ -97,6 +98,15 @@ if [ $? -eq 0 ]; then
   echo "mysql sink check passed"
 else
   echo "The output is not as expected."
+  exit 1
+fi
+
+echo "--- testing kafka sink"
+./ci/scripts/e2e-kafka-sink-test.sh
+if [ $? -eq 0 ]; then
+  echo "kafka sink check passed"
+else
+  echo "kafka sink test failed"
   exit 1
 fi
 

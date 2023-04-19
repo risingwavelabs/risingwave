@@ -15,6 +15,7 @@
 use bytes::Bytes;
 
 use super::{OwnedRow, Row, RowDeserializer};
+use crate::estimate_size::EstimateSize;
 use crate::types::DataType;
 use crate::util::value_encoding;
 
@@ -45,5 +46,11 @@ impl<R: Row> From<R> for CompactedRow {
         Self {
             row: row.value_serialize_bytes(),
         }
+    }
+}
+
+impl EstimateSize for CompactedRow {
+    fn estimated_heap_size(&self) -> usize {
+        self.row.estimated_heap_size()
     }
 }

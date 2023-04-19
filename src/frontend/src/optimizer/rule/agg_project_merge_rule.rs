@@ -14,6 +14,7 @@
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
+use crate::optimizer::plan_node::generic::Agg;
 
 /// Merge [`LogicalAgg`] <- [`LogicalProject`] to [`LogicalAgg`].
 pub struct AggProjectMergeRule {}
@@ -41,7 +42,7 @@ impl Rule for AggProjectMergeRule {
             .iter_mut()
             .for_each(|x| x.rewrite_input_index(proj_o2i.clone()));
 
-        Some(LogicalAgg::new(agg_calls, agg_group_keys, new_input).into())
+        Some(Agg::new(agg_calls, agg_group_keys, new_input).into())
     }
 }
 

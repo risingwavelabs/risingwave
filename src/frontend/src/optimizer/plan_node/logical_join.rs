@@ -393,11 +393,16 @@ impl LogicalJoin {
         // Reorder the join equal predicate to match the order key.
         let mut reorder_idx = Vec::with_capacity(at_least_prefix_len);
         for order_col_id in order_col_ids {
+            let mut found = false;
             for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
                 if order_col_id == output_column_ids[eq_idx] {
                     reorder_idx.push(i);
+                    found = true;
                     break;
                 }
+            }
+            if !found {
+                break;
             }
         }
         if reorder_idx.len() < at_least_prefix_len {
@@ -649,17 +654,6 @@ impl ExprRewritable for LogicalJoin {
     }
 }
 
-fn is_pure_fn_except_for_input_ref(expr: &ExprImpl) -> bool {
-    match expr {
-        ExprImpl::Literal(_) => true,
-        ExprImpl::FunctionCall(inner) => {
-            inner.is_pure() && inner.inputs().iter().all(is_pure_fn_except_for_input_ref)
-        }
-        ExprImpl::InputRef(_) => true,
-        _ => false,
-    }
-}
-
 /// We are trying to derive a predicate to apply to the other side of a join if all
 /// the `InputRef`s in the predicate are eq condition columns, and can hence be substituted
 /// with the corresponding eq condition columns of the other side.
@@ -683,7 +677,7 @@ fn derive_predicate_from_eq_condition(
     col_num: usize,
     expr_is_left: bool,
 ) -> Option<ExprImpl> {
-    if !is_pure_fn_except_for_input_ref(expr) {
+    if expr.is_impure() {
         return None;
     }
     let eq_indices = if expr_is_left {

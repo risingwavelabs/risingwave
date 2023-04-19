@@ -208,7 +208,86 @@ select sum(distinct v) from t;
 statement ok
 drop table t;
 
+statement ok
+create table t (v rw_int256)
+
+statement ok
+insert into t values (1), (1), (2), (2), (3), (3), (4), (5);
+
+query RR
+select avg(v), avg(distinct v) from t;
+----
+2.625 3
+
+query RRRR
+select stddev_pop(v), stddev_samp(v), var_pop(v), var_samp(v) from t
+----
+1.3169567191065923 1.407885953173359 1.734375 1.9821428571428572
+
+statement ok
+drop table t;
+
 query TT
-select v::varchar, pg_typeof(v) from (select 1::rw_int256 / 1::float8) as t(v);
+select v::varchar, pg_typeof(v) from (select 1::rw_int256 + 1::int) as t(v);
+----
+2 rw_int256
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int + 1::rw_int256) as t(v);
+----
+2 rw_int256
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::rw_int256 - 1::int) as t(v);
+----
+0 rw_int256
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int - 1::rw_int256) as t(v);
+----
+0 rw_int256
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::rw_int256 * 1::int) as t(v);
+----
+1 rw_int256
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int * 1::rw_int256) as t(v);
+----
+1 rw_int256
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::rw_int256 / 1::int) as t(v);
+----
+1 rw_int256
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int / 1::rw_int256) as t(v);
+----
+1 rw_int256
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::rw_int256 % 1::int) as t(v);
+----
+0 rw_int256
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int % 1::rw_int256) as t(v);
+----
+0 rw_int256
+
+query TT
+select v::varchar, pg_typeof(v) from (select sum(1::rw_int256)) as t(v);
+----
+1 rw_int256
+
+query TT
+select v::varchar, pg_typeof(v) from (select avg(1::rw_int256)) as t(v);
 ----
 1 double precision
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::rw_int256 + 1::rw_int256) as t(v);
+----
+2 rw_int256

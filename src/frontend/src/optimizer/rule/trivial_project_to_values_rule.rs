@@ -14,26 +14,28 @@
 
 use super::{BoxedRule, Rule};
 use crate::optimizer::plan_node::{LogicalValues, PlanTreeNodeUnary};
-use crate::optimizer::plan_visitor::CountRows;
+use crate::optimizer::plan_visitor::{CountRows, SideEffectVisitor};
 use crate::optimizer::{PlanRef, PlanVisitor};
 
 pub struct TrivialProjectToValuesRule {}
 impl Rule for TrivialProjectToValuesRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let project = plan.as_logical_project()?;
-        if project.exprs().iter().all(|e| e.is_const()) {
-            let mut count_rows = CountRows;
-            count_rows.visit(project.input()).map(|count| {
-                LogicalValues::new(
-                    vec![project.exprs().clone(); count],
-                    project.schema().clone(),
-                    project.ctx(),
-                )
-                .into()
-            })
-        } else {
-            None
+
+        if !project.exprs().iter().all(|e| e.is_const()) {
+            return None;
         }
+        if SideEffectVisitor.visit(project.input()) {
+            return None;
+        }
+
+        let row_count = CountRows.visit(project.input())?;
+        let values = LogicalValues::new(
+            vec![project.exprs().clone(); row_count],
+            project.schema().clone(),
+            project.ctx(),
+        );
+        Some(values.into())
     }
 }
 

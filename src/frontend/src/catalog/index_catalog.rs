@@ -23,7 +23,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::PbIndex;
 
 use super::ColumnId;
-use crate::catalog::{DatabaseId, RelationCatalog, SchemaId, TableCatalog};
+use crate::catalog::{DatabaseId, OwnedByUserCatalog, SchemaId, TableCatalog};
 use crate::expr::{Expr, ExprImpl, FunctionCall};
 use crate::user::UserId;
 
@@ -179,7 +179,7 @@ impl IndexCatalog {
     }
 }
 
-impl RelationCatalog for IndexCatalog {
+impl OwnedByUserCatalog for IndexCatalog {
     fn owner(&self) -> UserId {
         self.index_table.owner
     }

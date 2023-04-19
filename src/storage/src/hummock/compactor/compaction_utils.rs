@@ -20,7 +20,6 @@ use std::sync::Arc;
 use itertools::Itertools;
 use minstant::Instant;
 use risingwave_common::constants::hummock::CompactionFilterFlag;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
@@ -29,6 +28,7 @@ use risingwave_hummock_sdk::{HummockEpoch, KeyComparator};
 use risingwave_pb::hummock::{compact_task, CompactTask, KeyRange as KeyRange_vec, LevelType};
 
 pub use super::context::CompactorContext;
+use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::{
     MultiCompactionFilter, StateCleanUpCompactionFilter, TtlCompactionFilter,
 };
@@ -258,4 +258,22 @@ pub async fn generate_splits(
     }
 
     Ok(())
+}
+
+pub fn estimate_task_memory_capacity(context: Arc<CompactorContext>, task: &CompactTask) -> usize {
+    let max_target_file_size = context.storage_opts.sstable_size_mb as usize * (1 << 20);
+    let total_file_size = task
+        .input_ssts
+        .iter()
+        .flat_map(|level| level.table_infos.iter())
+        .map(|table| table.file_size)
+        .sum::<u64>();
+
+    let capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
+    let total_file_size = (total_file_size as f64 * 1.2).round() as usize;
+
+    match task.compression_algorithm {
+        0 => std::cmp::min(capacity, total_file_size),
+        _ => capacity,
+    }
 }

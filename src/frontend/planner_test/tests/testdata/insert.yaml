@@ -211,6 +211,19 @@
     └─BatchProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, *VALUES*_0.column_0, (*VALUES*_0.column_0 + *VALUES*_0.column_1) as $expr1] }
       └─BatchInsert { table: t, returning: true, mapping: [0:0, 1:1] }
         └─BatchValues { rows: [[0:Int32, 1:Int32], [1:Int32, 2:Int32]] }
+- name: insert with returning constant, should keep `Insert`
+  sql: |
+    create table t (v int);
+    insert into t values (114) returning 514;
+  logical_plan: |
+    LogicalProject { exprs: [514:Int32] }
+    └─LogicalInsert { table: t, returning: true }
+      └─LogicalValues { rows: [[114:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32] } }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [514:Int32] }
+      └─BatchInsert { table: t, returning: true }
+        └─BatchValues { rows: [[114:Int32]] }
 - name: insert with select and returning
   sql: |
     create table t (a int, b int);

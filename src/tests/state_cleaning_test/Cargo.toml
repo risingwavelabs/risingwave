@@ -24,7 +24,7 @@ risingwave_rt = { path = "../../utils/runtime" }
 serde = { version = "1", features = ["derive"] }
 serde_with = "2"
 tokio = { version = "0.2", package = "madsim-tokio" }
-tokio-postgres = "0.7.7"
+tokio-postgres = "0.7"
 tokio-stream = { version = "0.1", features = ["fs"] }
 toml = "0.7"
 tracing = "0.1"

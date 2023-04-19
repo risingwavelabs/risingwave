@@ -52,12 +52,8 @@ pub async fn handle_drop_function(
     let function_id = {
         let reader = session.env().catalog_reader().read_guard();
         match reader.get_function_by_name_args(db_name, schema_path, &function_name, &arg_types) {
-            Ok((function, _)) => {
-                if session.user_id() != function.owner {
-                    return Err(
-                        ErrorCode::PermissionDenied("Do not have the privilege".into()).into(),
-                    );
-                }
+            Ok((function, schema_name)) => {
+                session.check_privilege_for_drop_alter(schema_name, &**function)?;
                 function.id
             }
             Err(CatalogError::NotFound(kind, _)) if kind == "function" && if_exists => {

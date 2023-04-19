@@ -21,6 +21,10 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::common::AwsPrivateLinkItem;
 use risingwave_connector::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
 use risingwave_connector::source::KAFKA_CONNECTOR;
+use risingwave_pb::catalog::connection::private_link_service::{
+    PbPrivateLinkProvider, PrivateLinkProvider,
+};
+use risingwave_pb::catalog::connection::PbPrivateLinkService;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{connection, Connection};
@@ -32,10 +36,10 @@ use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
 use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, IdCategoryType,
-    MetaSrvEnv, StreamingJob,
+    CatalogManagerRef, ClusterManagerRef, ConnectionId, FragmentManagerRef, IdCategory,
+    IdCategoryType, MetaSrvEnv, StreamingJob,
 };
-use crate::rpc::cloud_provider::{AwsEc2Client, CLOUD_PROVIDER_AWS};
+use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::ddl_controller::{DdlCommand, DdlController, StreamingJobId};
 use crate::storage::MetaStore;
 use crate::stream::{visit_fragment, GlobalStreamManagerRef, SourceManagerRef};
@@ -100,6 +104,19 @@ fn kafka_props_broker_key(with_properties: &HashMap<String, String>) -> &str {
     } else {
         KAFKA_PROPS_BROKER_KEY_ALIAS
     }
+}
+
+#[inline(always)]
+fn get_property_required(
+    with_properties: &HashMap<String, String>,
+    property: &str,
+) -> MetaResult<String> {
+    with_properties
+        .get(property)
+        .map(|s| s.to_lowercase())
+        .ok_or(MetaError::from(anyhow!(
+            "Required property \"{property}\" is not provided"
+        )))
 }
 
 #[async_trait::async_trait]
@@ -188,8 +205,10 @@ where
         let mut source = request.into_inner().get_source()?.clone();
 
         // resolve private links before starting the DDL procedure
-        self.resolve_private_link_info(&mut source.properties)
-            .await?;
+        if let Some(connection_id) = source.connection_id {
+            self.resolve_private_link_info(connection_id, &mut source.properties)
+                .await?;
+        }
 
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         source.id = id;
@@ -596,47 +615,54 @@ where
         &self,
         request: Request<CreateConnectionRequest>,
     ) -> Result<Response<CreateConnectionResponse>, Status> {
-        if self.aws_client.is_none() {
-            return Err(Status::from(MetaError::unavailable(
-                "AWS client is not configured".into(),
-            )));
-        }
-
         let req = request.into_inner();
         if req.payload.is_none() {
             return Err(Status::invalid_argument("request is empty"));
         }
 
         match req.payload.unwrap() {
-            create_connection_request::Payload::PrivateLink(info) => {
+            create_connection_request::Payload::PrivateLink(link) => {
                 // currently we only support AWS
-                let private_link_conn = match info.provider.to_lowercase().as_str() {
-                    CLOUD_PROVIDER_AWS => {
+                let private_link_svc = match link.get_provider()? {
+                    PbPrivateLinkProvider::Mock => PbPrivateLinkService {
+                        provider: link.provider,
+                        service_name: String::new(),
+                        endpoint_id: String::new(),
+                        endpoint_dns_name: String::new(),
+                        dns_entries: HashMap::new(),
+                    },
+                    PbPrivateLinkProvider::Aws => {
+                        if self.aws_client.is_none() {
+                            return Err(Status::from(MetaError::unavailable(
+                                "AWS client is not configured".into(),
+                            )));
+                        }
                         let cli = self.aws_client.as_ref().unwrap();
-                        let private_link_svc =
-                            cli.create_aws_private_link(&info.service_name).await?;
-                        connection::Info::PrivateLinkService(private_link_svc)
+                        cli.create_aws_private_link(&link.service_name).await?
                     }
-                    _ => {
-                        return Err(Status::invalid_argument("unsupported cloud provider"));
+                    PbPrivateLinkProvider::Unspecified => {
+                        return Err(Status::invalid_argument("Privatelink provider unspecified"));
                     }
                 };
-
                 let id = self.gen_unique_id::<{ IdCategory::Connection }>().await?;
                 let connection = Connection {
                     id,
+                    schema_id: req.schema_id,
+                    database_id: req.database_id,
                     name: req.name,
-                    info: Some(private_link_conn),
+                    owner: req.owner_id,
+                    info: Some(connection::Info::PrivateLinkService(private_link_svc)),
                 };
 
                 // save private link info to catalog
-                self.ddl_controller
+                let version = self
+                    .ddl_controller
                     .run_command(DdlCommand::CreateConnection(connection))
                     .await?;
 
                 Ok(Response::new(CreateConnectionResponse {
                     connection_id: id,
-                    version: 0,
+                    version,
                 }))
             }
         }
@@ -660,13 +686,29 @@ where
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropConnection(req.connection_name))
+            .run_command(DdlCommand::DropConnection(req.connection_id))
             .await?;
 
         Ok(Response::new(DropConnectionResponse {
             status: None,
             version,
         }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn get_tables(
+        &self,
+        request: Request<GetTablesRequest>,
+    ) -> Result<Response<GetTablesResponse>, Status> {
+        let ret = self
+            .catalog_manager
+            .get_tables(&request.into_inner().table_ids)
+            .await;
+        let mut tables = HashMap::default();
+        for table in ret {
+            tables.insert(table.id, table);
+        }
+        Ok(Response::new(GetTablesResponse { tables }))
     }
 }
 
@@ -681,37 +723,30 @@ where
 
     async fn resolve_private_link_info(
         &self,
+        connection_id: ConnectionId,
         properties: &mut HashMap<String, String>,
     ) -> MetaResult<()> {
         let mut broker_rewrite_map = HashMap::new();
         const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
-        const PRIVATE_LINK_NAME_KEY: &str = "connection.name";
-        if let Some(link_target_value) = properties.get(PRIVATE_LINK_TARGETS_KEY) {
+        let conn = self
+            .catalog_manager
+            .get_connection_by_id(connection_id)
+            .await?;
+        if let Some(connection::Info::PrivateLinkService(svc)) = &conn.info {
             if !is_kafka_connector(properties) {
                 return Err(MetaError::from(anyhow!(
                     "Private link is only supported for Kafka connector",
                 )));
             }
-
-            let servers = properties
-                .get(kafka_props_broker_key(properties))
-                .cloned()
-                .ok_or(MetaError::from(anyhow!(
-                    "Must specify \"{KAFKA_PROPS_BROKER_KEY}\" property in WITH clause",
-                )))?;
-
-            let private_link_name =
-                properties
-                    .get(PRIVATE_LINK_NAME_KEY)
-                    .cloned()
-                    .ok_or(MetaError::from(anyhow!(
-                        "Must specify \"{PRIVATE_LINK_NAME_KEY}\" property in WITH clause",
-                    )))?;
-
+            // skip all checks for mock connection
+            if svc.get_provider()? == PrivateLinkProvider::Mock {
+                return Ok(());
+            }
+            let link_target_value = get_property_required(properties, PRIVATE_LINK_TARGETS_KEY)?;
+            let servers = get_property_required(properties, kafka_props_broker_key(properties))?;
             let broker_addrs = servers.split(',').collect_vec();
             let link_targets: Vec<AwsPrivateLinkItem> =
-                serde_json::from_str(link_target_value).map_err(|e| anyhow!(e))?;
-
+                serde_json::from_str(link_target_value.as_str()).map_err(|e| anyhow!(e))?;
             if broker_addrs.len() != link_targets.len() {
                 return Err(MetaError::from(anyhow!(
                     "The number of broker addrs {} does not match the number of private link targets {}",
@@ -719,29 +754,15 @@ where
                     link_targets.len()
                 )));
             }
-
-            let conn = self
-                .catalog_manager
-                .get_connection_by_name(&private_link_name)
-                .await?;
-
-            if let Some(connection::Info::PrivateLinkService(svc)) = &conn.info {
-                // check whether the VPC endpoint is ready
-                let cli = self.aws_client.as_ref().unwrap();
-                if !cli.is_vpc_endpoint_ready(&svc.endpoint_id).await? {
-                    return Err(MetaError::from(anyhow!(
-                        "Private link endpoint {} is not ready",
-                        svc.endpoint_id
-                    )));
-                }
-            } else {
+            // check whether private link is ready
+            let cli = self.aws_client.as_ref().unwrap();
+            if !cli.is_vpc_endpoint_ready(&svc.endpoint_id).await? {
                 return Err(MetaError::from(anyhow!(
-                    "Connection {} is not a private link service",
-                    private_link_name
+                    "Private link endpoint {} is not ready",
+                    svc.endpoint_id
                 )));
             }
 
-            // construct the rewrite mapping for brokers
             for (link, broker) in link_targets.iter().zip_eq_fast(broker_addrs.into_iter()) {
                 if let Some(connection::Info::PrivateLinkService(svc)) = &conn.info {
                     if svc.dns_entries.is_empty() {

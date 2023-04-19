@@ -15,6 +15,7 @@
 use paste::paste;
 use risingwave_common::catalog::{Field, Schema};
 
+use super::{DefaultBehavior, Merge};
 use crate::expr::ExprVisitor;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{Explain, PlanRef, PlanTreeNodeUnary};
@@ -101,9 +102,15 @@ macro_rules! visit_project {
 }
 
 impl PlanVisitor<Option<String>> for InputRefValidator {
+    type DefaultBehavior = impl DefaultBehavior<Option<String>>;
+
     visit_filter!(logical, batch, stream);
 
     visit_project!(logical, batch, stream);
+
+    fn default_behavior() -> Self::DefaultBehavior {
+        Merge(|a: Option<String>, b| a.or(b))
+    }
 
     fn visit_logical_scan(
         &mut self,
@@ -123,8 +130,4 @@ impl PlanVisitor<Option<String>> for InputRefValidator {
     }
 
     // TODO: add more checks
-
-    fn merge(a: Option<String>, b: Option<String>) -> Option<String> {
-        a.or(b)
-    }
 }

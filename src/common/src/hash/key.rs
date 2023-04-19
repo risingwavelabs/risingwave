@@ -39,7 +39,7 @@ use crate::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayError, ArrayImpl, ArrayResult, DataChunk, JsonbRef,
     ListRef, StructRef,
 };
-use crate::collection::estimate_size::EstimateSize;
+use crate::estimate_size::EstimateSize;
 use crate::row::{OwnedRow, RowDeserializer};
 use crate::types::num256::Int256Ref;
 use crate::types::{DataType, Date, Decimal, ScalarRef, Time, Timestamp, F32, F64};
@@ -335,7 +335,7 @@ pub trait HashKey:
 ///
 /// See [`crate::hash::calc_hash_key_kind`]
 #[derive(Clone, Debug)]
-pub struct FixedSizeKey<const N: usize, B = StackNullBitmap> {
+pub struct FixedSizeKey<const N: usize, B: NullBitmap = StackNullBitmap> {
     key: [u8; N],
     hash_code: u64,
     null_bitmap: B,
@@ -345,7 +345,7 @@ pub struct FixedSizeKey<const N: usize, B = StackNullBitmap> {
 ///
 /// See [`crate::hash::calc_hash_key_kind`]
 #[derive(Clone, Debug)]
-pub struct SerializedKey<B = StackNullBitmap> {
+pub struct SerializedKey<B: NullBitmap = StackNullBitmap> {
     // Key encoding.
     key: Vec<u8>,
     hash_code: u64,
@@ -498,7 +498,7 @@ impl HashKeySerDe<'_> for F32 {
     type S = [u8; 4];
 
     fn serialize(self) -> Self::S {
-        self.normalized().to_ne_bytes()
+        self.normalized().0.to_ne_bytes()
     }
 
     fn deserialize<R: Read>(source: &mut R) -> Self {
@@ -511,7 +511,7 @@ impl HashKeySerDe<'_> for F64 {
     type S = [u8; 8];
 
     fn serialize(self) -> Self::S {
-        self.normalized().to_ne_bytes()
+        self.normalized().0.to_ne_bytes()
     }
 
     fn deserialize<R: Read>(source: &mut R) -> Self {
