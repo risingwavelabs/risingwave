@@ -124,7 +124,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
-        lru_manager: AtomicU64Ref,
+        watermark_epoch: AtomicU64Ref,
     ) -> StreamResult<Self> {
         let ExecutorInfo {
             pk_indices, schema, ..
@@ -145,7 +145,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
             managed_state,
             storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
             group_by,
-            caches: GroupTopNCache::new(lru_manager),
+            caches: GroupTopNCache::new(watermark_epoch),
             cache_key_serde,
         })
     }

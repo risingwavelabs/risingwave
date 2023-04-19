@@ -104,7 +104,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutor<K,
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
-        lru_manager: AtomicU64Ref,
+        watermark_epoch: AtomicU64Ref,
     ) -> StreamResult<Self> {
         let ExecutorInfo {
             pk_indices, schema, ..
@@ -125,7 +125,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutor<K,
             managed_state,
             storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
             group_by,
-            caches: GroupTopNCache::new(lru_manager),
+            caches: GroupTopNCache::new(watermark_epoch),
             cache_key_serde,
         })
     }
@@ -136,8 +136,8 @@ pub struct GroupTopNCache<K: HashKey, const WITH_TIES: bool> {
 }
 
 impl<K: HashKey, const WITH_TIES: bool> GroupTopNCache<K, WITH_TIES> {
-    pub fn new(lru_manager: AtomicU64Ref) -> Self {
-        let cache = new_unbounded(lru_manager);
+    pub fn new(watermark_epoch: AtomicU64Ref) -> Self {
+        let cache = new_unbounded(watermark_epoch);
         Self { data: cache }
     }
 }
