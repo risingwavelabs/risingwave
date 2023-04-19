@@ -15,10 +15,8 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use risingwave_common::array::Op;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::row::OwnedRow;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::store::NewLocalOptions;
 use risingwave_storage::StateStore;
@@ -41,11 +39,6 @@ const FIRST_SEQ_ID: SeqIdType = 0;
 
 /// Readers truncate the offset at the granularity of epoch
 type ReaderTruncationOffsetType = u64;
-
-enum LogStoreRowOp {
-    Row { op: Op, row: OwnedRow },
-    Barrier { is_checkpoint: bool },
-}
 
 pub struct KvLogStoreFactory<S: StateStore> {
     state_store: S,

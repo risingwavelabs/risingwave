@@ -25,6 +25,7 @@ pub(crate) enum LogStoreBufferItem {
     StreamChunk(StreamChunk),
 
     Flushed {
+        vnode_bitmap: Bitmap,
         start_seq_id: SeqIdType,
         end_seq_id: SeqIdType,
     },
@@ -71,9 +72,15 @@ impl LogStoreBufferInner {
         ret
     }
 
-    fn add_flushed(&mut self, start_seq_id: SeqIdType, end_seq_id: SeqIdType) {
+    fn add_flushed(
+        &mut self,
+        start_seq_id: SeqIdType,
+        end_seq_id: SeqIdType,
+        new_vnode_bitmap: Bitmap,
+    ) {
         if let Some(LogStoreBufferItem::Flushed {
             end_seq_id: prev_end_seq_id,
+            vnode_bitmap,
             ..
         }) = self.queue.front_mut()
         {
@@ -84,10 +91,12 @@ impl LogStoreBufferInner {
                 start_seq_id
             );
             *prev_end_seq_id = end_seq_id;
+            *vnode_bitmap |= new_vnode_bitmap;
         } else {
             self.add_item(LogStoreBufferItem::Flushed {
                 start_seq_id,
                 end_seq_id,
+                vnode_bitmap: new_vnode_bitmap,
             });
         }
     }
@@ -115,8 +124,14 @@ impl LogStoreBufferSender {
         }
     }
 
-    pub(crate) fn add_flushed(&self, start_seq_id: SeqIdType, end_seq_id: SeqIdType) {
-        self.buffer_inner().add_flushed(start_seq_id, end_seq_id);
+    pub(crate) fn add_flushed(
+        &self,
+        start_seq_id: SeqIdType,
+        end_seq_id: SeqIdType,
+        vnode_bitmap: Bitmap,
+    ) {
+        self.buffer_inner()
+            .add_flushed(start_seq_id, end_seq_id, vnode_bitmap);
         self.update_notify.notify_waiters();
     }
 

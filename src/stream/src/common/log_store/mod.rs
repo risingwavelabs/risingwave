@@ -21,6 +21,7 @@ use std::sync::Arc;
 
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use risingwave_storage::error::StorageError;
 
 #[derive(thiserror::Error, Debug)]
@@ -33,6 +34,9 @@ pub enum LogStoreError {
 
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
+
+    #[error("Valud encoding error: {0}")]
+    ValueEncoding(#[from] ValueEncodingError),
 }
 
 pub type LogStoreResult<T> = Result<T, LogStoreError>;

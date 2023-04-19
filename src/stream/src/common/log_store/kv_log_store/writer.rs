@@ -17,9 +17,9 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_storage::store::LocalStateStore;
 
 use crate::common::log_store::kv_log_store::buffer::LogStoreBufferSender;
@@ -77,11 +77,15 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
                 // state store and flush
                 let epoch = self.state_store.epoch();
                 let start_seq_id = self.seq_id;
+                let mut vnode_bitmap_builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
                 for (op, row) in chunk.rows() {
-                    let (key, value) = self.serde.serialize_data_row(epoch, self.seq_id, op, row);
+                    let (vnode, key, value) =
+                        self.serde.serialize_data_row(epoch, self.seq_id, op, row);
+                    vnode_bitmap_builder.set(vnode.to_index(), true);
                     self.state_store.insert(key, value, None)?;
                     self.seq_id += 1;
                 }
+                let end_seq_id = self.seq_id - 1;
 
                 let mut delete_range = Vec::with_capacity(self.serde.vnodes().count_ones());
                 if let Some(truncation_offset) = self.tx.pop_truncation() {
@@ -95,7 +99,8 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
                 }
                 self.state_store.flush(delete_range).await?;
 
-                self.tx.add_flushed(start_seq_id, self.seq_id);
+                let vnode_bitmap = vnode_bitmap_builder.finish();
+                self.tx.add_flushed(start_seq_id, end_seq_id, vnode_bitmap);
             }
             Ok(())
         }
