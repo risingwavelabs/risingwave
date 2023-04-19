@@ -127,6 +127,7 @@ pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Option<Data
                 DataType::Decimal
             }
             DataType::Float32 | DataType::Float64 => DataType::Float64,
+            DataType::Int256 => DataType::Float64,
             DataType::Interval => DataType::Interval,
             _ => return None,
         },
@@ -156,6 +157,7 @@ pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Option<Data
                 DataType::Decimal
             }
             DataType::Float32 | DataType::Float64 => DataType::Float64,
+            DataType::Int256 => DataType::Float64,
             _ => return None,
         },
 

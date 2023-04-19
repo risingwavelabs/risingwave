@@ -28,7 +28,7 @@ use crate::expr::{
     CorrelatedId, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Subquery,
     SubqueryKind,
 };
-use crate::optimizer::plan_node::generic::{Project, ProjectBuilder};
+use crate::optimizer::plan_node::generic::{Agg, Project, ProjectBuilder};
 pub use crate::optimizer::plan_node::LogicalFilter;
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalApply, LogicalOverAgg, LogicalProject, LogicalProjectSet, LogicalTopN,
@@ -183,7 +183,7 @@ impl Planner {
             }else {
                 (0..fields.len()).collect()
             };
-            root = LogicalAgg::new(vec![], group_key, root).into();
+            root = Agg::new(vec![], group_key, root).into();
         }
 
         Ok(root)
@@ -198,7 +198,7 @@ impl Planner {
     /// Helper to create an `EXISTS` boolean operator with the given `input`.
     /// It is represented by `Project([$0 >= 1]) -> Agg(count(*)) -> input`
     fn create_exists(&self, input: PlanRef) -> Result<PlanRef> {
-        let count_star = LogicalAgg::new(vec![PlanAggCall::count_star()], vec![], input);
+        let count_star = Agg::new(vec![PlanAggCall::count_star()], vec![], input);
         let ge = FunctionCall::new(
             ExprType::GreaterThanOrEqual,
             vec![
