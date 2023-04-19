@@ -39,7 +39,7 @@ use super::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
     ExecutorInfo, Message, PkIndices, StreamExecutorError, StreamExecutorResult, Watermark,
 };
-use crate::cache::{new_unbounded, ExecutorCache};
+use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
 use crate::executor::over_window::state::StateEvictHint;
@@ -49,7 +49,7 @@ mod partition;
 mod state;
 
 type MemcmpEncoded = Box<[u8]>;
-type PartitionCache = ExecutorCache<MemcmpEncoded, Partition>; // TODO(rc): use `K: HashKey` as key like in hash agg?
+type PartitionCache = ManagedLruCache<MemcmpEncoded, Partition>; // TODO(rc): use `K: HashKey` as key like in hash agg?
 
 /// [`OverWindowExecutor`] consumes ordered input (on order key column with watermark) and outputs
 /// window function results. One [`OverWindowExecutor`] can handle one combination of partition key
@@ -316,7 +316,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 &encoded_partition_key,
             )
             .await?;
-            let partition = vars.partitions.get_mut(&encoded_partition_key).unwrap();
+            let mut partition = vars.partitions.get_mut(&encoded_partition_key).unwrap();
 
             // Materialize input to state table.
             this.state_table
@@ -426,7 +426,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         } = self;
 
         let mut vars = ExecutionVars {
-            partitions: ExecutorCache::new(new_unbounded(this.watermark_epoch.clone())),
+            partitions: new_unbounded(this.watermark_epoch.clone()),
             last_watermark: None,
             _phantom: PhantomData::<S>,
         };

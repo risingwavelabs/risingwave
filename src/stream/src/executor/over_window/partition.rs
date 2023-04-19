@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_expr::function::window::WindowFuncCall;
 
 use super::state::{create_window_state, StateKey, WindowState};
@@ -48,5 +49,13 @@ impl Partition {
         self.states
             .first()
             .and_then(|state| state.curr_window().key)
+    }
+}
+
+impl EstimateSize for Partition {
+    fn estimated_heap_size(&self) -> usize {
+        // FIXME: implement correct size
+        // https://github.com/risingwavelabs/risingwave/issues/8957
+        0
     }
 }

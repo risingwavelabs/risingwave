@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::Row;
-use crate::collection::estimate_size::EstimateSize;
+use crate::estimate_size::EstimateSize;
 use crate::types::{
     DataType, Date, Datum, DatumRef, Decimal, Interval, ScalarImpl, Time, Timestamp, ToDatumRef,
 };
@@ -92,7 +92,8 @@ impl OwnedRow {
 impl EstimateSize for OwnedRow {
     fn estimated_heap_size(&self) -> usize {
         // FIXME(bugen): this is not accurate now as the heap size of some `Scalar` is not counted.
-        self.0.capacity() * std::mem::size_of::<Datum>()
+        // https://github.com/risingwavelabs/risingwave/issues/8957
+        0
     }
 }
 
