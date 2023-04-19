@@ -110,6 +110,8 @@ impl BatchAggregatorWrapper<'_> {
         &'a self,
         values: impl ExactSizeIterator<Item = &'a [Datum]>,
     ) -> StreamExecutorResult<Datum> {
+        // TODO(rc): switch to a better general version of aggregator implementation
+
         let n_values = values.len();
 
         let mut args_builders = self
