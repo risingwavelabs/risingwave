@@ -25,7 +25,7 @@ use crate::optimizer::plan_node::{self, PlanTreeNode, PlanTreeNodeBinary, PlanTr
 use crate::optimizer::plan_visitor::PlanRef;
 
 pub mod card {
-    use std::cmp::{min, Ordering};
+    use std::cmp::{max, min, Ordering};
     use std::ops::{Add, Mul, Sub};
 
     /// The upper bound of the [`Cardinality`].
@@ -119,6 +119,12 @@ pub mod card {
         /// respectively the minimum of the lower and upper bounds of the two cardinalities.
         pub fn min(self, rhs: Self) -> Self {
             Self::new(min(self.lo(), rhs.lo()), min(self.hi, rhs.hi))
+        }
+
+        /// Returns the maximum of the two cardinalities, where the lower and upper bounds are
+        /// respectively the maximum of the lower and upper bounds of the two cardinalities.
+        pub fn max(self, rhs: Self) -> Self {
+            Self::new(max(self.lo(), rhs.lo()), max(self.hi, rhs.hi))
         }
 
         /// Returns the cardinality with both lower and upper bounds limited to `limit`.
@@ -256,6 +262,12 @@ pub mod card {
             let c1 = c * 2;
             assert_eq!(c1.lo(), 10);
             assert_eq!(c1.hi(), None);
+
+            let c = Cardinality::new(3, 5);
+            let c1 = Cardinality::new(2, 4);
+            let c2 = c * c1;
+            assert_eq!(c2.lo(), 6);
+            assert_eq!(c2.hi(), Some(20));
         }
     }
 }
@@ -352,10 +364,15 @@ impl PlanVisitor<Cardinality> for CardinalityVisitor {
         match plan.join_type() {
             JoinType::Unspecified => unreachable!(),
 
-            JoinType::Inner => left.mul(right).as_low_as(0),
+            JoinType::Inner => left.mul(right.as_low_as(0)),
 
-            JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti => left.as_low_as(0),
-            JoinType::RightOuter | JoinType::RightSemi | JoinType::RightAnti => right.as_low_as(0),
+            // Each row of some side matches at least one row from the other side or `NULL`.
+            JoinType::LeftOuter => left.mul(right.max(Cardinality::exact(1))),
+            JoinType::RightOuter => right.mul(left.max(Cardinality::exact(1))),
+
+            // Rows in the result set must be in some side.
+            JoinType::LeftSemi | JoinType::LeftAnti => left.as_low_as(0),
+            JoinType::RightSemi | JoinType::RightAnti => right.as_low_as(0),
 
             // TODO: refine the cardinality of full outer join
             JoinType::FullOuter => Cardinality::default(),
