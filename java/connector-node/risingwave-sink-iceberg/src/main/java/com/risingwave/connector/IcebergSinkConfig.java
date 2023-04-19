@@ -51,10 +51,6 @@ public class IcebergSinkConfig extends S3Config {
         return sinkType;
     }
 
-    public void setSinkType(String sinkType) {
-        this.sinkType = sinkType;
-    }
-
     public String getWarehousePath() {
         return warehousePath;
     }
@@ -67,15 +63,7 @@ public class IcebergSinkConfig extends S3Config {
         return databaseName;
     }
 
-    public void setDatabaseName(String databaseName) {
-        this.databaseName = databaseName;
-    }
-
     public String getTableName() {
         return tableName;
-    }
-
-    public void setTableName(String tableName) {
-        this.tableName = tableName;
     }
 }
