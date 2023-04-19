@@ -653,15 +653,12 @@ impl<'a> iter::Iterator for BitmapOnesIter<'a> {
                 Some(self.bitmap.bits[self.cur_idx])
             }
         }
-        match self.cur_bits {
-            Some(bits) => {
-                let low_bit = bits & bits.wrapping_neg();
-                let low_bit_idx = bits.trailing_zeros();
-                self.cur_bits = Some(bits ^ low_bit);
-                Some(self.cur_idx * BITS + low_bit_idx as usize)
-            }
-            _ => None,
-        }
+        self.cur_bits.map(|bits| {
+            let low_bit = bits & bits.wrapping_neg();
+            let low_bit_idx = bits.trailing_zeros();
+            self.cur_bits = Some(bits ^ low_bit);
+            Some(self.cur_idx * BITS + low_bit_idx as usize)
+        })
     }
 }
 
