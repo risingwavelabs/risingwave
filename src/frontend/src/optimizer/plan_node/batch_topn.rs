@@ -60,7 +60,7 @@ impl BatchTopN {
         let ensure_single_dist = if !batch_partial_topn.distribution().satisfies(&single_dist) {
             single_dist.enforce_if_not_satisfies(batch_partial_topn.into(), &Order::any())?
         } else {
-            // The input's distribution is singleton, so use one phase limit is enough.
+            // The input's distribution is singleton, so use one phase topn is enough.
             return Ok(batch_partial_topn.into());
         };
 
