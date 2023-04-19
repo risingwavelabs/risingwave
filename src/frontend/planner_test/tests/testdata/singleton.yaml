@@ -45,8 +45,7 @@
   batch_local_plan: |
     BatchProject { exprs: [mv.v] }
     └─BatchTopN { order: "[mv.v ASC]", limit: 10, offset: 0 }
-      └─BatchTopN { order: "[mv.v ASC]", limit: 10, offset: 0 }
-        └─BatchProject { exprs: [mv.v, mv.v] }
-          └─BatchLookupJoin { type: Inner, predicate: mv.v = mv.v, output: [mv.v] }
-            └─BatchExchange { order: [], dist: Single }
-              └─BatchScan { table: mv, columns: [mv.v], distribution: SomeShard }
+      └─BatchProject { exprs: [mv.v, mv.v] }
+        └─BatchLookupJoin { type: Inner, predicate: mv.v = mv.v, output: [mv.v] }
+          └─BatchExchange { order: [], dist: Single }
+            └─BatchScan { table: mv, columns: [mv.v], distribution: SomeShard }

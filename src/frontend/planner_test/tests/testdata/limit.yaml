@@ -78,8 +78,38 @@
 - sql: |
     select 1 limit 1
   batch_plan: |
-    BatchValues { rows: [[1:Int32]] }
+    BatchLimit { limit: 1, offset: 0 }
+    └─BatchValues { rows: [[1:Int32]] }
+- sql: |
+    select 1 order by 1 limit 1
+  batch_plan: |
+    BatchTopN { order: "[1:Int32 ASC]", limit: 1, offset: 0 }
+    └─BatchValues { rows: [[1:Int32]] }
 - sql: |
     select 1 union all select 1 limit 10
   batch_plan: |
-    BatchValues { rows: [[1:Int32], [1:Int32]] }
+    BatchLimit { limit: 10, offset: 0 }
+    └─BatchValues { rows: [[1:Int32], [1:Int32]] }
+- sql: |
+    select 1 union all select 1 order by 1 limit 10
+  batch_plan: |
+    BatchTopN { order: "[1:Int32 ASC]", limit: 10, offset: 0 }
+    └─BatchValues { rows: [[1:Int32], [1:Int32]] }
+- sql: |
+    create table t (a int);
+    select count(*) from t limit 1;
+  batch_plan: |
+    BatchLimit { limit: 1, offset: 0 }
+    └─BatchSimpleAgg { aggs: [sum0(count)] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchSimpleAgg { aggs: [count] }
+          └─BatchScan { table: t, columns: [], distribution: SomeShard }
+- sql: |
+    create table t (a int);
+    select count(*) from t order by 1 limit 1;
+  batch_plan: |
+    BatchTopN { order: "[sum0(count) ASC]", limit: 1, offset: 0 }
+    └─BatchSimpleAgg { aggs: [sum0(count)] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchSimpleAgg { aggs: [count] }
+          └─BatchScan { table: t, columns: [], distribution: SomeShard }
