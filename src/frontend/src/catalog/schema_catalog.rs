@@ -51,6 +51,8 @@ pub struct SchemaCatalog {
     function_by_id: HashMap<FunctionId, Arc<FunctionCatalog>>,
     connection_by_name: HashMap<String, Arc<ConnectionCatalog>>,
     connection_by_id: HashMap<ConnectionId, Arc<ConnectionCatalog>>,
+
+    // This field is currently used only for `show connections`
     connection_source_ref: HashMap<ConnectionId, Vec<Arc<SourceCatalog>>>,
 
     // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
