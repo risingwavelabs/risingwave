@@ -673,6 +673,7 @@ mod tests {
             Some(rand_bitmap::gen_rand_bitmap(
                 chunk_size,
                 (chunk_size as f64 * vis_rate) as usize,
+                666,
             ))
         } else {
             None
