@@ -235,6 +235,11 @@ message KeyRange {
 message TableOption {
   uint32 retention_seconds = 1;
 }
+enum CompactTaskPriority {
+  Normal = 0;
+  Low = 1;
+  High = 2;
+}
 
 message CompactTask {
   enum TaskStatus {
@@ -289,6 +294,7 @@ message CompactTask {
   // Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum
   TaskType task_type = 20;
   bool split_by_state_table = 21;
+  CompactTaskPriority priority = 22;
 }
 
 message LevelHandler {

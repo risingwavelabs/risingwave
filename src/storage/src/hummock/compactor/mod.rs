@@ -47,7 +47,8 @@ use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, CompactorWorkload, SubscribeCompactTasksResponse,
+    CompactTask, CompactTaskPriority, CompactTaskProgress, CompactorWorkload,
+    SubscribeCompactTasksResponse,
 };
 use risingwave_rpc_client::HummockMetaClient;
 pub use shared_buffer_compact::{compact, merge_imms_in_memory};
@@ -453,8 +454,14 @@ impl Compactor {
                             let shutdown = shutdown_map.clone();
                             let context = compactor_context.clone();
                             let meta_client = hummock_meta_client.clone();
+                            let (task_id, priority) = if let Task::CompactTask(compact_task) = &task
+                            {
+                                (compact_task.task_id, compact_task.priority())
+                            } else {
+                                (0, CompactTaskPriority::Low)
+                            };
 
-                            executor.spawn(async move {
+                            executor.spawn_with_priority(task_id, priority, async move {
                                 match task {
                                     Task::CompactTask(compact_task) => {
                                         let (tx, rx) = tokio::sync::oneshot::channel();

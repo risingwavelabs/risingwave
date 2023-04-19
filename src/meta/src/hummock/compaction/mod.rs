@@ -34,7 +34,8 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
-    CompactTask, CompactionConfig, GetScaleCompactorResponse, InputLevel, KeyRange, LevelType,
+    CompactTask, CompactTaskPriority, CompactionConfig, GetScaleCompactorResponse, InputLevel,
+    KeyRange, LevelType,
 };
 
 pub use crate::hummock::compaction::level_selector::{
@@ -153,6 +154,18 @@ impl CompactStatus {
             _ => 0,
         };
 
+        let priority = if ret.input.target_level > 0
+            && ret
+                .input
+                .input_levels
+                .iter()
+                .any(|level| level.level_idx == 0)
+        {
+            CompactTaskPriority::High
+        } else {
+            CompactTaskPriority::Normal
+        };
+
         let compact_task = CompactTask {
             input_ssts: ret.input.input_levels,
             splits: vec![KeyRange::inf()],
@@ -174,6 +187,7 @@ impl CompactStatus {
             target_sub_level_id: ret.input.target_sub_level_id,
             task_type: ret.compaction_task_type as i32,
             split_by_state_table: group.compaction_config.split_by_state_table,
+            priority: priority.into(),
         };
         Some(compact_task)
     }

@@ -149,7 +149,7 @@ pub async fn compactor_serve(
         sstable_store: sstable_store.clone(),
         compactor_metrics,
         is_share_buffer_compact: false,
-        compaction_executor: Arc::new(CompactionExecutor::new(
+        compaction_executor: Arc::new(CompactionExecutor::new_priority_pool(
             opts.compaction_worker_threads_number,
         )),
         filter_key_extractor_manager: filter_key_extractor_manager.clone(),

@@ -489,23 +489,12 @@ mod tests {
                     max_epoch: 0,
                 }],
             }],
-            splits: vec![],
-            watermark: 0,
-            sorted_output_ssts: vec![],
             task_id,
-            target_level: 0,
-            gc_delete_keys: false,
             task_status: TaskStatus::Pending as i32,
             compaction_group_id: StaticCompactionGroupId::StateDefault.into(),
-            existing_table_ids: vec![],
-            compression_algorithm: 0,
             target_file_size: 1,
-            compaction_filter_mask: 0,
-            table_options: HashMap::default(),
-            current_epoch_time: 0,
-            target_sub_level_id: 0,
             task_type: compact_task::TaskType::Dynamic as i32,
-            split_by_state_table: false,
+            ..Default::default()
         }
     }
 
