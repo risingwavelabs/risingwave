@@ -5,19 +5,6 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
-echo "--- Installing go toolchain"
-wget https://go.dev/dl/go1.20.3.linux-amd64.tar.gz
-rm -rf /usr/local/go
-tar -C /usr/local -xzf go1.20.3.linux-amd64.tar.gz
-export PATH=$PATH:/usr/local/go/bin
-
-echo "--- Installing promql cli client"
-git clone https://github.com/nalbury/promql-cli.git
-pushd promql-cli/
-OS=linux INSTALL_PATH="$PWD" make install
-buildkite-agent artifact upload ./promql
-popd
-
 # FIXME(kwannoel): Not sure if risingwave_java_binding is needed
 echo "--- Build Rust components"
 cargo build \

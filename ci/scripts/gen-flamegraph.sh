@@ -13,9 +13,10 @@ print_machine_debug_info() {
 
 download_build_artifacts() {
   # Download promql
-  buildkite-agent artifact download promql .
-  sudo mv ./promql /usr/local/bin/promql
-  chmod +x /usr/local/bin/promql
+  wget https://github.com/nalbury/promql-cli/releases/download/v0.3.0/promql-v0.3.0-linux-arm64.tar.gz
+  tar -xvf promql-v0.3.0-linux-arm64.tar.gz
+  chmod +x ./promql
+  mv ./promql /usr/local/bin/promql
 
   # Try to run it
   promql
