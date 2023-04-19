@@ -77,7 +77,7 @@ impl LocalQueryExecution {
     ) -> Self {
         let worker_node_manager = WorkerNodeSelector::new(
             front_env.worker_node_manager_ref(),
-            !snapshot.only_checkpoint_visible(),
+            snapshot.support_barrier_read(),
         );
         Self {
             sql: sql.into(),

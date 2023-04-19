@@ -94,15 +94,19 @@ impl WorkerNodeManager {
     }
 
     pub fn add_worker_node(&self, node: WorkerNode) {
-        self.inner.write().unwrap().worker_nodes.push(node);
+        let mut write_guard = self.inner.write().unwrap();
+        write_guard.worker_nodes.push(node);
+        if node.property.as_ref().map_or(false, |p| p.is_serving) {
+            write_guard.serving_fragment_vnode_mapping.clear();
+        }
     }
 
     pub fn remove_worker_node(&self, node: WorkerNode) {
-        self.inner
-            .write()
-            .unwrap()
-            .worker_nodes
-            .retain(|x| *x != node);
+        let mut write_guard = self.inner.write().unwrap();
+        write_guard.worker_nodes.retain(|x| *x != node);
+        if node.property.as_ref().map_or(false, |p| p.is_serving) {
+            write_guard.serving_fragment_vnode_mapping.clear();
+        }
     }
 
     pub fn refresh(
@@ -113,6 +117,7 @@ impl WorkerNodeManager {
         let mut write_guard = self.inner.write().unwrap();
         write_guard.worker_nodes = nodes;
         write_guard.streaming_fragment_vnode_mapping = mapping;
+        write_guard.serving_fragment_vnode_mapping.clear();
     }
 
     /// If parallel unit ids is empty, the scheduler may fail to schedule any task and stuck at

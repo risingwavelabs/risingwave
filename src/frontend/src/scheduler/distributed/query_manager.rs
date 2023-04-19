@@ -176,7 +176,7 @@ impl QueryManager {
 
         let worker_node_manager_reader = WorkerNodeSelector::new(
             self.worker_node_manager.clone(),
-            !pinned_snapshot.only_checkpoint_visible(),
+            pinned_snapshot.support_barrier_read(),
         );
         // Starts the execution of the query.
         let query_result_fetcher = query_execution

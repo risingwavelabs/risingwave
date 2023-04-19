@@ -103,8 +103,23 @@ where
     ) -> MetaResult<WorkerNode> {
         let mut core = self.core.write().await;
         match core.get_worker_by_host(host_address.clone()) {
-            // TODO #8940: handle property change
-            Some(worker) => Ok(worker.to_protobuf()),
+            // TODO(zehua): update parallelism when the worker exists.
+            Some(mut worker) => {
+                let property = self.parse_property(r#type, property);
+                if property != worker.worker_node.property {
+                    tracing::info!(
+                        "worker {} property updated from {:?} to {:?}",
+                        worker.worker_node.id,
+                        worker.worker_node.property,
+                        property
+                    );
+                    worker.worker_node.property = property;
+                    worker.insert(self.env.meta_store()).await?;
+                    core.workers
+                        .insert(WorkerKey(worker.key().unwrap()), worker.clone());
+                }
+                Ok(worker.to_protobuf())
+            }
             None => {
                 // Generate worker id.
                 let worker_id = self

@@ -58,10 +58,10 @@ impl PinnedHummockSnapshot {
         }
     }
 
-    pub fn only_checkpoint_visible(&self) -> bool {
+    pub fn support_barrier_read(&self) -> bool {
         match self {
-            PinnedHummockSnapshot::FrontendPinned(_, checkpoint) => *checkpoint,
-            PinnedHummockSnapshot::Other(_) => true,
+            PinnedHummockSnapshot::FrontendPinned(_, checkpoint) => !*checkpoint,
+            PinnedHummockSnapshot::Other(_) => false,
         }
     }
 }

@@ -48,8 +48,8 @@ message WorkerNode {
   }
   // Fields in `Property` that doesn't fit current worker type are just ignored by receiver.
   message Property {
-    bool is_streaming = 2;
-    bool is_serving = 3;
+    bool is_streaming = 1;
+    bool is_serving = 2;
   }
   uint32 id = 1;
   WorkerType type = 2;
