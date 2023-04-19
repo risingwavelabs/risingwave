@@ -171,7 +171,9 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
     }
 
     pub fn output2internal_col_mapping(&self) -> ColIndexMapping {
-        self.internal2output_col_mapping().inverse()
+        self.internal2output_col_mapping()
+            .inverse()
+            .expect("must be invertible")
     }
 
     pub fn internal2output_col_mapping(&self) -> ColIndexMapping {
