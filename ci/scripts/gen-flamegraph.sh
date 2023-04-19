@@ -12,6 +12,7 @@ print_machine_debug_info() {
 }
 
 download_build_artifacts() {
+  echo "--- Installing PromQL cli client"
   # Download promql
   wget https://github.com/nalbury/promql-cli/releases/download/v0.3.0/promql-v0.3.0-linux-arm64.tar.gz
   tar -xvf promql-v0.3.0-linux-arm64.tar.gz
@@ -21,6 +22,7 @@ download_build_artifacts() {
   # Try to run it
   promql
 
+  echo "--- Installing RisingWave components"
   ARTIFACTS="risingwave risedev-dev librisingwave_java_binding.so"
   # Create this so `risedev` tool can locate the binaries.
   mkdir -p target/release
@@ -71,8 +73,6 @@ setup_nexmark_bench() {
 
 # Install artifacts + tools, configure environment
 setup() {
-
-  echo "--- Downloading build artifacts"
   download_build_artifacts
 
   echo "--- Tryout promql"
