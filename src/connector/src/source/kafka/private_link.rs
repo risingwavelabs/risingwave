@@ -23,18 +23,39 @@ use rdkafka::ClientContext;
 use risingwave_common::util::addr::HostAddr;
 
 struct BrokerAddrRewriter {
+    role: String,
     rewrite_map: BTreeMap<BrokerAddr, BrokerAddr>,
 }
 
 impl BrokerAddrRewriter {
     fn rewrite_broker_addr(&self, addr: BrokerAddr) -> BrokerAddr {
-        match self.rewrite_map.get(&addr) {
-            None => addr,
-            Some(new_addr) => new_addr.clone(),
-        }
+        let reworte_addr = match self.rewrite_map.get(&addr) {
+            None => {
+                tracing::warn!(
+                    "[{}] didn't find target for broker addr {:?}",
+                    self.role,
+                    addr,
+                );
+                addr
+            }
+            Some(new_addr) => {
+                let target_addr = new_addr.clone();
+                tracing::info!(
+                    "[{}] rewrite broker addr {:?} -> {:?}",
+                    self.role,
+                    addr,
+                    target_addr
+                );
+                target_addr
+            }
+        };
+        reworte_addr
     }
 
-    pub fn new(broker_rewrite_map: Option<HashMap<String, String>>) -> anyhow::Result<Self> {
+    pub fn new(
+        role: String,
+        broker_rewrite_map: Option<HashMap<String, String>>,
+    ) -> anyhow::Result<Self> {
         let rewrite_map: anyhow::Result<BTreeMap<BrokerAddr, BrokerAddr>> = broker_rewrite_map
             .map_or(Ok(BTreeMap::new()), |addr_map| {
                 addr_map
@@ -55,7 +76,7 @@ impl BrokerAddrRewriter {
                     .collect()
             });
         let rewrite_map = rewrite_map?;
-        Ok(Self { rewrite_map })
+        Ok(Self { role, rewrite_map })
     }
 }
 
@@ -64,9 +85,12 @@ pub struct PrivateLinkConsumerContext {
 }
 
 impl PrivateLinkConsumerContext {
-    pub fn new(broker_rewrite_map: Option<HashMap<String, String>>) -> anyhow::Result<Self> {
+    pub fn new(
+        role: String,
+        broker_rewrite_map: Option<HashMap<String, String>>,
+    ) -> anyhow::Result<Self> {
         tracing::info!("kafka consumer rewrite map {:?}", broker_rewrite_map);
-        let inner = BrokerAddrRewriter::new(broker_rewrite_map)?;
+        let inner = BrokerAddrRewriter::new(role, broker_rewrite_map)?;
         Ok(Self { inner })
     }
 }
@@ -85,9 +109,12 @@ pub struct PrivateLinkProducerContext {
 }
 
 impl PrivateLinkProducerContext {
-    pub fn new(broker_rewrite_map: Option<HashMap<String, String>>) -> anyhow::Result<Self> {
+    pub fn new(
+        role: String,
+        broker_rewrite_map: Option<HashMap<String, String>>,
+    ) -> anyhow::Result<Self> {
         tracing::info!("kafka producer rewrite map {:?}", broker_rewrite_map);
-        let inner = BrokerAddrRewriter::new(broker_rewrite_map)?;
+        let inner = BrokerAddrRewriter::new(role, broker_rewrite_map)?;
         Ok(Self { inner })
     }
 }

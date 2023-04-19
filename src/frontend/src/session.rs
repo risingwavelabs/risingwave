@@ -59,6 +59,7 @@ use tracing::info;
 
 use crate::binder::{Binder, BoundStatement};
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
+use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{check_schema_writable, ConnectionId, DatabaseId, SchemaId};
 use crate::handler::extended_handle::{
@@ -562,6 +563,30 @@ impl SessionImpl {
 
         let db_id = catalog_reader.get_database_by_name(db_name)?.id();
         Ok((db_id, schema.id()))
+    }
+
+    pub fn get_connection_by_name(
+        &self,
+        schema_name: Option<String>,
+        connection_name: &str,
+    ) -> Result<Arc<ConnectionCatalog>> {
+        let db_name = self.database();
+        let search_path = self.config().get_search_path();
+        let user_name = &self.auth_context().user_name;
+
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let schema = match schema_name {
+            Some(schema_name) => catalog_reader.get_schema_by_name(db_name, &schema_name)?,
+            None => catalog_reader.first_valid_schema(db_name, &search_path, user_name)?,
+        };
+        let schema = catalog_reader.get_schema_by_name(db_name, schema.name().as_str())?;
+        let connection = schema
+            .get_connection_by_name(connection_name)
+            .ok_or(RwError::from(ErrorCode::ItemNotFound(format!(
+                "connection {} not found",
+                connection_name
+            ))))?;
+        Ok(connection.clone())
     }
 
     pub fn get_connection_id_for_create(

@@ -17,20 +17,21 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::Result;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     CreateSink, CreateSinkStatement, ObjectName, Query, Select, SelectItem, SetExpr, TableFactor,
     TableWithJoins,
 };
+use tracing::info;
 
 use super::create_mv::get_column_names;
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::connection_catalog::resolve_private_link_connection;
 use crate::handler::create_source::CONNECTION_NAME_KEY;
 use crate::handler::privilege::resolve_query_privileges;
-use crate::handler::util::is_kafka_connector;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::Explain;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
@@ -96,35 +97,29 @@ pub fn gen_sink_plan(
     // If column names not specified, use the name in materialized view.
     let col_names = get_column_names(&bound, session, stmt.columns)?;
 
-    let properties = context.with_options().clone();
-
-    let with_properties: HashMap<String, String> = properties.inner().clone().into_iter().collect();
-    let connectino_name = with_properties
-        .get(CONNECTION_NAME_KEY)
-        .map(|s| s.to_lowercase());
+    let mut with_options = context.with_options().clone();
+    let properties = with_options.inner_mut();
     let connection_id = {
-        if let Some(connection) = connectino_name {
-            let connection_id = session
-                .get_connection_id_for_create(sink_schema_name, &connection)
-                .map_err(|_| ErrorCode::ItemNotFound(connection))?;
-            if !is_kafka_connector(&with_properties) {
-                return Err(RwError::from(ErrorCode::ProtocolError(
-                    "Create sink with connection is only supported for kafka connectors."
-                        .to_string(),
-                )));
-            }
-            Some(ConnectionId(connection_id))
+        if let Some(connection_name) = properties
+            .get(CONNECTION_NAME_KEY)
+            .map(|s| s.to_lowercase())
+        {
+            let conn = session.get_connection_by_name(sink_schema_name, &connection_name)?;
+            resolve_private_link_connection(&conn, properties)?;
+            Some(ConnectionId(conn.id))
         } else {
             None
         }
     };
+
+    info!("Create sink with connection {:?}", connection_id);
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
     if let Some(col_names) = col_names {
         plan_root.set_out_names(col_names)?;
     };
 
-    let sink_plan = plan_root.gen_sink_plan(sink_table_name, definition, properties)?;
+    let sink_plan = plan_root.gen_sink_plan(sink_table_name, definition, with_options)?;
     let sink_desc = sink_plan.sink_desc().clone();
     let sink_plan: PlanRef = sink_plan.into();
 

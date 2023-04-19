@@ -45,6 +45,7 @@ use risingwave_sqlparser::ast::{
 use super::create_table::bind_sql_table_column_constraints;
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::connection_catalog::resolve_private_link_connection;
 use crate::catalog::ColumnId;
 use crate::expr::Expr;
 use crate::handler::create_table::{
@@ -54,6 +55,7 @@ use crate::handler::util::{get_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
 use crate::session::SessionImpl;
+use crate::WithOptions;
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 pub(crate) const CONNECTION_NAME_KEY: &str = "connection.name";
@@ -694,19 +696,23 @@ pub async fn handle_create_source(
 
     let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
 
+    // TODO: resolve connection info in frontend
     let connection_name = get_connection_name(&with_properties);
+    let is_kafka_connector = is_kafka_connector(&with_properties);
+    let mut with_options = WithOptions::new(with_properties);
     let connection_id = match connection_name {
         Some(connection_name) => {
-            let connection_id = session
-                .get_connection_id_for_create(schema_name, connection_name.as_str())
+            let connection = session
+                .get_connection_by_name(schema_name, &connection_name)
                 .map_err(|_| ErrorCode::ItemNotFound(connection_name))?;
-            if !is_kafka_connector(&with_properties) {
+            if !is_kafka_connector {
                 return Err(RwError::from(ErrorCode::ProtocolError(
                     "Create source with connection is only supported for kafka connectors."
                         .to_string(),
                 )));
             }
-            Some(connection_id)
+            resolve_private_link_connection(&connection, with_options.inner_mut())?;
+            Some(connection.id)
         }
         None => None,
     };
@@ -720,7 +726,7 @@ pub async fn handle_create_source(
         row_id_index,
         columns,
         pk_column_ids,
-        properties: with_properties.into_iter().collect(),
+        properties: with_options.into_inner().into_iter().collect(),
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs,
