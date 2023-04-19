@@ -13,13 +13,16 @@ print_machine_debug_info() {
 
 download_build_artifacts() {
   # Download promql
-  buildkite-agent artifact download ./promql
+  buildkite-agent artifact download promql .
   sudo mv ./promql /usr/local/bin/promql
+
+  # Try to run it
+  promql
 
   ARTIFACTS="risingwave risedev-dev librisingwave_java_binding.so"
   # Create this so `risedev` tool can locate the binaries.
   mkdir -p target/release
-  echo "$ARTIFACTS" | xargs -I 'buildkite-agent artifact download ./%-bench && mv ./%-bench target/release/%'
+  echo "$ARTIFACTS" | xargs -I 'buildkite-agent artifact download %-bench . && mv ./%-bench target/release/%'
 
 }
 
