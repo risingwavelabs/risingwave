@@ -16,6 +16,9 @@ use std::collections::VecDeque;
 
 use risingwave_expr::function::window::Frame;
 
+/// Actually with `VecDeque` as internal buffer, we don't need split key and value here. Just in
+/// case we want to switch to BTreeMap later, so that the general version of `OverWindow` executor
+/// can reuse this.
 struct Entry<K: Ord, V> {
     key: K,
     value: V,
@@ -30,10 +33,22 @@ pub(super) struct WindowBuffer<K: Ord, V> {
 
 const LEFT_IDX: usize = 0;
 
+/// Two simple properties of a window frame:
+/// 1. If the following half of the window is saturated, the current window is ready.
+/// 2. If the preceding half of the window is saturated, the first several entries can be removed
+/// when sliding.
+///
+/// Note: A window frame can be pure preceding, pure following, or across the _current row_.
 pub(super) struct CurrWindow<'a, K> {
     pub key: Option<&'a K>,
     pub preceding_saturated: bool,
     pub following_saturated: bool,
+}
+
+impl<K> CurrWindow<'_, K> {
+    pub fn is_ready(&self) -> bool {
+        self.following_saturated
+    }
 }
 
 impl<K: Ord, V> WindowBuffer<K, V> {
@@ -82,11 +97,8 @@ impl<K: Ord, V> WindowBuffer<K, V> {
     }
 
     /// Append a key value pair to the buffer.
-    /// Returns true if the key belongs to the current window.
-    pub fn append(&mut self, key: K, value: V) -> bool {
-        let following_not_saturated = !self.following_saturated();
+    pub fn append(&mut self, key: K, value: V) {
         self.buffer.push_back(Entry { key, value });
-        following_not_saturated
     }
 
     /// Get the current window info.
@@ -99,15 +111,15 @@ impl<K: Ord, V> WindowBuffer<K, V> {
     }
 
     /// Iterate over the values in the current window.
+    /// Panics if the current window is not ready.
     pub fn curr_window_values(&self) -> impl Iterator<Item = &V> {
+        assert!(self.curr_window().is_ready());
         self.buffer
-            .iter()
-            .skip(LEFT_IDX)
-            .take(self.right_idx - LEFT_IDX + 1)
+            .range(LEFT_IDX..=self.right_idx)
             .map(|Entry { value, .. }| value)
     }
 
-    /// Get the left most value of the current window.
+    /// Get the left most value in the current window.
     /// Returns `None` if there's nothing yet.
     pub fn curr_window_left(&self) -> Option<(&K, &V)> {
         self.buffer
@@ -115,9 +127,16 @@ impl<K: Ord, V> WindowBuffer<K, V> {
             .map(|Entry { key, value }| (key, value))
     }
 
+    /// Get the right most value in the current window.
+    /// Returns `None` if there's nothing yet.
+    pub fn curr_window_right(&self) -> Option<(&K, &V)> {
+        self.buffer
+            .get(self.right_idx)
+            .map(|Entry { key, value }| (key, value))
+    }
+
     /// Slide the current window forward.
     /// Returns the keys that are removed from the buffer.
-    /// Panics if the current window is not following-saturated.
     pub fn slide(&mut self) -> impl Iterator<Item = K> + '_ {
         let preceding_saturated = self.preceding_saturated();
         let del_range = match &self.frame {

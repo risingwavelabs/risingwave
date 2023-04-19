@@ -59,7 +59,7 @@ impl WindowState for AggregateState {
         let window = self.buffer.curr_window();
         StatePos {
             key: window.key,
-            is_ready: window.following_saturated,
+            is_ready: window.is_ready(),
         }
     }
 
