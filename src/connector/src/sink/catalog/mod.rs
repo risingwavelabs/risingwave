@@ -227,7 +227,7 @@ impl From<PbSink> for SinkCatalog {
                 .map(TableId::from)
                 .collect_vec(),
             sink_type: SinkType::from_proto(sink_type),
-            connection_id: pb.connection_id.map(|conn_id| ConnectionId(conn_id)),
+            connection_id: pb.connection_id.map(ConnectionId),
         }
     }
 }

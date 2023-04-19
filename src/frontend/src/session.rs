@@ -61,7 +61,7 @@ use crate::binder::{Binder, BoundStatement};
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::root_catalog::Catalog;
-use crate::catalog::{check_schema_writable, ConnectionId, DatabaseId, SchemaId};
+use crate::catalog::{check_schema_writable, DatabaseId, SchemaId};
 use crate::handler::extended_handle::{
     handle_bind, handle_execute, handle_parse, Portal, PrepareStatement,
 };
