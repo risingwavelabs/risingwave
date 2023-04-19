@@ -34,7 +34,10 @@ use crate::hummock::iterator::{
 use crate::hummock::store::memtable::ImmId;
 use crate::hummock::utils::{range_overlap, MemoryTracker};
 use crate::hummock::value::HummockValue;
-use crate::hummock::{create_monotonic_deletes, DeleteRangeTombstone, HummockEpoch, HummockResult};
+use crate::hummock::{
+    create_monotonic_events, create_tombstones_to_represent_monotonic_deletes,
+    DeleteRangeTombstone, HummockEpoch, HummockResult, MonotonicDeleteEvent,
+};
 use crate::storage_value::StorageValue;
 use crate::store::ReadOptions;
 
@@ -55,7 +58,7 @@ pub(crate) struct SharedBufferBatchInner {
     imm_ids: Vec<ImmId>,
     /// The epochs of the data in batch, sorted in ascending order (old to new)
     epochs: Vec<HummockEpoch>,
-    monotonic_deletes: Vec<DeleteRangeTombstone>,
+    monotonic_tombstone_events: Vec<MonotonicDeleteEvent>,
     largest_table_key: Vec<u8>,
     smallest_table_key: Vec<u8>,
     kv_count: usize,
@@ -96,17 +99,16 @@ impl SharedBufferBatchInner {
             .map(|(k, v)| (k, vec![(epoch, v)]))
             .collect_vec();
 
-        let mut monotonic_deletes = Vec::with_capacity(range_tombstones.len() * 2);
-        let range_tombstones_len = range_tombstones.len();
-        for i in 0..range_tombstones_len {
-            monotonic_deletes.push(range_tombstones[i].clone());
-            if i + 1 < range_tombstones_len {
-                monotonic_deletes.push(DeleteRangeTombstone {
-                    start_user_key: range_tombstones[i].end_user_key.clone(),
-                    end_user_key: range_tombstones[i + 1].start_user_key.clone(),
-                    sequence: HummockEpoch::MAX,
-                });
-            }
+        let mut monotonic_tombstone_events = Vec::with_capacity(range_tombstones.len() * 2);
+        for range_tombstone in &range_tombstones {
+            monotonic_tombstone_events.push(MonotonicDeleteEvent {
+                event_key: range_tombstone.start_user_key.clone(),
+                new_epoch: range_tombstone.sequence,
+            });
+            monotonic_tombstone_events.push(MonotonicDeleteEvent {
+                event_key: range_tombstone.end_user_key.clone(),
+                new_epoch: HummockEpoch::MAX,
+            });
         }
 
         let batch_id = SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed);
@@ -114,7 +116,7 @@ impl SharedBufferBatchInner {
             payload: items,
             imm_ids: vec![batch_id],
             epochs: vec![epoch],
-            monotonic_deletes,
+            monotonic_tombstone_events,
             kv_count,
             size,
             largest_table_key,
@@ -142,12 +144,12 @@ impl SharedBufferBatchInner {
 
         let max_imm_id = *imm_ids.iter().max().unwrap();
 
-        let monotonic_deletes = create_monotonic_deletes(&range_tombstone_list);
+        let monotonic_tombstone_events = create_monotonic_events(&range_tombstone_list);
         Self {
             payload,
             epochs,
             imm_ids,
-            monotonic_deletes,
+            monotonic_tombstone_events,
             largest_table_key,
             smallest_table_key,
             kv_count: num_items,
@@ -235,21 +237,13 @@ impl SharedBufferBatchInner {
     }
 
     fn get_min_delete_range_epoch(&self, query_user_key: &UserKey<&[u8]>) -> HummockEpoch {
-        let idx = self.monotonic_deletes.partition_point(
-            |DeleteRangeTombstone { start_user_key, .. }| {
-                start_user_key.as_ref().le(query_user_key)
-            },
+        let idx = self.monotonic_tombstone_events.partition_point(
+            |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(query_user_key),
         );
-        if idx == 0
-            || (idx == self.monotonic_deletes.len()
-                && self.monotonic_deletes[idx - 1]
-                    .end_user_key
-                    .as_ref()
-                    .le(query_user_key))
-        {
+        if idx == 0 {
             HummockEpoch::MAX
         } else {
-            self.monotonic_deletes[idx - 1].sequence
+            self.monotonic_tombstone_events[idx - 1].new_epoch
         }
     }
 }
@@ -452,7 +446,7 @@ impl SharedBufferBatch {
 
     #[inline(always)]
     pub fn has_range_tombstone(&self) -> bool {
-        !self.inner.monotonic_deletes.is_empty()
+        !self.inner.monotonic_tombstone_events.is_empty()
     }
 
     /// return inclusive right endpoint, which means that all data in this batch should be smaller
@@ -521,7 +515,7 @@ impl SharedBufferBatch {
     }
 
     pub fn get_delete_range_tombstones(&self) -> Vec<DeleteRangeTombstone> {
-        self.inner.monotonic_deletes.clone()
+        create_tombstones_to_represent_monotonic_deletes(&self.inner.monotonic_tombstone_events)
     }
 
     #[cfg(test)]
@@ -748,18 +742,14 @@ impl SharedBufferDeleteRangeIterator {
 
 impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
     fn next_user_key(&self) -> UserKey<&[u8]> {
-        if self.next_idx > 0 {
-            self.inner.monotonic_deletes[self.next_idx - 1]
-                .end_user_key
-                .as_ref()
-        } else {
-            self.inner.monotonic_deletes[0].start_user_key.as_ref()
-        }
+        self.inner.monotonic_tombstone_events[self.next_idx]
+            .event_key
+            .as_ref()
     }
 
     fn current_epoch(&self) -> HummockEpoch {
         if self.next_idx > 0 {
-            self.inner.monotonic_deletes[self.next_idx - 1].sequence
+            self.inner.monotonic_tombstone_events[self.next_idx - 1].new_epoch
         } else {
             HummockEpoch::MAX
         }
@@ -774,28 +764,13 @@ impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
     }
 
     fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
-        let monotonic_deletes = &self.inner.monotonic_deletes;
-        if !monotonic_deletes.is_empty() {
-            self.next_idx = monotonic_deletes.partition_point(
-                |DeleteRangeTombstone { start_user_key, .. }| {
-                    start_user_key.as_ref().le(&target_user_key)
-                },
-            );
-            if self.next_idx == monotonic_deletes.len() {
-                if monotonic_deletes[self.next_idx - 1]
-                    .end_user_key
-                    .as_ref()
-                    .le(&target_user_key)
-                {
-                    self.next_idx += 1;
-                }
-            }
-        }
+        self.next_idx = self.inner.monotonic_tombstone_events.partition_point(
+            |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(&target_user_key),
+        );
     }
 
     fn is_valid(&self) -> bool {
-        let len = self.inner.monotonic_deletes.len();
-        len > 0 && self.next_idx <= len
+        self.next_idx < self.inner.monotonic_tombstone_events.len()
     }
 }
 

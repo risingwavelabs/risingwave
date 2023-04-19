@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use tokio::task::JoinHandle;
 
-use super::{CompactionDeleteRanges, DeleteRangeTombstone};
+use super::{CompactionDeleteRanges, MonotonicDeleteEvent};
 use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::sstable::filter::FilterBuilder;
 use crate::hummock::sstable_store::SstableStoreRef;
@@ -184,7 +184,7 @@ where
     /// will be no-op.
     pub async fn seal_current(
         &mut self,
-        monotonic_deletes: Vec<DeleteRangeTombstone>,
+        monotonic_deletes: Vec<MonotonicDeleteEvent>,
     ) -> HummockResult<()> {
         if let Some(mut builder) = self.current_builder.take() {
             builder.add_monotonic_deletes(monotonic_deletes);

@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::key::UserKey;
 use risingwave_hummock_sdk::HummockEpoch;
 
-use super::{create_monotonic_deletes, DeleteRangeTombstone};
+use super::{create_monotonic_events, DeleteRangeTombstone, MonotonicDeleteEvent};
 use crate::hummock::iterator::DeleteRangeIterator;
 use crate::hummock::sstable_store::TableHolder;
 use crate::hummock::Sstable;
@@ -198,7 +198,7 @@ impl CompactionDeleteRanges {
         &self,
         smallest_user_key: &UserKey<&[u8]>,
         largest_user_key: &UserKey<&[u8]>,
-    ) -> Vec<DeleteRangeTombstone> {
+    ) -> Vec<MonotonicDeleteEvent> {
         if self.gc_delete_keys {
             return vec![];
         }
@@ -220,7 +220,7 @@ impl CompactionDeleteRanges {
             }
         }
 
-        create_monotonic_deletes(&tombstones)
+        create_monotonic_events(&tombstones)
     }
 }
 
@@ -288,20 +288,14 @@ impl SstableDeleteRangeIterator {
 
 impl DeleteRangeIterator for SstableDeleteRangeIterator {
     fn next_user_key(&self) -> UserKey<&[u8]> {
-        if self.next_idx > 0 {
-            self.table.value().meta.monotonic_tombstones[self.next_idx - 1]
-                .end_user_key
-                .as_ref()
-        } else {
-            self.table.value().meta.monotonic_tombstones[0]
-                .start_user_key
-                .as_ref()
-        }
+        self.table.value().meta.monotonic_tombstone_events[self.next_idx]
+            .event_key
+            .as_ref()
     }
 
     fn current_epoch(&self) -> HummockEpoch {
         if self.next_idx > 0 {
-            self.table.value().meta.monotonic_tombstones[self.next_idx - 1].sequence
+            self.table.value().meta.monotonic_tombstone_events[self.next_idx - 1].new_epoch
         } else {
             HummockEpoch::MAX
         }
@@ -316,28 +310,18 @@ impl DeleteRangeIterator for SstableDeleteRangeIterator {
     }
 
     fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
-        let monotonic_deletes = &self.table.value().meta.monotonic_tombstones;
-        if !monotonic_deletes.is_empty() {
-            self.next_idx = monotonic_deletes.partition_point(
-                |DeleteRangeTombstone { start_user_key, .. }| {
-                    start_user_key.as_ref().le(&target_user_key)
-                },
-            );
-            if self.next_idx == monotonic_deletes.len() {
-                if monotonic_deletes[self.next_idx - 1]
-                    .end_user_key
-                    .as_ref()
-                    .le(&target_user_key)
-                {
-                    self.next_idx += 1;
-                }
-            }
-        }
+        self.next_idx = self
+            .table
+            .value()
+            .meta
+            .monotonic_tombstone_events
+            .partition_point(|MonotonicDeleteEvent { event_key, .. }| {
+                event_key.as_ref().le(&target_user_key)
+            });
     }
 
     fn is_valid(&self) -> bool {
-        let len = self.table.value().meta.monotonic_tombstones.len();
-        len > 0 && self.next_idx <= len
+        self.next_idx < self.table.value().meta.monotonic_tombstone_events.len()
     }
 }
 
@@ -345,19 +329,13 @@ pub fn get_min_delete_range_epoch_from_sstable(
     table: &Sstable,
     query_user_key: &UserKey<&[u8]>,
 ) -> HummockEpoch {
-    let idx = table.meta.monotonic_tombstones.partition_point(
-        |DeleteRangeTombstone { start_user_key, .. }| start_user_key.as_ref().le(query_user_key),
+    let idx = table.meta.monotonic_tombstone_events.partition_point(
+        |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(query_user_key),
     );
-    if idx == 0
-        || (idx == table.meta.monotonic_tombstones.len()
-            && table.meta.monotonic_tombstones[idx - 1]
-                .end_user_key
-                .as_ref()
-                .le(query_user_key))
-    {
+    if idx == 0 {
         HummockEpoch::MAX
     } else {
-        table.meta.monotonic_tombstones[idx - 1].sequence
+        table.meta.monotonic_tombstone_events[idx - 1].new_epoch
     }
 }
 
@@ -451,11 +429,11 @@ mod tests {
             &test_user_key(b"bbbb").as_ref(),
             &test_user_key(b"eeeeee").as_ref(),
         );
-        assert_eq!(3, split_ranges.len());
-        assert_eq!(test_user_key(b"bbbb"), split_ranges[0].start_user_key);
-        assert_eq!(test_user_key(b"cccc"), split_ranges[1].start_user_key);
-        assert_eq!(test_user_key(b"dddd"), split_ranges[2].start_user_key);
-        assert_eq!(test_user_key(b"eeeeee"), split_ranges[2].end_user_key);
+        assert_eq!(4, split_ranges.len());
+        assert_eq!(test_user_key(b"bbbb"), split_ranges[0].event_key);
+        assert_eq!(test_user_key(b"cccc"), split_ranges[1].event_key);
+        assert_eq!(test_user_key(b"dddd"), split_ranges[2].event_key);
+        assert_eq!(test_user_key(b"eeeeee"), split_ranges[3].event_key);
     }
 
     #[tokio::test]

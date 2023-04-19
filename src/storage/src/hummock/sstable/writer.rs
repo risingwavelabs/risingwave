@@ -106,7 +106,7 @@ mod tests {
             smallest_key: Vec::new(),
             largest_key: Vec::new(),
             meta_offset: data.len() as u64,
-            monotonic_tombstones: vec![],
+            monotonic_tombstone_events: vec![],
             version: VERSION,
         };
 
