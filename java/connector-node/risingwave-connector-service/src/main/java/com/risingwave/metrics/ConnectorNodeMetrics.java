@@ -153,7 +153,7 @@ public class ConnectorNodeMetrics {
     }
 
     public static void incSinkRowsReceived(String sinkType, String sinkId, double amt) {
-        sourceRowsReceived.labels(sinkType, sinkId).inc(amt);
+        sinkRowsReceived.labels(sinkType, sinkId).inc(amt);
     }
 
     public static void incTotalConnections(String sinkType, String ip) {
