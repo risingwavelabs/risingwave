@@ -647,7 +647,7 @@ impl<'a> iter::Iterator for BitmapOnesIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         while self.cur_bits == Some(0) {
             self.cur_idx += 1;
-            self.cur_bits = if self.cur_idx >= self.bits.len() {
+            self.cur_bits = if self.cur_idx >= self.bitmap.bits.len() {
                 None
             } else {
                 Some(self.bitmap.bits[self.cur_idx])
@@ -657,7 +657,7 @@ impl<'a> iter::Iterator for BitmapOnesIter<'a> {
             let low_bit = bits & bits.wrapping_neg();
             let low_bit_idx = bits.trailing_zeros();
             self.cur_bits = Some(bits ^ low_bit);
-            Some(self.cur_idx * BITS + low_bit_idx as usize)
+            self.cur_idx * BITS + low_bit_idx as usize
         })
     }
 }
