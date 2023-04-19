@@ -373,7 +373,7 @@ impl<const APPEND_ONLY: bool> Sink for KafkaSink<APPEND_ONLY> {
         self.in_transaction_epoch = Some(epoch);
         self.do_with_retry(|conductor| conductor.start_transaction())
             .await?;
-        tracing::info!("begin epoch {:?}", epoch);
+        tracing::debug!("begin epoch {:?}", epoch);
         Ok(())
     }
 
@@ -392,14 +392,14 @@ impl<const APPEND_ONLY: bool> Sink for KafkaSink<APPEND_ONLY> {
             );
             return Err(SinkError::Kafka(KafkaError::Canceled));
         }
-        tracing::info!("commit epoch {:?}", self.state);
+        tracing::debug!("commit epoch {:?}", self.state);
         Ok(())
     }
 
     async fn abort(&mut self) -> Result<()> {
         self.do_with_retry(|conductor| conductor.abort_transaction())
             .await?;
-        tracing::info!("abort epoch {:?}", self.in_transaction_epoch);
+        tracing::debug!("abort epoch {:?}", self.in_transaction_epoch);
         self.in_transaction_epoch = None;
         Ok(())
     }
@@ -518,10 +518,8 @@ impl KafkaTransactionConductor {
             if config.use_transaction {
                 c.set("transactional.id", &config.identifier); // required by kafka transaction
             }
-            let client_ctx = PrivateLinkProducerContext::new(
-                "sink".to_string(),
-                config.common.broker_rewrite_map.clone(),
-            )?;
+            let client_ctx =
+                PrivateLinkProducerContext::new(config.common.broker_rewrite_map.clone())?;
             c.create_with_context(client_ctx).await?
         };
 

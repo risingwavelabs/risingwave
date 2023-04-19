@@ -93,8 +93,6 @@ impl SinkConfig {
         properties.remove(PRIVATE_LINK_TARGET_KEY);
         properties.remove(CONNECTION_NAME_KEY);
 
-        tracing::info!("sink properties: {:?}", properties);
-
         let sink_type = properties
             .get(CONNECTOR_TYPE_KEY)
             .ok_or_else(|| SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY)))?;
