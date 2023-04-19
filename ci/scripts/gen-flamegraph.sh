@@ -16,6 +16,8 @@ download_build_artifacts() {
   # Create this so `risedev` tool can locate the binaries.
   mkdir -p target/release
   echo "$ARTIFACTS" | xargs -I 'buildkite-agent artifact download ./%-bench && mv ./%-bench target/release/%'
+
+  buildkite-agent artifact download ./promql-bench && mv ./promql-bench /usr/local/bin/promql
 }
 
 install_nexmark_bench() {
@@ -61,14 +63,12 @@ setup_nexmark_bench() {
 
 # Install artifacts + tools, configure environment
 setup() {
-  echo "--- Installing promql cli"
-  git clone https://github.com/nalbury/promql-cli.git
-  pushd promql-cli/
-  OS=linux INSTALL_PATH=/usr/local/bin make install
-  popd
 
   echo "--- Downloading build artifacts"
   download_build_artifacts
+
+  echo "--- Tryout promql"
+  promql
 
   echo "--- Setting up nexmark-bench"
   # setup_nexmark_bench

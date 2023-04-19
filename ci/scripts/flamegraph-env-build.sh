@@ -13,8 +13,14 @@ cargo build \
     -p risingwave_java_binding \
     --features "static-link static-log-level" --profile release
 
+echo "--- Installing promql cli client"
+git clone https://github.com/nalbury/promql-cli.git
+pushd promql-cli/
+OS=linux INSTALL_PATH=../target/release make install
+popd
+
 # the file name suffix of artifact for risingwave_java_binding is so only for linux. It is dylib for MacOS
-artifacts=(risingwave risedev-dev librisingwave_java_binding.so)
+artifacts=(promql risingwave risedev-dev librisingwave_java_binding.so)
 
 echo "--- Show link info"
 ldd target/release/risingwave
