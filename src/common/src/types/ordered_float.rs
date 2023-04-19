@@ -52,8 +52,8 @@ use core::str::FromStr;
 
 pub use num_traits::Float;
 use num_traits::{
-    AsPrimitive, Bounded, CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub,
-    FromPrimitive, Num, NumCast, One, Pow, Signed, ToPrimitive, Zero,
+    Bounded, CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, FromPrimitive,
+    Num, NumCast, One, Pow, Signed, ToPrimitive, Zero,
 };
 
 // masks for the parts of the IEEE 754 float
@@ -1066,7 +1066,7 @@ mod impl_from {
         }
     }
 
-    macro_rules! impl_from {
+    macro_rules! impl_from_lossless {
         ($ty:ty, $f:ty) => {
             impl From<$ty> for OrderedFloat<$f> {
                 fn from(n: $ty) -> Self {
@@ -1077,16 +1077,24 @@ mod impl_from {
         };
     }
 
-    impl_from!(i16, f32);
-
-    impl_from!(i16, f64);
-    impl_from!(i32, f64);
-}
-
-impl From<i64> for OrderedFloat<f64> {
-    fn from(n: i64) -> Self {
-        AsPrimitive::<OrderedFloat<f64>>::as_(n)
+    macro_rules! impl_from_approx {
+        ($ty:ty, $f:ty) => {
+            impl From<$ty> for OrderedFloat<$f> {
+                fn from(n: $ty) -> Self {
+                    let inner: $f = n as _;
+                    Self(inner)
+                }
+            }
+        };
     }
+
+    impl_from_lossless!(i16, f32);
+    impl_from_approx!(i32, f32);
+    impl_from_approx!(i64, f32);
+
+    impl_from_lossless!(i16, f64);
+    impl_from_lossless!(i32, f64);
+    impl_from_approx!(i64, f64);
 }
 
 mod impl_into_ordered {
@@ -1138,6 +1146,38 @@ mod tests {
 
         use num_traits::Signed as _;
         assert_eq!(nan.abs(), nan.abs());
+    }
+
+    fn test_into_f32(expected: [u8; 4], v: impl Into<OrderedFloat<f32>>) {
+        assert_eq!(expected, v.into().0.to_be_bytes());
+    }
+
+    fn test_into_f64(expected: [u8; 8], v: impl Into<OrderedFloat<f64>>) {
+        assert_eq!(expected, v.into().0.to_be_bytes());
+    }
+
+    #[test]
+    fn test_ordered_float_cast() {
+        // Expectations obtained from PostgreSQL: select float4send('-32768'::int2::float4);
+        test_into_f32([0xc7, 0x00, 0x00, 0x00], i16::MIN);
+        test_into_f32([0xc6, 0xff, 0xfe, 0x00], -i16::MAX);
+        test_into_f32([0x46, 0xff, 0xfe, 0x00], i16::MAX);
+        test_into_f32([0xcf, 0x00, 0x00, 0x00], i32::MIN);
+        test_into_f32([0xcf, 0x00, 0x00, 0x00], -i32::MAX); // approx, so same as above
+        test_into_f32([0x4f, 0x00, 0x00, 0x00], i32::MAX);
+        test_into_f32([0xdf, 0x00, 0x00, 0x00], i64::MIN);
+        test_into_f32([0xdf, 0x00, 0x00, 0x00], -i64::MAX); // approx
+        test_into_f32([0x5f, 0x00, 0x00, 0x00], i64::MAX);
+
+        test_into_f64([0xc0, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], i16::MIN);
+        test_into_f64([0xc0, 0xdf, 0xff, 0xc0, 0x00, 0x00, 0x00, 0x00], -i16::MAX);
+        test_into_f64([0x40, 0xdf, 0xff, 0xc0, 0x00, 0x00, 0x00, 0x00], i16::MAX);
+        test_into_f64([0xc1, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], i32::MIN);
+        test_into_f64([0xc1, 0xdf, 0xff, 0xff, 0xff, 0xc0, 0x00, 0x00], -i32::MAX);
+        test_into_f64([0x41, 0xdf, 0xff, 0xff, 0xff, 0xc0, 0x00, 0x00], i32::MAX);
+        test_into_f64([0xc3, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], i64::MIN);
+        test_into_f64([0xc3, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], -i64::MAX); // approx
+        test_into_f64([0x43, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], i64::MAX);
     }
 
     #[test]
