@@ -17,7 +17,7 @@ use std::collections::VecDeque;
 use risingwave_expr::function::window::Frame;
 
 /// Actually with `VecDeque` as internal buffer, we don't need split key and value here. Just in
-/// case we want to switch to BTreeMap later, so that the general version of `OverWindow` executor
+/// case we want to switch to `BTreeMap` later, so that the general version of `OverWindow` executor
 /// can reuse this.
 struct Entry<K: Ord, V> {
     key: K,
@@ -83,7 +83,7 @@ impl<K: Ord, V> WindowBuffer<K, V> {
                 Frame::Rows(start, _) => {
                     let start_off = start.to_offset();
                     if let Some(start_off) = start_off {
-                        self.curr_idx - LEFT_IDX >= start_off.abs() as usize
+                        self.curr_idx - LEFT_IDX >= start_off.unsigned_abs()
                     } else {
                         // unbounded frame start, never be saturated
                         false

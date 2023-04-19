@@ -18,6 +18,7 @@ use futures::FutureExt;
 use risingwave_common::array::{DataChunk, Vis};
 use risingwave_common::must_match;
 use risingwave_common::types::{DataType, Datum};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::function::aggregate::{AggArgs, AggCall};
 use risingwave_expr::function::window::{WindowFuncCall, WindowFuncKind};
 use risingwave_expr::vector_op::agg::AggStateFactory;
@@ -117,7 +118,7 @@ impl BatchAggregatorWrapper<'_> {
             .map(|data_type| data_type.create_array_builder(n_values))
             .collect::<Vec<_>>();
         for value in values {
-            for (builder, datum) in args_builders.iter_mut().zip(value.iter()) {
+            for (builder, datum) in args_builders.iter_mut().zip_eq_fast(value.iter()) {
                 builder.append_datum(datum);
             }
         }
