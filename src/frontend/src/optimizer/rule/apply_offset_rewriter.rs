@@ -55,7 +55,8 @@ impl ApplyOffsetRewriter {
             index_mapping: ColIndexMapping::new(
                 correlated_indices.iter().copied().map(Some).collect_vec(),
             )
-            .inverse(),
+            .inverse()
+            .expect("must be invertible"),
             has_correlated_input_ref: false,
             correlated_id,
         }
