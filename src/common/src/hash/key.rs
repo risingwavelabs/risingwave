@@ -39,7 +39,7 @@ use crate::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayError, ArrayImpl, ArrayResult, DataChunk, JsonbRef,
     ListRef, StructRef,
 };
-use crate::collection::estimate_size::EstimateSize;
+use crate::estimate_size::EstimateSize;
 use crate::row::{OwnedRow, RowDeserializer};
 use crate::types::num256::Int256Ref;
 use crate::types::{DataType, Date, Decimal, ScalarRef, Time, Timestamp, F32, F64};
@@ -498,7 +498,7 @@ impl HashKeySerDe<'_> for F32 {
     type S = [u8; 4];
 
     fn serialize(self) -> Self::S {
-        self.normalized().to_ne_bytes()
+        self.normalized().0.to_ne_bytes()
     }
 
     fn deserialize<R: Read>(source: &mut R) -> Self {
@@ -511,7 +511,7 @@ impl HashKeySerDe<'_> for F64 {
     type S = [u8; 8];
 
     fn serialize(self) -> Self::S {
-        self.normalized().to_ne_bytes()
+        self.normalized().0.to_ne_bytes()
     }
 
     fn deserialize<R: Read>(source: &mut R) -> Self {

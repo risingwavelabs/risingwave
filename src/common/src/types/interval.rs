@@ -1259,15 +1259,15 @@ fn convert_hms(c: &mut Vec<String>, t: &mut Vec<TimeStrToken>) -> Option<()> {
         t.push(TimeStrToken::TimeUnit(DateTimeField::Minute))
     }
     if let Some(s) = c.get(2) {
-        let mut v: F64 = s.parse().ok()?;
+        let mut v: f64 = s.parse().ok()?;
         // PostgreSQL allows '60.x' for seconds.
-        if !(0f64 <= *v && *v < 61f64) {
+        if !(0f64..61f64).contains(&v) {
             return None;
         }
         if is_neg {
-            v = v.checked_neg()?;
+            v = -v;
         }
-        t.push(TimeStrToken::Second(v));
+        t.push(TimeStrToken::Second(v.into()));
         t.push(TimeStrToken::TimeUnit(DateTimeField::Second))
     }
     Some(())

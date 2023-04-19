@@ -14,7 +14,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
-use std::ptr::NonNull;
 use std::sync::Arc;
 
 use futures::{stream, Stream, StreamExt};
@@ -43,7 +42,7 @@ use super::{
     expect_first_barrier, ActorContextRef, ExecutorInfo, PkIndicesRef, StreamExecutorResult,
     Watermark,
 };
-use crate::cache::{cache_may_stale, new_with_hasher, ExecutorCache};
+use crate::cache::{cache_may_stale, new_with_hasher, ManagedLruCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::aggregation::{generate_agg_schema, AggGroup as GenericAggGroup};
@@ -53,7 +52,7 @@ use crate::executor::{BoxedMessageStream, Executor, Message};
 use crate::task::AtomicU64Ref;
 
 type AggGroup<S> = GenericAggGroup<S, OnlyOutputIfHasInput>;
-type AggGroupCache<K, S> = ExecutorCache<K, AggGroup<S>, PrecomputedBuildHasher>;
+type AggGroupCache<K, S> = ManagedLruCache<K, AggGroup<S>, PrecomputedBuildHasher>;
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -472,7 +471,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // Apply chunk to each of the state (per agg_call), for each group.
         for (key, visibility) in group_visibilities {
-            let agg_group = vars.agg_group_cache.get_mut(&key).unwrap();
+            let mut agg_group = vars.agg_group_cache.get_mut(&key).unwrap();
             let visibilities = call_visibilities
                 .iter()
                 .map(Option::as_ref)
@@ -548,20 +547,24 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             .drain()
             .map(|key| {
                 // Get agg group of the key.
-                let mut ptr: NonNull<_> = vars
-                    .agg_group_cache
-                    .get_mut(&key)
+                vars.agg_group_cache
+                    .get_mut_unsafe(&key)
                     .expect("changed group must have corresponding AggGroup")
-                    .into();
-                // SAFETY: `key`s in `keys_in_batch` are unique by nature, because they're
-                // from `group_change_set` which is a set.
-                unsafe { ptr.as_mut() }
             })
-            .map(|agg_group| async {
-                // Get agg outputs and build change.
-                let curr_outputs = agg_group.get_outputs(&this.storages).await?;
-                let change = agg_group.build_change(curr_outputs);
-                Ok::<_, StreamExecutorError>(change)
+            .map(|mut agg_group| {
+                let storages = &this.storages;
+                // SAFETY:
+                // 1. `key`s in `keys_in_batch` are unique by nature, because they're
+                // from `group_change_set` which is a set.
+                //
+                // 2. `MutGuard` should not be sent to other tasks.
+                let mut agg_group = unsafe { agg_group.as_mut_guard() };
+                async move {
+                    // Get agg outputs and build change.
+                    let curr_outputs = agg_group.get_outputs(storages).await?;
+                    let change = agg_group.build_change(curr_outputs);
+                    Ok::<_, StreamExecutorError>(change)
+                }
             });
 
         // TODO(rc): figure out a more reasonable concurrency limit.
@@ -631,10 +634,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         let mut vars = ExecutionVars {
             stats: ExecutionStats::new(),
-            agg_group_cache: AggGroupCache::new(new_with_hasher(
-                this.watermark_epoch.clone(),
-                PrecomputedBuildHasher,
-            )),
+            agg_group_cache: new_with_hasher(this.watermark_epoch.clone(), PrecomputedBuildHasher),
             group_change_set: HashSet::new(),
             distinct_dedup: DistinctDeduplicater::new(&this.agg_calls, &this.watermark_epoch),
             buffered_watermarks: vec![None; this.group_key_indices.len()],

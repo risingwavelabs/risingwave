@@ -22,7 +22,7 @@ use risingwave_pb::data::{ArrayType, PbArray};
 use super::{Array, ArrayBuilder, ArrayMeta};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::collection::estimate_size::EstimateSize;
+use crate::estimate_size::EstimateSize;
 use crate::util::iter_util::ZipEqDebug;
 
 /// `BytesArray` is a collection of Rust `[u8]`s.

@@ -26,7 +26,7 @@ use serde::{Deserializer, Serializer};
 
 use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayMeta, ArrayResult, RowRef};
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::collection::estimate_size::EstimateSize;
+use crate::estimate_size::EstimateSize;
 use crate::row::Row;
 use crate::types::to_text::ToText;
 use crate::types::{hash_datum, DataType, Datum, DatumRef, Scalar, ScalarRefImpl, ToDatumRef};

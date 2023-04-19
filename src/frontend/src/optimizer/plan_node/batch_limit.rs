@@ -50,14 +50,22 @@ impl BatchLimit {
         let logical_partial_limit = LogicalLimit::new(input, new_limit, new_offset);
         let batch_partial_limit = Self::new(logical_partial_limit);
         let any_order = Order::any();
-        let ensure_single_dist = RequiredDist::single().enforce_if_not_satisfies(
-            batch_partial_limit.into(),
-            if self.order().column_orders.is_empty() {
-                &any_order
-            } else {
-                self.order()
-            },
-        )?;
+
+        let single_dist = RequiredDist::single();
+        let ensure_single_dist = if !batch_partial_limit.distribution().satisfies(&single_dist) {
+            single_dist.enforce_if_not_satisfies(
+                batch_partial_limit.into(),
+                if self.order().column_orders.is_empty() {
+                    &any_order
+                } else {
+                    self.order()
+                },
+            )?
+        } else {
+            // The input's distribution is singleton, so use one phase limit is enough.
+            return Ok(batch_partial_limit.into());
+        };
+
         let batch_global_limit = self.clone_with_input(ensure_single_dist);
         Ok(batch_global_limit.into())
     }
