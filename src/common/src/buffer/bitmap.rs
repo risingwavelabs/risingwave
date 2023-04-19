@@ -340,9 +340,18 @@ impl Bitmap {
 
     /// Enumerates the index of each bit set to 1.
     pub fn iter_ones(&self) -> BitmapOnesIter<'_> {
-        BitmapOnesIter {
-            bitmap: self,
-            idx: 0,
+        if self.num_bits > 0 {
+            BitmapOnesIter {
+                bitmap: self,
+                cur_idx: 0,
+                cur_bits: Some(self.bits[0]),
+            }
+        } else {
+            BitmapOnesIter {
+                bitmap: self,
+                cur_idx: 0,
+                cur_bits: None,
+            }
         }
     }
 
@@ -631,18 +640,31 @@ unsafe impl TrustedLen for BitmapIter<'_> {}
 
 pub struct BitmapOnesIter<'a> {
     bitmap: &'a Bitmap,
-    idx: usize,
+    cur_idx: usize,
+    cur_bits: Option<usize>,
 }
 
 impl<'a> iter::Iterator for BitmapOnesIter<'a> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let next_idx = self.bitmap.next_set_bit(self.idx);
-        if let Some(idx) = next_idx {
-            self.idx = idx + 1;
+        while self.cur_bits == Some(0) {
+            self.cur_idx += 1;
+            self.cur_bits = if self.cur_idx == (self.bitmap.len() + BITS - 1) / BITS {
+                None
+            } else {
+                Some(self.bitmap.bits[self.cur_idx])
+            }
         }
-        next_idx
+        match self.cur_bits {
+            Some(bits) => {
+                let low_bit = bits & bits.wrapping_neg();
+                let low_bit_idx = bits.trailing_zeros();
+                self.cur_bits = self.cur_bits.map(|bits| bits ^ low_bit);
+                Some(self.cur_idx * BITS + low_bit_idx as usize)
+            }
+            _ => None,
+        }
     }
 }
 
