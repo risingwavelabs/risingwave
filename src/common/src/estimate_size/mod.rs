@@ -86,7 +86,7 @@ impl<T: EstimateSize> EstimateSize for HashSet<T> {
     }
 }
 
-macro_rules! estimate_size_impl {
+macro_rules! primitive_estimate_size_impl {
     ($($t:ty)*) => ($(
         impl EstimateSize for $t {
             fn estimated_heap_size(&self) -> usize { 0 }
@@ -102,4 +102,4 @@ macro_rules! estimate_size_impl {
     )*)
 }
 
-estimate_size_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 }
+primitive_estimate_size_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 }

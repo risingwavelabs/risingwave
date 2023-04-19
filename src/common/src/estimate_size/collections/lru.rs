@@ -41,7 +41,9 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
     /// Evict epochs lower than the watermark
     pub fn evict_by_epoch(&mut self, epoch: u64) {
         while let Some((key, value)) = self.inner.pop_lru_by_epoch(epoch) {
-            self.total_size -= key.estimated_size() + value.estimated_size();
+            self.total_size = self
+                .total_size
+                .saturating_sub(key.estimated_size() + value.estimated_size());
         }
     }
 
@@ -56,7 +58,9 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
     }
 
     pub fn put(&mut self, k: K, v: V) -> Option<V> {
-        self.total_size += k.estimated_size() + v.estimated_size();
+        self.total_size = self
+            .total_size
+            .saturating_add(k.estimated_size() + v.estimated_size());
         self.inner.put(k, v)
     }
 
@@ -84,7 +88,9 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
     }
 
     pub fn push(&mut self, k: K, v: V) -> Option<(K, V)> {
-        self.total_size += k.estimated_size() + v.estimated_size();
+        self.total_size = self
+            .total_size
+            .saturating_add(k.estimated_size() + v.estimated_size());
         self.inner.push(k, v)
     }
 
