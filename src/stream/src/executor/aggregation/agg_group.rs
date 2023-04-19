@@ -26,10 +26,10 @@ use risingwave_common::must_match;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::function::aggregate::AggCall;
 use risingwave_storage::StateStore;
 
 use super::agg_state::{AggState, AggStateStorage};
-use super::AggCall;
 use crate::common::table::state_table::StateTable;
 use crate::common::StreamChunkBuilder;
 use crate::executor::error::StreamExecutorResult;

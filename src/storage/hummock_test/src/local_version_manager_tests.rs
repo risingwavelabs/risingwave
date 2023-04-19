@@ -18,7 +18,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
+use risingwave_storage::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_meta::hummock::test_utils::{
     setup_compute_env, update_filter_key_extractor_for_table_ids,

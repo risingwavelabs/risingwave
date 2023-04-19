@@ -55,7 +55,6 @@ risingwave_storage = { path = "../storage" }
 serde_json = "1"
 smallvec = "1"
 static_assertions = "1"
-task_stats_alloc = { path = "../utils/task_stats_alloc" }
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -70,6 +69,9 @@ tokio-metrics = "0.1.0"
 tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
+
+[target.'cfg(enable_task_local_alloc)'.dependencies]
+task_stats_alloc = { path = "../utils/task_stats_alloc" }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

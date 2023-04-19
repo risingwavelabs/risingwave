@@ -422,7 +422,8 @@ impl LogicalScan {
 
         let mut mapping =
             ColIndexMapping::new(self.required_col_idx().iter().map(|i| Some(*i)).collect())
-                .inverse();
+                .inverse()
+                .expect("must be invertible");
         predicate = predicate.rewrite_expr(&mut mapping);
 
         let scan_without_predicate = Self::new(

@@ -100,9 +100,8 @@ impl<PlanRef: GenericPlanRef> ProjectSet<PlanRef> {
         let input_len = self.input.schema().len();
         let mut map = vec![None; 1 + self.select_list.len()];
         for (i, item) in self.select_list.iter().enumerate() {
-            map[1 + i] = match item {
-                ExprImpl::InputRef(input) => Some(input.index()),
-                _ => None,
+            if let ExprImpl::InputRef(input) = item {
+                map[1 + i] = Some(input.index())
             }
         }
         ColIndexMapping::with_target_size(map, input_len)
@@ -111,6 +110,13 @@ impl<PlanRef: GenericPlanRef> ProjectSet<PlanRef> {
     /// Gets the Mapping of columnIndex from input column index to output column index,if a input
     /// column corresponds more than one out columns, mapping to any one
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        self.o2i_col_mapping().inverse()
+        let input_len = self.input.schema().len();
+        let mut map = vec![None; input_len];
+        for (i, item) in self.select_list.iter().enumerate() {
+            if let ExprImpl::InputRef(input) = item {
+                map[input.index()] = Some(1 + i)
+            }
+        }
+        ColIndexMapping::with_target_size(map, 1 + self.select_list.len())
     }
 }

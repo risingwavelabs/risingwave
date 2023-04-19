@@ -29,6 +29,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::function::aggregate::AggCall;
 use risingwave_storage::StateStore;
 
 use super::agg_common::{AggExecutorArgs, GroupAggExecutorExtraArgs};
@@ -44,7 +45,7 @@ use super::{
 use crate::cache::{cache_may_stale, new_with_hasher, ManagedLruCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
-use crate::executor::aggregation::{generate_agg_schema, AggCall, AggGroup as GenericAggGroup};
+use crate::executor::aggregation::{generate_agg_schema, AggGroup as GenericAggGroup};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{BoxedMessageStream, Executor, Message};
@@ -737,11 +738,10 @@ pub mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::*;
+    use risingwave_expr::function::aggregate::{AggArgs, AggCall, AggKind};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
-    use crate::executor::aggregation::{AggArgs, AggCall};
     use crate::executor::test_utils::agg_executor::new_boxed_hash_agg_executor;
     use crate::executor::test_utils::*;
     use crate::executor::{Message, PkIndices, Watermark};
@@ -791,14 +791,12 @@ pub mod tests {
 
         // This is local hash aggregation, so we add another row count state
         let keys = vec![0];
-        let append_only = false;
         let agg_calls = vec![
             AggCall {
                 kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -807,7 +805,6 @@ pub mod tests {
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -816,7 +813,6 @@ pub mod tests {
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -825,6 +821,7 @@ pub mod tests {
         let hash_agg = new_boxed_hash_agg_executor(
             store,
             Box::new(source),
+            false,
             agg_calls,
             0,
             keys,
@@ -897,14 +894,12 @@ pub mod tests {
 
         // This is local hash aggregation, so we add another sum state
         let key_indices = vec![0];
-        let append_only = false;
         let agg_calls = vec![
             AggCall {
                 kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -913,7 +908,6 @@ pub mod tests {
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -923,7 +917,6 @@ pub mod tests {
                 args: AggArgs::Unary(DataType::Int64, 2),
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -932,6 +925,7 @@ pub mod tests {
         let hash_agg = new_boxed_hash_agg_executor(
             store,
             Box::new(source),
+            false,
             agg_calls,
             0,
             key_indices,
@@ -1012,7 +1006,6 @@ pub mod tests {
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only: false,
                 filter: None,
                 distinct: false,
             },
@@ -1021,7 +1014,6 @@ pub mod tests {
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only: false,
                 filter: None,
                 distinct: false,
             },
@@ -1030,6 +1022,7 @@ pub mod tests {
         let hash_agg = new_boxed_hash_agg_executor(
             store,
             Box::new(source),
+            false,
             agg_calls,
             0,
             keys,
@@ -1108,14 +1101,12 @@ pub mod tests {
 
         // This is local hash aggregation, so we add another row count state
         let keys = vec![0];
-        let append_only = true;
         let agg_calls = vec![
             AggCall {
                 kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -1124,7 +1115,6 @@ pub mod tests {
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -1133,6 +1123,7 @@ pub mod tests {
         let hash_agg = new_boxed_hash_agg_executor(
             store,
             Box::new(source),
+            true, // is append only
             agg_calls,
             0,
             keys,
@@ -1192,13 +1183,11 @@ pub mod tests {
         };
         let input_window_col = 1;
         let group_key_indices = vec![input_window_col];
-        let append_only = false;
         let agg_calls = vec![AggCall {
             kind: AggKind::Count, // as row count, index: 0
             args: AggArgs::None,
             return_type: DataType::Int64,
             column_orders: vec![],
-            append_only,
             filter: None,
             distinct: false,
         }];
@@ -1207,6 +1196,7 @@ pub mod tests {
         let hash_agg = new_boxed_hash_agg_executor(
             store,
             Box::new(source),
+            false,
             agg_calls,
             0,
             group_key_indices,

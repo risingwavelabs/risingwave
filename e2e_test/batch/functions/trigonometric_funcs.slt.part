@@ -332,3 +332,102 @@ query R
 SELECT cosd('-NaN')
 ----
 NaN
+
+query R
+SELECT tand(90)
+----
+Infinity
+
+query R
+SELECT tand(-90)
+----
+Infinity
+
+query R
+SELECT tand(270)
+----
+Infinity
+
+query R
+SELECT tand(-270)
+----
+Infinity
+
+
+query R
+SELECT tand(0)
+----
+0
+
+query R
+SELECT tand(('-Inf'))
+----
+NaN
+
+query R
+SELECT tand(('Inf'))
+----
+NaN
+
+query R
+SELECT tand('NaN')
+----
+NaN
+
+query R
+SELECT tand('-NaN')
+----
+NaN
+
+query R
+SELECT abs(tand(20) - 0.36397023426620234) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(tand(-20) + 0.36397023426620234) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(tand(45) - 1) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(tand(-45) + 1) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(tand(60) - 1.7320508075688772) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(tand(-60) + 1.7320508075688772) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(tand(75) - 3.7320508075688776) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(tand(-75) + 3.7320508075688776) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(tand(120) - -1.7320508075688772) < 0.000000000000001
+----
+t
+
+query R
+SELECT abs(tand(-120) + -1.7320508075688772) < 0.000000000000001
+----
+t
+
+
+
