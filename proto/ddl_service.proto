@@ -264,6 +264,7 @@ message CreateConnectionRequest {
   oneof payload {
     PrivateLink private_link = 4;
   }
+  uint32 owner_id = 5;
 }
 
 message CreateConnectionResponse {
