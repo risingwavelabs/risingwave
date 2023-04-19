@@ -27,12 +27,11 @@ use risingwave_storage::StateStore;
 
 use super::top_n_cache::TopNCacheTrait;
 use super::utils::*;
-use super::TopNCache;
+use super::{ManagedTopNState, TopNCache};
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::top_n::ManagedTopNState;
 use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Watermark};
 use crate::task::AtomicU64Ref;
 

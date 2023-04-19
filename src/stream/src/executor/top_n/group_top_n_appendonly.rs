@@ -41,17 +41,16 @@ use risingwave_storage::StateStore;
 use super::group_top_n::GroupTopNCache;
 use super::top_n_cache::AppendOnlyTopNCacheTrait;
 use super::utils::*;
-use super::TopNCache;
+use super::{ManagedTopNState, TopNCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::top_n::ManagedTopNState;
 use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Watermark};
 use crate::task::AtomicU64Ref;
 
-/// If the input contains only append, `AppendOnlyGroupTopNExecutor` does not need
-/// to keep all the data records/rows that have been seen. As long as a record
-/// is no longer being in the result set, it can be deleted.
+/// If the input is append-only, `AppendOnlyGroupTopNExecutor` does not need
+/// to keep all the rows seen. As long as a record
+/// is no longer in the result set, it can be deleted.
 pub type AppendOnlyGroupTopNExecutor<K, S, const WITH_TIES: bool> =
     TopNExecutorWrapper<InnerAppendOnlyGroupTopNExecutor<K, S, WITH_TIES>>;
 
