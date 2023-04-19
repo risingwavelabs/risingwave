@@ -83,6 +83,25 @@ pub mod card {
         }
     }
 
+    impl<T> From<T> for Cardinality
+    where
+        T: std::ops::RangeBounds<usize>,
+    {
+        fn from(value: T) -> Self {
+            let lo = match value.start_bound() {
+                std::ops::Bound::Included(lo) => *lo,
+                std::ops::Bound::Excluded(lo) => lo.saturating_add(1),
+                std::ops::Bound::Unbounded => 0,
+            };
+            let hi = match value.end_bound() {
+                std::ops::Bound::Included(hi) => Some(*hi),
+                std::ops::Bound::Excluded(hi) => Some(hi.saturating_sub(1)),
+                std::ops::Bound::Unbounded => None,
+            };
+            Self::new(lo, hi)
+        }
+    }
+
     impl Cardinality {
         /// Creates a new [`Cardinality`] with the given lower and upper bounds.
         pub fn new(lo: usize, hi: impl Into<Hi>) -> Self {
@@ -105,36 +124,29 @@ pub mod card {
             }
         }
 
-        /// Creates a new [`Cardinality`] with exactly `count` rows.
-        pub fn exact(count: usize) -> Self {
-            Self::new(count, Some(count))
-        }
-
-        /// Creates a new [`Cardinality`] with at least `count` rows.
-        pub fn at_least(count: usize) -> Self {
-            Self::new(count, None)
-        }
-
         /// Returns the minimum of the two cardinalities, where the lower and upper bounds are
         /// respectively the minimum of the lower and upper bounds of the two cardinalities.
-        pub fn min(self, rhs: Self) -> Self {
+        pub fn min(self, rhs: impl Into<Self>) -> Self {
+            let rhs = rhs.into();
             Self::new(min(self.lo(), rhs.lo()), min(self.hi, rhs.hi))
         }
 
         /// Returns the maximum of the two cardinalities, where the lower and upper bounds are
         /// respectively the maximum of the lower and upper bounds of the two cardinalities.
-        pub fn max(self, rhs: Self) -> Self {
+        pub fn max(self, rhs: impl Into<Self>) -> Self {
+            let rhs = rhs.into();
             Self::new(max(self.lo(), rhs.lo()), max(self.hi, rhs.hi))
         }
 
-        /// Returns the cardinality with both lower and upper bounds limited to `limit`.
-        pub fn limit_to(self, limit: usize) -> Self {
-            self.min(Self::exact(limit))
+        /// Returns the cardinality with the upper bounds limited to `limit`. The lower bound will
+        /// also be limited to `limit` if it is greater than `limit`.
+        pub fn limit_ub_to(self, limit: usize) -> Self {
+            self.min(limit..=limit)
         }
 
-        /// Returns the cardinality with the lower bound limited to `limit`.
-        pub fn as_low_as(self, limit: usize) -> Self {
-            self.min(Self::at_least(limit))
+        /// Returns the cardinality with the lower bound limited to `limit`, upper bound unchanged.
+        pub fn limit_lb_to(self, limit: usize) -> Self {
+            self.min(limit..)
         }
     }
 
@@ -209,29 +221,29 @@ pub mod card {
         use super::*;
 
         #[test]
-        fn test_limit_to() {
+        fn test_limit_ub_to() {
             let c = Cardinality::new(5, None);
-            let c1 = c.limit_to(3);
+            let c1 = c.limit_ub_to(3);
             assert_eq!(c1.lo(), 3);
             assert_eq!(c1.hi(), Some(3));
             assert_eq!(c1.get_exact(), Some(3));
 
             let c = Cardinality::new(5, None);
-            let c1 = c.limit_to(10);
+            let c1 = c.limit_ub_to(10);
             assert_eq!(c1.lo(), 5);
             assert_eq!(c1.hi(), Some(10));
             assert_eq!(c1.get_exact(), None);
         }
 
         #[test]
-        fn test_as_low_as() {
+        fn test_limit_lb_to() {
             let c = Cardinality::new(5, None);
-            let c1 = c.as_low_as(3);
+            let c1 = c.limit_lb_to(3);
             assert_eq!(c1.lo(), 3);
             assert_eq!(c1.hi(), None);
 
             let c = Cardinality::new(5, 10);
-            let c1 = c.as_low_as(3);
+            let c1 = c.limit_lb_to(3);
             assert_eq!(c1.lo(), 3);
             assert_eq!(c1.hi(), Some(10));
         }
@@ -252,7 +264,7 @@ pub mod card {
             assert_eq!(c2.hi(), None);
 
             let c = Cardinality::new(5, usize::MAX - 1);
-            let c1 = Cardinality::exact(2);
+            let c1 = (2..=2).into();
             let c2 = c + c1;
             assert_eq!(c2.lo(), 7);
             assert_eq!(c2.hi(), None);
@@ -284,21 +296,24 @@ impl PlanVisitor<Cardinality> for CardinalityVisitor {
     }
 
     fn visit_logical_values(&mut self, plan: &plan_node::LogicalValues) -> Cardinality {
-        Cardinality::exact(plan.rows().len())
+        {
+            let count = plan.rows().len();
+            (count..=count).into()
+        }
     }
 
     fn visit_logical_agg(&mut self, plan: &plan_node::LogicalAgg) -> Cardinality {
         let input = self.visit(plan.input());
 
         if plan.group_key().is_empty() {
-            input.limit_to(1)
+            input.limit_ub_to(1)
         } else {
-            input.as_low_as(1)
+            input.limit_lb_to(1)
         }
     }
 
     fn visit_logical_limit(&mut self, plan: &plan_node::LogicalLimit) -> Cardinality {
-        self.visit(plan.input()).limit_to(plan.limit() as usize)
+        self.visit(plan.input()).limit_ub_to(plan.limit() as usize)
     }
 
     fn visit_logical_project(&mut self, plan: &plan_node::LogicalProject) -> Cardinality {
@@ -309,10 +324,12 @@ impl PlanVisitor<Cardinality> for CardinalityVisitor {
         let input = self.visit(plan.input());
 
         match plan.limit_attr() {
-            Limit::Simple(limit) => input.sub(plan.offset() as usize).limit_to(limit as usize),
+            Limit::Simple(limit) => input
+                .sub(plan.offset() as usize)
+                .limit_ub_to(limit as usize),
             Limit::WithTies(limit) => {
                 assert_eq!(plan.offset(), 0, "ties with offset is not supported yet");
-                input.as_low_as(limit as usize)
+                input.limit_lb_to(limit as usize)
             }
         }
     }
@@ -339,9 +356,9 @@ impl PlanVisitor<Cardinality> for CardinalityVisitor {
             .iter()
             .any(|unique_key| eq_set.is_superset(unique_key))
         {
-            input.limit_to(1).as_low_as(0)
+            (0..=1).into()
         } else {
-            input.as_low_as(0)
+            input.limit_lb_to(0)
         }
     }
 
@@ -350,8 +367,7 @@ impl PlanVisitor<Cardinality> for CardinalityVisitor {
             plan.inputs()
                 .into_iter()
                 .map(|input| self.visit(input))
-                .reduce(std::ops::Add::add)
-                .unwrap_or_default()
+                .fold(Cardinality::default(), std::ops::Add::add)
         } else {
             Cardinality::default()
         }
@@ -364,15 +380,19 @@ impl PlanVisitor<Cardinality> for CardinalityVisitor {
         match plan.join_type() {
             JoinType::Unspecified => unreachable!(),
 
-            JoinType::Inner => left.mul(right.as_low_as(0)),
+            // lb = 0, ub multiplied
+            JoinType::Inner => left.mul(right).limit_lb_to(0),
 
             // Each row of some side matches at least one row from the other side or `NULL`.
-            JoinType::LeftOuter => left.mul(right.max(Cardinality::exact(1))),
-            JoinType::RightOuter => right.mul(left.max(Cardinality::exact(1))),
+            // lb = lb of Preserved Row table,
+            // ub multiplied
+            JoinType::LeftOuter => left.mul(right).limit_lb_to(left.lo()),
+            JoinType::RightOuter => right.mul(left).limit_ub_to(right.lo()),
 
             // Rows in the result set must be in some side.
-            JoinType::LeftSemi | JoinType::LeftAnti => left.as_low_as(0),
-            JoinType::RightSemi | JoinType::RightAnti => right.as_low_as(0),
+            // lb = 0, ub unchanged
+            JoinType::LeftSemi | JoinType::LeftAnti => left.limit_lb_to(0),
+            JoinType::RightSemi | JoinType::RightAnti => right.limit_lb_to(0),
 
             // TODO: refine the cardinality of full outer join
             JoinType::FullOuter => Cardinality::default(),
@@ -380,7 +400,7 @@ impl PlanVisitor<Cardinality> for CardinalityVisitor {
     }
 
     fn visit_logical_now(&mut self, _plan: &plan_node::LogicalNow) -> Cardinality {
-        Cardinality::exact(1)
+        (1..=1).into()
     }
 
     fn visit_logical_expand(&mut self, plan: &plan_node::LogicalExpand) -> Cardinality {
