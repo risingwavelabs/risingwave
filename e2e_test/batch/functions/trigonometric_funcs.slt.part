@@ -471,12 +471,12 @@ t
 
 
 query R
-SELECT abs(cotd(120) + 0.5773502691899182) < 0.00000000001; /*Current implementation is unable to calculate this with high accuracy*/
+SELECT abs(cotd(120) + 0.5773502691896255) < 0.000000000000001;
 ----
 t
 
 query R
-SELECT abs(cotd(-120) - 0.5773502691899182) < 0.00000000001; /*Current implementation is unable to calculate this with high accuracy*/
+SELECT abs(cotd(-120) - 0.5773502691896255) < 0.000000000000001;
 ----
 t
 
