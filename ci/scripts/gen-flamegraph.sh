@@ -19,9 +19,6 @@ download_build_artifacts() {
   chmod +x ./promql
   sudo mv ./promql /usr/local/bin/promql
 
-  # Try to run it
-  promql
-
   echo "--- Installing RisingWave components"
   ARTIFACTS="risingwave risedev-dev librisingwave_java_binding.so"
   # Create this so `risedev` tool can locate the binaries.
@@ -74,9 +71,6 @@ setup_nexmark_bench() {
 # Install artifacts + tools, configure environment
 setup() {
   download_build_artifacts
-
-  echo "--- Tryout promql"
-  promql
 
   echo "--- Setting up nexmark-bench"
   # setup_nexmark_bench
