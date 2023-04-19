@@ -77,7 +77,12 @@ main() {
   echo "Success!"
   echo "--- Running Benchmarks"
   echo "Success!"
-  echo "--- Generating flamegraph"
+  echo "--- Start Profiling"
+  echo "Success!"
+  echo "--- Monitoring Benchmark"
+  echo "Success!"
+  echo "--- Benchmark finished"
+  echo "--- Generate flamegraph"
   echo "Success!"
 }
 
