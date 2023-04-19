@@ -84,7 +84,7 @@ pub enum SinkState {
 pub const BLACKHOLE_SINK: &str = "blackhole";
 
 impl SinkConfig {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
+    pub fn from_hashmap(sink_id: u64, properties: HashMap<String, String>) -> Result<Self> {
         const CONNECTOR_TYPE_KEY: &str = "connector";
         let sink_type = properties
             .get(CONNECTOR_TYPE_KEY)
@@ -94,7 +94,9 @@ impl SinkConfig {
                 properties,
             )?))),
             BLACKHOLE_SINK => Ok(SinkConfig::BlackHole),
-            _ => Ok(SinkConfig::Remote(RemoteConfig::from_hashmap(properties)?)),
+            _ => Ok(SinkConfig::Remote(RemoteConfig::from_hashmap(
+                sink_id, properties,
+            )?)),
         }
     }
 

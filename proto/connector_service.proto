@@ -27,6 +27,7 @@ message SinkConfig {
   string connector_type = 1;
   map<string, string> properties = 2;
   TableSchema table_schema = 3;
+  uint64 sink_id = 4;
 }
 
 enum SinkPayloadFormat {

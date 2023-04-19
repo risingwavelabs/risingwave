@@ -30,7 +30,7 @@ pub async fn validate_sink(
     if let Some(connector) = properties.get(DOWNSTREAM_SINK_KEY) && connector == KAFKA_SINK {
         properties.insert("identifier".to_string(), u64::MAX.to_string());
     }
-    let sink_config = SinkConfig::from_hashmap(properties)
+    let sink_config = SinkConfig::from_hashmap(sink_catalog.id.sink_id.into(), properties)
         .map_err(|err| MetaError::from(anyhow!(err.to_string())))?;
 
     SinkImpl::validate(sink_config, sink_catalog, connector_rpc_endpoint)

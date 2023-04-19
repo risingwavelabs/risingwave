@@ -53,11 +53,12 @@ pub fn is_valid_remote_sink(connector_type: &str) -> bool {
 #[derive(Clone, Debug)]
 pub struct RemoteConfig {
     pub connector_type: String,
+    pub sink_id: u64,
     pub properties: HashMap<String, String>,
 }
 
 impl RemoteConfig {
-    pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
+    pub fn from_hashmap(sink_id: u64, values: HashMap<String, String>) -> Result<Self> {
         let connector_type = values
             .get("connector")
             .expect("sink type must be specified")
@@ -71,6 +72,7 @@ impl RemoteConfig {
 
         Ok(RemoteConfig {
             connector_type,
+            sink_id,
             properties: values,
         })
     }
@@ -146,6 +148,7 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
         let (request_sender, mut response) = client
             .start_sink_stream(
                 config.connector_type.clone(),
+                config.sink_id,
                 config.properties.clone(),
                 table_schema,
                 connector_params.sink_payload_format,
@@ -240,6 +243,7 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
         client
             .validate_sink_properties(
                 config.connector_type,
+                config.sink_id,
                 config.properties,
                 Some(table_schema),
                 sink_catalog.sink_type.to_proto(),

@@ -52,7 +52,8 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 format!("sink-{:?}", params.executor_id),
             );
         }
-        let config = SinkConfig::from_hashmap(properties).map_err(StreamExecutorError::from)?;
+        let config = SinkConfig::from_hashmap(sink_desc.id.into(), properties)
+            .map_err(StreamExecutorError::from)?;
 
         Ok(Box::new(
             SinkExecutor::new(

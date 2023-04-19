@@ -67,7 +67,8 @@ public class ConnectorNodeMetrics {
                     .register();
     private static final Counter sinkRowsReceived =
             Counter.build()
-                    .name("sink_rows_received")
+                    .name("connector_sink_rows_received")
+                    .labelNames("sink_type", "sink_id")
                     .help("Number of rows received by sink")
                     .register();
 
@@ -117,6 +118,7 @@ public class ConnectorNodeMetrics {
         registry.register(activeSourceConnections);
         registry.register(activeSinkConnections);
         registry.register(sourceRowsReceived);
+        registry.register(sinkRowsReceived);
         registry.register(cpuUsage);
         registry.register(ramUsage);
         PeriodicMetricsCollector collector = new PeriodicMetricsCollector(1000, "connector");
@@ -150,8 +152,8 @@ public class ConnectorNodeMetrics {
         sourceRowsReceived.labels(sourceType, sourceId).inc(amt);
     }
 
-    public static void incSinkRowsReceived() {
-        sinkRowsReceived.inc();
+    public static void incSinkRowsReceived(String sinkType, String sinkId, double amt) {
+        sourceRowsReceived.labels(sinkType, sinkId).inc(amt);
     }
 
     public static void incTotalConnections(String sinkType, String ip) {

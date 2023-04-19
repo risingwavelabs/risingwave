@@ -328,7 +328,7 @@ mod test {
             ],
         );
 
-        let config = SinkConfig::from_hashmap(properties).unwrap();
+        let config = SinkConfig::from_hashmap(0, properties).unwrap();
         let sink_executor = SinkExecutor::new(
             Box::new(mock),
             Arc::new(StreamingMetrics::unused()),

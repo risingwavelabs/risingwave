@@ -33,6 +33,10 @@ import org.slf4j.LoggerFactory;
 public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.SinkStreamRequest> {
     private SinkBase sink;
 
+    private String sinkType;
+
+    private long sinkId;
+
     private TableSchema tableSchema;
 
     private boolean epochStarted;
@@ -122,7 +126,7 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
 
                 try (CloseableIterator<SinkRow> rowIter =
                         deserializer.deserialize(sinkTask.getWrite())) {
-                    sink.write(new MonitoredRowIterator(rowIter));
+                    sink.write(new MonitoredRowIterator(rowIter, sinkType, String.valueOf(sinkId)));
                 }
 
                 currentBatchId = sinkTask.getWrite().getBatchId();
@@ -207,6 +211,8 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
                 deserializer = new StreamChunkDeserializer(tableSchema);
                 break;
         }
+        sinkType = sinkConfig.getConnectorType();
+        sinkId = sinkConfig.getSinkId();
         ConnectorNodeMetrics.incActiveSinkConnections(sinkConfig.getConnectorType(), "node1");
     }
 }
