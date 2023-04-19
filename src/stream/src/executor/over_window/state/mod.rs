@@ -107,16 +107,10 @@ pub(super) trait WindowState {
     /// Get the current window frame position.
     fn curr_window(&self) -> StatePos<'_>;
 
+    // TODO(rc): split `output` into `curr_output` and `slide` to avoid unnecessary computation on
+    // recovery.
     /// Return the output for the current ready window frame and push the window forward.
     fn output(&mut self) -> StreamExecutorResult<StateOutput>;
-
-    // fn curr_output(&self) -> Datum {
-    //     todo!()
-    // }
-
-    // fn slide(&mut self) -> StateEvictHint {
-    //     todo!()
-    // }
 }
 
 pub(super) fn create_window_state(
