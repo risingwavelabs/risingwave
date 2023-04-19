@@ -499,7 +499,7 @@ mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::function::aggregate::AggArgs;
+    use risingwave_expr::function::aggregate::{AggArgs, AggKind};
     use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncCall, WindowFuncKind};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
@@ -652,5 +652,39 @@ mod tests {
             tx.push_barrier(4, false);
             over_window.expect_barrier().await;
         }
+    }
+
+    #[tokio::test]
+    async fn test_over_window_aggregate() {
+        let store = MemoryStateStore::new();
+        let calls = vec![WindowFuncCall {
+            kind: WindowFuncKind::Aggregate(AggKind::Sum),
+            args: AggArgs::Unary(DataType::Int32, 3),
+            return_type: DataType::Int64,
+            frame: Frame::Rows(FrameBound::Preceding(1), FrameBound::Following(1)),
+        }];
+
+        let (mut tx, mut over_window) = create_executor(calls.clone(), store.clone()).await;
+
+        tx.push_barrier(1, false);
+        over_window.expect_barrier().await;
+
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I T  I   i
+            + 1 p1 100 10
+            + 1 p1 101 16
+            + 4 p1 102 20",
+        ));
+        assert_eq!(1, over_window.expect_watermark().await.val.into_int64());
+        let chunk = over_window.expect_chunk().await;
+        println!("{}", chunk.to_pretty_string());
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " T  I I   I
+                + p1 1 100 26
+                + p1 1 101 46"
+            )
+        );
     }
 }
