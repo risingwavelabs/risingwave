@@ -18,7 +18,7 @@ use risingwave_common::catalog::ColumnCatalog;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 
-use super::{ColumnId, RelationCatalog, SourceId};
+use super::{ColumnId, OwnedByUserCatalog, SourceId};
 use crate::catalog::TableId;
 use crate::user::UserId;
 use crate::WithOptions;
@@ -91,7 +91,7 @@ impl From<&PbSource> for SourceCatalog {
     }
 }
 
-impl RelationCatalog for SourceCatalog {
+impl OwnedByUserCatalog for SourceCatalog {
     fn owner(&self) -> UserId {
         self.owner
     }

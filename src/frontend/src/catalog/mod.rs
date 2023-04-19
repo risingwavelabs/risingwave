@@ -93,15 +93,16 @@ impl From<CatalogError> for RwError {
     }
 }
 
-/// A trait for the catalog of relations (table, index, sink, etc.).
+/// A trait for the catalog with owners, including relations (table, index, sink, etc.) and
+/// function, connection.
 ///
 /// This trait can be used to reduce code duplication and can be extended if needed in the future.
-pub trait RelationCatalog {
-    /// Returns the owner of the relation.
+pub trait OwnedByUserCatalog {
+    /// Returns the owner of the catalog.
     fn owner(&self) -> UserId;
 }
 
-impl RelationCatalog for SinkCatalog {
+impl OwnedByUserCatalog for SinkCatalog {
     fn owner(&self) -> UserId {
         self.owner.user_id
     }

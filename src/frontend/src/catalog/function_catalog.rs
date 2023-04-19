@@ -17,6 +17,8 @@ use risingwave_common::types::DataType;
 use risingwave_pb::catalog::function::PbKind;
 use risingwave_pb::catalog::PbFunction;
 
+use crate::catalog::OwnedByUserCatalog;
+
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct FunctionCatalog {
     pub id: FunctionId,
@@ -61,5 +63,11 @@ impl From<&PbFunction> for FunctionCatalog {
             identifier: prost.identifier.clone(),
             link: prost.link.clone(),
         }
+    }
+}
+
+impl OwnedByUserCatalog for FunctionCatalog {
+    fn owner(&self) -> u32 {
+        self.owner
     }
 }

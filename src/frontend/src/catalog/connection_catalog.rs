@@ -15,12 +15,15 @@
 use risingwave_pb::catalog::{connection, PbConnection};
 
 use super::ConnectionId;
+use crate::catalog::OwnedByUserCatalog;
+use crate::user::UserId;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ConnectionCatalog {
     pub id: ConnectionId,
     pub name: String,
     pub info: connection::Info,
+    owner: UserId,
 }
 
 impl From<&PbConnection> for ConnectionCatalog {
@@ -29,6 +32,13 @@ impl From<&PbConnection> for ConnectionCatalog {
             id: prost.id,
             name: prost.name.clone(),
             info: prost.info.clone().unwrap(),
+            owner: prost.owner,
         }
+    }
+}
+
+impl OwnedByUserCatalog for ConnectionCatalog {
+    fn owner(&self) -> UserId {
+        self.owner
     }
 }
