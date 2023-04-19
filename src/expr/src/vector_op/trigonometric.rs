@@ -284,6 +284,7 @@ pub fn radians_f64(input: F64) -> F64 {
 mod tests {
     use std::f64::consts::PI;
 
+    use num_traits::Float;
     use risingwave_common::types::F64;
 
     use crate::vector_op::trigonometric::*;
@@ -342,14 +343,13 @@ mod tests {
         assert_eq!(cosd_f64(F64::from(90)).0, 0.0);
 
         // cotd
-        assert_eq!(cot_f64(pi), cotd_f64(d));
-        assert_similar(
-            cot_f64((-180_f64).to_radians().into()),
-            cotd_f64(F64::from(-180)),
-        );
-        assert_similar(
-            cot_f64((-190_f64).to_radians().into()),
-            cotd_f64(F64::from(-190)),
+        assert_eq!(F64::from(-f64::INFINITY), cotd_f64(d));
+        assert!(cotd_f64(F64::from(-180)).is_infinite());
+        assert!(
+            (cotd_f64(F64::from(-190)) + F64::from(5.671281819617705))
+                .abs()
+                .0
+                <= 0.00000000000001,
         );
         assert_similar(cot_f64(50_f64.to_radians().into()), cotd_f64(F64::from(50)));
         assert_similar(
