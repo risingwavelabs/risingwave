@@ -74,7 +74,10 @@ fn trim_array(array: Option<ListRef<'_>>, n: Option<i32>) -> Result<Option<ListV
             match TryInto::<usize>::try_into(n) {
                 Ok(n) => {
                     if len < n {
-                        Err(ExprError::CastOutOfRange("parameter n"))
+                        Err(ExprError::InvalidParam {
+                            name: "n",
+                            reason: "more than array length".to_string(),
+                        })
                     } else {
                         Ok(Some(ListValue::new(
                             values
@@ -85,7 +88,10 @@ fn trim_array(array: Option<ListRef<'_>>, n: Option<i32>) -> Result<Option<ListV
                         )))
                     }
                 }
-                Err(_) => Err(ExprError::CastOutOfRange("parameter n")),
+                Err(_) => Err(ExprError::InvalidParam {
+                    name: "n",
+                    reason: "less than zero".to_string(),
+                }),
             }
         }
         _ => Ok(None),
