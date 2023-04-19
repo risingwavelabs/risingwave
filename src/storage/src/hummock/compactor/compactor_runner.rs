@@ -81,6 +81,7 @@ impl CompactorRunner {
                 stats_target_table_ids: Some(HashSet::from_iter(task.existing_table_ids.clone())),
                 task_type: task.task_type(),
                 split_by_table: task.split_by_state_table,
+                priority: task.priority(),
             },
         );
 

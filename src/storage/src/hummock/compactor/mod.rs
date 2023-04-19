@@ -55,6 +55,7 @@ pub use shared_buffer_compact::{compact, merge_imms_in_memory};
 use sysinfo::{CpuRefreshKind, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
+use yatp::task::future::reschedule;
 
 pub use self::compaction_utils::{CompactionStatistics, RemoteBuilderFactory, TaskConfig};
 use self::task_progress::TaskProgress;
@@ -569,9 +570,18 @@ impl Compactor {
         let mut last_table_stats = TableStats::default();
         let mut last_table_id = None;
         let mut compaction_statistics = CompactionStatistics::default();
+        let mut read_count = 0;
+        const MAX_READ_COUNT_RESCHEDULE: usize = 8192;
         while iter.is_valid() {
             let iter_key = iter.key();
             compaction_statistics.iter_total_key_counts += 1;
+            read_count += 1;
+            if read_count > MAX_READ_COUNT_RESCHEDULE
+                && task_config.priority != CompactTaskPriority::High
+            {
+                reschedule().await;
+                read_count = 0;
+            }
 
             let is_new_user_key =
                 last_key.is_empty() || iter_key.user_key != last_key.user_key.as_ref();

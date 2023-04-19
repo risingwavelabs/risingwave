@@ -212,7 +212,7 @@ pub async fn compute_node_serve(
                 sstable_store: storage.sstable_store(),
                 compactor_metrics: compactor_metrics.clone(),
                 is_share_buffer_compact: false,
-                compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
+                compaction_executor: Arc::new(CompactionExecutor::new_priority_pool(Some(1))),
                 filter_key_extractor_manager: storage.filter_key_extractor_manager().clone(),
                 read_memory_limiter,
                 sstable_object_id_manager: storage.sstable_object_id_manager().clone(),

@@ -43,6 +43,14 @@ pub enum TaskHandle<T> {
     Yatp(Receiver<T>),
 }
 
+impl<T: Send + 'static>  TaskHandle<T> {
+    pub fn abort(&self) {
+        if let TaskHandle::Tokio(handle) = self {
+            handle.abort();
+        }
+    }
+}
+
 impl<T: Send + 'static> Future for TaskHandle<T> {
     type Output = HummockResult<T>;
 

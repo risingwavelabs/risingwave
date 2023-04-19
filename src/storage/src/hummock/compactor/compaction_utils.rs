@@ -26,7 +26,9 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator};
-use risingwave_pb::hummock::{compact_task, CompactTask, KeyRange as KeyRange_vec, LevelType};
+use risingwave_pb::hummock::{
+    compact_task, CompactTask, CompactTaskPriority, KeyRange as KeyRange_vec, LevelType,
+};
 
 pub use super::context::CompactorContext;
 use crate::hummock::compactor::{
@@ -125,6 +127,7 @@ pub struct TaskConfig {
     pub stats_target_table_ids: Option<HashSet<u32>>,
     pub task_type: compact_task::TaskType,
     pub split_by_table: bool,
+    pub priority: CompactTaskPriority,
 }
 
 pub fn estimate_state_for_compaction(task: &CompactTask) -> (u64, usize) {

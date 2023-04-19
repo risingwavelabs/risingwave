@@ -324,9 +324,9 @@ impl SealedData {
         self.spilled_data.clear();
         self.imms_by_table_shard.clear();
         self.merged_imms.clear();
-        // self.merging_tasks
-        //     .iter()
-        //     .for_each(|task| task.join_handle.abort());
+        self.merging_tasks
+            .iter()
+            .for_each(|task| task.join_handle.abort());
         self.merging_tasks.clear();
     }
 
@@ -397,7 +397,7 @@ impl SealedData {
         // pop from oldest merging task to restore candidate imms back
         while let Some(task) = self.merging_tasks.pop_back() {
             // cancel the task
-            // task.join_handle.abort();
+            task.join_handle.abort();
             self.imms_by_table_shard
                 .entry((task.table_id, task.instance_id))
                 .and_modify(|imms| imms.extend(task.input_imms.into_iter()));

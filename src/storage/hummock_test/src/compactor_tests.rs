@@ -184,7 +184,7 @@ pub(crate) mod tests {
             hummock_meta_client: hummock_meta_client.clone(),
             compactor_metrics: Arc::new(CompactorMetrics::unused()),
             is_share_buffer_compact: false,
-            compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
+            compaction_executor: Arc::new(CompactionExecutor::new_priority_pool(Some(1))),
             read_memory_limiter: MemoryLimiter::unlimit(),
             filter_key_extractor_manager,
             sstable_object_id_manager: Arc::new(SstableObjectIdManager::new(

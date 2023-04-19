@@ -554,7 +554,7 @@ fn run_compactor_thread(
         sstable_store,
         compactor_metrics,
         is_share_buffer_compact: false,
-        compaction_executor: Arc::new(CompactionExecutor::new(None)),
+        compaction_executor: Arc::new(CompactionExecutor::new_priority_pool(None)),
         filter_key_extractor_manager,
         read_memory_limiter: MemoryLimiter::unlimit(),
         sstable_object_id_manager,
