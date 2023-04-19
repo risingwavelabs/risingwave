@@ -264,6 +264,8 @@ message BandJoinCondition {
   uint32 right_column_idx = 2;
   expr.ExprNode left_greater_conjunction = 3;
   expr.ExprNode right_greater_conjunction = 4;
+  /// 1 means left side bigger, 2 means right side bigger, 0 else.
+  uint32 absolute_bigger_side = 5;
 }
 
 message DeltaExpression {

@@ -80,19 +80,36 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             .collect_vec();
 
         let band_condition = match node.band_condition.as_ref() {
-            Some(band_condition) => Some(BandJoinCondition {
-                left: HalfBandJoinCondition {
-                    column_idx: band_condition.left_column_idx as usize,
-                    band_conjunction: build_from_prost(
-                        band_condition.left_greater_conjunction.as_ref().unwrap(),
-                    )?,
-                },
-                right: HalfBandJoinCondition {
-                    column_idx: band_condition.right_column_idx as usize,
-                    band_conjunction: build_from_prost(
-                        band_condition.right_greater_conjunction.as_ref().unwrap(),
-                    )?,
-                },
+            Some(band_condition) => Some({
+                let mut band = BandJoinCondition {
+                    left: HalfBandJoinCondition {
+                        column_idx: band_condition.left_column_idx as usize,
+                        band_conjunction: build_from_prost(
+                            band_condition.left_greater_conjunction.as_ref().unwrap(),
+                        )?,
+                        is_absolute_bigger_side: 0,
+                    },
+                    right: HalfBandJoinCondition {
+                        column_idx: band_condition.right_column_idx as usize,
+                        band_conjunction: build_from_prost(
+                            band_condition.right_greater_conjunction.as_ref().unwrap(),
+                        )?,
+                        is_absolute_bigger_side: 0,
+                    },
+                };
+                let flag = band_condition.get_absolute_bigger_side();
+                match flag {
+                    1 | 2 => {
+                        band.left.is_absolute_bigger_side = flag;
+                    }
+                    3 | 4 => {
+                        band.right.is_absolute_bigger_side = flag - 2;
+                    }
+                    _ => {
+                        debug_assert_eq!(flag, 0);
+                    }
+                }
+                band
             }),
             None => None,
         };
@@ -184,6 +201,8 @@ pub struct HalfBandJoinCondition {
     pub column_idx: usize,
     /// The band conjunction in which this side('s value) is required to be greater.
     pub band_conjunction: BoxedExpression,
+    /// 1 represents this side greater, 2 represents this side greater than or equal, 0 else.
+    pub is_absolute_bigger_side: u32,
 }
 
 #[derive(Debug)]

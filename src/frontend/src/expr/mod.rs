@@ -311,6 +311,8 @@ pub struct InequalityInputPair {
     pub(crate) key_required_smaller: usize,
     /// greater >= less + delta_expression
     pub(crate) delta_expression: Option<(ExprType, ExprImpl)>,
+    /// Whether the inequality includes equality.
+    pub(crate) can_equal: bool,
 }
 
 impl InequalityInputPair {
@@ -318,11 +320,13 @@ impl InequalityInputPair {
         key_required_larger: usize,
         key_required_smaller: usize,
         delta_expression: Option<(ExprType, ExprImpl)>,
+        can_equal: bool,
     ) -> Self {
         Self {
             key_required_larger,
             key_required_smaller,
             delta_expression,
+            can_equal,
         }
     }
 }
@@ -658,6 +662,8 @@ impl ExprImpl {
                 | ExprType::LessThanOrEqual
                 | ExprType::GreaterThan
                 | ExprType::GreaterThanOrEqual) => {
+                    let can_equal =
+                        matches!(ty, ExprType::LessThanOrEqual | ExprType::GreaterThanOrEqual);
                     let (_, mut op1, mut op2) = function_call.clone().decompose_as_binary();
                     if matches!(ty, ExprType::LessThan | ExprType::LessThanOrEqual) {
                         std::mem::swap(&mut op1, &mut op2);
@@ -667,9 +673,9 @@ impl ExprImpl {
                     {
                         match (lft_offset, rht_offset) {
                             (Some(_), Some(_)) => None,
-                            (None, rht_offset @ Some(_)) => {
-                                Some(InequalityInputPair::new(lft_input, rht_input, rht_offset))
-                            }
+                            (None, rht_offset @ Some(_)) => Some(InequalityInputPair::new(
+                                lft_input, rht_input, rht_offset, can_equal,
+                            )),
                             (Some((operator, operand)), None) => Some(InequalityInputPair::new(
                                 lft_input,
                                 rht_input,
@@ -681,10 +687,11 @@ impl ExprImpl {
                                     },
                                     operand,
                                 )),
+                                can_equal,
                             )),
-                            (None, None) => {
-                                Some(InequalityInputPair::new(lft_input, rht_input, None))
-                            }
+                            (None, None) => Some(InequalityInputPair::new(
+                                lft_input, rht_input, None, can_equal,
+                            )),
                         }
                     } else {
                         None

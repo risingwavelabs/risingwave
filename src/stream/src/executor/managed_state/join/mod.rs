@@ -363,6 +363,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.degree_state.table.update_watermark(watermark, false);
     }
 
+    pub fn prefix_serializer(&self) -> OrderedRowSerde {
+        self.pk_serializer.prefix(1).into_owned()
+    }
+
     /// Take the state for the given `key` out of the hash table and return it. One **MUST** call
     /// `update_state` after some operations to put the state back.
     ///

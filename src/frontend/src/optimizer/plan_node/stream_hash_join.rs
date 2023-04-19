@@ -45,6 +45,9 @@ pub struct BandCondition {
     right_column_idx: usize,
     left_greater_conjunction_idx: usize,
     right_greater_conjunction_idx: usize,
+    /// 1 represents left side greater, 2 represents left side greater than or equal, 3 represents
+    /// right side greater, 4 represents right side greater than or equal, 0 else.
+    absolute_bigger_side: u32,
 }
 
 fn find_equivalence_classes(mut input: PlanRef) -> Vec<usize> {
@@ -196,7 +199,8 @@ impl StreamHashJoin {
                     InequalityInputPair {
                         key_required_larger,
                         key_required_smaller,
-                        ..
+                        delta_expression,
+                        can_equal,
                     },
                 ) in &original_inequality_pairs
                 {
@@ -214,6 +218,15 @@ impl StreamHashJoin {
                                 *conjunction_idx,
                                 *key_required_larger,
                                 *key_required_smaller,
+                                if delta_expression.is_none() {
+                                    if *can_equal {
+                                        Some(2)
+                                    } else {
+                                        Some(1)
+                                    }
+                                } else {
+                                    None
+                                },
                             ),
                         ) {
                             let former = entry.get();
@@ -224,6 +237,7 @@ impl StreamHashJoin {
                                         right_column_idx: former.2 - left_cols_num,
                                         left_greater_conjunction_idx: former.0,
                                         right_greater_conjunction_idx: *conjunction_idx,
+                                        absolute_bigger_side: former.3.unwrap_or_default(),
                                     });
                                     break;
                                 }
@@ -235,6 +249,10 @@ impl StreamHashJoin {
                                         right_column_idx: former.1 - left_cols_num,
                                         left_greater_conjunction_idx: *conjunction_idx,
                                         right_greater_conjunction_idx: former.0,
+                                        absolute_bigger_side: former
+                                            .3
+                                            .map(|flag| flag + 2)
+                                            .unwrap_or_default(),
                                     });
                                     break;
                                 }
@@ -250,6 +268,7 @@ impl StreamHashJoin {
                     key_required_larger,
                     key_required_smaller,
                     delta_expression,
+                    can_equal,
                 },
             ) in original_inequality_pairs
             {
@@ -313,6 +332,7 @@ impl StreamHashJoin {
                             key_required_larger,
                             key_required_smaller,
                             delta_expression,
+                            can_equal,
                         },
                     ));
                 }
@@ -641,6 +661,7 @@ impl StreamNode for StreamHashJoin {
                             key_required_larger,
                             key_required_smaller,
                             delta_expression,
+                            ..
                         },
                     )| {
                         PbInequalityPair {
@@ -684,6 +705,7 @@ impl StreamNode for StreamHashJoin {
                             [band_condition.right_greater_conjunction_idx]
                             .to_expr_proto(),
                     ),
+                    absolute_bigger_side: band_condition.absolute_bigger_side,
                 }
             }),
         })

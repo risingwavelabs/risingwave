@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{btree_map, BTreeMap};
+use std::ops::Bound;
 
 use super::*;
 
@@ -58,6 +59,7 @@ impl JoinEntryState {
     /// Note: the first item in the tuple is the mutable reference to the value in this entry, while
     /// the second item is the decoded value. To mutate the degree, one **must not** forget to apply
     /// the changes to the first item.
+    #[cfg(test)]
     pub fn values_mut<'a>(
         &'a mut self,
         data_types: &'a [DataType],
@@ -68,6 +70,65 @@ impl JoinEntryState {
         ),
     > + 'a {
         self.cached.values_mut().map(|encoded| {
+            let decoded = encoded.decode(data_types);
+            (encoded, decoded)
+        })
+    }
+
+    pub fn iter_mut<'a>(
+        &'a mut self,
+        data_types: &'a [DataType],
+    ) -> impl Iterator<
+        Item = (
+            &'a PkType,
+            (
+                &'a mut StateValueType,
+                StreamExecutorResult<JoinRow<OwnedRow>>,
+            ),
+        ),
+    > + 'a {
+        self.cached.iter_mut().map(|(pk, encoded)| {
+            let decoded = encoded.decode(data_types);
+            (pk, (encoded, decoded))
+        })
+    }
+
+    pub fn values_mut_from<'a>(
+        &'a mut self,
+        data_types: &'a [DataType],
+        from_key: PkType,
+    ) -> impl Iterator<
+        Item = (
+            &'a mut StateValueType,
+            StreamExecutorResult<JoinRow<OwnedRow>>,
+        ),
+    > + 'a {
+        self.cached.range_mut(from_key..).map(|(_, encoded)| {
+            let decoded = encoded.decode(data_types);
+            (encoded, decoded)
+        })
+    }
+
+    pub fn values_mut_until<'a>(
+        &'a mut self,
+        data_types: &'a [DataType],
+        until_key: PkType,
+        stop_matched_pk: PkType,
+    ) -> impl Iterator<
+        Item = (
+            &'a mut StateValueType,
+            StreamExecutorResult<JoinRow<OwnedRow>>,
+        ),
+    > + 'a {
+        if until_key.is_empty() {
+            self.cached
+                .range_mut((Bound::Excluded(stop_matched_pk), Bound::Unbounded))
+        } else {
+            self.cached
+                .range_mut((Bound::Excluded(stop_matched_pk), Bound::Excluded(until_key)))
+        }
+        .rev()
+        .map(|(_, encoded)| {
             let decoded = encoded.decode(data_types);
             (encoded, decoded)
         })

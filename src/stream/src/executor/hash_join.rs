@@ -24,12 +24,13 @@ use multimap::MultiMap;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, NullBitmap};
-use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_expr::ExprError;
+use risingwave_hummock_sdk::key::next_key;
 use risingwave_storage::StateStore;
 
 use self::JoinType::{FullOuter, LeftOuter, LeftSemi, RightAnti, RightOuter, RightSemi};
@@ -1058,11 +1059,59 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     let mut append_only_matched_row = None;
                     if let Some(mut matched_rows) = matched_rows {
                         let mut matched_rows_to_clean = vec![];
+                        let mut early_checking = !useful_state_clean_columns.is_empty();
                         let mut match_band_res = side_match.half_band_condition.is_none();
-                        for (matched_row_ref, matched_row) in
-                            matched_rows.values_mut(&side_match.all_data_types)
+                        // 1 represents this side greater, 2 represents this side greater than or
+                        // equal, 0 else.
+                        let side_update_absolute_bigger = side_update
+                            .half_band_condition
+                            .as_ref()
+                            .map_or(0, |half_band_condition| {
+                                half_band_condition.is_absolute_bigger_side
+                            });
+                        // 1 represents this side greater, 2 represents this side greater than or
+                        // equal, 0 else.
+                        let side_match_absolute_bigger = side_match
+                            .half_band_condition
+                            .as_ref()
+                            .map_or(0, |half_band_condition| {
+                                half_band_condition.is_absolute_bigger_side
+                            });
+                        // 1 represents match side greater, 2 represents match side greater than or
+                        // equal, 3 represents update side greater, 4
+                        // represents update side greater than or equal, 0 else.
+                        let mut bounded_flag = 0;
+                        let mut stop_matched_pk = vec![];
+                        for (matched_pk, (matched_row_ref, matched_row)) in
+                            matched_rows.iter_mut(&side_match.all_data_types)
                         {
                             let mut matched_row = matched_row?;
+
+                            let late_check = if early_checking {
+                                let mut need_state_clean = false;
+                                for (column_idx, watermark) in &useful_state_clean_columns {
+                                    if matched_row
+                                        .row
+                                        .datum_at(*column_idx)
+                                        .map_or(false, |scalar| {
+                                            scalar < watermark.val.as_scalar_ref_impl()
+                                        })
+                                    {
+                                        need_state_clean = true;
+                                        break;
+                                    }
+                                }
+                                if need_state_clean {
+                                    matched_rows_to_clean.push(matched_row);
+                                    continue;
+                                } else {
+                                    early_checking = false;
+                                }
+                                false
+                            } else {
+                                true
+                            };
+
                             // TODO(yuhao-su): We should find a better way to eval the expression
                             // without concat two rows.
                             // if there are non-equi expressions
@@ -1073,8 +1122,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                     &matched_row.row,
                                     side_match.start_pos,
                                 );
-                                // TODO: We can use binary search to start matching with
-                                // `match_band_res==true`.
                                 if !match_band_res {
                                     match_band_res = side_match
                                         .half_band_condition
@@ -1122,6 +1169,17 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             } else {
                                 true
                             };
+                            if !match_band_res {
+                                if side_match_absolute_bigger != 0 {
+                                    bounded_flag = side_match_absolute_bigger;
+                                    break;
+                                }
+                                if side_update_absolute_bigger != 0 {
+                                    stop_matched_pk = matched_pk.clone();
+                                    bounded_flag = side_match_absolute_bigger + 2;
+                                    break;
+                                }
+                            }
                             let mut need_state_clean = false;
                             if check_join_condition {
                                 degree += 1;
@@ -1135,7 +1193,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                 if side_match.need_degree_table {
                                     side_match.ht.inc_degree(matched_row_ref, &mut matched_row);
                                 }
-                            } else {
+                            } else if late_check {
                                 for (column_idx, watermark) in &useful_state_clean_columns {
                                     if matched_row
                                         .row
@@ -1161,6 +1219,230 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                 // `append_only_optimize` and `need_state_clean` won't both be true.
                                 // 'else' here is only to suppress compiler error.
                                 matched_rows_to_clean.push(matched_row);
+                            }
+                        }
+                        if bounded_flag != 0 {
+                            let pk = row
+                                .project(&[side_update
+                                    .half_band_condition
+                                    .as_ref()
+                                    .unwrap()
+                                    .column_idx])
+                                .memcmp_serialize(&side_match.ht.prefix_serializer());
+                            match bounded_flag {
+                                1 | 2 => {
+                                    let from_key =
+                                        if bounded_flag == 2 { pk } else { next_key(&pk) };
+                                    if !from_key.is_empty() {
+                                        for (matched_row_ref, matched_row) in matched_rows
+                                            .values_mut_from(&side_match.all_data_types, from_key)
+                                        {
+                                            let mut matched_row = matched_row?;
+                                            // TODO(yuhao-su): We should find a better way to eval
+                                            // the
+                                            // expression without concat
+                                            // two rows. if there are
+                                            // non-equi expressions
+                                            let check_join_condition = {
+                                                let new_row = Self::row_concat(
+                                                    &row,
+                                                    side_update.start_pos,
+                                                    &matched_row.row,
+                                                    side_match.start_pos,
+                                                );
+                                                let update_band_res = {
+                                                    let eval_res = side_update
+                                                        .half_band_condition
+                                                        .as_ref()
+                                                        .unwrap()
+                                                        .band_conjunction
+                                                        .eval_row_infallible(&new_row, |err| {
+                                                            ctx.on_compute_error(err, identity)
+                                                        })
+                                                        .await
+                                                        .map(|s| *s.as_bool());
+                                                    if eval_res == Some(false) {
+                                                        break;
+                                                    }
+                                                    eval_res.unwrap_or(false)
+                                                };
+                                                update_band_res && {
+                                                    if let Some(ref mut cond) = cond {
+                                                        cond.eval_row_infallible(&new_row, |err| {
+                                                            ctx.on_compute_error(err, identity)
+                                                        })
+                                                        .await
+                                                        .map(|s| *s.as_bool())
+                                                        .unwrap_or(false)
+                                                    } else {
+                                                        true
+                                                    }
+                                                }
+                                            };
+                                            let mut need_state_clean = false;
+                                            if check_join_condition {
+                                                degree += 1;
+                                                if !forward_exactly_once(T, SIDE) {
+                                                    if let Some(chunk) = hashjoin_chunk_builder
+                                                        .with_match_on_insert(&row, &matched_row)
+                                                    {
+                                                        yield chunk;
+                                                    }
+                                                }
+                                                if side_match.need_degree_table {
+                                                    side_match.ht.inc_degree(
+                                                        matched_row_ref,
+                                                        &mut matched_row,
+                                                    );
+                                                }
+                                            } else {
+                                                for (column_idx, watermark) in
+                                                    &useful_state_clean_columns
+                                                {
+                                                    if matched_row.row.datum_at(*column_idx).map_or(
+                                                        false,
+                                                        |scalar| {
+                                                            scalar
+                                                                < watermark.val.as_scalar_ref_impl()
+                                                        },
+                                                    ) {
+                                                        need_state_clean = true;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                            // If the stream is append-only and the join key covers
+                                            // pk in
+                                            // both side, then we can
+                                            // remove matched rows since pk is unique and will not
+                                            // be
+                                            // inserted again
+                                            if append_only_optimize {
+                                                // Since join key contains pk and pk is unique,
+                                                // there should
+                                                // be only
+                                                // one row if matched.
+                                                assert!(append_only_matched_row.is_none());
+                                                append_only_matched_row = Some(matched_row);
+                                            } else if need_state_clean {
+                                                // `append_only_optimize` and `need_state_clean`
+                                                // won't both
+                                                // be true.
+                                                // 'else' here is only to suppress compiler error.
+                                                matched_rows_to_clean.push(matched_row);
+                                            }
+                                        }
+                                    }
+                                }
+                                3 | 4 => {
+                                    let until_key =
+                                        if bounded_flag == 3 { pk } else { next_key(&pk) };
+                                    if until_key.is_empty() || stop_matched_pk < until_key {
+                                        for (matched_row_ref, matched_row) in matched_rows
+                                            .values_mut_until(
+                                                &side_match.all_data_types,
+                                                until_key,
+                                                stop_matched_pk,
+                                            )
+                                        {
+                                            let mut matched_row = matched_row?;
+                                            // TODO(yuhao-su): We should find a better way to eval
+                                            // the
+                                            // expression without concat
+                                            // two rows. if there are
+                                            // non-equi expressions
+                                            let check_join_condition = {
+                                                let new_row = Self::row_concat(
+                                                    &row,
+                                                    side_update.start_pos,
+                                                    &matched_row.row,
+                                                    side_match.start_pos,
+                                                );
+                                                let match_band_res = {
+                                                    let eval_res = side_match
+                                                        .half_band_condition
+                                                        .as_ref()
+                                                        .unwrap()
+                                                        .band_conjunction
+                                                        .eval_row_infallible(&new_row, |err| {
+                                                            ctx.on_compute_error(err, identity)
+                                                        })
+                                                        .await
+                                                        .map(|s| *s.as_bool());
+                                                    if eval_res == Some(false) {
+                                                        break;
+                                                    }
+                                                    eval_res.unwrap_or(false)
+                                                };
+                                                match_band_res && {
+                                                    if let Some(ref mut cond) = cond {
+                                                        cond.eval_row_infallible(&new_row, |err| {
+                                                            ctx.on_compute_error(err, identity)
+                                                        })
+                                                        .await
+                                                        .map(|s| *s.as_bool())
+                                                        .unwrap_or(false)
+                                                    } else {
+                                                        true
+                                                    }
+                                                }
+                                            };
+                                            let mut need_state_clean = false;
+                                            if check_join_condition {
+                                                degree += 1;
+                                                if !forward_exactly_once(T, SIDE) {
+                                                    if let Some(chunk) = hashjoin_chunk_builder
+                                                        .with_match_on_insert(&row, &matched_row)
+                                                    {
+                                                        yield chunk;
+                                                    }
+                                                }
+                                                if side_match.need_degree_table {
+                                                    side_match.ht.inc_degree(
+                                                        matched_row_ref,
+                                                        &mut matched_row,
+                                                    );
+                                                }
+                                            } else {
+                                                for (column_idx, watermark) in
+                                                    &useful_state_clean_columns
+                                                {
+                                                    if matched_row.row.datum_at(*column_idx).map_or(
+                                                        false,
+                                                        |scalar| {
+                                                            scalar
+                                                                < watermark.val.as_scalar_ref_impl()
+                                                        },
+                                                    ) {
+                                                        need_state_clean = true;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                            // If the stream is append-only and the join key covers
+                                            // pk in
+                                            // both side, then we can
+                                            // remove matched rows since pk is unique and will not
+                                            // be
+                                            // inserted again
+                                            if append_only_optimize {
+                                                // Since join key contains pk and pk is unique,
+                                                // there should
+                                                // be only
+                                                // one row if matched.
+                                                assert!(append_only_matched_row.is_none());
+                                                append_only_matched_row = Some(matched_row);
+                                            } else if need_state_clean {
+                                                // `append_only_optimize` and `need_state_clean`
+                                                // won't both
+                                                // be true.
+                                                // 'else' here is only to suppress compiler error.
+                                                matched_rows_to_clean.push(matched_row);
+                                            }
+                                        }
+                                    }
+                                }
+                                _ => unreachable!(),
                             }
                         }
                         if degree == 0 {
@@ -1205,11 +1487,59 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     let mut degree = 0;
                     if let Some(mut matched_rows) = matched_rows {
                         let mut matched_rows_to_clean = vec![];
+                        let mut early_checking = !useful_state_clean_columns.is_empty();
                         let mut match_band_res = side_match.half_band_condition.is_none();
-                        for (matched_row_ref, matched_row) in
-                            matched_rows.values_mut(&side_match.all_data_types)
+                        // 1 represents this side greater, 2 represents this side greater than or
+                        // equal, 0 else.
+                        let side_update_absolute_bigger = side_update
+                            .half_band_condition
+                            .as_ref()
+                            .map_or(0, |half_band_condition| {
+                                half_band_condition.is_absolute_bigger_side
+                            });
+                        // 1 represents this side greater, 2 represents this side greater than or
+                        // equal, 0 else.
+                        let side_match_absolute_bigger = side_match
+                            .half_band_condition
+                            .as_ref()
+                            .map_or(0, |half_band_condition| {
+                                half_band_condition.is_absolute_bigger_side
+                            });
+                        // 1 represents match side greater, 2 represents match side greater than or
+                        // equal, 3 represents update side greater, 4
+                        // represents update side greater than or equal, 0 else.
+                        let mut bounded_flag = 0;
+                        let mut stop_matched_pk = vec![];
+                        for (matched_pk, (matched_row_ref, matched_row)) in
+                            matched_rows.iter_mut(&side_match.all_data_types)
                         {
                             let mut matched_row = matched_row?;
+
+                            let late_check = if early_checking {
+                                let mut need_state_clean = false;
+                                for (column_idx, watermark) in &useful_state_clean_columns {
+                                    if matched_row
+                                        .row
+                                        .datum_at(*column_idx)
+                                        .map_or(false, |scalar| {
+                                            scalar < watermark.val.as_scalar_ref_impl()
+                                        })
+                                    {
+                                        need_state_clean = true;
+                                        break;
+                                    }
+                                }
+                                if need_state_clean {
+                                    matched_rows_to_clean.push(matched_row);
+                                    continue;
+                                } else {
+                                    early_checking = false;
+                                }
+                                false
+                            } else {
+                                true
+                            };
+
                             // TODO(yuhao-su): We should find a better way to eval the expression
                             // without concat two rows.
                             // if there are non-equi expressions
@@ -1267,6 +1597,17 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             } else {
                                 true
                             };
+                            if !match_band_res {
+                                if side_match_absolute_bigger != 0 {
+                                    bounded_flag = side_match_absolute_bigger;
+                                    break;
+                                }
+                                if side_update_absolute_bigger != 0 {
+                                    stop_matched_pk = matched_pk.clone();
+                                    bounded_flag = side_match_absolute_bigger + 2;
+                                    break;
+                                }
+                            }
                             let mut need_state_clean = false;
                             if check_join_condition {
                                 degree += 1;
@@ -1280,7 +1621,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                         yield chunk;
                                     }
                                 }
-                            } else {
+                            } else if late_check {
                                 for (column_idx, watermark) in &useful_state_clean_columns {
                                     if matched_row
                                         .row
@@ -1296,6 +1637,196 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             }
                             if need_state_clean {
                                 matched_rows_to_clean.push(matched_row);
+                            }
+                        }
+                        if bounded_flag != 0 {
+                            let pk = row
+                                .project(&[side_update
+                                    .half_band_condition
+                                    .as_ref()
+                                    .unwrap()
+                                    .column_idx])
+                                .memcmp_serialize(&side_match.ht.prefix_serializer());
+                            match bounded_flag {
+                                1 | 2 => {
+                                    let from_key =
+                                        if bounded_flag == 2 { pk } else { next_key(&pk) };
+                                    if !from_key.is_empty() {
+                                        for (matched_row_ref, matched_row) in matched_rows
+                                            .values_mut_from(&side_match.all_data_types, from_key)
+                                        {
+                                            let mut matched_row = matched_row?;
+                                            // TODO(yuhao-su): We should find a better way to eval
+                                            // the
+                                            // expression without concat
+                                            // two rows. if there are
+                                            // non-equi expressions
+                                            let check_join_condition = {
+                                                let new_row = Self::row_concat(
+                                                    &row,
+                                                    side_update.start_pos,
+                                                    &matched_row.row,
+                                                    side_match.start_pos,
+                                                );
+                                                let update_band_res = {
+                                                    let eval_res = side_update
+                                                        .half_band_condition
+                                                        .as_ref()
+                                                        .unwrap()
+                                                        .band_conjunction
+                                                        .eval_row_infallible(&new_row, |err| {
+                                                            ctx.on_compute_error(err, identity)
+                                                        })
+                                                        .await
+                                                        .map(|s| *s.as_bool());
+                                                    if eval_res == Some(false) {
+                                                        break;
+                                                    }
+                                                    eval_res.unwrap_or(false)
+                                                };
+                                                update_band_res && {
+                                                    if let Some(ref mut cond) = cond {
+                                                        cond.eval_row_infallible(&new_row, |err| {
+                                                            ctx.on_compute_error(err, identity)
+                                                        })
+                                                        .await
+                                                        .map(|s| *s.as_bool())
+                                                        .unwrap_or(false)
+                                                    } else {
+                                                        true
+                                                    }
+                                                }
+                                            };
+                                            let mut need_state_clean = false;
+                                            if check_join_condition {
+                                                degree += 1;
+                                                if side_match.need_degree_table {
+                                                    side_match.ht.dec_degree(
+                                                        matched_row_ref,
+                                                        &mut matched_row,
+                                                    );
+                                                }
+                                                if !forward_exactly_once(T, SIDE) {
+                                                    if let Some(chunk) = hashjoin_chunk_builder
+                                                        .with_match_on_delete(&row, &matched_row)
+                                                    {
+                                                        yield chunk;
+                                                    }
+                                                }
+                                            } else {
+                                                for (column_idx, watermark) in
+                                                    &useful_state_clean_columns
+                                                {
+                                                    if matched_row.row.datum_at(*column_idx).map_or(
+                                                        false,
+                                                        |scalar| {
+                                                            scalar
+                                                                < watermark.val.as_scalar_ref_impl()
+                                                        },
+                                                    ) {
+                                                        need_state_clean = true;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                            if need_state_clean {
+                                                matched_rows_to_clean.push(matched_row);
+                                            }
+                                        }
+                                    }
+                                }
+                                3 | 4 => {
+                                    let until_key =
+                                        if bounded_flag == 3 { pk } else { next_key(&pk) };
+                                    if until_key.is_empty() || stop_matched_pk < until_key {
+                                        for (matched_row_ref, matched_row) in matched_rows
+                                            .values_mut_until(
+                                                &side_match.all_data_types,
+                                                until_key,
+                                                stop_matched_pk,
+                                            )
+                                        {
+                                            let mut matched_row = matched_row?;
+                                            // TODO(yuhao-su): We should find a better way to eval
+                                            // the
+                                            // expression without concat
+                                            // two rows. if there are
+                                            // non-equi expressions
+                                            let check_join_condition = {
+                                                let new_row = Self::row_concat(
+                                                    &row,
+                                                    side_update.start_pos,
+                                                    &matched_row.row,
+                                                    side_match.start_pos,
+                                                );
+                                                let match_band_res = {
+                                                    let eval_res = side_match
+                                                        .half_band_condition
+                                                        .as_ref()
+                                                        .unwrap()
+                                                        .band_conjunction
+                                                        .eval_row_infallible(&new_row, |err| {
+                                                            ctx.on_compute_error(err, identity)
+                                                        })
+                                                        .await
+                                                        .map(|s| *s.as_bool());
+                                                    if eval_res == Some(false) {
+                                                        break;
+                                                    }
+                                                    eval_res.unwrap_or(false)
+                                                };
+                                                match_band_res && {
+                                                    if let Some(ref mut cond) = cond {
+                                                        cond.eval_row_infallible(&new_row, |err| {
+                                                            ctx.on_compute_error(err, identity)
+                                                        })
+                                                        .await
+                                                        .map(|s| *s.as_bool())
+                                                        .unwrap_or(false)
+                                                    } else {
+                                                        true
+                                                    }
+                                                }
+                                            };
+                                            let mut need_state_clean = false;
+                                            if check_join_condition {
+                                                degree += 1;
+                                                if side_match.need_degree_table {
+                                                    side_match.ht.dec_degree(
+                                                        matched_row_ref,
+                                                        &mut matched_row,
+                                                    );
+                                                }
+                                                if !forward_exactly_once(T, SIDE) {
+                                                    if let Some(chunk) = hashjoin_chunk_builder
+                                                        .with_match_on_delete(&row, &matched_row)
+                                                    {
+                                                        yield chunk;
+                                                    }
+                                                }
+                                            } else {
+                                                for (column_idx, watermark) in
+                                                    &useful_state_clean_columns
+                                                {
+                                                    if matched_row.row.datum_at(*column_idx).map_or(
+                                                        false,
+                                                        |scalar| {
+                                                            scalar
+                                                                < watermark.val.as_scalar_ref_impl()
+                                                        },
+                                                    ) {
+                                                        need_state_clean = true;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                            if need_state_clean {
+                                                matched_rows_to_clean.push(matched_row);
+                                            }
+                                        }
+                                    }
+                                }
+                                _ => unreachable!(),
                             }
                         }
                         if degree == 0 {
