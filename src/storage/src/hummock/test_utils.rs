@@ -24,7 +24,7 @@ use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use super::iterator::test_utils::iterator_test_table_key_of;
 use super::{
-    create_monotonic_events, CompressionAlgorithm, HummockResult, InMemWriter, SstableMeta,
+    create_monotonic_deletes, CompressionAlgorithm, HummockResult, InMemWriter, SstableMeta,
     SstableWriterOptions, DEFAULT_RESTART_INTERVAL,
 };
 use crate::error::StorageResult;
@@ -263,7 +263,7 @@ pub async fn gen_test_sstable_inner<B: AsRef<[u8]> + Clone + Default + Eq>(
             .await
             .unwrap();
     }
-    b.add_monotonic_deletes(create_monotonic_events(&range_tombstones));
+    b.add_monotonic_deletes(create_monotonic_deletes(&range_tombstones));
     let output = b.finish().await.unwrap();
     output.writer_output.await.unwrap().unwrap();
     let table = sstable_store

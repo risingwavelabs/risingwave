@@ -30,8 +30,8 @@ use crate::hummock::compactor::{CompactOutput, CompactionFilter, Compactor, Comp
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
 use crate::hummock::sstable::CompactionDeleteRangesBuilder;
 use crate::hummock::{
-    create_tombstones_to_represent_monotonic_deletes, CachePolicy, CompactionDeleteRanges,
-    CompressionAlgorithm, HummockResult, SstableBuilderOptions, SstableStoreRef,
+    CachePolicy, CompactionDeleteRanges, CompressionAlgorithm, HummockResult,
+    SstableBuilderOptions, SstableStoreRef,
 };
 use crate::monitor::StoreLocalStatistic;
 
@@ -128,15 +128,19 @@ impl CompactorRunner {
 
             for table_info in &level.table_infos {
                 let table = sstable_store.sstable(table_info, &mut local_stats).await?;
-                let mut range_tombstone_list = create_tombstones_to_represent_monotonic_deletes(
-                    &table.value().meta.monotonic_tombstone_events,
-                );
-                range_tombstone_list.retain(|tombstone| {
-                    !filter.should_delete(FullKey::from_user_key(
-                        tombstone.start_user_key.as_ref(),
-                        tombstone.sequence,
-                    ))
-                });
+                let range_tombstone_list = table
+                    .value()
+                    .meta
+                    .monotonic_tombstones
+                    .iter()
+                    .filter(|tombstone| {
+                        !filter.should_delete(FullKey::from_user_key(
+                            tombstone.start_user_key.as_ref(),
+                            tombstone.sequence,
+                        ))
+                    })
+                    .cloned()
+                    .collect_vec();
                 builder.add_tombstone(range_tombstone_list);
             }
         }
@@ -203,7 +207,7 @@ mod tests {
     use crate::hummock::test_utils::{
         default_builder_opt_for_test, gen_test_sstable_with_range_tombstone,
     };
-    use crate::hummock::{create_monotonic_events, DeleteRangeTombstone};
+    use crate::hummock::DeleteRangeTombstone;
 
     #[tokio::test]
     async fn test_delete_range_aggregator_with_filter() {
@@ -245,9 +249,6 @@ mod tests {
             &UserKey::<Bytes>::default().as_ref(),
             &UserKey::<Bytes>::default().as_ref(),
         );
-        assert_eq!(
-            ret,
-            create_monotonic_events(&vec![range_tombstones[1].clone()])
-        );
+        assert_eq!(ret, vec![range_tombstones[1].clone()]);
     }
 }

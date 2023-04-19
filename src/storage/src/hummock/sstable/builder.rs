@@ -25,7 +25,7 @@ use risingwave_pb::hummock::SstableInfo;
 
 use super::utils::CompressionAlgorithm;
 use super::{
-    BlockBuilder, BlockBuilderOptions, BlockMeta, MonotonicDeleteEvent, SstableMeta, SstableWriter,
+    BlockBuilder, BlockBuilderOptions, BlockMeta, DeleteRangeTombstone, SstableMeta, SstableWriter,
     DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
 };
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
@@ -107,7 +107,7 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     /// key wmk1 (5) and till the next event key wmk2 (7) (not inclusive).
     /// If there is no range deletes between current event key and next event key, `new_epoch` will
     /// be `HummockEpoch::MAX`.
-    monotonic_deletes: Vec<MonotonicDeleteEvent>,
+    monotonic_deletes: Vec<DeleteRangeTombstone>,
     /// `table_id` of added keys.
     table_ids: BTreeSet<u32>,
     last_full_key: Vec<u8>,
@@ -183,16 +183,13 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     }
 
     /// Add kv pair to sstable.
-    pub fn add_monotonic_deletes(&mut self, monotonic_deletes: Vec<MonotonicDeleteEvent>) {
+    pub fn add_monotonic_deletes(&mut self, monotonic_deletes: Vec<DeleteRangeTombstone>) {
         let mut last_table_id = TableId::default();
-        for monotonic_delete in monotonic_deletes
-            .iter()
-            .filter(|monotonic_delete| monotonic_delete.new_epoch != HummockEpoch::MAX)
-        {
-            if last_table_id != monotonic_delete.event_key.table_id {
-                last_table_id = monotonic_delete.event_key.table_id;
+        for monotonic_delete in &monotonic_deletes {
+            if last_table_id != monotonic_delete.start_user_key.table_id {
+                last_table_id = monotonic_delete.start_user_key.table_id;
                 self.table_ids
-                    .insert(monotonic_delete.event_key.table_id.table_id());
+                    .insert(monotonic_delete.start_user_key.table_id.table_id());
             }
         }
         self.monotonic_deletes.extend(monotonic_deletes);
@@ -318,18 +315,19 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let mut right_exclusive = false;
         let meta_offset = self.writer.data_len() as u64;
         if let Some(monotonic_delete) = self.monotonic_deletes.last() {
-            debug_assert_eq!(monotonic_delete.new_epoch, HummockEpoch::MAX);
             if largest_key.is_empty()
                 || KeyComparator::encoded_less_than_unencoded(
                     user_key(&largest_key),
-                    &monotonic_delete.event_key,
+                    &monotonic_delete.end_user_key,
                 )
             {
-                // use MAX as epoch because the last monotonic delete must be `HummockEpoch::MAX`,
-                // so we can not include any version of this key.
-                largest_key =
-                    FullKey::from_user_key(monotonic_delete.event_key.clone(), HummockEpoch::MAX)
-                        .encode();
+                // use MAX as epoch because `end_user_key` of the range-tombstone is exclusive, so
+                // we can not include any version of this key.
+                largest_key = FullKey::from_user_key(
+                    monotonic_delete.end_user_key.clone(),
+                    HummockEpoch::MAX,
+                )
+                .encode();
                 right_exclusive = true;
             }
         }
@@ -337,12 +335,12 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             if smallest_key.is_empty()
                 || KeyComparator::encoded_greater_than_unencoded(
                     user_key(&smallest_key),
-                    &monotonic_delete.event_key,
+                    &monotonic_delete.start_user_key,
                 )
             {
                 smallest_key = FullKey::from_user_key(
-                    monotonic_delete.event_key.clone(),
-                    monotonic_delete.new_epoch,
+                    monotonic_delete.start_user_key.clone(),
+                    monotonic_delete.sequence,
                 )
                 .encode();
             }
@@ -370,7 +368,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             largest_key,
             version: VERSION,
             meta_offset,
-            monotonic_tombstone_events: self.monotonic_deletes,
+            monotonic_tombstones: self.monotonic_deletes,
         };
         meta.estimated_size = meta.encoded_size() as u32 + meta_offset as u32;
 
@@ -379,11 +377,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             let mut tombstone_min_epoch = u64::MAX;
             let mut tombstone_max_epoch = u64::MIN;
 
-            for monotonic_delete in &meta.monotonic_tombstone_events {
-                if monotonic_delete.new_epoch != HummockEpoch::MAX {
-                    tombstone_min_epoch = cmp::min(tombstone_min_epoch, monotonic_delete.new_epoch);
-                    tombstone_max_epoch = cmp::max(tombstone_max_epoch, monotonic_delete.new_epoch);
-                }
+            for monotonic_delete in &meta.monotonic_tombstones {
+                tombstone_min_epoch = cmp::min(tombstone_min_epoch, monotonic_delete.sequence);
+                tombstone_max_epoch = cmp::max(tombstone_max_epoch, monotonic_delete.sequence);
             }
 
             (tombstone_min_epoch, tombstone_max_epoch)
@@ -556,10 +552,12 @@ pub(super) mod tests {
         };
         let table_id = TableId::default();
         let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
-        b.add_monotonic_deletes(vec![
-            MonotonicDeleteEvent::new(table_id, b"abcd".to_vec(), 0),
-            MonotonicDeleteEvent::new(table_id, b"eeee".to_vec(), HummockEpoch::MAX),
-        ]);
+        b.add_monotonic_deletes(vec![DeleteRangeTombstone::new(
+            table_id,
+            b"abcd".to_vec(),
+            b"eeee".to_vec(),
+            0,
+        )]);
         let s = b.finish().await.unwrap().sst_info;
         let key_range = s.sst_info.key_range.unwrap();
         assert_eq!(

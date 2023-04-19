@@ -169,41 +169,31 @@ impl MonotonicDeleteEvent {
     }
 }
 
-pub(crate) fn create_monotonic_events(
+pub(crate) fn create_monotonic_deletes(
     delete_range_tombstones: &Vec<DeleteRangeTombstone>,
-) -> Vec<MonotonicDeleteEvent> {
+) -> Vec<DeleteRangeTombstone> {
     let events = CompactionDeleteRangesBuilder::build_events(delete_range_tombstones);
     let mut epochs = BTreeSet::new();
-    let mut monotonic_tombstone_events = Vec::with_capacity(events.len());
+    let mut monotonic_deletes = Vec::with_capacity(events.len());
+    let mut half_tombstone: Option<DeleteRangeTombstone> = None;
     for event in events {
         apply_event(&mut epochs, &event);
-        monotonic_tombstone_events.push(MonotonicDeleteEvent {
-            event_key: event.0,
-            new_epoch: epochs.first().map_or(HummockEpoch::MAX, |epoch| *epoch),
+        let new_epoch = epochs.first().map_or(HummockEpoch::MAX, |epoch| *epoch);
+        if let Some(last_tombstone) = half_tombstone.as_mut() {
+            if new_epoch == last_tombstone.sequence {
+                continue;
+            }
+            last_tombstone.end_user_key = event.0.clone();
+            monotonic_deletes.push(half_tombstone.take().unwrap());
+        }
+        half_tombstone = Some(DeleteRangeTombstone {
+            start_user_key: event.0,
+            end_user_key: UserKey::default(),
+            sequence: new_epoch,
         });
     }
-    monotonic_tombstone_events.dedup_by_key(|MonotonicDeleteEvent { new_epoch, .. }| *new_epoch);
 
-    monotonic_tombstone_events
-}
-
-pub(crate) fn create_tombstones_to_represent_monotonic_deletes(
-    monotonic_deletes: &Vec<MonotonicDeleteEvent>,
-) -> Vec<DeleteRangeTombstone> {
-    let mut ret = vec![];
-    let len = monotonic_deletes.len();
-    if len > 1 {
-        for i in 0..(len - 1) {
-            if monotonic_deletes[i].new_epoch != HummockEpoch::MAX {
-                ret.push(DeleteRangeTombstone {
-                    start_user_key: monotonic_deletes[i].event_key.clone(),
-                    end_user_key: monotonic_deletes[i + 1].event_key.clone(),
-                    sequence: monotonic_deletes[i].new_epoch,
-                });
-            }
-        }
-    }
-    ret
+    monotonic_deletes
 }
 
 /// [`Sstable`] is a handle for accessing SST.
@@ -366,7 +356,7 @@ pub struct SstableMeta {
     /// key wmk1 (5) and till the next event key wmk2 (7) (not inclusive).
     /// If there is no range deletes between current event key and next event key, `new_epoch` will
     /// be `HummockEpoch::MAX`.
-    pub monotonic_tombstone_events: Vec<MonotonicDeleteEvent>,
+    pub monotonic_tombstones: Vec<DeleteRangeTombstone>,
     /// Format version, for further compatibility.
     pub version: u32,
 }
@@ -381,8 +371,8 @@ impl SstableMeta {
     /// | estimated size (4B) | key count (4B) |
     /// | smallest key len (4B) | smallest key |
     /// | largest key len (4B) | largest key |
-    /// | K (4B) |
-    /// | tombstone-event 0 | ... | tombstone-event K-1 |
+    /// | M (4B) |
+    /// | monotonic-tombstone 0 | ... | monotonic-tombstone M-1 |
     /// | file offset of this meta block (8B) |
     /// | checksum (8B) | version (4B) | magic (4B) |
     /// ```
@@ -403,9 +393,9 @@ impl SstableMeta {
         buf.put_u32_le(self.key_count);
         put_length_prefixed_slice(buf, &self.smallest_key);
         put_length_prefixed_slice(buf, &self.largest_key);
-        buf.put_u32_le(self.monotonic_tombstone_events.len() as u32);
-        for monotonic_tombstone_event in &self.monotonic_tombstone_events {
-            monotonic_tombstone_event.encode(buf);
+        buf.put_u32_le(self.monotonic_tombstones.len() as u32);
+        for monotonic_tombstone in &self.monotonic_tombstones {
+            monotonic_tombstone.encode(buf);
         }
         buf.put_u64_le(self.meta_offset);
         let checksum = xxhash64_checksum(&buf[start_offset..]);
@@ -444,11 +434,11 @@ impl SstableMeta {
         let key_count = buf.get_u32_le();
         let smallest_key = get_length_prefixed_slice(buf);
         let largest_key = get_length_prefixed_slice(buf);
-        let tomb_event_count = buf.get_u32_le() as usize;
-        let mut monotonic_tombstone_events = Vec::with_capacity(tomb_event_count);
-        for _ in 0..tomb_event_count {
-            let monotonic_tombstone_event = MonotonicDeleteEvent::decode(buf);
-            monotonic_tombstone_events.push(monotonic_tombstone_event);
+        let monotonic_tomb_count = buf.get_u32_le() as usize;
+        let mut monotonic_tombstones = Vec::with_capacity(monotonic_tomb_count);
+        for _ in 0..monotonic_tomb_count {
+            let monotonic_tombstone = DeleteRangeTombstone::decode(buf);
+            monotonic_tombstones.push(monotonic_tombstone);
         }
         let meta_offset = buf.get_u64_le();
 
@@ -460,7 +450,7 @@ impl SstableMeta {
             smallest_key,
             largest_key,
             meta_offset,
-            monotonic_tombstone_events,
+            monotonic_tombstones,
             version,
         })
     }
@@ -473,11 +463,11 @@ impl SstableMeta {
             .iter()
             .map(|block_meta| block_meta.encoded_size())
             .sum::<usize>()
-            + 4 // monotonic tombstone events len
+            + 4 // monotonic tombstones len
             + self
-            .monotonic_tombstone_events
+            .monotonic_tombstones
             .iter()
-            .map(|event| 8 + 4 + event.event_key.encoded_len())
+            .map(|tombstone| 8 + 4 + tombstone.start_user_key.encoded_len() + 4 + tombstone.end_user_key.encoded_len())
             .sum::<usize>()
             + 4 // bloom filter len
             + self.bloom_filter.len()
@@ -536,7 +526,7 @@ mod tests {
             smallest_key: b"0-smallest-key".to_vec(),
             largest_key: b"9-largest-key".to_vec(),
             meta_offset: 123,
-            monotonic_tombstone_events: vec![],
+            monotonic_tombstones: vec![],
             version: VERSION,
         };
         let sz = meta.encoded_size();

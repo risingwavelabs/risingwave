@@ -223,11 +223,12 @@ pub async fn sst_dump_via_sstable_store(
     println!("Version: {}", sstable_meta.version);
     println!(
         "Monotonoic Deletes Count: {}",
-        sstable_meta.monotonic_tombstone_events.len()
+        sstable_meta.monotonic_tombstones.len()
     );
-    for monotonic_delete in &sstable_meta.monotonic_tombstone_events {
-        println!("\tevent key: {:?}", monotonic_delete.event_key);
-        println!("\tnew epoch: {:?}", monotonic_delete.new_epoch);
+    for monotonic_tombstone in &sstable_meta.monotonic_tombstones {
+        println!("\tstart user key: {:?}", monotonic_tombstone.start_user_key);
+        println!("\tend user key: {:?}", monotonic_tombstone.end_user_key);
+        println!("\tsequence: {:?}", monotonic_tombstone.sequence);
     }
 
     println!("Block Count: {}", sstable.block_count());
