@@ -12,10 +12,10 @@ tar -C /usr/local -xzf go1.20.3.linux-amd64.tar.gz
 export PATH=$PATH:/usr/local/go/bin
 
 echo "--- Installing promql cli client"
-TARGET_PATH="$PWD/target/release"
 git clone https://github.com/nalbury/promql-cli.git
 pushd promql-cli/
-OS=linux INSTALL_PATH="$TARGET_PATH" make install
+OS=linux INSTALL_PATH="$PWD" make install
+buildkite-agent artifact upload ./promql
 popd
 
 # FIXME(kwannoel): Not sure if risingwave_java_binding is needed
@@ -27,7 +27,7 @@ cargo build \
     --features "static-link static-log-level" --profile release
 
 # the file name suffix of artifact for risingwave_java_binding is so only for linux. It is dylib for MacOS
-artifacts=(promql risingwave risedev-dev librisingwave_java_binding.so)
+artifacts=(risingwave risedev-dev librisingwave_java_binding.so)
 
 echo "--- Show link info"
 ldd target/release/risingwave
