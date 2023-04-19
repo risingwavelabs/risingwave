@@ -14,9 +14,11 @@
 
 use std::collections::BTreeSet;
 
+use futures::FutureExt;
+use risingwave_common::array::{DataChunk, Vis};
 use risingwave_common::must_match;
-use risingwave_common::types::Datum;
-use risingwave_expr::function::aggregate::AggCall;
+use risingwave_common::types::{DataType, Datum};
+use risingwave_expr::function::aggregate::{AggArgs, AggCall};
 use risingwave_expr::function::window::{WindowFuncCall, WindowFuncKind};
 use risingwave_expr::vector_op::agg::AggStateFactory;
 use smallvec::SmallVec;
@@ -27,15 +29,22 @@ use crate::executor::StreamExecutorResult;
 
 pub(super) struct AggregateState {
     factory: AggStateFactory,
+    arg_data_types: Vec<DataType>,
     buffer: WindowBuffer<StateKey, SmallVec<[Datum; 2]>>,
 }
 
 impl AggregateState {
     pub fn new(call: &WindowFuncCall) -> StreamExecutorResult<Self> {
         let agg_kind = must_match!(call.kind, WindowFuncKind::Aggregate(agg_kind) => agg_kind);
+        let arg_data_types = call.args.arg_types().to_vec();
         let agg_call = AggCall {
             kind: agg_kind,
-            args: call.args.clone(),
+            args: match &call.args {
+                // convert args to [0] or [0, 1]
+                AggArgs::None => AggArgs::None,
+                AggArgs::Unary(data_type, _) => AggArgs::Unary(data_type.to_owned(), 0),
+                AggArgs::Binary(data_types, _) => AggArgs::Binary(data_types.to_owned(), [0, 1]),
+            },
             return_type: call.return_type.clone(),
             column_orders: Vec::new(), // the input is already sorted
             // TODO(rc): support filter on window function call
@@ -45,6 +54,7 @@ impl AggregateState {
         };
         Ok(Self {
             factory: AggStateFactory::new(agg_call)?,
+            arg_data_types,
             buffer: WindowBuffer::new(call.frame.clone()),
         })
     }
@@ -63,12 +73,17 @@ impl WindowState for AggregateState {
         }
     }
 
-    fn output(&mut self) -> StateOutput {
-        debug_assert!(self.curr_window().is_ready);
-        let aggregator = self.factory.create_agg_state();
-        let return_value = None; // TODO(): do aggregation
+    fn output(&mut self) -> StreamExecutorResult<StateOutput> {
+        assert!(self.buffer.curr_window().is_ready());
+        let wrapper = BatchAggregatorWrapper {
+            factory: &self.factory,
+            arg_data_types: &self.arg_data_types,
+        };
+        let return_value = wrapper.aggregate(self.buffer.curr_window_values().map(
+            |val: &SmallVec<[Option<risingwave_common::types::ScalarImpl>; 2]>| val.as_slice(),
+        ))?;
         let removed_keys: BTreeSet<_> = self.buffer.slide().collect();
-        StateOutput {
+        Ok(StateOutput {
             return_value,
             evict_hint: if removed_keys.is_empty() {
                 StateEvictHint::CannotEvict(
@@ -81,6 +96,46 @@ impl WindowState for AggregateState {
             } else {
                 StateEvictHint::CanEvict(removed_keys)
             },
+        })
+    }
+}
+
+struct BatchAggregatorWrapper<'a> {
+    factory: &'a AggStateFactory,
+    arg_data_types: &'a [DataType],
+}
+
+impl BatchAggregatorWrapper<'_> {
+    fn aggregate<'a>(
+        &'a self,
+        values: impl ExactSizeIterator<Item = &'a [Datum]>,
+    ) -> StreamExecutorResult<Datum> {
+        let n_values = values.len();
+
+        let mut args_builders = self
+            .arg_data_types
+            .iter()
+            .map(|data_type| data_type.create_array_builder(n_values))
+            .collect::<Vec<_>>();
+        for value in values {
+            for (builder, datum) in args_builders.iter_mut().zip(value.iter()) {
+                builder.append_datum(datum);
+            }
         }
+        let columns = args_builders
+            .into_iter()
+            .map(|builder| builder.finish().into())
+            .collect::<Vec<_>>();
+        let chunk = DataChunk::new(columns, Vis::Compact(n_values));
+
+        let mut aggregator = self.factory.create_agg_state();
+        aggregator
+            .update_multi(&chunk, 0, n_values)
+            .now_or_never()
+            .expect("we don't support UDAF currently, so the function should return immediately")?;
+
+        let mut ret_value_builder = aggregator.return_type().create_array_builder(1);
+        aggregator.output(&mut ret_value_builder)?;
+        Ok(ret_value_builder.finish().to_datum())
     }
 }

@@ -21,6 +21,7 @@ use smallvec::SmallVec;
 
 use super::{StateKey, StateOutput, StatePos, WindowState};
 use crate::executor::over_window::state::StateEvictHint;
+use crate::executor::StreamExecutorResult;
 
 struct BufferEntry(StateKey, Datum);
 
@@ -62,9 +63,9 @@ impl WindowState for LagState {
         }
     }
 
-    fn output(&mut self) -> StateOutput {
+    fn output(&mut self) -> StreamExecutorResult<StateOutput> {
         debug_assert!(self.curr_window().is_ready);
-        if self.curr_idx < self.offset {
+        Ok(if self.curr_idx < self.offset {
             // the ready window doesn't have enough preceding rows, just return NULL
             self.curr_idx += 1;
             StateOutput {
@@ -79,6 +80,6 @@ impl WindowState for LagState {
                 return_value: value,
                 evict_hint: StateEvictHint::CanEvict(std::iter::once(key).collect()),
             }
-        }
+        })
     }
 }

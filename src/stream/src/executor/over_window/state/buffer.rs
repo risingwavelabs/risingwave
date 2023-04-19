@@ -112,7 +112,7 @@ impl<K: Ord, V> WindowBuffer<K, V> {
 
     /// Iterate over the values in the current window.
     /// Panics if the current window is not ready.
-    pub fn curr_window_values(&self) -> impl Iterator<Item = &V> {
+    pub fn curr_window_values(&self) -> impl ExactSizeIterator<Item = &V> {
         assert!(self.curr_window().is_ready());
         self.buffer
             .range(LEFT_IDX..=self.right_idx)

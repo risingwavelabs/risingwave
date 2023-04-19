@@ -21,6 +21,7 @@ use smallvec::SmallVec;
 
 use super::{StateKey, StateOutput, StatePos, WindowState};
 use crate::executor::over_window::state::StateEvictHint;
+use crate::executor::StreamExecutorResult;
 
 struct BufferEntry(StateKey, Datum);
 
@@ -53,13 +54,13 @@ impl WindowState for LeadState {
         }
     }
 
-    fn output(&mut self) -> StateOutput {
+    fn output(&mut self) -> StreamExecutorResult<StateOutput> {
         debug_assert!(self.curr_window().is_ready);
         let lead_value = self.buffer[self.offset].1.clone();
         let BufferEntry(key, _) = self.buffer.pop_front().unwrap();
-        StateOutput {
+        Ok(StateOutput {
             return_value: lead_value,
             evict_hint: StateEvictHint::CanEvict(std::iter::once(key).collect()),
-        }
+        })
     }
 }

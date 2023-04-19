@@ -108,7 +108,7 @@ pub(super) trait WindowState {
     fn curr_window(&self) -> StatePos<'_>;
 
     /// Return the output for the current ready window frame and push the window forward.
-    fn output(&mut self) -> StateOutput;
+    fn output(&mut self) -> StreamExecutorResult<StateOutput>;
 
     // fn curr_output(&self) -> Datum {
     //     todo!()

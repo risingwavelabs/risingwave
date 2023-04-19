@@ -18,7 +18,6 @@ use std::marker::PhantomData;
 
 use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
-use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
@@ -246,7 +245,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                         .input_pk_indices
                         .iter()
                         .map(|idx| this.col_mapping.upstream_to_state_table(*idx).unwrap())
-                        .collect_vec(),
+                        .collect::<Vec<_>>(),
                 ),
                 &vec![OrderType::ascending(); this.input_pk_indices.len()],
             )?
@@ -265,7 +264,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                                 .val_indices()
                                 .iter()
                                 .map(|idx| this.col_mapping.upstream_to_state_table(*idx).unwrap())
-                                .collect_vec(),
+                                .collect::<Vec<_>>(),
                         )
                         .into_owned_row()
                         .into_inner()
@@ -279,9 +278,9 @@ impl<S: StateStore> OverWindowExecutor<S> {
 
         // Ignore ready windows (all ready windows were outputted before).
         while partition.is_ready() {
-            partition.states.iter_mut().for_each(|state| {
-                state.output();
-            });
+            for state in &mut partition.states {
+                state.output()?;
+            }
         }
 
         cache.put(encoded_partition_key.clone(), partition);
@@ -364,6 +363,8 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     .states
                     .iter_mut()
                     .map(|state| state.output())
+                    .try_collect::<Vec<_>>()?
+                    .into_iter()
                     .map(|o| (o.return_value, o.evict_hint))
                     .unzip();
 
@@ -402,10 +403,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             }
         }
 
-        let columns: Vec<Column> = builders
-            .into_iter()
-            .map(|b| b.finish().into())
-            .collect_vec();
+        let columns: Vec<Column> = builders.into_iter().map(|b| b.finish().into()).collect();
         let chunk_size = columns[0].len();
         Ok(if chunk_size > 0 {
             Some(StreamChunk::new(
