@@ -17,7 +17,8 @@ download_build_artifacts() {
   mkdir -p target/release
   echo "$ARTIFACTS" | xargs -I 'buildkite-agent artifact download ./%-bench && mv ./%-bench target/release/%'
 
-  buildkite-agent artifact download ./promql-bench && mv ./promql-bench /usr/local/bin/promql
+  buildkite-agent artifact download ./promql-bench
+  sudo mv ./promql-bench /usr/local/bin/promql
 }
 
 install_nexmark_bench() {
