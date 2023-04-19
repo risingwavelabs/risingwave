@@ -60,7 +60,7 @@ fn parse_bson_value(
         ))
     })?;
     let id_field = bson_doc
-        .get("id")
+        .get("_id")
         .ok_or_else(|| {
             RwError::from(ProtocolError(
                 "Debezuim Mongo requires document has a `_id` field".into(),
