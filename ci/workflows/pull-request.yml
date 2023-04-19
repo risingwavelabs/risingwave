@@ -319,3 +319,4 @@ steps:
     command: "ci/scripts/gen-flamegraph.sh"
     depends_on: "cpu-flamegraph-env-build"
     if: build.pull_request.labels includes "cpu_flamegraph"
+    timeout_in_minutes: 20
