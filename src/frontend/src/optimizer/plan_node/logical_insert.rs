@@ -122,7 +122,7 @@ impl LogicalInsert {
         if verbose {
             write!(
                 f,
-                ", source to insert column mapping: [{}]",
+                ", mapping: [{}]",
                 self.column_indices()
                     .iter()
                     .cloned()
