@@ -13,13 +13,15 @@
 // limitations under the License.
 
 use std::collections::HashSet;
-use std::ops::Sub;
+use std::ops::{Mul, Sub};
+
+use risingwave_pb::plan_common::JoinType;
 
 use self::card::Cardinality;
 use super::{DefaultBehavior, DefaultValue, PlanVisitor};
 use crate::catalog::system_catalog::pg_catalog::PG_NAMESPACE_TABLE_NAME;
 use crate::optimizer::plan_node::generic::Limit;
-use crate::optimizer::plan_node::{self, PlanTreeNode, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{self, PlanTreeNode, PlanTreeNodeBinary, PlanTreeNodeUnary};
 use crate::optimizer::plan_visitor::PlanRef;
 
 pub mod card {
@@ -136,7 +138,7 @@ pub mod card {
         /// Returns the sum of the two cardinalities, where the lower and upper bounds are
         /// respectively the sum of the lower and upper bounds of the two cardinalities.
         fn add(self, rhs: Self) -> Self::Output {
-            let lo = self.lo() + rhs.lo();
+            let lo = self.lo().saturating_add(rhs.lo());
             let hi = if let (Some(lhs), Some(rhs)) = (self.hi(), rhs.hi()) {
                 lhs.checked_add(rhs)
             } else {
@@ -153,6 +155,22 @@ pub mod card {
         fn sub(self, rhs: usize) -> Self::Output {
             let lo = self.lo().saturating_sub(rhs);
             let hi = self.hi().map(|hi| hi.saturating_sub(rhs));
+            Self::new(lo, hi)
+        }
+    }
+
+    impl Mul<Cardinality> for Cardinality {
+        type Output = Cardinality;
+
+        /// Returns the product of the two cardinalities, where the lower and upper bounds are
+        /// respectively the product of the lower and upper bounds of the two cardinalities.
+        fn mul(self, rhs: Cardinality) -> Self::Output {
+            let lo = self.lo().saturating_mul(rhs.lo());
+            let hi = if let (Some(lhs), Some(rhs)) = (self.hi(), rhs.hi()) {
+                lhs.checked_mul(rhs)
+            } else {
+                None
+            };
             Self::new(lo, hi)
         }
     }
@@ -324,6 +342,23 @@ impl PlanVisitor<Cardinality> for CardinalityVisitor {
                 .unwrap_or_default()
         } else {
             Cardinality::default()
+        }
+    }
+
+    fn visit_logical_join(&mut self, plan: &plan_node::LogicalJoin) -> Cardinality {
+        let left = self.visit(plan.left());
+        let right = self.visit(plan.right());
+
+        match plan.join_type() {
+            JoinType::Unspecified => unreachable!(),
+
+            JoinType::Inner => left.mul(right).as_low_as(0),
+
+            JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti => left.as_low_as(0),
+            JoinType::RightOuter | JoinType::RightSemi | JoinType::RightAnti => right.as_low_as(0),
+
+            // TODO: refine the cardinality of full outer join
+            JoinType::FullOuter => Cardinality::default(),
         }
     }
 
