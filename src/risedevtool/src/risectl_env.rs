@@ -17,7 +17,7 @@ use std::process::Command;
 
 use anyhow::Result;
 
-use crate::{add_storage_backend, HummockInMemoryStrategy, ServiceConfig};
+use crate::{add_hummock_backend, HummockInMemoryStrategy, ServiceConfig};
 
 pub fn compute_risectl_env(services: &Vec<ServiceConfig>) -> Result<String> {
     // Pick one of the compute node and generate risectl config
@@ -29,7 +29,7 @@ pub fn compute_risectl_env(services: &Vec<ServiceConfig>) -> Result<String> {
             // If the cluster is launched without a shared storage, we will skip this.
             {
                 let mut cmd = Command::new("compute-node");
-                if add_storage_backend(
+                if add_hummock_backend(
                     "risectl",
                     c.provide_opendal.as_ref().unwrap(),
                     c.provide_minio.as_ref().unwrap(),
