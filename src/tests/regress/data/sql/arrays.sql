@@ -580,9 +580,9 @@ select array_to_string(array[1,2,3,4,NULL,6], NULL);
 --@ select array_length(array[[1,2,3], [4,5,6]], 2);
 --@ select array_length(array[[1,2,3], [4,5,6]], 3);
 
---@ select cardinality(NULL::int[]);
---@ select cardinality('{}'::int[]);
---@ select cardinality(array[1,2,3]);
+select cardinality(NULL::int[]);
+select cardinality('{}'::int[]);
+select cardinality(array[1,2,3]);
 --@ select cardinality('[2:4]={5,6,7}'::int[]);
 --@ select cardinality('{{1,2}}'::int[]);
 --@ select cardinality('{{1,2},{3,4},{5,6}}'::int[]);
@@ -733,5 +733,5 @@ select array_remove(array['X','X','X'], 'X') = '{}';
 --@         ('[-15:-10]={1,2,3,4,5,6}'),
 --@         ('{{1,10},{2,20},{3,30},{4,40}}')) v(arr);
 --@ 
---@ SELECT trim_array(ARRAY[1, 2, 3], -1); -- fail
---@ SELECT trim_array(ARRAY[1, 2, 3], 10); -- fail
+SELECT trim_array(ARRAY[1, 2, 3], -1); -- fail
+SELECT trim_array(ARRAY[1, 2, 3], 10); -- fail
