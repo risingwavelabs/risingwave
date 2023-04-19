@@ -12,6 +12,11 @@ RUN apt-get update -yy && \
 
 SHELL ["/bin/bash", "-c"]
 
+# Install `go` toolchain.
+RUN wget https://go.dev/dl/go1.20.3.linux-amd64.tar.gz
+RUN rm -rf /usr/local/go && tar -C /usr/local -xzf go1.20.3.linux-amd64.tar.gz
+ENV PATH $PATH:/usr/local/go/bin
+
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain ${RUST_TOOLCHAIN} -y
 
 RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.4.0/buf-$(uname -s)-$(uname -m).tar.gz" | \
