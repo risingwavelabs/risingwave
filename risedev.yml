@@ -289,20 +289,20 @@ profile:
   ci-gen-cpu-flamegraph:
     config-path: src/config/ci-gen-cpu-flamegraph.toml
     steps:
-      # - use: aws-s3
+      - use: aws-s3
         # Id to be picked-up by services
-        # id: aws-s3
+        id: aws-s3
 
         # The bucket to be used for AWS S3
-        # bucket: noel-hummock-test
+        bucket: rw-ci-benchmark
 
         # access key, secret key and region should be set in aws config (either by env var or .aws/config)
 
         # used to support other s3 compatible object store.
-        # s3-compatible: false
+        s3-compatible: false
 
       # FIXME(kwannoel): should use s3.
-      - use: minio
+      # - use: minio
       - use: etcd
       - use: meta-node
       - use: compute-node
