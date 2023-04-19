@@ -95,18 +95,18 @@ impl WorkerNodeManager {
 
     pub fn add_worker_node(&self, node: WorkerNode) {
         let mut write_guard = self.inner.write().unwrap();
-        write_guard.worker_nodes.push(node);
         if node.property.as_ref().map_or(false, |p| p.is_serving) {
             write_guard.serving_fragment_vnode_mapping.clear();
         }
+        write_guard.worker_nodes.push(node);
     }
 
     pub fn remove_worker_node(&self, node: WorkerNode) {
         let mut write_guard = self.inner.write().unwrap();
-        write_guard.worker_nodes.retain(|x| *x != node);
         if node.property.as_ref().map_or(false, |p| p.is_serving) {
             write_guard.serving_fragment_vnode_mapping.clear();
         }
+        write_guard.worker_nodes.retain(|x| *x != node);
     }
 
     pub fn refresh(
