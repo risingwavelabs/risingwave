@@ -43,7 +43,7 @@ use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, Not, RangeInclu
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::PbBuffer;
 
-use crate::collection::estimate_size::EstimateSize;
+use crate::estimate_size::EstimateSize;
 
 #[derive(Default, Debug)]
 pub struct BitmapBuilder {

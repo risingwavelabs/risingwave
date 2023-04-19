@@ -22,7 +22,7 @@ use super::{ArrayResult, DataChunkTestExt};
 use crate::array::column::Column;
 use crate::array::{DataChunk, Vis};
 use crate::buffer::Bitmap;
-use crate::collection::estimate_size::EstimateSize;
+use crate::estimate_size::EstimateSize;
 use crate::row::{OwnedRow, Row};
 use crate::types::to_text::ToText;
 use crate::types::DataType;
