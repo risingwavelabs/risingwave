@@ -12,9 +12,10 @@ tar -C /usr/local -xzf go1.20.3.linux-amd64.tar.gz
 export PATH=$PATH:/usr/local/go/bin
 
 echo "--- Installing promql cli client"
+TARGET_PATH="$PWD/target/release"
 git clone https://github.com/nalbury/promql-cli.git
 pushd promql-cli/
-OS=linux INSTALL_PATH=../target/release make install
+OS=linux INSTALL_PATH="$TARGET_PATH" make install
 popd
 
 # FIXME(kwannoel): Not sure if risingwave_java_binding is needed
