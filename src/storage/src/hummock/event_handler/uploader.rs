@@ -644,7 +644,7 @@ impl HummockUploader {
     }
 
     pub(crate) fn seal_epoch(&mut self, epoch: HummockEpoch) {
-        // info_in_release!("epoch {} is sealed", epoch);
+        info_in_release!("epoch {} is sealed", epoch);
         assert!(
             epoch > self.max_sealed_epoch,
             "sealing a sealed epoch {}. {}",
@@ -666,10 +666,10 @@ impl HummockUploader {
                     .expect("we have checked non-empty");
                 self.sealed_data.seal_new_epoch(epoch, unsealed_data);
             } else {
-                // info_in_release!("epoch {} to seal has no data", epoch);
+                info_in_release!("epoch {} to seal has no data", epoch);
             }
         } else {
-            // info_in_release!("epoch {} to seal has no data", epoch);
+            info_in_release!("epoch {} to seal has no data", epoch);
         }
     }
 
