@@ -317,6 +317,6 @@ steps:
   # Generates cpu flamegraph if label `cpu_flamegraph` is added to PR.
   - label: "Generate CPU flamegraph"
     command: "ci/scripts/gen-flamegraph.sh"
-    depends_on: "cpu-flamegraph-env-build"
+    # depends_on: "cpu-flamegraph-env-build"
     if: build.pull_request.labels includes "cpu_flamegraph"
     timeout_in_minutes: 20
