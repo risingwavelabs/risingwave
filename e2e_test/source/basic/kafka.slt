@@ -288,6 +288,18 @@ create source s22 (v1 int as v2-1, v2 int, v3 int as v2+1) with (
   scan.startup.mode = 'earliest'
 ) row format json
 
+
+statement ok
+CREATE TABLE mongo_customers (
+	_id BIGINT PRIMARY KEY,
+	payload jsonb
+)
+WITH (
+	connector = 'kafka',
+  properties.bootstrap.server = '127.0.0.1:29092',
+	topic = 'debezium_mongo_json_customers')
+ROW FORMAT DEBEZIUM_MONGO_JSON
+
 statement ok
 flush;
 
@@ -468,6 +480,20 @@ select * from s22;
 20 21 22
 NULL NULL NULL
 
+query II 
+SELECT
+	*
+FROM
+	mongo_customers
+ORDER BY
+	_id;
+----
+1001    {"_id": 1001, "first_name": "Sally", "last_name": "Thomas", "email": "sally.thomas@acme.com"}
+1002    {"_id": 1002, "first_name": "George", "last_name": "Bailey", "email": "gbailey@foobar.com"}
+1003    {"_id": 1003, "first_name": "Edward", "last_name": "Walker", "email": "ed@walker.com"}
+1004    {"_id": 1004, "first_name": "Anne", "last_name": "Kretchmar", "email": "annek@noanswer.org"}
+
+
 statement ok
 drop materialized view source_mv1
 
@@ -515,3 +541,6 @@ drop table s21
 
 statement ok
 drop source s22
+
+statement ok
+DROP TABLE mongo_customers;

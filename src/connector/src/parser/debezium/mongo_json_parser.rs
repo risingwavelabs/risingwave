@@ -87,12 +87,12 @@ fn parse_bson_value(
                 id_type
             ))))?,
         },
-        _ => unreachable!("DebeziumMongoJsonParser::new must ensure _id column datatyps."),
+        _ => unreachable!("DebeziumMongoJsonParser::new must ensure _id column datatypes."),
     };
     let payload: Datum = match payload_type {
         DataType::Jsonb => ScalarImpl::Jsonb(bson_value.into_relaxed_extjson().into()).into(),
         DataType::Varchar => ScalarImpl::Utf8(bson_str.into()).into(),
-        _ => unreachable!("DebeziumMongoJsonParser::new must ensure payload column datatyps."),
+        _ => unreachable!("DebeziumMongoJsonParser::new must ensure payload column datatypes."),
     };
 
     Ok((id, payload))
