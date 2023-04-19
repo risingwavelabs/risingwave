@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, LinkedList};
 use std::sync::{Arc, RwLock};
 
 use anyhow::anyhow;
 use itertools::Itertools;
-use rand::seq::{IteratorRandom, SliceRandom};
+use rand::seq::SliceRandom;
 use risingwave_common::bail;
 use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};
 use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
-use risingwave_pb::common::{WorkerNode, WorkerType};
+use risingwave_pb::common::{ParallelUnit, WorkerNode, WorkerType};
 
 use crate::catalog::FragmentId;
 use crate::scheduler::{SchedulerError, SchedulerResult};
@@ -175,8 +175,7 @@ impl WorkerNodeManager {
             .streaming_fragment_vnode_mapping
             .insert(fragment_id, vnode_mapping)
             .unwrap();
-        // TODO #8940: re-calculate serving schedule to keep locality with best efforts
-        guard.serving_fragment_vnode_mapping.clear();
+        guard.serving_fragment_vnode_mapping.remove(&fragment_id);
     }
 
     pub fn remove_streaming_fragment_mapping(&self, fragment_id: &FragmentId) {
@@ -185,8 +184,7 @@ impl WorkerNodeManager {
             .streaming_fragment_vnode_mapping
             .remove(fragment_id)
             .unwrap();
-        // TODO #8940: re-calculate serving schedule to keep locality with best efforts
-        guard.serving_fragment_vnode_mapping.clear();
+        guard.serving_fragment_vnode_mapping.remove(fragment_id);
     }
 
     /// Returns fragment's vnode mapping for serving.
@@ -218,17 +216,20 @@ impl WorkerNodeManagerInner {
             .cloned()
     }
 
+    /// Calculates serving vnode mappings for `fragment_id`.
+    /// The `serving_parallelism` is set to min(`all_serving_pus`, `streaming_parallelism`).
     fn reschedule_serving(
         &mut self,
         fragment_id: FragmentId,
     ) -> SchedulerResult<ParallelUnitMapping> {
-        let serving_pus = self
+        let all_serving_pus: BTreeMap<u32, Vec<ParallelUnit>> = self
             .worker_nodes
             .iter()
             .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
-            .flat_map(|w| w.parallel_units.clone())
-            .collect_vec();
-        if serving_pus.is_empty() {
+            .map(|w| (w.id, w.parallel_units.clone()))
+            .collect();
+        let serving_pus_total_num = all_serving_pus.values().map(|p| p.len()).sum::<usize>();
+        if serving_pus_total_num == 0 {
             return Err(SchedulerError::EmptyWorkerNodes);
         }
         let streaming_vnode_mapping = self
@@ -241,16 +242,32 @@ impl WorkerNodeManagerInner {
                 )
             })?;
         let serving_parallelism = std::cmp::min(
-            serving_pus.len(),
+            serving_pus_total_num,
             streaming_vnode_mapping.iter_unique().count(),
         );
-        let pus = serving_pus
-            .into_iter()
-            .choose_multiple(&mut rand::thread_rng(), serving_parallelism);
-        let pu_mapping = ParallelUnitMapping::build(&pus);
+        assert!(serving_parallelism > 0);
+        // round-robin similar to `Scheduler` in meta node.
+        let mut parallel_units: LinkedList<_> = all_serving_pus
+            .into_values()
+            .map(|v| v.into_iter().sorted_by_key(|p| p.id))
+            .collect();
+        let mut round_robin = Vec::new();
+        while !parallel_units.is_empty() {
+            parallel_units.drain_filter(|ps| {
+                if let Some(p) = ps.next() {
+                    round_robin.push(p);
+                    false
+                } else {
+                    true
+                }
+            });
+        }
+        round_robin.truncate(serving_parallelism);
+        round_robin.sort_unstable_by_key(|p| p.id);
+        let selected_serving_pus = ParallelUnitMapping::build(&round_robin);
         self.serving_fragment_vnode_mapping
-            .insert(fragment_id, pu_mapping.clone());
-        Ok(pu_mapping)
+            .insert(fragment_id, selected_serving_pus.clone());
+        Ok(selected_serving_pus)
     }
 }
 
