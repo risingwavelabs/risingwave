@@ -64,3 +64,8 @@ impl WindowState for LeadState {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    // TODO(rc): need to add some unit tests
+}

@@ -156,8 +156,5 @@ impl<K: Ord, V> WindowBuffer<K, V> {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn test() {
-        // TODO()
-    }
+    // TODO(rc): need to add some unit tests
 }

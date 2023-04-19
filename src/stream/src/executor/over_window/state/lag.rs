@@ -83,3 +83,8 @@ impl WindowState for LagState {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    // TODO(rc): need to add some unit tests
+}

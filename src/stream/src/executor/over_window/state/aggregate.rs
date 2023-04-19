@@ -138,3 +138,8 @@ impl BatchAggregatorWrapper<'_> {
         Ok(ret_value_builder.finish().to_datum())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    // TODO(rc): need to add some unit tests
+}
