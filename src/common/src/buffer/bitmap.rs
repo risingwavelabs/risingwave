@@ -647,7 +647,7 @@ impl<'a> iter::Iterator for BitmapOnesIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         while self.cur_bits == Some(0) {
             self.cur_idx += 1;
-            self.cur_bits = if self.cur_idx == (self.bitmap.len() + BITS - 1) / BITS {
+            self.cur_bits = if self.cur_idx >= self.bits.len() {
                 None
             } else {
                 Some(self.bitmap.bits[self.cur_idx])
