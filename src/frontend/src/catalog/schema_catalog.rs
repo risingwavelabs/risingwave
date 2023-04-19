@@ -195,6 +195,15 @@ impl SchemaCatalog {
 
     pub fn drop_source(&mut self, id: SourceId) {
         let source_ref = self.source_by_id.remove(&id).unwrap();
+        if let Some(connection_id) = source_ref.connection_id {
+            self.connection_source_ref
+                .entry(connection_id)
+                .and_modify(|sources| {
+                    let idx = sources.iter().position(|s| s.id == id).unwrap();
+                    sources.remove(idx);
+                })
+                .or_insert(vec![source_ref.clone()]);
+        }
         self.source_by_name.remove(&source_ref.name).unwrap();
     }
 
