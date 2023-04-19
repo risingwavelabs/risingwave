@@ -19,8 +19,17 @@ For those (object) storage products that are not compatible with s3 (or compatib
 
 All of these object stores are supported in risedev, you can use the risedev command to start RisingWave on these storage backends.
 ## How to build RisingWave with multiple object store
-### COS
-### Lyvecloud Storage
+### COS and Lyvecloud Storage
+To use COS or Lyvecloud Storage, you need to 
+```shell
+export S3_COMPATIBLE_REGION = "your_bucket_region"
+export S3_COMPATIBLE_ENDPOINT = "endpoint"
+export S3_COMPATIBLE_ACCESS_KEY_ID = "access_key_id"
+export S3_COMPATIBLE_SECRET_ACCESS_KEY ="access_key_secret"
+```
+
+then in `risedev.yml`, [enable using aws s3](https://github.com/risingwavelabs/risingwave/blob/5993d24a4ccadf6dc9fc93ce0fd7e175a2810b71/risedev.yml#L25-L29) and set the bucket name and `s3-compatible = true`. Finally, start RisingWave with ridedev, then you can successfully run RisingWave on these two storage backends.
+
 ### GCS
 ### OSS
 ### HDFS
