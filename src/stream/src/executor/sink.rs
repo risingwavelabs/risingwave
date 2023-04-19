@@ -259,7 +259,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 sink.commit().await?;
                                 sink_commit_duration_metrics
                                     .observe(start_time.elapsed().as_millis() as f64);
-                                log_reader.truncate().await?;
                                 SinkState::Checkpointed { prev_epoch: epoch }
                             } else {
                                 SinkState::Writing { curr_epoch: epoch }
@@ -275,6 +274,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             SinkState::Checkpointed { prev_epoch: epoch }
                         }
                     };
+                    if is_checkpoint {
+                        log_reader.truncate().await?;
+                    }
                 }
             }
         }
@@ -397,5 +399,70 @@ mod test {
 
         // The last barrier message.
         executor.next().await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_empty_barrier_sink() {
+        use risingwave_common::catalog::Field;
+        use risingwave_common::types::DataType;
+
+        use crate::executor::Barrier;
+
+        let properties = maplit::hashmap! {
+            "connector".into() => "blackhole".into(),
+            "type".into() => "append-only".into(),
+            "force_append_only".into() => "true".into()
+        };
+        let schema = Schema::new(vec![
+            Field::with_name(DataType::Int64, "v1"),
+            Field::with_name(DataType::Int64, "v2"),
+        ]);
+        let pk = vec![0];
+
+        let mock = MockSource::with_messages(
+            schema.clone(),
+            pk.clone(),
+            vec![
+                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Barrier(Barrier::new_test_barrier(3)),
+            ],
+        );
+
+        let config = SinkConfig::from_hashmap(properties).unwrap();
+        let sink_executor = SinkExecutor::new(
+            Box::new(mock),
+            Arc::new(StreamingMetrics::unused()),
+            config,
+            0,
+            Default::default(),
+            schema.clone(),
+            pk.clone(),
+            SinkType::ForceAppendOnly,
+            ActorContext::create(0),
+            BoundedInMemLogStoreFactory::new(1),
+        )
+        .await
+        .unwrap();
+
+        let mut executor = SinkExecutor::execute(Box::new(sink_executor));
+
+        // Barrier message.
+        assert_eq!(
+            executor.next().await.unwrap().unwrap(),
+            Message::Barrier(Barrier::new_test_barrier(1))
+        );
+
+        // Barrier message.
+        assert_eq!(
+            executor.next().await.unwrap().unwrap(),
+            Message::Barrier(Barrier::new_test_barrier(2))
+        );
+
+        // The last barrier message.
+        assert_eq!(
+            executor.next().await.unwrap().unwrap(),
+            Message::Barrier(Barrier::new_test_barrier(3))
+        );
     }
 }
