@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 
 set -euo pipefail
 
@@ -15,7 +15,9 @@ print_machine_debug_info() {
 
 install_nexmark_bench() {
   git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/nexmark-bench.git
+  pushd nexmark-bench
   make install
+  popd
 }
 
 install_nperf() {
@@ -126,6 +128,14 @@ gen_events() {
   popd
 }
 
+gen_cpu_flamegraph() {
+  ~/not-perf/target/release/nperf flamegraph --merge-threads perf.data > perf.svg
+}
+
+############## MONITORING
+
+# TODO
+
 ############## LIB
 
 # Install artifacts + tools, configure environment
@@ -159,20 +169,35 @@ main() {
   psql -h localhost -p 4566 -d dev -U root -f ci/scripts/sql/nexmark/ddl.sql
 
   echo "--- Running Benchmarks"
-  # TODO: Allow users to configure which query they want to run.
+  # TODO(kwannoel): Allow users to configure which query they want to run.
   psql -h localhost -p 4566 -d dev -U root -f ci/scripts/sql/nexmark/q17.sql
 
   echo "--- Start Profiling"
   start_nperf
 
+  # NOTE(kwannoel): Can stub first if promql gives us issues.
+  # Most nexmark queries (q4-q20) will have a runtime of 10+ min.
+  # We can just let flamegraph profile 5min slice.
+  # TODO(kwannoel): Use promql to monitor when throughput hits 0 with 1-minute intervals.
   echo "--- Monitoring Benchmark"
-  echo "Success!"
+  sleep $((5 * 60))
 
   echo "--- Benchmark finished"
   echo "Success!"
 
+  # NOTE(kwannoel): We can only generate cpu flamegraph OR extract metrics.
+  # Running profiling will take up 30-50% of a single CPU core.
+  # So that will affect benchmark accuracy.
+  # Another solution could be to:
+  # 1. Run cpu flamegraph for first 10 mins.
+  # 2. Monitor throughput for next 10 mins.
+  # Benchmark will still not be as accurate as just running benchmark w/o profiling,
+  # but quick way to get both results.
   echo "--- Generate flamegraph"
-  echo "Success!"
+  gen_cpu_flamegraph
+
+  echo "--- Uploading flamegraph"
+  buildkite-agent artifact upload ./perf.svg
 
   echo "--- Cleanup"
   # TODO: cleanup s3 bucket.
