@@ -799,6 +799,9 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::Level0StopWriteThresholdSubLevelNumber(c) => {
                 target.level0_stop_write_threshold_sub_level_number = *c;
             }
+            MutableConfig::SplitByStateTable(c) => {
+                target.split_by_state_table = *c;
+            }
         }
     }
 }

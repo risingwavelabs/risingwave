@@ -545,6 +545,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint32 compaction_filter_mask = 8;
       uint32 max_sub_compaction = 9;
       uint64 level0_stop_write_threshold_sub_level_number = 10;
+      bool split_by_state_table = 11;
     }
   }
   repeated uint64 compaction_group_ids = 1;
