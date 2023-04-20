@@ -41,7 +41,8 @@ public class SourceValidateHandler {
         try {
             validateDbProperties(request, this.responseObserver);
             // validate pass
-            responseObserver.onNext(ConnectorServiceProto.ValidateSourceResponse.newBuilder().build());
+            responseObserver.onNext(
+                    ConnectorServiceProto.ValidateSourceResponse.newBuilder().build());
             responseObserver.onCompleted();
         } catch (Exception e) {
             LOG.error("failed to validate source", e);
