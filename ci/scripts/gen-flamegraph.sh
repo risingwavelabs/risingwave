@@ -21,7 +21,8 @@ print_machine_debug_info() {
 install_nperf() {
   git clone https://github.com/koute/not-perf.git
   pushd not-perf/cli
-  cargo build --release
+  # NOTE(kwannoel): Don't change the pinned toolchain, unless the new one works in ci!
+  cargo +nightly-2023-03-01 build --release
   popd
 }
 
