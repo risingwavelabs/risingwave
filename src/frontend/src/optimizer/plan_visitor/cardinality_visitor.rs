@@ -118,13 +118,15 @@ impl PlanVisitor<Cardinality> for CardinalityVisitor {
         match plan.join_type() {
             JoinType::Unspecified => unreachable!(),
 
+            // For each row from one side, we match `0..=(right.hi)` rows from the other side.
             JoinType::Inner => left.mul(right.min(0..)),
 
-            // Each row of some side matches at least one row from the other side or `NULL`.
+            // For each row from one side, we match `1..=max(right.hi, 1)` rows from the other side,
+            // since we can at least match a `NULL` row.
             JoinType::LeftOuter => left.mul(right.max(1)),
             JoinType::RightOuter => right.mul(left.max(1)),
 
-            // Rows in the result set must be in some side.
+            // For each row in the result set, it must belong to the given side.
             JoinType::LeftSemi | JoinType::LeftAnti => left.min(0..),
             JoinType::RightSemi | JoinType::RightAnti => right.min(0..),
 

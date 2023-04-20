@@ -178,7 +178,7 @@ impl Cardinality {
     }
 }
 
-impl Add<Cardinality> for Cardinality {
+impl<T: Into<Cardinality>> Add<T> for Cardinality {
     type Output = Self;
 
     /// Returns the sum of the two cardinalities, where the lower and upper bounds are
@@ -196,7 +196,8 @@ impl Add<Cardinality> for Cardinality {
     /// let card3 = Cardinality::from(8..);
     /// assert_eq!(card1 + card2, card3);
     /// ```
-    fn add(self, rhs: Self) -> Self::Output {
+    fn add(self, rhs: T) -> Self::Output {
+        let rhs: Self = rhs.into();
         let lo = self.lo().saturating_add(rhs.lo());
         let hi = if let (Some(lhs), Some(rhs)) = (self.hi(), rhs.hi()) {
             lhs.checked_add(rhs)
@@ -230,8 +231,8 @@ impl Sub<usize> for Cardinality {
     }
 }
 
-impl Mul<Cardinality> for Cardinality {
-    type Output = Cardinality;
+impl<T: Into<Cardinality>> Mul<T> for Cardinality {
+    type Output = Self;
 
     /// Returns the product of the two cardinalities, where the lower and upper bounds are
     /// respectively the product of the lower and upper bounds of the two cardinalities.
@@ -252,25 +253,8 @@ impl Mul<Cardinality> for Cardinality {
     /// let card2 = Cardinality::from(3..=5);
     /// let card3 = Cardinality::from((usize::MAX)..);
     /// assert_eq!(card1 * card2, card3);
-    /// ```
-    fn mul(self, rhs: Cardinality) -> Self::Output {
-        let lo = self.lo().saturating_mul(rhs.lo());
-        let hi = if let (Some(lhs), Some(rhs)) = (self.hi(), rhs.hi()) {
-            lhs.checked_mul(rhs)
-        } else {
-            None
-        };
-        Self::new(lo, hi)
-    }
-}
-
-impl Mul<usize> for Cardinality {
-    type Output = Self;
-
-    /// Returns the cardinality with both lower and upper bounds multiplied by `rhs`.
     ///
-    /// ```
-    /// # use risingwave_frontend::optimizer::property::Cardinality;
+    /// // Or directly with a scalar.
     /// let card = Cardinality::from(3..=5);
     /// assert_eq!(card * 2, Cardinality::from(6..=10));
     ///
@@ -280,9 +264,14 @@ impl Mul<usize> for Cardinality {
     /// let card = Cardinality::from((usize::MAX - 1)..=(usize::MAX));
     /// assert_eq!(card * 2, Cardinality::from((usize::MAX)..));
     /// ```
-    fn mul(self, rhs: usize) -> Self::Output {
-        let lo = self.lo().saturating_mul(rhs);
-        let hi = self.hi().and_then(|hi| hi.checked_mul(rhs));
+    fn mul(self, rhs: T) -> Self::Output {
+        let rhs: Self = rhs.into();
+        let lo = self.lo().saturating_mul(rhs.lo());
+        let hi = if let (Some(lhs), Some(rhs)) = (self.hi(), rhs.hi()) {
+            lhs.checked_mul(rhs)
+        } else {
+            None
+        };
         Self::new(lo, hi)
     }
 }
