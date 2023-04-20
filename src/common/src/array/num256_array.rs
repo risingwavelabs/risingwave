@@ -93,11 +93,6 @@ macro_rules! impl_array_for_num256 {
                 self.bitmap = bitmap;
             }
 
-            fn create_builder(&self, capacity: usize) -> super::ArrayBuilderImpl {
-                let array_builder = Self::Builder::new(capacity);
-                super::ArrayBuilderImpl::$variant_name(array_builder)
-            }
-
             fn data_type(&self) -> DataType {
                 DataType::$variant_name
             }

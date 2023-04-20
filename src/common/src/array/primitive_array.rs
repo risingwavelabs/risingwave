@@ -22,7 +22,7 @@ use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::{Array, ArrayBuilder, ArrayResult};
 use crate::array::serial_array::Serial;
-use crate::array::{ArrayBuilderImpl, ArrayImpl, DataType};
+use crate::array::{ArrayImpl, DataType};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
 use crate::for_all_native_types;
@@ -49,8 +49,6 @@ where
     fn try_into_array_ref(arr: &ArrayImpl) -> Option<&PrimitiveArray<Self>>;
     /// Returns array type of the primitive array
     fn array_type() -> ArrayType;
-    /// Creates an `ArrayBuilder` for this primitive type
-    fn create_array_builder(capacity: usize) -> ArrayBuilderImpl;
 
     // item methods
     fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize>;
@@ -80,11 +78,6 @@ macro_rules! impl_array_methods {
 
         fn array_type() -> ArrayType {
             ArrayType::$array_type_pb
-        }
-
-        fn create_array_builder(capacity: usize) -> ArrayBuilderImpl {
-            let array_builder = PrimitiveArrayBuilder::<$scalar_type>::new(capacity);
-            ArrayBuilderImpl::$array_impl_variant(array_builder)
         }
     };
 }
@@ -221,10 +214,6 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
 
     fn set_bitmap(&mut self, bitmap: Bitmap) {
         self.bitmap = bitmap;
-    }
-
-    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
-        T::create_array_builder(capacity)
     }
 
     fn data_type(&self) -> DataType {

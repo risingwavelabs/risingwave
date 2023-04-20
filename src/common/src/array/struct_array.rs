@@ -187,11 +187,6 @@ impl Array for StructArray {
         self.bitmap = bitmap;
     }
 
-    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
-        let array_builder = StructArrayBuilder::with_type(capacity, self.data_type());
-        ArrayBuilderImpl::Struct(array_builder)
-    }
-
     fn data_type(&self) -> DataType {
         DataType::Struct(self.type_.clone())
     }
@@ -560,7 +555,7 @@ mod tests {
             vec![DataType::Int32, DataType::Float32],
         );
         let builder = arr.create_builder(4);
-        let arr2 = try_match_expand!(builder.finish(), ArrayImpl::Struct).unwrap();
+        let arr2 = builder.finish();
         assert_eq!(arr.data_type(), arr2.data_type());
     }
 

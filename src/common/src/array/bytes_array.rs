@@ -20,7 +20,6 @@ use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::{Array, ArrayBuilder, DataType};
-use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
 use crate::util::iter_util::ZipEqDebug;
@@ -110,11 +109,6 @@ impl Array for BytesArray {
 
     fn set_bitmap(&mut self, bitmap: Bitmap) {
         self.bitmap = bitmap;
-    }
-
-    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
-        let array_builder = BytesArrayBuilder::new(capacity);
-        ArrayBuilderImpl::Bytea(array_builder)
     }
 
     fn data_type(&self) -> DataType {

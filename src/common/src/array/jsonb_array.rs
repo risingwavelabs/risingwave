@@ -452,11 +452,6 @@ impl Array for JsonbArray {
         self.bitmap = bitmap;
     }
 
-    fn create_builder(&self, capacity: usize) -> super::ArrayBuilderImpl {
-        let array_builder = Self::Builder::new(capacity);
-        super::ArrayBuilderImpl::Jsonb(array_builder)
-    }
-
     fn data_type(&self) -> DataType {
         DataType::Jsonb
     }

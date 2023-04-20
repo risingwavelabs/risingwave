@@ -209,16 +209,6 @@ impl Array for ListArray {
         self.bitmap = bitmap;
     }
 
-    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
-        let array_builder = ListArrayBuilder::with_type(
-            capacity,
-            DataType::List {
-                datatype: Box::new(self.value_type.clone()),
-            },
-        );
-        ArrayBuilderImpl::List(array_builder)
-    }
-
     fn data_type(&self) -> DataType {
         DataType::List {
             datatype: Box::new(self.value_type.clone()),
@@ -664,7 +654,7 @@ mod tests {
             DataType::Float32,
         );
         let builder = arr.create_builder(0);
-        let arr2 = try_match_expand!(builder.finish(), ArrayImpl::List).unwrap();
+        let arr2 = builder.finish();
         assert_eq!(arr.data_type(), arr2.data_type());
     }
 

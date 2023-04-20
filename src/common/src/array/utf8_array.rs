@@ -18,7 +18,6 @@ use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::bytes_array::{BytesWriter, PartialBytesWriter};
 use super::{Array, ArrayBuilder, BytesArray, BytesArrayBuilder, DataType};
-use crate::array::ArrayBuilderImpl;
 use crate::buffer::Bitmap;
 use crate::estimate_size::EstimateSize;
 
@@ -67,11 +66,6 @@ impl Array for Utf8Array {
 
     fn set_bitmap(&mut self, bitmap: Bitmap) {
         self.bytes.set_bitmap(bitmap);
-    }
-
-    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
-        let array_builder = Utf8ArrayBuilder::new(capacity);
-        ArrayBuilderImpl::Utf8(array_builder)
     }
 
     fn data_type(&self) -> DataType {

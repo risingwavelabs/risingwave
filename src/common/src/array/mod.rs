@@ -270,7 +270,9 @@ pub trait Array:
         self.len() == 0
     }
 
-    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl;
+    fn create_builder(&self, capacity: usize) -> Self::Builder {
+        Self::Builder::with_type(capacity, self.data_type())
+    }
 
     fn data_type(&self) -> DataType;
 }
@@ -627,7 +629,7 @@ macro_rules! impl_array {
 
             pub fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
                 match self {
-                    $( Self::$variant_name(inner) => inner.create_builder(capacity), )*
+                    $( Self::$variant_name(inner) => ArrayBuilderImpl::$variant_name(inner.create_builder(capacity)), )*
                 }
             }
         }
