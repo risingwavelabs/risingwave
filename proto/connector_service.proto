@@ -129,16 +129,10 @@ enum SourceType {
 }
 
 message GetEventStreamRequest {
-  message StartSource {
-    uint64 source_id = 1;
-    SourceType source_type = 2;
-    string start_offset = 3;
-    map<string, string> properties = 4;
-  }
-
-  oneof request {
-    StartSource start = 2;
-  }
+  uint64 source_id = 1;
+  SourceType source_type = 2;
+  string start_offset = 3;
+  map<string, string> properties = 4;
 }
 
 message GetEventStreamResponse {

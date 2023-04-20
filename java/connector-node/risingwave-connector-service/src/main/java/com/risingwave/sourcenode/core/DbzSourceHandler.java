@@ -113,6 +113,5 @@ public class DbzSourceHandler implements SourceHandler {
                 LOG.warn("Failed to stop Engine#{}", config.getSourceId(), e);
             }
         }
-        LOG.info("End consuming events of table {}", config.getSourceId());
     }
 }

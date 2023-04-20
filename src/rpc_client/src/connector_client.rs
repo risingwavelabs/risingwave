@@ -21,9 +21,6 @@ use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::catalog::SinkType;
 use risingwave_pb::connector_service::connector_service_client::ConnectorServiceClient;
-use risingwave_pb::connector_service::get_event_stream_request::{
-    Request as SourceRequest, StartSource,
-};
 use risingwave_pb::connector_service::sink_stream_request::{Request as SinkRequest, StartSink};
 use risingwave_pb::connector_service::*;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
@@ -67,12 +64,10 @@ impl ConnectorClient {
             .0
             .to_owned()
             .get_event_stream(GetEventStreamRequest {
-                request: Some(SourceRequest::Start(StartSource {
-                    source_id,
-                    source_type: source_type as _,
-                    start_offset: start_offset.unwrap_or_default(),
-                    properties,
-                })),
+                source_id,
+                source_type: source_type as _,
+                start_offset: start_offset.unwrap_or_default(),
+                properties,
             })
             .await
             .inspect_err(|err| {

@@ -15,18 +15,13 @@
 package com.risingwave.sourcenode;
 
 import com.risingwave.connector.api.source.SourceTypeE;
-import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.proto.ConnectorServiceProto;
-import com.risingwave.sourcenode.common.DbzConnectorConfig;
 import com.risingwave.sourcenode.core.SourceHandlerFactory;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public class SourceRequestHandler {
     private final StreamObserver<ConnectorServiceProto.GetEventStreamResponse> responseObserver;
-    static final Logger LOG = LoggerFactory.getLogger(SourceRequestHandler.class);
 
     public SourceRequestHandler(
             StreamObserver<ConnectorServiceProto.GetEventStreamResponse> responseObserver) {
@@ -34,34 +29,14 @@ public class SourceRequestHandler {
     }
 
     public void handle(ConnectorServiceProto.GetEventStreamRequest request) {
-        switch (request.getRequestCase()) {
-            case START:
-                var startRequest = request.getStart();
-                try {
-                    var handler =
-                            SourceHandlerFactory.createSourceHandler(
-                                    SourceTypeE.valueOf(startRequest.getSourceType()),
-                                    startRequest.getSourceId(),
-                                    startRequest.getStartOffset(),
-                                    startRequest.getPropertiesMap());
-                    ConnectorNodeMetrics.incActiveSourceConnections(
-                            startRequest.getSourceType().toString(),
-                            startRequest.getPropertiesMap().get(DbzConnectorConfig.HOST));
-                    handler.startSource(
-                            (ServerCallStreamObserver<ConnectorServiceProto.GetEventStreamResponse>)
-                                    responseObserver);
-                    ConnectorNodeMetrics.decActiveSourceConnections(
-                            startRequest.getSourceType().toString(),
-                            startRequest.getPropertiesMap().get(DbzConnectorConfig.HOST));
-                } catch (Throwable t) {
-                    LOG.error("failed to start source", t);
-                    responseObserver.onError(t);
-                }
-                break;
-            case REQUEST_NOT_SET:
-                LOG.warn("request not set");
-                responseObserver.onCompleted();
-                break;
-        }
+        var handler =
+                SourceHandlerFactory.createSourceHandler(
+                        SourceTypeE.valueOf(request.getSourceType()),
+                        request.getSourceId(),
+                        request.getStartOffset(),
+                        request.getPropertiesMap());
+        handler.startSource(
+                (ServerCallStreamObserver<ConnectorServiceProto.GetEventStreamResponse>)
+                        responseObserver);
     }
 }
