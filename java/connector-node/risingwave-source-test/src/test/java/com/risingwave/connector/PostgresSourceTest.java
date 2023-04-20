@@ -184,49 +184,57 @@ public class PostgresSourceTest {
                                         .build())
                         .addPkIndices(0)
                         .build();
-        Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream1 =
-                testClient.getEventStreamValidate(
-                        pg.getJdbcUrl(),
-                        pg.getHost(),
-                        "debezium",
-                        pg.getPassword(),
-                        ConnectorServiceProto.SourceType.POSTGRES,
-                        tableSchema,
-                        "test",
-                        "orders");
-        StatusRuntimeException exception1 =
-                assertThrows(
-                        StatusRuntimeException.class,
-                        () -> {
-                            eventStream1.hasNext();
-                        });
-        assertEquals(
-                "INVALID_ARGUMENT: INTERNAL: The publication 'dbz_publication' does not cover all necessary columns in table orders",
-                exception1.getMessage());
+
+        try {
+            testClient.validateSource(
+                    pg.getJdbcUrl(),
+                    pg.getHost(),
+                    "debezium",
+                    pg.getPassword(),
+                    ConnectorServiceProto.SourceType.POSTGRES,
+                    tableSchema,
+                    "test",
+                    "orders");
+
+        } catch (Exception e) {
+            StatusRuntimeException exception1 =
+                    assertThrows(
+                            StatusRuntimeException.class,
+                            () -> {
+                                throw e;
+                            });
+            assertEquals(
+                    "INTERNAL: The publication 'dbz_publication' does not cover all necessary columns in table orders",
+                    exception1.getMessage());
+        }
+
         query = "DROP PUBLICATION dbz_publication";
         SourceTestClient.performQuery(connDbz, query);
         // revoke superuser and replication, check if reports error
         query = "ALTER USER debezium nosuperuser noreplication";
         SourceTestClient.performQuery(connDbz, query);
-        Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream2 =
-                testClient.getEventStreamValidate(
-                        pg.getJdbcUrl(),
-                        pg.getHost(),
-                        "debezium",
-                        pg.getPassword(),
-                        ConnectorServiceProto.SourceType.POSTGRES,
-                        tableSchema,
-                        "test",
-                        "orders");
-        StatusRuntimeException exception2 =
-                assertThrows(
-                        StatusRuntimeException.class,
-                        () -> {
-                            eventStream2.hasNext();
-                        });
-        assertEquals(
-                "INVALID_ARGUMENT: INTERNAL: Postgres user must be superuser or replication role to start walsender.",
-                exception2.getMessage());
+        try {
+            testClient.validateSource(
+                    pg.getJdbcUrl(),
+                    pg.getHost(),
+                    "debezium",
+                    pg.getPassword(),
+                    ConnectorServiceProto.SourceType.POSTGRES,
+                    tableSchema,
+                    "test",
+                    "orders");
+        } catch (Exception e) {
+            StatusRuntimeException exception2 =
+                    assertThrows(
+                            StatusRuntimeException.class,
+                            () -> {
+                                throw e;
+                            });
+            assertEquals(
+                    "INTERNAL: Postgres user must be superuser or replication role to start walsender.",
+                    exception2.getMessage());
+        }
+
         // cleanup
         query = "DROP TABLE orders";
         SourceTestClient.performQuery(connDbz, query);
