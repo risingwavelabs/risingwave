@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use rand::Rng;
+use rand::{Rng, SeedableRng};
 
 use crate::array::stream_chunk::Op;
 use crate::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder};
@@ -22,14 +22,15 @@ pub fn gen_legal_stream_chunk(
     bitmap: Option<&Bitmap>,
     chunk_size: usize,
     append_only: bool,
+    seed: u64,
 ) -> (Vec<Op>, ArrayImpl) {
     let mut data_builder = I64ArrayBuilder::new(chunk_size);
     let mut ops: Vec<Op> = vec![];
     let mut cur_data: Vec<i64> = vec![];
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     if let Some(bitmap) = bitmap {
         for i in 0..chunk_size {
-            // SAFETY(value_at_unchecked): the idx is always in bound.
+            // SAFETY(value_at_unchecked): the idx is always in bound.hao
             unsafe {
                 if bitmap.is_set_unchecked(i) {
                     let op = if append_only || cur_data.is_empty() || rng.gen() {
