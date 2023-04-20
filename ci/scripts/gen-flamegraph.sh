@@ -12,14 +12,14 @@ print_machine_debug_info() {
 }
 
 download_build_artifacts() {
-  echo "--- Installing PromQL cli client"
+  echo ">>> Installing PromQL cli client"
   # Download promql
   wget https://github.com/nalbury/promql-cli/releases/download/v0.3.0/promql-v0.3.0-linux-arm64.tar.gz
   tar -xvf promql-v0.3.0-linux-arm64.tar.gz
   chmod +x ./promql
   mv ./promql /usr/local/bin/promql
 
-  echo "--- Installing RisingWave components"
+  echo ">>> Installing RisingWave components"
   ARTIFACTS="risingwave risedev-dev librisingwave_java_binding.so"
   # Create this so `risedev` tool can locate the binaries.
   mkdir -p target/release
@@ -72,9 +72,22 @@ setup_nexmark_bench() {
 setup() {
   download_build_artifacts
 
-  echo "--- Setting up nexmark-bench"
-  # setup_nexmark_bench
+  echo ">>> Setting up nexmark-bench"
+  setup_nexmark_bench
   echo "Success!"
+}
+
+gen_events() {
+  pushd nexmark-bench
+  nexmark-server -c
+  NEXMARK_EVENTS=100000000
+  echo "Generating "$NEXMARK_EVENTS" events"
+  nexmark-server \
+    --event-rate 500000 \
+    --max-events "$NEXMARK_EVENTS" \
+    --num-event-generators 8 1>gen_events.log 2>&1 &
+  echo "Generated "$NEXMARK_EVENTS" events"
+  popd
 }
 
 ############## MAIN
@@ -83,10 +96,11 @@ main() {
   echo "--- Machine Debug Info"
   print_machine_debug_info
 
+  echo "--- Running setup"
   setup
 
   echo "--- Spawning nexmark events"
-  echo "Success!"
+  # gen_events
 
   echo "--- Starting up RW"
   ENABLE_RW_RELEASE_PROFILE=true ./risedev d ci-gen-cpu-flamegraph
