@@ -12,44 +12,55 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::array::ListValue;
 use risingwave_common::types::ScalarImpl;
 use risingwave_expr_macro::function;
 
-// This function produces the expected result when delimiter is null, although not sql standard
-#[function("string_to_array(varchar) -> list")]
-pub fn string_to_array1(s: &str) -> ListValue {
-    ListValue::new(
-        s.chars()
-            .map(|x| Some(ScalarImpl::Utf8(x.to_string().into())))
-            .collect(),
-    )
-}
-
-#[function("string_to_array(varchar, varchar) -> list")]
-pub fn string_to_array2(s: &str, sep: &str) -> ListValue {
-    match sep.is_empty() {
-        true => ListValue::new(vec![Some(ScalarImpl::Utf8(s.to_string().into()))]),
-        _ => ListValue::new(
-            s.split(sep)
-                .collect::<Vec<_>>()
-                .into_iter()
-                .map(|x| Some(ScalarImpl::Utf8(x.to_string().into())))
-                .collect(),
-        ),
+fn string_to_array_inner(s: Option<&str>, sep: Option<&str>) -> Vec<String> {
+    if let Some(s) = s {
+        if let Some(sep) = sep {
+            match sep.is_empty() {
+                true => vec![s.to_string()],
+                false => s
+                    .split(sep)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .map(|x| x.to_string())
+                    .collect_vec(),
+            }
+        } else {
+            s.chars().map(|x| x.to_string()).collect_vec()
+        }
+    } else {
+        vec![]
     }
 }
 
-#[function("string_to_array(varchar, varchar, varchar) -> list")]
-pub fn string_to_array3(s: &str, sep: &str, null: &str) -> ListValue {
+// Use cases shown in `e2e_test/batch/functions/string_to_array.slt.part`
+#[function("string_to_array(varchar, varchar) -> list")]
+pub fn string_to_array2(s: Option<&str>, sep: Option<&str>) -> ListValue {
     ListValue::new(
-        s.split(sep)
-            .collect::<Vec<_>>()
+        string_to_array_inner(s, sep)
             .into_iter()
-            .map(|x| match x == null {
-                true => None,
-                _ => Some(ScalarImpl::Utf8(x.to_string().into())),
-            })
-            .collect(),
+            .map(|x| Some(ScalarImpl::Utf8(x.into())))
+            .collect_vec(),
     )
+}
+
+#[function("string_to_array(varchar, varchar, varchar) -> list")]
+pub fn string_to_array3(s: Option<&str>, sep: Option<&str>, null: Option<&str>) -> ListValue {
+    if let Some(null) = null {
+        ListValue::new(
+            string_to_array_inner(s, sep)
+                .into_iter()
+                .map(|x| match x == null {
+                    true => None,
+                    _ => Some(ScalarImpl::Utf8(x.into())),
+                })
+                .collect_vec(),
+        )
+    } else {
+        string_to_array2(s, sep)
+    }
 }
