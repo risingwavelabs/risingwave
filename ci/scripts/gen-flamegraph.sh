@@ -128,7 +128,7 @@ main() {
   setup
 
   echo "--- Starting kafka"
-  kafka_start
+  # kafka_start
 
   echo "--- Spawning nexmark events"
   # gen_events
