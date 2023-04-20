@@ -18,10 +18,12 @@ print_machine_debug_info() {
 
 ############## INSTALL
 
+# TODO(kwannoel): Some of these could be moved to the `build` step.
+
 install_nexmark_bench() {
   git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/nexmark-bench.git
   pushd nexmark-bench
-  make install
+  cargo -Z sparse-registry install --path .
   popd
 }
 
