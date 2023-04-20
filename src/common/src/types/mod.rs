@@ -34,26 +34,23 @@ use crate::util::iter_util::ZipEqDebug;
 
 mod native_type;
 mod ops;
+mod ordered_float;
+mod postgres_type;
 mod scalar_impl;
 mod successor;
 
 use std::fmt::Debug;
 use std::str::{FromStr, Utf8Error};
 
-pub use native_type::*;
-pub use scalar_impl::*;
-pub use successor::*;
 pub mod chrono_wrapper;
 pub mod decimal;
 pub mod interval;
 pub mod jsonb;
-mod postgres_type;
+pub mod num256;
+pub mod serial;
 pub mod struct_type;
 pub mod to_binary;
 pub mod to_text;
-
-pub mod num256;
-mod ordered_float;
 
 use chrono::{Datelike, Timelike};
 use itertools::Itertools;
@@ -65,13 +62,16 @@ pub use self::chrono_wrapper::{Date, Time, Timestamp, UNIX_EPOCH_DAYS};
 pub use self::decimal::Decimal;
 pub use self::interval::{DateTimeField, Interval, IntervalDisplay};
 pub use self::jsonb::{JsonbRef, JsonbVal};
+pub use self::native_type::*;
 pub use self::num256::{Int256, Int256Ref};
 pub use self::ops::{CheckedAdd, IsNegative};
 pub use self::ordered_float::{FloatExt, IntoOrdered};
+pub use self::scalar_impl::*;
+pub use self::serial::Serial;
 pub use self::struct_type::StructType;
+pub use self::successor::*;
 use self::to_binary::ToBinary;
 use self::to_text::ToText;
-use crate::array::serial_array::Serial;
 use crate::array::{
     ArrayBuilderImpl, ListRef, ListValue, PrimitiveArrayItemType, StructRef, StructValue,
 };

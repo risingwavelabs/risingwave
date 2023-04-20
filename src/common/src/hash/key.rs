@@ -34,7 +34,6 @@ use fixedbitset::FixedBitSet;
 use smallbitset::Set64;
 use static_assertions::const_assert_eq;
 
-use crate::array::serial_array::Serial;
 use crate::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayError, ArrayImpl, ArrayResult, DataChunk, ListRef,
     StructRef,
@@ -42,7 +41,7 @@ use crate::array::{
 use crate::estimate_size::EstimateSize;
 use crate::row::{OwnedRow, RowDeserializer};
 use crate::types::{
-    DataType, Date, Decimal, Int256Ref, JsonbRef, ScalarRef, Time, Timestamp, F32, F64,
+    DataType, Date, Decimal, Int256Ref, JsonbRef, ScalarRef, Serial, Time, Timestamp, F32, F64,
 };
 use crate::util::hash_util::{Crc32FastBuilder, XxHash64Builder};
 use crate::util::iter_util::ZipEqFast;
