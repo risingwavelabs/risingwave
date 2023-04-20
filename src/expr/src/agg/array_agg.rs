@@ -23,19 +23,26 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use super::Aggregator;
 use crate::{ExprError, Result};
 
+#[build_aggregate("array_agg(list) -> list")]
+fn build_array_agg(return_type: DataType, column_orders: Vec<ColumnOrder>) -> Box<dyn Aggregator> {
+    if column_orders.is_empty() {
+        Box::new(ArrayAggUnordered::new(return_type))
+    } else {
+        Box::new(ArrayAggOrdered::new(return_type, column_orders))
+    }
+}
+
 #[derive(Clone)]
 struct ArrayAggUnordered {
     return_type: DataType,
-    agg_col_idx: usize,
     values: Vec<Datum>,
 }
 
 impl ArrayAggUnordered {
-    fn new(return_type: DataType, agg_col_idx: usize) -> Self {
+    fn new(return_type: DataType) -> Self {
         debug_assert!(matches!(return_type, DataType::List { datatype: _ }));
         ArrayAggUnordered {
             return_type,
-            agg_col_idx,
             values: vec![],
         }
     }
@@ -67,7 +74,7 @@ impl Aggregator for ArrayAggUnordered {
     ) -> Result<()> {
         self.values.reserve(end_row_id - start_row_id);
         for row_id in start_row_id..end_row_id {
-            let array = input.column_at(self.agg_col_idx).array_ref();
+            let array = input.column_at(0).array_ref();
             self.push(array.datum_at(row_id));
         }
         Ok(())
@@ -92,14 +99,13 @@ type OrderKey = Vec<u8>;
 #[derive(Clone)]
 struct ArrayAggOrdered {
     return_type: DataType,
-    agg_col_idx: usize,
     order_col_indices: Vec<usize>,
     order_types: Vec<OrderType>,
     unordered_values: Vec<(OrderKey, Datum)>,
 }
 
 impl ArrayAggOrdered {
-    fn new(return_type: DataType, agg_col_idx: usize, column_orders: Vec<ColumnOrder>) -> Self {
+    fn new(return_type: DataType, column_orders: Vec<ColumnOrder>) -> Self {
         assert!(matches!(return_type, DataType::List { datatype: _ }));
         let (order_col_indices, order_types) = column_orders
             .into_iter()
@@ -107,7 +113,6 @@ impl ArrayAggOrdered {
             .unzip();
         ArrayAggOrdered {
             return_type,
-            agg_col_idx,
             order_col_indices,
             order_types,
             unordered_values: vec![],
@@ -118,7 +123,7 @@ impl ArrayAggOrdered {
         let key =
             memcmp_encoding::encode_row(row.project(&self.order_col_indices), &self.order_types)
                 .map_err(|e| ExprError::Internal(anyhow!("failed to encode row, error: {}", e)))?;
-        let datum = row.datum_at(self.agg_col_idx).to_owned_datum();
+        let datum = row.datum_at(0).to_owned_datum();
         self.unordered_values.push((key, datum));
         Ok(())
     }
@@ -158,22 +163,6 @@ impl Aggregator for ArrayAggOrdered {
         } else {
             bail!("Builder fail to match {}.", stringify!(Utf8))
         }
-    }
-}
-
-pub fn create_array_agg_state(
-    return_type: DataType,
-    agg_col_idx: usize,
-    column_orders: Vec<ColumnOrder>,
-) -> Box<dyn Aggregator> {
-    if column_orders.is_empty() {
-        Box::new(ArrayAggUnordered::new(return_type, agg_col_idx))
-    } else {
-        Box::new(ArrayAggOrdered::new(
-            return_type,
-            agg_col_idx,
-            column_orders,
-        ))
     }
 }
 

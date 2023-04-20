@@ -15,29 +15,25 @@
 use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::types::*;
+use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::Aggregator;
 use crate::Result;
 
-#[derive(Clone)]
-pub struct CountStar {
-    return_type: DataType,
-    result: usize,
+#[build_aggregate("count() -> int64")]
+fn build_count_star(_: DataType, _: Vec<ColumnOrder>) -> Box<dyn Aggregator> {
+    Box::new(CountStar::default())
 }
 
-impl CountStar {
-    pub fn new(return_type: DataType) -> Self {
-        Self {
-            return_type,
-            result: 0,
-        }
-    }
+#[derive(Clone, Default)]
+pub struct CountStar {
+    result: usize,
 }
 
 #[async_trait::async_trait]
 impl Aggregator for CountStar {
     fn return_type(&self) -> DataType {
-        self.return_type.clone()
+        DataType::Int64
     }
 
     async fn update_multi(
@@ -60,12 +56,10 @@ impl Aggregator for CountStar {
 
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         let res = std::mem::replace(&mut self.result, 0) as i64;
-        match builder {
-            ArrayBuilderImpl::Int64(b) => {
-                b.append(Some(res));
-                Ok(())
-            }
-            _ => bail!("Unexpected builder for count(*)."),
-        }
+        let ArrayBuilderImpl::Int64(b) = builder else {
+            bail!("Unexpected builder for count(*).");
+        };
+        b.append(Some(res));
+        Ok(())
     }
 }

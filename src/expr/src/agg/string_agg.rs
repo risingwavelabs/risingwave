@@ -26,20 +26,23 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use super::Aggregator;
 use crate::{ExprError, Result};
 
+#[build_aggregate("string_agg(varchar, varchar) -> varchar")]
+fn build_string_agg(_: DataType, column_orders: Vec<ColumnOrder>) -> Box<dyn Aggregator> {
+    if column_orders.is_empty() {
+        Box::new(StringAggUnordered::new())
+    } else {
+        Box::new(StringAggOrdered::new(column_orders))
+    }
+}
+
 #[derive(Clone)]
 struct StringAggUnordered {
-    agg_col_idx: usize,
-    delim_col_idx: usize,
     result: Option<String>,
 }
 
 impl StringAggUnordered {
-    fn new(agg_col_idx: usize, delim_col_idx: usize) -> Self {
-        Self {
-            agg_col_idx,
-            delim_col_idx,
-            result: None,
-        }
+    fn new() -> Self {
+        Self { result: None }
     }
 
     fn push(&mut self, value: &str, delim: &str) {
@@ -69,8 +72,8 @@ impl Aggregator for StringAggUnordered {
         end_row_id: usize,
     ) -> Result<()> {
         let (ArrayImpl::Utf8(agg_col), ArrayImpl::Utf8(delim_col)) = (
-            input.column_at(self.agg_col_idx).array_ref(),
-            input.column_at(self.delim_col_idx).array_ref(),
+            input.column_at(0).array_ref(),
+            input.column_at(1).array_ref(),
         ) else {
             bail!("Input fail to match {}.", stringify!(Utf8))
         };
@@ -87,13 +90,12 @@ impl Aggregator for StringAggUnordered {
     }
 
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-        if let ArrayBuilderImpl::Utf8(builder) = builder {
-            let res = self.get_result_and_reset();
-            builder.append(res.as_deref());
-            Ok(())
-        } else {
+        let ArrayBuilderImpl::Utf8(builder) = builder else {
             bail!("Builder fail to match {}.", stringify!(Utf8))
-        }
+        };
+        let res = self.get_result_and_reset();
+        builder.append(res.as_deref());
+        Ok(())
     }
 }
 
@@ -107,22 +109,18 @@ struct StringAggData {
 
 #[derive(Clone)]
 struct StringAggOrdered {
-    agg_col_idx: usize,
-    delim_col_idx: usize,
     order_col_indices: Vec<usize>,
     order_types: Vec<OrderType>,
     unordered_values: Vec<(OrderKey, StringAggData)>,
 }
 
 impl StringAggOrdered {
-    fn new(agg_col_idx: usize, delim_col_idx: usize, column_orders: Vec<ColumnOrder>) -> Self {
+    fn new(column_orders: Vec<ColumnOrder>) -> Self {
         let (order_col_indices, order_types) = column_orders
             .into_iter()
             .map(|c| (c.column_index, c.order_type))
             .unzip();
         Self {
-            agg_col_idx,
-            delim_col_idx,
             order_col_indices,
             order_types,
             unordered_values: vec![],
@@ -171,52 +169,34 @@ impl Aggregator for StringAggOrdered {
         start_row_id: usize,
         end_row_id: usize,
     ) -> Result<()> {
-        if let (ArrayImpl::Utf8(agg_col), ArrayImpl::Utf8(delim_col)) = (
-            input.column_at(self.agg_col_idx).array_ref(),
-            input.column_at(self.delim_col_idx).array_ref(),
-        ) {
-            for (row_id, (value, delim)) in agg_col
-                .iter()
-                .zip_eq_fast(delim_col.iter())
-                .enumerate()
-                .skip(start_row_id)
-                .take(end_row_id - start_row_id)
-                .filter(|(_, (v, _))| v.is_some())
-            {
-                let (row_ref, vis) = input.row_at(row_id);
-                assert!(vis);
-                self.push_row(value.unwrap(), delim.unwrap_or(""), row_ref)?;
-            }
-            Ok(())
-        } else {
+        let (ArrayImpl::Utf8(agg_col), ArrayImpl::Utf8(delim_col)) = (
+            input.column_at(0).array_ref(),
+            input.column_at(1).array_ref(),
+        ) else {
             bail!("Input fail to match {}.", stringify!(Utf8))
+        };
+        for (row_id, (value, delim)) in agg_col
+            .iter()
+            .zip_eq_fast(delim_col.iter())
+            .enumerate()
+            .skip(start_row_id)
+            .take(end_row_id - start_row_id)
+            .filter(|(_, (v, _))| v.is_some())
+        {
+            let (row_ref, vis) = input.row_at(row_id);
+            assert!(vis);
+            self.push_row(value.unwrap(), delim.unwrap_or(""), row_ref)?;
         }
+        Ok(())
     }
 
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-        if let ArrayBuilderImpl::Utf8(builder) = builder {
-            let res = self.get_result_and_reset();
-            builder.append(res.as_deref());
-            Ok(())
-        } else {
+        let ArrayBuilderImpl::Utf8(builder) = builder else {
             bail!("Builder fail to match {}.", stringify!(Utf8))
-        }
-    }
-}
-
-pub fn create_string_agg_state(
-    agg_col_idx: usize,
-    delim_col_idx: usize,
-    column_orders: Vec<ColumnOrder>,
-) -> Box<dyn Aggregator> {
-    if column_orders.is_empty() {
-        Box::new(StringAggUnordered::new(agg_col_idx, delim_col_idx))
-    } else {
-        Box::new(StringAggOrdered::new(
-            agg_col_idx,
-            delim_col_idx,
-            column_orders,
-        ))
+        };
+        let res = self.get_result_and_reset();
+        builder.append(res.as_deref());
+        Ok(())
     }
 }
 
@@ -236,7 +216,7 @@ mod tests {
              ccc ,
              ddd ,",
         );
-        let mut agg = create_string_agg_state(0, 1, vec![]);
+        let mut agg = StringAggUnordered::new();
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;
@@ -257,7 +237,7 @@ mod tests {
              ccc _
              ddd .",
         );
-        let mut agg = create_string_agg_state(0, 1, vec![]);
+        let mut agg = StringAggUnordered::new();
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;
@@ -272,21 +252,17 @@ mod tests {
     #[tokio::test]
     async fn test_string_agg_with_order() -> Result<()> {
         let chunk = DataChunk::from_pretty(
-            "T T   i i
-             _ aaa 1 3
-             _ bbb 0 4
-             _ ccc 0 8
-             _ ddd 1 3",
+            "T   T i i
+             aaa _ 1 3
+             bbb _ 0 4
+             ccc _ 0 8
+             ddd _ 1 3",
         );
-        let mut agg = create_string_agg_state(
-            1,
-            0,
-            vec![
-                ColumnOrder::new(2, OrderType::ascending()),
-                ColumnOrder::new(3, OrderType::descending()),
-                ColumnOrder::new(1, OrderType::descending()),
-            ],
-        );
+        let mut agg = StringAggOrdered::new(vec![
+            ColumnOrder::new(2, OrderType::ascending()),
+            ColumnOrder::new(3, OrderType::descending()),
+            ColumnOrder::new(0, OrderType::descending()),
+        ]);
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;

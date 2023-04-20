@@ -28,12 +28,8 @@ mod general;
 mod general_sorted_grouper;
 mod string_agg;
 
-use self::approx_count_distinct::ApproxCountDistinct;
-use self::array_agg::create_array_agg_state;
-use self::count_star::CountStar;
 use self::filter::*;
 pub use self::general_sorted_grouper::{create_sorted_grouper, BoxedSortedGrouper, EqGroups};
-use self::string_agg::create_string_agg_state;
 
 /// An `Aggregator` supports `update` data and `output` result.
 #[async_trait::async_trait]
@@ -65,34 +61,6 @@ pub type BoxedAggState = Box<dyn Aggregator>;
 /// Build an `Aggregator` from `AggCall`.
 pub fn build(agg_call: AggCall) -> Result<BoxedAggState> {
     // NOTE: The function signature is checked by `AggCall::infer_return_type` in the frontend.
-
-    let initial_agg_state: BoxedAggState = match (agg_call.kind, agg_call.args) {
-        (AggKind::Count, AggArgs::None) => Box::new(CountStar::new(agg_call.return_type.clone())),
-        (AggKind::ApproxCountDistinct, AggArgs::Unary(_, arg_idx)) => Box::new(
-            ApproxCountDistinct::new(agg_call.return_type.clone(), arg_idx),
-        ),
-        (AggKind::StringAgg, AggArgs::Binary([value_type, delim_type], [value_idx, delim_idx])) => {
-            assert_eq!(value_type, DataType::Varchar);
-            assert_eq!(delim_type, DataType::Varchar);
-            create_string_agg_state(value_idx, delim_idx, agg_call.column_orders.clone())
-        }
-        (AggKind::ArrayAgg, AggArgs::Unary(_, arg_idx)) => create_array_agg_state(
-            agg_call.return_type.clone(),
-            arg_idx,
-            agg_call.column_orders.clone(),
-        ),
-        (agg_kind, AggArgs::Unary(arg_type, arg_idx)) => {
-            // other unary agg call
-            create_agg_state_unary(
-                arg_type,
-                arg_idx,
-                agg_kind,
-                agg_call.return_type.clone(),
-                agg_call.distinct,
-            )?
-        }
-        (agg_kind, _) => bail!("Invalid agg call: {:?}", agg_kind),
-    };
 
     // wrap the agg state in a `Filter` if needed
     let initial_agg_state = match agg_call.filter {
