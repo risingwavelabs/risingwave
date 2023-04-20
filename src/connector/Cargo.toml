@@ -66,6 +66,7 @@ rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = [
     "cmake-build",
     "ssl-vendored",
     "gssapi",
+    "zstd",
 ] }
 reqwest = { version = "0.11", features = ["json"] }
 risingwave_common = { path = "../common" }
