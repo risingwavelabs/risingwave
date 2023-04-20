@@ -170,7 +170,7 @@ mod tests {
     use risingwave_backup::error::BackupError;
     use risingwave_backup::meta_snapshot::MetaSnapshot;
     use risingwave_common::error::ToErrorStr;
-    use risingwave_common::system_param::default_system_params;
+    use risingwave_common::system_param::system_params_for_test;
     use risingwave_pb::hummock::{HummockVersion, HummockVersionStats};
 
     use crate::backup_restore::meta_snapshot_builder::MetaSnapshotBuilder;
@@ -218,7 +218,7 @@ mod tests {
         let err = assert_matches!(err, BackupError::Other(e) => e);
         assert_eq!("system params not found in meta store", err.to_error_str());
 
-        default_system_params()
+        system_params_for_test()
             .insert(meta_store.deref())
             .await
             .unwrap();

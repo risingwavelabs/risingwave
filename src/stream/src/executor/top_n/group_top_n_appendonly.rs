@@ -181,7 +181,7 @@ where
                     .await?;
                 self.caches.push(group_cache_key.clone(), topn_cache);
             }
-            let cache = self.caches.get_mut(group_cache_key).unwrap();
+            let mut cache = self.caches.get_mut(group_cache_key).unwrap();
 
             debug_assert_eq!(op, Op::Insert);
             cache.insert(

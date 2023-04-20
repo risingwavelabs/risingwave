@@ -146,9 +146,10 @@ message ExprNode {
     CARDINALITY = 537;
     ARRAY_REMOVE = 538;
     ARRAY_POSITIONS = 539;
+    TRIM_ARRAY = 540;
 
     // Int256 functions
-    HEX_TO_INT256 = 540;
+    HEX_TO_INT256 = 560;
 
     // Jsonb functions
 

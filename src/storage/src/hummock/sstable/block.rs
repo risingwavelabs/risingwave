@@ -423,6 +423,10 @@ impl BlockBuilder {
         }
     }
 
+    pub fn add_for_test(&mut self, full_key: FullKey<&[u8]>, value: &[u8]) {
+        self.add(full_key, value);
+    }
+
     /// Appends a kv pair to the block.
     ///
     /// NOTE: Key must be added in ASCEND order.
@@ -646,10 +650,10 @@ mod tests {
     fn test_block_enc_dec() {
         let options = BlockBuilderOptions::default();
         let mut builder = BlockBuilder::new(options);
-        builder.add(construct_full_key_struct(0, b"k1", 1), b"v01");
-        builder.add(construct_full_key_struct(0, b"k2", 2), b"v02");
-        builder.add(construct_full_key_struct(0, b"k3", 3), b"v03");
-        builder.add(construct_full_key_struct(0, b"k4", 4), b"v04");
+        builder.add_for_test(construct_full_key_struct(0, b"k1", 1), b"v01");
+        builder.add_for_test(construct_full_key_struct(0, b"k2", 2), b"v02");
+        builder.add_for_test(construct_full_key_struct(0, b"k3", 3), b"v03");
+        builder.add_for_test(construct_full_key_struct(0, b"k4", 4), b"v04");
         let capacity = builder.uncompressed_block_size();
         assert_eq!(capacity, builder.approximate_len() - 9);
         let buf = builder.build().to_vec();
@@ -692,10 +696,10 @@ mod tests {
             ..Default::default()
         };
         let mut builder = BlockBuilder::new(options);
-        builder.add(construct_full_key_struct(0, b"k1", 1), b"v01");
-        builder.add(construct_full_key_struct(0, b"k2", 2), b"v02");
-        builder.add(construct_full_key_struct(0, b"k3", 3), b"v03");
-        builder.add(construct_full_key_struct(0, b"k4", 4), b"v04");
+        builder.add_for_test(construct_full_key_struct(0, b"k1", 1), b"v01");
+        builder.add_for_test(construct_full_key_struct(0, b"k2", 2), b"v02");
+        builder.add_for_test(construct_full_key_struct(0, b"k3", 3), b"v03");
+        builder.add_for_test(construct_full_key_struct(0, b"k4", 4), b"v04");
         let capacity = builder.uncompressed_block_size();
         assert_eq!(capacity, builder.approximate_len() - 9);
         let buf = builder.build().to_vec();
@@ -742,9 +746,9 @@ mod tests {
         let large_key = vec![b'b'; MAX_KEY_LEN];
         let xlarge_key = vec![b'c'; MAX_KEY_LEN + 500];
 
-        builder.add(construct_full_key_struct(0, &medium_key, 1), b"v1");
-        builder.add(construct_full_key_struct(0, &large_key, 2), b"v2");
-        builder.add(construct_full_key_struct(0, &xlarge_key, 3), b"v3");
+        builder.add_for_test(construct_full_key_struct(0, &medium_key, 1), b"v1");
+        builder.add_for_test(construct_full_key_struct(0, &large_key, 2), b"v2");
+        builder.add_for_test(construct_full_key_struct(0, &xlarge_key, 3), b"v3");
         let capacity = builder.uncompressed_block_size();
         assert_eq!(capacity, builder.approximate_len() - 9);
         let buf = builder.build().to_vec();
@@ -783,15 +787,15 @@ mod tests {
                 if index < 50 {
                     let mut medium_key = vec![b'A'; MAX_KEY_LEN - 500];
                     medium_key.push(index);
-                    builder.add(construct_full_key_struct(0, &medium_key, 1), b"v1");
+                    builder.add_for_test(construct_full_key_struct(0, &medium_key, 1), b"v1");
                 } else if index < 80 {
                     let mut large_key = vec![b'B'; MAX_KEY_LEN];
                     large_key.push(index);
-                    builder.add(construct_full_key_struct(0, &large_key, 2), b"v2");
+                    builder.add_for_test(construct_full_key_struct(0, &large_key, 2), b"v2");
                 } else {
                     let mut xlarge_key = vec![b'C'; MAX_KEY_LEN + 500];
                     xlarge_key.push(index);
-                    builder.add(construct_full_key_struct(0, &xlarge_key, 3), b"v3");
+                    builder.add_for_test(construct_full_key_struct(0, &xlarge_key, 3), b"v3");
                 }
             }
 

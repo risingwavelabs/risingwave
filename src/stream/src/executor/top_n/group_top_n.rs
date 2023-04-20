@@ -28,7 +28,7 @@ use risingwave_storage::StateStore;
 use super::top_n_cache::TopNCacheTrait;
 use super::utils::*;
 use super::TopNCache;
-use crate::cache::{new_unbounded, ExecutorCache};
+use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
@@ -132,18 +132,18 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutor<K,
 }
 
 pub struct GroupTopNCache<K: HashKey, const WITH_TIES: bool> {
-    data: ExecutorCache<K, TopNCache<WITH_TIES>>,
+    data: ManagedLruCache<K, TopNCache<WITH_TIES>>,
 }
 
 impl<K: HashKey, const WITH_TIES: bool> GroupTopNCache<K, WITH_TIES> {
     pub fn new(lru_manager: AtomicU64Ref) -> Self {
-        let cache = ExecutorCache::new(new_unbounded(lru_manager));
+        let cache = new_unbounded(lru_manager);
         Self { data: cache }
     }
 }
 
 impl<K: HashKey, const WITH_TIES: bool> Deref for GroupTopNCache<K, WITH_TIES> {
-    type Target = ExecutorCache<K, TopNCache<WITH_TIES>>;
+    type Target = ManagedLruCache<K, TopNCache<WITH_TIES>>;
 
     fn deref(&self) -> &Self::Target {
         &self.data
@@ -185,7 +185,7 @@ where
                     .await?;
                 self.caches.push(group_cache_key.clone(), topn_cache);
             }
-            let cache = self.caches.get_mut(group_cache_key).unwrap();
+            let mut cache = self.caches.get_mut(group_cache_key).unwrap();
 
             // apply the chunk to state table
             match op {
