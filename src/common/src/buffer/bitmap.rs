@@ -37,10 +37,13 @@
 #![allow(clippy::disallowed_methods)]
 
 use std::iter::{self, TrustedLen};
+use std::mem::size_of;
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, Not, RangeInclusive};
 
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::PbBuffer;
+
+use crate::estimate_size::EstimateSize;
 
 #[derive(Default, Debug)]
 pub struct BitmapBuilder {
@@ -173,14 +176,22 @@ impl BitmapBuilder {
 /// An immutable bitmap. Use [`BitmapBuilder`] to build it.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Bitmap {
-    // The useful bits in the bitmap. The total number of bits will usually
-    // be larger than the useful bits due to byte-padding.
+    /// The useful bits in the bitmap. The total number of bits will usually
+    /// be larger than the useful bits due to byte-padding.
     num_bits: usize,
 
-    // The number of high bits in the bitmap.
+    /// The number of high bits in the bitmap.
     count_ones: usize,
 
+    /// Bits are stored in a compact form.
+    /// They are packed into `usize`s.
     bits: Box<[usize]>,
+}
+
+impl EstimateSize for Bitmap {
+    fn estimated_heap_size(&self) -> usize {
+        self.bits.len() * size_of::<usize>()
+    }
 }
 
 impl std::fmt::Debug for Bitmap {
@@ -310,6 +321,7 @@ impl Bitmap {
             bits: &self.bits,
             idx: 0,
             num_bits: self.num_bits,
+            current_usize: 0,
         }
     }
 
@@ -327,11 +339,17 @@ impl Bitmap {
     }
 
     /// Enumerates the index of each bit set to 1.
-    pub fn iter_ones(&self) -> impl Iterator<Item = usize> + '_ {
-        self.iter()
-            .enumerate()
-            .filter(|(_, bit)| *bit)
-            .map(|(pos, _)| pos)
+    pub fn iter_ones(&self) -> BitmapOnesIter<'_> {
+        let cur_bits = if self.num_bits > 0 {
+            Some(self.bits[0])
+        } else {
+            None
+        };
+        BitmapOnesIter {
+            bitmap: self,
+            cur_idx: 0,
+            cur_bits,
+        }
     }
 
     /// Returns an iterator which yields the position ranges of continuous high bits.
@@ -556,6 +574,27 @@ pub struct BitmapIter<'a> {
     bits: &'a [usize],
     idx: usize,
     num_bits: usize,
+    current_usize: usize,
+}
+
+impl<'a> BitmapIter<'a> {
+    fn next_always_load_usize(&mut self) -> Option<bool> {
+        if self.idx >= self.num_bits {
+            return None;
+        }
+
+        // Offset of the bit within the usize.
+        let usize_offset = self.idx % BITS;
+
+        // Get the index of usize which the bit is located in
+        let usize_index = self.idx / BITS;
+        self.current_usize = unsafe { *self.bits.get_unchecked(usize_index) };
+
+        let bit_mask = 1 << usize_offset;
+        let bit_flag = self.current_usize & bit_mask != 0;
+        self.idx += 1;
+        Some(bit_flag)
+    }
 }
 
 impl<'a> iter::Iterator for BitmapIter<'a> {
@@ -565,9 +604,21 @@ impl<'a> iter::Iterator for BitmapIter<'a> {
         if self.idx >= self.num_bits {
             return None;
         }
-        let b = unsafe { self.bits.get_unchecked(self.idx / BITS) } & (1 << (self.idx % BITS)) != 0;
+
+        // Offset of the bit within the usize.
+        let usize_offset = self.idx % BITS;
+
+        if usize_offset == 0 {
+            // Get the index of usize which the bit is located in
+            let usize_index = self.idx / BITS;
+            self.current_usize = unsafe { *self.bits.get_unchecked(usize_index) };
+        }
+
+        let bit_mask = 1 << usize_offset;
+
+        let bit_flag = self.current_usize & bit_mask != 0;
         self.idx += 1;
-        Some(b)
+        Some(bit_flag)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -577,12 +628,39 @@ impl<'a> iter::Iterator for BitmapIter<'a> {
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         self.idx += n;
-        self.next()
+        self.next_always_load_usize()
     }
 }
 
 impl ExactSizeIterator for BitmapIter<'_> {}
 unsafe impl TrustedLen for BitmapIter<'_> {}
+
+pub struct BitmapOnesIter<'a> {
+    bitmap: &'a Bitmap,
+    cur_idx: usize,
+    cur_bits: Option<usize>,
+}
+
+impl<'a> iter::Iterator for BitmapOnesIter<'a> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.cur_bits == Some(0) {
+            self.cur_idx += 1;
+            self.cur_bits = if self.cur_idx >= self.bitmap.bits.len() {
+                None
+            } else {
+                Some(self.bitmap.bits[self.cur_idx])
+            }
+        }
+        self.cur_bits.map(|bits| {
+            let low_bit = bits & bits.wrapping_neg();
+            let low_bit_idx = bits.trailing_zeros();
+            self.cur_bits = Some(bits ^ low_bit);
+            self.cur_idx * BITS + low_bit_idx as usize
+        })
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -627,6 +705,26 @@ mod tests {
         let byte1 = 0b0101_0110_u8;
         let expected = Bitmap::from_bytes(&[byte1]);
         assert_eq!(bitmap2, expected);
+    }
+
+    #[test]
+    fn test_bitmap_get_size() {
+        let bitmap1 = {
+            let mut builder = BitmapBuilder::default();
+            let bits = [
+                false, true, true, false, true, false, true, false, true, false, true, true, false,
+                true, false, true,
+            ];
+            for bit in bits {
+                builder.append(bit);
+            }
+            for (idx, bit) in bits.iter().enumerate() {
+                assert_eq!(builder.is_set(idx), *bit);
+            }
+            builder.finish()
+        };
+        assert_eq!(8, bitmap1.estimated_heap_size());
+        assert_eq!(40, bitmap1.estimated_size());
     }
 
     #[test]
@@ -848,6 +946,22 @@ mod tests {
             assert!(b.is_set(b.len() - 1));
             b.pop();
             assert!(!b.is_set(b.len() - 1));
+        }
+    }
+
+    #[test]
+    fn test_bitmap_iter_ones() {
+        let mut builder = BitmapBuilder::zeroed(1000);
+        builder.append_n(1000, true);
+        let bitmap = builder.finish();
+        let mut iter = bitmap.iter_ones();
+        for i in 0..1000 {
+            let item = iter.next();
+            assert!(item == Some(i + 1000));
+        }
+        for _ in 0..5 {
+            let item = iter.next();
+            assert!(item.is_none());
         }
     }
 }

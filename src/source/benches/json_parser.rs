@@ -16,7 +16,7 @@ use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use rand::distributions::Alphanumeric;
 use rand::prelude::*;
 use risingwave_common::catalog::ColumnId;
-use risingwave_common::types::{DataType, NaiveDateTimeWrapper, NaiveDateWrapper};
+use risingwave_common::types::{DataType, Date, Timestamp};
 use risingwave_connector::parser::{JsonParser, SourceStreamChunkBuilder};
 use risingwave_connector::source::SourceColumnDesc;
 
@@ -34,9 +34,9 @@ fn generate_json(rng: &mut impl Rng) -> String {
             .take(7)
             .map(char::from)
             .collect::<String>(),
-        NaiveDateWrapper::from_num_days_from_ce_uncheck((rng.gen::<u32>() % (1 << 20)) as i32).0,
+        Date::from_num_days_from_ce_uncheck((rng.gen::<u32>() % (1 << 20)) as i32).0,
         {
-            let datetime = NaiveDateTimeWrapper::from_timestamp_uncheck((rng.gen::<u32>() % (1u32 << 28)) as i64, 0).0;
+            let datetime = Timestamp::from_timestamp_uncheck((rng.gen::<u32>() % (1u32 << 28)) as i64, 0).0;
             format!("{:?} {:?}", datetime.date(), datetime.time())
         }
     )

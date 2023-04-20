@@ -18,23 +18,22 @@ use futures::{pin_mut, StreamExt};
 use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::{ArrayImpl, Op};
+use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, RowExt};
-use risingwave_common::types::{Datum, DatumRef, ScalarImpl};
+use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::function::aggregate::{AggCall, AggKind};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
-use smallvec::SmallVec;
 
-use super::state_cache::array_agg::ArrayAgg;
-use super::state_cache::extreme::ExtremeAgg;
-use super::state_cache::string_agg::StringAgg;
-use super::state_cache::{CacheKey, SortedStateCache, StateCache, TopNStateCache};
-use super::AggCall;
+use super::agg_state_cache::{AggStateCache, GenericAggStateCache, StateCacheInputBatch};
+use super::minput_agg_impl::array_agg::ArrayAgg;
+use super::minput_agg_impl::extreme::ExtremeAgg;
+use super::minput_agg_impl::string_agg::StringAgg;
+use crate::common::cache::{OrderedStateCache, TopNStateCache};
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
 use crate::executor::{PkIndices, StreamExecutorResult};
@@ -58,7 +57,7 @@ pub struct MaterializedInputState<S: StateStore> {
     state_table_order_col_indices: Vec<usize>,
 
     /// Cache of state table.
-    cache: Box<dyn StateCache>,
+    cache: Box<dyn AggStateCache + Send + Sync>,
 
     /// Serializer for cache key.
     cache_key_serializer: OrderedRowSerde,
@@ -124,12 +123,18 @@ impl<S: StateStore> MaterializedInputState<S> {
             .collect_vec();
         let cache_key_serializer = OrderedRowSerde::new(cache_key_data_types, order_types);
 
-        let cache: Box<dyn StateCache> = match agg_call.kind {
-            AggKind::Min | AggKind::Max | AggKind::FirstValue => {
-                Box::new(TopNStateCache::new(ExtremeAgg, extreme_cache_size))
-            }
-            AggKind::StringAgg => Box::new(SortedStateCache::new(StringAgg)),
-            AggKind::ArrayAgg => Box::new(SortedStateCache::new(ArrayAgg)),
+        let cache: Box<dyn AggStateCache + Send + Sync> = match agg_call.kind {
+            AggKind::Min | AggKind::Max | AggKind::FirstValue => Box::new(
+                GenericAggStateCache::new(TopNStateCache::new(extreme_cache_size), ExtremeAgg),
+            ),
+            AggKind::StringAgg => Box::new(GenericAggStateCache::new(
+                OrderedStateCache::new(),
+                StringAgg,
+            )),
+            AggKind::ArrayAgg => Box::new(GenericAggStateCache::new(
+                OrderedStateCache::new(),
+                ArrayAgg,
+            )),
             _ => panic!(
                 "Agg kind `{}` is not expected to have materialized input state",
                 agg_call.kind
@@ -178,14 +183,14 @@ impl<S: StateStore> MaterializedInputState<S> {
                 .iter_with_pk_prefix(
                     &group_key,
                     PrefetchOptions {
-                        exhaust_iter: cache_filler.capacity() == usize::MAX,
+                        exhaust_iter: cache_filler.capacity().is_none(),
                     },
                 )
                 .await?;
             pin_mut!(all_data_iter);
 
             #[for_await]
-            for state_row in all_data_iter.take(cache_filler.capacity()) {
+            for state_row in all_data_iter.take(cache_filler.capacity().unwrap_or(usize::MAX)) {
                 let state_row: OwnedRow = state_row?;
                 let cache_key = {
                     let mut cache_key = Vec::new();
@@ -202,77 +207,12 @@ impl<S: StateStore> MaterializedInputState<S> {
                     .iter()
                     .map(|i| state_row[*i].as_ref().map(ScalarImpl::as_scalar_ref_impl))
                     .collect();
-                cache_filler.insert(cache_key, cache_value);
+                cache_filler.append(cache_key, cache_value);
             }
             cache_filler.finish();
         }
         assert!(self.cache.is_synced());
         Ok(self.cache.get_output())
-    }
-}
-
-// TODO(yuchao): May extract common logic here to `struct [Data/Stream]ChunkRef` if there's other
-// usage in the future. https://github.com/risingwavelabs/risingwave/pull/5908#discussion_r1002896176
-pub struct StateCacheInputBatch<'a> {
-    idx: usize,
-    ops: Ops<'a>,
-    visibility: Option<&'a Bitmap>,
-    columns: &'a [&'a ArrayImpl],
-    cache_key_serializer: &'a OrderedRowSerde,
-    arg_col_indices: &'a [usize],
-    order_col_indices: &'a [usize],
-}
-
-impl<'a> StateCacheInputBatch<'a> {
-    fn new(
-        ops: Ops<'a>,
-        visibility: Option<&'a Bitmap>,
-        columns: &'a [&'a ArrayImpl],
-        cache_key_serializer: &'a OrderedRowSerde,
-        arg_col_indices: &'a [usize],
-        order_col_indices: &'a [usize],
-    ) -> Self {
-        let first_idx = visibility.map_or(0, |v| v.next_set_bit(0).unwrap_or(ops.len()));
-        Self {
-            idx: first_idx,
-            ops,
-            visibility,
-            columns,
-            cache_key_serializer,
-            arg_col_indices,
-            order_col_indices,
-        }
-    }
-}
-
-impl<'a> Iterator for StateCacheInputBatch<'a> {
-    type Item = (Op, CacheKey, SmallVec<[DatumRef<'a>; 2]>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.idx >= self.ops.len() {
-            None
-        } else {
-            let op = self.ops[self.idx];
-            let key = {
-                let mut key = Vec::new();
-                self.cache_key_serializer.serialize_datums(
-                    self.order_col_indices
-                        .iter()
-                        .map(|col_idx| self.columns[*col_idx].value_at(self.idx)),
-                    &mut key,
-                );
-                key
-            };
-            let value = self
-                .arg_col_indices
-                .iter()
-                .map(|col_idx| self.columns[*col_idx].value_at(self.idx))
-                .collect();
-            self.idx = self.visibility.map_or(self.idx + 1, |v| {
-                v.next_set_bit(self.idx + 1).unwrap_or(self.ops.len())
-            });
-            Some((op, key, value))
-        }
     }
 }
 
@@ -291,14 +231,13 @@ mod tests {
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::iter_util::ZipEqFast;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-    use risingwave_expr::expr::AggKind;
+    use risingwave_expr::function::aggregate::{AggArgs, AggCall, AggKind};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
     use super::MaterializedInputState;
     use crate::common::table::state_table::StateTable;
     use crate::common::StateTableColumnMapping;
-    use crate::executor::aggregation::{AggArgs, AggCall};
     use crate::executor::StreamExecutorResult;
 
     fn create_chunk<S: StateStore>(
@@ -351,7 +290,6 @@ mod tests {
             args: AggArgs::Unary(arg_type.clone(), arg_idx),
             return_type: arg_type,
             column_orders: vec![],
-            append_only: false,
             filter: None,
             distinct: false,
         }
@@ -1048,7 +986,6 @@ mod tests {
                 ColumnOrder::new(2, OrderType::ascending()),  // b ASC
                 ColumnOrder::new(0, OrderType::descending()), // a DESC
             ],
-            append_only: false,
             filter: None,
             distinct: false,
         };
@@ -1150,7 +1087,6 @@ mod tests {
                 ColumnOrder::new(2, OrderType::ascending()),  // c ASC
                 ColumnOrder::new(0, OrderType::descending()), // a DESC
             ],
-            append_only: false,
             filter: None,
             distinct: false,
         };

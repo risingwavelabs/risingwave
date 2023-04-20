@@ -115,6 +115,10 @@ impl FunctionAttr {
         let exprs = (0..num_args)
             .map(|i| format_ident!("e{i}"))
             .collect::<Vec<_>>();
+        #[expect(
+            clippy::redundant_clone,
+            reason = "false positive https://github.com/rust-lang/rust-clippy/issues/10545"
+        )]
         let exprs0 = exprs.clone();
 
         let build_expr = if self.ret == "varchar" && self.user_fn.is_writer_style() {
@@ -169,7 +173,7 @@ impl FunctionAttr {
             };
             quote! {
                 Ok(Box::new(crate::expr::template_fast::#template_struct::new(
-                    #(#exprs),*,
+                    #(#exprs,)*
                     #batch,
                     |#(#args),*| #func,
                 )))
@@ -188,19 +192,20 @@ impl FunctionAttr {
             };
             quote! {
                 Ok(Box::new(crate::expr::template_fast::CompareExpression::<_, #(#arg_arrays),*>::new(
-                    #(#exprs),*,
+                    #(#exprs,)*
                     |#(#args),*| #fn_name #generic(#(#args1),*),
                 )))
             }
         } else if self.args.iter().all(|t| types::is_primitive(t)) && self.user_fn.is_pure() {
             let template_struct = match num_args {
+                0 => format_ident!("NullaryExpression"),
                 1 => format_ident!("UnaryExpression"),
                 2 => format_ident!("BinaryExpression"),
                 _ => return Err(Error::new(Span::call_site(), "unsupported arguments")),
             };
             quote! {
-                Ok(Box::new(crate::expr::template_fast::#template_struct::<_, #(#arg_types),*, #ret_type>::new(
-                    #(#exprs),*,
+                Ok(Box::new(crate::expr::template_fast::#template_struct::<_, #(#arg_types,)* #ret_type>::new(
+                    #(#exprs,)*
                     return_type,
                     #fn_name,
                 )))
@@ -241,14 +246,15 @@ impl FunctionAttr {
                 };
             };
             quote! {
-                Ok(Box::new(crate::expr::template::#template_struct::<#(#arg_arrays),*, #ret_array, _>::new(
-                    #(#exprs),*,
+                Ok(Box::new(crate::expr::template::#template_struct::<#(#arg_arrays,)* #ret_array, _>::new(
+                    #(#exprs,)*
                     return_type,
                     |#(#args),*| #func,
                 )))
             }
         } else {
             let template_struct = match num_args {
+                0 => format_ident!("NullaryExpression"),
                 1 => format_ident!("UnaryExpression"),
                 2 => format_ident!("BinaryExpression"),
                 3 => format_ident!("TernaryExpression"),
@@ -262,8 +268,8 @@ impl FunctionAttr {
                 _ => panic!("return type should not contain Option"),
             };
             quote! {
-                Ok(Box::new(crate::expr::template::#template_struct::<#(#arg_arrays),*, #ret_array, _>::new(
-                    #(#exprs),*,
+                Ok(Box::new(crate::expr::template::#template_struct::<#(#arg_arrays,)* #ret_array, _>::new(
+                    #(#exprs,)*
                     return_type,
                     |#(#args),*| #func,
                 )))

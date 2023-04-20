@@ -54,9 +54,6 @@ macro_rules! def_rewriter {
 
         /// it's kind of like a [`PlanVisitor<PlanRef>`](super::plan_visitor::PlanVisitor), but with default behaviour of each rewrite method
         pub trait PlanRewriter {
-            fn check_convention(&self, _convention: Convention) -> bool {
-                return true;
-            }
             paste! {
                 fn rewrite(&mut self, plan: PlanRef) -> PlanRef{
                     match plan.node_type() {

@@ -13,10 +13,10 @@
     select v1 from t where v2 > 2
   logical_plan: |
     LogicalProject { exprs: [t.v1] }
-    └─LogicalFilter { predicate: (t.v2 > 2:Int32) }
+    └─LogicalFilter { predicate: (t.v2 > 2:Int32::Float64) }
       └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan_for_batch: |
-    LogicalScan { table: t, output_columns: [t.v1], required_columns: [t.v1, t.v2], predicate: (t.v2 > 2:Int32) }
+    LogicalScan { table: t, output_columns: [t.v1], required_columns: [t.v1, t.v2], predicate: (t.v2 > 2:Int32::Float64) }
 - name: join
   sql: |
     create table t1 (v1 int, v2 int, v3 int);
@@ -39,11 +39,11 @@
     LogicalProject { exprs: [count(t.v1)] }
     └─LogicalAgg { aggs: [count(t.v1)] }
       └─LogicalProject { exprs: [t.v1] }
-        └─LogicalFilter { predicate: (t.v2 > 2:Int32) }
+        └─LogicalFilter { predicate: (t.v2 > 2:Int32::Float64) }
           └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan_for_batch: |
     LogicalAgg { aggs: [count(t.v1)] }
-    └─LogicalScan { table: t, output_columns: [t.v1], required_columns: [t.v1, t.v2], predicate: (t.v2 > 2:Int32) }
+    └─LogicalScan { table: t, output_columns: [t.v1], required_columns: [t.v1, t.v2], predicate: (t.v2 > 2:Int32::Float64) }
 - name: top n
   sql: |
     create table t (v1 int, v2 int, v3 int);
@@ -73,11 +73,11 @@
     select 1 from t where v2>1
   logical_plan: |
     LogicalProject { exprs: [1:Int32] }
-    └─LogicalFilter { predicate: (t.v2 > 1:Int32) }
+    └─LogicalFilter { predicate: (t.v2 > 1:Int32::Float64) }
       └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [1:Int32] }
-    └─LogicalScan { table: t, output_columns: [], required_columns: [t.v2], predicate: (t.v2 > 1:Int32) }
+    └─LogicalScan { table: t, output_columns: [], required_columns: [t.v2], predicate: (t.v2 > 1:Int32::Float64) }
 - name: constant agg
   sql: |
     create table t (v1 bigint, v2 double precision, v3 int);
@@ -99,12 +99,12 @@
     LogicalProject { exprs: [count(1:Int32)] }
     └─LogicalAgg { aggs: [count(1:Int32)] }
       └─LogicalProject { exprs: [1:Int32] }
-        └─LogicalFilter { predicate: (t.v2 > 1:Int32) }
+        └─LogicalFilter { predicate: (t.v2 > 1:Int32::Float64) }
           └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan_for_batch: |
     LogicalAgg { aggs: [count(1:Int32)] }
     └─LogicalProject { exprs: [1:Int32] }
-      └─LogicalScan { table: t, output_columns: [], required_columns: [t.v2], predicate: (t.v2 > 1:Int32) }
+      └─LogicalScan { table: t, output_columns: [], required_columns: [t.v2], predicate: (t.v2 > 1:Int32::Float64) }
 - name: join + filter
   sql: |
     create table t1 (v1 int, v2 int, v3 int);
@@ -128,12 +128,12 @@
     LogicalProject { exprs: [count(1:Int32), count(t.v1)] }
     └─LogicalAgg { aggs: [count(1:Int32), count(t.v1)] }
       └─LogicalProject { exprs: [1:Int32, t.v1] }
-        └─LogicalFilter { predicate: (t.v2 > 1:Int32) }
+        └─LogicalFilter { predicate: (t.v2 > 1:Int32::Float64) }
           └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan_for_batch: |
     LogicalAgg { aggs: [count(1:Int32), count(t.v1)] }
     └─LogicalProject { exprs: [1:Int32, t.v1] }
-      └─LogicalScan { table: t, output_columns: [t.v1], required_columns: [t.v1, t.v2], predicate: (t.v2 > 1:Int32) }
+      └─LogicalScan { table: t, output_columns: [t.v1], required_columns: [t.v1, t.v2], predicate: (t.v2 > 1:Int32::Float64) }
 - name: hop window, time_col not selected
   sql: |
     create table t1 (a int, b int, created_at timestamp);
@@ -152,7 +152,7 @@
       └─BatchFilter { predicate: IsNotNull(t1.created_at) }
         └─BatchScan { table: t1, columns: [t1.a, t1.created_at], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [a, window_end, t1._row_id(hidden)], pk_columns: [t1._row_id, window_end], pk_conflict: "no check" }
+    StreamMaterialize { columns: [a, window_end, t1._row_id(hidden)], stream_key: [t1._row_id, window_end], pk_columns: [t1._row_id, window_end], pk_conflict: "NoCheck" }
     └─StreamHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: [t1.a, window_end, t1._row_id] }
       └─StreamFilter { predicate: IsNotNull(t1.created_at) }
         └─StreamTableScan { table: t1, columns: [t1.a, t1.created_at, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }

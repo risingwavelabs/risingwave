@@ -23,14 +23,14 @@ use bytes::Bytes;
 use futures::StreamExt;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
+use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{load_config, RwConfig, NO_OVERRIDE};
+use risingwave_common::config::{
+    extract_storage_memory_config, load_config, RwConfig, NO_OVERRIDE,
+};
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::filter_key_extractor::{
-    FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
-};
 use risingwave_hummock_test::get_notification_client_for_test;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use risingwave_meta::hummock::test_utils::setup_compute_env_with_config;
@@ -41,10 +41,13 @@ use risingwave_pb::catalog::PbTable;
 use risingwave_pb::hummock::{CompactionConfig, CompactionGroupInfo};
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::filter_key_extractor::{
+    FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
+};
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::{
-    HummockStorage, MemoryLimiter, SstableObjectIdManager, SstableStore, TieredCache,
+    CachePolicy, HummockStorage, MemoryLimiter, SstableObjectIdManager, SstableStore, TieredCache,
 };
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
@@ -163,7 +166,12 @@ async fn compaction_test(
         ..Default::default()
     }
     .into();
-    let storage_opts = Arc::new(StorageOpts::from((&config, &system_params)));
+    let storage_memory_config = extract_storage_memory_config(&config);
+    let storage_opts = Arc::new(StorageOpts::from((
+        &config,
+        &system_params,
+        &storage_memory_config,
+    )));
     let state_store_metrics = Arc::new(HummockStateStoreMetrics::unused());
     let compactor_metrics = Arc::new(CompactorMetrics::unused());
     let object_store_metrics = Arc::new(ObjectStoreMetrics::unused());
@@ -176,8 +184,9 @@ async fn compaction_test(
     let sstable_store = Arc::new(SstableStore::new(
         Arc::new(remote_object_store),
         system_params.data_directory().to_string(),
-        config.storage.block_cache_capacity_mb * (1 << 20),
-        config.storage.meta_cache_capacity_mb * (1 << 20),
+        storage_memory_config.block_cache_capacity_mb * (1 << 20),
+        storage_memory_config.meta_cache_capacity_mb * (1 << 20),
+        0,
         TieredCache::none(),
     ));
 
@@ -186,6 +195,7 @@ async fn compaction_test(
         sstable_store.clone(),
         meta_client.clone(),
         get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
+        Arc::new(FilterKeyExtractorManager::default()),
         state_store_metrics.clone(),
         Arc::new(risingwave_tracing::RwTracingService::disabled()),
         compactor_metrics.clone(),
@@ -392,6 +402,7 @@ impl NormalState {
                     table_id: self.table_id,
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await
@@ -418,6 +429,7 @@ impl NormalState {
                         table_id: self.table_id,
                         read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                        cache_policy: CachePolicy::Fill(CachePriority::High),
                     },
                 )
                 .await
@@ -450,6 +462,7 @@ impl CheckState for NormalState {
                         table_id: self.table_id,
                         read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                        cache_policy: CachePolicy::Fill(CachePriority::High),
                     },
                 )
                 .await
@@ -544,7 +557,7 @@ fn run_compactor_thread(
         is_share_buffer_compact: false,
         compaction_executor: Arc::new(CompactionExecutor::new(None)),
         filter_key_extractor_manager,
-        read_memory_limiter: MemoryLimiter::unlimit(),
+        output_memory_limiter: MemoryLimiter::unlimit(),
         sstable_object_id_manager,
         task_progress_manager: Default::default(),
         compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(CompactorRuntimeConfig {

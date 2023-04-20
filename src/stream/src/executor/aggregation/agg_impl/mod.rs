@@ -24,13 +24,13 @@ use dyn_clone::DynClone;
 pub use foldable::*;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, BoolArray, BytesArray, DecimalArray,
-    F32Array, F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray, NaiveDateArray,
-    NaiveDateTimeArray, NaiveTimeArray, StructArray, Utf8Array,
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, BoolArray, BytesArray, DateArray,
+    DecimalArray, F32Array, F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray,
+    StructArray, TimeArray, TimestampArray, Utf8Array,
 };
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::function::aggregate::AggKind;
 use risingwave_expr::*;
 pub use row_count::*;
 
@@ -164,14 +164,9 @@ pub fn create_streaming_agg_impl(
                     (Count, boolean, int64, StreamingCountAgg::<BoolArray>),
                     (Count, varchar, int64, StreamingCountAgg::<Utf8Array>),
                     (Count, interval, int64, StreamingCountAgg::<IntervalArray>),
-                    (Count, date, int64, StreamingCountAgg::<NaiveDateArray>),
-                    (
-                        Count,
-                        timestamp,
-                        int64,
-                        StreamingCountAgg::<NaiveDateTimeArray>
-                    ),
-                    (Count, time, int64, StreamingCountAgg::<NaiveTimeArray>),
+                    (Count, date, int64, StreamingCountAgg::<DateArray>),
+                    (Count, timestamp, int64, StreamingCountAgg::<TimestampArray>),
+                    (Count, time, int64, StreamingCountAgg::<TimeArray>),
                     (Count, struct_type, int64, StreamingCountAgg::<StructArray>),
                     (Count, list, int64, StreamingCountAgg::<ListArray>),
                     // Sum0
@@ -211,14 +206,9 @@ pub fn create_streaming_agg_impl(
                     (Min, float32, float32, StreamingMinAgg::<F32Array>),
                     (Min, float64, float64, StreamingMinAgg::<F64Array>),
                     (Min, interval, interval, StreamingMinAgg::<IntervalArray>),
-                    (Min, time, time, StreamingMinAgg::<NaiveTimeArray>),
-                    (Min, date, date, StreamingMinAgg::<NaiveDateArray>),
-                    (
-                        Min,
-                        timestamp,
-                        timestamp,
-                        StreamingMinAgg::<NaiveDateTimeArray>
-                    ),
+                    (Min, time, time, StreamingMinAgg::<TimeArray>),
+                    (Min, date, date, StreamingMinAgg::<DateArray>),
+                    (Min, timestamp, timestamp, StreamingMinAgg::<TimestampArray>),
                     (Min, timestamptz, timestamptz, StreamingMinAgg::<I64Array>),
                     (Min, varchar, varchar, StreamingMinAgg::<Utf8Array>),
                     (Min, bytea, bytea, StreamingMinAgg::<BytesArray>),
@@ -230,14 +220,9 @@ pub fn create_streaming_agg_impl(
                     (Max, float32, float32, StreamingMaxAgg::<F32Array>),
                     (Max, float64, float64, StreamingMaxAgg::<F64Array>),
                     (Max, interval, interval, StreamingMaxAgg::<IntervalArray>),
-                    (Max, time, time, StreamingMaxAgg::<NaiveTimeArray>),
-                    (Max, date, date, StreamingMaxAgg::<NaiveDateArray>),
-                    (
-                        Max,
-                        timestamp,
-                        timestamp,
-                        StreamingMaxAgg::<NaiveDateTimeArray>
-                    ),
+                    (Max, time, time, StreamingMaxAgg::<TimeArray>),
+                    (Max, date, date, StreamingMaxAgg::<DateArray>),
+                    (Max, timestamp, timestamp, StreamingMaxAgg::<TimestampArray>),
                     (Max, timestamptz, timestamptz, StreamingMaxAgg::<I64Array>),
                     (Max, varchar, varchar, StreamingMaxAgg::<Utf8Array>),
                     (Max, bytea, bytea, StreamingMaxAgg::<BytesArray>),

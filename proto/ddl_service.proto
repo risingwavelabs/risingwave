@@ -139,6 +139,22 @@ message CreateTableResponse {
   uint64 version = 3;
 }
 
+message AlterRelationNameRequest {
+  oneof relation {
+    uint32 table_id = 1;
+    uint32 view_id = 2;
+    uint32 index_id = 3;
+    uint32 sink_id = 4;
+    uint32 source_id = 5;
+  }
+  string new_name = 20;
+}
+
+message AlterRelationNameResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
 message CreateFunctionRequest {
   catalog.Function function = 1;
 }
@@ -239,14 +255,16 @@ message GetDdlProgressResponse {
 
 message CreateConnectionRequest {
   message PrivateLink {
-    string provider = 1;
+    catalog.Connection.PrivateLinkService.PrivateLinkProvider provider = 1;
     string service_name = 2;
-    repeated string availability_zones = 3;
   }
-
+  string name = 1;
+  uint32 database_id = 2;
+  uint32 schema_id = 3;
   oneof payload {
-    PrivateLink private_link = 1;
+    PrivateLink private_link = 4;
   }
+  uint32 owner_id = 5;
 }
 
 message CreateConnectionResponse {
@@ -262,10 +280,21 @@ message ListConnectionsResponse {
 }
 
 message DropConnectionRequest {
-  string connection_name = 1;
+  uint32 connection_id = 1;
 }
 
-message DropConnectionResponse {}
+message DropConnectionResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
+message GetTablesRequest {
+  repeated uint32 table_ids = 1;
+}
+
+message GetTablesResponse {
+  map<uint32, catalog.Table> tables = 1;
+}
 
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
@@ -279,6 +308,7 @@ service DdlService {
   rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
   rpc CreateTable(CreateTableRequest) returns (CreateTableResponse);
+  rpc AlterRelationName(AlterRelationNameRequest) returns (AlterRelationNameResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
   rpc CreateView(CreateViewRequest) returns (CreateViewResponse);
@@ -293,4 +323,5 @@ service DdlService {
   rpc CreateConnection(CreateConnectionRequest) returns (CreateConnectionResponse);
   rpc ListConnections(ListConnectionsRequest) returns (ListConnectionsResponse);
   rpc DropConnection(DropConnectionRequest) returns (DropConnectionResponse);
+  rpc GetTables(GetTablesRequest) returns (GetTablesResponse);
 }

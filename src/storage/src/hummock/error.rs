@@ -130,6 +130,10 @@ impl HummockError {
         matches!(self.inner, HummockErrorInner::ExpiredEpoch { .. })
     }
 
+    pub fn is_meta_error(&self) -> bool {
+        matches!(self.inner, HummockErrorInner::MetaError(..))
+    }
+
     pub fn compaction_executor(error: impl ToString) -> HummockError {
         HummockErrorInner::CompactionExecutor(error.to_string()).into()
     }

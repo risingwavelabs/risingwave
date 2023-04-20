@@ -17,17 +17,21 @@ use std::marker::PhantomData;
 
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilderImpl, Op};
+use risingwave_common::array::stream_record::{Record, RecordType};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::function::aggregate::AggCall;
 use risingwave_storage::StateStore;
 
 use super::agg_state::{AggState, AggStateStorage};
-use super::AggCall;
 use crate::common::table::state_table::StateTable;
+use crate::common::StreamChunkBuilder;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkIndices;
 
@@ -39,7 +43,7 @@ pub trait Strategy {
         curr_row_count: usize,
         prev_outputs: Option<&OwnedRow>,
         curr_outputs: &OwnedRow,
-    ) -> Option<AggChangeType>;
+    ) -> Option<RecordType>;
 }
 
 /// The strategy that always outputs the aggregation result no matter there're input rows or not.
@@ -54,7 +58,7 @@ impl Strategy for AlwaysOutput {
         curr_row_count: usize,
         prev_outputs: Option<&OwnedRow>,
         curr_outputs: &OwnedRow,
-    ) -> Option<AggChangeType> {
+    ) -> Option<RecordType> {
         match prev_outputs {
             None => {
                 // First time to build changes, assert to ensure correctness.
@@ -63,14 +67,14 @@ impl Strategy for AlwaysOutput {
                 assert_eq!(prev_row_count, 0);
 
                 // Generate output no matter whether current row count is 0 or not.
-                Some(AggChangeType::Insert)
+                Some(RecordType::Insert)
             }
             Some(prev_outputs) => {
                 if prev_row_count == 0 && curr_row_count == 0 || prev_outputs == curr_outputs {
                     // No rows exist, or output is not changed.
                     None
                 } else {
-                    Some(AggChangeType::Update)
+                    Some(RecordType::Update)
                 }
             }
         }
@@ -83,7 +87,7 @@ impl Strategy for OnlyOutputIfHasInput {
         curr_row_count: usize,
         prev_outputs: Option<&OwnedRow>,
         curr_outputs: &OwnedRow,
-    ) -> Option<AggChangeType> {
+    ) -> Option<RecordType> {
         match (prev_row_count, curr_row_count) {
             (0, 0) => {
                 // No rows of current group exist.
@@ -91,11 +95,11 @@ impl Strategy for OnlyOutputIfHasInput {
             }
             (0, _) => {
                 // Insert new output row for this newly emerged group.
-                Some(AggChangeType::Insert)
+                Some(RecordType::Insert)
             }
             (_, 0) => {
                 // Delete old output row for this newly disappeared group.
-                Some(AggChangeType::Delete)
+                Some(RecordType::Delete)
             }
             (_, _) => {
                 // Update output row.
@@ -103,7 +107,7 @@ impl Strategy for OnlyOutputIfHasInput {
                     // No output change.
                     None
                 } else {
-                    Some(AggChangeType::Update)
+                    Some(RecordType::Update)
                 }
             }
         }
@@ -136,25 +140,12 @@ impl<S: StateStore, Strtg: Strategy> Debug for AggGroup<S, Strtg> {
     }
 }
 
-/// Type of aggregation change.
-pub enum AggChangeType {
-    Insert,
-    Delete,
-    Update,
-}
-
-/// Aggregation change. The result rows include group key prefix.
-pub enum AggChange {
-    Insert {
-        new_row: OwnedRow,
-    },
-    Delete {
-        old_row: OwnedRow,
-    },
-    Update {
-        old_row: OwnedRow,
-        new_row: OwnedRow,
-    },
+impl<S: StateStore, Strtg: Strategy> EstimateSize for AggGroup<S, Strtg> {
+    fn estimated_heap_size(&self) -> usize {
+        // FIXME: implement correct size
+        // https://github.com/risingwavelabs/risingwave/issues/8957
+        0
+    }
 }
 
 impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
@@ -299,7 +290,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
 
     /// Build aggregation result change, according to previous and current agg outputs.
     /// The saved previous outputs will be updated to the latest outputs after this method.
-    pub fn build_change(&mut self, curr_outputs: OwnedRow) -> Option<AggChange> {
+    pub fn build_change(&mut self, curr_outputs: OwnedRow) -> Option<Record<OwnedRow>> {
         let prev_row_count = self.prev_row_count();
         let curr_row_count = curr_outputs[self.row_count_index]
             .as_ref()
@@ -319,71 +310,65 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             &curr_outputs,
         );
 
-        // Split `AggChangeType` and `AggChange` to avoid unnecessary cloning.
         change_type.map(|change_type| match change_type {
-            AggChangeType::Insert => {
+            RecordType::Insert => {
                 let new_row = self.group_key().chain(&curr_outputs).into_owned_row();
                 self.prev_outputs = Some(curr_outputs);
-                AggChange::Insert { new_row }
+                Record::Insert { new_row }
             }
-            AggChangeType::Delete => {
+            RecordType::Delete => {
                 let prev_outputs = self.prev_outputs.take();
                 let old_row = self.group_key().chain(prev_outputs).into_owned_row();
-                AggChange::Delete { old_row }
+                Record::Delete { old_row }
             }
-            AggChangeType::Update => {
+            RecordType::Update => {
                 let new_row = self.group_key().chain(&curr_outputs).into_owned_row();
                 let prev_outputs = self.prev_outputs.replace(curr_outputs);
                 let old_row = self.group_key().chain(prev_outputs).into_owned_row();
-                AggChange::Update { old_row, new_row }
+                Record::Update { old_row, new_row }
             }
         })
     }
+}
 
-    pub fn apply_change_to_builders(
-        &self,
-        change: &AggChange,
-        builders: &mut [ArrayBuilderImpl],
-        ops: &mut Vec<Op>,
-    ) {
-        match change {
-            AggChange::Insert { new_row } => {
-                trace!("insert row: {:?}", new_row);
-                ops.push(Op::Insert);
-                for (builder, new_value) in builders.iter_mut().zip_eq_fast(new_row.iter()) {
-                    builder.append_datum(new_value);
-                }
-            }
-            AggChange::Delete { old_row } => {
-                trace!("delete row: {:?}", old_row);
-                ops.push(Op::Delete);
-                for (builder, old_value) in builders.iter_mut().zip_eq_fast(old_row.iter()) {
-                    builder.append_datum(old_value);
-                }
-            }
-            AggChange::Update { old_row, new_row } => {
-                trace!("update row: prev = {:?}, curr = {:?}", old_row, new_row);
-                ops.push(Op::UpdateDelete);
-                ops.push(Op::UpdateInsert);
-                for (builder, old_value, new_value) in
-                    itertools::multizip((builders.iter_mut(), old_row.iter(), new_row.iter()))
-                {
-                    builder.append_datum(old_value);
-                    builder.append_datum(new_value);
-                }
+// TODO(rc): split logic of `StreamChunkBuilder` to chunk builder and row merger.
+/// A wrapper of [`StreamChunkBuilder`] that provides a more convenient API.
+pub struct ChunkBuilder {
+    inner: StreamChunkBuilder,
+}
+
+impl ChunkBuilder {
+    pub fn new(capacity: usize, data_types: &[DataType]) -> Self {
+        Self {
+            inner: StreamChunkBuilder::new(
+                capacity,
+                data_types,
+                (0..data_types.len()).map(|x| (x, x)).collect(),
+                vec![],
+            ),
+        }
+    }
+
+    /// Append a row to the builder, return a chunk if the builder is full.
+    #[must_use]
+    pub fn append_row(&mut self, op: Op, row: impl Row) -> Option<StreamChunk> {
+        self.inner.append_row_update(op, row)
+    }
+
+    /// Append a record to the builder, return a chunk if the builder is full.
+    pub fn append_record(&mut self, record: Record<impl Row>) -> Option<StreamChunk> {
+        match record {
+            Record::Insert { new_row } => self.append_row(Op::Insert, new_row),
+            Record::Delete { old_row } => self.append_row(Op::Delete, old_row),
+            Record::Update { old_row, new_row } => {
+                let _none = self.append_row(Op::UpdateDelete, old_row);
+                self.append_row(Op::UpdateInsert, new_row)
             }
         }
     }
 
-    pub fn apply_change_to_result_table(
-        &self,
-        change: &AggChange,
-        result_table: &mut StateTable<S>,
-    ) {
-        match change {
-            AggChange::Insert { new_row } => result_table.insert(new_row),
-            AggChange::Delete { old_row } => result_table.delete(old_row),
-            AggChange::Update { old_row, new_row } => result_table.update(old_row, new_row),
-        }
+    /// Take remaining rows and build a chunk.
+    pub fn take(&mut self) -> Option<StreamChunk> {
+        self.inner.take()
     }
 }

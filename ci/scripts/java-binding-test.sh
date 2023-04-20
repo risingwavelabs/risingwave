@@ -3,7 +3,7 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-source ci/scripts/common.env.sh
+source ci/scripts/common.sh
 
 while getopts 'p:' opt; do
     case ${opt} in
@@ -21,26 +21,9 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-echo "--- Download artifacts"
-mkdir -p target/debug
-buildkite-agent artifact download risingwave-"$profile" target/debug/
-buildkite-agent artifact download risedev-dev-"$profile" target/debug/
-buildkite-agent artifact download librisingwave_java_binding.so-"$profile" target/debug
-mv target/debug/risingwave-"$profile" target/debug/risingwave
-mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
-mv target/debug/librisingwave_java_binding.so-"$profile" target/debug/librisingwave_java_binding.so
+download_and_prepare_rw "$profile" source
 
-echo "--- Adjust permission"
-chmod +x ./target/debug/risingwave
-chmod +x ./target/debug/risedev-dev
-chmod +x ./target/debug/librisingwave_java_binding.so
-
-echo "--- Generate RiseDev CI config"
-cp ci/risedev-components.ci.source.env risedev-components.user.env
-
-echo "--- Prepare RiseDev dev cluster"
-cargo make pre-start-dev
-cargo make link-all-in-one-binaries
+download_java_binding "$profile"
 
 echo "--- starting risingwave cluster"
 cargo make ci-start java-binding-demo

@@ -22,7 +22,7 @@ use crate::catalog::TableId;
 use crate::expr::ExprImpl;
 use crate::user::UserId;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundDelete {
     /// Id of the table to perform deleting.
     pub table_id: TableId,

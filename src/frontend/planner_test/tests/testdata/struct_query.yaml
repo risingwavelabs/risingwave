@@ -6,7 +6,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchScan { table: t, columns: [t.country], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [country, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check" }
+    StreamMaterialize { columns: [country, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: "NoCheck" }
     └─StreamTableScan { table: t, columns: [t.country, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   create_source:
     row_format: protobuf
@@ -340,7 +340,7 @@
 - sql: |
     insert into s values (1,2,(1,2,(1,2,null)));
   logical_plan: |
-    LogicalInsert { table: s }
+    LogicalInsert { table: s, mapping: [0:0, 1:1, 2:2] }
     └─LogicalValues { rows: [[1:Int32, 2:Int32, Row(1:Int32, 2:Int32, Row(1:Int32, 2:Int32, null:Int32))]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32, *VALUES*_0.column_2:Struct(StructType { fields: [Int32, Int32, Struct(StructType { fields: [Int32, Int32, Int32], field_names: ["v1", "v2", "v3"] })], field_names: ["v1", "v2", "v3"] })] } }
   create_table_with_connector:
     row_format: protobuf

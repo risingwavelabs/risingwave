@@ -761,6 +761,7 @@ mod tests {
         use crate::manager::LocalNotification;
 
         let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+        env.notification_manager().clear_local_sender().await;
         let context_id = worker_node.id;
         let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
         let compaction_scheduler = CompactionScheduler::new(

@@ -45,15 +45,16 @@ pub trait ToText {
     /// - `ScalarRefImpl::Int16` -> `DataType::Int16`
     /// - `ScalarRefImpl::Int32` -> `DataType::Int32`
     /// - `ScalarRefImpl::Int64` -> `DataType::Int64`
+    /// - `ScalarRefImpl::Int256` -> `DataType::Int256`
     /// - `ScalarRefImpl::Float32` -> `DataType::Float32`
     /// - `ScalarRefImpl::Float64` -> `DataType::Float64`
     /// - `ScalarRefImpl::Decimal` -> `DataType::Decimal`
     /// - `ScalarRefImpl::Boolean` -> `DataType::Boolean`
     /// - `ScalarRefImpl::Utf8` -> `DataType::Varchar`
     /// - `ScalarRefImpl::Bytea` -> `DataType::Bytea`
-    /// - `ScalarRefImpl::NaiveDate` -> `DataType::Date`
-    /// - `ScalarRefImpl::NaiveTime` -> `DataType::Time`
-    /// - `ScalarRefImpl::NaiveDateTime` -> `DataType::Timestamp`
+    /// - `ScalarRefImpl::Date` -> `DataType::Date`
+    /// - `ScalarRefImpl::Time` -> `DataType::Time`
+    /// - `ScalarRefImpl::Timestamp` -> `DataType::Timestamp`
     /// - `ScalarRefImpl::Interval` -> `DataType::Interval`
     /// - `ScalarRefImpl::List` -> `DataType::List`
     /// - `ScalarRefImpl::Struct` -> `DataType::Struct`
@@ -118,10 +119,11 @@ macro_rules! implement_using_ryu {
             $(
             impl ToText for $scalar_type {
                 fn write<W: Write>(&self, f: &mut W) -> Result {
-                    match self.classify() {
-                        FpCategory::Infinite if self.is_sign_negative() => write!(f, "-Infinity"),
+                    let inner = self.0;
+                    match inner.classify() {
+                        FpCategory::Infinite if inner.is_sign_negative() => write!(f, "-Infinity"),
                         FpCategory::Infinite => write!(f, "Infinity"),
-                        FpCategory::Zero if self.is_sign_negative() => write!(f, "-0"),
+                        FpCategory::Zero if inner.is_sign_negative() => write!(f, "-0"),
                         FpCategory::Nan => write!(f, "NaN"),
                         _ => {
                             let mut buf = ryu::Buffer::new();
@@ -161,8 +163,8 @@ macro_rules! implement_using_ryu {
 }
 
 implement_using_ryu! {
-    { crate::types::OrderedF32, Float32 },
-    { crate::types::OrderedF64, Float64 }
+    { crate::types::F32, Float32 },
+    { crate::types::F64, Float64 }
 }
 
 impl ToText for i64 {

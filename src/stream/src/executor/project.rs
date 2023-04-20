@@ -19,7 +19,7 @@ use multimap::MultiMap;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_expr::expr::BoxedExpression;
+use risingwave_expr::expr::{BoxedExpression, ExprContext, CONTEXT};
 
 use super::*;
 
@@ -115,6 +115,7 @@ impl Inner {
     async fn map_filter_chunk(
         &self,
         chunk: StreamChunk,
+        context: ExprContext,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         let chunk = if chunk.selectivity() <= self.materialize_selectivity_threshold {
             chunk.compact()
@@ -125,11 +126,15 @@ impl Inner {
         let mut projected_columns = Vec::new();
 
         for expr in &self.exprs {
-            let evaluated_expr = expr
-                .eval_infallible(&data_chunk, |err| {
-                    self.ctx.on_compute_error(err, &self.info.identity)
-                })
+            let evaluated_expr = CONTEXT
+                .scope(
+                    context.clone(),
+                    expr.eval_infallible(&data_chunk, |err| {
+                        self.ctx.on_compute_error(err, &self.info.identity)
+                    }),
+                )
                 .await;
+
             let new_column = Column::new(evaluated_expr);
             projected_columns.push(new_column);
         }
@@ -170,8 +175,13 @@ impl Inner {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute(self, input: BoxedExecutor) {
+        let mut input = input.execute();
+        let first_barrier = expect_first_barrier(&mut input).await?;
+        let mut context = ExprContext::new(first_barrier.get_curr_epoch());
+        yield Message::Barrier(first_barrier);
+
         #[for_await]
-        for msg in input.execute() {
+        for msg in input {
             let msg = msg?;
             match msg {
                 Message::Watermark(w) => {
@@ -180,11 +190,16 @@ impl Inner {
                         yield Message::Watermark(watermark)
                     }
                 }
-                Message::Chunk(chunk) => match self.map_filter_chunk(chunk).await? {
-                    Some(new_chunk) => yield Message::Chunk(new_chunk),
-                    None => continue,
-                },
-                m => yield m,
+                Message::Chunk(chunk) => {
+                    match self.map_filter_chunk(chunk, context.clone()).await? {
+                        Some(new_chunk) => yield Message::Chunk(new_chunk),
+                        None => continue,
+                    }
+                }
+                Message::Barrier(barrier) => {
+                    context = ExprContext::new(barrier.get_curr_epoch());
+                    yield Message::Barrier(barrier);
+                }
             }
         }
     }
@@ -197,8 +212,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::{build, Expression, InputRefExpression, LiteralExpression};
-    use risingwave_pb::expr::expr_node::PbType;
+    use risingwave_expr::expr::build_from_pretty;
 
     use super::super::test_utils::MockSource;
     use super::super::*;
@@ -223,17 +237,9 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);
+        let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
 
-        let test_expr = build(
-            PbType::Add,
-            DataType::Int64,
-            vec![
-                InputRefExpression::new(DataType::Int64, 0).boxed(),
-                InputRefExpression::new(DataType::Int64, 1).boxed(),
-            ],
-        )
-        .unwrap();
+        let test_expr = build_from_pretty("(add:int8 $0:int8 $1:int8)");
 
         let project = Box::new(ProjectExecutor::new(
             ActorContext::create(123),
@@ -245,6 +251,13 @@ mod tests {
             0.0,
         ));
         let mut project = project.execute();
+
+        tx.push_barrier(1, false);
+        let barrier = project.next().await.unwrap().unwrap();
+        barrier.as_barrier().unwrap();
+
+        tx.push_chunk(chunk1);
+        tx.push_chunk(chunk2);
 
         let msg = project.next().await.unwrap().unwrap();
         assert_eq!(
@@ -267,6 +280,7 @@ mod tests {
             )
         );
 
+        tx.push_barrier(2, true);
         assert!(project.next().await.unwrap().unwrap().is_stop());
     }
     #[tokio::test]
@@ -279,28 +293,8 @@ mod tests {
         };
         let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
 
-        let a_expr = build(
-            PbType::Add,
-            DataType::Int64,
-            vec![
-                InputRefExpression::new(DataType::Int64, 0).boxed(),
-                LiteralExpression::new(DataType::Int64, Some(ScalarImpl::Int64(1))).boxed(),
-            ],
-        )
-        .unwrap();
-
-        let b_expr = build(
-            PbType::Subtract,
-            DataType::Int64,
-            vec![
-                Box::new(InputRefExpression::new(DataType::Int64, 0)),
-                Box::new(LiteralExpression::new(
-                    DataType::Int64,
-                    Some(ScalarImpl::Int64(1)),
-                )),
-            ],
-        )
-        .unwrap();
+        let a_expr = build_from_pretty("(add:int8 $0:int8 1:int8)");
+        let b_expr = build_from_pretty("(subtract:int8 $0:int8 1:int8)");
 
         let project = Box::new(ProjectExecutor::new(
             ActorContext::create(123),
@@ -313,8 +307,11 @@ mod tests {
         ));
         let mut project = project.execute();
 
+        tx.push_barrier(1, false);
         tx.push_int64_watermark(0, 100);
 
+        let b1 = project.next().await.unwrap().unwrap();
+        b1.as_barrier().unwrap();
         let w1 = project.next().await.unwrap().unwrap();
         let w1 = w1.as_watermark().unwrap();
         let w2 = project.next().await.unwrap().unwrap();
@@ -343,7 +340,7 @@ mod tests {
             }
         );
         tx.push_int64_watermark(1, 100);
-        tx.push_barrier(1, true);
+        tx.push_barrier(2, true);
         assert!(project.next().await.unwrap().unwrap().is_stop());
     }
 }

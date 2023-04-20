@@ -160,10 +160,9 @@ impl<'a> TryFrom<&'a ExprNode> for CaseExpression {
 mod tests {
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::Scalar;
-    use risingwave_pb::expr::expr_node::PbType;
 
     use super::*;
-    use crate::expr::{build, InputRefExpression, LiteralExpression};
+    use crate::expr::build_from_pretty;
 
     async fn test_eval_row(expr: CaseExpression, row_inputs: Vec<i32>, expected: Vec<Option<f32>>) {
         for (i, row_input) in row_inputs.iter().enumerate() {
@@ -177,27 +176,12 @@ mod tests {
     #[tokio::test]
     async fn test_eval_searched_case() {
         let ret_type = DataType::Float32;
-        // when x <= 2 then 3.1
+        // when x <= 2 then 3.1 else 4.1
         let when_clauses = vec![WhenClause {
-            when: build(
-                PbType::LessThanOrEqual,
-                DataType::Boolean,
-                vec![
-                    Box::new(InputRefExpression::new(DataType::Int32, 0)),
-                    Box::new(LiteralExpression::new(DataType::Float32, Some(2f32.into()))),
-                ],
-            )
-            .unwrap(),
-            then: Box::new(LiteralExpression::new(
-                DataType::Float32,
-                Some(3.1f32.into()),
-            )),
+            when: build_from_pretty("(less_than_or_equal:boolean (cast:float4 $0:int4) 2:float4)"),
+            then: build_from_pretty("3.1:float4"),
         }];
-        // else 4.1
-        let els = Box::new(LiteralExpression::new(
-            DataType::Float32,
-            Some(4.1f32.into()),
-        ));
+        let els = build_from_pretty("4.1:float4");
         let searched_case_expr = CaseExpression::new(ret_type, when_clauses, Some(els));
         let input = DataChunk::from_pretty(
             "i
@@ -220,19 +204,8 @@ mod tests {
         let ret_type = DataType::Float32;
         // when x <= 3 then 3.1
         let when_clauses = vec![WhenClause {
-            when: build(
-                PbType::LessThanOrEqual,
-                DataType::Boolean,
-                vec![
-                    Box::new(InputRefExpression::new(DataType::Int32, 0)),
-                    Box::new(LiteralExpression::new(DataType::Float32, Some(3f32.into()))),
-                ],
-            )
-            .unwrap(),
-            then: Box::new(LiteralExpression::new(
-                DataType::Float32,
-                Some(3.1f32.into()),
-            )),
+            when: build_from_pretty("(less_than_or_equal:boolean (cast:float4 $0:int4) 3:float4)"),
+            then: build_from_pretty("3.1:float4"),
         }];
         let searched_case_expr = CaseExpression::new(ret_type, when_clauses, None);
         let input = DataChunk::from_pretty(
@@ -252,27 +225,12 @@ mod tests {
     #[tokio::test]
     async fn test_eval_row_searched_case() {
         let ret_type = DataType::Float32;
-        // when x <= 2 then 3.1
+        // when x <= 2 then 3.1 else 4.1
         let when_clauses = vec![WhenClause {
-            when: build(
-                PbType::LessThanOrEqual,
-                DataType::Boolean,
-                vec![
-                    Box::new(InputRefExpression::new(DataType::Int32, 0)),
-                    Box::new(LiteralExpression::new(DataType::Float32, Some(2f32.into()))),
-                ],
-            )
-            .unwrap(),
-            then: Box::new(LiteralExpression::new(
-                DataType::Float32,
-                Some(3.1f32.into()),
-            )),
+            when: build_from_pretty("(less_than_or_equal:boolean (cast:float4 $0:int4) 2:float4)"),
+            then: build_from_pretty("3.1:float4"),
         }];
-        // else 4.1
-        let els = Box::new(LiteralExpression::new(
-            DataType::Float32,
-            Some(4.1f32.into()),
-        ));
+        let els = build_from_pretty("4.1:float4");
         let searched_case_expr = CaseExpression::new(ret_type, when_clauses, Some(els));
 
         let row_inputs = vec![1, 2, 3, 4, 5];
@@ -292,19 +250,8 @@ mod tests {
         let ret_type = DataType::Float32;
         // when x <= 3 then 3.1
         let when_clauses = vec![WhenClause {
-            when: build(
-                PbType::LessThanOrEqual,
-                DataType::Boolean,
-                vec![
-                    Box::new(InputRefExpression::new(DataType::Int32, 0)),
-                    Box::new(LiteralExpression::new(DataType::Float32, Some(3f32.into()))),
-                ],
-            )
-            .unwrap(),
-            then: Box::new(LiteralExpression::new(
-                DataType::Float32,
-                Some(3.1f32.into()),
-            )),
+            when: build_from_pretty("(less_than_or_equal:boolean (cast:float4 $0:int4) 3:float4)"),
+            then: build_from_pretty("3.1:float4"),
         }];
         let searched_case_expr = CaseExpression::new(ret_type, when_clauses, None);
 

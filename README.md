@@ -16,6 +16,14 @@ Data in RisingWave can be output to external targets such as message brokers, da
 
 Learn more at [Introduction to RisingWave](https://www.risingwave.dev/docs/current/intro/).
 
+## RisingWave Cloud
+
+RisingWave Cloud is the fully managed service of RisingWave Database. It is now in Beta. Feel free to try out at: [risingwave.com/cloud](risingwave.com/cloud).
+
+## Notes on telemetry
+
+RisingWave collects anonymous usage statistics to better understand how the community is using RisingWave. The sole intention of this exercise is to help improve the product. These statistics are related to system resource usage, OS versions and system uptime. RisingWave doesn't have access to any user data or metadata running on RisingWave clusters including source and sink connection parameters, sources, sinks, materialized views, and tables. Users have an option to opt out of this collection using a system parameter. Please refer to the RisingWave user documentation for more details.
+
 ## Quick Start
 
 ### Installation
@@ -26,9 +34,9 @@ There are two ways to install RisingWave: use a pre-built package or compile fro
 
 ```shell
 # Download the pre-built binary
-wget https://github.com/risingwavelabs/risingwave/releases/download/v0.1.17/risingwave-v0.1.17-x86_64-unknown-linux.tar.gz
+wget https://github.com/risingwavelabs/risingwave/releases/download/v0.18.0/risingwave-v0.18.0-x86_64-unknown-linux.tar.gz
 # Unzip the binary
-tar xvf risingwave-v0.1.17-x86_64-unknown-linux.tar.gz
+tar xvf risingwave-v0.18.0-x86_64-unknown-linux.tar.gz
 # Start RisingWave in single-binary playground mode
 ./risingwave playground
 ```
@@ -37,7 +45,7 @@ tar xvf risingwave-v0.1.17-x86_64-unknown-linux.tar.gz
 
 ```shell
 # Start RisingWave in single-binary playground mode
-docker run -it --pull=always -p 4566:4566 -p 5691:5691 ghcr.io/risingwavelabs/risingwave:v0.1.17 playground
+docker run -it --pull=always -p 4566:4566 -p 5691:5691 ghcr.io/risingwavelabs/risingwave:v0.18.0 playground
 ```
 
 **Compile from Source with [RiseDev](docs/developer-guide.md#set-up-the-development-environment) (Linux and macOS)**

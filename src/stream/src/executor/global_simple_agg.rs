@@ -17,16 +17,17 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::function::aggregate::AggCall;
 use risingwave_storage::StateStore;
 
-use super::agg_common::AggExecutorArgs;
+use super::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
 use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggStateStorage, AlwaysOutput, DistinctDeduplicater,
 };
 use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
-use crate::executor::aggregation::{generate_agg_schema, AggCall, AggGroup};
+use crate::executor::aggregation::{generate_agg_schema, AggGroup};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message};
 use crate::task::AtomicU64Ref;
@@ -126,7 +127,7 @@ impl<S: StateStore> Executor for GlobalSimpleAggExecutor<S> {
 }
 
 impl<S: StateStore> GlobalSimpleAggExecutor<S> {
-    pub fn new(args: AggExecutorArgs<S>) -> StreamResult<Self> {
+    pub fn new(args: AggExecutorArgs<S, SimpleAggExecutorExtraArgs>) -> StreamResult<Self> {
         let input_info = args.input.info();
         let schema = generate_agg_schema(args.input.as_ref(), &args.agg_calls, None);
         Ok(Self {
@@ -226,7 +227,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         vars: &mut ExecutionVars<S>,
         epoch: EpochPair,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        if vars.state_changed || vars.agg_group.is_uninitialized() {
+        let chunk = if vars.state_changed || vars.agg_group.is_uninitialized() {
             // Flush agg states.
             vars.agg_group
                 .flush_state_if_needed(&mut this.storages)
@@ -242,42 +243,31 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             )
             .await?;
 
-            // Create array builders.
-            // As the datatype is retrieved from schema, it contains both group key and aggregation
-            // state outputs.
-            let mut builders = this.info.schema.create_array_builders(2);
-            let mut new_ops = Vec::with_capacity(2);
             // Retrieve modified states and put the changes into the builders.
             let curr_outputs = vars.agg_group.get_outputs(&this.storages).await?;
-            if let Some(change) = vars.agg_group.build_change(curr_outputs) {
-                vars.agg_group
-                    .apply_change_to_builders(&change, &mut builders, &mut new_ops);
-                vars.agg_group
-                    .apply_change_to_result_table(&change, &mut this.result_table);
-                this.result_table.commit(epoch).await?;
-            } else {
-                // Agg result is not changed.
-                this.result_table.commit_no_data_expected(epoch);
-                return Ok(None);
+            match vars.agg_group.build_change(curr_outputs) {
+                Some(change) => {
+                    this.result_table.write_record(change.as_ref());
+                    this.result_table.commit(epoch).await?;
+                    Some(change.to_stream_chunk(&this.info.schema.data_types()))
+                }
+                None => {
+                    // Agg result is not changed.
+                    this.result_table.commit_no_data_expected(epoch);
+                    None
+                }
             }
-
-            let columns = builders
-                .into_iter()
-                .map(|builder| builder.finish().into())
-                .collect();
-
-            let chunk = StreamChunk::new(new_ops, columns, None);
-
-            vars.state_changed = false;
-            Ok(Some(chunk))
         } else {
             // No state is changed.
             // Call commit on state table to increment the epoch.
             this.all_state_tables_mut().for_each(|table| {
                 table.commit_no_data_expected(epoch);
             });
-            Ok(None)
-        }
+            None
+        };
+
+        vars.state_changed = false;
+        Ok(chunk)
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -346,11 +336,10 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::Field;
     use risingwave_common::types::*;
-    use risingwave_expr::expr::*;
+    use risingwave_expr::function::aggregate::{AggArgs, AggCall, AggKind};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
-    use crate::executor::aggregation::{AggArgs, AggCall};
     use crate::executor::test_utils::agg_executor::new_boxed_simple_agg_executor;
     use crate::executor::test_utils::*;
     use crate::executor::*;
@@ -389,14 +378,12 @@ mod tests {
         tx.push_barrier(4, false);
 
         // This is local simple aggregation, so we add another row count state
-        let append_only = false;
         let agg_calls = vec![
             AggCall {
                 kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -405,7 +392,6 @@ mod tests {
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -414,7 +400,6 @@ mod tests {
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -423,7 +408,6 @@ mod tests {
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -433,6 +417,7 @@ mod tests {
             ActorContext::create(123),
             store,
             Box::new(source),
+            false,
             agg_calls,
             0,
             vec![2],

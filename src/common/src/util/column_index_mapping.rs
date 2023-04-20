@@ -194,6 +194,14 @@ impl ColIndexMapping {
         Self::with_target_size(map, following.target_size())
     }
 
+    pub fn clone_with_offset(&self, offset: usize) -> Self {
+        let mut map = self.map.clone();
+        for target in &mut map {
+            *target = target.and_then(|index| index.checked_add(offset));
+        }
+        Self::with_target_size(map, self.target_size() + offset)
+    }
+
     /// Union two mapping, the result mapping `target_size` and source size will be the max size
     /// of the two mappings.
     ///
@@ -217,15 +225,17 @@ impl ColIndexMapping {
         Self::with_target_size(map, target_size)
     }
 
-    /// inverse the mapping, if a target corresponds more than one source, it will choose any one as
-    /// it inverse mapping's target
+    /// Inverse the mapping. If a target corresponds to more than one source, return `None`.
     #[must_use]
-    pub fn inverse(&self) -> Self {
+    pub fn inverse(&self) -> Option<Self> {
         let mut map = vec![None; self.target_size()];
         for (src, dst) in self.mapping_pairs() {
+            if map[dst].is_some() {
+                return None;
+            }
             map[dst] = Some(src);
         }
-        Self::with_target_size(map, self.source_size())
+        Some(Self::with_target_size(map, self.source_size()))
     }
 
     /// return iter of (src, dst) order by src

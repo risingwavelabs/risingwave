@@ -345,7 +345,7 @@ impl Stream for SelectReceivers {
         // If this barrier asks the actor to stop, we do not reset the active upstreams so that the
         // next call would return `Poll::Ready(None)` due to `is_terminated`.
         let upstreams = std::mem::take(&mut self.blocked);
-        if barrier.is_stop_or_update_drop_actor(self.actor_id) {
+        if barrier.is_stop(self.actor_id) {
             drop(upstreams);
         } else {
             self.extend_active(upstreams);

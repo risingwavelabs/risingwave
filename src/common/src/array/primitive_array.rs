@@ -24,12 +24,11 @@ use super::{Array, ArrayBuilder, ArrayResult};
 use crate::array::serial_array::Serial;
 use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayMeta};
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::estimate_size::EstimateSize;
 use crate::for_all_native_types;
 use crate::types::decimal::Decimal;
-use crate::types::interval::IntervalUnit;
-use crate::types::{
-    NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, NativeType, Scalar, ScalarRef,
-};
+use crate::types::interval::Interval;
+use crate::types::{Date, NativeType, Scalar, ScalarRef, Time, Timestamp};
 
 /// Physical type of array items which have fixed size.
 pub trait PrimitiveArrayItemType
@@ -120,10 +119,10 @@ macro_rules! impl_primitive_for_others {
 
 impl_primitive_for_others! {
     { Decimal, Decimal, Decimal },
-    { IntervalUnit, Interval, Interval },
-    { NaiveDateWrapper, Date, NaiveDate },
-    { NaiveTimeWrapper, Time, NaiveTime },
-    { NaiveDateTimeWrapper, Timestamp, NaiveDateTime }
+    { Interval, Interval, Interval },
+    { Date, Date, Date },
+    { Time, Time, Time },
+    { Timestamp, Timestamp, Timestamp }
 }
 
 /// `PrimitiveArray` is a collection of primitive types, such as `i32`, `f32`.
@@ -275,10 +274,16 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
     }
 }
 
+impl<T: PrimitiveArrayItemType> EstimateSize for PrimitiveArray<T> {
+    fn estimated_heap_size(&self) -> usize {
+        self.bitmap.estimated_heap_size() + self.data.capacity() * size_of::<T>()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{OrderedF32, OrderedF64};
+    use crate::types::{F32, F64};
 
     fn helper_test_builder<T: PrimitiveArrayItemType>(data: Vec<Option<T>>) -> PrimitiveArray<T> {
         let mut builder = PrimitiveArrayBuilder::<T>::new(data.len());
@@ -326,7 +331,7 @@ mod tests {
 
     #[test]
     fn test_f32_builder() {
-        let arr = helper_test_builder::<OrderedF32>(
+        let arr = helper_test_builder::<F32>(
             (0..1000)
                 .map(|x| {
                     if x % 2 == 0 {
@@ -344,7 +349,7 @@ mod tests {
 
     #[test]
     fn test_f64_builder() {
-        let arr = helper_test_builder::<OrderedF64>(
+        let arr = helper_test_builder::<F64>(
             (0..1000)
                 .map(|x| {
                     if x % 2 == 0 {

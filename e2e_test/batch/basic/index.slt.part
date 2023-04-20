@@ -90,3 +90,41 @@ NULL 5
 
 statement ok
 drop table t1;
+
+# create functional indexes
+statement ok
+
+create table t (v1 varchar, v2 varchar);
+
+statement ok
+insert into t values ('Hello', 'World');
+
+statement ok
+create index idx on t(lower(v1));
+
+# functional indexes selection
+query II
+select * from t where lower(v1) = 'hello';
+----
+Hello World
+
+statement ok
+drop table t;
+
+# indexes on expressions
+statement ok
+create table people (first_name varchar, last_name varchar, info varchar);
+
+statement ok
+create index people_names ON people ((first_name || ' ' || last_name));
+
+statement ok
+insert into people values ('John', 'Smith', 'test'), ('Dylan', 'Chen', 'test');
+
+query TTT
+select * from people where (first_name || ' ' || last_name) = 'John Smith';;
+----
+John Smith test
+
+statement ok
+drop table people;

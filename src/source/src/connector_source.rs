@@ -32,7 +32,6 @@ use risingwave_connector::source::{
 pub struct ConnectorSource {
     pub config: ConnectorProperties,
     pub columns: Vec<SourceColumnDesc>,
-    // pub parser: Arc<SourceParserImpl>,
     pub parser_config: SpecificParserConfig,
     pub connector_message_buffer_size: usize,
 }

@@ -18,7 +18,6 @@ use std::iter::empty;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use fixedbitset::FixedBitSet;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Array, DataChunk, RowRef};
@@ -37,6 +36,7 @@ use super::{ChunkedData, JoinType, RowId};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
+use crate::risingwave_common::hash::NullBitmap;
 use crate::task::BatchTaskContext;
 
 /// Hash Join Executor
@@ -232,13 +232,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
             JoinHashMap::with_capacity_and_hasher(build_row_count, PrecomputedBuildHasher);
         let mut next_build_row_with_same_key =
             ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
-        let null_matched = {
-            let mut null_matched = FixedBitSet::with_capacity(self.null_matched.len());
-            for (idx, col_null_matched) in self.null_matched.into_iter().enumerate() {
-                null_matched.set(idx, col_null_matched);
-            }
-            null_matched
-        };
+
+        let null_matched = K::Bitmap::from_bool_vec(self.null_matched);
 
         // Build hash map
         for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {
@@ -1694,7 +1689,7 @@ impl BoxedExecutorBuilder for HashJoinExecutor<()> {
             cond,
             identity: context.plan_node().get_identity().clone(),
             right_key_types,
-            chunk_size: context.context.get_config().developer.batch_chunk_size,
+            chunk_size: context.context.get_config().developer.chunk_size,
         }
         .dispatch())
     }
@@ -1799,8 +1794,7 @@ mod tests {
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::iter_util::ZipEqDebug;
-    use risingwave_expr::expr::{build, BoxedExpression, Expression, InputRefExpression};
-    use risingwave_pb::expr::expr_node::PbType;
+    use risingwave_expr::expr::{build_from_pretty, BoxedExpression};
 
     use super::{
         ChunkedData, HashJoinExecutor, JoinType, LeftNonEquiJoinState, RightNonEquiJoinState, RowId,
@@ -1985,15 +1979,7 @@ mod tests {
         }
 
         fn create_cond() -> BoxedExpression {
-            build(
-                PbType::LessThan,
-                DataType::Boolean,
-                vec![
-                    InputRefExpression::new(DataType::Float32, 1).boxed(),
-                    InputRefExpression::new(DataType::Float64, 3).boxed(),
-                ],
-            )
-            .unwrap()
+            build_from_pretty("(less_than:boolean $1:float4 $3:float8)")
         }
 
         fn create_join_executor_with_chunk_size_and_executors(

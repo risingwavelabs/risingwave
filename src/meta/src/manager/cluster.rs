@@ -101,42 +101,45 @@ where
         worker_node_parallelism: usize,
     ) -> MetaResult<WorkerNode> {
         let mut core = self.core.write().await;
-        match core.get_worker_by_host(host_address.clone()) {
-            // TODO(zehua): update parallelism when the worker exists.
-            Some(worker) => Ok(worker.to_protobuf()),
-            None => {
-                // Generate worker id.
-                let worker_id = self
-                    .env
-                    .id_gen_manager()
-                    .generate::<{ IdCategory::Worker }>()
-                    .await? as WorkerId;
-
-                // Generate parallel units.
-                let parallel_units = self
-                    .generate_cn_parallel_units(worker_node_parallelism, worker_id)
-                    .await?;
-
-                // Construct worker.
-                let worker_node = WorkerNode {
-                    id: worker_id,
-                    r#type: r#type as i32,
-                    host: Some(host_address.clone()),
-                    state: State::Starting as i32,
-                    parallel_units,
-                };
-
-                let worker = Worker::from_protobuf(worker_node.clone());
-
-                // Persist worker node.
-                worker.insert(self.env.meta_store()).await?;
-
-                // Update core.
-                core.add_worker_node(worker);
-
-                Ok(worker_node)
-            }
+        if let Some(worker) = core.get_worker_by_host_mut(host_address.clone()) {
+            // TODO: update parallelism when the worker exists.
+            worker.update_ttl(self.max_heartbeat_interval);
+            return Ok(worker.to_protobuf());
         }
+
+        // Generate worker id.
+        let worker_id = self
+            .env
+            .id_gen_manager()
+            .generate::<{ IdCategory::Worker }>()
+            .await? as WorkerId;
+
+        // Generate parallel units.
+        let parallel_units = if r#type == WorkerType::ComputeNode {
+            self.generate_cn_parallel_units(worker_node_parallelism, worker_id)
+                .await?
+        } else {
+            vec![]
+        };
+
+        // Construct worker.
+        let worker_node = WorkerNode {
+            id: worker_id,
+            r#type: r#type as i32,
+            host: Some(host_address.clone()),
+            state: State::Starting as i32,
+            parallel_units,
+        };
+
+        let worker = Worker::from_protobuf(worker_node.clone());
+
+        // Persist worker node.
+        worker.insert(self.env.meta_store()).await?;
+
+        // Update core.
+        core.add_worker_node(worker);
+
+        Ok(worker_node)
     }
 
     pub async fn activate_worker_node(&self, host_address: HostAddress) -> MetaResult<()> {
@@ -182,11 +185,13 @@ where
                 .await;
         }
 
-        // Notify local subscribers.
-        self.env
-            .notification_manager()
-            .notify_local_subscribers(LocalNotification::WorkerNodeIsDeleted(worker_node))
-            .await;
+        if worker_type != WorkerType::RiseCtl {
+            // Notify local subscribers.
+            self.env
+                .notification_manager()
+                .notify_local_subscribers(LocalNotification::WorkerNodeIsDeleted(worker_node))
+                .await;
+        }
 
         Ok(worker_type)
     }
@@ -386,6 +391,10 @@ impl ClusterManagerCore {
 
     pub fn get_worker_by_host(&self, host_address: HostAddress) -> Option<Worker> {
         self.workers.get(&WorkerKey(host_address)).cloned()
+    }
+
+    pub fn get_worker_by_host_mut(&mut self, host_address: HostAddress) -> Option<&mut Worker> {
+        self.workers.get_mut(&WorkerKey(host_address))
     }
 
     fn get_worker_by_id(&self, id: WorkerId) -> Option<Worker> {

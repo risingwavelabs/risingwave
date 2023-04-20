@@ -27,12 +27,11 @@ use risingwave_storage::StateStore;
 
 use super::top_n_cache::TopNCacheTrait;
 use super::utils::*;
-use super::TopNCache;
-use crate::cache::{new_unbounded, ExecutorCache};
+use super::{ManagedTopNState, TopNCache};
+use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::top_n::ManagedTopNState;
 use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Watermark};
 use crate::task::AtomicU64Ref;
 
@@ -104,7 +103,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutor<K,
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
-        lru_manager: AtomicU64Ref,
+        watermark_epoch: AtomicU64Ref,
     ) -> StreamResult<Self> {
         let ExecutorInfo {
             pk_indices, schema, ..
@@ -125,25 +124,25 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutor<K,
             managed_state,
             storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
             group_by,
-            caches: GroupTopNCache::new(lru_manager),
+            caches: GroupTopNCache::new(watermark_epoch),
             cache_key_serde,
         })
     }
 }
 
 pub struct GroupTopNCache<K: HashKey, const WITH_TIES: bool> {
-    data: ExecutorCache<K, TopNCache<WITH_TIES>>,
+    data: ManagedLruCache<K, TopNCache<WITH_TIES>>,
 }
 
 impl<K: HashKey, const WITH_TIES: bool> GroupTopNCache<K, WITH_TIES> {
-    pub fn new(lru_manager: AtomicU64Ref) -> Self {
-        let cache = ExecutorCache::new(new_unbounded(lru_manager));
+    pub fn new(watermark_epoch: AtomicU64Ref) -> Self {
+        let cache = new_unbounded(watermark_epoch);
         Self { data: cache }
     }
 }
 
 impl<K: HashKey, const WITH_TIES: bool> Deref for GroupTopNCache<K, WITH_TIES> {
-    type Target = ExecutorCache<K, TopNCache<WITH_TIES>>;
+    type Target = ManagedLruCache<K, TopNCache<WITH_TIES>>;
 
     fn deref(&self) -> &Self::Target {
         &self.data
@@ -185,7 +184,7 @@ where
                     .await?;
                 self.caches.push(group_cache_key.clone(), topn_cache);
             }
-            let cache = self.caches.get_mut(group_cache_key).unwrap();
+            let mut cache = self.caches.get_mut(group_cache_key).unwrap();
 
             // apply the chunk to state table
             match op {
@@ -245,7 +244,7 @@ where
         if watermark.col_idx == self.group_by[0] {
             self.managed_state
                 .state_table
-                .update_watermark(watermark.val.clone());
+                .update_watermark(watermark.val.clone(), false);
             Some(watermark)
         } else {
             None

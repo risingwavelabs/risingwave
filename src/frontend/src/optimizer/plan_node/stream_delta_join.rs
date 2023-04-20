@@ -20,8 +20,8 @@ use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
-use super::generic::GenericPlanRef;
-use super::{ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
+use super::generic::{self, GenericPlanRef};
+use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
 use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
@@ -35,7 +35,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamDeltaJoin {
     pub base: PlanBase,
-    logical: LogicalJoin,
+    logical: generic::Join<PlanRef>,
 
     /// The join condition must be equivalent to `logical.on`, but separated into equal and
     /// non-equal parts to facilitate execution later
@@ -43,11 +43,10 @@ pub struct StreamDeltaJoin {
 }
 
 impl StreamDeltaJoin {
-    pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
-        let ctx = logical.base.ctx.clone();
+    pub fn new(logical: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Self {
         // Inner join won't change the append-only behavior of the stream. The rest might.
-        let append_only = match logical.join_type() {
-            JoinType::Inner => logical.left().append_only() && logical.right().append_only(),
+        let append_only = match logical.join_type {
+            JoinType::Inner => logical.left.append_only() && logical.right.append_only(),
             _ => todo!("delta join only supports inner join for now"),
         };
         if eq_join_predicate.has_non_eq() {
@@ -60,23 +59,16 @@ impl StreamDeltaJoin {
         let watermark_columns = {
             let from_left = logical
                 .l2i_col_mapping()
-                .rewrite_bitset(logical.left().watermark_columns());
+                .rewrite_bitset(logical.left.watermark_columns());
             let from_right = logical
                 .r2i_col_mapping()
-                .rewrite_bitset(logical.right().watermark_columns());
+                .rewrite_bitset(logical.right.watermark_columns());
             let watermark_columns = from_left.bitand(&from_right);
             logical.i2o_col_mapping().rewrite_bitset(&watermark_columns)
         };
         // TODO: derive from input
-        let base = PlanBase::new_stream(
-            ctx,
-            logical.schema().clone(),
-            logical.base.logical_pk.to_vec(),
-            logical.functional_dependency().clone(),
-            dist,
-            append_only,
-            watermark_columns,
-        );
+        let base =
+            PlanBase::new_stream_with_logical(&logical, dist, append_only, watermark_columns);
 
         Self {
             base,
@@ -95,7 +87,7 @@ impl fmt::Display for StreamDeltaJoin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("StreamDeltaJoin");
-        builder.field("type", &self.logical.join_type());
+        builder.field("type", &self.logical.join_type);
 
         let mut concat_schema = self.left().schema().fields.clone();
         concat_schema.extend(self.right().schema().fields.clone());
@@ -111,7 +103,7 @@ impl fmt::Display for StreamDeltaJoin {
         if verbose {
             if self
                 .logical
-                .output_indices()
+                .output_indices
                 .iter()
                 .copied()
                 .eq(0..self.logical.internal_column_num())
@@ -121,7 +113,7 @@ impl fmt::Display for StreamDeltaJoin {
                 builder.field(
                     "output",
                     &IndicesDisplay {
-                        indices: self.logical.output_indices(),
+                        indices: &self.logical.output_indices,
                         input_schema: &concat_schema,
                     },
                 );
@@ -134,18 +126,18 @@ impl fmt::Display for StreamDeltaJoin {
 
 impl PlanTreeNodeBinary for StreamDeltaJoin {
     fn left(&self) -> PlanRef {
-        self.logical.left()
+        self.logical.left.clone()
     }
 
     fn right(&self) -> PlanRef {
-        self.logical.right()
+        self.logical.right.clone()
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::new(
-            self.logical.clone_with_left_right(left, right),
-            self.eq_join_predicate.clone(),
-        )
+        let mut logical = self.logical.clone();
+        logical.left = left;
+        logical.right = right;
+        Self::new(logical, self.eq_join_predicate.clone())
     }
 }
 
@@ -172,7 +164,7 @@ impl StreamNode for StreamDeltaJoin {
         // TODO: add a separate delta join node in proto, or move fragmenter to frontend so that we
         // don't need an intermediate representation.
         NodeBody::DeltaIndexJoin(DeltaIndexJoinNode {
-            join_type: self.logical.join_type() as i32,
+            join_type: self.logical.join_type as i32,
             left_key: self
                 .eq_join_predicate
                 .left_eq_indexes()
@@ -216,7 +208,7 @@ impl StreamNode for StreamDeltaJoin {
             }),
             output_indices: self
                 .logical
-                .output_indices()
+                .output_indices
                 .iter()
                 .map(|&x| x as u32)
                 .collect(),
@@ -230,14 +222,8 @@ impl ExprRewritable for StreamDeltaJoin {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self::new(
-            self.logical
-                .rewrite_exprs(r)
-                .as_logical_join()
-                .unwrap()
-                .clone(),
-            self.eq_join_predicate.rewrite_exprs(r),
-        )
-        .into()
+        let mut logical = self.logical.clone();
+        logical.rewrite_exprs(r);
+        Self::new(logical, self.eq_join_predicate.rewrite_exprs(r)).into()
     }
 }

@@ -20,7 +20,7 @@ use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::TemporalJoinNode;
 
-use super::{ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
+use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
 use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::plan_tree_node::PlanTreeNodeUnary;
@@ -35,18 +35,16 @@ use crate::utils::ColIndexMappingRewriteExt;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamTemporalJoin {
     pub base: PlanBase,
-    logical: LogicalJoin,
+    logical: generic::Join<PlanRef>,
     eq_join_predicate: EqJoinPredicate,
 }
 
 impl StreamTemporalJoin {
-    pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
-        assert!(
-            logical.join_type() == JoinType::Inner || logical.join_type() == JoinType::LeftOuter
-        );
-        assert!(logical.left().append_only());
-        assert!(logical.right().logical_pk() == eq_join_predicate.right_eq_indexes());
-        let right = logical.right();
+    pub fn new(logical: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Self {
+        assert!(logical.join_type == JoinType::Inner || logical.join_type == JoinType::LeftOuter);
+        assert!(logical.left.append_only());
+        assert!(logical.right.logical_pk() == eq_join_predicate.right_eq_indexes());
+        let right = logical.right.clone();
         let exchange: &StreamExchange = right
             .as_stream_exchange()
             .expect("should be a no shuffle stream exchange");
@@ -55,30 +53,21 @@ impl StreamTemporalJoin {
         let scan: &StreamTableScan = exchange_input
             .as_stream_table_scan()
             .expect("should be a stream table scan");
-        assert!(scan.logical().for_system_time_as_of_now());
+        assert!(scan.logical().for_system_time_as_of_proctime());
 
-        let ctx = logical.base.ctx.clone();
         let l2o = logical
             .l2i_col_mapping()
             .composite(&logical.i2o_col_mapping());
-        let dist = l2o.rewrite_provided_distribution(logical.left().distribution());
+        let dist = l2o.rewrite_provided_distribution(logical.left.distribution());
 
         // Use left side watermark directly.
         let watermark_columns = logical.i2o_col_mapping().rewrite_bitset(
             &logical
                 .l2i_col_mapping()
-                .rewrite_bitset(logical.left().watermark_columns()),
+                .rewrite_bitset(logical.left.watermark_columns()),
         );
 
-        let base = PlanBase::new_stream(
-            ctx,
-            logical.schema().clone(),
-            logical.base.logical_pk.to_vec(),
-            logical.functional_dependency().clone(),
-            dist,
-            true,
-            watermark_columns,
-        );
+        let base = PlanBase::new_stream_with_logical(&logical, dist, true, watermark_columns);
 
         Self {
             base,
@@ -89,7 +78,7 @@ impl StreamTemporalJoin {
 
     /// Get join type
     pub fn join_type(&self) -> JoinType {
-        self.logical.join_type()
+        self.logical.join_type
     }
 
     pub fn eq_join_predicate(&self) -> &EqJoinPredicate {
@@ -102,7 +91,7 @@ impl fmt::Display for StreamTemporalJoin {
         let mut builder = f.debug_struct("StreamTemporalJoin");
 
         let verbose = self.base.ctx.is_explain_verbose();
-        builder.field("type", &self.logical.join_type());
+        builder.field("type", &self.logical.join_type);
 
         let mut concat_schema = self.left().schema().fields.clone();
         concat_schema.extend(self.right().schema().fields.clone());
@@ -130,7 +119,7 @@ impl fmt::Display for StreamTemporalJoin {
         if verbose {
             if self
                 .logical
-                .output_indices()
+                .output_indices
                 .iter()
                 .copied()
                 .eq(0..self.logical.internal_column_num())
@@ -140,7 +129,7 @@ impl fmt::Display for StreamTemporalJoin {
                 builder.field(
                     "output",
                     &IndicesDisplay {
-                        indices: self.logical.output_indices(),
+                        indices: &self.logical.output_indices,
                         input_schema: &concat_schema,
                     },
                 );
@@ -153,18 +142,18 @@ impl fmt::Display for StreamTemporalJoin {
 
 impl PlanTreeNodeBinary for StreamTemporalJoin {
     fn left(&self) -> PlanRef {
-        self.logical.left()
+        self.logical.left.clone()
     }
 
     fn right(&self) -> PlanRef {
-        self.logical.right()
+        self.logical.right.clone()
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::new(
-            self.logical.clone_with_left_right(left, right),
-            self.eq_join_predicate.clone(),
-        )
+        let mut logical = self.logical.clone();
+        logical.left = left;
+        logical.right = right;
+        Self::new(logical, self.eq_join_predicate.clone())
     }
 }
 
@@ -190,7 +179,7 @@ impl StreamNode for StreamTemporalJoin {
             .expect("should be a stream table scan");
 
         NodeBody::TemporalJoin(TemporalJoinNode {
-            join_type: self.logical.join_type() as i32,
+            join_type: self.logical.join_type as i32,
             left_key: left_jk_indices_prost,
             right_key: right_jk_indices_prost,
             null_safe: null_safe_prost,
@@ -201,14 +190,14 @@ impl StreamNode for StreamTemporalJoin {
                 .map(|x| x.to_expr_proto()),
             output_indices: self
                 .logical
-                .output_indices()
+                .output_indices
                 .iter()
                 .map(|&x| x as u32)
                 .collect(),
             table_desc: Some(scan.logical().table_desc().to_protobuf()),
             table_output_indices: scan
                 .logical()
-                .output_column_indices()
+                .output_col_idx()
                 .iter()
                 .map(|&i| i as _)
                 .collect(),
@@ -222,14 +211,8 @@ impl ExprRewritable for StreamTemporalJoin {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self::new(
-            self.logical
-                .rewrite_exprs(r)
-                .as_logical_join()
-                .unwrap()
-                .clone(),
-            self.eq_join_predicate.rewrite_exprs(r),
-        )
-        .into()
+        let mut logical = self.logical.clone();
+        logical.rewrite_exprs(r);
+        Self::new(logical, self.eq_join_predicate.rewrite_exprs(r)).into()
     }
 }

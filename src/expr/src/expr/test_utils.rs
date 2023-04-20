@@ -17,7 +17,7 @@
 use std::num::NonZeroUsize;
 
 use num_traits::CheckedSub;
-use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
+use risingwave_common::types::{DataType, Interval, ScalarImpl};
 use risingwave_common::util::value_encoding::serialize_datum;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::{PbDataType, PbDatum};
@@ -63,7 +63,7 @@ pub fn make_i32_literal(data: i32) -> ExprNode {
     }
 }
 
-fn make_interval_literal(data: IntervalUnit) -> ExprNode {
+fn make_interval_literal(data: Interval) -> ExprNode {
     ExprNode {
         expr_type: Type::ConstantValue as i32,
         return_type: Some(PbDataType {
@@ -90,9 +90,9 @@ pub fn make_field_function(children: Vec<ExprNode>, ret: TypeName) -> ExprNode {
 pub fn make_hop_window_expression(
     time_col_data_type: DataType,
     time_col_idx: usize,
-    window_size: IntervalUnit,
-    window_slide: IntervalUnit,
-    window_offset: IntervalUnit,
+    window_size: Interval,
+    window_slide: Interval,
+    window_offset: Interval,
 ) -> Result<(Vec<BoxedExpression>, Vec<BoxedExpression>)> {
     let units = window_size
         .exact_div(&window_slide)

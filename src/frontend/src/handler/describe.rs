@@ -32,7 +32,7 @@ use crate::handler::HandlerArgs;
 
 pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let mut binder = Binder::new(&session);
+    let mut binder = Binder::new_for_system(&session);
     let relation = binder.bind_relation_by_name(table_name.clone(), None, false)?;
     // For Source, it doesn't have table catalog so use get source to get column descs.
     let (columns, pk_columns, indices): (Vec<ColumnDesc>, Vec<ColumnDesc>, Vec<Arc<IndexCatalog>>) = {
@@ -231,10 +231,10 @@ mod tests {
         }
 
         let expected_columns: HashMap<String, String> = maplit::hashmap! {
-            "v1".into() => "Int32".into(),
-            "v2".into() => "Int32".into(),
-            "v3".into() => "Int32".into(),
-            "v4".into() => "Int32".into(),
+            "v1".into() => "integer".into(),
+            "v2".into() => "integer".into(),
+            "v3".into() => "integer".into(),
+            "v4".into() => "integer".into(),
             "primary key".into() => "v3".into(),
             "idx1".into() => "index(v1 DESC, v2 ASC, v3 ASC) include(v4) distributed by(v1, v2)".into(),
         };

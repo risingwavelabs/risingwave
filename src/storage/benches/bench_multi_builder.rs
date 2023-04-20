@@ -101,7 +101,7 @@ async fn build_tables<F: SstableWriterFactory>(
 ) {
     for i in RANGE {
         builder
-            .add_full_key(
+            .add_full_key_for_test(
                 FullKey::from_user_key(test_user_key_of(i).as_ref(), 1),
                 HummockValue::put(VALUE),
                 true,
@@ -140,6 +140,7 @@ fn bench_builder(
         "test".to_string(),
         64 << 20,
         128 << 20,
+        0,
         TieredCache::none(),
     ));
 

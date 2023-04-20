@@ -24,14 +24,7 @@ use risingwave_stream::task::LocalStreamManager;
 use super::MemoryControlPolicy;
 use crate::memory_management::MemoryControlStats;
 
-/// The minimal memory requirement of computing tasks in megabytes.
-pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
-/// The memory reserved for system usage (stack and code segment of processes, allocation overhead,
-/// network buffer, etc.) in megabytes.
-pub const SYSTEM_RESERVED_MEMORY_MB: usize = 512;
-
-/// When `enable_managed_cache` is set, compute node will launch a [`GlobalMemoryManager`] to limit
-/// the memory usage.
+/// Compute node uses [`GlobalMemoryManager`] to limit the memory usage.
 pub struct GlobalMemoryManager {
     /// All cached data before the watermark should be evicted.
     watermark_epoch: Arc<AtomicU64>,
@@ -83,8 +76,7 @@ impl GlobalMemoryManager {
         batch_manager: Arc<BatchManager>,
         stream_manager: Arc<LocalStreamManager>,
     ) {
-        let mut tick_interval =
-            tokio::time::interval(Duration::from_millis(self.barrier_interval_ms as u64));
+        let mut tick_interval = tokio::time::interval(Duration::from_millis(50));
         let mut memory_control_stats = MemoryControlStats {
             batch_memory_usage: 0,
             streaming_memory_usage: 0,
@@ -120,12 +112,6 @@ impl GlobalMemoryManager {
             self.metrics
                 .jemalloc_allocated_bytes
                 .set(memory_control_stats.jemalloc_allocated_mib as i64);
-            self.metrics
-                .stream_total_mem_usage
-                .set(memory_control_stats.streaming_memory_usage as i64);
-            self.metrics
-                .batch_total_mem_usage
-                .set(memory_control_stats.batch_memory_usage as i64);
         }
     }
 }

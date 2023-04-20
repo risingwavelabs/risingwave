@@ -3,9 +3,21 @@
   sql: |
     explain create table t1 (v1 int as v2-1, v2 int, v3 int as v2+1);
   explain_output: |
-    StreamMaterialize { columns: [v1, v2, v3, _row_id(hidden)], pk_columns: [_row_id], pk_conflict: "overwrite" }
+    StreamMaterialize { columns: [v1, v2, v3, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: "Overwrite" }
     └─StreamExchange { dist: HashShard(_row_id) }
       └─StreamRowIdGen { row_id_index: 3 }
         └─StreamProject { exprs: [(v2 - 1:Int32) as $expr1, v2, (v2 + 1:Int32) as $expr2, _row_id] }
           └─StreamDml { columns: [v2, _row_id] }
             └─StreamSource
+- name: source with generated columns
+  sql: |
+    create source s1 (v1 int as v2-1, v2 int, v3 int as v2+1) with (connector = 'kinesis') ROW FORMAT JSON;
+    select v3 from s1
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [(v2 + 1:Int32) as $expr1] }
+      └─BatchSource { source: "s1", columns: ["v2", "_row_id"], filter: (None, None) }
+- name: select proctime()
+  sql: |
+    select proctime();
+  binder_error: 'Invalid input syntax: Function `PROCTIME()` is only allowed in CREATE TABLE/SOURCE. Is `NOW()` what you want?'

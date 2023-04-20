@@ -14,6 +14,8 @@
 
 use std::collections::HashSet;
 
+use super::{DefaultBehavior, DefaultValue, Merge};
+use crate::catalog::system_catalog::pg_catalog::PG_NAMESPACE_TABLE_NAME;
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalApply, LogicalExpand, LogicalFilter, LogicalHopWindow, LogicalLimit,
     LogicalNow, LogicalProject, LogicalProjectSet, LogicalScan, LogicalTopN, LogicalUnion,
@@ -26,8 +28,10 @@ pub struct MaxOneRowVisitor;
 
 /// Return true if we can determine at most one row returns by the plan, otherwise false.
 impl PlanVisitor<bool> for MaxOneRowVisitor {
-    fn merge(a: bool, b: bool) -> bool {
-        a & b
+    type DefaultBehavior = impl DefaultBehavior<bool>;
+
+    fn default_behavior() -> Self::DefaultBehavior {
+        Merge(|a, b| a & b)
     }
 
     fn visit_logical_values(&mut self, plan: &LogicalValues) -> bool {
@@ -51,7 +55,7 @@ impl PlanVisitor<bool> for MaxOneRowVisitor {
     }
 
     fn visit_logical_top_n(&mut self, plan: &LogicalTopN) -> bool {
-        (plan.limit() <= 1 && !plan.with_ties()) || self.visit(plan.input())
+        plan.limit_attr().max_one_row() || self.visit(plan.input())
     }
 
     fn visit_logical_filter(&mut self, plan: &LogicalFilter) -> bool {
@@ -65,8 +69,22 @@ impl PlanVisitor<bool> for MaxOneRowVisitor {
                 eq_set.insert(input_ref.index);
             }
         }
-        eq_set.is_superset(&plan.input().logical_pk().iter().copied().collect())
-            || self.visit(plan.input())
+        let input = plan.input();
+        eq_set.is_superset(&input.logical_pk().iter().copied().collect())
+            || {
+                // We don't have UNIQUE key now. So we hack here to support some complex queries on
+                // system tables.
+                if let Some(scan) = input.as_logical_scan() && scan.is_sys_table() && scan.table_name() == PG_NAMESPACE_TABLE_NAME {
+                    let nspname = scan.output_col_idx().iter().find(|i| scan.table_desc().columns[**i].name == "nspname").unwrap();
+                    let unique_key = [
+                        *nspname
+                    ];
+                    eq_set.is_superset(&unique_key.into_iter().collect())
+                } else {
+                    false
+                }
+            }
+            || self.visit(input)
     }
 
     fn visit_logical_union(&mut self, _plan: &LogicalUnion) -> bool {
@@ -93,8 +111,10 @@ impl PlanVisitor<bool> for MaxOneRowVisitor {
 pub struct HasMaxOneRowApply();
 
 impl PlanVisitor<bool> for HasMaxOneRowApply {
-    fn merge(a: bool, b: bool) -> bool {
-        a | b
+    type DefaultBehavior = impl DefaultBehavior<bool>;
+
+    fn default_behavior() -> Self::DefaultBehavior {
+        Merge(|a, b| a | b)
     }
 
     fn visit_logical_apply(&mut self, plan: &LogicalApply) -> bool {
@@ -105,9 +125,10 @@ impl PlanVisitor<bool> for HasMaxOneRowApply {
 pub struct CountRows;
 
 impl PlanVisitor<Option<usize>> for CountRows {
-    fn merge(_a: Option<usize>, _b: Option<usize>) -> Option<usize> {
-        // Impossible to determine count e.g. after a join
-        None
+    type DefaultBehavior = impl DefaultBehavior<Option<usize>>;
+
+    fn default_behavior() -> Self::DefaultBehavior {
+        DefaultValue
     }
 
     fn visit_logical_agg(&mut self, plan: &LogicalAgg) -> Option<usize> {

@@ -25,12 +25,14 @@
 #![feature(assert_matches)]
 #![feature(lint_reasons)]
 #![feature(box_patterns)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![feature(result_option_inspect)]
 #![feature(macro_metavar_expr)]
 #![feature(slice_internals)]
 #![feature(min_specialization)]
 #![feature(is_some_and)]
+#![feature(extend_one)]
+#![feature(type_alias_impl_trait)]
 #![recursion_limit = "256"]
 
 #[macro_use]
@@ -46,7 +48,6 @@ mod optimizer;
 pub use optimizer::{Explain, OptimizerContext, OptimizerContextRef, PlanRef};
 mod planner;
 pub use planner::Planner;
-#[expect(dead_code)]
 mod scheduler;
 pub mod session;
 mod stream_fragmenter;

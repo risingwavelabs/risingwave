@@ -99,7 +99,12 @@ mod min_max_on_index_rule;
 pub use min_max_on_index_rule::*;
 mod always_false_filter_rule;
 pub use always_false_filter_rule::*;
-
+mod join_project_transpose_rule;
+pub use join_project_transpose_rule::*;
+mod limit_push_down_rule;
+pub use limit_push_down_rule::*;
+mod pull_up_hop_rule;
+pub use pull_up_hop_rule::*;
 mod apply_offset_rewriter;
 use apply_offset_rewriter::ApplyOffsetRewriter;
 
@@ -143,6 +148,9 @@ macro_rules! for_all_rules {
             , { AlwaysFalseFilterRule }
             , { BushyTreeJoinOrderingRule }
             , { StreamProjectMergeRule }
+            , { JoinProjectTransposeRule }
+            , { LimitPushDownRule }
+            , { PullUpHopRule }
         }
     };
 }

@@ -22,7 +22,7 @@ use rand::{Rng, SeedableRng};
 use serde_json::json;
 
 use crate::field_generator::{NumericFieldRandomGenerator, NumericFieldSequenceGenerator};
-use crate::types::{Datum, OrderedF32, OrderedF64, Scalar};
+use crate::types::{Datum, Scalar, F32, F64};
 
 trait NumericType
 where
@@ -165,8 +165,8 @@ macro_rules! for_all_fields_variants {
             { I16RandomField,I16SequenceField,i16 },
             { I32RandomField,I32SequenceField,i32 },
             { I64RandomField,I64SequenceField,i64 },
-            { F32RandomField,F32SequenceField,OrderedF32 },
-            { F64RandomField,F64SequenceField,OrderedF64 }
+            { F32RandomField,F32SequenceField,F32 },
+            { F64RandomField,F64SequenceField,F64 }
         }
     };
 }
@@ -231,7 +231,7 @@ mod tests {
         for i in 5..=10 {
             assert_eq!(
                 f32_field.generate_datum(),
-                Some(OrderedF32::from(i as f32).to_scalar_value())
+                Some(F32::from(i as f32).to_scalar_value())
             );
         }
     }

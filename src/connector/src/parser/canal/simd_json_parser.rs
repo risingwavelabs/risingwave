@@ -26,6 +26,7 @@ use risingwave_expr::vector_op::cast::{
 use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 
 use crate::parser::canal::operators::*;
+use crate::parser::common::json_object_smart_get_value;
 use crate::parser::util::at_least_one_ok;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{SourceColumnDesc, SourceContextRef};
@@ -34,7 +35,7 @@ use crate::{ensure_rust_type, ensure_str, impl_common_parser_logic};
 const AFTER: &str = "data";
 const BEFORE: &str = "old";
 const OP: &str = "type";
-const IS_DDL: &str = "isddl";
+const IS_DDL: &str = "isDdl";
 
 impl_common_parser_logic!(CanalJsonParser);
 #[derive(Debug)]
@@ -95,7 +96,10 @@ impl CanalJsonParser {
                         writer.insert(|column| {
                             cannal_simd_json_parse_value(
                                 &column.data_type,
-                                v.get(column.name_in_lower_case.as_str()),
+                                crate::parser::common::json_object_smart_get_value(
+                                    v,
+                                    (&column.name).into(),
+                                ),
                             )
                         })
                     })
@@ -134,14 +138,15 @@ impl CanalJsonParser {
                             // in origin canal, old only contains the changed columns but data
                             // contains all columns.
                             // in ticdc, old contains all fields
-                            let col_name_lc = column.name_in_lower_case.as_str();
                             let before_value =
-                                before.get(col_name_lc).or_else(|| after.get(col_name_lc));
+                                json_object_smart_get_value(before, (&column.name).into()).or_else(
+                                    || json_object_smart_get_value(after, (&column.name).into()),
+                                );
                             let before =
                                 cannal_simd_json_parse_value(&column.data_type, before_value)?;
                             let after = cannal_simd_json_parse_value(
                                 &column.data_type,
-                                after.get(col_name_lc),
+                                json_object_smart_get_value(after, (&column.name).into()),
                             )?;
                             Ok((before, after))
                         })
@@ -167,7 +172,7 @@ impl CanalJsonParser {
                         writer.delete(|column| {
                             cannal_simd_json_parse_value(
                                 &column.data_type,
-                                v.get(column.name_in_lower_case.as_str()),
+                                json_object_smart_get_value(v, (&column.name).into()),
                             )
                         })
                     })
@@ -286,7 +291,7 @@ mod tests {
             );
             assert_eq!(
                 row.datum_at(4).to_owned_datum(),
-                (Some(ScalarImpl::NaiveDateTime(
+                (Some(ScalarImpl::Timestamp(
                     str_to_timestamp("2018-01-01 00:00:01").unwrap()
                 )))
             );
@@ -314,7 +319,7 @@ mod tests {
             );
             assert_eq!(
                 row.datum_at(4).to_owned_datum(),
-                (Some(ScalarImpl::NaiveDateTime(
+                (Some(ScalarImpl::Timestamp(
                     str_to_timestamp("2018-01-01 00:00:01").unwrap()
                 )))
             );

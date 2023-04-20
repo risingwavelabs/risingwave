@@ -22,6 +22,7 @@ pub(crate) mod tests {
     use bytes::Bytes;
     use itertools::Itertools;
     use rand::Rng;
+    use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::TableId;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_common::util::epoch::Epoch;
@@ -29,10 +30,6 @@ pub(crate) mod tests {
     use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-    use risingwave_hummock_sdk::filter_key_extractor::{
-        FilterKeyExtractorImpl, FilterKeyExtractorManagerRef, FixedLengthFilterKeyExtractor,
-        FullKeyFilterKeyExtractor,
-    };
     use risingwave_hummock_sdk::key::{next_key, TABLE_PREFIX_LEN};
     use risingwave_meta::hummock::compaction::{default_level_selector, ManualCompactionOption};
     use risingwave_meta::hummock::test_utils::{
@@ -43,11 +40,15 @@ pub(crate) mod tests {
     use risingwave_meta::storage::MetaStore;
     use risingwave_pb::hummock::{HummockVersion, TableOption};
     use risingwave_rpc_client::HummockMetaClient;
+    use risingwave_storage::filter_key_extractor::{
+        FilterKeyExtractorImpl, FilterKeyExtractorManagerRef, FixedLengthFilterKeyExtractor,
+        FullKeyFilterKeyExtractor,
+    };
     use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
     use risingwave_storage::hummock::{
-        HummockStorage as GlobalHummockStorage, HummockStorage, MemoryLimiter,
+        CachePolicy, HummockStorage as GlobalHummockStorage, HummockStorage, MemoryLimiter,
         SstableObjectIdManager,
     };
     use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
@@ -184,7 +185,7 @@ pub(crate) mod tests {
             compactor_metrics: Arc::new(CompactorMetrics::unused()),
             is_share_buffer_compact: false,
             compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
-            read_memory_limiter: MemoryLimiter::unlimit(),
+            output_memory_limiter: MemoryLimiter::unlimit(),
             filter_key_extractor_manager,
             sstable_object_id_manager: Arc::new(SstableObjectIdManager::new(
                 hummock_meta_client.clone(),
@@ -305,6 +306,7 @@ pub(crate) mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await
@@ -324,6 +326,7 @@ pub(crate) mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await;
@@ -440,6 +443,7 @@ pub(crate) mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await
@@ -805,6 +809,7 @@ pub(crate) mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await
@@ -986,6 +991,7 @@ pub(crate) mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await
@@ -1169,6 +1175,7 @@ pub(crate) mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await

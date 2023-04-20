@@ -123,6 +123,18 @@ macro_rules! int64 {
 pub(crate) use int64;
 
 #[macro_export]
+macro_rules! int256 {
+    ($macro:ident) => {
+        $macro! {
+            risingwave_common::types::DataType::Int256,
+            risingwave_common::array::Int256Array
+        }
+    };
+}
+
+pub(crate) use int256;
+
+#[macro_export]
 macro_rules! float32 {
     ($macro:ident) => {
         $macro! {
@@ -175,7 +187,7 @@ macro_rules! date {
     ($macro:ident) => {
         $macro! {
             risingwave_common::types::DataType::Date,
-            risingwave_common::array::NaiveDateArray
+            risingwave_common::array::DateArray
         }
     };
 }
@@ -211,7 +223,7 @@ macro_rules! time {
     ($macro:ident) => {
         $macro! {
             risingwave_common::types::DataType::Time,
-            risingwave_common::array::NaiveTimeArray
+            risingwave_common::array::TimeArray
         }
     };
 }
@@ -223,7 +235,7 @@ macro_rules! timestamp {
     ($macro:ident) => {
         $macro! {
             risingwave_common::types::DataType::Timestamp,
-            risingwave_common::array::NaiveDateTimeArray
+            risingwave_common::array::TimestampArray
         }
     };
 }

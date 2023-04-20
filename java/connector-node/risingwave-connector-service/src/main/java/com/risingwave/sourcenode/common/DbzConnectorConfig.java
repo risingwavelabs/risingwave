@@ -36,6 +36,8 @@ public class DbzConnectorConfig {
     public static final String DB_NAME = "database.name";
     public static final String TABLE_NAME = "table.name";
 
+    public static final String DB_SERVERS = "database.servers";
+
     /* MySQL specified configs */
     public static final String MYSQL_SERVER_ID = "server.id";
 
@@ -43,6 +45,7 @@ public class DbzConnectorConfig {
     public static final String PG_SLOT_NAME = "slot.name";
     public static final String PG_SCHEMA_NAME = "schema.name";
 
+    private static final String DBZ_CONFIG_FILE = "debezium.properties";
     private static final String MYSQL_CONFIG_FILE = "mysql.properties";
     private static final String POSTGRES_CONFIG_FILE = "postgres.properties";
 
@@ -62,10 +65,17 @@ public class DbzConnectorConfig {
     }
 
     private final long sourceId;
+
+    private final SourceTypeE sourceType;
+
     private final Properties resolvedDbzProps;
 
     public long getSourceId() {
         return sourceId;
+    }
+
+    public SourceTypeE getSourceType() {
+        return sourceType;
     }
 
     public Properties getResolvedDebeziumProps() {
@@ -74,15 +84,8 @@ public class DbzConnectorConfig {
 
     public DbzConnectorConfig(
             SourceTypeE source, long sourceId, String startOffset, Map<String, String> userProps) {
-        var dbzProps = new Properties();
-        try (var input = getClass().getClassLoader().getResourceAsStream("debezium.properties")) {
-            assert input != null;
-            dbzProps.load(input);
-        } catch (IOException e) {
-            throw new RuntimeException("failed to load debezium.properties", e);
-        }
-
         StringSubstitutor substitutor = new StringSubstitutor(userProps);
+        var dbzProps = initiateDbConfig(DBZ_CONFIG_FILE, substitutor);
         if (source == SourceTypeE.MYSQL) {
             var mysqlProps = initiateDbConfig(MYSQL_CONFIG_FILE, substitutor);
             // if offset is specified, we will continue binlog reading from the specified offset
@@ -97,8 +100,13 @@ public class DbzConnectorConfig {
             }
 
             dbzProps.putAll(mysqlProps);
-        } else if (source == SourceTypeE.POSTGRES) {
+        } else if (source == SourceTypeE.POSTGRES || source == SourceTypeE.CITUS) {
             var postgresProps = initiateDbConfig(POSTGRES_CONFIG_FILE, substitutor);
+
+            // citus needs all_tables publication to capture all shards
+            if (source == SourceTypeE.CITUS) {
+                postgresProps.setProperty("publication.autocreate.mode", "all_tables");
+            }
 
             // if offset is specified, we will continue reading changes from the specified offset
             if (null != startOffset && !startOffset.isBlank()) {
@@ -115,6 +123,7 @@ public class DbzConnectorConfig {
         dbzProps.putAll(otherProps);
 
         this.sourceId = sourceId;
+        this.sourceType = source;
         this.resolvedDbzProps = dbzProps;
     }
 
@@ -126,7 +135,7 @@ public class DbzConnectorConfig {
             var resolvedStr = substitutor.replace(inputStr);
             dbProps.load(new StringReader(resolvedStr));
         } catch (IOException e) {
-            throw new RuntimeException("failed to load " + fileName, e);
+            throw new RuntimeException("failed to load config file " + fileName, e);
         }
         return dbProps;
     }

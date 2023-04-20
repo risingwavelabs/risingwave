@@ -71,6 +71,8 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                 "0.0.0.0:5691",
                 "--state-store",
                 "hummock+memory",
+                "--data-directory",
+                "hummock_001",
                 "--advertise-addr",
                 "127.0.0.1:5690",
                 "--connector-rpc-endpoint",
@@ -88,6 +90,8 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                 "127.0.0.1:5690",
                 "--state-store",
                 "hummock+memory-shared",
+                "--data-directory",
+                "hummock_001",
             ])),
             RisingWaveService::Compute(osstrs([
                 "--listen-addr",
@@ -120,6 +124,8 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                     "0.0.0.0:5691",
                     "--state-store",
                     "hummock+memory",
+                    "--data-directory",
+                    "hummock_001",
                     "--connector-rpc-endpoint",
                     "127.0.0.1:50051",
                 ])),
@@ -242,7 +248,7 @@ pub async fn playground() -> Result<()> {
                     let _stderr_handle = tokio::spawn(async move {
                         let mut reader = BufReader::new(stderr).lines();
                         while let Ok(Some(line)) = reader.next_line().await {
-                            tracing::error!(target: "risingwave_connector_node", "{}", line);
+                            tracing::info!(target: "risingwave_connector_node", "{}", line);
                         }
                     });
                 } else {

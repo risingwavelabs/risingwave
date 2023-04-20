@@ -15,6 +15,7 @@
 //! Build executor from protobuf.
 
 mod agg_common;
+mod append_only_dedup;
 mod barrier_recv;
 mod batch_query;
 mod chain;
@@ -44,6 +45,7 @@ mod temporal_join;
 mod top_n;
 mod top_n_appendonly;
 mod union;
+mod values;
 mod watermark_filter;
 
 // import for submodules
@@ -52,6 +54,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamNode, TemporalJoinNode};
 use risingwave_storage::StateStore;
 
+use self::append_only_dedup::*;
 use self::barrier_recv::*;
 use self::batch_query::*;
 use self::chain::*;
@@ -84,6 +87,7 @@ use self::union::*;
 use self::watermark_filter::WatermarkFilterBuilder;
 use crate::error::StreamResult;
 use crate::executor::{BoxedExecutor, Executor, ExecutorInfo};
+use crate::from_proto::values::ValuesExecutorBuilder;
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 #[async_trait::async_trait]
@@ -154,6 +158,8 @@ pub async fn create_executor(
         NodeBody::RowIdGen => RowIdGenExecutorBuilder,
         NodeBody::Now => NowExecutorBuilder,
         NodeBody::TemporalJoin => TemporalJoinExecutorBuilder,
+        NodeBody::Values => ValuesExecutorBuilder,
         NodeBody::BarrierRecv => BarrierRecvExecutorBuilder,
+        NodeBody::AppendOnlyDedup => AppendOnlyDedupExecutorBuilder,
     }
 }

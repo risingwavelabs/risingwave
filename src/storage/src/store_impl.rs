@@ -17,12 +17,14 @@ use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_object_store::object::{
     parse_local_object_store, parse_remote_object_store, ObjectStoreImpl,
 };
 
 use crate::error::StorageResult;
+use crate::filter_key_extractor::{
+    FilterKeyExtractorManager, FilterKeyExtractorManagerRef, RemoteTableAccessor,
+};
 use crate::hummock::backup_reader::BackupReaderRef;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::sstable_store::SstableStoreRef;
@@ -595,15 +597,20 @@ impl StateStoreImpl {
                     opts.data_directory.to_string(),
                     opts.block_cache_capacity_mb * (1 << 20),
                     opts.meta_cache_capacity_mb * (1 << 20),
+                    opts.high_priority_ratio,
                     tiered_cache,
                 ));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
+                let key_filter_manager = Arc::new(FilterKeyExtractorManager::new(Box::new(
+                    RemoteTableAccessor::new(hummock_meta_client.get_inner().clone()),
+                )));
                 let inner = HummockStorage::new(
                     opts.clone(),
                     sstable_store,
                     hummock_meta_client.clone(),
                     notification_client,
+                    key_filter_manager,
                     state_store_metrics.clone(),
                     tracing,
                     compactor_metrics.clone(),

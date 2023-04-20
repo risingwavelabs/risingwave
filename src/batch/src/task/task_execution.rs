@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
+#[cfg(enable_task_local_alloc)]
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
+#[cfg(enable_task_local_alloc)]
 use std::time::Duration;
 
 use futures::{FutureExt, StreamExt};
@@ -23,12 +25,11 @@ use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
-use task_stats_alloc::{TaskLocalBytesAllocated, BYTES_ALLOCATED};
-use tokio::runtime::Runtime;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio_metrics::TaskMonitor;
 
@@ -45,6 +46,7 @@ pub const TASK_STATUS_BUFFER_SIZE: usize = 2;
 
 /// A special version for batch allocation stat, passed in another task `context` C to report task
 /// mem usage 0 bytes at the end.
+#[cfg(enable_task_local_alloc)]
 pub async fn allocation_stat_for_batch<Fut, T, F, C>(
     future: Fut,
     interval: Duration,
@@ -56,6 +58,8 @@ where
     F: FnMut(usize),
     C: BatchTaskContext,
 {
+    use task_stats_alloc::{TaskLocalBytesAllocated, BYTES_ALLOCATED};
+
     BYTES_ALLOCATED
         .scope(TaskLocalBytesAllocated::new(), async move {
             // The guard has the same lifetime as the counter so that the counter will keep positive
@@ -293,7 +297,7 @@ pub struct BatchTaskExecution<C> {
     epoch: BatchQueryEpoch,
 
     /// Runtime for the batch tasks.
-    runtime: &'static Runtime,
+    runtime: Arc<BackgroundShutdownRuntime>,
 }
 
 impl<C: BatchTaskContext> BatchTaskExecution<C> {
@@ -302,13 +306,13 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         plan: PlanFragment,
         context: C,
         epoch: BatchQueryEpoch,
-        runtime: &'static Runtime,
+        runtime: Arc<BackgroundShutdownRuntime>,
     ) -> Result<Self> {
         let task_id = TaskId::from(prost_tid);
 
         let (sender, receivers) = create_output_channel(
             plan.get_exchange_info()?,
-            context.get_config().developer.batch_output_channel_size,
+            context.get_config().developer.output_channel_size,
         )?;
 
         let mut rts = Vec::new();
@@ -431,19 +435,27 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             }
         };
 
-        // For every fired Batch Task, we will wrap it with allocation stats to report memory
-        // estimation per task to `BatchManager`.
-        let ctx1 = self.context.clone();
-        let ctx2 = self.context.clone();
-        let alloc_stat_wrap_fut = allocation_stat_for_batch(
-            fut,
-            Duration::from_millis(1000),
-            move |bytes| {
-                ctx1.store_mem_usage(bytes);
-            },
-            ctx2,
-        );
-        self.runtime.spawn(alloc_stat_wrap_fut);
+        #[cfg(enable_task_local_alloc)]
+        {
+            // For every fired Batch Task, we will wrap it with allocation stats to report memory
+            // estimation per task to `BatchManager`.
+            let ctx1 = self.context.clone();
+            let ctx2 = self.context.clone();
+            let alloc_stat_wrap_fut = allocation_stat_for_batch(
+                fut,
+                Duration::from_millis(1000),
+                move |bytes| {
+                    ctx1.store_mem_usage(bytes);
+                },
+                ctx2,
+            );
+            self.runtime.spawn(alloc_stat_wrap_fut);
+        }
+
+        #[cfg(not(enable_task_local_alloc))]
+        {
+            self.runtime.spawn(fut);
+        }
 
         Ok(())
     }

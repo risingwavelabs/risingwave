@@ -5,11 +5,11 @@ extend = [
   { path = "src/risedevtool/etcd.toml" },
   { path = "src/risedevtool/jaeger.toml" },
   { path = "src/risedevtool/kafka.toml" },
-  { path = "src/risedevtool/gcloud-pubsub.toml"},
+  { path = "src/risedevtool/gcloud-pubsub.toml" },
   { path = "src/risedevtool/redis.toml" },
   { path = "src/risedevtool/connector.toml" },
   { path = "src/risedevtool/risedev-components.toml" },
-  { path = "src/sqlparser/test_runner/sqlparser_test.toml"},
+  { path = "src/sqlparser/test_runner/sqlparser_test.toml" },
   { path = "src/frontend/planner_test/planner_test.toml" },
   { path = "src/tests/compaction_test/Makefile.toml" },
   { path = "src/storage/backup/integration_tests/Makefile.toml" },
@@ -371,7 +371,6 @@ cp "src/risedevtool/welcome.sh" "${PREFIX_BIN}/welcome.sh"
 category = "RiseDev - Components"
 description = "Download all available components at once"
 dependencies = [
-  "download-connector",
   "download-maven",
   "download-etcd",
   "download-grafana",
@@ -443,7 +442,7 @@ alias = "playground"
 [tasks.playground]
 category = "RiseDev - Start"
 description = "Start a lite RisingWave playground using risingwave all-in-one binary"
-dependencies = ["download-connector"]
+dependencies = ["build-connector-node"]
 script = '''
 #!/usr/bin/env bash
 
@@ -477,8 +476,7 @@ alias = "dev"
 [tasks.dev]
 category = "RiseDev - Start"
 dependencies = ["pre-start-dev"]
-command = "target/${BUILD_MODE_DIR}/risedev-dev"
-args = ["${@}"]
+script = "RUST_BACKTRACE=full target/${BUILD_MODE_DIR}/risedev-dev ${@}"
 description = "Start a full RisingWave dev cluster using risedev-dev"
 
 [tasks.kafka]
@@ -590,7 +588,11 @@ description = "Run unit tests"
 [tasks.build-connector-node]
 category = "RiseDev - Components"
 dependencies = ["prepare"]
-condition = { env_set = [ "ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
+condition = { env_set = ["ENABLE_BUILD_RW_CONNECTOR"], files_modified = { input = [
+  "./java/connector-node/**/*.java",
+], output = [
+  "./java/connector-node/assembly/target/*",
+] } }
 description = "Build RisingWave Connector from source"
 script = '''
 #!/usr/bin/env bash
@@ -605,18 +607,14 @@ fi
 ARTIFACT="risingwave-connector-1.0.0.tar.gz"
 TARGET_PATH="${JAVA_DIR}/connector-node/assembly/target/${ARTIFACT}"
 
-if [[ ! -f ${TARGET_PATH} ]] || [[ ! -z ${REBUILD_CONNECTOR_NODE} ]]; then
-  echo "Rebuild connector node"
-  cd "${JAVA_DIR}"
-  "${MAVEN_PATH}" --batch-mode --update-snapshots clean package -Dmaven.test.skip
-else
-  echo "Connector node was built already. Skipped. Set REBUILD_CONNECTOR_NODE=1 to enable rebuild"
-fi
+echo "Building connector node..."
+cd "${JAVA_DIR}"
+"${MAVEN_PATH}" --batch-mode --update-snapshots clean package -Dmaven.test.skip
+
 rm -rf ${PREFIX_BIN}/connector-node
 mkdir -p "${PREFIX_BIN}/connector-node"
 tar xf ${TARGET_PATH} -C "${PREFIX_BIN}/connector-node"
 '''
-
 
 [tasks.sbuild]
 category = "RiseDev - Build in simulation mode"
@@ -761,7 +759,7 @@ cargo llvm-cov run \
 category = "RiseDev - Check"
 description = "Run mvn spotless:check in connector-node"
 dependencies = ["warn-on-missing-tools"]
-condition = { env_set = [ "ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
+condition = { env_set = ["ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
 script = """
 #!/usr/bin/env bash
 set -e
@@ -780,7 +778,7 @@ cd "${JAVA_DIR}"
 category = "RiseDev - Check"
 description = "Run mvn spotless:apply in connector-node"
 dependencies = ["warn-on-missing-tools"]
-condition = { env_set = [ "ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
+condition = { env_set = ["ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
 script = """
 #!/usr/bin/env bash
 set -e
@@ -803,9 +801,8 @@ script = """
 
 echo "Running $(tput setaf 4)cargo hakari$(tput sgr0) checks and attempting to fix"
 
-# cargo hakari will generate new Cargo.toml regardless whether the original Cargo.toml is correct or not.
-# So we always verify before generate, so as not to change the modified time of Cargo.toml.
-(cargo hakari verify > /dev/null) || cargo hakari generate
+cargo hakari generate --diff --quiet || cargo hakari generate
+cargo hakari verify > /dev/null
 test $? -eq 0 || exit 1
 """
 

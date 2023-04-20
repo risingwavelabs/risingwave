@@ -18,6 +18,8 @@ use std::time::Duration;
 
 use either::Either;
 use etcd_client::ConnectOptions;
+use futures::future::join_all;
+use itertools::Itertools;
 use risingwave_common::config::MetaBackend;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
@@ -58,7 +60,7 @@ use crate::manager::{
 };
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
-use crate::rpc::metrics::{start_worker_info_monitor, MetaMetrics};
+use crate::rpc::metrics::{start_fragment_info_monitor, start_worker_info_monitor, MetaMetrics};
 use crate::rpc::service::backup_service::BackupServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
@@ -70,7 +72,7 @@ use crate::rpc::service::telemetry_service::TelemetryInfoServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
 use crate::stream::{GlobalStreamManager, SourceManager};
-use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
+use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher, TrackingId};
 use crate::{hummock, MetaResult};
 
 #[derive(Debug)]
@@ -386,6 +388,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     let (barrier_scheduler, scheduled_barriers) = BarrierScheduler::new_pair(
         hummock_manager.clone(),
+        meta_metrics.clone(),
         system_params_reader.checkpoint_frequency() as usize,
     );
 
@@ -395,6 +398,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             barrier_scheduler.clone(),
             catalog_manager.clone(),
             fragment_manager.clone(),
+            meta_metrics.clone(),
         )
         .await
         .unwrap(),
@@ -432,10 +436,12 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     hummock_manager
         .purge(
-            &fragment_manager
-                .list_table_fragments()
+            &catalog_manager
+                .list_tables()
                 .await
-                .expect("list_table_fragments"),
+                .into_iter()
+                .map(|t| t.id)
+                .collect_vec(),
         )
         .await?;
 
@@ -443,7 +449,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let backup_manager = BackupManager::new(
         env.clone(),
         hummock_manager.clone(),
-        meta_metrics.registry().clone(),
+        meta_metrics.clone(),
         system_params_reader.backup_storage_url(),
         system_params_reader.backup_storage_directory(),
     )
@@ -523,13 +529,25 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     ));
 
     // sub_tasks executed concurrently. Can be shutdown via shutdown_all
-    let mut sub_tasks =
-        hummock::start_hummock_workers(vacuum_manager, compaction_scheduler, &env.opts);
+    let mut sub_tasks = hummock::start_hummock_workers(
+        hummock_manager.clone(),
+        vacuum_manager,
+        compaction_scheduler,
+        &env.opts,
+    );
     sub_tasks.push(
         start_worker_info_monitor(
             cluster_manager.clone(),
             election_client.clone(),
             Duration::from_secs(env.opts.node_num_monitor_interval_sec),
+            meta_metrics.clone(),
+        )
+        .await,
+    );
+    sub_tasks.push(
+        start_fragment_info_monitor(
+            cluster_manager.clone(),
+            fragment_manager.clone(),
             meta_metrics.clone(),
         )
         .await,
@@ -540,7 +558,11 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     if cfg!(not(test)) {
         sub_tasks.push(
-            ClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1)).await,
+            ClusterManager::start_heartbeat_checker(
+                cluster_manager.clone(),
+                Duration::from_secs(1),
+            )
+            .await,
         );
         sub_tasks.push(GlobalBarrierManager::start(barrier_manager).await);
     }
@@ -564,13 +586,25 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let mgr = TelemetryManager::new(
         local_system_params_manager.watch_params(),
         Arc::new(MetaTelemetryInfoFetcher::new(meta_store.clone())),
-        Arc::new(MetaReportCreator::new()),
+        Arc::new(MetaReportCreator::new(
+            cluster_manager,
+            meta_store.meta_store_type(),
+        )),
     );
+
+    {
+        // always create a tracking_id for a cluster
+        // if it's persistent in etcd, won't create a new one
+        let tracking_id: String = TrackingId::get_or_create_meta_store(&meta_store)
+            .await?
+            .into();
+        tracing::info!("Launching Meta {}", tracking_id);
+    }
 
     // May start telemetry reporting
     if let MetaBackend::Etcd = meta_store.meta_store_type() && env.opts.telemetry_enabled && telemetry_env_enabled(){
         if system_params_reader.telemetry_enabled(){
-            mgr.start_telemetry_reporting();
+            mgr.start_telemetry_reporting().await;
         }
         sub_tasks.push(mgr.watch_params_change());
     } else {
@@ -578,23 +612,33 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     }
 
     let shutdown_all = async move {
+        let mut handles = Vec::with_capacity(sub_tasks.len());
+
         for (join_handle, shutdown_sender) in sub_tasks {
             if let Err(_err) = shutdown_sender.send(()) {
                 continue;
             }
-            // The barrier manager can't be shutdown gracefully if it's under recovering, try to
-            // abort it using timeout.
-            match tokio::time::timeout(Duration::from_secs(1), join_handle).await {
-                Ok(Err(err)) => {
-                    tracing::warn!("Failed to join shutdown: {:?}", err);
+
+            handles.push(join_handle);
+        }
+
+        // The barrier manager can't be shutdown gracefully if it's under recovering, try to
+        // abort it using timeout.
+        match tokio::time::timeout(Duration::from_secs(1), join_all(handles)).await {
+            Ok(results) => {
+                for result in results {
+                    if let Err(err) = result {
+                        tracing::warn!("Failed to join shutdown: {:?}", err);
+                    }
                 }
-                Err(e) => {
-                    tracing::warn!("Join shutdown timeout: {:?}", e);
-                }
-                _ => {}
+            }
+            Err(e) => {
+                tracing::warn!("Join shutdown timeout: {:?}", e);
             }
         }
     };
+
+    tracing::info!("Starting meta services");
 
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))

@@ -16,12 +16,11 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use pretty_bytes::converter::convert;
 use risingwave_batch::executor::{BatchManagerMetrics, BatchTaskMetrics};
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{
-    load_config, AsyncStackTraceOption, StorageConfig, MAX_CONNECTION_WINDOW_SIZE,
+    load_config, AsyncStackTraceOption, StorageMemoryConfig, MAX_CONNECTION_WINDOW_SIZE,
     STREAM_WINDOW_SIZE,
 };
 use risingwave_common::monitor::process_linux::monitor_process;
@@ -29,6 +28,7 @@ use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::pretty_bytes::convert;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
@@ -60,9 +60,10 @@ use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use crate::memory_management::memory_control_policy_from_config;
-use crate::memory_management::memory_manager::{
-    GlobalMemoryManager, MIN_COMPUTE_MEMORY_MB, SYSTEM_RESERVED_MEMORY_MB,
+use crate::memory_management::memory_manager::GlobalMemoryManager;
+use crate::memory_management::{
+    memory_control_policy_from_config, reserve_memory_bytes, storage_memory_config,
+    MIN_COMPUTE_MEMORY_MB,
 };
 use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
@@ -103,20 +104,42 @@ pub async fn compute_node_serve(
         WorkerType::ComputeNode,
         &advertise_addr,
         opts.parallelism,
+        &config.meta,
     )
     .await
     .unwrap();
-    let storage_opts = Arc::new(StorageOpts::from((&config, &system_params)));
 
     let state_store_url = system_params.state_store();
 
     let embedded_compactor_enabled =
         embedded_compactor_enabled(state_store_url, config.storage.disable_remote_compactor);
+
+    let (reserved_memory_bytes, non_reserved_memory_bytes) =
+        reserve_memory_bytes(opts.total_memory_bytes);
+    let storage_memory_config = storage_memory_config(non_reserved_memory_bytes, &config.storage);
+
     let storage_memory_bytes =
-        total_storage_memory_limit_bytes(&config.storage, embedded_compactor_enabled);
-    let compute_memory_bytes =
-        validate_compute_node_memory_config(opts.total_memory_bytes, storage_memory_bytes);
+        total_storage_memory_limit_bytes(&storage_memory_config, embedded_compactor_enabled);
+    let compute_memory_bytes = validate_compute_node_memory_config(
+        opts.total_memory_bytes,
+        reserved_memory_bytes,
+        storage_memory_bytes,
+    );
+    print_memory_config(
+        opts.total_memory_bytes,
+        compute_memory_bytes,
+        storage_memory_bytes,
+        &storage_memory_config,
+        embedded_compactor_enabled,
+    );
+
     let memory_control_policy = memory_control_policy_from_config(&opts).unwrap();
+
+    let storage_opts = Arc::new(StorageOpts::from((
+        &config,
+        &system_params,
+        &storage_memory_config,
+    )));
 
     let worker_id = meta_client.worker_id();
     info!("Assigned worker node id {}", worker_id);
@@ -180,7 +203,7 @@ pub async fn compute_node_serve(
         extra_info_sources.push(storage.sstable_object_id_manager().clone());
         if embedded_compactor_enabled {
             tracing::info!("start embedded compactor");
-            let read_memory_limiter = Arc::new(MemoryLimiter::new(
+            let output_memory_limiter = Arc::new(MemoryLimiter::new(
                 storage_opts.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
             ));
             let compactor_context = Arc::new(CompactorContext {
@@ -191,7 +214,7 @@ pub async fn compute_node_serve(
                 is_share_buffer_compact: false,
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
                 filter_key_extractor_manager: storage.filter_key_extractor_manager().clone(),
-                read_memory_limiter,
+                output_memory_limiter,
                 sstable_object_id_manager: storage.sstable_object_id_manager().clone(),
                 task_progress_manager: Default::default(),
                 compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(
@@ -251,8 +274,16 @@ pub async fn compute_node_serve(
     // Spawn LRU Manager that have access to collect memory from batch mgr and stream mgr.
     let batch_mgr_clone = batch_mgr.clone();
     let stream_mgr_clone = stream_mgr.clone();
+
+    // NOTE: Due to some limits, we use `total_memory_bytes` as `total_compute_memory_bytes` for
+    // memory control. This is just a workaround for some memory control issues and should be
+    // modified as soon as we figure out a better solution.
+    //
+    // Related issues:
+    // - https://github.com/risingwavelabs/risingwave/issues/8696
+    // - https://github.com/risingwavelabs/risingwave/issues/8822
     let memory_mgr = GlobalMemoryManager::new(
-        compute_memory_bytes,
+        opts.total_memory_bytes,
         system_params.barrier_interval_ms(),
         streaming_metrics.clone(),
         memory_control_policy,
@@ -342,7 +373,7 @@ pub async fn compute_node_serve(
     if config.server.telemetry_enabled && telemetry_env_enabled() {
         // if all configs are true, start reporting
         if telemetry_enabled {
-            telemetry_manager.start_telemetry_reporting();
+            telemetry_manager.start_telemetry_reporting().await;
         }
         // if config and env are true, starting watching
         sub_tasks.push(telemetry_manager.watch_params_change());
@@ -400,10 +431,12 @@ pub async fn compute_node_serve(
 
 /// Check whether the compute node has enough memory to perform computing tasks. Apart from storage,
 /// it is recommended to reserve at least `MIN_COMPUTE_MEMORY_MB` for computing and
-/// `SYSTEM_RESERVED_MEMORY_MB` for other system usage. If the requirement is not met, we will print
-/// out a warning and enforce the memory used for computing tasks as `MIN_COMPUTE_MEMORY_MB`.
+/// `SYSTEM_RESERVED_MEMORY_PROPORTION` of total memory for other system usage. If the requirement
+/// is not met, we will print out a warning and enforce the memory used for computing tasks as
+/// `MIN_COMPUTE_MEMORY_MB`.
 fn validate_compute_node_memory_config(
     cn_total_memory_bytes: usize,
+    reserved_memory_bytes: usize,
     storage_memory_bytes: usize,
 ) -> usize {
     if storage_memory_bytes > cn_total_memory_bytes {
@@ -413,7 +446,7 @@ fn validate_compute_node_memory_config(
             convert(storage_memory_bytes as _)
         );
         MIN_COMPUTE_MEMORY_MB << 20
-    } else if storage_memory_bytes + ((MIN_COMPUTE_MEMORY_MB + SYSTEM_RESERVED_MEMORY_MB) << 20)
+    } else if storage_memory_bytes + (MIN_COMPUTE_MEMORY_MB << 20) + reserved_memory_bytes
         >= cn_total_memory_bytes
     {
         tracing::warn!(
@@ -423,24 +456,24 @@ fn validate_compute_node_memory_config(
         );
         MIN_COMPUTE_MEMORY_MB << 20
     } else {
-        cn_total_memory_bytes - storage_memory_bytes - (SYSTEM_RESERVED_MEMORY_MB << 20)
+        cn_total_memory_bytes - storage_memory_bytes - reserved_memory_bytes
     }
 }
 
 /// The maximal memory that storage components may use based on the configurations in bytes. Note
 /// that this is the total storage memory for one compute node instead of the whole cluster.
 fn total_storage_memory_limit_bytes(
-    storage_config: &StorageConfig,
+    storage_memory_config: &StorageMemoryConfig,
     embedded_compactor_enabled: bool,
 ) -> usize {
-    let total_memory = storage_config.block_cache_capacity_mb
-        + storage_config.meta_cache_capacity_mb
-        + storage_config.shared_buffer_capacity_mb
-        + storage_config.file_cache.total_buffer_capacity_mb;
+    let total_storage_memory_mb = storage_memory_config.block_cache_capacity_mb
+        + storage_memory_config.meta_cache_capacity_mb
+        + storage_memory_config.shared_buffer_capacity_mb
+        + storage_memory_config.file_cache_total_buffer_capacity_mb;
     if embedded_compactor_enabled {
-        (total_memory + storage_config.compactor_memory_limit_mb) << 20
+        (storage_memory_config.compactor_memory_limit_mb + total_storage_memory_mb) << 20
     } else {
-        total_memory << 20
+        total_storage_memory_mb << 20
     }
 }
 
@@ -451,4 +484,46 @@ fn embedded_compactor_enabled(state_store_url: &str, disable_remote_compactor: b
     state_store_url == "hummock+memory"
         || state_store_url.starts_with("hummock+disk")
         || disable_remote_compactor
+}
+
+// Print out the memory outline of the compute node.
+fn print_memory_config(
+    cn_total_memory_bytes: usize,
+    compute_memory_bytes: usize,
+    storage_memory_bytes: usize,
+    storage_memory_config: &StorageMemoryConfig,
+    embedded_compactor_enabled: bool,
+) {
+    info!("Memory outline: ");
+    info!("> total_memory: {}", convert(cn_total_memory_bytes as _));
+    info!(
+        ">     storage_memory: {}",
+        convert(storage_memory_bytes as _)
+    );
+    info!(
+        ">         block_cache_capacity: {}",
+        convert((storage_memory_config.block_cache_capacity_mb << 20) as _)
+    );
+    info!(
+        ">         meta_cache_capacity: {}",
+        convert((storage_memory_config.meta_cache_capacity_mb << 20) as _)
+    );
+    info!(
+        ">         shared_buffer_capacity: {}",
+        convert((storage_memory_config.shared_buffer_capacity_mb << 20) as _)
+    );
+    info!(
+        ">         file_cache_total_buffer_capacity: {}",
+        convert((storage_memory_config.file_cache_total_buffer_capacity_mb << 20) as _)
+    );
+    if embedded_compactor_enabled {
+        info!(
+            ">         compactor_memory_limit: {}",
+            convert((storage_memory_config.compactor_memory_limit_mb << 20) as _)
+        );
+    }
+    info!(
+        ">     compute_memory: {}",
+        convert(compute_memory_bytes as _)
+    );
 }

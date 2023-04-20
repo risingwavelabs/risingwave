@@ -20,7 +20,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::HopWindowNode;
 
-use super::{ExprRewritable, LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
@@ -29,46 +29,39 @@ use crate::utils::ColIndexMappingRewriteExt;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamHopWindow {
     pub base: PlanBase,
-    logical: LogicalHopWindow,
+    logical: generic::HopWindow<PlanRef>,
     window_start_exprs: Vec<ExprImpl>,
     window_end_exprs: Vec<ExprImpl>,
 }
 
 impl StreamHopWindow {
     pub fn new(
-        logical: LogicalHopWindow,
+        logical: generic::HopWindow<PlanRef>,
         window_start_exprs: Vec<ExprImpl>,
         window_end_exprs: Vec<ExprImpl>,
     ) -> Self {
-        let ctx = logical.base.ctx.clone();
-        let pk_indices = logical.base.logical_pk.to_vec();
-        let input = logical.input();
-        let schema = logical.schema().clone();
-
+        let input = logical.input.clone();
         let i2o = logical.i2o_col_mapping();
         let dist = i2o.rewrite_provided_distribution(input.distribution());
 
         let mut watermark_columns = input.watermark_columns().clone();
         watermark_columns.grow(logical.internal_column_num());
 
-        if watermark_columns.contains(logical.core.time_col.index) {
+        if watermark_columns.contains(logical.time_col.index) {
             // Watermark on `time_col` indicates watermark on both `window_start` and `window_end`.
             watermark_columns.insert(logical.internal_window_start_col_idx());
             watermark_columns.insert(logical.internal_window_end_col_idx());
         }
         let watermark_columns = ColIndexMapping::with_remaining_columns(
-            logical.output_indices(),
+            &logical.output_indices,
             logical.internal_column_num(),
         )
         .rewrite_bitset(&watermark_columns);
 
-        let base = PlanBase::new_stream(
-            ctx,
-            schema,
-            pk_indices,
-            logical.functional_dependency().clone(),
+        let base = PlanBase::new_stream_with_logical(
+            &logical,
             dist,
-            logical.input().append_only(),
+            logical.input.append_only(),
             watermark_columns,
         );
         Self {
@@ -103,12 +96,14 @@ impl fmt::Display for StreamHopWindow {
 
 impl PlanTreeNodeUnary for StreamHopWindow {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
+        let mut logical = self.logical.clone();
+        logical.input = input;
         Self::new(
-            self.logical.clone_with_input(input),
+            logical,
             self.window_start_exprs.clone(),
             self.window_end_exprs.clone(),
         )
@@ -120,12 +115,11 @@ impl_plan_tree_node_for_unary! {StreamHopWindow}
 impl StreamNode for StreamHopWindow {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         PbNodeBody::HopWindow(HopWindowNode {
-            time_col: self.logical.core.time_col.index() as _,
-            window_slide: Some(self.logical.core.window_slide.into()),
-            window_size: Some(self.logical.core.window_size.into()),
+            time_col: self.logical.time_col.index() as _,
+            window_slide: Some(self.logical.window_slide.into()),
+            window_size: Some(self.logical.window_size.into()),
             output_indices: self
                 .logical
-                .core
                 .output_indices
                 .iter()
                 .map(|&x| x as u32)
