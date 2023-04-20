@@ -19,10 +19,10 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ProjectSetNode;
 
-use super::ExprRewritable;
+use super::{generic, ExprRewritable};
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{
-    LogicalProjectSet, PlanBase, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, ToLocalBatch,
+    PlanBase, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
 use crate::optimizer::PlanRef;
 use crate::utils::ColIndexMappingRewriteExt;
@@ -30,19 +30,17 @@ use crate::utils::ColIndexMappingRewriteExt;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchProjectSet {
     pub base: PlanBase,
-    logical: LogicalProjectSet,
+    logical: generic::ProjectSet<PlanRef>,
 }
 
 impl BatchProjectSet {
-    pub fn new(logical: LogicalProjectSet) -> Self {
-        let ctx = logical.base.ctx.clone();
+    pub fn new(logical: generic::ProjectSet<PlanRef>) -> Self {
         let distribution = logical
             .i2o_col_mapping()
-            .rewrite_provided_distribution(logical.input().distribution());
+            .rewrite_provided_distribution(logical.input.distribution());
 
-        let base = PlanBase::new_batch(
-            ctx,
-            logical.schema().clone(),
+        let base = PlanBase::new_batch_from_logical(
+            &logical,
             distribution,
             logical.get_out_column_index_order(),
         );
@@ -58,11 +56,13 @@ impl fmt::Display for BatchProjectSet {
 
 impl PlanTreeNodeUnary for BatchProjectSet {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let mut logical = self.logical.clone();
+        logical.input = input;
+        Self::new(logical)
     }
 }
 
@@ -82,7 +82,7 @@ impl ToBatchPb for BatchProjectSet {
         NodeBody::ProjectSet(ProjectSetNode {
             select_list: self
                 .logical
-                .select_list()
+                .select_list
                 .iter()
                 .map(|select_item| select_item.to_project_set_select_item_proto())
                 .collect_vec(),
@@ -103,13 +103,8 @@ impl ExprRewritable for BatchProjectSet {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self::new(
-            self.logical
-                .rewrite_exprs(r)
-                .as_logical_project_set()
-                .unwrap()
-                .clone(),
-        )
-        .into()
+        let mut logical = self.logical.clone();
+        logical.rewrite_exprs(r);
+        Self::new(logical).into()
     }
 }

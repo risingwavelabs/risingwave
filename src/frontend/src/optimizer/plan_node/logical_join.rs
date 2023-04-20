@@ -24,8 +24,8 @@ use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::ChainType;
 
 use super::{
-    generic, ColPrunable, CollectInputRef, ExprRewritable, LogicalProject, PlanBase, PlanRef,
-    PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
+    generic, ColPrunable, CollectInputRef, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary,
+    PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::plan_node::generic::{
@@ -938,7 +938,7 @@ impl LogicalJoin {
             let logical_filter = generic::Filter::new(predicate.non_eq_cond(), hash_join);
             let plan = StreamFilter::new(logical_filter).into();
             if self.output_indices() != &default_indices {
-                let logical_project = LogicalProject::with_mapping(
+                let logical_project = generic::Project::with_mapping(
                     plan,
                     ColIndexMapping::with_remaining_columns(
                         self.output_indices(),
@@ -1175,7 +1175,7 @@ impl LogicalJoin {
         {
             // The schema of dynamic filter is always the same as the left side now, and we have
             // checked that all output columns are from the left side before.
-            let logical_project = LogicalProject::with_mapping(
+            let logical_project = generic::Project::with_mapping(
                 plan,
                 ColIndexMapping::with_remaining_columns(
                     self.output_indices(),
