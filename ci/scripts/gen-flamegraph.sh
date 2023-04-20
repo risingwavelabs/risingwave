@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-# FIXME(kwannoel): This is a workaround
+# FIXME(kwannoel): This is a workaround since workdir is `/risingwave` by default.
 pushd ..
 
 ############## DEBUG INFO
@@ -41,9 +41,7 @@ install_all() {
   tar -zxvf kafka_2.13-3.4.0.tgz
 
   echo ">>> Installing nexmark bench"
-  mkdir -p nexmark-bench
-  pushd nexmark-bench
-  buildkite-agent artifact download nexmark-bench
+  buildkite-agent artifact download nexmark-bench /usr/local/bin
   popd
 
   echo ">>> Installing nperf"
@@ -59,6 +57,7 @@ install_all() {
 ############## CONFIGURE
 
 configure_nexmark_bench() {
+mkdir nexmark-bench
 pushd nexmark-bench
 cat <<EOF > .env
 KAFKA_HOST="localhost:9092"
