@@ -178,9 +178,7 @@ impl LogicalProjectSet {
         let _verbose = self.base.ctx.is_explain_verbose();
         // TODO: add verbose display like Project
 
-        let mut builder = f.debug_struct(name);
-        builder.field("select_list", self.select_list());
-        builder.finish()
+        self.core.fmt_with_name(f, name)
     }
 }
 
@@ -324,7 +322,8 @@ impl ToStream for LogicalProjectSet {
 
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         let new_input = self.input().to_stream(ctx)?;
-        let new_logical = self.clone_with_input(new_input);
+        let mut new_logical = self.core.clone();
+        new_logical.input = new_input;
         Ok(StreamProjectSet::new(new_logical).into())
     }
 }

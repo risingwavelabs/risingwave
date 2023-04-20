@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt;
+
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 
@@ -42,6 +44,16 @@ impl<PlanRef> ProjectSet<PlanRef> {
             .iter()
             .map(|e| r.rewrite_expr(e.clone()))
             .collect();
+    }
+
+    pub(crate) fn output_len(&self) -> usize {
+        self.select_list.len() + 1
+    }
+
+    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+        let mut builder = f.debug_struct(name);
+        builder.field("select_list", &self.select_list);
+        builder.finish()
     }
 }
 
