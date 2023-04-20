@@ -20,11 +20,21 @@ use risingwave_common::types::DataType;
 use super::WindowFuncKind;
 use crate::function::aggregate::AggArgs;
 
-#[derive(Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Frame {
     Rows(FrameBound<usize>, FrameBound<usize>),
     // Groups(FrameBound<usize>, FrameBound<usize>),
     // Range(FrameBound<ScalarImpl>, FrameBound<ScalarImpl>),
+}
+
+impl Default for Frame {
+    fn default() -> Self {
+        // note it's not (unbounded, current row]
+        Frame::Rows(
+            FrameBound::UnboundedPreceding,
+            FrameBound::UnboundedFollowing,
+        )
+    }
 }
 
 impl Frame {
@@ -58,7 +68,7 @@ impl Display for Frame {
     }
 }
 
-#[derive(Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum FrameBound<T> {
     UnboundedPreceding,
     Preceding(T),

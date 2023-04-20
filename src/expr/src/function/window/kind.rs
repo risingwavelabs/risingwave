@@ -21,6 +21,9 @@ use crate::function::aggregate::AggKind;
 #[display(style = "snake_case")]
 pub enum WindowFuncKind {
     // General-purpose window functions.
+    // RowNumber,
+    // Rank,
+    // DenseRank,
     Lag,
     Lead,
     // FirstValue,
