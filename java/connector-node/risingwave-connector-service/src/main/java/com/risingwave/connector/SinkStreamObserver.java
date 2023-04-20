@@ -211,7 +211,7 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
                 deserializer = new StreamChunkDeserializer(tableSchema);
                 break;
         }
-        sinkType = sinkConfig.getConnectorType();
+        sinkType = sinkConfig.getConnectorType().toUpperCase();
         sinkId = sinkConfig.getSinkId();
         ConnectorNodeMetrics.incActiveSinkConnections(sinkConfig.getConnectorType(), "node1");
     }
