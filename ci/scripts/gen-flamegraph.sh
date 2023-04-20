@@ -17,7 +17,7 @@ download_build_artifacts() {
   wget https://github.com/nalbury/promql-cli/releases/download/v0.3.0/promql-v0.3.0-linux-arm64.tar.gz
   tar -xvf promql-v0.3.0-linux-arm64.tar.gz
   chmod +x ./promql
-  sudo mv ./promql /usr/local/bin/promql
+  mv ./promql /usr/local/bin/promql
 
   echo "--- Installing RisingWave components"
   ARTIFACTS="risingwave risedev-dev librisingwave_java_binding.so"
