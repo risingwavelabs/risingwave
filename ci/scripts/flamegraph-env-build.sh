@@ -7,13 +7,14 @@ source ci/scripts/common.sh
 
 ############# INSTALL NEXMARK BENCH
 
+echo "CUR_DIR: $PWD"
 pushd ..
 git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/nexmark-bench.git
 pushd nexmark-bench
 # FIXME(kwannoel): Upstream this fix
 echo "nightly-2023-03-01" > rust-toolchain
 make install
-cp $(which nexmark-server) ./nexmark-server
+cp /risingwave/.cargo/bin/nexmark-server ./nexmark-server
 buildkite-agent artifact upload ./nexmark-server
 popd
 popd
