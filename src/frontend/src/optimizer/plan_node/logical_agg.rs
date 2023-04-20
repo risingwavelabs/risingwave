@@ -22,7 +22,7 @@ use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::function::aggregate::AggKind;
 
-use super::generic::{Agg, AggCallState, GenericPlanRef, PlanAggCall, ProjectBuilder};
+use super::generic::{self, Agg, AggCallState, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg,
@@ -124,7 +124,7 @@ impl LogicalAgg {
         );
         let vnode_col_idx = exprs.len() - 1;
         // TODO(kwannoel): We should apply Project optimization rules here.
-        let project = StreamProject::new(LogicalProject::new(stream_input, exprs));
+        let project = StreamProject::new(generic::Project::new(exprs, stream_input));
 
         // Generate local agg step
         let mut local_group_key = self.group_key().to_vec();
@@ -1157,7 +1157,7 @@ impl ToStream for LogicalAgg {
             Ok(stream_agg)
         } else {
             // a `count(*)` is appended, should project the output
-            Ok(StreamProject::new(LogicalProject::with_out_col_idx(
+            Ok(StreamProject::new(generic::Project::with_out_col_idx(
                 stream_agg,
                 0..self.schema().len(),
             ))
