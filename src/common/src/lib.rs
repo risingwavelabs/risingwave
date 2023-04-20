@@ -34,6 +34,7 @@
 #![allow(incomplete_features)]
 #![feature(const_option_ext)]
 #![feature(iterator_try_collect)]
+#![feature(round_ties_even)]
 
 #[macro_use]
 pub mod jemalloc;

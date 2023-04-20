@@ -1095,6 +1095,47 @@ mod impl_from {
     impl_from_lossless!(i16, f64);
     impl_from_lossless!(i32, f64);
     impl_from_approx!(i64, f64);
+
+    impl TryFrom<OrderedFloat<f64>> for OrderedFloat<f32> {
+        type Error = u8;
+
+        fn try_from(s: OrderedFloat<f64>) -> Result<Self, Self::Error> {
+            let inner = s.0 as f32;
+            if inner.is_infinite() && s.0.is_finite() {
+                Err(1)
+            } else if inner == 0.0 && s.0 != 0.0 {
+                Err(2)
+            } else {
+                Ok(Self(inner))
+            }
+        }
+    }
+
+    macro_rules! impl_try_from_even {
+        ($f:ty, $ty:ty) => {
+            impl TryFrom<OrderedFloat<$f>> for $ty {
+                type Error = ();
+
+                fn try_from(n: OrderedFloat<$f>) -> Result<Self, Self::Error> {
+                    let n = n.0.round_ties_even();
+                    // `-MIN` can be represented exactly but `MAX` cannot.
+                    // So we test `>= -MIN` rather than `> MAX`.
+                    if n.is_nan() || n < (<$ty>::MIN as $f) || n >= -(<$ty>::MIN as $f) {
+                        Err(())
+                    } else {
+                        Ok(n as _)
+                    }
+                }
+            }
+        };
+    }
+
+    impl_try_from_even!(f32, i16);
+    impl_try_from_even!(f32, i32);
+    impl_try_from_even!(f32, i64);
+    impl_try_from_even!(f64, i16);
+    impl_try_from_even!(f64, i32);
+    impl_try_from_even!(f64, i64);
 }
 
 mod impl_into_ordered {
@@ -1123,6 +1164,7 @@ use crate::estimate_size::EstimateSize;
 mod tests {
     use crate::estimate_size::EstimateSize;
     use crate::types::ordered_float::OrderedFloat;
+    use crate::types::IntoOrdered;
 
     #[test]
     fn test_cast_to_f64() {
@@ -1156,6 +1198,14 @@ mod tests {
         assert_eq!(expected, v.into().0.to_be_bytes());
     }
 
+    fn test_from_f32<T>(float_bytes: [u8; 4], expected: Option<T>)
+    where
+        T: TryFrom<OrderedFloat<f32>> + Eq + std::fmt::Debug,
+    {
+        let v = f32::from_be_bytes(float_bytes).into_ordered();
+        assert_eq!(v.try_into().ok(), expected);
+    }
+
     #[test]
     fn test_ordered_float_cast() {
         // Expectations obtained from PostgreSQL: select float4send('-32768'::int2::float4);
@@ -1178,6 +1228,29 @@ mod tests {
         test_into_f64([0xc3, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], i64::MIN);
         test_into_f64([0xc3, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], -i64::MAX); // approx
         test_into_f64([0x43, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], i64::MAX);
+
+        // neg i16
+        test_from_f32([0xc7, 0x00, 0x00, 0x81], None::<i16>);
+        test_from_f32([0xc7, 0x00, 0x00, 0x80], Some(i16::MIN)); // -32768.5
+        test_from_f32([0xc7, 0x00, 0x00, 0x00], Some(i16::MIN));
+        // pos i16
+        test_from_f32([0x46, 0xff, 0xfe, 0x00], Some(i16::MAX));
+        test_from_f32([0x46, 0xff, 0xfe, 0xff], Some(i16::MAX));
+        test_from_f32([0x46, 0xff, 0xff, 0x00], None::<i16>); // 32767.5
+
+        // neg i32
+        test_from_f32([0xcf, 0x00, 0x00, 0x01], None::<i32>);
+        test_from_f32([0xcf, 0x00, 0x00, 0x00], Some(i32::MIN));
+        // pos i32
+        test_from_f32([0x4e, 0xff, 0xff, 0xff], Some(0x7fff_ff80_i32));
+        test_from_f32([0x4f, 0x00, 0x00, 0x00], None::<i32>);
+
+        // neg i64
+        test_from_f32([0xdf, 0x00, 0x00, 0x01], None::<i64>);
+        test_from_f32([0xdf, 0x00, 0x00, 0x00], Some(i64::MIN));
+        // pos i64
+        test_from_f32([0x5e, 0xff, 0xff, 0xff], Some(0x7fff_ff80_0000_0000_i64));
+        test_from_f32([0x5f, 0x00, 0x00, 0x00], None::<i64>);
     }
 
     #[test]
