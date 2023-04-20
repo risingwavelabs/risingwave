@@ -25,3 +25,18 @@ pub fn convert(num_bytes: f64) -> String {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::convert;
+
+    #[test]
+    fn test_bytes_convert() {
+        let base = 1024_f64;
+
+        assert_eq!(convert(1_f64), "1 bytes".to_string());
+        assert_eq!(convert(base), "1.00 KiB".to_string());
+        assert_eq!(convert(base * base), "1.00 MiB".to_string());
+        assert_eq!(convert(base * base * base), "1.00 GiB".to_string());
+    }
+}
