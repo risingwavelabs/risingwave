@@ -96,6 +96,7 @@ pub trait ExprRewriter {
             function_type,
             partition_by,
             order_by,
+            frame,
         } = window_func;
         let args = args
             .into_iter()
@@ -107,6 +108,7 @@ pub trait ExprRewriter {
             function_type,
             partition_by,
             order_by,
+            frame,
         }
         .into()
     }

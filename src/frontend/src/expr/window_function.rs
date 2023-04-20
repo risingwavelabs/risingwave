@@ -18,6 +18,8 @@ use itertools::Itertools;
 use parse_display::Display;
 use risingwave_common::error::ErrorCode;
 use risingwave_common::types::DataType;
+use risingwave_expr::function::aggregate::AggKind;
+use risingwave_expr::function::window::Frame;
 
 use super::{Expr, ExprImpl, OrderBy, RwResult};
 
@@ -34,6 +36,7 @@ pub struct WindowFunction {
     pub function_type: WindowFunctionType,
     pub partition_by: Vec<ExprImpl>,
     pub order_by: OrderBy,
+    pub frame: Option<Frame>,
 }
 
 #[derive(Debug, Display, Copy, Clone, PartialEq, Eq, Hash)]
@@ -42,6 +45,11 @@ pub enum WindowFunctionType {
     RowNumber,
     Rank,
     DenseRank,
+
+    Lag,
+    Lead,
+    #[display("{0}")]
+    Aggregate(AggKind),
 }
 
 impl WindowFunctionType {
@@ -63,10 +71,18 @@ impl FromStr for WindowFunctionType {
             "row_number" => Ok(WindowFunctionType::RowNumber),
             "rank" => Ok(WindowFunctionType::Rank),
             "dense_rank" => Ok(WindowFunctionType::DenseRank),
-            _ => Err(ErrorCode::NotImplemented(
-                format!("unknown table function kind: {s}"),
-                None.into(),
-            )),
+            "lag" => Ok(WindowFunctionType::Lag),
+            "lead" => Ok(WindowFunctionType::Lead),
+            _ => {
+                if let Ok(agg_kind) = AggKind::from_str(s) {
+                    Ok(WindowFunctionType::Aggregate(agg_kind))
+                } else {
+                    Err(ErrorCode::NotImplemented(
+                        format!("unknown table function kind: {s}"),
+                        None.into(),
+                    ))
+                }
+            }
         }
     }
 }
@@ -79,6 +95,7 @@ impl WindowFunction {
         partition_by: Vec<ExprImpl>,
         order_by: OrderBy,
         args: Vec<ExprImpl>,
+        frame: Option<Frame>,
     ) -> RwResult<Self> {
         if !args.is_empty() {
             return Err(ErrorCode::BindError(format!(
@@ -93,6 +110,7 @@ impl WindowFunction {
             function_type,
             partition_by,
             order_by,
+            frame,
         })
     }
 }
@@ -100,13 +118,19 @@ impl WindowFunction {
 impl std::fmt::Debug for WindowFunction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if f.alternate() {
-            f.debug_struct("WindowFunction")
+            let mut builder = f.debug_struct("WindowFunction");
+            builder
                 .field("function_type", &self.function_type)
                 .field("return_type", &self.return_type)
                 .field("args", &self.args)
                 .field("partition_by", &self.partition_by)
-                .field("order_by", &format_args!("{}", self.order_by))
-                .finish()
+                .field("order_by", &format_args!("{}", self.order_by));
+            if let Some(frame) = &self.frame {
+                builder.field("frame", &format_args!("{}", frame));
+            } else {
+                builder.field("frame", &format!("None"));
+            }
+            builder.finish()
         } else {
             write!(f, "{}() OVER(", self.function_type)?;
 
@@ -121,6 +145,9 @@ impl std::fmt::Debug for WindowFunction {
             }
             if !self.order_by.sort_exprs.is_empty() {
                 write!(f, "{delim}{}", self.order_by)?;
+            }
+            if let Some(frame) = &self.frame {
+                write!(f, "{delim}{}", frame)?;
             }
             f.write_str(")")?;
 

@@ -171,6 +171,7 @@ impl LogicalOverAgg {
             }
         }
         if window_funcs.len() > 1 {
+            // TODO()
             return Err(ErrorCode::NotImplemented(
                 "Multiple window functions".to_string(),
                 None.into(),
@@ -183,6 +184,7 @@ impl LogicalOverAgg {
             function_type,
             partition_by,
             order_by,
+            frame,
         } = window_funcs.into_iter().next().unwrap();
         assert!(args.is_empty());
         assert!(return_type == DataType::Int64);

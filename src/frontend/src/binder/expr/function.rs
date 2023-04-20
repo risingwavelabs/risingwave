@@ -26,7 +26,10 @@ use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_expr::function::aggregate::AggKind;
-use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, WindowSpec};
+use risingwave_expr::function::window::{Frame, FrameBound};
+use risingwave_sqlparser::ast::{
+    Function, FunctionArg, FunctionArgExpr, WindowFrameBound, WindowFrameUnits, WindowSpec,
+};
 
 use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
@@ -62,14 +65,7 @@ impl Binder {
         };
 
         // agg calls
-        if let Ok(kind) = function_name.parse() {
-            if f.over.is_some() {
-                return Err(ErrorCode::NotImplemented(
-                    format!("aggregate function as over window function: {}", kind),
-                    4978.into(),
-                )
-                .into());
-            }
+        if f.over.is_none() && let Ok(kind) = function_name.parse() {
             return self.bind_agg(f, kind);
         }
 
@@ -228,26 +224,61 @@ impl Binder {
         inputs: Vec<ExprImpl>,
     ) -> Result<ExprImpl> {
         self.ensure_window_function_allowed()?;
-        if let Some(window_frame) = window_frame {
-            return Err(ErrorCode::NotImplemented(
-                format!("window frame: {}", window_frame),
-                None.into(),
-            )
-            .into());
-        }
         let window_function_type = WindowFunctionType::from_str(&function_name)?;
         let partition_by = partition_by
             .into_iter()
             .map(|arg| self.bind_expr(arg))
             .try_collect()?;
-
         let order_by = OrderBy::new(
             order_by
                 .into_iter()
                 .map(|order_by_expr| self.bind_order_by_expr(order_by_expr))
                 .collect::<Result<_>>()?,
         );
-        Ok(WindowFunction::new(window_function_type, partition_by, order_by, inputs)?.into())
+        if let Some(window_frame) = &window_frame && window_function_type.is_rank_function() {
+            return Err(ErrorCode::NotImplemented(
+                format!("window frame: {}", window_frame),
+                None.into(),
+            )
+            .into());
+        }
+        let frame = if let Some(frame) = window_frame {
+            Some(match frame.units {
+                WindowFrameUnits::Rows => {
+                    let convert_bound = |bound| match bound {
+                        WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
+                        WindowFrameBound::Preceding(None) => FrameBound::UnboundedPreceding,
+                        WindowFrameBound::Preceding(Some(offset)) => {
+                            FrameBound::Preceding(offset as usize)
+                        }
+                        WindowFrameBound::Following(None) => FrameBound::UnboundedFollowing,
+                        WindowFrameBound::Following(Some(offset)) => {
+                            FrameBound::Following(offset as usize)
+                        }
+                    };
+                    let start = convert_bound(frame.start_bound);
+                    let end = if let Some(end_bound) = frame.end_bound {
+                        convert_bound(end_bound)
+                    } else {
+                        FrameBound::CurrentRow
+                    };
+                    Frame::Rows(start, end)
+                }
+                WindowFrameUnits::Range | WindowFrameUnits::Groups => {
+                    return Err(ErrorCode::NotImplemented(
+                        format!("window frame in `{}` mode is not supported", frame.units),
+                        9124.into(),
+                    )
+                    .into());
+                }
+            })
+        } else {
+            None
+        };
+        Ok(
+            WindowFunction::new(window_function_type, partition_by, order_by, inputs, frame)?
+                .into(),
+        )
     }
 
     fn bind_builtin_scalar_function(

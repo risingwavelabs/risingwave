@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::fmt::Display;
 
 use risingwave_common::types::DataType;
 
@@ -43,6 +44,17 @@ impl Frame {
         match self {
             Frame::Rows(_, end) => matches!(end, FrameBound::UnboundedFollowing),
         }
+    }
+}
+
+impl Display for Frame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Frame::Rows(start, end) => {
+                write!(f, "ROWS BETWEEN {} AND {}", start, end)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -82,6 +94,19 @@ impl<T: Ord> PartialOrd for FrameBound<T> {
             (Preceding(_), Following(_)) => Some(Ordering::Less),
             (Following(_), Preceding(_)) => Some(Ordering::Greater),
         }
+    }
+}
+
+impl Display for FrameBound<usize> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FrameBound::UnboundedPreceding => write!(f, "UNBOUNDED PRECEDING")?,
+            FrameBound::Preceding(n) => write!(f, "{} PRECEDING", n)?,
+            FrameBound::CurrentRow => write!(f, "CURRENT ROW")?,
+            FrameBound::Following(n) => write!(f, "{} FOLLOWING", n)?,
+            FrameBound::UnboundedFollowing => write!(f, "UNBOUNDED FOLLOWING")?,
+        }
+        Ok(())
     }
 }
 

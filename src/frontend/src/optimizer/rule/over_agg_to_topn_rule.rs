@@ -71,6 +71,7 @@ impl Rule for OverAggToTopNRule {
             WindowFunctionType::RowNumber => false,
             WindowFunctionType::Rank => true,
             WindowFunctionType::DenseRank => unreachable!("Not implemented. Banned in planner."),
+            _ => unimplemented!(), // TODO()
         };
 
         let (rank_pred, other_pred) = {
