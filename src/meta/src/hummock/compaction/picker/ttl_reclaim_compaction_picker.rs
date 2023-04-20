@@ -243,7 +243,7 @@ mod test {
         let l0 = generate_l0_nonoverlapping_sublevels(vec![]);
         assert_eq!(l0.sub_levels.len(), 0);
 
-        let current_epoch_time = Epoch::now().0;
+        let current_epoch_time = Epoch::now().physical_time();
         let expired_epoch = Epoch::from_physical_time(
             current_epoch_time - MIN_TTL_EXPIRE_INTERVAL_MS - (1000 * 1000),
         )
