@@ -2261,7 +2261,7 @@
       | └─StreamHashAgg { group_key: [partsupp.ps_partkey], aggs: [sum($expr1), count] }
       |   └─StreamExchange { dist: HashShard(partsupp.ps_partkey) }
       |     └─StreamProject { exprs: [partsupp.ps_partkey, (partsupp.ps_supplycost * partsupp.ps_availqty::Decimal) as $expr1, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
-      |       └─StreamShare { id = 13 }
+      |       └─StreamShare { id = 10 }
       |         └─StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_suppkey, supplier.s_suppkey, supplier.s_nationkey, nation.n_nationkey] }
       |           ├─StreamExchange { dist: HashShard(supplier.s_nationkey) }
       |           | └─StreamHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey] }
@@ -2279,7 +2279,7 @@
             └─StreamExchange { dist: Single }
               └─StreamStatelessLocalSimpleAgg { aggs: [sum($expr2)] }
                 └─StreamProject { exprs: [(partsupp.ps_supplycost * partsupp.ps_availqty::Decimal) as $expr2, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
-                  └─StreamShare { id = 13 }
+                  └─StreamShare { id = 10 }
                     └─StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_suppkey, supplier.s_suppkey, supplier.s_nationkey, nation.n_nationkey] }
                       ├─StreamExchange { dist: HashShard(supplier.s_nationkey) }
                       | └─StreamHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey] }
@@ -2807,7 +2807,7 @@
       | └─StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1), lineitem.l_suppkey] }
       |   ├─StreamExchange { dist: HashShard(supplier.s_suppkey) }
       |   | └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
-      |   └─StreamShare { id = 11 }
+      |   └─StreamShare { id = 9 }
       |     └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr1)] }
       |       └─StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [sum($expr1), count] }
       |         └─StreamExchange { dist: HashShard(lineitem.l_suppkey) }
@@ -2820,7 +2820,7 @@
             └─StreamExchange { dist: Single }
               └─StreamHashAgg { group_key: [$expr2], aggs: [max(sum($expr1)), count] }
                 └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr1), Vnode(lineitem.l_suppkey) as $expr2] }
-                  └─StreamShare { id = 11 }
+                  └─StreamShare { id = 9 }
                     └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr1)] }
                       └─StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [sum($expr1), count] }
                         └─StreamExchange { dist: HashShard(lineitem.l_suppkey) }
