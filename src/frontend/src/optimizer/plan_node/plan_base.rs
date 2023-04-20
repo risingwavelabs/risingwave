@@ -124,9 +124,9 @@ impl PlanBase {
     ) -> Self {
         Self::new_stream(
             logical.ctx(),
-            logical.schema().clone(),
+            logical.schema(),
             logical.logical_pk().unwrap_or_default().to_vec(),
-            logical.functional_dependency().clone(),
+            logical.functional_dependency(),
             dist,
             append_only,
             watermark_columns,
