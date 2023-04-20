@@ -20,6 +20,7 @@ use risingwave_common::types::DataType;
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::{Expr, ExprDisplay, ExprImpl, ExprRewriter};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::batch::BatchPlanRef;
 use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
 
@@ -131,7 +132,9 @@ impl<PlanRef: GenericPlanRef> ProjectSet<PlanRef> {
         }
         ColIndexMapping::with_target_size(map, 1 + self.select_list.len())
     }
+}
 
+impl<PlanRef: BatchPlanRef> ProjectSet<PlanRef> {
     /// Map the order of the input to use the updated indices
     pub fn get_out_column_index_order(&self) -> Order {
         self.i2o_col_mapping()
