@@ -42,6 +42,7 @@
 #![feature(exact_size_is_empty)]
 #![feature(return_position_impl_trait_in_trait)]
 #![feature(test)]
+#![feature(is_some_and)]
 
 #[macro_use]
 extern crate tracing;

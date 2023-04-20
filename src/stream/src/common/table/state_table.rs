@@ -447,12 +447,11 @@ where
         }
     }
 
-    /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
     pub fn init_epoch(&mut self, epoch: EpochPair) {
         self.local_store.init(epoch.curr)
     }
 
-    /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
+    /// get the newest epoch of the state store and panic if `init_epoch()` has never be called
     pub fn epoch(&self) -> u64 {
         self.local_store.epoch()
     }
