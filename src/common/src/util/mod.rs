@@ -30,6 +30,7 @@ pub mod hash_util;
 pub mod iter_util;
 pub mod memcmp_encoding;
 pub mod ordered;
+pub mod pretty_bytes;
 pub mod prost;
 pub mod resource_util;
 pub mod row_id;

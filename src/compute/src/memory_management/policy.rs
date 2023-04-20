@@ -16,10 +16,10 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use pretty_bytes::converter::convert;
 use risingwave_batch::task::BatchManager;
 use risingwave_common::error::Result;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_common::util::pretty_bytes::convert;
 use risingwave_stream::task::LocalStreamManager;
 
 use super::{MemoryControl, MemoryControlStats};
