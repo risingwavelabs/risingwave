@@ -20,7 +20,7 @@ use risingwave_common::types::DataType;
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::{Expr, ExprDisplay, ExprImpl, ExprRewriter};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
 
 /// [`ProjectSet`] projects one row multiple times according to `select_list`.
@@ -130,5 +130,11 @@ impl<PlanRef: GenericPlanRef> ProjectSet<PlanRef> {
             }
         }
         ColIndexMapping::with_target_size(map, 1 + self.select_list.len())
+    }
+
+    /// Map the order of the input to use the updated indices
+    pub fn get_out_column_index_order(&self) -> Order {
+        self.i2o_col_mapping()
+            .rewrite_provided_order(self.input.order())
     }
 }

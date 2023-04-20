@@ -25,8 +25,7 @@ use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFun
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::Order;
-use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
+use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalProjectSet` projects one row multiple times according to `select_list`.
 ///
@@ -182,23 +181,6 @@ impl LogicalProjectSet {
     }
 }
 
-impl LogicalProjectSet {
-    pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        self.core.o2i_col_mapping()
-    }
-
-    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        self.core.i2o_col_mapping()
-    }
-
-    /// Map the order of the input to use the updated indices
-    pub fn get_out_column_index_order(&self) -> Order {
-        self.core
-            .i2o_col_mapping()
-            .rewrite_provided_order(self.input().order())
-    }
-}
-
 impl PlanTreeNodeUnary for LogicalProjectSet {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
@@ -277,8 +259,8 @@ impl PredicatePushdown for LogicalProjectSet {
 
 impl ToBatch for LogicalProjectSet {
     fn to_batch(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_batch()?;
-        let new_logical = self.clone_with_input(new_input);
+        let mut new_logical = self.core.clone();
+        new_logical.input = self.input().to_batch()?;
         Ok(BatchProjectSet::new(new_logical).into())
     }
 }
