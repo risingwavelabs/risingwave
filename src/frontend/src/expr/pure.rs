@@ -164,7 +164,8 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             expr_node::Type::Vnode
             | expr_node::Type::Now
             | expr_node::Type::Proctime
-            | expr_node::Type::Udf => true,
+            | expr_node::Type::Udf
+            | expr_node::Type::StringToArray => true,
         }
     }
 }

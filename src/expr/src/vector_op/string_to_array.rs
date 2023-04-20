@@ -1,0 +1,55 @@
+// Copyright 2023 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use risingwave_common::array::ListValue;
+use risingwave_common::types::ScalarImpl;
+use risingwave_expr_macro::function;
+
+// This function produces the expected result when delimiter is null, although not sql standard
+#[function("string_to_array(varchar) -> list")]
+pub fn string_to_array1(s: &str) -> ListValue {
+    ListValue::new(
+        s.chars()
+            .map(|x| Some(ScalarImpl::Utf8(x.to_string().into())))
+            .collect(),
+    )
+}
+
+#[function("string_to_array(varchar, varchar) -> list")]
+pub fn string_to_array2(s: &str, sep: &str) -> ListValue {
+    match sep.is_empty() {
+        true => ListValue::new(vec![Some(ScalarImpl::Utf8(s.to_string().into()))]),
+        _ => ListValue::new(
+            s.split(sep)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|x| Some(ScalarImpl::Utf8(x.to_string().into())))
+                .collect(),
+        ),
+    }
+}
+
+#[function("string_to_array(varchar, varchar, varchar) -> list")]
+pub fn string_to_array3(s: &str, sep: &str, null: &str) -> ListValue {
+    ListValue::new(
+        s.split(sep)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|x| match x == null {
+                true => None,
+                _ => Some(ScalarImpl::Utf8(x.to_string().into())),
+            })
+            .collect(),
+    )
+}

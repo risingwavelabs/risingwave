@@ -605,6 +605,9 @@ fn infer_type_for_special(
                 _ => Ok(None),
             }
         }
+        ExprType::StringToArray => Ok(Some(DataType::List {
+            datatype: Box::new(DataType::Varchar),
+        })),
         ExprType::Cardinality => {
             ensure_arity!("cardinality", | inputs | == 1);
             let return_type = inputs[0].return_type();
