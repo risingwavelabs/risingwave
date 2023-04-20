@@ -104,6 +104,7 @@ pub trait CatalogWriter: Send + Sync {
         connection_name: String,
         database_id: u32,
         schema_id: u32,
+        owner_id: u32,
         connection: create_connection_request::Payload,
     ) -> Result<()>;
 
@@ -247,11 +248,18 @@ impl CatalogWriter for CatalogWriterImpl {
         connection_name: String,
         database_id: u32,
         schema_id: u32,
+        owner_id: u32,
         connection: create_connection_request::Payload,
     ) -> Result<()> {
         let (_, version) = self
             .meta_client
-            .create_connection(connection_name, database_id, schema_id, connection)
+            .create_connection(
+                connection_name,
+                database_id,
+                schema_id,
+                owner_id,
+                connection,
+            )
             .await?;
         self.wait_version(version).await
     }

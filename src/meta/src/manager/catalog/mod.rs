@@ -360,10 +360,13 @@ where
         &self,
         connection: Connection,
     ) -> MetaResult<NotificationVersion> {
-        let core = &mut self.core.lock().await;
+        let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
+        let user_core = &mut core.user;
         database_core.ensure_database_id(connection.database_id)?;
         database_core.ensure_schema_id(connection.schema_id)?;
+        #[cfg(not(test))]
+        user_core.ensure_user_id(connection.owner)?;
 
         let key = (
             connection.database_id,
@@ -377,6 +380,8 @@ where
         connections.insert(conn_id, connection.to_owned());
         commit_meta!(self, connections)?;
 
+        user_core.increase_ref(connection.owner);
+
         let version = self
             .notify_frontend(Operation::Add, Info::Connection(connection))
             .await;
@@ -384,8 +389,11 @@ where
     }
 
     pub async fn drop_connection(&self, conn_id: ConnectionId) -> MetaResult<NotificationVersion> {
-        let core = &mut self.core.lock().await;
+        let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
+        database_core.ensure_connection_id(conn_id)?;
+
+        let user_core = &mut core.user;
         let mut connections = BTreeMapTransaction::new(&mut database_core.connections);
 
         // TODO(weili): wait for yezizp to refactor ref cnt
@@ -407,6 +415,7 @@ where
                     .ok_or_else(|| anyhow!("connection not found"))?;
 
                 commit_meta!(self, connections)?;
+                user_core.decrease_ref(connection.owner);
 
                 let version = self
                     .notify_frontend(Operation::Delete, Info::Connection(connection))

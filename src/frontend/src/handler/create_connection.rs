@@ -132,6 +132,7 @@ pub async fn handle_create_connection(
             connection_name,
             database_id,
             schema_id,
+            session.user_id(),
             create_connection_payload,
         )
         .await?;
