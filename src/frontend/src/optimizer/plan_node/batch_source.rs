@@ -19,10 +19,9 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SourceNode;
 
+use super::generic::{self};
 use super::generic::GenericPlanNode;
-use super::{
-    generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, ToLocalBatch,
-};
+use super::{ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, ToLocalBatch};
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::property::{Distribution, Order};
 
@@ -35,9 +34,8 @@ pub struct BatchSource {
 
 impl BatchSource {
     pub fn new(logical: generic::Source) -> Self {
-        let base = PlanBase::new_batch(
-            logical.ctx.clone(),
-            logical.schema(),
+        let base = PlanBase::new_batch_from_logical(
+            &logical,
             // Use `Single` by default, will be updated later with `clone_with_dist`.
             Distribution::Single,
             Order::any(),
