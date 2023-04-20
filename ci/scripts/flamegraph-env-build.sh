@@ -13,7 +13,8 @@ pushd nexmark-bench
 # FIXME(kwannoel): Upstream this fix
 echo "nightly-2023-03-01" > rust-toolchain
 make install
-buildkite-agent artifact upload /nexmark-server
+cp $(which nexmark-server) ./nexmark-server
+buildkite-agent artifact upload ./nexmark-server
 popd
 popd
 
