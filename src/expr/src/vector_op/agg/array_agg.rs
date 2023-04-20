@@ -175,15 +175,15 @@ pub fn create_array_agg_state(
     return_type: DataType,
     agg_col_idx: usize,
     column_orders: Vec<ColumnOrder>,
-) -> Result<Box<dyn Aggregator>> {
+) -> Box<dyn Aggregator> {
     if column_orders.is_empty() {
-        Ok(Box::new(ArrayAggUnordered::new(return_type, agg_col_idx)))
+        Box::new(ArrayAggUnordered::new(return_type, agg_col_idx))
     } else {
-        Ok(Box::new(ArrayAggOrdered::new(
+        Box::new(ArrayAggOrdered::new(
             return_type,
             agg_col_idx,
             column_orders,
-        )))
+        ))
     }
 }
 
@@ -208,7 +208,7 @@ mod tests {
         let return_type = DataType::List {
             datatype: Box::new(DataType::Int32),
         };
-        let mut agg = create_array_agg_state(return_type.clone(), 0, vec![])?;
+        let mut agg = create_array_agg_state(return_type.clone(), 0, vec![]);
         let mut builder = return_type.create_array_builder(0);
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;
@@ -234,7 +234,7 @@ mod tests {
         let return_type = DataType::List {
             datatype: Box::new(DataType::Int32),
         };
-        let mut agg = create_array_agg_state(return_type.clone(), 0, vec![])?;
+        let mut agg = create_array_agg_state(return_type.clone(), 0, vec![]);
         let mut builder = return_type.create_array_builder(0);
         agg.output(&mut builder)?;
 
@@ -283,7 +283,7 @@ mod tests {
                 ColumnOrder::new(1, OrderType::ascending()),
                 ColumnOrder::new(0, OrderType::descending()),
             ],
-        )?;
+        );
         let mut builder = return_type.create_array_builder(0);
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;

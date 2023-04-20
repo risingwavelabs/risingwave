@@ -436,6 +436,14 @@ impl DatabaseManager {
         }
     }
 
+    pub fn ensure_connection_id(&self, connection_id: ConnectionId) -> MetaResult<()> {
+        if self.connections.contains_key(&connection_id) {
+            Ok(())
+        } else {
+            Err(MetaError::catalog_id_not_found("connection", connection_id))
+        }
+    }
+
     // TODO(zehua): refactor when using SourceId.
     pub fn ensure_table_view_or_source_id(&self, table_id: &TableId) -> MetaResult<()> {
         if self.tables.contains_key(table_id)

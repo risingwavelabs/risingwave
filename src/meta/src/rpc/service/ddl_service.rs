@@ -650,6 +650,7 @@ where
                     schema_id: req.schema_id,
                     database_id: req.database_id,
                     name: req.name,
+                    owner: req.owner_id,
                     info: Some(connection::Info::PrivateLinkService(private_link_svc)),
                 };
 
@@ -692,6 +693,22 @@ where
             status: None,
             version,
         }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn get_tables(
+        &self,
+        request: Request<GetTablesRequest>,
+    ) -> Result<Response<GetTablesResponse>, Status> {
+        let ret = self
+            .catalog_manager
+            .get_tables(&request.into_inner().table_ids)
+            .await;
+        let mut tables = HashMap::default();
+        for table in ret {
+            tables.insert(table.id, table);
+        }
+        Ok(Response::new(GetTablesResponse { tables }))
     }
 }
 

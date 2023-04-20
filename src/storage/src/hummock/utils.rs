@@ -281,6 +281,10 @@ impl MemoryLimiter {
     pub fn get_memory_usage(&self) -> u64 {
         self.inner.total_size.load(AtomicOrdering::Acquire)
     }
+
+    pub fn quota(&self) -> u64 {
+        self.inner.quota
+    }
 }
 
 impl MemoryLimiter {

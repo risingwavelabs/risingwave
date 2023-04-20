@@ -267,11 +267,6 @@ impl FunctionCall {
         self.func_type
     }
 
-    /// Refer to [`ExprType`] for details.
-    pub fn is_pure(&self) -> bool {
-        0 < self.func_type as i32 && self.func_type as i32 <= 600
-    }
-
     /// Get a reference to the function call's inputs.
     pub fn inputs(&self) -> &[ExprImpl] {
         self.inputs.as_ref()

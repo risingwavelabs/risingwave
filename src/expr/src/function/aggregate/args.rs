@@ -15,17 +15,15 @@
 use std::slice;
 
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_expr::expr::{AggKind, ExpressionRef};
 
 /// An aggregation function may accept 0, 1 or 2 arguments.
 #[derive(Clone, Debug)]
 pub enum AggArgs {
-    /// `None` is used for aggregation function accepts 0 arguments, such as `count(*)`.
+    /// `None` is used for function calls that accept 0 argument, e.g. `count(*)`.
     None,
-    /// `Unary` is used for aggregation function accepts 1 argument, such as [`AggKind::Sum`].
+    /// `Unary` is used for function calls that accept 1 argument, e.g. `sum(x)`.
     Unary(DataType, usize),
-    /// `Binary` is used for aggregation function accepts 2 arguments.
+    /// `Binary` is used for function calls that accept 2 arguments, e.g. `string_agg(x, delim)`.
     Binary([DataType; 2], [usize; 2]),
 }
 
@@ -49,29 +47,4 @@ impl AggArgs {
             Binary(_, val_indices) => val_indices,
         }
     }
-}
-
-/// Represents an aggregation function.
-#[derive(Clone, Debug)]
-pub struct AggCall {
-    /// Aggregation kind for constructing agg state.
-    pub kind: AggKind,
-    /// Arguments of aggregation function input.
-    pub args: AggArgs,
-    /// The return type of aggregation function.
-    pub return_type: DataType,
-
-    /// Order requirements specified in order by clause of agg call
-    pub column_orders: Vec<ColumnOrder>,
-
-    /// Whether the stream is append-only.
-    /// Specific streaming aggregator may optimize its implementation
-    /// based on this knowledge.
-    pub append_only: bool,
-
-    /// Filter of aggregation.
-    pub filter: Option<ExpressionRef>,
-
-    /// Should deduplicate the input before aggregation.
-    pub distinct: bool,
 }

@@ -32,6 +32,7 @@
 #![feature(min_specialization)]
 #![feature(is_some_and)]
 #![feature(extend_one)]
+#![feature(type_alias_impl_trait)]
 #![recursion_limit = "256"]
 
 #[macro_use]

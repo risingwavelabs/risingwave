@@ -19,6 +19,7 @@ use std::fmt::Debug;
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::{Op, RowRef};
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{CompactedRow, Row, RowDeserializer, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_storage::StateStore;
@@ -61,6 +62,14 @@ pub struct TopNCache<const WITH_TIES: bool> {
     ///
     /// For debug formatting only.
     data_types: Vec<DataType>,
+}
+
+impl<const WITH_TIES: bool> EstimateSize for TopNCache<WITH_TIES> {
+    fn estimated_heap_size(&self) -> usize {
+        // FIXME: implement correct size
+        // https://github.com/risingwavelabs/risingwave/issues/8957
+        0
+    }
 }
 
 impl<const WITH_TIES: bool> Debug for TopNCache<WITH_TIES> {

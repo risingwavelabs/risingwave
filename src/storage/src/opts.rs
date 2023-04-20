@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use risingwave_common::config::{extract_storage_memory_config, RwConfig, StorageMemoryConfig};
-use risingwave_common::system_param::default_system_params;
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::system_param::system_params_for_test;
 
 #[derive(Clone, Debug)]
 pub struct StorageOpts {
@@ -78,7 +78,7 @@ pub struct StorageOpts {
 impl Default for StorageOpts {
     fn default() -> Self {
         let c = RwConfig::default();
-        let p = default_system_params();
+        let p = system_params_for_test();
         let s = extract_storage_memory_config(&c);
         Self::from((&c, &p.into(), &s))
     }
