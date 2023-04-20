@@ -85,10 +85,10 @@ impl TtlReclaimCompactionPicker {
         }
     }
 
-    fn filter(&self, sst: &SstableInfo, current_epoch_time: u64) -> bool {
+    fn filter(&self, sst: &SstableInfo, current_epoch_physical_time: u64) -> bool {
         let table_id_in_sst = sst.table_ids.iter().cloned().collect::<HashSet<u32>>();
         let expire_epoch =
-            Epoch::from_physical_time(current_epoch_time - MIN_TTL_EXPIRE_INTERVAL_MS);
+            Epoch::from_physical_time(current_epoch_physical_time - MIN_TTL_EXPIRE_INTERVAL_MS);
 
         for table_id in table_id_in_sst {
             match self.table_id_to_ttl.get(&table_id) {
@@ -153,7 +153,7 @@ impl TtlReclaimCompactionPicker {
             state.init(key_range_this_round);
         }
 
-        let current_epoch_time = Epoch::now().0;
+        let current_epoch_physical_time = Epoch::now().physical_time();
         let mut select_file_size = 0;
 
         for sst in &reclaimed_level.table_infos {
@@ -165,7 +165,7 @@ impl TtlReclaimCompactionPicker {
 
             if unmatched_sst
                 || level_handler.is_pending_compact(&sst.sst_id)
-                || self.filter(sst, current_epoch_time)
+                || self.filter(sst, current_epoch_physical_time)
             {
                 if !select_input_ssts.is_empty() {
                     // Our goal is to pick as many complete layers of data as possible and keep the
