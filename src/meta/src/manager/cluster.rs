@@ -102,6 +102,7 @@ where
     ) -> MetaResult<WorkerNode> {
         let mut core = self.core.write().await;
         if let Some(worker) = core.get_worker_by_host_mut(host_address.clone()) {
+            // TODO: update parallelism when the worker exists.
             worker.update_ttl(self.max_heartbeat_interval);
             return Ok(worker.to_protobuf());
         }
@@ -114,9 +115,13 @@ where
             .await? as WorkerId;
 
         // Generate parallel units.
-        let parallel_units = self
-            .generate_cn_parallel_units(worker_node_parallelism, worker_id)
-            .await?;
+        let parallel_units = if r#type == WorkerType::ComputeNode {
+            self
+                .generate_cn_parallel_units(worker_node_parallelism, worker_id)
+                .await?
+        } else {
+            vec![]
+        };
 
         // Construct worker.
         let worker_node = WorkerNode {
