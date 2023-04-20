@@ -1112,7 +1112,7 @@ impl GrpcMetaClientCore {
 ///
 /// It is a wrapper of tonic client. See [`rpc_client_method_impl`].
 #[derive(Debug, Clone)]
-struct GrpcMetaClient {
+pub struct GrpcMetaClient {
     force_refresh_sender: mpsc::Sender<oneshot::Sender<Result<()>>>,
     core: Arc<RwLock<GrpcMetaClientCore>>,
 }
@@ -1365,7 +1365,7 @@ impl GrpcMetaClient {
             .map_err(RpcError::TransportError)
     }
 
-    pub(crate) async fn try_build_rpc_channel(addrs: Vec<String>) -> Result<(Channel, String)> {
+    pub async fn try_build_rpc_channel(addrs: Vec<String>) -> Result<(Channel, String)> {
         let endpoints: Vec<_> = addrs
             .into_iter()
             .map(|addr| Self::addr_to_endpoint(addr.clone()).map(|endpoint| (endpoint, addr)))

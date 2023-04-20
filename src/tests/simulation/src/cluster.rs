@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::num::dec2flt::number;
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::Write;
@@ -20,15 +19,21 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use clap::Parser;
 use futures::channel::{mpsc, oneshot};
 use futures::future::join_all;
 use futures::{SinkExt, StreamExt};
+use itertools::Itertools;
 use madsim::net::ipvs::*;
 use madsim::runtime::{Handle, NodeHandle};
 use rand::Rng;
+use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
+use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
+use risingwave_rpc_client;
+use risingwave_rpc_client::error::RpcError;
 use sqllogictest::AsyncDB;
+use tonic::transport::{Channel, Endpoint};
 
 use crate::client::RisingWave;
 
@@ -520,6 +525,76 @@ impl Cluster {
             madsim::runtime::Handle::current().restart(name);
         }))
         .await;
+    }
+
+    fn addr_to_endpoint(addr: String) -> Result<Endpoint> {
+        let res = Endpoint::from_shared(addr)
+            .map(|endpoint| endpoint.initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE));
+        match res {
+            Ok(ept) => Ok(ept),
+            Err(_) => Err(anyhow!("Unable to connect")),
+        }
+    }
+
+    // Copy of the implementation in meta_client
+    pub async fn try_build_rpc_channel(addrs: Vec<String>) -> Result<(Channel, String)> {
+        let endpoints: Vec<_> = addrs
+            .into_iter()
+            .map(|addr| Self::addr_to_endpoint(addr.clone()).map(|endpoint| (endpoint, addr)))
+            .try_collect()?;
+
+        let endpoints = endpoints.clone();
+
+        for (endpoint, addr) in endpoints {
+            match Self::connect_to_endpoint(endpoint).await {
+                Ok(channel) => {
+                    tracing::info!("Connect to meta server {} successfully", addr);
+                    return Ok((channel, addr));
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to connect to meta server {}, trying again: {}",
+                        addr,
+                        e
+                    )
+                }
+            }
+        }
+
+        Err(anyhow!("Failed to connect to meta server"))
+    }
+
+    async fn connect_to_endpoint(endpoint: Endpoint) -> Result<Channel> {
+      let res =   endpoint
+            .http2_keep_alive_interval(Duration::from_secs(60)) // Self::ENDPOINT_KEEP_ALIVE_INTERVAL_SEC
+            .keep_alive_timeout(Duration::from_secs(60)) // Self::ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC
+            .connect_timeout(Duration::from_secs(5))
+            .connect()
+            .await; 
+        match res {
+            Ok(c) => Ok(c), 
+            Err(_) => Err(anyhow!("unable to connect to endpoint")),
+        }
+    }
+
+    /// remove node from cluster gracefully by informing meta that node is no longer available.
+    pub async fn remove_node(&self) {
+        // where do I get the  client from?
+        // ClusterServiceClient.DeleteWorkerNode
+        let meta_addrs = (1..self.config.meta_nodes)
+            .map(|i| format!("http://meta-{i}:5690"))
+            .collect::<Vec<String>>();
+
+        // Which node?
+        let (channel, _) = Self::try_build_rpc_channel(meta_addrs)
+            .await
+            .expect("Unable to remove node");
+
+        let cluster_client = ClusterServiceClient::new(channel);
+        // let WorkerNode here
+
+        let request = worker_node.host.unwrap(); // HostAddress
+        cluster_client.delete_worker_node(request);
     }
 
     /// Create a node for kafka producer and prepare data.

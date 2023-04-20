@@ -22,18 +22,19 @@ use risingwave_simulation::cluster::{Configuration, KillOpts};
 use risingwave_simulation::nexmark::{self, NexmarkCluster, THROUGHPUT};
 use risingwave_simulation::utils::AssertResult;
 
+/// gets the output without failures as the standard result
+// TODO: may be nice to have
+// async fn get_expected(mut cluster: NexmarkCluster, create: &str, select: &str, drop: &str)  ->
+// Result<String> {}
+
 /// Setup a nexmark stream, inject failures, and verify results.
-async fn nexmark_recovery_common(create: &str, select: &str, drop: &str) -> Result<()> {
+async fn nexmark_scaling_up_common(create: &str, select: &str, drop: &str, number_of_nodes: usize) -> Result<()> {
     // tracing_subscriber::fmt()
     //     .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
     //     .init();
 
-    panic!("scaling test is running"); 
-
     let mut cluster =
         NexmarkCluster::new(Configuration::for_scale(), 6, Some(THROUGHPUT * 20), false).await?;
-
-    // get the output without failures as the standard result
     cluster.run(create).await?;
     sleep(Duration::from_secs(30)).await;
     let expected = cluster.run(select).await?;
@@ -42,11 +43,12 @@ async fn nexmark_recovery_common(create: &str, select: &str, drop: &str) -> Resu
 
     cluster.run(create).await?;
 
-    // TODO: for now only add 1 new node. Add multiple in the future
-    // scale up cluster
-    cluster.add_compute_node(1);
+    cluster.add_compute_node(number_of_nodes);
+    sleep(Duration::from_secs(2)).await;
 
-    // TODO: How is scaling down different from killing? 
+    cluster.kill_node(opts)
+
+    // TODO: How is scaling down different from killing?
     // kill nodes and trigger recovery
     // for _ in 0..5 {
     //     sleep(Duration::from_secs(2)).await;
@@ -60,14 +62,23 @@ async fn nexmark_recovery_common(create: &str, select: &str, drop: &str) -> Resu
     Ok(())
 }
 
+
+
+
 // TODO: rename this to nexmark_scaling
 macro_rules! test {
     ($query:ident) => {
         paste::paste! {
             #[madsim::test]
-            async fn [< nexmark_recovery_ $query >]() -> Result<()> {
+            async fn [< nexmark_scaling_up_ $query >]() -> Result<()> {
                 use risingwave_simulation::nexmark::queries::$query::*;
-                nexmark_recovery_common(CREATE, SELECT, DROP)
+                nexmark_scaling_up_common(CREATE, SELECT, DROP, 1)
+                .await
+            }
+            #[madsim::test]
+            async fn [< nexmark_scaling_up_2_ $query >]() -> Result<()> {
+                use risingwave_simulation::nexmark::queries::$query::*;
+                nexmark_scaling_up_common(CREATE, SELECT, DROP, 2)
                 .await
             }
         }

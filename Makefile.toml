@@ -681,6 +681,7 @@ cargo nextest run \
   "$@"
 """
 
+
 [tasks.sarchive-scale-test]
 category = "RiseDev - Simulation scaling tests"
 description = "Archive integration scaling tests in deterministic simulation mode"
