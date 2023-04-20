@@ -131,6 +131,7 @@ pub async fn compute_node_serve(
         storage_memory_bytes,
         &storage_memory_config,
         embedded_compactor_enabled,
+        reserved_memory_bytes,
     );
 
     let memory_control_policy = memory_control_policy_from_config(&opts).unwrap();
@@ -283,7 +284,7 @@ pub async fn compute_node_serve(
     // - https://github.com/risingwavelabs/risingwave/issues/8696
     // - https://github.com/risingwavelabs/risingwave/issues/8822
     let memory_mgr = GlobalMemoryManager::new(
-        opts.total_memory_bytes,
+        compute_memory_bytes,
         system_params.barrier_interval_ms(),
         streaming_metrics.clone(),
         memory_control_policy,
@@ -493,6 +494,7 @@ fn print_memory_config(
     storage_memory_bytes: usize,
     storage_memory_config: &StorageMemoryConfig,
     embedded_compactor_enabled: bool,
+    reserved_memory_bytes: usize,
 ) {
     info!("Memory outline: ");
     info!("> total_memory: {}", convert(cn_total_memory_bytes as _));
@@ -525,5 +527,9 @@ fn print_memory_config(
     info!(
         ">     compute_memory: {}",
         convert(compute_memory_bytes as _)
+    );
+    info!(
+        ">     reserved_memory: {}",
+        convert(reserved_memory_bytes as _)
     );
 }
