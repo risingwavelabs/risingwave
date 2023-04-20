@@ -330,4 +330,6 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
+          environment:
+            - GITHUB_TOKEN
     timeout_in_minutes: 20
