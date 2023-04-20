@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-############## LIB
+############## DEBUG INFO
 
 print_machine_debug_info() {
   echo "Free space on Machine"
@@ -11,7 +11,20 @@ print_machine_debug_info() {
   ls
 }
 
-download_build_artifacts() {
+############## INSTALL
+
+install_nexmark_bench() {
+  git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/nexmark-bench.git
+  make install
+}
+
+install_nperf() {
+  git clone https://github.com/koute/not-perf.git
+  cd not-perf/cli
+  cargo build --release
+}
+
+install_all() {
   echo ">>> Installing PromQL cli client"
   # Download promql
   wget https://github.com/nalbury/promql-cli/releases/download/v0.3.0/promql-v0.3.0-linux-arm64.tar.gz
@@ -39,9 +52,7 @@ download_build_artifacts() {
   echo "$ARTIFACTS" | xargs -I 'buildkite-agent artifact download %-bench . && mv ./%-bench target/release/%'
 }
 
-install_nexmark_bench() {
-  git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/nexmark-bench.git
-}
+############## CONFIGURE
 
 configure_nexmark_bench() {
 pushd nexmark-bench
@@ -70,26 +81,8 @@ EOF
 popd
 }
 
-build_nexmark_bench() {
-  echo "TODO"
-}
-
-setup_nexmark_bench() {
-  configure_nexmark_bench
-  build_nexmark_bench
-}
-
-install_nperf() {
-  git clone https://github.com/koute/not-perf.git
-  cd not-perf/cli
-  cargo build --release
-}
-
-start_nperf() {
-  not-perf/target/release/nperf record -p $(pidof compute-node) -o perf.data
-}
-
-setup_rw() {
+configure_rw() {
+pushd risingwave
 cat <<EOF > .env
 RISEDEV_CONFIGURED=true
 
@@ -101,18 +94,23 @@ ENABLE_BUILD_RUST=true
 ENABLE_RELEASE_PROFILE=true
 ENABLE_ALL_IN_ONE=true
 EOF
+popd
 }
 
-# Install artifacts + tools, configure environment
-setup() {
-  download_build_artifacts
+configure_all() {
+  configure_rw
+  configure_nexmark_bench
+}
 
-  echo ">>> Setting up nexmark-bench"
-  setup_nexmark_bench
+############## Start benchmark environment
 
-  echo ">>> Setting up RisingWave"
-  setup_rw
-  echo "Success!"
+start_nperf() {
+  not-perf/target/release/nperf record -p $(pidof compute-node) -o perf.data
+}
+
+kafka_start() {
+  nohup ./kafka_2.13-3.2.1/bin/zookeeper-server-start.sh ./opt/kafka_2.13-3.4.0/config/zookeeper.properties > zookeeper.log 2>&1 &
+  nohup ./kafka_2.13-3.2.1/bin/kafka-server-start.sh ./opt/kafka_2.13-3.4.0/config/server.properties --override num.partitions=8 > kafka.log 2>&1 &
 }
 
 gen_events() {
@@ -128,9 +126,12 @@ gen_events() {
   popd
 }
 
-kafka_start() {
-  nohup ./kafka_2.13-3.2.1/bin/zookeeper-server-start.sh ./opt/kafka_2.13-3.4.0/config/zookeeper.properties > zookeeper.log 2>&1 &
-  nohup ./kafka_2.13-3.2.1/bin/kafka-server-start.sh ./opt/kafka_2.13-3.4.0/config/server.properties --override num.partitions=8 > kafka.log 2>&1 &
+############## LIB
+
+# Install artifacts + tools, configure environment
+setup() {
+  install_all
+  configure_all
 }
 
 ############## MAIN
@@ -149,7 +150,7 @@ main() {
   kafka_start
 
   echo "--- Spawning nexmark events"
-  # gen_events
+  gen_events
 
   echo "--- Starting up RW"
   ./risedev d ci-gen-cpu-flamegraph
