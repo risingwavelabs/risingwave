@@ -17,45 +17,51 @@ use risingwave_common::array::ListValue;
 use risingwave_common::types::ScalarImpl;
 use risingwave_expr_macro::function;
 
-fn string_to_array_inner(s: Option<&str>, sep: Option<&str>) -> Vec<String> {
-    s.map_or(vec![], |s| {
-        sep.map_or(
-            s.chars().map(|x| x.to_string()).collect_vec(),
-            |sep| match sep.is_empty() {
-                true => vec![s.to_string()],
-                false => s
-                    .split(sep)
-                    .collect_vec()
-                    .into_iter()
-                    .map(|x| x.to_string())
-                    .collect_vec(),
-            },
-        )
-    })
+fn string_to_array_inner(s: &str, sep: Option<&str>) -> Vec<String> {
+    sep.map_or(
+        s.chars().map(|x| x.to_string()).collect_vec(),
+        |sep| match sep.is_empty() {
+            true => vec![s.to_string()],
+            false => s
+                .split(sep)
+                .collect_vec()
+                .into_iter()
+                .map(|x| x.to_string())
+                .collect_vec(),
+        },
+    )
 }
 
 // Use cases shown in `e2e_test/batch/functions/string_to_array.slt.part`
 #[function("string_to_array(varchar, varchar) -> list")]
-pub fn string_to_array2(s: Option<&str>, sep: Option<&str>) -> ListValue {
-    ListValue::new(
-        string_to_array_inner(s, sep)
-            .into_iter()
-            .map(|x| Some(ScalarImpl::Utf8(x.into())))
-            .collect_vec(),
-    )
-}
-
-#[function("string_to_array(varchar, varchar, varchar) -> list")]
-pub fn string_to_array3(s: Option<&str>, sep: Option<&str>, null: Option<&str>) -> ListValue {
-    null.map_or(string_to_array2(s, sep), |null| {
+pub fn string_to_array2(s: Option<&str>, sep: Option<&str>) -> Option<ListValue> {
+    s.map(|s| {
         ListValue::new(
             string_to_array_inner(s, sep)
                 .into_iter()
-                .map(|x| match x == null {
-                    true => None,
-                    _ => Some(ScalarImpl::Utf8(x.into())),
-                })
+                .map(|x| Some(ScalarImpl::Utf8(x.into())))
                 .collect_vec(),
         )
+    })
+}
+
+#[function("string_to_array(varchar, varchar, varchar) -> list")]
+pub fn string_to_array3(
+    s: Option<&str>,
+    sep: Option<&str>,
+    null: Option<&str>,
+) -> Option<ListValue> {
+    s.map(|s| {
+        null.map_or(string_to_array2(Some(s), sep).unwrap(), |null| {
+            ListValue::new(
+                string_to_array_inner(s, sep)
+                    .into_iter()
+                    .map(|x| match x == null {
+                        true => None,
+                        _ => Some(ScalarImpl::Utf8(x.into())),
+                    })
+                    .collect_vec(),
+            )
+        })
     })
 }
