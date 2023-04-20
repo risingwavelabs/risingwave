@@ -533,18 +533,22 @@ impl HummockVersionReader {
         // 1. read staging data
         for imm in &imms {
             // skip imm that only holding out-of-date data
-            if imm.max_epoch() <= min_epoch {
+            if imm.max_epoch() < min_epoch {
                 continue;
             }
 
-            if let Some(data) = get_from_batch(
+            if let Some((data, data_epoch)) = get_from_batch(
                 imm,
                 TableKey(table_key.as_ref()),
                 epoch,
                 &read_options,
                 &mut stats_guard.local_stats,
             ) {
-                return Ok(data.into_user_value());
+                return Ok(if data_epoch < min_epoch {
+                    None
+                } else {
+                    data.into_user_value()
+                });
             }
         }
 
@@ -556,7 +560,7 @@ impl HummockVersionReader {
         let full_key = FullKey::new(read_options.table_id, TableKey(table_key.clone()), epoch);
         for local_sst in &uncommitted_ssts {
             stats_guard.local_stats.sub_iter_count += 1;
-            if let Some(data) = get_from_sstable_info(
+            if let Some((data, data_epoch)) = get_from_sstable_info(
                 self.sstable_store.clone(),
                 local_sst,
                 full_key.to_ref(),
@@ -566,7 +570,11 @@ impl HummockVersionReader {
             )
             .await?
             {
-                return Ok(data.into_user_value());
+                return Ok(if data_epoch < min_epoch {
+                    None
+                } else {
+                    data.into_user_value()
+                });
             }
         }
 
@@ -589,7 +597,7 @@ impl HummockVersionReader {
                     );
                     for sstable_info in sstable_infos {
                         stats_guard.local_stats.sub_iter_count += 1;
-                        if let Some(v) = get_from_sstable_info(
+                        if let Some((data, data_epoch)) = get_from_sstable_info(
                             self.sstable_store.clone(),
                             sstable_info,
                             full_key.to_ref(),
@@ -599,7 +607,11 @@ impl HummockVersionReader {
                         )
                         .await?
                         {
-                            return Ok(v.into_user_value());
+                            return Ok(if data_epoch < min_epoch {
+                                None
+                            } else {
+                                data.into_user_value()
+                            });
                         }
                     }
                 }
@@ -622,7 +634,7 @@ impl HummockVersionReader {
                     }
 
                     stats_guard.local_stats.sub_iter_count += 1;
-                    if let Some(v) = get_from_sstable_info(
+                    if let Some((data, data_epoch)) = get_from_sstable_info(
                         self.sstable_store.clone(),
                         &level.table_infos[table_info_idx],
                         full_key.to_ref(),
@@ -632,7 +644,11 @@ impl HummockVersionReader {
                     )
                     .await?
                     {
-                        return Ok(v.into_user_value());
+                        return Ok(if data_epoch < min_epoch {
+                            None
+                        } else {
+                            data.into_user_value()
+                        });
                     }
                 }
             }

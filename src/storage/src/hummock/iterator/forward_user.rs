@@ -93,7 +93,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             let epoch = full_key.epoch;
 
             // handle multi-version
-            if epoch <= self.min_epoch || epoch > self.read_epoch {
+            if epoch < self.min_epoch || epoch > self.read_epoch {
                 self.iterator.next().await?;
                 continue;
             }
