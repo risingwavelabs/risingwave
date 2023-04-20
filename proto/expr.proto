@@ -147,7 +147,7 @@ message ExprNode {
     ARRAY_REMOVE = 538;
     ARRAY_POSITIONS = 539;
     TRIM_ARRAY = 540;
-    STRING_TO_ARRAY=541;
+    STRING_TO_ARRAY = 541;
 
     // Int256 functions
     HEX_TO_INT256 = 560;
