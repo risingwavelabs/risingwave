@@ -26,20 +26,22 @@ download_build_artifacts() {
   wget https://downloads.apache.org/kafka/3.4.0/kafka_2.13-3.4.0.tgz
   tar -zxvf kafka_2.13-3.4.0.tgz
 
+  echo ">>> Installing nexmark bench"
+  install_nexmark_bench
+
   echo ">>> Installing RisingWave components"
   ARTIFACTS="risingwave risedev-dev librisingwave_java_binding.so"
   # Create this so `risedev` tool can locate the binaries.
   mkdir -p target/release
   echo "$ARTIFACTS" | xargs -I 'buildkite-agent artifact download %-bench . && mv ./%-bench target/release/%'
-
 }
 
 install_nexmark_bench() {
   git clone https://github.com/risingwavelabs/nexmark-bench.git
-  pushd nexmark-bench
 }
 
 configure_nexmark_bench() {
+pushd nexmark-bench
 cat <<EOF > .env
 KAFKA_HOST="localhost:9092"
 BASE_TOPIC="nexmark"
@@ -50,7 +52,6 @@ NUM_PARTITIONS=8
 # NOTE: Due to https://github.com/risingwavelabs/risingwave/issues/6747, use `SEPARATE_TOPICS=false`
 SEPARATE_TOPICS=false
 RUST_LOG="nexmark_server=info"
-}
 
 ### DEFAULTS
 # host when running locally, use kafka1:19092 when running in docker
@@ -63,6 +64,7 @@ RUST_LOG="nexmark_server=info"
 # SEPARATE_TOPICS=true
 # RUST_LOG="nexmark_server=info"
 EOF
+popd
 }
 
 build_nexmark_bench() {
@@ -70,7 +72,6 @@ build_nexmark_bench() {
 }
 
 setup_nexmark_bench() {
-  install_nexmark_bench
   configure_nexmark_bench
   build_nexmark_bench
 }
@@ -122,11 +123,14 @@ kafka_start() {
 ############## MAIN
 
 main() {
-  echo "--- Machine Debug Info"
+  echo "--- Machine Debug Info before Setup"
   print_machine_debug_info
 
   echo "--- Running setup"
   setup
+
+  echo "--- Machine Debug Info after Setup"
+  print_machine_debug_info
 
   echo "--- Starting kafka"
   kafka_start
