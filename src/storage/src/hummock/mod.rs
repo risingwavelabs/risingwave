@@ -384,8 +384,10 @@ pub async fn get_from_sstable_info(
     // Iterator has sought passed the borders.
     if !iter.is_valid() {
         if !read_options.ignore_range_tombstone {
-            let delete_epoch =
-                get_min_delete_range_epoch_from_sstable(iter.sst().value().as_ref(), full_key.user_key);
+            let delete_epoch = get_min_delete_range_epoch_from_sstable(
+                iter.sst().value().as_ref(),
+                full_key.user_key,
+            );
             if delete_epoch <= full_key.epoch {
                 return Ok(Some((HummockValue::Delete, delete_epoch)));
             }
