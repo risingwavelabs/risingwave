@@ -17,8 +17,8 @@ use std::sync::Arc;
 
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
-    ArrayBuilder, ArrayImpl, ArrayMeta, ArrayRef, DataChunk, ListArrayBuilder, ListValue,
-    StructArrayBuilder, StructValue,
+    ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, ListArrayBuilder, ListValue, StructArrayBuilder,
+    StructValue,
 };
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar};
@@ -46,25 +46,15 @@ impl Expression for NestedConstructExpression {
             columns.push(e.eval_checked(input).await?);
         }
 
-        if let DataType::Struct(t) = &self.data_type {
-            let mut builder = StructArrayBuilder::with_meta(
-                input.capacity(),
-                ArrayMeta::Struct {
-                    children: t.fields.clone().into(),
-                    children_names: vec![].into(),
-                },
-            );
+        if let DataType::Struct(_) = &self.data_type {
+            let mut builder =
+                StructArrayBuilder::with_meta(input.capacity(), self.data_type.clone());
             builder.append_array_refs(columns, input.capacity());
             Ok(Arc::new(ArrayImpl::Struct(builder.finish())))
-        } else if let DataType::List { datatype } = &self.data_type {
+        } else if let DataType::List { .. } = &self.data_type {
             let columns = columns.into_iter().map(Column::new).collect();
             let chunk = DataChunk::new(columns, input.vis().clone());
-            let mut builder = ListArrayBuilder::with_meta(
-                input.capacity(),
-                ArrayMeta::List {
-                    datatype: datatype.clone(),
-                },
-            );
+            let mut builder = ListArrayBuilder::with_meta(input.capacity(), self.data_type.clone());
             for row in chunk.rows_with_holes() {
                 if let Some(row) = row {
                     builder.append_row_ref(row);

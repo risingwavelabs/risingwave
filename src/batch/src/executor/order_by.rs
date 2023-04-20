@@ -539,14 +539,11 @@ mod tests {
         };
         let mut struct_builder = StructArrayBuilder::with_meta(
             0,
-            ArrayMeta::Struct {
-                children: Arc::new([DataType::Varchar, DataType::Float32]),
-                children_names: vec![].into(),
-            },
+            DataType::Struct(Arc::new(vec![DataType::Varchar, DataType::Float32].into())),
         );
         let mut list_builder = ListArrayBuilder::with_meta(
             0,
-            ArrayMeta::List {
+            DataType::List {
                 datatype: Box::new(DataType::Int64),
             },
         );
@@ -605,14 +602,11 @@ mod tests {
         );
         let mut struct_builder = StructArrayBuilder::with_meta(
             0,
-            ArrayMeta::Struct {
-                children: Arc::new([DataType::Varchar, DataType::Float32]),
-                children_names: vec![].into(),
-            },
+            DataType::Struct(Arc::new(vec![DataType::Varchar, DataType::Float32].into())),
         );
         let mut list_builder = ListArrayBuilder::with_meta(
             0,
-            ArrayMeta::List {
+            DataType::List {
                 datatype: Box::new(DataType::Int64),
             },
         );

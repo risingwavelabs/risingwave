@@ -21,7 +21,7 @@ use serde_json::Value;
 use super::{Array, ArrayBuilder};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
-use crate::types::{Scalar, ScalarRef};
+use crate::types::{DataType, Scalar, ScalarRef};
 use crate::util::iter_util::ZipEqFast;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -329,11 +329,16 @@ pub struct JsonbArray {
 impl ArrayBuilder for JsonbArrayBuilder {
     type ArrayType = JsonbArray;
 
-    fn with_meta(capacity: usize, _meta: super::ArrayMeta) -> Self {
+    fn new(capacity: usize) -> Self {
         Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: Vec::with_capacity(capacity),
         }
+    }
+
+    fn with_meta(capacity: usize, meta: DataType) -> Self {
+        assert_eq!(meta, DataType::Jsonb);
+        Self::new(capacity)
     }
 
     fn append_n(&mut self, n: usize, value: Option<<Self::ArrayType as Array>::RefItem<'_>>) {
@@ -450,6 +455,10 @@ impl Array for JsonbArray {
     fn create_builder(&self, capacity: usize) -> super::ArrayBuilderImpl {
         let array_builder = Self::Builder::new(capacity);
         super::ArrayBuilderImpl::Jsonb(array_builder)
+    }
+
+    fn data_type(&self) -> DataType {
+        DataType::Jsonb
     }
 }
 

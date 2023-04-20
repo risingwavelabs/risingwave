@@ -24,7 +24,7 @@ use itertools::Itertools;
 use risingwave_pb::data::{ListArrayData, PbArray, PbArrayType};
 use serde::{Deserializer, Serializer};
 
-use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayMeta, ArrayResult, RowRef};
+use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, RowRef};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
 use crate::row::Row;
@@ -54,24 +54,23 @@ impl ArrayBuilder for ListArrayBuilder {
     fn new(capacity: usize) -> Self {
         Self::with_meta(
             capacity,
-            ArrayMeta::List {
+            DataType::List {
                 // Default datatype
                 datatype: Box::new(DataType::Int16),
             },
         )
     }
 
-    fn with_meta(capacity: usize, meta: ArrayMeta) -> Self {
-        if let ArrayMeta::List { datatype } = meta {
-            Self {
-                bitmap: BitmapBuilder::with_capacity(capacity),
-                offsets: vec![0],
-                value: Box::new(datatype.create_array_builder(capacity)),
-                value_type: *datatype,
-                len: 0,
-            }
-        } else {
-            panic!("must be ArrayMeta::List");
+    fn with_meta(capacity: usize, meta: DataType) -> Self {
+        let DataType::List { datatype } = meta else {
+            panic!("data type must be DataType::List");
+        };
+        Self {
+            bitmap: BitmapBuilder::with_capacity(capacity),
+            offsets: vec![0],
+            value: Box::new(datatype.create_array_builder(capacity)),
+            value_type: *datatype,
+            len: 0,
         }
     }
 
@@ -213,15 +212,15 @@ impl Array for ListArray {
     fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         let array_builder = ListArrayBuilder::with_meta(
             capacity,
-            ArrayMeta::List {
+            DataType::List {
                 datatype: Box::new(self.value_type.clone()),
             },
         );
         ArrayBuilderImpl::List(array_builder)
     }
 
-    fn array_meta(&self) -> ArrayMeta {
-        ArrayMeta::List {
+    fn data_type(&self) -> DataType {
+        DataType::List {
             datatype: Box::new(self.value_type.clone()),
         }
     }
@@ -616,7 +615,7 @@ mod tests {
 
         let mut builder = ListArrayBuilder::with_meta(
             4,
-            ArrayMeta::List {
+            DataType::List {
                 datatype: Box::new(DataType::Int32),
             },
         );
@@ -644,7 +643,7 @@ mod tests {
 
         let mut builder = ListArrayBuilder::with_meta(
             4,
-            ArrayMeta::List {
+            DataType::List {
                 datatype: Box::new(DataType::Int32),
             },
         );
@@ -666,7 +665,7 @@ mod tests {
         );
         let builder = arr.create_builder(0);
         let arr2 = try_match_expand!(builder.finish(), ArrayImpl::List).unwrap();
-        assert_eq!(arr.array_meta(), arr2.array_meta());
+        assert_eq!(arr.data_type(), arr2.data_type());
     }
 
     #[test]
@@ -676,7 +675,7 @@ mod tests {
         {
             let mut builder = ListArrayBuilder::with_meta(
                 1,
-                ArrayMeta::List {
+                DataType::List {
                     datatype: Box::new(DataType::Int32),
                 },
             );
@@ -689,7 +688,7 @@ mod tests {
         }
 
         {
-            let meta = ArrayMeta::List {
+            let meta = DataType::List {
                 datatype: Box::new(DataType::List {
                     datatype: Box::new(DataType::Int32),
                 }),
@@ -798,7 +797,7 @@ mod tests {
 
         let mut builder = ListArrayBuilder::with_meta(
             3,
-            ArrayMeta::List {
+            DataType::List {
                 datatype: Box::new(DataType::List {
                     datatype: Box::new(DataType::Int32),
                 }),
@@ -880,7 +879,7 @@ mod tests {
 
         let mut builder = ListArrayBuilder::with_meta(
             0,
-            ArrayMeta::List {
+            DataType::List {
                 datatype: Box::new(DataType::Varchar),
             },
         );
@@ -958,7 +957,7 @@ mod tests {
 
             let mut builder = ListArrayBuilder::with_meta(
                 0,
-                ArrayMeta::List {
+                DataType::List {
                     datatype: Box::new(datatype),
                 },
             );

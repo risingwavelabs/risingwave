@@ -312,7 +312,7 @@ mod tests {
             return_type,
             ArrayBuilderImpl::List(ListArrayBuilder::with_meta(
                 0,
-                ArrayMeta::List {
+                DataType::List {
                     datatype: Box::new(DataType::Int32),
                 },
             )),

@@ -137,14 +137,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_filter_executor() {
-        use risingwave_common::array::{
-            ArrayBuilder, ArrayMeta, ListArrayBuilder, ListRef, ListValue,
-        };
+        use risingwave_common::array::{ArrayBuilder, ListArrayBuilder, ListRef, ListValue};
         use risingwave_common::types::Scalar;
 
         let mut builder = ListArrayBuilder::with_meta(
             4,
-            ArrayMeta::List {
+            DataType::List {
                 datatype: Box::new(DataType::Int32),
             },
         );

@@ -105,14 +105,11 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
     type ArrayType: Array<Builder = Self>;
 
     /// Create a new builder with `capacity`.
-    fn new(capacity: usize) -> Self {
-        // No metadata by default.
-        Self::with_meta(capacity, ArrayMeta::Simple)
-    }
+    fn new(capacity: usize) -> Self;
 
     /// # Panics
     /// Panics if `meta`'s type mismatches with the array type.
-    fn with_meta(capacity: usize, meta: ArrayMeta) -> Self;
+    fn with_meta(capacity: usize, meta: DataType) -> Self;
 
     /// Append a value multiple times.
     ///
@@ -275,39 +272,7 @@ pub trait Array:
 
     fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl;
 
-    fn array_meta(&self) -> ArrayMeta {
-        ArrayMeta::Simple
-    }
-}
-
-/// The creation of [`Array`] typically does not rely on [`DataType`].
-/// For now the exceptions are list and struct, which require type details
-/// as they decide the layout of the array.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ArrayMeta {
-    Simple, // Simple array without given any extra metadata.
-    Struct {
-        children: Arc<[DataType]>,
-        children_names: Arc<[String]>,
-    },
-    List {
-        datatype: Box<DataType>,
-    },
-}
-
-impl From<&DataType> for ArrayMeta {
-    fn from(data_type: &DataType) -> Self {
-        match data_type {
-            DataType::Struct(struct_type) => ArrayMeta::Struct {
-                children: struct_type.fields.clone().into(),
-                children_names: struct_type.field_names.clone().into(),
-            },
-            DataType::List { datatype } => ArrayMeta::List {
-                datatype: datatype.clone(),
-            },
-            _ => ArrayMeta::Simple,
-        }
-    }
+    fn data_type(&self) -> DataType;
 }
 
 /// Implement `compact` on array, which removes element according to `visibility`.
@@ -319,7 +284,7 @@ trait CompactableArray: Array {
 
 impl<A: Array> CompactableArray for A {
     fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self {
-        let mut builder = A::Builder::with_meta(cardinality, self.array_meta());
+        let mut builder = A::Builder::with_meta(cardinality, self.data_type());
         for (elem, visible) in self.iter().zip_eq_fast(visibility.iter()) {
             if visible {
                 builder.append(elem);
@@ -753,7 +718,7 @@ mod tests {
         A: Array + 'a,
         F: Fn(Option<A::RefItem<'a>>) -> bool,
     {
-        let mut builder = A::Builder::with_meta(data.len(), data.array_meta());
+        let mut builder = A::Builder::with_meta(data.len(), data.data_type());
         for i in 0..data.len() {
             if pred(data.value_at(i)) {
                 builder.append(data.value_at(i));

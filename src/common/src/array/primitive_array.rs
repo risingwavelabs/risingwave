@@ -22,7 +22,7 @@ use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::{Array, ArrayBuilder, ArrayResult};
 use crate::array::serial_array::Serial;
-use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayMeta};
+use crate::array::{ArrayBuilderImpl, ArrayImpl, DataType};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
 use crate::for_all_native_types;
@@ -39,6 +39,7 @@ where
         + Scalar<ScalarRefType<'a> = Self>
         + ScalarRef<'a, ScalarType = Self>,
 {
+    const DATA_TYPE: DataType;
     // array methods
     /// A helper to convert a primitive array to `ArrayImpl`.
     fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl;
@@ -57,6 +58,8 @@ where
 
 macro_rules! impl_array_methods {
     ($scalar_type:ty, $array_type_pb:ident, $array_impl_variant:ident) => {
+        const DATA_TYPE: DataType = DataType::$array_impl_variant;
+
         fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl {
             ArrayImpl::$array_impl_variant(arr)
         }
@@ -223,6 +226,10 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
     fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         T::create_array_builder(capacity)
     }
+
+    fn data_type(&self) -> DataType {
+        T::DATA_TYPE
+    }
 }
 
 /// `PrimitiveArrayBuilder` constructs a `PrimitiveArray` from `Option<Primitive>`.
@@ -235,11 +242,16 @@ pub struct PrimitiveArrayBuilder<T: PrimitiveArrayItemType> {
 impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
     type ArrayType = PrimitiveArray<T>;
 
-    fn with_meta(capacity: usize, _meta: ArrayMeta) -> Self {
+    fn new(capacity: usize) -> Self {
         Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: Vec::with_capacity(capacity),
         }
+    }
+
+    fn with_meta(capacity: usize, meta: DataType) -> Self {
+        assert_eq!(meta, T::DATA_TYPE);
+        Self::new(capacity)
     }
 
     fn append_n(&mut self, n: usize, value: Option<T>) {

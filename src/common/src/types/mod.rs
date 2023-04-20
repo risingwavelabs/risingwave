@@ -294,16 +294,8 @@ impl DataType {
             DataType::Interval => IntervalArrayBuilder::new(capacity).into(),
             DataType::Jsonb => JsonbArrayBuilder::new(capacity).into(),
             DataType::Int256 => Int256ArrayBuilder::new(capacity).into(),
-            DataType::Struct(t) => {
-                StructArrayBuilder::with_meta(capacity, t.to_array_meta()).into()
-            }
-            DataType::List { datatype } => ListArrayBuilder::with_meta(
-                capacity,
-                ArrayMeta::List {
-                    datatype: datatype.clone(),
-                },
-            )
-            .into(),
+            DataType::Struct(_) => StructArrayBuilder::with_meta(capacity, self.clone()).into(),
+            DataType::List { .. } => ListArrayBuilder::with_meta(capacity, self.clone()).into(),
             DataType::Bytea => BytesArrayBuilder::new(capacity).into(),
         }
     }

@@ -17,7 +17,6 @@ use std::fmt::{Display, Formatter};
 use itertools::Itertools;
 
 use super::DataType;
-use crate::array::ArrayMeta;
 use crate::util::iter_util::ZipEqFast;
 
 /// Details about a struct type. There are 2 cases for a struct:
@@ -44,11 +43,13 @@ impl StructType {
             field_names,
         }
     }
+}
 
-    pub fn to_array_meta(&self) -> ArrayMeta {
-        ArrayMeta::Struct {
-            children: self.fields.clone().into(),
-            children_names: self.field_names.clone().into(),
+impl From<Vec<DataType>> for StructType {
+    fn from(fields: Vec<DataType>) -> Self {
+        Self {
+            fields,
+            field_names: Vec::new(),
         }
     }
 }

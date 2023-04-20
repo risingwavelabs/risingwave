@@ -17,7 +17,7 @@ use std::fmt::{Display, Write};
 use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::bytes_array::{BytesWriter, PartialBytesWriter};
-use super::{Array, ArrayBuilder, ArrayMeta, BytesArray, BytesArrayBuilder};
+use super::{Array, ArrayBuilder, BytesArray, BytesArrayBuilder, DataType};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::Bitmap;
 use crate::estimate_size::EstimateSize;
@@ -72,6 +72,10 @@ impl Array for Utf8Array {
     fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         let array_builder = Utf8ArrayBuilder::new(capacity);
         ArrayBuilderImpl::Utf8(array_builder)
+    }
+
+    fn data_type(&self) -> DataType {
+        DataType::Varchar
     }
 }
 
@@ -129,10 +133,15 @@ pub struct Utf8ArrayBuilder {
 impl ArrayBuilder for Utf8ArrayBuilder {
     type ArrayType = Utf8Array;
 
-    fn with_meta(capacity: usize, meta: ArrayMeta) -> Self {
+    fn new(capacity: usize) -> Self {
         Self {
-            bytes: BytesArrayBuilder::with_meta(capacity, meta),
+            bytes: BytesArrayBuilder::new(capacity),
         }
+    }
+
+    fn with_meta(capacity: usize, meta: DataType) -> Self {
+        assert_eq!(meta, DataType::Varchar);
+        Self::new(capacity)
     }
 
     #[inline]
