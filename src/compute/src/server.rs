@@ -16,7 +16,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use pretty_bytes::converter::convert;
+use number_prefix::{self, NumberPrefix};
 use risingwave_batch::executor::{BatchManagerMetrics, BatchTaskMetrics};
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
@@ -486,6 +486,18 @@ fn embedded_compactor_enabled(state_store_url: &str, disable_remote_compactor: b
         || disable_remote_compactor
 }
 
+/// convert bytes to binary pretty format
+fn convert(num_bytes: f64) -> String {
+    match NumberPrefix::binary(num_bytes) {
+        NumberPrefix::Standalone(bytes) => {
+            format!("{} bytes", bytes)
+        }
+        NumberPrefix::Prefixed(prefix, n) => {
+            format!("{:.2} {}B", n, prefix)
+        }
+    }
+}
+
 // Print out the memory outline of the compute node.
 fn print_memory_config(
     cn_total_memory_bytes: usize,
@@ -526,4 +538,19 @@ fn print_memory_config(
         ">     compute_memory: {}",
         convert(compute_memory_bytes as _)
     );
+}
+
+#[cfg(test)]
+mod test {
+    use super::convert;
+
+    #[test]
+    fn test_bytes_convert() {
+        let base = 1024_f64;
+
+        assert_eq!(convert(1_f64), "1 bytes".to_string());
+        assert_eq!(convert(base), "1.00 KiB".to_string());
+        assert_eq!(convert(base * base), "1.00 MiB".to_string());
+        assert_eq!(convert(base * base * base), "1.00 GiB".to_string());
+    }
 }
