@@ -18,6 +18,12 @@ download_build_artifacts() {
   tar -xvf promql-v0.3.0-linux-arm64.tar.gz
   chmod +x ./promql
   mv ./promql /usr/local/bin/promql
+  echo ">>> Run Sanity check that PromQL is installed"
+  promql --help
+
+  echo ">>> Installing Kafka"
+  wget https://downloads.apache.org/kafka/3.4.0/kafka_2.13-3.4.0.tgz
+  tar -zxvf kafka_2.13-3.4.0.tgz
 
   echo ">>> Installing RisingWave components"
   ARTIFACTS="risingwave risedev-dev librisingwave_java_binding.so"
@@ -68,12 +74,29 @@ setup_nexmark_bench() {
   build_nexmark_bench
 }
 
+setup_rw() {
+cat <<EOF > .env
+RISEDEV_CONFIGURED=true
+
+ENABLE_PROMETHEUS_GRAFANA=true
+ENABLE_ETCD=true
+ENABLE_KAFKA=true
+ENABLE_COMPUTE_TRACING=true
+ENABLE_BUILD_RUST=true
+ENABLE_RELEASE_PROFILE=true
+ENABLE_ALL_IN_ONE=true
+EOF
+}
+
 # Install artifacts + tools, configure environment
 setup() {
   download_build_artifacts
 
   echo ">>> Setting up nexmark-bench"
   setup_nexmark_bench
+
+  echo ">>> Setting up RisingWave"
+  setup_rw
   echo "Success!"
 }
 
@@ -90,6 +113,11 @@ gen_events() {
   popd
 }
 
+kafka_start() {
+  nohup ./opt/kafka_2.13-3.2.1/bin/zookeeper-server-start.sh ./opt/kafka_2.13-3.2.1/config/zookeeper.properties > zookeeper.log 2>&1 &
+  nohup ./opt/kafka_2.13-3.2.1/bin/kafka-server-start.sh ./opt/kafka_2.13-3.2.1/config/server.properties --override num.partitions=8 > kafka.log 2>&1 &
+}
+
 ############## MAIN
 
 main() {
@@ -99,11 +127,14 @@ main() {
   echo "--- Running setup"
   setup
 
+  echo "--- Starting kafka"
+  kafka_start
+
   echo "--- Spawning nexmark events"
   # gen_events
 
   echo "--- Starting up RW"
-  ENABLE_RW_RELEASE_PROFILE=true ./risedev d ci-gen-cpu-flamegraph
+  ./risedev d ci-gen-cpu-flamegraph
 
   echo "--- Running Benchmarks"
   echo "Success!"
