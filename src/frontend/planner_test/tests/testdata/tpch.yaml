@@ -2261,7 +2261,7 @@
       | └─StreamHashAgg { group_key: [partsupp.ps_partkey], aggs: [sum($expr1), count] }
       |   └─StreamExchange { dist: HashShard(partsupp.ps_partkey) }
       |     └─StreamProject { exprs: [partsupp.ps_partkey, (partsupp.ps_supplycost * partsupp.ps_availqty::Decimal) as $expr1, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
-      |       └─StreamShare { id = 12 }
+      |       └─StreamShare { id = 10 }
       |         └─StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_suppkey, supplier.s_suppkey, supplier.s_nationkey, nation.n_nationkey] }
       |           ├─StreamExchange { dist: HashShard(supplier.s_nationkey) }
       |           | └─StreamHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey] }
@@ -2279,7 +2279,7 @@
             └─StreamExchange { dist: Single }
               └─StreamStatelessLocalSimpleAgg { aggs: [sum($expr2)] }
                 └─StreamProject { exprs: [(partsupp.ps_supplycost * partsupp.ps_availqty::Decimal) as $expr2, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
-                  └─StreamShare { id = 12 }
+                  └─StreamShare { id = 10 }
                     └─StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_suppkey, supplier.s_suppkey, supplier.s_nationkey, nation.n_nationkey] }
                       ├─StreamExchange { dist: HashShard(supplier.s_nationkey) }
                       | └─StreamHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey] }
