@@ -116,12 +116,12 @@ gen_events() {
   pushd nexmark-bench
   nexmark-server -c
   NEXMARK_EVENTS=100000000
-  echo "Generating "$NEXMARK_EVENTS" events"
+  echo "Generating $NEXMARK_EVENTS events"
   nexmark-server \
     --event-rate 500000 \
     --max-events "$NEXMARK_EVENTS" \
     --num-event-generators 8 1>gen_events.log 2>&1 &
-  echo "Generated "$NEXMARK_EVENTS" events"
+  echo "Generated $NEXMARK_EVENTS events"
   popd
 }
 
