@@ -18,14 +18,6 @@ print_machine_debug_info() {
 
 ############## INSTALL
 
-install_nperf() {
-  git clone https://github.com/koute/not-perf.git
-  pushd not-perf/cli
-  # NOTE(kwannoel): Don't change the pinned toolchain, unless the new one works in ci!
-  cargo +nightly-2023-03-01 build --release
-  popd
-}
-
 install_all() {
   echo ">>> Installing PromQL cli client"
   # Download promql
@@ -33,7 +25,7 @@ install_all() {
   tar -xvf promql-v0.3.0-linux-arm64.tar.gz
   chmod +x ./promql
   mv ./promql /usr/local/bin/promql
-  # FIXME
+  # FIXME(kwannoel): For some reason this hangs...
   # echo ">>> Run Sanity check that PromQL is installed"
   # promql --help
 
@@ -46,7 +38,8 @@ install_all() {
   popd
 
   echo ">>> Installing nperf"
-  install_nperf
+  wget https://github.com/koute/not-perf/releases/download/0.1.1/not-perf-x86_64-unknown-linux-gnu.tgz
+  tar -xvf not-perf-x86_64-unknown-linux-gnu.tgz
 
   echo ">>> Installing RisingWave components (includes other components installed by risedev (prometheus + grafana + etcd)"
   ARTIFACTS="risingwave risedev-dev librisingwave_java_binding.so"
@@ -109,7 +102,7 @@ configure_all() {
 ############## Start benchmark environment
 
 start_nperf() {
-  not-perf/target/release/nperf record -p $(pidof compute-node) -o perf.data
+  ./nperf record -p $(pidof compute-node) -o perf.data
 }
 
 kafka_start() {
