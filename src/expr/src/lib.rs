@@ -22,6 +22,7 @@
 #![feature(lazy_cell)]
 #![feature(try_blocks)]
 
+pub mod agg;
 mod error;
 pub mod expr;
 pub mod function;

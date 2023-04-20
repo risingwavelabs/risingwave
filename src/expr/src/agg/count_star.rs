@@ -16,7 +16,7 @@ use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::types::*;
 
-use crate::vector_op::agg::aggregator::Aggregator;
+use super::Aggregator;
 use crate::Result;
 
 #[derive(Clone)]

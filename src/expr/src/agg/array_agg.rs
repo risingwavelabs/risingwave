@@ -20,7 +20,7 @@ use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
 use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
-use crate::vector_op::agg::aggregator::Aggregator;
+use super::Aggregator;
 use crate::{ExprError, Result};
 
 #[derive(Clone)]

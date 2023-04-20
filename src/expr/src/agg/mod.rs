@@ -18,15 +18,22 @@ use risingwave_common::bail;
 use risingwave_common::types::*;
 
 use crate::function::aggregate::{AggArgs, AggCall, AggKind};
-use crate::vector_op::agg::approx_count_distinct::ApproxCountDistinct;
-use crate::vector_op::agg::array_agg::create_array_agg_state;
-use crate::vector_op::agg::count_star::CountStar;
-use crate::vector_op::agg::filter::*;
-use crate::vector_op::agg::functions::*;
-use crate::vector_op::agg::general_agg::*;
-use crate::vector_op::agg::general_distinct_agg::*;
-use crate::vector_op::agg::string_agg::create_string_agg_state;
 use crate::Result;
+
+mod approx_count_distinct;
+mod array_agg;
+mod count_star;
+mod filter;
+mod general;
+mod general_sorted_grouper;
+mod string_agg;
+
+use self::approx_count_distinct::ApproxCountDistinct;
+use self::array_agg::create_array_agg_state;
+use self::count_star::CountStar;
+use self::filter::*;
+pub use self::general_sorted_grouper::{create_sorted_grouper, BoxedSortedGrouper, EqGroups};
+use self::string_agg::create_string_agg_state;
 
 /// An `Aggregator` supports `update` data and `output` result.
 #[async_trait::async_trait]

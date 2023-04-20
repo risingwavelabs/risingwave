@@ -17,8 +17,7 @@ use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use super::aggregator::Aggregator;
-use super::BoxedAggState;
+use super::{Aggregator, BoxedAggState};
 use crate::expr::ExpressionRef;
 use crate::Result;
 
