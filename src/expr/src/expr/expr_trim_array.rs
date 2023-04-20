@@ -36,7 +36,12 @@ use crate::Result;
 /// {1,2,3,4,5,NULL}
 ///
 /// query T
-/// select trim_array(array[1,2,3,4,5,null::int], null::int);
+/// select trim_array(array[1,2,3,4,5,null::int], null);
+/// ----
+/// NULL
+///
+/// query T
+/// select trim_array(array[1,2,3,4,5,null::int], null::smallint);
 /// ----
 /// NULL
 ///
@@ -57,43 +62,37 @@ use crate::Result;
 /// select trim_array(array[1,2,3,4,5,null::int], -1);
 ///
 /// statement error
+/// select trim_array(array[1,2,3,4,5,null::int], null::bigint);
+///
+/// statement error
 /// select trim_array(array[1,2,3,4,5,null::int], 3.14);
 ///
 /// statement error
-/// select trim_array(array[1,2,3,4,5,null::int], null::int[]);
+/// select trim_array(array[1,2,3,4,5,null::int], array[1]);
 ///
 /// statement error
 /// select trim_array(array[1,2,3,4,5,null::int], true);
 /// ```
 #[function("trim_array(list, int32) -> list")]
-fn trim_array(array: Option<ListRef<'_>>, n: Option<i32>) -> Result<Option<ListValue>> {
-    match (array, n) {
-        (Some(array), Some(n)) => {
-            let values = array.values_ref();
-            let len = values.len();
-            match TryInto::<usize>::try_into(n) {
-                Ok(n) => {
-                    if len < n {
-                        Err(ExprError::InvalidParam {
-                            name: "n",
-                            reason: "more than array length".to_string(),
-                        })
-                    } else {
-                        Ok(Some(ListValue::new(
-                            values
-                                .into_iter()
-                                .take(len - n)
-                                .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
-                                .collect(),
-                        )))
-                    }
-                }
-                Err(_) => Err(ExprError::InvalidParam {
-                    name: "n",
-                    reason: "less than zero".to_string(),
-                }),
-            }
-        }
-        _ => Ok(None),
-    }
+fn trim_array(array: ListRef<'_>, n: i32) -> Result<ListValue> {
+    let values = array.values_ref();
+    let len_to_trim: usize = n.try_into().map_err(|_| ExprError::InvalidParam {
+        name: "n",
+        reason: "less than zero".to_string(),
+    })?;
+    let len_to_retain =
+        values
+            .len()
+            .checked_sub(len_to_trim)
+            .ok_or_else(|| ExprError::InvalidParam {
+                name: "n",
+                reason: "more than array length".to_string(),
+            })?;
+    Ok(ListValue::new(
+        values
+            .into_iter()
+            .take(len_to_retain)
+            .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
+            .collect(),
+    ))
 }

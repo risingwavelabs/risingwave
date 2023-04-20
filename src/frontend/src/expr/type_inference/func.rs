@@ -626,14 +626,11 @@ fn infer_type_for_special(
         ExprType::TrimArray => {
             ensure_arity!("trim_array", | inputs | == 2);
 
-            if inputs[0].is_unknown() || inputs[1].is_unknown() {
-                return Err(ErrorCode::BindError("unknown type".to_string()).into());
-            }
+            let owned = std::mem::replace(&mut inputs[1], ExprImpl::literal_bool(true));
+            inputs[1] = owned.cast_implicit(DataType::Int32)?;
 
-            match (inputs[0].return_type(), inputs[1].return_type()) {
-                (DataType::List { datatype: typ }, DataType::Int32) => {
-                    Ok(Some(DataType::List { datatype: typ }))
-                }
+            match inputs[0].return_type() {
+                DataType::List { datatype: typ } => Ok(Some(DataType::List { datatype: typ })),
                 _ => Ok(None),
             }
         }
