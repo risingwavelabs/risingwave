@@ -29,8 +29,9 @@ install_nexmark_bench() {
 
 install_nperf() {
   git clone https://github.com/koute/not-perf.git
-  cd not-perf/cli
+  pushd not-perf/cli
   cargo build --release
+  popd
 }
 
 install_all() {
