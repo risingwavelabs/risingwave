@@ -1,13 +1,15 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 set -euo pipefail
 
 ############## DEBUG INFO
 
 print_machine_debug_info() {
-  echo "Free space on Machine"
+  echo "Shell:"
+  echo "$SHELL"
+  echo "Free space on Machine:"
   df -h
-  echo "Files on Machine"
+  echo "Files on Machine:"
   ls
 }
 
