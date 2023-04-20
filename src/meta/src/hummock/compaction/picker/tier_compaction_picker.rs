@@ -110,7 +110,8 @@ impl TierCompactionPicker {
             // compact task never be trigger.
             if level.level_type == non_overlapping_type
                 && is_write_amp_large
-                && select_level_inputs.len() < self.config.level0_tier_compact_file_number as usize
+                && select_level_inputs.len()
+                    < self.config.level0_sub_level_compact_level_count as usize
                 && compact_file_count < self.config.level0_max_compact_file_number
             {
                 stats.skip_by_write_amp_limit += 1;
@@ -257,7 +258,8 @@ impl TierCompactionPicker {
                     select_level_inputs.push(cur_level);
                 }
 
-                if select_level_inputs.len() < self.config.level0_tier_compact_file_number as usize
+                if select_level_inputs.len()
+                    < self.config.level0_sub_level_compact_level_count as usize
                 {
                     stats.skip_by_count_limit += 1;
                     continue;
@@ -302,9 +304,11 @@ impl TierCompactionPicker {
                 table_infos: level.table_infos.clone(),
             }];
 
+            // We assume that the maximum size of each sub_level is sub_level_max_compaction_bytes,
+            // so the design here wants to merge multiple overlapping-levels in one compaction
             let max_compaction_bytes = std::cmp::min(
                 self.config.max_compaction_bytes,
-                self.config.sub_level_max_compaction_bytes,
+                self.config.sub_level_max_compaction_bytes * 4,
             );
 
             let mut compaction_bytes = level.total_file_size;
@@ -339,7 +343,9 @@ impl TierCompactionPicker {
                 });
             }
 
-            if compact_file_count < self.config.level0_tier_compact_file_number
+            // If waiting_enough_files is not satisfied, we will raise the priority of the number of
+            // levels to ensure that we can merge as many sub_levels as possible
+            if select_level_inputs.len() < self.config.level0_sub_level_compact_level_count as usize
                 && waiting_enough_files
             {
                 stats.skip_by_count_limit += 1;
