@@ -114,8 +114,8 @@ gen_events() {
 }
 
 kafka_start() {
-  nohup ./opt/kafka_2.13-3.2.1/bin/zookeeper-server-start.sh ./opt/kafka_2.13-3.2.1/config/zookeeper.properties > zookeeper.log 2>&1 &
-  nohup ./opt/kafka_2.13-3.2.1/bin/kafka-server-start.sh ./opt/kafka_2.13-3.2.1/config/server.properties --override num.partitions=8 > kafka.log 2>&1 &
+  nohup ./kafka_2.13-3.2.1/bin/zookeeper-server-start.sh ./opt/kafka_2.13-3.4.0/config/zookeeper.properties > zookeeper.log 2>&1 &
+  nohup ./kafka_2.13-3.2.1/bin/kafka-server-start.sh ./opt/kafka_2.13-3.4.0/config/server.properties --override num.partitions=8 > kafka.log 2>&1 &
 }
 
 ############## MAIN
@@ -128,7 +128,7 @@ main() {
   setup
 
   echo "--- Starting kafka"
-  # kafka_start
+  kafka_start
 
   echo "--- Spawning nexmark events"
   # gen_events
