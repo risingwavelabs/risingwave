@@ -281,20 +281,21 @@ impl ToStream for LogicalProject {
         let new_input = self
             .input()
             .to_stream_with_dist_required(&input_required, ctx)?;
-        let new_logical = self.clone_with_input(new_input.clone());
+        let mut new_logical = self.core.clone();
+        new_logical.input = new_input;
         let stream_plan = if let Some(input_proj) = new_input.as_stream_project() {
             let outer_project = new_logical;
             let inner_project = input_proj.as_logical();
             let mut subst = Substitute {
-                mapping: inner_project.exprs().clone(),
+                mapping: inner_project.exprs.clone(),
             };
             let exprs = outer_project
-                .exprs()
+                .exprs
                 .iter()
                 .cloned()
                 .map(|expr| subst.rewrite_expr(expr))
                 .collect();
-            StreamProject::new(LogicalProject::new(inner_project.input(), exprs))
+            StreamProject::new(generic::Project::new(exprs, inner_project.input))
         } else {
             StreamProject::new(new_logical)
         };
