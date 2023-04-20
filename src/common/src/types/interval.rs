@@ -21,6 +21,7 @@ use std::ops::{Add, Neg, Sub};
 
 use byteorder::{BigEndian, NetworkEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
+use chrono::Timelike;
 use num_traits::{CheckedAdd, CheckedNeg, CheckedSub, Zero};
 use postgres_types::{to_sql_checked, FromSql};
 use risingwave_common_proc_macro::EstimateSize;

@@ -16,7 +16,7 @@
 mod tests {
     use risingwave_common::array::interval_array::IntervalArray;
     use risingwave_common::array::*;
-    use risingwave_common::types::test_utils::IntervalTestExt;
+    use risingwave_common::types::interval::test_utils::IntervalTestExt;
     use risingwave_common::types::{Date, Decimal, Interval, Scalar};
     use risingwave_pb::expr::expr_node::Type;
 

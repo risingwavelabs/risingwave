@@ -24,12 +24,12 @@ use either::{for_both, Either};
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 
-use crate::array::{serial_array, ArrayImpl, JsonbVal, ListRef, ListValue, StructRef, StructValue};
+use crate::array::{serial_array, ArrayImpl, ListRef, ListValue, StructRef, StructValue};
 use crate::catalog::ColumnId;
 use crate::row::{Row, RowDeserializer as BasicDeserializer};
 use crate::types::struct_type::StructType;
 use crate::types::{
-    DataType, Date, Datum, Decimal, Interval, ScalarImpl, ScalarRefImpl, Time, Timestamp,
+    DataType, Date, Datum, Decimal, Interval, JsonbVal, ScalarImpl, ScalarRefImpl, Time, Timestamp,
     ToDatumRef, F32, F64,
 };
 

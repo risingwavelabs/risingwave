@@ -50,6 +50,8 @@ macro_rules! impl_chrono_wrapper {
         pub struct $variant_name(pub $chrono);
 
         impl $variant_name {
+            pub const MIN: Self = Self(<$chrono>::MIN);
+
             pub fn new(data: $chrono) -> Self {
                 $variant_name(data)
             }

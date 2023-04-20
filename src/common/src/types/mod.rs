@@ -46,6 +46,7 @@ pub use successor::*;
 pub mod chrono_wrapper;
 pub mod decimal;
 pub mod interval;
+pub mod jsonb;
 mod postgres_type;
 pub mod struct_type;
 pub mod to_binary;
@@ -54,27 +55,27 @@ pub mod to_text;
 pub mod num256;
 mod ordered_float;
 
-use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
-pub use chrono_wrapper::{Date, Time, Timestamp, UNIX_EPOCH_DAYS};
-pub use decimal::Decimal;
-pub use interval::*;
+use chrono::{Datelike, Timelike};
 use itertools::Itertools;
-pub use ops::{CheckedAdd, IsNegative};
-pub use ordered_float::{FloatExt, IntoOrdered};
 use paste::paste;
 use postgres_types::{IsNull, ToSql, Type};
 use strum_macros::EnumDiscriminants;
 
+pub use self::chrono_wrapper::{Date, Time, Timestamp, UNIX_EPOCH_DAYS};
+pub use self::decimal::Decimal;
+pub use self::interval::{DateTimeField, Interval, IntervalDisplay};
+pub use self::jsonb::{JsonbRef, JsonbVal};
+pub use self::num256::{Int256, Int256Ref};
+pub use self::ops::{CheckedAdd, IsNegative};
+pub use self::ordered_float::{FloatExt, IntoOrdered};
 pub use self::struct_type::StructType;
 use self::to_binary::ToBinary;
 use self::to_text::ToText;
 use crate::array::serial_array::Serial;
 use crate::array::{
-    ArrayBuilderImpl, JsonbRef, JsonbVal, ListRef, ListValue, PrimitiveArrayItemType, StructRef,
-    StructValue,
+    ArrayBuilderImpl, ListRef, ListValue, PrimitiveArrayItemType, StructRef, StructValue,
 };
 use crate::error::Result as RwResult;
-pub use crate::types::num256::{Int256, Int256Ref};
 
 pub type F32 = ordered_float::OrderedFloat<f32>;
 pub type F64 = ordered_float::OrderedFloat<f64>;
@@ -408,9 +409,9 @@ impl DataType {
             DataType::Boolean => ScalarImpl::Bool(false),
             DataType::Varchar => ScalarImpl::Utf8("".into()),
             DataType::Bytea => ScalarImpl::Bytea("".to_string().into_bytes().into()),
-            DataType::Date => ScalarImpl::Date(Date(NaiveDate::MIN)),
+            DataType::Date => ScalarImpl::Date(Date::MIN),
             DataType::Time => ScalarImpl::Time(Time::from_hms_uncheck(0, 0, 0)),
-            DataType::Timestamp => ScalarImpl::Timestamp(Timestamp(NaiveDateTime::MIN)),
+            DataType::Timestamp => ScalarImpl::Timestamp(Timestamp::MIN),
             // FIXME(yuhao): Add a timestamptz scalar.
             DataType::Timestamptz => ScalarImpl::Int64(i64::MIN),
             DataType::Decimal => ScalarImpl::Decimal(Decimal::NegativeInf),

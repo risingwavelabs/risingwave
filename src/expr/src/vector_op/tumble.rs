@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use num_traits::Zero;
-use risingwave_common::types::{Date, Interval, Timestamp, USECS_PER_DAY, USECS_PER_MONTH};
+use risingwave_common::types::interval::{USECS_PER_DAY, USECS_PER_MONTH};
+use risingwave_common::types::{Date, Interval, Timestamp};
 use risingwave_expr_macro::function;
 
 use crate::Result;
@@ -106,7 +107,7 @@ pub fn tumble_start_offset_timestamptz(
 #[cfg(test)]
 mod tests {
     use chrono::{Datelike, Timelike};
-    use risingwave_common::types::test_utils::IntervalTestExt;
+    use risingwave_common::types::interval::test_utils::IntervalTestExt;
     use risingwave_common::types::{Date, Interval};
 
     use super::tumble_start_offset_date_time;
