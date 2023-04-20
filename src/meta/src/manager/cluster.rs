@@ -116,8 +116,7 @@ where
 
         // Generate parallel units.
         let parallel_units = if r#type == WorkerType::ComputeNode {
-            self
-                .generate_cn_parallel_units(worker_node_parallelism, worker_id)
+            self.generate_cn_parallel_units(worker_node_parallelism, worker_id)
                 .await?
         } else {
             vec![]
