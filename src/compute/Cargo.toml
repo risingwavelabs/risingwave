@@ -24,7 +24,6 @@ futures-async-stream = "0.2"
 hyper = "0.14"
 itertools = "0.10"
 maplit = "1.0.2"
-number_prefix = "0.4.0"
 pprof = { version = "0.11", features = ["flamegraph"] }
 prometheus = { version = "0.13" }
 risingwave_batch = { path = "../batch" }
