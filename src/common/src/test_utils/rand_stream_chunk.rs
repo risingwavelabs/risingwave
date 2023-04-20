@@ -30,7 +30,7 @@ pub fn gen_legal_stream_chunk(
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     if let Some(bitmap) = bitmap {
         for i in 0..chunk_size {
-            // SAFETY(value_at_unchecked): the idx is always in bound.hao
+            // SAFETY(value_at_unchecked): the idx is always in bound.
             unsafe {
                 if bitmap.is_set_unchecked(i) {
                     let op = if append_only || cur_data.is_empty() || rng.gen() {
