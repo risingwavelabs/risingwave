@@ -22,7 +22,7 @@ use risingwave_pb::expr::ExprNode;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
-use crate::expr::{ExprImpl, ExprRewriter, Expr};
+use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::utils::ColIndexMappingRewriteExt;
 

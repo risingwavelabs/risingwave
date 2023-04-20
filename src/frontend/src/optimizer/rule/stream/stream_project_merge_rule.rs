@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::expr::ExprRewriter;
-use crate::optimizer::plan_node::{PlanTreeNodeUnary, StreamProject, generic};
+use crate::optimizer::plan_node::{generic, PlanTreeNodeUnary, StreamProject};
 use crate::optimizer::{BoxedRule, PlanRef, Rule};
 use crate::utils::Substitute;
 
