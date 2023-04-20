@@ -162,7 +162,7 @@ impl PlanBase {
         dist: Distribution,
         order: Order,
     ) -> Self {
-        Self::new_batch(logical.ctx(), logical.schema().clone(), dist, order)
+        Self::new_batch(logical.ctx(), logical.schema(), dist, order)
     }
 
     pub fn new_batch(

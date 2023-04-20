@@ -19,8 +19,9 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SourceNode;
 
-use super::generic::{self, GenericPlanNode};
-use super::{ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, ToLocalBatch};
+use super::{
+    generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, ToLocalBatch,
+};
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::property::{Distribution, Order};
 
