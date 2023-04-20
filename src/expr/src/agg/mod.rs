@@ -62,91 +62,45 @@ dyn_clone::clone_trait_object!(Aggregator);
 
 pub type BoxedAggState = Box<dyn Aggregator>;
 
-pub struct AggStateFactory {
-    /// Return type of the agg call.
-    return_type: DataType,
-    /// The _prototype_ of agg state. It is cloned when need to create a new agg state.
-    initial_agg_state: BoxedAggState,
-}
+/// Build an `Aggregator` from `AggCall`.
+pub fn build(agg_call: AggCall) -> Result<BoxedAggState> {
+    // NOTE: The function signature is checked by `AggCall::infer_return_type` in the frontend.
 
-impl AggStateFactory {
-    pub fn new(agg_call: AggCall) -> Result<Self> {
-        // NOTE: The function signature is checked by `AggCall::infer_return_type` in the frontend.
-
-        let initial_agg_state: BoxedAggState = match (agg_call.kind, agg_call.args) {
-            (AggKind::Count, AggArgs::None) => {
-                Box::new(CountStar::new(agg_call.return_type.clone()))
-            }
-            (AggKind::ApproxCountDistinct, AggArgs::Unary(_, arg_idx)) => Box::new(
-                ApproxCountDistinct::new(agg_call.return_type.clone(), arg_idx),
-            ),
-            (
-                AggKind::StringAgg,
-                AggArgs::Binary([value_type, delim_type], [value_idx, delim_idx]),
-            ) => {
-                assert_eq!(value_type, DataType::Varchar);
-                assert_eq!(delim_type, DataType::Varchar);
-                create_string_agg_state(value_idx, delim_idx, agg_call.column_orders.clone())
-            }
-            (AggKind::Sum, AggArgs::Unary(arg_type, arg_idx))
-                if matches!(arg_type, DataType::Int256) =>
-            {
-                // Special handling of the `sum` function for `Int256`, when the
-                // `GeneralAgg` is applied to `sum`, it needs `sum` to return a temporary
-                // `ScalarRef` for intermediate variable. However, this is not feasible
-                // for non-primitive `Int256` types. Therefore, we have added a separate handling
-                // here. It is important to note that this is a temporary and rough imitation of the
-                // `GeneralAgg` solution and will need to be considered and fixed
-                // when refactoring the code related to aggregation in the future.
-                Box::new(Int256Sum::new(arg_idx, agg_call.distinct))
-            }
-            (AggKind::ArrayAgg, AggArgs::Unary(_, arg_idx)) => create_array_agg_state(
-                agg_call.return_type.clone(),
+    let initial_agg_state: BoxedAggState = match (agg_call.kind, agg_call.args) {
+        (AggKind::Count, AggArgs::None) => Box::new(CountStar::new(agg_call.return_type.clone())),
+        (AggKind::ApproxCountDistinct, AggArgs::Unary(_, arg_idx)) => Box::new(
+            ApproxCountDistinct::new(agg_call.return_type.clone(), arg_idx),
+        ),
+        (AggKind::StringAgg, AggArgs::Binary([value_type, delim_type], [value_idx, delim_idx])) => {
+            assert_eq!(value_type, DataType::Varchar);
+            assert_eq!(delim_type, DataType::Varchar);
+            create_string_agg_state(value_idx, delim_idx, agg_call.column_orders.clone())
+        }
+        (AggKind::ArrayAgg, AggArgs::Unary(_, arg_idx)) => create_array_agg_state(
+            agg_call.return_type.clone(),
+            arg_idx,
+            agg_call.column_orders.clone(),
+        ),
+        (agg_kind, AggArgs::Unary(arg_type, arg_idx)) => {
+            // other unary agg call
+            create_agg_state_unary(
+                arg_type,
                 arg_idx,
-                agg_call.column_orders.clone(),
-            ),
-            (agg_kind, AggArgs::Unary(arg_type, arg_idx)) => {
-                // other unary agg call
-                create_agg_state_unary(
-                    arg_type,
-                    arg_idx,
-                    agg_kind,
-                    agg_call.return_type.clone(),
-                    agg_call.distinct,
-                )?
-            }
-            (agg_kind, _) => bail!("Invalid agg call: {:?}", agg_kind),
-        };
+                agg_kind,
+                agg_call.return_type.clone(),
+                agg_call.distinct,
+            )?
+        }
+        (agg_kind, _) => bail!("Invalid agg call: {:?}", agg_kind),
+    };
 
-        // wrap the agg state in a `Filter` if needed
-        let initial_agg_state = match agg_call.filter {
-            Some(ref expr) => Box::new(Filter::new(expr.clone(), initial_agg_state)),
-            None => initial_agg_state,
-        };
+    // wrap the agg state in a `Filter` if needed
+    let initial_agg_state = match agg_call.filter {
+        Some(ref expr) => Box::new(Filter::new(expr.clone(), initial_agg_state)),
+        None => initial_agg_state,
+    };
 
-        Ok(Self {
-            return_type: agg_call.return_type,
-            initial_agg_state,
-        })
-    }
-
-    pub fn create_agg_state(&self) -> BoxedAggState {
-        self.initial_agg_state.clone()
-    }
-
-    pub fn get_return_type(&self) -> DataType {
-        self.return_type.clone()
-    }
-}
-
-pub fn create_agg_state_unary(
-    input_type: DataType,
-    input_col_idx: usize,
-    agg_kind: AggKind,
-    return_type: DataType,
-    distinct: bool,
-) -> Result<BoxedAggState> {
-    todo!()
+    Ok(initial_agg_state)
 }
 
 #[cfg(test)]
