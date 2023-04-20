@@ -18,18 +18,22 @@ use risingwave_common::types::ScalarImpl;
 use risingwave_expr_macro::function;
 
 fn string_to_array_inner(s: &str, sep: Option<&str>) -> Vec<String> {
-    sep.map_or(
-        s.chars().map(|x| x.to_string()).collect_vec(),
-        |sep| match sep.is_empty() {
-            true => vec![s.to_string()],
-            false => s
-                .split(sep)
-                .collect_vec()
-                .into_iter()
-                .map(|x| x.to_string())
-                .collect_vec(),
-        },
-    )
+    if s.is_empty() {
+        vec![]
+    } else {
+        sep.map_or(
+            s.chars().map(|x| x.to_string()).collect_vec(),
+            |sep| match sep.is_empty() {
+                true => vec![s.to_string()],
+                false => s
+                    .split(sep)
+                    .collect_vec()
+                    .into_iter()
+                    .map(|x| x.to_string())
+                    .collect_vec(),
+            },
+        )
+    }
 }
 
 // Use cases shown in `e2e_test/batch/functions/string_to_array.slt.part`
