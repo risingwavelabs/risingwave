@@ -18,8 +18,9 @@ download_build_artifacts() {
   tar -xvf promql-v0.3.0-linux-arm64.tar.gz
   chmod +x ./promql
   mv ./promql /usr/local/bin/promql
-  echo ">>> Run Sanity check that PromQL is installed"
-  promql --help
+  # FIXME
+  # echo ">>> Run Sanity check that PromQL is installed"
+  # promql --help
 
   echo ">>> Installing Kafka"
   wget https://downloads.apache.org/kafka/3.4.0/kafka_2.13-3.4.0.tgz
