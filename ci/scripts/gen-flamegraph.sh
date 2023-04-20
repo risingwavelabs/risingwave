@@ -137,8 +137,12 @@ main() {
   echo "--- Starting up RW"
   ./risedev d ci-gen-cpu-flamegraph
 
+  echo "--- Running ddl"
+  psql -h localhost -p 4566 -d dev -U root -f ci/scripts/sql/nexmark/ddl.sql
+
   echo "--- Running Benchmarks"
-  echo "Success!"
+  # TODO: Allow users to configure which query they want to run.
+  psql -h localhost -p 4566 -d dev -U root -f ci/scripts/sql/nexmark/q17.sql
 
   echo "--- Start Profiling"
   echo "Success!"
