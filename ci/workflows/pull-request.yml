@@ -318,8 +318,13 @@ steps:
   - label: "Generate CPU flamegraph"
     command: "ci/scripts/gen-flamegraph.sh"
     depends_on: "cpu-flamegraph-env-build"
+
     if: build.pull_request.labels includes "cpu_flamegraph"
+
     plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GITHUB_TOKEN: github-token
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env

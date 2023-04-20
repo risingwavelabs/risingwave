@@ -29,7 +29,10 @@ download_build_artifacts() {
   echo ">>> Installing nexmark bench"
   install_nexmark_bench
 
-  echo ">>> Installing RisingWave components"
+  echo ">>> Installing nperf"
+  install_nperf
+
+  echo ">>> Installing RisingWave components (includes other components installed by risedev (prometheus + grafana + etcd)"
   ARTIFACTS="risingwave risedev-dev librisingwave_java_binding.so"
   # Create this so `risedev` tool can locate the binaries.
   mkdir -p target/release
@@ -37,7 +40,7 @@ download_build_artifacts() {
 }
 
 install_nexmark_bench() {
-  git clone https://github.com/risingwavelabs/nexmark-bench.git
+  git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/nexmark-bench.git
 }
 
 configure_nexmark_bench() {
@@ -74,6 +77,16 @@ build_nexmark_bench() {
 setup_nexmark_bench() {
   configure_nexmark_bench
   build_nexmark_bench
+}
+
+install_nperf() {
+  git clone https://github.com/koute/not-perf.git
+  cd not-perf/cli
+  cargo build --release
+}
+
+start_nperf() {
+  not-perf/target/release/nperf record -p $(pidof compute-node) -o perf.data
 }
 
 setup_rw() {
@@ -149,7 +162,7 @@ main() {
   psql -h localhost -p 4566 -d dev -U root -f ci/scripts/sql/nexmark/q17.sql
 
   echo "--- Start Profiling"
-  echo "Success!"
+  start_nperf
 
   echo "--- Monitoring Benchmark"
   echo "Success!"
