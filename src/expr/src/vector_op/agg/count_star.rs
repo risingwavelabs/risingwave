@@ -40,13 +40,6 @@ impl Aggregator for CountStar {
         self.return_type.clone()
     }
 
-    async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
-        if let (_, true) = input.row_at(row_id) {
-            self.result += 1;
-        }
-        Ok(())
-    }
-
     async fn update_multi(
         &mut self,
         input: &DataChunk,

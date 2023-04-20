@@ -124,12 +124,6 @@ impl Aggregator for ApproxCountDistinct {
         self.return_type.clone()
     }
 
-    async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
-        let array = input.column_at(self.input_col_idx).array_ref();
-        self.add_datum(array.value_at(row_id));
-        Ok(())
-    }
-
     async fn update_multi(
         &mut self,
         input: &DataChunk,

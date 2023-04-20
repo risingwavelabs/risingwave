@@ -34,7 +34,9 @@ pub trait Aggregator: Send + DynClone + 'static {
     fn return_type(&self) -> DataType;
 
     /// `update_single` update the aggregator with a single row with type checked at runtime.
-    async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()>;
+    async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
+        self.update_multi(input, row_id, row_id + 1).await
+    }
 
     /// `update_multi` update the aggregator with multiple rows with type checked at runtime.
     async fn update_multi(

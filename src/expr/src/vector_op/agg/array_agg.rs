@@ -59,12 +59,6 @@ impl Aggregator for ArrayAggUnordered {
         self.return_type.clone()
     }
 
-    async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
-        let array = input.column_at(self.agg_col_idx).array_ref();
-        self.push(array.datum_at(row_id));
-        Ok(())
-    }
-
     async fn update_multi(
         &mut self,
         input: &DataChunk,
@@ -73,7 +67,8 @@ impl Aggregator for ArrayAggUnordered {
     ) -> Result<()> {
         self.values.reserve(end_row_id - start_row_id);
         for row_id in start_row_id..end_row_id {
-            self.update_single(input, row_id).await?;
+            let array = input.column_at(self.agg_col_idx).array_ref();
+            self.push(array.datum_at(row_id));
         }
         Ok(())
     }
@@ -141,13 +136,6 @@ impl Aggregator for ArrayAggOrdered {
         self.return_type.clone()
     }
 
-    async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
-        let (row, vis) = input.row_at(row_id);
-        assert!(vis);
-        self.push_row(row)?;
-        Ok(())
-    }
-
     async fn update_multi(
         &mut self,
         input: &DataChunk,
@@ -156,7 +144,9 @@ impl Aggregator for ArrayAggOrdered {
     ) -> Result<()> {
         self.unordered_values.reserve(end_row_id - start_row_id);
         for row_id in start_row_id..end_row_id {
-            self.update_single(input, row_id).await?;
+            let (row, vis) = input.row_at(row_id);
+            assert!(vis);
+            self.push_row(row)?;
         }
         Ok(())
     }

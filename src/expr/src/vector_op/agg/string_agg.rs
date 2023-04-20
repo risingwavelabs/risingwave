@@ -62,45 +62,28 @@ impl Aggregator for StringAggUnordered {
         DataType::Varchar
     }
 
-    async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
-        if let (ArrayImpl::Utf8(agg_col), ArrayImpl::Utf8(delim_col)) = (
-            input.column_at(self.agg_col_idx).array_ref(),
-            input.column_at(self.delim_col_idx).array_ref(),
-        ) {
-            if let Some(value) = agg_col.value_at(row_id) {
-                // only need to save rows with non-empty string value to aggregate
-                let delim = delim_col.value_at(row_id).unwrap_or("");
-                self.push(value, delim);
-            }
-            Ok(())
-        } else {
-            bail!("Input fail to match {}.", stringify!(Utf8))
-        }
-    }
-
     async fn update_multi(
         &mut self,
         input: &DataChunk,
         start_row_id: usize,
         end_row_id: usize,
     ) -> Result<()> {
-        if let (ArrayImpl::Utf8(agg_col), ArrayImpl::Utf8(delim_col)) = (
+        let (ArrayImpl::Utf8(agg_col), ArrayImpl::Utf8(delim_col)) = (
             input.column_at(self.agg_col_idx).array_ref(),
             input.column_at(self.delim_col_idx).array_ref(),
-        ) {
-            for (value, delim) in agg_col
-                .iter()
-                .zip_eq_fast(delim_col.iter())
-                .skip(start_row_id)
-                .take(end_row_id - start_row_id)
-                .filter(|(v, _)| v.is_some())
-            {
-                self.push(value.unwrap(), delim.unwrap_or(""));
-            }
-            Ok(())
-        } else {
+        ) else {
             bail!("Input fail to match {}.", stringify!(Utf8))
+        };
+        for (value, delim) in agg_col
+            .iter()
+            .zip_eq_fast(delim_col.iter())
+            .skip(start_row_id)
+            .take(end_row_id - start_row_id)
+            .filter(|(v, _)| v.is_some())
+        {
+            self.push(value.unwrap(), delim.unwrap_or(""));
         }
+        Ok(())
     }
 
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
@@ -180,24 +163,6 @@ impl StringAggOrdered {
 impl Aggregator for StringAggOrdered {
     fn return_type(&self) -> DataType {
         DataType::Varchar
-    }
-
-    async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
-        if let (ArrayImpl::Utf8(agg_col), ArrayImpl::Utf8(delim_col)) = (
-            input.column_at(self.agg_col_idx).array_ref(),
-            input.column_at(self.delim_col_idx).array_ref(),
-        ) {
-            if let Some(value) = agg_col.value_at(row_id) {
-                // only need to save rows with non-empty string value to aggregate
-                let delim = delim_col.value_at(row_id).unwrap_or("");
-                let (row_ref, vis) = input.row_at(row_id);
-                assert!(vis);
-                self.push_row(value, delim, row_ref)?;
-            }
-            Ok(())
-        } else {
-            bail!("Input fail to match {}.", stringify!(Utf8))
-        }
     }
 
     async fn update_multi(

@@ -43,21 +43,6 @@ impl Aggregator for Filter {
         self.inner.return_type()
     }
 
-    async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
-        let (row_ref, vis) = input.row_at(row_id);
-        assert!(vis); // cuz the input chunk is supposed to be compacted
-        if self
-            .condition
-            .eval_row(&row_ref.into_owned_row())
-            .await?
-            .map(ScalarImpl::into_bool)
-            .unwrap_or(false)
-        {
-            self.inner.update_single(input, row_id).await?;
-        }
-        Ok(())
-    }
-
     async fn update_multi(
         &mut self,
         input: &DataChunk,
@@ -127,11 +112,6 @@ mod tests {
     impl Aggregator for MockAgg {
         fn return_type(&self) -> DataType {
             DataType::Int64
-        }
-
-        async fn update_single(&mut self, _input: &DataChunk, _row_id: usize) -> Result<()> {
-            self.count.fetch_add(1, Ordering::Relaxed);
-            Ok(())
         }
 
         async fn update_multi(
