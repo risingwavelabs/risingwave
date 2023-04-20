@@ -638,6 +638,10 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         }
     };
 
+    // Persist params before starting services so that invalid params that cause meta node
+    // to crash will not be persisted.
+    system_params_manager.flush_params().await?;
+
     tracing::info!("Starting meta services");
 
     tonic::transport::Server::builder()

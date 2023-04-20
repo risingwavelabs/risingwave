@@ -98,22 +98,31 @@ macro_rules! def_default {
 
 for_all_undeprecated_params!(def_default);
 
+macro_rules! impl_check_missing_fields {
+    ($({ $field:ident, $type:ty, $default:expr },)*) => {
+        /// Check if any undeprecated fields are missing.
+        pub fn check_missing_params(params: &SystemParams) -> Result<()> {
+            $(
+                if params.$field.is_none() {
+                    return Err(format!("missing system param {:?}", key_of!($field)));
+                }
+            )*
+            Ok(())
+        }
+    };
+}
+
 /// Derive serialization to kv pairs.
 macro_rules! impl_system_params_to_kv {
     ($({ $field:ident, $type:ty, $default:expr },)*) => {
         /// The returned map only contains undeprecated fields.
         /// Return error if there are missing fields.
         pub fn system_params_to_kv(params: &SystemParams) -> Result<Vec<(String, String)>> {
-            let mut ret = Vec::with_capacity(9);
+            check_missing_params(params)?;
+            let mut ret = Vec::new();
             $(ret.push((
                 key_of!($field).to_string(),
-                params
-                    .$field.as_ref()
-                    .ok_or_else(||format!(
-                        "missing system param {:?}",
-                        key_of!($field)
-                    ))?
-                    .to_string(),
+                params.$field.as_ref().unwrap().to_string(),
             ));)*
             Ok(ret)
         }
@@ -278,6 +287,7 @@ macro_rules! impl_system_params_for_test {
 
 for_all_undeprecated_params!(impl_derive_missing_fields);
 for_all_params!(impl_system_params_from_kv);
+for_all_undeprecated_params!(impl_check_missing_fields);
 for_all_undeprecated_params!(impl_system_params_to_kv);
 for_all_undeprecated_params!(impl_set_system_param);
 for_all_undeprecated_params!(impl_default_validation_on_set);

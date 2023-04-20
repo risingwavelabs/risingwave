@@ -14,12 +14,13 @@
 
 pub mod model;
 
-use std::ops::DerefMut;
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::anyhow;
 use risingwave_common::system_param::reader::SystemParamsReader;
-use risingwave_common::system_param::set_system_param;
+use risingwave_common::system_param::{check_missing_params, set_system_param};
 use risingwave_common::{for_all_undeprecated_params, key_of};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SystemParams;
@@ -37,8 +38,12 @@ pub type SystemParamsManagerRef<S> = Arc<SystemParamsManager<S>>;
 
 pub struct SystemParamsManager<S: MetaStore> {
     meta_store: Arc<S>,
+    // Notify workers and local subscribers of parameter change.
     notification_manager: NotificationManagerRef<S>,
+    // Cached parameters.
     params: RwLock<SystemParams>,
+    // If cluster is launched for the first time.
+    first_launch: bool,
 }
 
 impl<S: MetaStore> SystemParamsManager<S> {
@@ -50,17 +55,18 @@ impl<S: MetaStore> SystemParamsManager<S> {
     ) -> MetaResult<Self> {
         let persisted = SystemParams::get(meta_store.as_ref()).await?;
 
-        let params = if let Some(persisted) = persisted {
-            merge_params(persisted, init_params)
+        let (params, first_launch) = if let Some(persisted) = persisted {
+            (merge_params(persisted, init_params), false)
         } else {
-            init_params
+            (init_params, true)
         };
 
-        SystemParams::insert(&params, meta_store.as_ref()).await?;
+        check_missing_params(&params).map_err(|e| anyhow!(e))?;
 
         Ok(Self {
             meta_store,
             notification_manager,
+            first_launch,
             params: RwLock::new(params),
         })
     }
@@ -97,6 +103,18 @@ impl<S: MetaStore> SystemParamsManager<S> {
         self.notify_workers(params).await;
 
         Ok(())
+    }
+
+    /// Flush the cached params to meta store.
+    pub async fn flush_params(&self) -> MetaResult<()> {
+        Ok(
+            SystemParams::insert(self.params.read().await.deref(), self.meta_store.as_ref())
+                .await?,
+        )
+    }
+
+    pub fn cluster_first_launch(&self) -> bool {
+        self.first_launch
     }
 
     // Periodically sync params to worker nodes.
@@ -141,11 +159,12 @@ impl<S: MetaStore> SystemParamsManager<S> {
 }
 
 // For each field in `persisted` and `init`
-// 1. Some, None: Params not from CLI need not be validated. Use persisted value.
+// 1. Some, None: The persisted field is deprecated, so just ignore it.
 // 2. Some, Some: Check equality and warn if they differ.
 // 3. None, Some: A new version of RW cluster is launched for the first time and newly introduced
 // params are not set. Use init value.
-// 4. None, None: Impossible.
+// 4. None, None: A new version of RW cluster is launched for the first time and newly introduced
+// params are not set. The new field is not initialized either, just leave it as `None`.
 macro_rules! impl_merge_params {
     ($({ $field:ident, $type:ty, $default:expr },)*) => {
         fn merge_params(mut persisted: SystemParams, init: SystemParams) -> SystemParams {
@@ -153,11 +172,15 @@ macro_rules! impl_merge_params {
                 match (persisted.$field.as_ref(), init.$field) {
                     (Some(persisted), Some(init)) => {
                         if persisted != &init {
-                            tracing::warn!("System parameters \"{:?}\" from CLI and config file ({}) differ from persisted ({})", key_of!($field), init, persisted);
+                            tracing::warn!(
+                                "The initializing value of \"{:?}\" ({}) differ from persisted ({}), using persisted value",
+                                key_of!($field),
+                                init,
+                                persisted
+                            );
                         }
                     },
                     (None, Some(init)) => persisted.$field = Some(init),
-                    (None, None) => unreachable!(),
                     _ => {},
                 }
             )*
