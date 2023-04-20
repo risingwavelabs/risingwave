@@ -44,11 +44,11 @@ impl BatchSource {
         Self { base, logical }
     }
 
-    pub fn column_names(&self) -> Vec<String> {
+    pub fn column_names(&self) -> Vec<&str> {
         self.schema()
             .fields()
             .iter()
-            .map(|f| f.name.clone())
+            .map(|f| f.name.as_str())
             .collect()
     }
 
