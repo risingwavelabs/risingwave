@@ -2,6 +2,9 @@
 
 set -euo pipefail
 
+# FIXME(kwannoel): This is a workaround
+pushd ..
+
 ############## DEBUG INFO
 
 print_machine_debug_info() {
@@ -53,7 +56,7 @@ install_all() {
   ARTIFACTS="risingwave risedev-dev librisingwave_java_binding.so"
   # Create this so `risedev` tool can locate the binaries.
   mkdir -p target/release
-  echo "$ARTIFACTS" | xargs -I 'buildkite-agent artifact download %-bench . && mv ./%-bench target/release/%'
+  echo "$ARTIFACTS" | xargs -I 'buildkite-agent artifact download %-bench . && mv ./%-bench risingwave/target/release/%'
 }
 
 ############## CONFIGURE
@@ -162,10 +165,14 @@ main() {
   kafka_start
 
   echo "--- Spawning nexmark events"
+  pushd nexmark-bench
   gen_events
+  popd
 
   echo "--- Starting up RW"
+  pushd risingwave
   ./risedev d ci-gen-cpu-flamegraph
+  popd
 
   echo "--- Running ddl"
   psql -h localhost -p 4566 -d dev -U root -f ci/scripts/sql/nexmark/ddl.sql
