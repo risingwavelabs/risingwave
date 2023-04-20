@@ -184,7 +184,7 @@ where
 
                     if worker.worker_node.state != State::Deleting as i32 || worker.worker_node.id != node_id  {
                         tracing::warn!(
-                            "Worker node changed. Expected state deleting, got {}. Expected ID {}, got {}", 
+                            "Worker node changed. Expected state deleting, got {}. Expected ID {}, got {}",
                             worker.worker_node.state,
                             node_id,
                             worker.worker_node.id

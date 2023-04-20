@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::num::dec2flt::number;
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::Write;
@@ -328,6 +329,33 @@ impl Cluster {
             client,
             ctl,
         })
+    }
+
+    pub fn add_compute_node(&mut self, number_of_nodes: usize) {
+        // compute node
+        for i in self.config.compute_nodes + 1..=self.config.compute_nodes + number_of_nodes {
+            let opts = risingwave_compute::ComputeNodeOpts::parse_from([
+                "compute-node",
+                "--config-path",
+                self.config.config_path.as_str(),
+                "--listen-addr",
+                "0.0.0.0:5688",
+                "--advertise-addr",
+                &format!("192.168.3.{i}:5688"),
+                "--total-memory-bytes",
+                "6979321856",
+                "--parallelism",
+                &self.config.compute_node_cores.to_string(),
+            ]);
+            self.handle
+                .create_node()
+                .name(format!("compute-{i}"))
+                .ip([192, 168, 3, i as u8].into())
+                .cores(self.config.compute_node_cores)
+                .init(move || risingwave_compute::start(opts.clone()))
+                .build();
+        }
+        self.config.compute_nodes += number_of_nodes;
     }
 
     /// Start a SQL session on the client node.
