@@ -307,11 +307,16 @@ steps:
     command: "ci/scripts/flamegraph-env-build.sh"
     if: build.pull_request.labels includes "cpu_flamegraph"
     plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GITHUB_TOKEN: github-token
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
+          environment:
+            - GITHUB_TOKEN
     timeout_in_minutes: 20
 
   # Generates cpu flamegraph if label `cpu_flamegraph` is added to PR.
