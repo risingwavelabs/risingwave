@@ -249,8 +249,8 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
         }
     }
 
-    fn with_meta(capacity: usize, meta: DataType) -> Self {
-        assert_eq!(meta, T::DATA_TYPE);
+    fn with_type(capacity: usize, ty: DataType) -> Self {
+        assert_eq!(ty, T::DATA_TYPE);
         Self::new(capacity)
     }
 

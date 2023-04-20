@@ -109,7 +109,7 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
 
     /// # Panics
     /// Panics if `meta`'s type mismatches with the array type.
-    fn with_meta(capacity: usize, meta: DataType) -> Self;
+    fn with_type(capacity: usize, ty: DataType) -> Self;
 
     /// Append a value multiple times.
     ///
@@ -284,7 +284,7 @@ trait CompactableArray: Array {
 
 impl<A: Array> CompactableArray for A {
     fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self {
-        let mut builder = A::Builder::with_meta(cardinality, self.data_type());
+        let mut builder = A::Builder::with_type(cardinality, self.data_type());
         for (elem, visible) in self.iter().zip_eq_fast(visibility.iter()) {
             if visible {
                 builder.append(elem);
@@ -718,7 +718,7 @@ mod tests {
         A: Array + 'a,
         F: Fn(Option<A::RefItem<'a>>) -> bool,
     {
-        let mut builder = A::Builder::with_meta(data.len(), data.data_type());
+        let mut builder = A::Builder::with_type(data.len(), data.data_type());
         for i in 0..data.len() {
             if pred(data.value_at(i)) {
                 builder.append(data.value_at(i));

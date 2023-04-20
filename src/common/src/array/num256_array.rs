@@ -113,8 +113,8 @@ macro_rules! impl_array_for_num256 {
                 }
             }
         
-            fn with_meta(capacity: usize, meta: DataType) -> Self {
-                assert_eq!(meta, DataType::$variant_name);
+            fn with_type(capacity: usize, ty: DataType) -> Self {
+                assert_eq!(ty, DataType::$variant_name);
                 Self::new(capacity)
             }
 

@@ -138,8 +138,8 @@ impl ArrayBuilder for BoolArrayBuilder {
         }
     }
 
-    fn with_meta(capacity: usize, meta: DataType) -> Self {
-        assert_eq!(meta, DataType::Boolean);
+    fn with_type(capacity: usize, ty: DataType) -> Self {
+        assert_eq!(ty, DataType::Boolean);
         Self::new(capacity)
     }
 

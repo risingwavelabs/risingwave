@@ -336,8 +336,8 @@ impl ArrayBuilder for JsonbArrayBuilder {
         }
     }
 
-    fn with_meta(capacity: usize, meta: DataType) -> Self {
-        assert_eq!(meta, DataType::Jsonb);
+    fn with_type(capacity: usize, ty: DataType) -> Self {
+        assert_eq!(ty, DataType::Jsonb);
         Self::new(capacity)
     }
 

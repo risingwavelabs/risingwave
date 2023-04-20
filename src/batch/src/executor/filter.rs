@@ -140,7 +140,7 @@ mod tests {
         use risingwave_common::array::{ArrayBuilder, ListArrayBuilder, ListRef, ListValue};
         use risingwave_common::types::Scalar;
 
-        let mut builder = ListArrayBuilder::with_meta(
+        let mut builder = ListArrayBuilder::with_type(
             4,
             DataType::List {
                 datatype: Box::new(DataType::Int32),

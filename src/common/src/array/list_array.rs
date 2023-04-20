@@ -47,12 +47,12 @@ impl ArrayBuilder for ListArrayBuilder {
 
     #[cfg(not(test))]
     fn new(_capacity: usize) -> Self {
-        panic!("Must use with_meta.")
+        panic!("Must use with_type.")
     }
 
     #[cfg(test)]
     fn new(capacity: usize) -> Self {
-        Self::with_meta(
+        Self::with_type(
             capacity,
             DataType::List {
                 // Default datatype
@@ -61,8 +61,8 @@ impl ArrayBuilder for ListArrayBuilder {
         )
     }
 
-    fn with_meta(capacity: usize, meta: DataType) -> Self {
-        let DataType::List { datatype } = meta else {
+    fn with_type(capacity: usize, ty: DataType) -> Self {
+        let DataType::List { datatype } = ty else {
             panic!("data type must be DataType::List");
         };
         Self {
@@ -210,7 +210,7 @@ impl Array for ListArray {
     }
 
     fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
-        let array_builder = ListArrayBuilder::with_meta(
+        let array_builder = ListArrayBuilder::with_type(
             capacity,
             DataType::List {
                 datatype: Box::new(self.value_type.clone()),
@@ -613,7 +613,7 @@ mod tests {
             ]
         );
 
-        let mut builder = ListArrayBuilder::with_meta(
+        let mut builder = ListArrayBuilder::with_type(
             4,
             DataType::List {
                 datatype: Box::new(DataType::Int32),
@@ -641,7 +641,7 @@ mod tests {
             DataType::Int32,
         );
 
-        let mut builder = ListArrayBuilder::with_meta(
+        let mut builder = ListArrayBuilder::with_type(
             4,
             DataType::List {
                 datatype: Box::new(DataType::Int32),
@@ -673,7 +673,7 @@ mod tests {
         use crate::array::*;
 
         {
-            let mut builder = ListArrayBuilder::with_meta(
+            let mut builder = ListArrayBuilder::with_type(
                 1,
                 DataType::List {
                     datatype: Box::new(DataType::Int32),
@@ -693,7 +693,7 @@ mod tests {
                     datatype: Box::new(DataType::Int32),
                 }),
             };
-            let mut builder = ListArrayBuilder::with_meta(2, meta);
+            let mut builder = ListArrayBuilder::with_type(2, meta);
             let val1 = ListValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
             let val2 = ListValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
             let list1 = ListValue::new(vec![Some(val1.into()), Some(val2.into())]);
@@ -795,7 +795,7 @@ mod tests {
             ]
         );
 
-        let mut builder = ListArrayBuilder::with_meta(
+        let mut builder = ListArrayBuilder::with_type(
             3,
             DataType::List {
                 datatype: Box::new(DataType::List {
@@ -877,7 +877,7 @@ mod tests {
             value
         );
 
-        let mut builder = ListArrayBuilder::with_meta(
+        let mut builder = ListArrayBuilder::with_type(
             0,
             DataType::List {
                 datatype: Box::new(DataType::Varchar),
@@ -955,7 +955,7 @@ mod tests {
             };
             assert_eq!(lhs_serialized.cmp(&rhs_serialized), order);
 
-            let mut builder = ListArrayBuilder::with_meta(
+            let mut builder = ListArrayBuilder::with_type(
                 0,
                 DataType::List {
                     datatype: Box::new(datatype),

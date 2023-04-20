@@ -46,19 +46,19 @@ impl ArrayBuilder for StructArrayBuilder {
 
     #[cfg(not(test))]
     fn new(_capacity: usize) -> Self {
-        panic!("Must use with_meta.")
+        panic!("Must use with_type.")
     }
 
     #[cfg(test)]
     fn new(capacity: usize) -> Self {
-        Self::with_meta(
+        Self::with_type(
             capacity,
             DataType::Struct(Arc::new(StructType::new(vec![]))),
         )
     }
 
-    fn with_meta(capacity: usize, meta: DataType) -> Self {
-        let DataType::Struct(ty) = meta else {
+    fn with_type(capacity: usize, ty: DataType) -> Self {
+        let DataType::Struct(ty) = ty else {
             panic!("must be DataType::Struct");
         };
         let children_array = ty
@@ -188,7 +188,7 @@ impl Array for StructArray {
     }
 
     fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
-        let array_builder = StructArrayBuilder::with_meta(capacity, self.data_type());
+        let array_builder = StructArrayBuilder::with_type(capacity, self.data_type());
         ArrayBuilderImpl::Struct(array_builder)
     }
 
@@ -536,7 +536,7 @@ mod tests {
             ]
         );
 
-        let mut builder = StructArrayBuilder::with_meta(
+        let mut builder = StructArrayBuilder::with_type(
             4,
             DataType::Struct(Arc::new(vec![DataType::Int32, DataType::Float32].into())),
         );
@@ -637,7 +637,7 @@ mod tests {
         );
 
         let mut builder =
-            StructArrayBuilder::with_meta(0, DataType::Struct(Arc::new(fields.to_vec().into())));
+            StructArrayBuilder::with_type(0, DataType::Struct(Arc::new(fields.to_vec().into())));
         builder.append(Some(struct_ref));
         let array = builder.finish();
         let struct_ref = array.value_at(0).unwrap();
@@ -730,7 +730,7 @@ mod tests {
             };
             assert_eq!(lhs_serialized.cmp(&rhs_serialized), order);
 
-            let mut builder = StructArrayBuilder::with_meta(
+            let mut builder = StructArrayBuilder::with_type(
                 0,
                 DataType::Struct(Arc::new(fields.to_vec().into())),
             );

@@ -139,8 +139,8 @@ impl ArrayBuilder for Utf8ArrayBuilder {
         }
     }
 
-    fn with_meta(capacity: usize, meta: DataType) -> Self {
-        assert_eq!(meta, DataType::Varchar);
+    fn with_type(capacity: usize, ty: DataType) -> Self {
+        assert_eq!(ty, DataType::Varchar);
         Self::new(capacity)
     }
 

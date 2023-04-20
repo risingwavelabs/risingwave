@@ -199,7 +199,7 @@ impl Expression for RegexpMatchExpression {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let text_arr = self.child.eval_checked(input).await?;
         let text_arr: &Utf8Array = text_arr.as_ref().into();
-        let mut output = ListArrayBuilder::with_meta(
+        let mut output = ListArrayBuilder::with_type(
             input.capacity(),
             DataType::List {
                 datatype: Box::new(DataType::Varchar),

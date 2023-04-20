@@ -172,8 +172,8 @@ impl ArrayBuilder for BytesArrayBuilder {
         }
     }
 
-    fn with_meta(capacity: usize, meta: DataType) -> Self {
-        assert_eq!(meta, DataType::Bytea);
+    fn with_type(capacity: usize, ty: DataType) -> Self {
+        assert_eq!(ty, DataType::Bytea);
         Self::new(capacity)
     }
 
