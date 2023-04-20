@@ -10,11 +10,10 @@ source ci/scripts/common.sh
 pushd ..
 git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/nexmark-bench.git
 pushd nexmark-bench
-# FIXME
+# FIXME(kwannoel): Upstream this fix
 echo "nightly-2023-03-01" > rust-toolchain
 make install
-cp /usr/local/cargo/bin/nexmark-server ./nexmark-server
-buildkite-agent artifact upload ./nexmark-server
+buildkite-agent artifact upload /nexmark-server
 popd
 popd
 
