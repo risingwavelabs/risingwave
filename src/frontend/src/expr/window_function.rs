@@ -16,12 +16,12 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 use parse_display::Display;
-use risingwave_common::error::ErrorCode;
+use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::DataType;
 use risingwave_expr::function::aggregate::AggKind;
 use risingwave_expr::function::window::Frame;
 
-use super::{Expr, ExprImpl, OrderBy, RwResult};
+use super::{AggCall, Expr, ExprImpl, OrderBy, RwResult};
 
 /// A window function performs a calculation across a set of table rows that are somehow related to
 /// the current row, according to the window spec `OVER (PARTITION BY .. ORDER BY ..)`.
@@ -97,21 +97,73 @@ impl WindowFunction {
         args: Vec<ExprImpl>,
         frame: Option<Frame>,
     ) -> RwResult<Self> {
-        if !args.is_empty() {
-            return Err(ErrorCode::BindError(format!(
-                "the length of args of {function_type} function should be 0"
-            ))
-            .into());
-        }
-
+        let return_type = Self::infer_return_type(function_type, &args)?;
         Ok(Self {
             args,
-            return_type: DataType::Int64,
+            return_type,
             function_type,
             partition_by,
             order_by,
             frame,
         })
+    }
+
+    fn infer_return_type(
+        function_type: WindowFunctionType,
+        args: &[ExprImpl],
+    ) -> RwResult<DataType> {
+        match (function_type, args) {
+            (WindowFunctionType::RowNumber, []) => Ok(DataType::Int64),
+            (WindowFunctionType::Rank, []) => Ok(DataType::Int64),
+            (WindowFunctionType::DenseRank, []) => Ok(DataType::Int64),
+
+            (WindowFunctionType::Lag | WindowFunctionType::Lead, [value]) => {
+                Ok(value.return_type())
+            }
+            (WindowFunctionType::Lag | WindowFunctionType::Lead, [value, offset]) => {
+                if !offset.return_type().is_int() {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "the `offset` of `{function_type}` function should be integer"
+                    ))
+                    .into());
+                }
+                if offset.as_literal().is_none() {
+                    return Err(ErrorCode::NotImplemented(
+                        format!(
+                            "non-const `offset` of `{function_type}` function is not supported yet"
+                        ),
+                        None.into(),
+                    )
+                    .into());
+                }
+                Ok(value.return_type())
+            }
+            (WindowFunctionType::Lag | WindowFunctionType::Lead, [_value, _offset, _default]) => {
+                Err(RwError::from(ErrorCode::NotImplemented(
+                    format!(
+                        "`{}` window function with `default` argument is not supported yet",
+                        function_type
+                    ),
+                    None.into(),
+                )))
+            }
+
+            (WindowFunctionType::Aggregate(agg_kind), args) => {
+                let arg_types = args.iter().map(ExprImpl::return_type).collect::<Vec<_>>();
+                AggCall::infer_return_type(agg_kind, &arg_types)
+            }
+
+            _ => {
+                let args = args
+                    .iter()
+                    .map(|e| format!("{}", e.return_type()))
+                    .join(", ");
+                Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
+                    "Invalid window function: {}({})",
+                    function_type, args
+                ))))
+            }
+        }
     }
 }
 
