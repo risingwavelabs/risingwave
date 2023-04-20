@@ -41,7 +41,7 @@ install_all() {
   tar -zxvf kafka_2.13-3.4.0.tgz
 
   echo ">>> Installing nexmark bench"
-  buildkite-agent artifact download nexmark-bench /usr/local/bin
+  buildkite-agent artifact download nexmark-server /usr/local/bin
   popd
 
   echo ">>> Installing nperf"
