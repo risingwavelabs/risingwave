@@ -33,25 +33,14 @@ impl StreamTopN {
     pub fn new(logical: generic::TopN<PlanRef>) -> Self {
         assert!(logical.group_key.is_empty());
         assert!(logical.limit_attr.limit() > 0);
-        let base = PlanBase::new_logical_with_core(&logical);
-        let ctx = base.ctx;
         let input = &logical.input;
-        let schema = base.schema;
         let dist = match input.distribution() {
             Distribution::Single => Distribution::Single,
             _ => panic!(),
         };
-        let watermark_columns = FixedBitSet::with_capacity(schema.len());
+        let watermark_columns = FixedBitSet::with_capacity(input.schema().len());
 
-        let base = PlanBase::new_stream(
-            ctx,
-            schema,
-            input.logical_pk().to_vec(),
-            base.functional_dependency,
-            dist,
-            false,
-            watermark_columns,
-        );
+        let base = PlanBase::new_stream_with_logical(&logical, dist, false, watermark_columns);
         StreamTopN { base, logical }
     }
 
