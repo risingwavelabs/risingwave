@@ -261,6 +261,9 @@ message AggCall {
     VAR_SAMP = 12;
     STDDEV_POP = 13;
     STDDEV_SAMP = 14;
+    BIT_AND = 15;
+    BIT_OR = 16;
+    BIT_XOR = 17;
   }
   Type type = 1;
   repeated InputRef args = 2;
