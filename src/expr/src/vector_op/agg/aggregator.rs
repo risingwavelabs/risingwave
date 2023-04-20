@@ -25,7 +25,6 @@ use crate::vector_op::agg::filter::*;
 use crate::vector_op::agg::functions::*;
 use crate::vector_op::agg::general_agg::*;
 use crate::vector_op::agg::general_distinct_agg::*;
-use crate::vector_op::agg::non_primitive_sum::Int256Sum;
 use crate::vector_op::agg::string_agg::create_string_agg_state;
 use crate::Result;
 
@@ -138,119 +137,7 @@ pub fn create_agg_state_unary(
     return_type: DataType,
     distinct: bool,
 ) -> Result<BoxedAggState> {
-    use crate::expr::data_types::*;
-
-    macro_rules! gen_arms {
-        [$(($agg:ident, $fn:expr, $in:tt, $ret:tt, $init_result:expr)),* $(,)?] => {
-            match (
-                input_type,
-                agg_kind,
-                return_type.clone(),
-                distinct,
-            ) {
-                $(
-                    ($in! { type_match_pattern }, AggKind::$agg, $ret! { type_match_pattern }, false) => {
-                        Box::new(GeneralAgg::<$in! { type_array }, _, $ret! { type_array }>::new(
-                            return_type,
-                            input_col_idx,
-                            $fn,
-                            $init_result,
-                        ))
-                    },
-                    ($in! { type_match_pattern }, AggKind::$agg, $ret! { type_match_pattern }, true) => {
-                        Box::new(GeneralDistinctAgg::<$in! { type_array }, _, $ret! { type_array }>::new(
-                            return_type,
-                            input_col_idx,
-                            $fn,
-                        ))
-                    },
-                )*
-                (unimpl_input, unimpl_agg, unimpl_ret, distinct) => {
-                    bail!(
-                        "unsupported aggregator: type={:?} input={:?} output={:?} distinct={}",
-                        unimpl_agg, unimpl_input, unimpl_ret, distinct
-                    )
-                }
-            }
-        };
-    }
-
-    let state: BoxedAggState = gen_arms![
-        (Count, count, int16, int64, Some(0)),
-        (Count, count, int32, int64, Some(0)),
-        (Count, count, int64, int64, Some(0)),
-        (Count, count, float32, int64, Some(0)),
-        (Count, count, float64, int64, Some(0)),
-        (Count, count, decimal, int64, Some(0)),
-        (Count, count_str, varchar, int64, Some(0)),
-        (Count, count, boolean, int64, Some(0)),
-        (Count, count, interval, int64, Some(0)),
-        (Count, count, date, int64, Some(0)),
-        (Count, count, timestamp, int64, Some(0)),
-        (Count, count, time, int64, Some(0)),
-        (Count, count, timestamptz, int64, Some(0)),
-        (Count, count_int256, int256, int64, Some(0)),
-        (Count, count_struct, struct_type, int64, Some(0)),
-        (Count, count_list, list, int64, Some(0)),
-        (Sum0, sum, int64, int64, Some(0)),
-        (Sum, sum, int16, int64, None),
-        (Sum, sum, int32, int64, None),
-        (Sum, sum, int64, decimal, None),
-        (Sum, sum, float32, float32, None),
-        (Sum, sum, float64, float64, None),
-        (Sum, sum, decimal, decimal, None),
-        (Sum, sum, interval, interval, None),
-        (Min, min, int16, int16, None),
-        (Min, min, int32, int32, None),
-        (Min, min, int64, int64, None),
-        (Min, min_int256, int256, int256, None),
-        (Min, min, float32, float32, None),
-        (Min, min, float64, float64, None),
-        (Min, min, decimal, decimal, None),
-        (Min, min, boolean, boolean, None), // TODO(#359): remove once unnecessary
-        (Min, min, interval, interval, None),
-        (Min, min, date, date, None),
-        (Min, min, timestamp, timestamp, None),
-        (Min, min, time, time, None),
-        (Min, min, timestamptz, timestamptz, None),
-        (Min, min_struct, struct_type, struct_type, None),
-        (Min, min_str, varchar, varchar, None),
-        (Min, min_list, list, list, None),
-        (Max, max, int16, int16, None),
-        (Max, max, int32, int32, None),
-        (Max, max, int64, int64, None),
-        (Max, max_int256, int256, int256, None),
-        (Max, max, float32, float32, None),
-        (Max, max, float64, float64, None),
-        (Max, max, decimal, decimal, None),
-        (Max, max, boolean, boolean, None), // TODO(#359): remove once unnecessary
-        (Max, max, interval, interval, None),
-        (Max, max, date, date, None),
-        (Max, max, timestamp, timestamp, None),
-        (Max, max, time, time, None),
-        (Max, max, timestamptz, timestamptz, None),
-        (Max, max_struct, struct_type, struct_type, None),
-        (Max, max_str, varchar, varchar, None),
-        (Max, max_list, list, list, None),
-        (FirstValue, first, int16, int16, None),
-        (FirstValue, first, int32, int32, None),
-        (FirstValue, first, int64, int64, None),
-        (FirstValue, first_int256, int256, int256, None),
-        (FirstValue, first, float32, float32, None),
-        (FirstValue, first, float64, float64, None),
-        (FirstValue, first, decimal, decimal, None),
-        (FirstValue, first, boolean, boolean, None),
-        (FirstValue, first, interval, interval, None),
-        (FirstValue, first, date, date, None),
-        (FirstValue, first, timestamp, timestamp, None),
-        (FirstValue, first, time, time, None),
-        (FirstValue, first_struct, struct_type, struct_type, None),
-        (FirstValue, first_str, varchar, varchar, None),
-        (FirstValue, first_list, list, list, None),
-        // Global Agg
-        (Sum, sum, int64, int64, None),
-    ];
-    Ok(state)
+    todo!()
 }
 
 #[cfg(test)]
