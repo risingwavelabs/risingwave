@@ -2375,7 +2375,7 @@ def section_connector_node(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('connector_sink_rows_received')}[$__interval])",
-                            "{{sink_type}} @ {{sink_id}}",
+                            "{{connector_type}} @ {{sink_id}}",
                         ),
                     ],
                 ),

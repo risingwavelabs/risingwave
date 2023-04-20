@@ -36,14 +36,14 @@ public class ConnectorNodeMetrics {
     private static final Counter activeSinkConnections =
             Counter.build()
                     .name("active_sink_connections")
-                    .labelNames("sink_type", "ip")
+                    .labelNames("connector_type", "ip")
                     .help("Number of active sink connections")
                     .register();
 
     private static final Counter totalSinkConnections =
             Counter.build()
                     .name("total_sink_connections")
-                    .labelNames("sink_type", "ip")
+                    .labelNames("connector_type", "ip")
                     .help("Number of total connections")
                     .register();
     private static final Counter cpuUsage =
@@ -140,20 +140,20 @@ public class ConnectorNodeMetrics {
         activeSourceConnections.remove(sourceType, ip);
     }
 
-    public static void incActiveSinkConnections(String sinkType, String ip) {
-        activeSinkConnections.labels(sinkType, ip).inc();
+    public static void incActiveSinkConnections(String connectorType, String ip) {
+        activeSinkConnections.labels(connectorType, ip).inc();
     }
 
-    public static void decActiveSinkConnections(String sinkType, String ip) {
-        activeSinkConnections.remove(sinkType, ip);
+    public static void decActiveSinkConnections(String connectorType, String ip) {
+        activeSinkConnections.remove(connectorType, ip);
     }
 
     public static void incSourceRowsReceived(String sourceType, String sourceId, double amt) {
         sourceRowsReceived.labels(sourceType, sourceId).inc(amt);
     }
 
-    public static void incSinkRowsReceived(String sinkType, String sinkId, double amt) {
-        sinkRowsReceived.labels(sinkType, sinkId).inc(amt);
+    public static void incSinkRowsReceived(String connectorType, String sinkId, double amt) {
+        sinkRowsReceived.labels(connectorType, sinkId).inc(amt);
     }
 
     public static void incTotalConnections(String sinkType, String ip) {
