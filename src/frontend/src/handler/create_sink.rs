@@ -104,13 +104,12 @@ pub fn gen_sink_plan(
         {
             let conn = session.get_connection_by_name(sink_schema_name, &connection_name)?;
             resolve_private_link_connection(&conn, properties)?;
+            tracing::debug!("Create sink with connection {:?}", conn.id);
             Some(ConnectionId(conn.id))
         } else {
             None
         }
     };
-
-    info!("Create sink with connection {:?}", connection_id);
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
     if let Some(col_names) = col_names {
