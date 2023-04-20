@@ -25,7 +25,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
 use risingwave_pb::catalog::PbTable;
 
-use super::{ColumnId, DatabaseId, FragmentId, RelationCatalog, SchemaId};
+use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId};
 use crate::user::UserId;
 use crate::WithOptions;
 
@@ -461,7 +461,7 @@ impl From<&PbTable> for TableCatalog {
     }
 }
 
-impl RelationCatalog for TableCatalog {
+impl OwnedByUserCatalog for TableCatalog {
     fn owner(&self) -> UserId {
         self.owner
     }

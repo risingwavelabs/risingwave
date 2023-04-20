@@ -29,7 +29,7 @@ use super::{
     DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
 };
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
-use crate::hummock::sstable::{FilterBuilder, XorFilterBuilder};
+use crate::hummock::sstable::{create_monotonic_events, FilterBuilder, XorFilterBuilder};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{DeleteRangeTombstone, HummockResult};
 use crate::opts::StorageOpts;
@@ -184,6 +184,16 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     }
 
     /// Add kv pair to sstable.
+    pub async fn add_for_test(
+        &mut self,
+        full_key: FullKey<&[u8]>,
+        value: HummockValue<&[u8]>,
+        is_new_user_key: bool,
+    ) -> HummockResult<()> {
+        self.add(full_key, value, is_new_user_key).await
+    }
+
+    /// Add kv pair to sstable.
     pub async fn add(
         &mut self,
         full_key: FullKey<&[u8]>,
@@ -332,6 +342,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             .map(|block_meta| block_meta.uncompressed_size as u64)
             .sum::<u64>();
 
+        let monotonic_tombstone_events = create_monotonic_events(&self.range_tombstones);
+
         let mut meta = SstableMeta {
             block_metas: self.block_metas,
             bloom_filter,
@@ -342,6 +354,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             version: VERSION,
             meta_offset,
             range_tombstone_list: self.range_tombstones,
+            monotonic_tombstone_events,
         };
         meta.estimated_size = meta.encoded_size() as u32 + meta_offset as u32;
 
@@ -549,7 +562,7 @@ pub(super) mod tests {
         let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
 
         for i in 0..TEST_KEYS_COUNT {
-            b.add(
+            b.add_for_test(
                 test_key_of(i).to_ref(),
                 HummockValue::put(&test_value_of(i)),
                 true,

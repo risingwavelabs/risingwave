@@ -20,7 +20,7 @@ use super::bytes_array::{BytesWriter, PartialBytesWriter};
 use super::{Array, ArrayBuilder, ArrayMeta, BytesArray, BytesArrayBuilder};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::Bitmap;
-use crate::collection::estimate_size::EstimateSize;
+use crate::estimate_size::EstimateSize;
 
 /// `Utf8Array` is a collection of Rust Utf8 `str`s. It's a wrapper of `BytesArray`.
 #[derive(Debug, Clone, PartialEq, Eq)]

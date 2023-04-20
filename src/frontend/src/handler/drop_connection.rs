@@ -37,7 +37,7 @@ pub async fn handle_drop_connection(
 
     let connection_id = {
         let reader = session.env().catalog_reader().read_guard();
-        let (connection, _schema_name) =
+        let (connection, schema_name) =
             match reader.get_connection_by_name(db_name, schema_path, connection_name.as_str()) {
                 Ok((c, s)) => (c, s),
                 Err(e) => {
@@ -54,6 +54,7 @@ pub async fn handle_drop_connection(
                     }
                 }
             };
+        session.check_privilege_for_drop_alter(schema_name, &**connection)?;
 
         connection.id
     };

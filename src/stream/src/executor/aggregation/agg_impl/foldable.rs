@@ -288,18 +288,19 @@ where
                 }
             }
             Some(visibility) => {
-                for ((visible, op), data) in visibility
-                    .iter()
-                    .zip_eq_fast(ops.iter())
-                    .zip_eq_fast(data.iter())
-                {
-                    if visible {
-                        match op {
+                for idx in visibility.iter_ones() {
+                    // SAFETY(value_at_unchecked): the idx is always in bound.
+                    unsafe {
+                        match ops[idx] {
                             Op::Insert | Op::UpdateInsert => {
-                                self.result = S::accumulate(self.result.as_ref(), data)?
+                                self.result = S::accumulate(
+                                    self.result.as_ref(),
+                                    data.value_at_unchecked(idx),
+                                )?
                             }
                             Op::Delete | Op::UpdateDelete => {
-                                self.result = S::retract(self.result.as_ref(), data)?
+                                self.result =
+                                    S::retract(self.result.as_ref(), data.value_at_unchecked(idx))?
                             }
                         }
                     }
@@ -672,6 +673,7 @@ mod tests {
             Some(rand_bitmap::gen_rand_bitmap(
                 chunk_size,
                 (chunk_size as f64 * vis_rate) as usize,
+                666,
             ))
         } else {
             None

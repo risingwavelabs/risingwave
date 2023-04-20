@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use super::{DefaultBehavior, Merge};
 use crate::optimizer::plan_node::{
     BatchSeqScan, LogicalScan, PlanTreeNodeBinary, StreamTableScan, StreamTemporalJoin,
 };
@@ -29,8 +30,10 @@ impl TemporalJoinValidator {
 }
 
 impl PlanVisitor<bool> for TemporalJoinValidator {
-    fn merge(a: bool, b: bool) -> bool {
-        a | b
+    type DefaultBehavior = impl DefaultBehavior<bool>;
+
+    fn default_behavior() -> Self::DefaultBehavior {
+        Merge(|a, b| a | b)
     }
 
     fn visit_stream_table_scan(&mut self, stream_table_scan: &StreamTableScan) -> bool {

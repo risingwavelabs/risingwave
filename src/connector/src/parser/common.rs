@@ -71,7 +71,7 @@ fn do_parse_simd_json_value(
         DataType::Float32 => {
             let scalar_val = ScalarImpl::Float32((simd_json_ensure_float!(v, f32) as f32).into());
             if let ScalarImpl::Float32(f) = scalar_val {
-                if f.is_infinite() {
+                if f.0.is_infinite() {
                     anyhow::bail!("{v} is out of range for type f32");
                 }
             }
