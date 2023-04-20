@@ -76,6 +76,7 @@ mod lookup_union;
 mod managed_state;
 mod merge;
 mod mview;
+mod no_op;
 mod now;
 mod over_window;
 mod project;
@@ -142,6 +143,7 @@ pub use union::UnionExecutor;
 pub use values::ValuesExecutor;
 pub use watermark_filter::WatermarkFilterExecutor;
 pub use wrapper::WrapperExecutor;
+pub use no_op::NoOpExecutor;
 
 use self::barrier_align::AlignedMessageStream;
 
