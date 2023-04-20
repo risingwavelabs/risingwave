@@ -5,6 +5,19 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
+############# INSTALL NEXMARK BENCH
+
+pushd ..
+git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/nexmark-bench.git
+pushd nexmark-bench
+make install
+cp /usr/local/cargo/bin/nexmark-server ./nexmark-server
+buildkite-agent artifact upload ./nexmark-server
+popd
+popd
+
+############# SETUP RW
+
 # FIXME(kwannoel): Not sure if risingwave_java_binding is needed
 echo "--- Build Rust components"
 cargo build \

@@ -18,15 +18,6 @@ print_machine_debug_info() {
 
 ############## INSTALL
 
-# TODO(kwannoel): Some of these could be moved to the `build` step.
-
-install_nexmark_bench() {
-  git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/nexmark-bench.git
-  pushd nexmark-bench
-  cargo -Z sparse-registry install --path .
-  popd
-}
-
 install_nperf() {
   git clone https://github.com/koute/not-perf.git
   pushd not-perf/cli
@@ -50,7 +41,10 @@ install_all() {
   tar -zxvf kafka_2.13-3.4.0.tgz
 
   echo ">>> Installing nexmark bench"
-  install_nexmark_bench
+  mkdir -p nexmark-bench
+  pushd nexmark-bench
+  buildkite-agent artifact download nexmark-bench
+  popd
 
   echo ">>> Installing nperf"
   install_nperf
