@@ -67,7 +67,6 @@ message ExprNode {
     LTRIM = 210;
     RTRIM = 211;
     CASE = 212;
-    STRING_TO_ARRAY=259;
     // ROUND(numeric, integer) -> numeric
     ROUND_DIGIT = 213;
     // ROUND(numeric) -> numeric
@@ -148,6 +147,7 @@ message ExprNode {
     ARRAY_REMOVE = 538;
     ARRAY_POSITIONS = 539;
     TRIM_ARRAY = 540;
+    STRING_TO_ARRAY=541;
 
     // Int256 functions
     HEX_TO_INT256 = 560;
