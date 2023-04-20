@@ -22,12 +22,13 @@ use itertools::Itertools;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
-use risingwave_hummock_sdk::key::{FullKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
+use tracing::error;
 
+use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
 use crate::hummock::compactor::context::CompactorContext;
 use crate::hummock::compactor::{CompactOutput, Compactor};
@@ -37,12 +38,12 @@ use crate::hummock::iterator::{Forward, HummockIterator, OrderedMergeIteratorInn
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchInner, SharedBufferVersionedEntry,
 };
-use crate::hummock::sstable::DeleteRangeAggregatorBuilder;
+use crate::hummock::sstable::CompactionDeleteRangesBuilder;
 use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    CachePolicy, HummockError, HummockResult, RangeTombstonesCollector, SstableBuilderOptions,
+    CachePolicy, CompactionDeleteRanges, HummockError, HummockResult, SstableBuilderOptions,
 };
 
 const GC_DELETE_KEYS_FOR_FLUSH: bool = false;
@@ -100,12 +101,40 @@ pub async fn compact(
 /// For compaction from shared buffer to level 0, this is the only function gets called.
 async fn compact_shared_buffer(
     context: Arc<CompactorContext>,
-    payload: UploadTaskPayload,
+    mut payload: UploadTaskPayload,
 ) -> HummockResult<Vec<LocalSstableInfo>> {
     // Local memory compaction looks at all key ranges.
+
+    let mut existing_table_ids: HashSet<u32> = payload
+        .iter()
+        .map(|imm| imm.table_id.table_id)
+        .dedup()
+        .collect();
+
+    assert!(!existing_table_ids.is_empty());
+
+    let multi_filter_key_extractor = context
+        .filter_key_extractor_manager
+        .acquire(existing_table_ids.clone())
+        .await?;
+    if let FilterKeyExtractorImpl::Multi(multi) = &multi_filter_key_extractor {
+        existing_table_ids = multi.get_exsting_table_ids();
+    }
+    let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
+
     let mut size_and_start_user_keys = vec![];
     let mut compact_data_size = 0;
-    let mut builder = DeleteRangeAggregatorBuilder::default();
+    let mut builder = CompactionDeleteRangesBuilder::default();
+    payload.retain(|imm| {
+        let ret = existing_table_ids.contains(&imm.table_id.table_id);
+        if !ret {
+            error!(
+                "can not find table {:?}, it may be removed by meta-service",
+                imm.table_id
+            );
+        }
+        ret
+    });
     for imm in &payload {
         let data_size = {
             let tombstones = imm.get_delete_range_tombstones();
@@ -157,26 +186,12 @@ async fn compact_shared_buffer(
         }
     }
 
-    let existing_table_ids: HashSet<u32> = payload
-        .iter()
-        .map(|imm| imm.table_id.table_id)
-        .dedup()
-        .collect();
-
-    assert!(!existing_table_ids.is_empty());
-
-    let multi_filter_key_extractor = context
-        .filter_key_extractor_manager
-        .acquire(existing_table_ids)
-        .await;
-    let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
-
     let parallelism = splits.len();
     let mut compact_success = true;
     let mut output_ssts = Vec::with_capacity(parallelism);
     let mut compaction_futures = vec![];
 
-    let agg = builder.build(GC_WATERMARK_FOR_FLUSH, GC_DELETE_KEYS_FOR_FLUSH);
+    let agg = builder.build_for_compaction(GC_WATERMARK_FOR_FLUSH, GC_DELETE_KEYS_FOR_FLUSH);
     for (split_index, key_range) in splits.into_iter().enumerate() {
         let compactor = SharedBufferCompactRunner::new(
             split_index,
@@ -258,9 +273,16 @@ pub async fn merge_imms_in_memory(
     let mut merged_size = 0;
     let mut merged_imm_ids = Vec::with_capacity(imms.len());
 
+    let mut smallest_table_key = vec![];
+    let mut smallest_empty = true;
+    let mut largest_table_key = vec![];
+
     let mut imm_iters = Vec::with_capacity(imms.len());
     for imm in imms {
-        assert!(imm.kv_count() > 0, "imm should not be empty");
+        assert!(
+            imm.kv_count() > 0 || imm.has_range_tombstone(),
+            "imm should not be empty"
+        );
         assert_eq!(
             table_id,
             imm.table_id(),
@@ -272,9 +294,25 @@ pub async fn merge_imms_in_memory(
         kv_count += imm.kv_count();
         merged_size += imm.size();
         range_tombstone_list.extend(imm.get_delete_range_tombstones());
+
+        if smallest_empty || smallest_table_key.gt(imm.raw_smallest_key()) {
+            smallest_table_key.clear();
+            smallest_table_key.extend_from_slice(imm.raw_smallest_key());
+            smallest_empty = false;
+        }
+        if largest_table_key.lt(imm.raw_largest_key()) {
+            largest_table_key.clear();
+            largest_table_key.extend_from_slice(imm.raw_largest_key());
+        }
+
         imm_iters.push(imm.into_forward_iter());
     }
-    range_tombstone_list.sort();
+    let mut builder = CompactionDeleteRangesBuilder::default();
+    builder.add_tombstone(range_tombstone_list.clone());
+    let compaction_delete_ranges =
+        builder.build_for_compaction(GC_WATERMARK_FOR_FLUSH, GC_DELETE_KEYS_FOR_FLUSH);
+    let mut del_iter = compaction_delete_ranges.iter();
+    del_iter.rewind();
     epochs.sort();
 
     // use merge iterator to merge input imms
@@ -289,27 +327,61 @@ pub async fn merge_imms_in_memory(
 
     let mut merged_payload: Vec<SharedBufferVersionedEntry> = Vec::new();
     let mut pivot = items.first().map(|((k, _), _)| k.clone()).unwrap();
+    del_iter.earliest_delete_which_can_see_key(
+        &UserKey::new(table_id, TableKey(pivot.as_ref())),
+        HummockEpoch::MAX,
+    );
     let mut versions: Vec<(HummockEpoch, HummockValue<Bytes>)> = Vec::new();
+
+    let mut pivot_last_delete_epoch = HummockEpoch::MAX;
 
     for ((key, value), epoch) in items {
         assert!(key >= pivot, "key should be in ascending order");
-        if key == pivot {
-            versions.push((epoch, value));
+        let earliest_range_delete_which_can_see_key = if key == pivot {
+            del_iter.earliest_delete_since(epoch)
         } else {
             merged_payload.push((pivot, versions));
             pivot = key;
-            versions = vec![(epoch, value)];
+            pivot_last_delete_epoch = HummockEpoch::MAX;
+            versions = vec![];
+            del_iter.earliest_delete_which_can_see_key(
+                &UserKey::new(table_id, TableKey(pivot.as_ref())),
+                epoch,
+            )
+        };
+        if value.is_delete() {
+            pivot_last_delete_epoch = epoch;
+        } else if earliest_range_delete_which_can_see_key < pivot_last_delete_epoch {
+            debug_assert!(
+                epoch < earliest_range_delete_which_can_see_key
+                    && earliest_range_delete_which_can_see_key < pivot_last_delete_epoch
+            );
+            pivot_last_delete_epoch = earliest_range_delete_which_can_see_key;
+            // In each merged immutable memtable, since a union set of delete ranges is constructed
+            // and thus original delete ranges are replaced with the union set and not
+            // used in read, we lose exact information about whether a key is deleted by
+            // a delete range in the merged imm which it belongs to. Therefore we need
+            // to construct a corresponding delete key to represent this.
+            versions.push((
+                earliest_range_delete_which_can_see_key,
+                HummockValue::Delete,
+            ));
         }
+        versions.push((epoch, value));
     }
     // process the last key
     if !versions.is_empty() {
         merged_payload.push((pivot, versions));
     }
 
+    drop(del_iter);
+
     Ok(SharedBufferBatch {
         inner: Arc::new(SharedBufferBatchInner::new_with_multi_epoch_batches(
             epochs,
             merged_payload,
+            smallest_table_key,
+            largest_table_key,
             kv_count,
             merged_imm_ids,
             range_tombstone_list,
@@ -358,7 +430,7 @@ impl SharedBufferCompactRunner {
         self,
         iter: impl HummockIterator<Direction = Forward>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
-        del_agg: Arc<RangeTombstonesCollector>,
+        del_agg: Arc<CompactionDeleteRanges>,
     ) -> HummockResult<CompactOutput> {
         let dummy_compaction_filter = DummyCompactionFilter {};
         let (ssts, table_stats_map) = self

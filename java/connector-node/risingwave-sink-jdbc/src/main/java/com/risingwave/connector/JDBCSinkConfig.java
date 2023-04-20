@@ -44,15 +44,11 @@ public class JDBCSinkConfig extends CommonSinkConfig {
         return jdbcUrl;
     }
 
-    public void setJdbcUrl(String jdbcUrl) {
-        this.jdbcUrl = jdbcUrl;
-    }
-
     public String getTableName() {
         return tableName;
     }
 
-    public void setTableName(String tableName) {
-        this.tableName = tableName;
+    public String getSinkType() {
+        return sinkType;
     }
 }

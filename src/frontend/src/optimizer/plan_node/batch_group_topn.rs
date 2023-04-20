@@ -34,11 +34,8 @@ pub struct BatchGroupTopN {
 impl BatchGroupTopN {
     pub fn new(logical: generic::TopN<PlanRef>) -> Self {
         assert!(!logical.group_key.is_empty());
-        let base = PlanBase::new_logical_with_core(&logical);
-        let ctx = base.ctx;
-        let base = PlanBase::new_batch(
-            ctx,
-            base.schema,
+        let base = PlanBase::new_batch_from_logical(
+            &logical,
             logical.input.distribution().clone(),
             // BatchGroupTopN outputs data in the order of specified order
             logical.order.clone(),

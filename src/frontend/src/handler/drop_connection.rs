@@ -12,19 +12,55 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
+use crate::binder::Binder;
+use crate::catalog::root_catalog::SchemaPath;
 use crate::handler::HandlerArgs;
 
-pub fn handle_drop_connection(
-    _handler_args: HandlerArgs,
-    _connection_name: ObjectName,
-    _if_exists: bool,
+pub async fn handle_drop_connection(
+    handler_args: HandlerArgs,
+    connection_name: ObjectName,
+    if_exists: bool,
 ) -> Result<RwPgResponse> {
-    Err(RwError::from(ErrorCode::NotImplemented(
-        "DROP CONNECTION is not implemented\n".to_string(),
-        None.into(),
-    )))
+    let session = handler_args.session;
+    let db_name = session.database();
+    let (schema_name, connection_name) =
+        Binder::resolve_schema_qualified_name(db_name, connection_name)?;
+    let search_path = session.config().get_search_path();
+    let user_name = &session.auth_context().user_name;
+
+    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+
+    let connection_id = {
+        let reader = session.env().catalog_reader().read_guard();
+        let (connection, schema_name) =
+            match reader.get_connection_by_name(db_name, schema_path, connection_name.as_str()) {
+                Ok((c, s)) => (c, s),
+                Err(e) => {
+                    return if if_exists {
+                        Ok(RwPgResponse::empty_result_with_notice(
+                            StatementType::DROP_CONNECTION,
+                            format!(
+                                "connection \"{}\" does not exist, skipping",
+                                connection_name
+                            ),
+                        ))
+                    } else {
+                        Err(e.into())
+                    }
+                }
+            };
+        session.check_privilege_for_drop_alter(schema_name, &**connection)?;
+
+        connection.id
+    };
+
+    let catalog_writer = session.env().catalog_writer();
+    catalog_writer.drop_connection(connection_id).await?;
+
+    Ok(PgResponse::empty_result(StatementType::DROP_CONNECTION))
 }

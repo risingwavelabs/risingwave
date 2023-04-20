@@ -23,6 +23,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::function::aggregate::AggCall;
 use risingwave_expr::vector_op::agg::{AggStateFactory, BoxedAggState};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
@@ -77,7 +78,7 @@ impl HashAggExecutorBuilder {
         let agg_factories: Vec<_> = hash_agg_node
             .get_agg_calls()
             .iter()
-            .map(AggStateFactory::new)
+            .map(|agg_call| AggCall::from_protobuf(agg_call).and_then(AggStateFactory::new))
             .try_collect()?;
 
         let group_key_columns = hash_agg_node

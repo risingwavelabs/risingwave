@@ -31,9 +31,8 @@ pub struct StreamExpand {
 
 impl StreamExpand {
     pub fn new(logical: generic::Expand<PlanRef>) -> Self {
-        let base = PlanBase::new_logical_with_core(&logical);
         let input = logical.input.clone();
-        let schema = base.schema;
+        let schema = input.schema();
 
         let dist = match input.distribution() {
             Distribution::Single => Distribution::Single,
@@ -51,11 +50,8 @@ impl StreamExpand {
                 .map(|idx| idx + input.schema().len()),
         );
 
-        let base = PlanBase::new_stream(
-            base.ctx,
-            schema,
-            base.logical_pk,
-            base.functional_dependency,
+        let base = PlanBase::new_stream_with_logical(
+            &logical,
             dist,
             input.append_only(),
             watermark_columns,

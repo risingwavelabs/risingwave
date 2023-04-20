@@ -46,7 +46,7 @@ use tempfile::{Builder, NamedTempFile};
 
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
-use crate::catalog::{DatabaseId, SchemaId};
+use crate::catalog::{ConnectionId, DatabaseId, SchemaId};
 use crate::handler::extended_handle::{Portal, PrepareStatement};
 use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
@@ -301,6 +301,9 @@ impl CatalogWriter for MockCatalogWriter {
     async fn create_connection(
         &self,
         _connection_name: String,
+        _database_id: u32,
+        _schema_id: u32,
+        _owner_id: u32,
         _connection: create_connection_request::Payload,
     ) -> Result<()> {
         unreachable!()
@@ -395,7 +398,7 @@ impl CatalogWriter for MockCatalogWriter {
         unreachable!()
     }
 
-    async fn drop_connection(&self, _connection_name: &str) -> Result<()> {
+    async fn drop_connection(&self, _connection_id: ConnectionId) -> Result<()> {
         unreachable!()
     }
 

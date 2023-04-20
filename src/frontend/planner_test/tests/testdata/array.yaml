@@ -132,7 +132,7 @@
     create table t (v1 varchar[]);
     insert into t values ('{c,d}');
   logical_plan: |
-    LogicalInsert { table: t }
+    LogicalInsert { table: t, mapping: [0:0] }
     └─LogicalValues { rows: [['{c,d}':Varchar::List { datatype: Varchar }]], schema: Schema { fields: [*VALUES*_0.column_0:List { datatype: Varchar }] } }
 - name: unknown to varchar[] in explicit context
   sql: |
@@ -145,7 +145,7 @@
     create table t (v1 varchar);
     insert into t values (array['a', 'b']);
   logical_plan: |
-    LogicalInsert { table: t }
+    LogicalInsert { table: t, mapping: [0:0] }
     └─LogicalValues { rows: [[Array('a':Varchar, 'b':Varchar)::Varchar]], schema: Schema { fields: [*VALUES*_0.column_0:Varchar] } }
 - name: varchar[] to string in explicit context
   sql: |

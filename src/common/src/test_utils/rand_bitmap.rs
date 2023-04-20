@@ -12,30 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::catalog::Connection;
+use itertools::Itertools;
+use rand::seq::SliceRandom;
+use rand::SeedableRng;
 
-use crate::model::{MetadataModel, MetadataModelResult};
+use crate::buffer::{Bitmap, BitmapBuilder};
 
-/// Column family name for connection.
-const CONNECTION_CF_NAME: &str = "cf/connection";
-
-impl MetadataModel for Connection {
-    type KeyType = u32;
-    type PbType = Connection;
-
-    fn cf_name() -> String {
-        CONNECTION_CF_NAME.to_string()
+pub fn gen_rand_bitmap(num_bits: usize, count_ones: usize, seed: u64) -> Bitmap {
+    let mut builder = BitmapBuilder::zeroed(num_bits);
+    let mut range = (0..num_bits).collect_vec();
+    range.shuffle(&mut rand::rngs::StdRng::seed_from_u64(seed));
+    let shuffled = range.into_iter().collect_vec();
+    for item in shuffled.iter().take(count_ones) {
+        builder.set(*item, true);
     }
-
-    fn to_protobuf(&self) -> Self::PbType {
-        self.clone()
-    }
-
-    fn from_protobuf(prost: Self::PbType) -> Self {
-        prost
-    }
-
-    fn key(&self) -> MetadataModelResult<Self::KeyType> {
-        Ok(self.id)
-    }
+    builder.finish()
 }

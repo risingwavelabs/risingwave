@@ -20,9 +20,9 @@ use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::function::aggregate::AggKind;
 
-use super::generic::{self, AggCallState, GenericPlanRef, PlanAggCall, ProjectBuilder};
+use super::generic::{self, Agg, AggCallState, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg,
@@ -49,7 +49,7 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, Substi
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct LogicalAgg {
     pub base: PlanBase,
-    core: generic::Agg<PlanRef>,
+    core: Agg<PlanRef>,
 }
 
 impl LogicalAgg {
@@ -76,10 +76,12 @@ impl LogicalAgg {
     /// Should only be used iff input is distributed. Input must be converted to stream form.
     fn gen_stateless_two_phase_streaming_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         debug_assert!(self.group_key().is_empty());
-        let local_agg = StreamLocalSimpleAgg::new(self.clone_with_input(stream_input));
+        let mut logical = self.core.clone();
+        logical.input = stream_input;
+        let local_agg = StreamLocalSimpleAgg::new(logical);
         let exchange =
             RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
-        let global_agg = new_stream_global_simple_agg(generic::Agg::new(
+        let global_agg = new_stream_global_simple_agg(Agg::new(
             self.agg_calls()
                 .iter()
                 .enumerate()
@@ -122,14 +124,14 @@ impl LogicalAgg {
         );
         let vnode_col_idx = exprs.len() - 1;
         // TODO(kwannoel): We should apply Project optimization rules here.
-        let project = StreamProject::new(LogicalProject::new(stream_input, exprs));
+        let project = StreamProject::new(generic::Project::new(exprs, stream_input));
 
         // Generate local agg step
         let mut local_group_key = self.group_key().to_vec();
         local_group_key.push(vnode_col_idx);
         let n_local_group_key = local_group_key.len();
         let local_agg = new_stream_hash_agg(
-            generic::Agg::new(self.agg_calls().to_vec(), local_group_key, project.into()),
+            Agg::new(self.agg_calls().to_vec(), local_group_key, project.into()),
             Some(vnode_col_idx),
         );
         // Global group key excludes vnode.
@@ -144,7 +146,7 @@ impl LogicalAgg {
         if self.group_key().is_empty() {
             let exchange =
                 RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
-            let global_agg = new_stream_global_simple_agg(generic::Agg::new(
+            let global_agg = new_stream_global_simple_agg(Agg::new(
                 self.agg_calls()
                     .iter()
                     .enumerate()
@@ -162,7 +164,7 @@ impl LogicalAgg {
             // Local phase should have reordered the group keys into their required order.
             // we can just follow it.
             let global_agg = new_stream_hash_agg(
-                generic::Agg::new(
+                Agg::new(
                     self.agg_calls()
                         .iter()
                         .enumerate()
@@ -303,7 +305,7 @@ impl LogicalAgg {
     // Check if the input is already sorted, and hence sort merge aggregation can be used
     // It can only be used, if the input is sorted on all group key indices and the
     // datatype of the column is int32
-    fn input_provides_order_on_group_keys(&self, new_logical: &generic::Agg<PlanRef>) -> bool {
+    fn input_provides_order_on_group_keys(&self, new_logical: &Agg<PlanRef>) -> bool {
         self.group_key().iter().all(|group_by_idx| {
             let input = &new_logical.input;
             input
@@ -321,7 +323,7 @@ impl LogicalAgg {
         })
     }
 
-    pub fn core(&self) -> &generic::Agg<PlanRef> {
+    pub fn core(&self) -> &Agg<PlanRef> {
         &self.core
     }
 }
@@ -373,7 +375,7 @@ impl LogicalAggBuilder {
         let logical_project = LogicalProject::with_core(self.input_proj_builder.build(input));
 
         // This LogicalAgg focuses on calculating the aggregates and grouping.
-        LogicalAgg::new(self.agg_calls, self.group_key, logical_project.into())
+        Agg::new(self.agg_calls, self.group_key, logical_project.into()).into()
     }
 
     fn rewrite_with_error(&mut self, expr: ExprImpl) -> Result<ExprImpl> {
@@ -553,7 +555,7 @@ impl LogicalAggBuilder {
                     order_by: order_by.clone(),
                     filter: filter.clone(),
                 });
-                let left = ExprImpl::from(left_ref).cast_implicit(return_type).unwrap();
+                let left = ExprImpl::from(left_ref).cast_explicit(return_type).unwrap();
 
                 let right_return_type =
                     AggCall::infer_return_type(&AggKind::Count, &[inputs[0].return_type()])
@@ -613,7 +615,7 @@ impl LogicalAggBuilder {
                     order_by: order_by.clone(),
                     filter: filter.clone(),
                 }))
-                .cast_implicit(return_type.clone())
+                .cast_explicit(return_type.clone())
                 .unwrap();
 
                 // after that, we compute sum
@@ -628,7 +630,7 @@ impl LogicalAggBuilder {
                     order_by: order_by.clone(),
                     filter: filter.clone(),
                 }))
-                .cast_implicit(return_type.clone())
+                .cast_explicit(return_type.clone())
                 .unwrap();
 
                 // then, we compute count
@@ -806,18 +808,21 @@ impl ExprRewriter for LogicalAggBuilder {
     }
 }
 
-impl From<generic::Agg<PlanRef>> for LogicalAgg {
-    fn from(core: generic::Agg<PlanRef>) -> Self {
+impl From<Agg<PlanRef>> for LogicalAgg {
+    fn from(core: Agg<PlanRef>) -> Self {
         let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
     }
 }
 
-impl LogicalAgg {
-    pub fn new(agg_calls: Vec<PlanAggCall>, group_key: Vec<usize>, input: PlanRef) -> Self {
-        Self::from(generic::Agg::new(agg_calls, group_key, input))
+/// Because `From`/`Into` are not transitive
+impl From<Agg<PlanRef>> for PlanRef {
+    fn from(core: Agg<PlanRef>) -> Self {
+        LogicalAgg::from(core).into()
     }
+}
 
+impl LogicalAgg {
     /// get the Mapping of columnIndex from input column index to out column index
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
         self.core.i2o_col_mapping()
@@ -897,20 +902,12 @@ impl LogicalAgg {
             .cloned()
             .map(|key| input_col_change.map(key))
             .collect();
-        Self::new(agg_calls, group_key, input)
-    }
-
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        self.core.fmt_with_name(f, name)
-    }
-
-    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
-        self.core.fmt_fields_with_builder(builder)
+        Agg::new(agg_calls, group_key, input).into()
     }
 
     fn to_batch_simple_agg(&self) -> Result<PlanRef> {
         let input = self.input().to_batch()?;
-        let new_logical = generic::Agg {
+        let new_logical = Agg {
             input,
             ..self.core.clone()
         };
@@ -924,7 +921,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.agg_calls().to_vec(), self.group_key().to_vec(), input)
+        Agg::new(self.agg_calls().to_vec(), self.group_key().to_vec(), input).into()
     }
 
     #[must_use]
@@ -944,7 +941,7 @@ impl_plan_tree_node_for_unary! {LogicalAgg}
 
 impl fmt::Display for LogicalAgg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalAgg")
+        self.core.fmt_with_name(f, "LogicalAgg")
     }
 }
 
@@ -1116,7 +1113,7 @@ impl ToBatch for LogicalAgg {
     }
 }
 
-fn find_or_append_row_count(mut logical: generic::Agg<PlanRef>) -> (generic::Agg<PlanRef>, usize) {
+fn find_or_append_row_count(mut logical: Agg<PlanRef>) -> (Agg<PlanRef>, usize) {
     // `HashAgg`/`GlobalSimpleAgg` executors require a `count(*)` to correctly build changes, so
     // append a `count(*)` if not exists.
     let count_star = PlanAggCall::count_star();
@@ -1134,15 +1131,12 @@ fn find_or_append_row_count(mut logical: generic::Agg<PlanRef>) -> (generic::Agg
     (logical, row_count_idx)
 }
 
-fn new_stream_global_simple_agg(logical: generic::Agg<PlanRef>) -> StreamGlobalSimpleAgg {
+fn new_stream_global_simple_agg(logical: Agg<PlanRef>) -> StreamGlobalSimpleAgg {
     let (logical, row_count_idx) = find_or_append_row_count(logical);
     StreamGlobalSimpleAgg::new(logical, row_count_idx)
 }
 
-fn new_stream_hash_agg(
-    logical: generic::Agg<PlanRef>,
-    vnode_col_idx: Option<usize>,
-) -> StreamHashAgg {
+fn new_stream_hash_agg(logical: Agg<PlanRef>, vnode_col_idx: Option<usize>) -> StreamHashAgg {
     let (logical, row_count_idx) = find_or_append_row_count(logical);
     StreamHashAgg::new(logical, vnode_col_idx, row_count_idx)
 }
@@ -1163,7 +1157,7 @@ impl ToStream for LogicalAgg {
             Ok(stream_agg)
         } else {
             // a `count(*)` is appended, should project the output
-            Ok(StreamProject::new(LogicalProject::with_out_col_idx(
+            Ok(StreamProject::new(generic::Project::with_out_col_idx(
                 stream_agg,
                 0..self.schema().len(),
             ))
@@ -1353,7 +1347,7 @@ mod tests {
             order_by: vec![],
             filter: Condition::true_cond(),
         };
-        LogicalAgg::new(vec![agg_call], vec![1], values.into())
+        Agg::new(vec![agg_call], vec![1], values.into()).into()
     }
 
     #[tokio::test]
@@ -1472,7 +1466,7 @@ mod tests {
             order_by: vec![],
             filter: Condition::true_cond(),
         };
-        let agg: PlanRef = LogicalAgg::new(vec![agg_call], vec![1], values.into()).into();
+        let agg: PlanRef = Agg::new(vec![agg_call], vec![1], values.into()).into();
 
         // Perform the prune
         let required_cols = vec![1];
@@ -1546,7 +1540,7 @@ mod tests {
                 filter: Condition::true_cond(),
             },
         ];
-        let agg: PlanRef = LogicalAgg::new(agg_calls, vec![1, 2], values.into()).into();
+        let agg: PlanRef = Agg::new(agg_calls, vec![1, 2], values.into()).into();
 
         // Perform the prune
         let required_cols = vec![0, 3];

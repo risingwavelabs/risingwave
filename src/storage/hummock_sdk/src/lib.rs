@@ -21,9 +21,6 @@
 
 mod key_cmp;
 
-#[macro_use]
-extern crate num_derive;
-
 use std::cmp::Ordering;
 
 pub use key_cmp::*;
@@ -36,7 +33,6 @@ use crate::table_stats::{to_prost_table_stats_map, PbTableStatsMap, TableStatsMa
 
 pub mod compact;
 pub mod compaction_group;
-pub mod filter_key_extractor;
 pub mod key;
 pub mod key_range;
 pub mod prost_key_range;

@@ -25,7 +25,6 @@ hyper = "0.14"
 itertools = "0.10"
 maplit = "1.0.2"
 pprof = { version = "0.11", features = ["flamegraph"] }
-pretty-bytes = "0.2.2"
 prometheus = { version = "0.13" }
 risingwave_batch = { path = "../batch" }
 risingwave_common = { path = "../common" }

@@ -72,7 +72,12 @@ public class MySQLSourceTest {
             mysql.withCopyFileToContainer(
                     MountableFile.forClasspathResource("orders.tbl"), "/home/orders.tbl");
             mysql.start();
-            mysqlDataSource = SourceTestClient.getDataSource(mysql);
+            mysqlDataSource =
+                    SourceTestClient.getDataSource(
+                            mysql.getJdbcUrl(),
+                            mysql.getUsername(),
+                            mysql.getPassword(),
+                            mysql.getDriverClassName());
             LOG.info("mysql started");
         } catch (IOException e) {
             fail("IO exception: ", e);
@@ -131,7 +136,7 @@ public class MySQLSourceTest {
         try {
             int count = countResult.get();
             LOG.info("number of cdc messages received: {}", count);
-            assertEquals(count, 10000);
+            assertEquals(10000, count);
         } catch (ExecutionException e) {
             fail("Execution exception: ", e);
         }

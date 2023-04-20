@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::function::aggregate::AggKind;
 use risingwave_pb::expr::PbAggCall;
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePb};
 
@@ -54,7 +54,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         });
     }
 
-    fn output_len(&self) -> usize {
+    pub(crate) fn output_len(&self) -> usize {
         self.group_key.len() + self.agg_calls.len()
     }
 
@@ -70,7 +70,11 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
 
     /// get the Mapping of columnIndex from input column index to out column index
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        self.o2i_col_mapping().inverse()
+        let mut map = vec![None; self.input.schema().len()];
+        for (i, key) in self.group_key.iter().enumerate() {
+            map[*key] = Some(i);
+        }
+        ColIndexMapping::with_target_size(map, self.output_len())
     }
 
     pub(crate) fn can_two_phase_agg(&self) -> bool {
@@ -648,7 +652,7 @@ impl PlanAggCall {
 
     pub fn to_protobuf(&self) -> PbAggCall {
         PbAggCall {
-            r#type: self.agg_kind.to_prost().into(),
+            r#type: self.agg_kind.to_protobuf().into(),
             return_type: Some(self.return_type.to_protobuf()),
             args: self.inputs.iter().map(InputRef::to_proto).collect(),
             distinct: self.distinct,

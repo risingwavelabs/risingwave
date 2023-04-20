@@ -19,7 +19,7 @@ use risingwave_pb::data::PbColumn;
 
 use super::{Array, ArrayError, ArrayResult, I64Array};
 use crate::array::{ArrayImpl, ArrayRef};
-use crate::collection::estimate_size::EstimateSize;
+use crate::estimate_size::EstimateSize;
 
 /// A [`Column`] consists of its logical data type
 /// and its corresponding physical array implementation,
