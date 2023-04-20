@@ -32,13 +32,14 @@ import java.util.stream.IntStream;
 public class FileSink extends SinkBase {
     private final FileWriter sinkWriter;
 
-    private String sinkPath;
+    private FileSinkConfig config;
 
     private boolean closed = false;
 
-    public FileSink(String sinkPath, TableSchema tableSchema) {
+    public FileSink(FileSinkConfig config, TableSchema tableSchema) {
         super(tableSchema);
-        this.sinkPath = sinkPath;
+
+        String sinkPath = config.getSinkPath();
         try {
             new File(sinkPath).mkdirs();
             Path path = Paths.get(sinkPath, UUID.randomUUID() + ".dat");
@@ -48,10 +49,12 @@ public class FileSink extends SinkBase {
                 throw INTERNAL.withDescription("failed to create file: " + path)
                         .asRuntimeException();
             }
-            this.sinkPath = path.toString();
+            config.setSinkPath(path.toString());
         } catch (IOException e) {
             throw INTERNAL.withCause(e).asRuntimeException();
         }
+
+        this.config = config;
     }
 
     @Override
@@ -103,7 +106,7 @@ public class FileSink extends SinkBase {
     }
 
     public String getSinkPath() {
-        return sinkPath;
+        return config.getSinkPath();
     }
 
     public boolean isClosed() {

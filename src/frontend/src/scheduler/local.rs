@@ -49,7 +49,7 @@ use crate::catalog::TableId;
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
-use crate::scheduler::{PinnedHummockSnapshot, SchedulerResult};
+use crate::scheduler::{PinnedHummockSnapshot, SchedulerError, SchedulerResult};
 use crate::session::{AuthContext, FrontendEnv};
 
 pub type LocalQueryStream = ReceiverStream<Result<DataChunk, BoxedError>>;
@@ -403,17 +403,9 @@ impl LocalQueryExecution {
                             .inner_side_table_desc
                             .as_ref()
                             .expect("no side table desc");
-                        let table = self
-                            .front_env
-                            .catalog_reader()
-                            .read_guard()
-                            .get_table_by_id(&side_table_desc.table_id.into())
-                            .context("side table not found")?;
                         let mapping = self
-                            .front_env
-                            .worker_node_manager()
-                            .get_fragment_mapping(&table.fragment_id)
-                            .context("fragment mapping not found")?;
+                            .get_vnode_mapping(&side_table_desc.table_id.into())
+                            .context("side table not found")?;
 
                         // TODO: should we use `pb::ParallelUnitMapping` here?
                         node.inner_side_vnode_mapping = mapping.to_expanded();
@@ -454,9 +446,8 @@ impl LocalQueryExecution {
 
     #[inline(always)]
     fn get_vnode_mapping(&self, table_id: &TableId) -> Option<ParallelUnitMapping> {
-        self.front_env
-            .catalog_reader()
-            .read_guard()
+        let reader = self.front_env.catalog_reader().read_guard();
+        reader
             .get_table_by_id(table_id)
             .map(|table| {
                 self.front_env
@@ -468,20 +459,19 @@ impl LocalQueryExecution {
     }
 
     fn choose_worker(&self, stage: &Arc<QueryStage>) -> SchedulerResult<Vec<WorkerNode>> {
-        if stage.parallelism.unwrap() == 1 {
-            if let NodeBody::Insert(insert_node) = &stage.root.node
-                && let Some(vnode_mapping) = self.get_vnode_mapping(&insert_node.table_id.into()) {
-                    let worker_node = {
-                        let parallel_unit_ids = vnode_mapping.iter_unique().collect_vec();
-                        let candidates = self.front_env
-                            .worker_node_manager()
-                            .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
-                        candidates.choose(&mut rand::thread_rng()).unwrap().clone()
-                    };
-                    Ok(vec![worker_node])
-            } else {
-                Ok(vec![self.front_env.worker_node_manager().next_random()?])
-            }
+        if let Some(table_id) = stage.dml_table_id.as_ref() {
+            let vnode_mapping = self
+                .get_vnode_mapping(table_id)
+                .ok_or_else(|| SchedulerError::EmptyWorkerNodes)?;
+            let worker_node = {
+                let parallel_unit_ids = vnode_mapping.iter_unique().collect_vec();
+                let candidates = self
+                    .front_env
+                    .worker_node_manager()
+                    .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
+                candidates.choose(&mut rand::thread_rng()).unwrap().clone()
+            };
+            Ok(vec![worker_node])
         } else {
             let mut workers = Vec::with_capacity(stage.parallelism.unwrap() as usize);
             for _ in 0..stage.parallelism.unwrap() {

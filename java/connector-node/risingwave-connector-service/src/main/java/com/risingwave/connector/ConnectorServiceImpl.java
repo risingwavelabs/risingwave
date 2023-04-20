@@ -17,6 +17,7 @@ package com.risingwave.connector;
 import com.risingwave.proto.ConnectorServiceGrpc;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.sourcenode.SourceRequestHandler;
+import com.risingwave.sourcenode.SourceValidateHandler;
 import io.grpc.stub.StreamObserver;
 
 public class ConnectorServiceImpl extends ConnectorServiceGrpc.ConnectorServiceImplBase {

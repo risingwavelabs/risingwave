@@ -37,6 +37,18 @@ create function series(int) returns table (x int) language python as series usin
 statement ok
 create function series2(int) returns table (x int, y varchar) language python as series2 using link 'http://localhost:8815';
 
+statement ok
+create function hex_to_dec(varchar) returns decimal language python as hex_to_dec using link 'http://localhost:8815';
+
+statement ok
+create function array_access(varchar[], int) returns varchar language python as array_access using link 'http://localhost:8815';
+
+statement ok
+create function jsonb_access(jsonb, int) returns jsonb language python as jsonb_access using link 'http://localhost:8815';
+
+statement ok
+create function jsonb_concat(jsonb[]) returns jsonb language python as jsonb_concat using link 'http://localhost:8815';
+
 query I
 select int_42();
 ----
@@ -51,6 +63,29 @@ query I
 select gcd(25, 15, 3);
 ----
 1
+
+query I
+select hex_to_dec('000000000000000000000000000000000000000000c0f6346334241a61f90a36');
+----
+233276425899864771438119478
+
+query T
+select array_access(ARRAY['a', 'b', 'c'], 2);
+----
+b
+
+query T
+select jsonb_access(a::jsonb, 1) from
+(values ('["a", "b", "c"]'), (null), ('[0, false]')) t(a);
+----
+"b"
+NULL
+false
+
+query T
+select jsonb_concat(ARRAY['null'::jsonb, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb]);
+----
+[null, 1, "str", {}]
 
 query I
 select series(5);
@@ -87,6 +122,34 @@ query TTII
 select (extract_tcp_info(E'\\x45000034a8a8400040065b8ac0a8000ec0a80001035d20b6d971b900000000080020200493310000020405b4' :: BYTEA)).*;
 ----
 192.168.0.14 192.168.0.1 861 8374
+
+# error handling
+
+statement error
+select hex_to_dec('1z');
+
+statement ok
+create table t (dummy date, v varchar);
+
+statement ok
+create materialized view mv as select dummy, hex_to_dec(v) from t;
+
+statement ok
+insert into t values ('2023-01-01', '1z');
+
+statement ok
+flush;
+
+query TI
+select * from mv;
+----
+2023-01-01 NULL
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table t;
 
 # TODO: drop function without arguments
 

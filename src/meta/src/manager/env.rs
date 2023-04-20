@@ -245,7 +245,7 @@ impl MetaSrvEnv<MemStore> {
             SystemParamsManager::new(
                 meta_store.clone(),
                 notification_manager.clone(),
-                risingwave_common::system_param::default_system_params(),
+                risingwave_common::system_param::system_params_for_test(),
             )
             .await
             .unwrap(),

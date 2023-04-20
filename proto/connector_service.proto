@@ -125,6 +125,7 @@ enum SourceType {
   UNSPECIFIED = 0;
   MYSQL = 1;
   POSTGRES = 2;
+  CITUS = 3;
 }
 
 message GetEventStreamRequest {

@@ -540,6 +540,34 @@ fn infer_type_for_special(
                 .into()),
             }
         }
+        ExprType::ArrayRemove => {
+            ensure_arity!("array_remove", | inputs | == 2);
+            let common_type = align_array_and_element(0, 1, inputs);
+            match common_type {
+                Ok(casted) => Ok(Some(casted)),
+                Err(_) => Err(ErrorCode::BindError(format!(
+                    "Cannot remove {} from {}",
+                    inputs[1].return_type(),
+                    inputs[0].return_type()
+                ))
+                .into()),
+            }
+        }
+        ExprType::ArrayPositions => {
+            ensure_arity!("array_positions", | inputs | == 2);
+            let common_type = align_array_and_element(0, 1, inputs);
+            match common_type {
+                Ok(_) => Ok(Some(DataType::List {
+                    datatype: Box::new(DataType::Int32),
+                })),
+                Err(_) => Err(ErrorCode::BindError(format!(
+                    "Cannot get position of {} in {}",
+                    inputs[1].return_type(),
+                    inputs[0].return_type()
+                ))
+                .into()),
+            }
+        }
         ExprType::ArrayDistinct => {
             ensure_arity!("array_distinct", | inputs | == 1);
             let ret_type = inputs[0].return_type();
@@ -595,12 +623,27 @@ fn infer_type_for_special(
                 _ => Ok(None),
             }
         }
+        ExprType::TrimArray => {
+            ensure_arity!("trim_array", | inputs | == 2);
+
+            let owned = std::mem::replace(&mut inputs[1], ExprImpl::literal_bool(true));
+            inputs[1] = owned.cast_implicit(DataType::Int32)?;
+
+            match inputs[0].return_type() {
+                DataType::List { datatype: typ } => Ok(Some(DataType::List { datatype: typ })),
+                _ => Ok(None),
+            }
+        }
         ExprType::Vnode => {
             ensure_arity!("vnode", 1 <= | inputs |);
             Ok(Some(DataType::Int16))
         }
         ExprType::Now => {
             ensure_arity!("now", | inputs | <= 1);
+            Ok(Some(DataType::Timestamptz))
+        }
+        ExprType::Proctime => {
+            ensure_arity!("proctime", | inputs | == 0);
             Ok(Some(DataType::Timestamptz))
         }
         _ => Ok(None),

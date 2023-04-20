@@ -17,7 +17,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::user::grant_privilege::{PbAction, PbObject};
 
 use crate::binder::{BoundQuery, BoundStatement, Relation};
-use crate::catalog::RelationCatalog;
+use crate::catalog::OwnedByUserCatalog;
 use crate::session::SessionImpl;
 use crate::user::UserId;
 
@@ -185,7 +185,7 @@ impl SessionImpl {
     pub fn check_privilege_for_drop_alter(
         &self,
         schema_name: &str,
-        relation: &impl RelationCatalog,
+        relation: &impl OwnedByUserCatalog,
     ) -> Result<()> {
         let schema_owner = self
             .env()

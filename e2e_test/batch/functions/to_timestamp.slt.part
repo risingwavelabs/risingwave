@@ -22,3 +22,31 @@ query T
 select to_timestamp('2022/12/25 15', 'YYYY/MM/DD HH24');
 ----
 2022-12-25 15:00:00
+
+query T
+select to_timestamp('2001-04-17 00:00:00.900006', 'YYYY-MM-DD HH24:MI:SS.US');
+----
+2001-04-17 00:00:00.900006
+
+query T
+select to_timestamp('2001-04-17 00:00:00.000000', 'YYYY-MM-DD HH24:MI:SS.US');
+----
+2001-04-17 00:00:00
+
+query T
+select to_timestamp('2001-04-17 00:00:00.906', 'YYYY-MM-DD HH24:MI:SS.MS');
+----
+2001-04-17 00:00:00.906
+
+query T
+select to_timestamp('2001-04-17 00:00:00.000', 'YYYY-MM-DD HH24:MI:SS.MS');
+----
+2001-04-17 00:00:00
+
+# FIXME: false positive cases, but hard to handle in chrono.
+
+statement error
+select to_timestamp('2001-04-17 00:00:00.9', 'YYYY-MM-DD HH24:MI:SS.MS');
+
+statement error
+select to_timestamp('2001-04-17 00:00:00.9999', 'YYYY-MM-DD HH24:MI:SS.US');

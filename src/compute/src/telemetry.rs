@@ -28,8 +28,9 @@ impl ComputeTelemetryCreator {
     }
 }
 
+#[async_trait::async_trait]
 impl TelemetryReportCreator for ComputeTelemetryCreator {
-    fn create_report(
+    async fn create_report(
         &self,
         tracking_id: String,
         session_id: String,

@@ -21,7 +21,6 @@ import com.risingwave.sourcenode.common.DbzConnectorConfig;
 import com.risingwave.sourcenode.core.SourceHandlerFactory;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
-import java.util.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

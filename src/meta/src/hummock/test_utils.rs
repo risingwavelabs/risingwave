@@ -17,14 +17,10 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::filter_key_extractor::{
-    FilterKeyExtractorImpl, FilterKeyExtractorManagerRef, FullKeyFilterKeyExtractor,
-};
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
-use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{
@@ -75,8 +71,6 @@ where
         .commit_epoch(epoch, ssts, sst_to_worker)
         .await
         .unwrap();
-    // Current state: {v0: [], v1: [test_tables]}
-
     // Simulate a compaction and increase version by 1.
     let mut temp_compactor = false;
     if hummock_manager
@@ -103,6 +97,14 @@ where
         .await
         .unwrap()
         .unwrap();
+    assert_eq!(
+        compact_task
+            .input_ssts
+            .iter()
+            .map(|i| i.table_infos.len())
+            .sum::<usize>(),
+        3
+    );
     compact_task.target_level = 6;
     hummock_manager
         .assign_compaction_task(&compact_task, compactor.context_id())
@@ -123,8 +125,6 @@ where
             .compactor_manager_ref_for_test()
             .remove_compactor(context_id);
     }
-    // Current state: {v0: [], v1: [test_tables], v2: [test_tables_2, test_tables to_delete]}
-
     // Increase version by 1.
     epoch += 1;
     let test_tables_3 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
@@ -143,8 +143,6 @@ where
         .commit_epoch(epoch, ssts, sst_to_worker)
         .await
         .unwrap();
-    // Current state: {v0: [], v1: [test_tables], v2: [test_tables_2, to_delete:test_tables], v3:
-    // [test_tables_2, test_tables_3]}
     vec![test_tables, test_tables_2, test_tables_3]
 }
 
@@ -222,32 +220,6 @@ pub async fn unregister_table_ids_from_compaction_group<S>(
         .unregister_table_ids(table_ids)
         .await
         .unwrap();
-}
-
-pub fn update_filter_key_extractor_for_table_ids(
-    filter_key_extractor_manager_ref: &FilterKeyExtractorManagerRef,
-    table_ids: &[u32],
-) {
-    for table_id in table_ids {
-        filter_key_extractor_manager_ref.update(
-            *table_id,
-            Arc::new(FilterKeyExtractorImpl::FullKey(
-                FullKeyFilterKeyExtractor::default(),
-            )),
-        )
-    }
-}
-
-pub fn update_filter_key_extractor_for_tables(
-    filter_key_extractor_manager_ref: &FilterKeyExtractorManagerRef,
-    tables: &[PbTable],
-) {
-    for table in tables {
-        filter_key_extractor_manager_ref.update(
-            table.id,
-            Arc::new(FilterKeyExtractorImpl::from_table(table)),
-        )
-    }
 }
 
 /// Generate keys like `001_key_test_00002` with timestamp `epoch`.

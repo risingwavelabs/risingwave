@@ -252,6 +252,12 @@ impl StreamGraphFormatter {
                     self.pretty_add_table(node.get_state_table().unwrap()),
                 ));
             }
+            stream_node::NodeBody::AppendOnlyDedup(node) => {
+                fields.push((
+                    "state table",
+                    self.pretty_add_table(node.get_state_table().unwrap()),
+                ));
+            }
             _ => {},
         };
 

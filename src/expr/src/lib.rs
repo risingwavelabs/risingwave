@@ -19,11 +19,12 @@
 #![feature(lint_reasons)]
 #![feature(iterator_try_collect)]
 #![feature(exclusive_range_pattern)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![feature(try_blocks)]
 
 mod error;
 pub mod expr;
+pub mod function;
 pub mod sig;
 pub mod table_function;
 pub mod vector_op;

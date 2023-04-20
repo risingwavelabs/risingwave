@@ -11,13 +11,16 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    strategy:
+      matrix:
+        java: [ '11', '17' ]
+    name: Java ${{ matrix.java }}
     steps:
       - uses: actions/checkout@v3
-      - name: Set up JDK 11
+      - name: Set up JDK ${{ matrix.java }}
         uses: actions/setup-java@v3
         with:
-          java-version: '11'
+          java-version: ${{ matrix.java }}
           distribution: 'adopt'
           cache: 'maven'
       - name: run integration tests
@@ -28,7 +31,7 @@ jobs:
           
           echo "--- build connector node"
           cd ${RISINGWAVE_ROOT}/java
-          mvn --batch-mode --update-snapshots clean package  -DskipTests=true
+          mvn --batch-mode --update-snapshots clean package
           
           echo "--- install postgresql client"
           sudo apt install postgresql postgresql-contrib libpq-dev
@@ -60,7 +63,7 @@ jobs:
         
           echo "--- prepare integration tests"
           cd ${RISINGWAVE_ROOT}/java/connector-node
-          pip3 install grpcio grpcio-tools psycopg2 psycopg2-binary pyspark
+          pip3 install grpcio grpcio-tools psycopg2 psycopg2-binary pyspark==3.3
           cd python-client && bash gen-stub.sh
 
           echo "--- running jdbc integration tests"
@@ -75,13 +78,6 @@ jobs:
             echo "Jdbc sink test passed"
           else
             echo "Jdbc sink test failed"
-            exit 1
-          fi
-
-          if python3 integration_tests.py --print_sink; then
-            echo "Print sink test passed"
-          else
-            echo "Print sink test failed"
             exit 1
           fi
           cd ..

@@ -15,7 +15,6 @@
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
 #![feature(binary_heap_drain_sorted)]
-#![feature(option_result_contains)]
 #![feature(type_alias_impl_trait)]
 #![feature(drain_filter)]
 #![feature(custom_test_frameworks)]
@@ -25,7 +24,7 @@
 #![feature(is_some_and)]
 #![feature(btree_drain_filter)]
 #![feature(result_option_inspect)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![feature(let_chains)]
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
@@ -34,6 +33,7 @@
 #![cfg_attr(coverage, feature(no_coverage))]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 #![feature(is_sorted)]
+#![feature(string_leak)]
 
 pub mod backup_restore;
 mod barrier;
@@ -130,42 +130,42 @@ pub struct OverrideConfigOpts {
 
     /// The interval of periodic barrier.
     #[clap(long, env = "RW_BARRIER_INTERVAL_MS")]
-    #[override_opts(path = system.barrier_interval_ms)]
+    #[override_opts(path = system.barrier_interval_ms, optional_in_config)]
     barrier_interval_ms: Option<u32>,
 
     /// Target size of the Sstable.
     #[clap(long, env = "RW_SSTABLE_SIZE_MB")]
-    #[override_opts(path = system.sstable_size_mb)]
+    #[override_opts(path = system.sstable_size_mb, optional_in_config)]
     sstable_size_mb: Option<u32>,
 
     /// Size of each block in bytes in SST.
     #[clap(long, env = "RW_BLOCK_SIZE_KB")]
-    #[override_opts(path = system.block_size_kb)]
+    #[override_opts(path = system.block_size_kb, optional_in_config)]
     block_size_kb: Option<u32>,
 
     /// False positive probability of bloom filter.
     #[clap(long, env = "RW_BLOOM_FALSE_POSITIVE")]
-    #[override_opts(path = system.bloom_false_positive)]
+    #[override_opts(path = system.bloom_false_positive, optional_in_config)]
     bloom_false_positive: Option<f64>,
 
     /// State store url
     #[clap(long, env = "RW_STATE_STORE")]
-    #[override_opts(path = system.state_store)]
+    #[override_opts(path = system.state_store, optional_in_config)]
     state_store: Option<String>,
 
     /// Remote directory for storing data and metadata objects.
     #[clap(long, env = "RW_DATA_DIRECTORY")]
-    #[override_opts(path = system.data_directory)]
+    #[override_opts(path = system.data_directory, optional_in_config)]
     data_directory: Option<String>,
 
     /// Remote storage url for storing snapshots.
     #[clap(long, env = "RW_BACKUP_STORAGE_URL")]
-    #[override_opts(path = system.backup_storage_url)]
+    #[override_opts(path = system.backup_storage_url, optional_in_config)]
     backup_storage_url: Option<String>,
 
     /// Remote directory for storing snapshots.
     #[clap(long, env = "RW_BACKUP_STORAGE_DIRECTORY")]
-    #[override_opts(path = system.backup_storage_directory)]
+    #[override_opts(path = system.backup_storage_directory, optional_in_config)]
     backup_storage_directory: Option<String>,
 }
 

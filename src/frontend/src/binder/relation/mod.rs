@@ -284,7 +284,7 @@ impl Binder {
         &mut self,
         name: ObjectName,
         alias: Option<TableAlias>,
-        for_system_time_as_of_now: bool,
+        for_system_time_as_of_proctime: bool,
     ) -> Result<Relation> {
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
         if schema_name.is_none() && let Some(item) = self.context.cte_to_relation.get(&table_name) {
@@ -320,7 +320,7 @@ impl Binder {
             Ok(share_relation)
         } else {
 
-            self.bind_relation_by_name_inner(schema_name.as_deref(), &table_name, alias, for_system_time_as_of_now)
+            self.bind_relation_by_name_inner(schema_name.as_deref(), &table_name, alias, for_system_time_as_of_proctime)
         }
     }
 
@@ -393,8 +393,8 @@ impl Binder {
             TableFactor::Table {
                 name,
                 alias,
-                for_system_time_as_of_now,
-            } => self.bind_relation_by_name(name, alias, for_system_time_as_of_now),
+                for_system_time_as_of_proctime,
+            } => self.bind_relation_by_name(name, alias, for_system_time_as_of_proctime),
             TableFactor::TableFunction { name, alias, args } => {
                 let func_name = &name.0[0].real_value();
                 if func_name.eq_ignore_ascii_case(RW_INTERNAL_TABLE_FUNCTION_NAME) {

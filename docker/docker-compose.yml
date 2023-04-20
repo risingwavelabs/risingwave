@@ -177,7 +177,7 @@ services:
       - "./grafana.ini:/etc/grafana/grafana.ini"
       - "./grafana-risedev-datasource.yml:/etc/grafana/provisioning/datasources/grafana-risedev-datasource.yml"
       - "./grafana-risedev-dashboard.yml:/etc/grafana/provisioning/dashboards/grafana-risedev-dashboard.yml"
-      - "./risingwave-dashboard.json:/risingwave-dashboard.json"
+      - "./dashboards:/dashboards"
     environment: {}
     container_name: grafana-0
     healthcheck:
@@ -209,6 +209,8 @@ services:
       - "connector-node:50051"
       - "--state-store"
       - "hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001"
+      - "--data-directory"
+      - "hummock_001"
       - "--config-path"
       - /risingwave.toml
     expose:

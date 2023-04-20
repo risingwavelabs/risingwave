@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use risingwave_common::config::{extract_storage_memory_config, RwConfig, StorageMemoryConfig};
-use risingwave_common::system_param::default_system_params;
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::system_param::system_params_for_test;
 
 #[derive(Clone, Debug)]
 pub struct StorageOpts {
@@ -32,6 +32,8 @@ pub struct StorageOpts {
     /// Maximum shared buffer size, writes attempting to exceed the capacity will stall until there
     /// is enough space.
     pub shared_buffer_capacity_mb: usize,
+    /// The threshold for the number of immutable memtables to merge to a new imm.
+    pub imm_merge_threshold: usize,
     /// Remote directory for storing data and metadata objects.
     pub data_directory: String,
     /// Whether to enable write conflict detection
@@ -69,12 +71,14 @@ pub struct StorageOpts {
     pub backup_storage_url: String,
     /// The storage directory for storing backups.
     pub backup_storage_directory: String,
+    /// max time which wait for preload. 0 represent do not do any preload.
+    pub max_preload_wait_time_mill: u64,
 }
 
 impl Default for StorageOpts {
     fn default() -> Self {
         let c = RwConfig::default();
-        let p = default_system_params();
+        let p = system_params_for_test();
         let s = extract_storage_memory_config(&c);
         Self::from((&c, &p.into(), &s))
     }
@@ -91,6 +95,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .storage
                 .share_buffer_compaction_worker_threads_number,
             shared_buffer_capacity_mb: s.shared_buffer_capacity_mb,
+            imm_merge_threshold: c.storage.imm_merge_threshold,
             data_directory: p.data_directory().to_string(),
             write_conflict_detection_enabled: c.storage.write_conflict_detection_enabled,
             high_priority_ratio: s.high_priority_ratio_in_percent,
@@ -111,6 +116,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             file_cache_file_fallocate_unit_mb: c.storage.file_cache.cache_file_fallocate_unit_mb,
             file_cache_meta_fallocate_unit_mb: c.storage.file_cache.cache_meta_fallocate_unit_mb,
             file_cache_file_max_write_size_mb: c.storage.file_cache.cache_file_max_write_size_mb,
+            max_preload_wait_time_mill: c.storage.max_preload_wait_time_mill,
             backup_storage_url: p.backup_storage_url().to_string(),
             backup_storage_directory: p.backup_storage_directory().to_string(),
         }

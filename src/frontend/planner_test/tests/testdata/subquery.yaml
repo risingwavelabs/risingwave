@@ -4,7 +4,7 @@
     select v1 from (select * from t) where v2 > 1;
   logical_plan: |
     LogicalProject { exprs: [t.v1] }
-    └─LogicalFilter { predicate: (t.v2 > 1:Int32) }
+    └─LogicalFilter { predicate: (t.v2 > 1:Int32::Float64) }
       └─LogicalProject { exprs: [t.v1, t.v2] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - name: merge and then eliminate
@@ -26,7 +26,7 @@
     select v3 from (select v2, v1 as v3 from t) where v2 > 1;
   logical_plan: |
     LogicalProject { exprs: [t.v1] }
-    └─LogicalFilter { predicate: (t.v2 > 1:Int32) }
+    └─LogicalFilter { predicate: (t.v2 > 1:Int32::Float64) }
       └─LogicalProject { exprs: [t.v2, t.v1] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - name: consecutive projects are merged
@@ -217,35 +217,37 @@
           └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr1] }
             └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   optimized_logical_plan_for_batch: |
-    LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(auction.date_time, auction.date_time), output: all }
-    ├─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
-    | └─LogicalScan { table: auction, columns: [auction.date_time], predicate: IsNotNull(auction.date_time) }
-    └─LogicalProject { exprs: [auction.date_time] }
-      └─LogicalProject { exprs: [auction.date_time, auction.date_time] }
-        └─LogicalAgg { group_key: [auction.date_time], aggs: [] }
-          └─LogicalJoin { type: Inner, on: true, output: all }
-            ├─LogicalAgg { group_key: [auction.date_time], aggs: [] }
-            | └─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
-            |   └─LogicalScan { table: auction, columns: [auction.date_time], predicate: IsNotNull(auction.date_time) }
-            └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
+    └─LogicalFilter { predicate: IsNotNull(auction.date_time) }
+      └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(auction.date_time, auction.date_time), output: all }
+        ├─LogicalScan { table: auction, columns: [auction.date_time], predicate: IsNotNull(auction.date_time) }
+        └─LogicalProject { exprs: [auction.date_time] }
+          └─LogicalProject { exprs: [auction.date_time, auction.date_time] }
+            └─LogicalAgg { group_key: [auction.date_time], aggs: [] }
+              └─LogicalJoin { type: Inner, on: true, output: all }
+                ├─LogicalAgg { group_key: [auction.date_time], aggs: [] }
+                | └─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
+                |   └─LogicalScan { table: auction, columns: [auction.date_time], predicate: IsNotNull(auction.date_time) }
+                └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
-    BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: LeftSemi, predicate: auction.date_time IS NOT DISTINCT FROM auction.date_time, output: all }
-      ├─BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
-      | └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
-      |   └─BatchFilter { predicate: IsNotNull(auction.date_time) }
-      |     └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
-      └─BatchProject { exprs: [auction.date_time] }
-        └─BatchHashAgg { group_key: [auction.date_time], aggs: [] }
-          └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
-            └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
-              ├─BatchExchange { order: [], dist: Single }
-              | └─BatchHashAgg { group_key: [auction.date_time], aggs: [] }
-              |   └─BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
-              |     └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
-              |       └─BatchFilter { predicate: IsNotNull(auction.date_time) }
-              |         └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
-              └─BatchValues { rows: [[]] }
+    BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchFilter { predicate: IsNotNull(auction.date_time) }
+        └─BatchHashJoin { type: LeftSemi, predicate: auction.date_time IS NOT DISTINCT FROM auction.date_time, output: all }
+          ├─BatchExchange { order: [], dist: HashShard(auction.date_time) }
+          | └─BatchFilter { predicate: IsNotNull(auction.date_time) }
+          |   └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
+          └─BatchProject { exprs: [auction.date_time] }
+            └─BatchHashAgg { group_key: [auction.date_time], aggs: [] }
+              └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
+                └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+                  ├─BatchExchange { order: [], dist: Single }
+                  | └─BatchHashAgg { group_key: [auction.date_time], aggs: [] }
+                  |   └─BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
+                  |     └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
+                  |       └─BatchFilter { predicate: IsNotNull(auction.date_time) }
+                  |         └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
+                  └─BatchValues { rows: [[]] }
   stream_error: |-
     Not supported: streaming nested-loop join
     HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.

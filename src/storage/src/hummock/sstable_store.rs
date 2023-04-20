@@ -19,7 +19,7 @@ use await_tree::InstrumentAwait;
 use bytes::{Buf, BufMut, Bytes};
 use fail::fail_point;
 use itertools::Itertools;
-use risingwave_common::cache::{CachePriority, LruCacheEventListener};
+use risingwave_common::cache::{CachePriority, LookupResponse, LruCacheEventListener};
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_object_store::object::{
     BlockLocation, MonitoredStreamingReader, ObjectError, ObjectMetadata, ObjectStoreRef,
@@ -354,14 +354,17 @@ impl SstableStore {
         self.meta_cache.clear();
     }
 
+    /// Returns `table_holder`, `local_cache_meta_block_miss` (1 if cache miss) and
+    /// `local_cache_meta_block_unhit` (1 if not cache hit).
     pub async fn sstable_syncable(
         &self,
         sst: &SstableInfo,
         stats: &StoreLocalStatistic,
-    ) -> HummockResult<(TableHolder, u64)> {
+    ) -> HummockResult<(TableHolder, u64, u64)> {
         let mut local_cache_meta_block_miss = 0;
+        let mut local_cache_meta_block_unhit = 0;
         let object_id = sst.get_object_id();
-        let result = self
+        let lookup_response = self
             .meta_cache
             .lookup_with_request_dedup::<_, HummockError, _>(
                 object_id,
@@ -390,10 +393,20 @@ impl SstableStore {
                         Ok((Box::new(sst), charge))
                     }
                 },
-            )
+            );
+        if !matches!(lookup_response, LookupResponse::Cached(..)) {
+            local_cache_meta_block_unhit += 1;
+        }
+        let result = lookup_response
             .verbose_instrument_await("meta_cache_lookup")
             .await;
-        result.map(|table_holder| (table_holder, local_cache_meta_block_miss))
+        result.map(|table_holder| {
+            (
+                table_holder,
+                local_cache_meta_block_miss,
+                local_cache_meta_block_unhit,
+            )
+        })
     }
 
     pub async fn sstable(
@@ -402,7 +415,7 @@ impl SstableStore {
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<TableHolder> {
         self.sstable_syncable(sst, stats).await.map(
-            |(table_holder, local_cache_meta_block_miss)| {
+            |(table_holder, local_cache_meta_block_miss, ..)| {
                 stats.apply_meta_fetch(local_cache_meta_block_miss);
                 table_holder
             },
@@ -766,40 +779,6 @@ impl SstableWriterFactory for StreamingSstableWriterFactory {
             uploader,
             options,
         ))
-    }
-}
-
-pub struct CompactorMemoryCollector {
-    uploading_memory_limiter: Arc<MemoryLimiter>,
-    data_memory_limiter: Arc<MemoryLimiter>,
-    sstable_store: SstableStoreRef,
-}
-
-impl CompactorMemoryCollector {
-    pub fn new(
-        uploading_memory_limiter: Arc<MemoryLimiter>,
-        sstable_store: SstableStoreRef,
-        data_memory_limiter: Arc<MemoryLimiter>,
-    ) -> Self {
-        Self {
-            uploading_memory_limiter,
-            data_memory_limiter,
-            sstable_store,
-        }
-    }
-}
-
-impl MemoryCollector for CompactorMemoryCollector {
-    fn get_meta_memory_usage(&self) -> u64 {
-        self.sstable_store.get_meta_memory_usage()
-    }
-
-    fn get_data_memory_usage(&self) -> u64 {
-        self.data_memory_limiter.get_memory_usage()
-    }
-
-    fn get_uploading_memory_usage(&self) -> u64 {
-        self.uploading_memory_limiter.get_memory_usage()
     }
 }
 

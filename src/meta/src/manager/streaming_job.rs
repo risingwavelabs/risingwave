@@ -62,6 +62,15 @@ impl StreamingJob {
         }
     }
 
+    pub fn mv_table(&self) -> Option<u32> {
+        match self {
+            Self::MaterializedView(table) => Some(table.id),
+            Self::Sink(_sink) => None,
+            Self::Table(_, table) => Some(table.id),
+            Self::Index(_, table) => Some(table.id),
+        }
+    }
+
     /// Returns the reference to the [`Table`] of the job if it exists.
     pub fn table(&self) -> Option<&Table> {
         match self {

@@ -35,7 +35,9 @@ use super::{
 };
 use crate::common::KafkaCommon;
 use crate::sink::{datum_to_json_object, record_to_json, Result};
-use crate::{deserialize_bool_from_string, deserialize_duration_from_string};
+use crate::{
+    deserialize_bool_from_string, deserialize_duration_from_string, deserialize_u32_from_string,
+};
 
 pub const KAFKA_SINK: &str = "kafka";
 
@@ -52,15 +54,29 @@ const fn _default_retry_backoff() -> Duration {
 }
 
 const fn _default_use_transaction() -> bool {
-    true
+    false
+}
+
+const fn _default_force_append_only() -> bool {
+    false
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct KafkaConfig {
+    #[serde(skip_serializing)]
+    pub connector: String, // Must be "kafka" here.
+
     #[serde(flatten)]
     pub common: KafkaCommon,
 
     pub r#type: String, // accept "append-only", "debezium", or "upsert"
+
+    #[serde(
+        default = "_default_force_append_only",
+        deserialize_with = "deserialize_bool_from_string"
+    )]
+    pub force_append_only: bool,
 
     pub identifier: String,
 
@@ -71,7 +87,11 @@ pub struct KafkaConfig {
     )]
     pub timeout: Duration,
 
-    #[serde(rename = "properties.retry.max", default = "_default_max_retries")]
+    #[serde(
+        rename = "properties.retry.max",
+        default = "_default_max_retries",
+        deserialize_with = "deserialize_u32_from_string"
+    )]
     pub max_retry_num: u32,
 
     #[serde(
@@ -82,10 +102,15 @@ pub struct KafkaConfig {
     pub retry_interval: Duration,
 
     #[serde(
-        deserialize_with = "deserialize_bool_from_string",
-        default = "_default_use_transaction"
+        default = "_default_use_transaction",
+        deserialize_with = "deserialize_bool_from_string"
     )]
     pub use_transaction: bool,
+
+    /// We have parsed the primary key for an upsert kafka sink into a `usize` vector representing
+    /// the indices of the pk columns in the frontend, so we simply store the primary key here
+    /// as a string.
+    pub primary_key: Option<String>,
 }
 
 impl KafkaConfig {
@@ -411,11 +436,41 @@ pub fn chunk_to_json(chunk: StreamChunk, schema: &Schema) -> Result<Vec<String>>
 
 fn fields_to_json(fields: &[Field]) -> Value {
     let mut res = Vec::new();
+
     fields.iter().for_each(|field| {
+        // mapping from 'https://debezium.io/documentation/reference/2.1/connectors/postgresql.html#postgresql-data-types'
+        let r#type = match field.data_type() {
+            risingwave_common::types::DataType::Boolean => "boolean",
+            risingwave_common::types::DataType::Int16 => "int16",
+            risingwave_common::types::DataType::Int32 => "int32",
+            risingwave_common::types::DataType::Int64 => "int64",
+            risingwave_common::types::DataType::Int256 => "string",
+            risingwave_common::types::DataType::Float32 => "float32",
+            risingwave_common::types::DataType::Float64 => "float64",
+            // currently, we only support handling decimal as string.
+            // https://debezium.io/documentation/reference/2.1/connectors/postgresql.html#postgresql-decimal-types
+            risingwave_common::types::DataType::Decimal => "string",
+
+            risingwave_common::types::DataType::Varchar => "string",
+
+            risingwave_common::types::DataType::Date => "int32",
+            risingwave_common::types::DataType::Time => "int64",
+            risingwave_common::types::DataType::Timestamp => "int64",
+            risingwave_common::types::DataType::Timestamptz => "string",
+            risingwave_common::types::DataType::Interval => "string",
+
+            risingwave_common::types::DataType::Bytea => "bytes",
+            risingwave_common::types::DataType::Jsonb => "string",
+            risingwave_common::types::DataType::Serial => "int32",
+            // since the original debezium pg support HSTORE via encoded as json string by default,
+            // we do the same here
+            risingwave_common::types::DataType::Struct(_) => "string",
+            risingwave_common::types::DataType::List { .. } => "string",
+        };
         res.push(json!({
             "field": field.name,
             "optional": true,
-            "type": field.type_name,
+            "type": r#type,
         }))
     });
 
@@ -450,12 +505,13 @@ pub struct KafkaTransactionConductor {
 }
 
 impl KafkaTransactionConductor {
-    async fn new(config: KafkaConfig) -> Result<Self> {
+    async fn new(mut config: KafkaConfig) -> Result<Self> {
         let inner: ThreadedProducer<DefaultProducerContext> = {
             let mut c = ClientConfig::new();
             config.common.set_security_properties(&mut c);
             c.set("bootstrap.servers", &config.common.brokers)
                 .set("message.timeout.ms", "5000");
+            config.use_transaction = false;
             if config.use_transaction {
                 c.set("transactional.id", &config.identifier); // required by kafka transaction
             }
@@ -525,30 +581,88 @@ mod test {
     #[test]
     fn parse_kafka_config() {
         let properties: HashMap<String, String> = hashmap! {
+            "connector".to_string() => "kafka".to_string(),
             "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
             "topic".to_string() => "test".to_string(),
             "type".to_string() => "append-only".to_string(),
+            "force_append_only".to_string() => "true".to_string(),
             "use_transaction".to_string() => "False".to_string(),
-            "security_protocol".to_string() => "SASL".to_string(),
-            "sasl_mechanism".to_string() => "SASL".to_string(),
-            "sasl_username".to_string() => "test".to_string(),
-            "sasl_password".to_string() => "test".to_string(),
+            "properties.security.protocol".to_string() => "SASL".to_string(),
+            "properties.sasl.mechanism".to_string() => "SASL".to_string(),
+            "properties.sasl.username".to_string() => "test".to_string(),
+            "properties.sasl.password".to_string() => "test".to_string(),
             "identifier".to_string() => "test_sink_1".to_string(),
-            "properties.timeout".to_string() => "5s".to_string(),
+            "properties.timeout".to_string() => "10s".to_string(),
+            "properties.retry.max".to_string() => "20".to_string(),
+            "properties.retry.interval".to_string() => "500ms".to_string(),
         };
-
         let config = KafkaConfig::from_hashmap(properties).unwrap();
-        println!("{:?}", config);
+        assert_eq!(config.common.brokers, "localhost:9092");
+        assert_eq!(config.common.topic, "test");
+        assert_eq!(config.r#type, "append-only");
+        assert!(config.force_append_only);
+        assert!(!config.use_transaction);
+        assert_eq!(config.timeout, Duration::from_secs(10));
+        assert_eq!(config.max_retry_num, 20);
+        assert_eq!(config.retry_interval, Duration::from_millis(500));
+
+        // Optional fields eliminated.
+        let properties: HashMap<String, String> = hashmap! {
+            "connector".to_string() => "kafka".to_string(),
+            "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
+            "topic".to_string() => "test".to_string(),
+            "type".to_string() => "upsert".to_string(),
+            "identifier".to_string() => "test_sink_2".to_string(),
+        };
+        let config = KafkaConfig::from_hashmap(properties).unwrap();
+        assert!(!config.force_append_only);
+        assert!(!config.use_transaction);
+        assert_eq!(config.timeout, Duration::from_secs(5));
+        assert_eq!(config.max_retry_num, 3);
+        assert_eq!(config.retry_interval, Duration::from_millis(100));
+
+        // Invalid u32 input.
+        let properties: HashMap<String, String> = hashmap! {
+            "connector".to_string() => "kafka".to_string(),
+            "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
+            "topic".to_string() => "test".to_string(),
+            "type".to_string() => "upsert".to_string(),
+            "identifier".to_string() => "test_sink_3".to_string(),
+            "properties.retry.max".to_string() => "-20".to_string(),  // error!
+        };
+        assert!(KafkaConfig::from_hashmap(properties).is_err());
+
+        // Invalid bool input.
+        let properties: HashMap<String, String> = hashmap! {
+            "connector".to_string() => "kafka".to_string(),
+            "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
+            "topic".to_string() => "test".to_string(),
+            "type".to_string() => "upsert".to_string(),
+            "identifier".to_string() => "test_sink_4".to_string(),
+            "force_append_only".to_string() => "yes".to_string(),  // error!
+        };
+        assert!(KafkaConfig::from_hashmap(properties).is_err());
+
+        // Invalid duration input.
+        let properties: HashMap<String, String> = hashmap! {
+            "connector".to_string() => "kafka".to_string(),
+            "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
+            "topic".to_string() => "test".to_string(),
+            "type".to_string() => "upsert".to_string(),
+            "identifier".to_string() => "test_sink_5".to_string(),
+            "properties.retry.interval".to_string() => "500minutes".to_string(),  // error!
+        };
+        assert!(KafkaConfig::from_hashmap(properties).is_err());
     }
 
     #[ignore]
     #[tokio::test]
     async fn test_kafka_producer() -> Result<()> {
         let properties = hashmap! {
-            "kafka.brokers".to_string() => "localhost:29092".to_string(),
+            "properties.bootstrap.server".to_string() => "localhost:29092".to_string(),
             "identifier".to_string() => "test_sink_1".to_string(),
             "type".to_string() => "append-only".to_string(),
-            "kafka.topic".to_string() => "test_topic".to_string(),
+            "topic".to_string() => "test_topic".to_string(),
         };
         let schema = Schema::new(vec![
             Field {
@@ -654,7 +768,7 @@ mod test {
 
         let json_chunk = chunk_to_json(chunk, &schema).unwrap();
         let schema_json = schema_to_json(&schema);
-        assert_eq!(schema_json.to_string(), "{\"fields\":[{\"field\":\"before\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"\"}],\"optional\":true,\"type\":\"struct\"},{\"field\":\"after\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"\"}],\"optional\":true,\"type\":\"struct\"}],\"optional\":false,\"type\":\"struct\"}");
+        assert_eq!(schema_json.to_string(), "{\"fields\":[{\"field\":\"before\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float32\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"optional\":true,\"type\":\"struct\"},{\"field\":\"after\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float32\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"optional\":true,\"type\":\"struct\"}],\"optional\":false,\"type\":\"struct\"}");
         assert_eq!(
             json_chunk[0].as_str(),
             "{\"v1\":0,\"v2\":0.0,\"v3\":{\"v4\":0,\"v5\":0.0}}"

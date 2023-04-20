@@ -24,6 +24,7 @@ use risingwave_common::array::{
     JsonbRef, ListArray, ListRef, ListValue, StructArray, StructRef, StructValue, Utf8Array,
 };
 use risingwave_common::row::OwnedRow;
+use risingwave_common::types::num256::Int256;
 use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{
@@ -257,7 +258,10 @@ pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-#[function("cast(varchar) -> *number")]
+#[function("cast(varchar) -> *int")]
+#[function("cast(varchar) -> *numeric")]
+#[function("cast(varchar) -> *float")]
+#[function("cast(varchar) -> int256")]
 #[function("cast(varchar) -> interval")]
 #[function("cast(varchar) -> jsonb")]
 pub fn str_parse<T>(elem: &str) -> Result<T>
@@ -306,6 +310,14 @@ pub fn to_f32<T: ToPrimitive + Debug>(elem: T) -> Result<F32> {
     elem.to_f32()
         .map(Into::into)
         .ok_or(ExprError::CastOutOfRange("f32"))
+}
+
+#[function("cast(int16) -> int256")]
+#[function("cast(int32) -> int256")]
+#[function("cast(int64) -> int256")]
+pub fn to_int256<T: TryInto<Int256>>(elem: T) -> Result<Int256> {
+    elem.try_into()
+        .map_err(|_| ExprError::CastOutOfRange("int256"))
 }
 
 #[function("cast(decimal) -> float64")]
@@ -384,7 +396,7 @@ pub fn timestamp_to_time(elem: Timestamp) -> Time {
 /// In `PostgreSQL`, casting from interval to time discards the days part.
 #[function("cast(interval) -> time")]
 pub fn interval_to_time(elem: Interval) -> Time {
-    let usecs = elem.get_usecs_of_day();
+    let usecs = elem.usecs_of_day();
     let secs = (usecs / 1_000_000) as u32;
     let nano = (usecs % 1_000_000 * 1000) as u32;
     Time::from_num_seconds_from_midnight_uncheck(secs, nano)
@@ -419,6 +431,7 @@ where
 #[function("cast(date) -> timestamp")]
 #[function("cast(time) -> interval")]
 #[function("cast(varchar) -> varchar")]
+#[function("cast(int256) -> float64")]
 pub fn cast<T1, T2>(elem: T1) -> T2
 where
     T1: Into<T2>,
@@ -451,7 +464,10 @@ pub fn int32_to_bool(input: i32) -> Result<bool> {
 
 // For most of the types, cast them to varchar is similar to return their text format.
 // So we use this function to cast type to varchar.
-#[function("cast(*number) -> varchar")]
+#[function("cast(*int) -> varchar")]
+#[function("cast(*numeric) -> varchar")]
+#[function("cast(*float) -> varchar")]
+#[function("cast(int256) -> varchar")]
 #[function("cast(time) -> varchar")]
 #[function("cast(date) -> varchar")]
 #[function("cast(interval) -> varchar")]
@@ -493,6 +509,7 @@ pub fn literal_parsing(
         DataType::Int16 => str_parse::<i16>(s)?.into(),
         DataType::Int32 => str_parse::<i32>(s)?.into(),
         DataType::Int64 => str_parse::<i64>(s)?.into(),
+        DataType::Int256 => str_parse::<Int256>(s)?.into(),
         DataType::Serial => return Err(None),
         DataType::Decimal => str_parse::<Decimal>(s)?.into(),
         DataType::Float32 => str_parse::<F32>(s)?.into(),

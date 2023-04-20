@@ -158,7 +158,8 @@ CREATE TABLE s12(
     code string, 
     timestamp bigint, 
     xfas struct<device_model_id int, device_make_id int, ip string>[],
-    contacts struct<emails string[], phones string[]>)
+    contacts struct<emails string[], phones string[]>,
+    jsonb jsonb)
 WITH (
     connector = 'kafka',
     topic = 'json_c',
@@ -428,9 +429,9 @@ select id, code, timestamp, xfas, contacts, sex from s11;
 0 abc 1473305798 {"(0,200,127.0.0.1)","(1,400,127.0.0.2)"} ({1xxx,2xxx},{1xxx,2xxx}) MALE
 
 query ITITT
-select id, code, timestamp, xfas, contacts from s12;
+select id, code, timestamp, xfas, contacts, jsonb from s12;
 ----
-100 abc 1473305798 {"(0,200,10.0.0.1)","(1,400,10.0.0.2)"} ({1xxx,2xxx},{1xxx,2xxx})
+100 abc 1473305798 {"(0,200,10.0.0.1)","(1,400,10.0.0.2)"} ({1xxx,2xxx},{1xxx,2xxx}) {"blockNumber": 16938734}
 
 query ITIT
 select * from s13 order by id;

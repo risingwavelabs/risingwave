@@ -29,6 +29,7 @@ mod iterator;
 mod jsonb_array;
 pub mod list_array;
 mod macros;
+mod num256_array;
 mod primitive_array;
 pub mod serial_array;
 pub mod stream_chunk;
@@ -56,6 +57,7 @@ pub use interval_array::{IntervalArray, IntervalArrayBuilder};
 pub use iterator::ArrayIterator;
 pub use jsonb_array::{JsonbArray, JsonbArrayBuilder, JsonbRef, JsonbVal};
 pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
+pub use num256_array::*;
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
 use risingwave_pb::data::{PbArray, PbArrayType};
@@ -66,10 +68,12 @@ pub use utf8_array::*;
 pub use vis::{Vis, VisRef};
 
 pub use self::error::ArrayError;
+pub use crate::array::num256_array::{Int256Array, Int256ArrayBuilder};
 use crate::buffer::Bitmap;
+use crate::estimate_size::EstimateSize;
 use crate::types::*;
 use crate::util::iter_util::ZipEqFast;
-pub type ArrayResult<T> = std::result::Result<T, ArrayError>;
+pub type ArrayResult<T> = Result<T, ArrayError>;
 
 pub type I64Array = PrimitiveArray<i64>;
 pub type I32Array = PrimitiveArray<i32>;
@@ -158,7 +162,9 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
 /// In some cases, we will need to store owned data. For example, when aggregating min
 /// and max, we need to store current maximum in the aggregator. In this case, we
 /// could use `A::OwnedItem` in aggregator struct.
-pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImpl> {
+pub trait Array:
+    std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImpl> + EstimateSize
+{
     /// A reference to item in array, as well as return type of `value_at`, which is
     /// reciprocal to `Self::OwnedItem`.
     type RefItem<'a>: ScalarRef<'a, ScalarType = Self::OwnedItem>
@@ -338,6 +344,7 @@ macro_rules! for_all_variants {
             { Int16, int16, I16Array, I16ArrayBuilder },
             { Int32, int32, I32Array, I32ArrayBuilder },
             { Int64, int64, I64Array, I64ArrayBuilder },
+            { Int256, int256, Int256Array, Int256ArrayBuilder },
             { Float32, float32, F32Array, F32ArrayBuilder },
             { Float64, float64, F64Array, F64ArrayBuilder },
             { Utf8, utf8, Utf8Array, Utf8ArrayBuilder },
@@ -372,6 +379,12 @@ for_all_variants! { array_impl_enum }
 impl<T: PrimitiveArrayItemType> From<PrimitiveArray<T>> for ArrayImpl {
     fn from(arr: PrimitiveArray<T>) -> Self {
         T::erase_array_type(arr)
+    }
+}
+
+impl From<Int256Array> for ArrayImpl {
+    fn from(arr: Int256Array) -> Self {
+        Self::Int256(arr)
     }
 }
 
@@ -658,6 +671,20 @@ macro_rules! impl_array {
 
 for_all_variants! { impl_array }
 
+macro_rules! impl_array_estimate_size {
+    ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        impl EstimateSize for ArrayImpl {
+            fn estimated_heap_size(&self) -> usize {
+                match self {
+                    $( Self::$variant_name(inner) => inner.estimated_heap_size(), )*
+                }
+            }
+        }
+    }
+}
+
+for_all_variants! { impl_array_estimate_size }
+
 impl ArrayImpl {
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = DatumRef<'_>> + ExactSizeIterator {
         (0..self.len()).map(|i| self.value_at(i))
@@ -695,6 +722,7 @@ impl ArrayImpl {
             PbArrayType::Bytea => {
                 read_string_array::<BytesArrayBuilder, BytesValueReader>(array, cardinality)?
             }
+            PbArrayType::Int256 => Int256Array::from_protobuf(array, cardinality)?,
         };
         Ok(array)
     }

@@ -14,16 +14,15 @@
 
 //! Streaming Aggregators
 
+use risingwave_expr::function::aggregate::AggCall;
 use risingwave_pb::stream_plan::SimpleAggNode;
 
 use super::agg_common::{
-    build_agg_call_from_prost, build_agg_state_storages_from_proto,
-    build_distinct_dedup_table_from_proto,
+    build_agg_state_storages_from_proto, build_distinct_dedup_table_from_proto,
 };
 use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::executor::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
-use crate::executor::aggregation::AggCall;
 use crate::executor::GlobalSimpleAggExecutor;
 
 pub struct GlobalSimpleAggExecutorBuilder;
@@ -42,7 +41,7 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()
             .iter()
-            .map(|agg_call| build_agg_call_from_prost(node.is_append_only, agg_call))
+            .map(AggCall::from_protobuf)
             .try_collect()?;
         let storages =
             build_agg_state_storages_from_proto(node.get_agg_call_states(), store.clone(), None)

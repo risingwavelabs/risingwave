@@ -338,6 +338,11 @@ pub enum Expr {
         substring_from: Option<Box<Expr>>,
         substring_for: Option<Box<Expr>>,
     },
+    /// POSITION(<expr> IN <expr>)
+    Position {
+        substring: Box<Expr>,
+        string: Box<Expr>,
+    },
     /// OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])
     Overlay {
         expr: Box<Expr>,
@@ -345,13 +350,14 @@ pub enum Expr {
         start: Box<Expr>,
         count: Option<Box<Expr>>,
     },
-    /// TRIM([BOTH | LEADING | TRAILING] <expr> [FROM <expr>])\
+    /// TRIM([BOTH | LEADING | TRAILING] [<expr>] FROM <expr>)\
     /// Or\
-    /// TRIM(<expr>)
+    /// TRIM([BOTH | LEADING | TRAILING] [FROM] <expr> [, <expr>])
     Trim {
         expr: Box<Expr>,
         // ([BOTH | LEADING | TRAILING], <expr>)
-        trim_where: Option<(TrimWhereField, Box<Expr>)>,
+        trim_where: Option<TrimWhereField>,
+        trim_what: Option<Box<Expr>>,
     },
     /// `expr COLLATE collation`
     Collate {
@@ -550,6 +556,9 @@ impl fmt::Display for Expr {
 
                 write!(f, ")")
             }
+            Expr::Position { substring, string } => {
+                write!(f, "POSITION({} IN {})", substring, string)
+            }
             Expr::Overlay {
                 expr,
                 new_substring,
@@ -568,15 +577,19 @@ impl fmt::Display for Expr {
             }
             Expr::IsDistinctFrom(a, b) => write!(f, "{} IS DISTINCT FROM {}", a, b),
             Expr::IsNotDistinctFrom(a, b) => write!(f, "{} IS NOT DISTINCT FROM {}", a, b),
-            Expr::Trim { expr, trim_where } => {
+            Expr::Trim {
+                expr,
+                trim_where,
+                trim_what,
+            } => {
                 write!(f, "TRIM(")?;
-                if let Some((ident, trim_char)) = trim_where {
-                    write!(f, "{} {} FROM {}", ident, trim_char, expr)?;
-                } else {
-                    write!(f, "{}", expr)?;
+                if let Some(ident) = trim_where {
+                    write!(f, "{} ", ident)?;
                 }
-
-                write!(f, ")")
+                if let Some(trim_char) = trim_what {
+                    write!(f, "{} ", trim_char)?;
+                }
+                write!(f, "FROM {})", expr)
             }
             Expr::Row(exprs) => write!(
                 f,
@@ -746,6 +759,7 @@ pub enum ShowObject {
     Source { schema: Option<Ident> },
     Sink { schema: Option<Ident> },
     Columns { table: ObjectName },
+    Connection { schema: Option<Ident> },
 }
 
 impl fmt::Display for ShowObject {
@@ -776,6 +790,7 @@ impl fmt::Display for ShowObject {
             ShowObject::Source { schema } => write!(f, "SOURCES{}", fmt_schema(schema)),
             ShowObject::Sink { schema } => write!(f, "SINKS{}", fmt_schema(schema)),
             ShowObject::Columns { table } => write!(f, "COLUMNS FROM {}", table),
+            ShowObject::Connection { schema } => write!(f, "CONNECTIONS{}", fmt_schema(schema)),
         }
     }
 }
@@ -976,6 +991,8 @@ pub enum Statement {
     CreateSource { stmt: CreateSourceStatement },
     /// CREATE SINK
     CreateSink { stmt: CreateSinkStatement },
+    /// CREATE CONNECTION
+    CreateConnection { stmt: CreateConnectionStatement },
     /// CREATE FUNCTION
     ///
     /// Postgres: https://www.postgresql.org/docs/15/sql-createfunction.html
@@ -1411,6 +1428,7 @@ impl fmt::Display for Statement {
                 stmt,
             ),
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
+            Statement::CreateConnection { stmt } => write!(f, "CREATE CONNECTION {}", stmt,),
             Statement::AlterTable { name, operation } => {
                 write!(f, "ALTER TABLE {} {}", name, operation)
             }
@@ -1814,12 +1832,30 @@ impl fmt::Display for GrantObjects {
     }
 }
 
-/// SQL assignment `foo = expr` as used in SQLUpdate
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum AssignmentValue {
+    /// An expression, e.g. `foo = 1`
+    Expr(Expr),
+    /// The `DEFAULT` keyword, e.g. `foo = DEFAULT`
+    Default,
+}
+
+impl fmt::Display for AssignmentValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AssignmentValue::Expr(expr) => write!(f, "{}", expr),
+            AssignmentValue::Default => f.write_str("DEFAULT"),
+        }
+    }
+}
+
+/// SQL assignment `foo = { expr | DEFAULT }` as used in SQLUpdate
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Assignment {
     pub id: Vec<Ident>,
-    pub value: Expr,
+    pub value: AssignmentValue,
 }
 
 impl fmt::Display for Assignment {
@@ -1951,6 +1987,7 @@ pub enum ObjectType {
     Sink,
     Database,
     User,
+    Connection,
 }
 
 impl fmt::Display for ObjectType {
@@ -1965,6 +2002,7 @@ impl fmt::Display for ObjectType {
             ObjectType::Sink => "SINK",
             ObjectType::Database => "DATABASE",
             ObjectType::User => "USER",
+            ObjectType::Connection => "CONNECTION",
         })
     }
 }
@@ -1989,9 +2027,11 @@ impl ParseTo for ObjectType {
             ObjectType::Database
         } else if parser.parse_keyword(Keyword::USER) {
             ObjectType::User
+        } else if parser.parse_keyword(Keyword::CONNECTION) {
+            ObjectType::Connection
         } else {
             return parser.expected(
-                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SCHEMA, DATABASE or USER after DROP",
+                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SCHEMA, DATABASE, USER or CONNECTION after DROP",
                 parser.peek_token(),
             );
         };

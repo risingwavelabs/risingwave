@@ -142,6 +142,28 @@ impl LogicalJoin {
         &self.core.on
     }
 
+    /// Collect all input ref in the on condition. And separate them into left and right.
+    pub fn input_idx_on_condition(&self) -> (Vec<usize>, Vec<usize>) {
+        let input_refs = self
+            .core
+            .on
+            .collect_input_refs(self.core.left.schema().len() + self.core.right.schema().len());
+        let index_group = input_refs
+            .ones()
+            .group_by(|i| *i < self.core.left.schema().len());
+        let left_index = index_group
+            .into_iter()
+            .next()
+            .map_or(vec![], |group| group.1.collect_vec());
+        let right_index = index_group.into_iter().next().map_or(vec![], |group| {
+            group
+                .1
+                .map(|i| i - self.core.left.schema().len())
+                .collect_vec()
+        });
+        (left_index, right_index)
+    }
+
     /// Get the join type of the logical join.
     pub fn join_type(&self) -> JoinType {
         self.core.join_type
@@ -371,11 +393,16 @@ impl LogicalJoin {
         // Reorder the join equal predicate to match the order key.
         let mut reorder_idx = Vec::with_capacity(at_least_prefix_len);
         for order_col_id in order_col_ids {
+            let mut found = false;
             for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
                 if order_col_id == output_column_ids[eq_idx] {
                     reorder_idx.push(i);
+                    found = true;
                     break;
                 }
+            }
+            if !found {
+                break;
             }
         }
         if reorder_idx.len() < at_least_prefix_len {
@@ -627,17 +654,6 @@ impl ExprRewritable for LogicalJoin {
     }
 }
 
-fn is_pure_fn_except_for_input_ref(expr: &ExprImpl) -> bool {
-    match expr {
-        ExprImpl::Literal(_) => true,
-        ExprImpl::FunctionCall(inner) => {
-            inner.is_pure() && inner.inputs().iter().all(is_pure_fn_except_for_input_ref)
-        }
-        ExprImpl::InputRef(_) => true,
-        _ => false,
-    }
-}
-
 /// We are trying to derive a predicate to apply to the other side of a join if all
 /// the `InputRef`s in the predicate are eq condition columns, and can hence be substituted
 /// with the corresponding eq condition columns of the other side.
@@ -661,7 +677,7 @@ fn derive_predicate_from_eq_condition(
     col_num: usize,
     expr_is_left: bool,
 ) -> Option<ExprImpl> {
-    if !is_pure_fn_except_for_input_ref(expr) {
+    if expr.is_impure() {
         return None;
     }
     let eq_indices = if expr_is_left {
@@ -901,7 +917,11 @@ impl LogicalJoin {
         // For inner joins, pull non-equal conditions to a filter operator on top of it
         // We do so as the filter operator can apply the non-equal condition batch-wise (vectorized)
         // as opposed to the HashJoin, which applies the condition row-wise.
-        let pull_filter = self.join_type() == JoinType::Inner && predicate.has_non_eq();
+
+        let stream_hash_join = StreamHashJoin::new(logical_join.core.clone(), predicate.clone());
+        let pull_filter = self.join_type() == JoinType::Inner
+            && stream_hash_join.eq_join_predicate().has_non_eq()
+            && stream_hash_join.inequality_pairs().is_empty();
         if pull_filter {
             let default_indices = (0..self.internal_column_num()).collect::<Vec<_>>();
 
@@ -915,7 +935,7 @@ impl LogicalJoin {
             );
             let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
             let hash_join = StreamHashJoin::new(logical_join.core, eq_cond).into();
-            let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
+            let logical_filter = generic::Filter::new(predicate.non_eq_cond(), hash_join);
             let plan = StreamFilter::new(logical_filter).into();
             if self.output_indices() != &default_indices {
                 let logical_project = LogicalProject::with_mapping(
@@ -930,14 +950,14 @@ impl LogicalJoin {
                 Ok(plan)
             }
         } else {
-            Ok(StreamHashJoin::new(logical_join.core, predicate).into())
+            Ok(stream_hash_join.into())
         }
     }
 
     fn should_be_temporal_join(&self) -> bool {
         let right = self.right();
         if let Some(logical_scan) = right.as_logical_scan() {
-            logical_scan.for_system_time_as_of_now()
+            logical_scan.for_system_time_as_of_proctime()
         } else {
             false
         }
@@ -970,10 +990,10 @@ impl LogicalJoin {
             )));
         };
 
-        if !logical_scan.for_system_time_as_of_now() {
+        if !logical_scan.for_system_time_as_of_proctime() {
             return Err(RwError::from(ErrorCode::NotSupported(
                 "Temporal join requires a table defined as temporal table".into(),
-                "Please use FOR SYSTEM_TIME AS OF NOW() syntax".into(),
+                "Please use FOR SYSTEM_TIME AS OF PROCTIME() syntax".into(),
             )));
         }
 

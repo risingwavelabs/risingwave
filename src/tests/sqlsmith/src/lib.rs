@@ -14,7 +14,7 @@
 
 #![feature(let_chains)]
 #![feature(if_let_guard)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![feature(box_patterns)]
 
 use rand::prelude::SliceRandom;
@@ -42,7 +42,6 @@ pub fn sql_gen(rng: &mut impl Rng, tables: Vec<Table>) -> String {
 }
 
 /// Generate `INSERT`
-#[allow(dead_code)]
 pub fn insert_sql_gen(rng: &mut impl Rng, tables: Vec<Table>, count: usize) -> Vec<String> {
     let mut gen = SqlGenerator::new(rng, vec![]);
     tables
