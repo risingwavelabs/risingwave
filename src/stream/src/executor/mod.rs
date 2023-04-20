@@ -126,6 +126,7 @@ pub use lookup::*;
 pub use lookup_union::LookupUnionExecutor;
 pub use merge::MergeExecutor;
 pub use mview::*;
+pub use no_op::NoOpExecutor;
 pub use now::NowExecutor;
 pub use project::ProjectExecutor;
 pub use project_set::*;
@@ -143,7 +144,6 @@ pub use union::UnionExecutor;
 pub use values::ValuesExecutor;
 pub use watermark_filter::WatermarkFilterExecutor;
 pub use wrapper::WrapperExecutor;
-pub use no_op::NoOpExecutor;
 
 use self::barrier_align::AlignedMessageStream;
 

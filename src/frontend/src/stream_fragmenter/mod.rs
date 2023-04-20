@@ -25,7 +25,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag,
+    DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag, NoOpNode,
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
@@ -297,7 +297,8 @@ fn build_fragment(
                     // Exchange node should have only one input.
                     let [input]: [_; 1] = std::mem::take(&mut child_node.input).try_into().unwrap();
                     let child_fragment = build_and_add_fragment(state, input)?;
-                    state.fragment_graph.add_edge(
+
+                    let result = state.fragment_graph.try_add_edge(
                         child_fragment.fragment_id,
                         current_fragment.fragment_id,
                         StreamFragmentEdge {
@@ -305,6 +306,59 @@ fn build_fragment(
                             link_id: child_node.operator_id,
                         },
                     );
+
+                    if result.is_err() {
+                        child_node.operator_id = state.gen_operator_id() as u64;
+
+                        let child_fragment_node = child_fragment.node.as_ref().unwrap();
+                        let strategy = DispatchStrategy {
+                            r#type: DispatcherType::NoShuffle as i32,
+                            dist_key_indices: vec![],
+                            output_indices: (0..child_fragment_node.fields.len() as u32).collect(),
+                        };
+
+                        let no_op_operator_id = state.gen_operator_id() as u64;
+                        let no_shuffle_exchange_operator_id = state.gen_operator_id() as u64;
+
+                        let node = StreamNode {
+                            operator_id: no_op_operator_id,
+                            identity: "My No-op".into(),
+                            node_body: Some(NodeBody::NoOp(NoOpNode {})),
+                            input: vec![StreamNode {
+                                operator_id: no_shuffle_exchange_operator_id,
+                                identity: "My No-shuffle Exchange".into(),
+                                node_body: Some(NodeBody::Exchange(ExchangeNode {
+                                    strategy: Some(strategy.clone()),
+                                })),
+                                input: vec![],
+                                ..*child_fragment_node.clone()
+                            }],
+                            ..*child_fragment_node.clone()
+                        };
+
+                        let mut no_op_fragment = state.new_stream_fragment();
+                        no_op_fragment.node = Some(node.into());
+                        let no_op_fragment = Rc::new(no_op_fragment);
+
+                        state.fragment_graph.add_fragment(no_op_fragment.clone());
+
+                        state.fragment_graph.add_edge(
+                            child_fragment.fragment_id,
+                            no_op_fragment.fragment_id,
+                            StreamFragmentEdge {
+                                dispatch_strategy: strategy.clone(),
+                                link_id: no_shuffle_exchange_operator_id,
+                            },
+                        );
+                        state.fragment_graph.add_edge(
+                            no_op_fragment.fragment_id,
+                            current_fragment.fragment_id,
+                            StreamFragmentEdge {
+                                dispatch_strategy: strategy,
+                                link_id: child_node.operator_id,
+                            },
+                        );
+                    }
 
                     Ok(child_node)
                 }
