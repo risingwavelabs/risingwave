@@ -256,7 +256,7 @@ impl LogicalSource {
         )?;
         if let Some(exprs) = exprs {
             let source = BatchSource::new(self.rewrite_to_stream_batch_source());
-            let logical_project = LogicalProject::new(source.into(), exprs);
+            let logical_project = generic::Project::new(exprs, source.into());
             Ok(BatchProject::new(logical_project).into())
         } else {
             let source = BatchSource::new(self.core.clone());

@@ -20,10 +20,9 @@ use risingwave_pb::batch_plan::ProjectNode;
 use risingwave_pb::expr::ExprNode;
 
 use super::{
-    ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb,
-    ToDistributedBatch,
+    generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
-use crate::expr::{Expr, ExprImpl, ExprRewriter};
+use crate::expr::{ExprImpl, ExprRewriter, Expr};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::utils::ColIndexMappingRewriteExt;
 
@@ -32,45 +31,46 @@ use crate::utils::ColIndexMappingRewriteExt;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchProject {
     pub base: PlanBase,
-    logical: LogicalProject,
+    logical: generic::Project<PlanRef>,
 }
 
 impl BatchProject {
-    pub fn new(logical: LogicalProject) -> Self {
-        let ctx = logical.base.ctx.clone();
+    pub fn new(logical: generic::Project<PlanRef>) -> Self {
         let distribution = logical
             .i2o_col_mapping()
-            .rewrite_provided_distribution(logical.input().distribution());
+            .rewrite_provided_distribution(logical.input.distribution());
         let order = logical
             .i2o_col_mapping()
-            .rewrite_provided_order(logical.input().order());
+            .rewrite_provided_order(logical.input.order());
 
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), distribution, order);
+        let base = PlanBase::new_batch_from_logical(&logical, distribution, order);
         BatchProject { base, logical }
     }
 
-    pub fn as_logical(&self) -> &LogicalProject {
+    pub fn as_logical(&self) -> &generic::Project<PlanRef> {
         &self.logical
     }
 
     pub fn exprs(&self) -> &Vec<ExprImpl> {
-        self.logical.exprs()
+        &self.logical.exprs
     }
 }
 
 impl fmt::Display for BatchProject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchProject")
+        self.logical.fmt_with_name(f, "BatchProject", self.schema())
     }
 }
 
 impl PlanTreeNodeUnary for BatchProject {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let mut logical = self.logical.clone();
+        logical.input = input;
+        Self::new(logical)
     }
 }
 
@@ -87,7 +87,7 @@ impl ToBatchPb for BatchProject {
     fn to_batch_prost_body(&self) -> NodeBody {
         let select_list = self
             .logical
-            .exprs()
+            .exprs
             .iter()
             .map(|expr| expr.to_expr_proto())
             .collect::<Vec<ExprNode>>();
@@ -108,13 +108,8 @@ impl ExprRewritable for BatchProject {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self::new(
-            self.logical
-                .rewrite_exprs(r)
-                .as_logical_project()
-                .unwrap()
-                .clone(),
-        )
-        .into()
+        let mut logical = self.logical.clone();
+        logical.rewrite_exprs(r);
+        Self::new(logical).into()
     }
 }
