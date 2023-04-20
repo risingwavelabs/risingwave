@@ -46,7 +46,7 @@ install_all() {
   artifacts=(risingwave risedev-dev librisingwave_java_binding.so)
   # Create this so `risedev` tool can locate the binaries.
   mkdir -p target/release
-  echo "$artifacts" | parallel -d ' ' "buildkite-agent artifact download {}-bench . && mv ./{}-bench target/release/{}"
+  echo "${artifacts[*]}" | parallel -d ' ' "buildkite-agent artifact download {}-bench . && mv ./{}-bench target/release/{}"
   popd
 }
 
