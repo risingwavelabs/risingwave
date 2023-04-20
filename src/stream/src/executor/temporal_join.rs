@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::alloc::Global;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use either::Either;
@@ -27,6 +28,7 @@ use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::StateStore;
 
@@ -59,7 +61,7 @@ pub struct TemporalJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
 struct TemporalSide<S: StateStore> {
     source: StorageTable<S>,
     table_output_indices: Vec<usize>,
-    cache: ManagedLruCache<OwnedRow, Option<OwnedRow>, DefaultHasher, SharedStatsAlloc<Global>>,
+    cache: ManagedLruCache<OwnedRow, HashSet<OwnedRow>, DefaultHasher, SharedStatsAlloc<Global>>,
 }
 
 impl<S: StateStore> TemporalSide<S> {
@@ -67,18 +69,27 @@ impl<S: StateStore> TemporalSide<S> {
         &mut self,
         key: impl Row,
         epoch: HummockEpoch,
-    ) -> StreamExecutorResult<Option<OwnedRow>> {
+    ) -> StreamExecutorResult<HashSet<OwnedRow>> {
         let key = key.into_owned_row();
         Ok(match self.cache.get(&key) {
             Some(res) => res.clone(),
             None => {
-                let res = self
+                let iter = self
                     .source
-                    .get_row(key.clone(), HummockReadEpoch::NoWait(epoch))
-                    .await?
-                    .map(|row| row.project(&self.table_output_indices).into_owned_row());
-                self.cache.put(key, res.clone());
-                res
+                    .batch_iter_with_pk_bounds(
+                        HummockReadEpoch::NoWait(epoch),
+                        key.clone(),
+                        ..,
+                        false,
+                        PrefetchOptions::new_for_exhaust_iter(),
+                    )
+                    .await?;
+                let rows: HashSet<_> = iter
+                    .map_ok(|(_, row)| row.project(&self.table_output_indices).into_owned_row())
+                    .try_collect()
+                    .await?;
+                self.cache.put(key, rows.clone());
+                rows
             }
         })
     }
@@ -88,8 +99,8 @@ impl<S: StateStore> TemporalSide<S> {
             let key = row.project(join_keys).into_owned_row();
             if let Some(mut value) = self.cache.get_mut(&key) {
                 match op {
-                    Op::Insert | Op::UpdateInsert => *value = Some(row.into_owned_row()),
-                    Op::Delete | Op::UpdateDelete => *value = None,
+                    Op::Insert | Op::UpdateInsert => value.insert(row.into_owned_row()),
+                    Op::Delete | Op::UpdateDelete => value.remove(&row.into_owned_row()),
                 };
             }
         });
@@ -249,27 +260,30 @@ impl<S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<S, T> {
                         {
                             continue;
                         }
-                        if let Some(right_row) = self.right_table.lookup(key, epoch).await? {
-                            // check join condition
-                            let ok = if let Some(ref mut cond) = self.condition {
-                                let concat_row = left_row.chain(&right_row).into_owned_row();
-                                cond.eval_row_infallible(&concat_row, |err| {
-                                    self.ctx.on_compute_error(err, self.identity.as_str())
-                                })
-                                .await
-                                .map(|s| *s.as_bool())
-                                .unwrap_or(false)
-                            } else {
-                                true
-                            };
-                            if ok {
-                                if let Some(chunk) = builder.append_row(op, left_row, &right_row) {
-                                    yield Message::Chunk(chunk);
-                                }
-                            }
-                        } else if T == JoinType::LeftOuter {
+                        let right_rows = self.right_table.lookup(key, epoch).await?;
+                        if right_rows.is_empty() && T == JoinType::LeftOuter {
                             if let Some(chunk) = builder.append_row_update(op, left_row) {
                                 yield Message::Chunk(chunk);
+                            }
+                        } else {
+                            for right_row in right_rows {
+                                let ok = if let Some(ref mut cond) = self.condition {
+                                    let concat_row = left_row.chain(&right_row).into_owned_row();
+                                    cond.eval_row_infallible(&concat_row, |err| {
+                                        self.ctx.on_compute_error(err, self.identity.as_str())
+                                    })
+                                    .await
+                                    .map(|s| *s.as_bool())
+                                    .unwrap_or(false)
+                                } else {
+                                    true
+                                };
+                                if ok {
+                                    if let Some(chunk) = builder.append_row(op, left_row, right_row)
+                                    {
+                                        yield Message::Chunk(chunk);
+                                    }
+                                }
                             }
                         }
                     }
