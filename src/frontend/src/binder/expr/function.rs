@@ -429,6 +429,7 @@ impl Binder {
                 ("cardinality", raw_call(ExprType::Cardinality)),
                 ("array_remove", raw_call(ExprType::ArrayRemove)),
                 ("array_positions", raw_call(ExprType::ArrayPositions)),
+                ("trim_array", raw_call(ExprType::TrimArray)),
                 // int256
                 ("hex_to_int256", raw_call(ExprType::HexToInt256)),
                 // jsonb

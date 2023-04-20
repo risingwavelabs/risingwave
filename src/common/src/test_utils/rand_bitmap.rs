@@ -14,13 +14,14 @@
 
 use itertools::Itertools;
 use rand::seq::SliceRandom;
+use rand::SeedableRng;
 
 use crate::buffer::{Bitmap, BitmapBuilder};
 
-pub fn gen_rand_bitmap(num_bits: usize, count_ones: usize) -> Bitmap {
+pub fn gen_rand_bitmap(num_bits: usize, count_ones: usize, seed: u64) -> Bitmap {
     let mut builder = BitmapBuilder::zeroed(num_bits);
     let mut range = (0..num_bits).collect_vec();
-    range.shuffle(&mut rand::thread_rng());
+    range.shuffle(&mut rand::rngs::StdRng::seed_from_u64(seed));
     let shuffled = range.into_iter().collect_vec();
     for item in shuffled.iter().take(count_ones) {
         builder.set(*item, true);

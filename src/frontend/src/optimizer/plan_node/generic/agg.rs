@@ -54,7 +54,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         });
     }
 
-    fn output_len(&self) -> usize {
+    pub(crate) fn output_len(&self) -> usize {
         self.group_key.len() + self.agg_calls.len()
     }
 

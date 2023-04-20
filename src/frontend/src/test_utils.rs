@@ -303,6 +303,7 @@ impl CatalogWriter for MockCatalogWriter {
         _connection_name: String,
         _database_id: u32,
         _schema_id: u32,
+        _owner_id: u32,
         _connection: create_connection_request::Payload,
     ) -> Result<()> {
         unreachable!()

@@ -22,7 +22,6 @@ use risingwave_sqlparser::ast::{
     CreateSink, CreateSinkStatement, ObjectName, Query, Select, SelectItem, SetExpr, TableFactor,
     TableWithJoins,
 };
-use tracing::info;
 
 use super::create_mv::get_column_names;
 use super::RwPgResponse;

@@ -116,6 +116,23 @@ impl PlanBase {
         )
     }
 
+    pub fn new_stream_with_logical(
+        logical: &impl GenericPlanNode,
+        dist: Distribution,
+        append_only: bool,
+        watermark_columns: FixedBitSet,
+    ) -> Self {
+        Self::new_stream(
+            logical.ctx(),
+            logical.schema(),
+            logical.logical_pk().unwrap_or_default().to_vec(),
+            logical.functional_dependency(),
+            dist,
+            append_only,
+            watermark_columns,
+        )
+    }
+
     pub fn new_stream(
         ctx: OptimizerContextRef,
         schema: Schema,

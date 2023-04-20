@@ -113,6 +113,7 @@ message Connection {
   oneof info {
     PrivateLinkService private_link_service = 5;
   }
+  uint32 owner = 6;
 }
 
 message Index {

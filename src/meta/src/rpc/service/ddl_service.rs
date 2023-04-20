@@ -617,6 +617,7 @@ where
                     schema_id: req.schema_id,
                     database_id: req.database_id,
                     name: req.name,
+                    owner: req.owner_id,
                     info: Some(connection::Info::PrivateLinkService(private_link_svc)),
                 };
 

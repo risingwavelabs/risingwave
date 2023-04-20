@@ -25,13 +25,15 @@ use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_pb::catalog::connection::private_link_service::PrivateLinkProvider;
 use risingwave_pb::catalog::{connection, PbConnection};
 
-use crate::catalog::ConnectionId;
+use crate::catalog::{ConnectionId, OwnedByUserCatalog};
+use crate::user::UserId;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ConnectionCatalog {
     pub id: ConnectionId,
     pub name: String,
     pub info: connection::Info,
+    owner: UserId,
 }
 
 impl From<&PbConnection> for ConnectionCatalog {
@@ -40,7 +42,14 @@ impl From<&PbConnection> for ConnectionCatalog {
             id: prost.id,
             name: prost.name.clone(),
             info: prost.info.clone().unwrap(),
+            owner: prost.owner,
         }
+    }
+}
+
+impl OwnedByUserCatalog for ConnectionCatalog {
+    fn owner(&self) -> UserId {
+        self.owner
     }
 }
 
