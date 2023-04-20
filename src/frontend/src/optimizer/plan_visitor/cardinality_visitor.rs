@@ -123,8 +123,8 @@ impl PlanVisitor<Cardinality> for CardinalityVisitor {
 
             // For each row from one side, we match `1..=max(right.hi, 1)` rows from the other side,
             // since we can at least match a `NULL` row.
-            JoinType::LeftOuter => left.mul(right.max(1)),
-            JoinType::RightOuter => right.mul(left.max(1)),
+            JoinType::LeftOuter => left.mul(right.max(1).min(1..)),
+            JoinType::RightOuter => right.mul(left.max(1).min(1..)),
 
             // For each row in the result set, it must belong to the given side.
             JoinType::LeftSemi | JoinType::LeftAnti => left.min(0..),
