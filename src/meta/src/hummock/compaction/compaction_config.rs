@@ -136,4 +136,5 @@ builder_field! {
     max_space_reclaim_bytes: u64,
     level0_stop_write_threshold_sub_level_number: u64,
     level0_max_compact_file_number: u64,
+    level0_sub_level_compact_level_count: u32,
 }

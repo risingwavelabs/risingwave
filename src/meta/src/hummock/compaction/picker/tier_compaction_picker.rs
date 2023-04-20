@@ -308,7 +308,8 @@ impl TierCompactionPicker {
             // so the design here wants to merge multiple overlapping-levels in one compaction
             let max_compaction_bytes = std::cmp::min(
                 self.config.max_compaction_bytes,
-                self.config.sub_level_max_compaction_bytes * 4,
+                self.config.sub_level_max_compaction_bytes
+                    * self.config.level0_sub_level_compact_level_count as u64,
             );
 
             let mut compaction_bytes = level.total_file_size;
@@ -435,6 +436,7 @@ pub mod tests {
             CompactionConfigBuilder::new()
                 .level0_tier_compact_file_number(2)
                 .target_file_size_base(30)
+                .level0_sub_level_compact_level_count(2)
                 .build(),
         );
         let mut picker =
@@ -519,6 +521,7 @@ pub mod tests {
         let config = Arc::new(
             CompactionConfigBuilder::new()
                 .level0_tier_compact_file_number(2)
+                .level0_sub_level_compact_level_count(2)
                 .build(),
         );
         let mut picker =
@@ -568,6 +571,7 @@ pub mod tests {
                 .level0_tier_compact_file_number(2)
                 .sub_level_max_compaction_bytes(100)
                 .max_compaction_bytes(500000)
+                .level0_sub_level_compact_level_count(2)
                 .build(),
         );
 
