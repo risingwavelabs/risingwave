@@ -50,7 +50,7 @@ pub fn string_to_array2(s: Option<&str>, sep: Option<&str>) -> ListValue {
 
 #[function("string_to_array(varchar, varchar, varchar) -> list")]
 pub fn string_to_array3(s: Option<&str>, sep: Option<&str>, null: Option<&str>) -> ListValue {
-    if let Some(null) = null {
+    null.map_or(string_to_array2(s, sep), |null| {
         ListValue::new(
             string_to_array_inner(s, sep)
                 .into_iter()
@@ -60,7 +60,5 @@ pub fn string_to_array3(s: Option<&str>, sep: Option<&str>, null: Option<&str>) 
                 })
                 .collect_vec(),
         )
-    } else {
-        string_to_array2(s, sep)
-    }
+    })
 }
