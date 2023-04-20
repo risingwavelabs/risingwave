@@ -146,6 +146,8 @@ struct ExecutionVars<K: HashKey, S: StateStore> {
 
     /// Stream chunk builder.
     chunk_builder: ChunkBuilder,
+
+    buffer: SortBuffer<S>,
 }
 
 struct ExecutionStats {
@@ -450,7 +452,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 }
             });
 
-        let mut buffer = SortBuffer::new(0, &this.result_table);
         // TODO(rc): figure out a more reasonable concurrency limit.
         const MAX_CONCURRENT_TASKS: usize = 100;
         let mut futs_batches = IterChunks::chunks(futs_of_all_groups, MAX_CONCURRENT_TASKS);
@@ -462,7 +463,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             if this.emit_on_window_close {
                 for change in changes.into_iter().flatten() {
                     // For EOWC, write change to the sort buffer.
-                    buffer.apply_change(change, &mut this.result_table);
+                    vars.buffer.apply_change(change, &mut this.result_table);
                 }
             } else {
                 for change in changes.into_iter().flatten() {
@@ -479,7 +480,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         if this.emit_on_window_close {
             if let Some(watermark) = window_watermark.as_ref() {
                 #[for_await]
-                for row in buffer.consume(watermark.clone(), &mut this.result_table) {
+                for row in vars
+                    .buffer
+                    .consume(watermark.clone(), &mut this.result_table)
+                {
                     let row = row?;
                     if let Some(chunk) = vars.chunk_builder.append_row(Op::Insert, row) {
                         yield chunk;
@@ -534,6 +538,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             buffered_watermarks: vec![None; this.group_key_indices.len()],
             window_watermark: None,
             chunk_builder: ChunkBuilder::new(this.chunk_size, &this.info.schema.data_types()),
+            buffer: SortBuffer::new(0, &this.result_table),
         };
 
         // TODO(rc): use something like a `ColumnMapping` type
