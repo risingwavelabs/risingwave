@@ -144,7 +144,7 @@ public class ConnectorNodeMetrics {
         activeSinkConnections.labels(sinkType, ip).inc();
     }
 
-    public static void decActiveConnections(String sinkType, String ip) {
+    public static void decActiveSinkConnections(String sinkType, String ip) {
         activeSinkConnections.remove(sinkType, ip);
     }
 

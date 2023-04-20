@@ -192,6 +192,7 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
         if (sink != null) {
             sink.drop();
         }
+        ConnectorNodeMetrics.decActiveSinkConnections(sinkType, "node1");
     }
 
     private void bindSink(SinkConfig sinkConfig, ConnectorServiceProto.SinkPayloadFormat format) {
@@ -213,6 +214,6 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
         }
         sinkType = sinkConfig.getConnectorType().toUpperCase();
         sinkId = sinkConfig.getSinkId();
-        ConnectorNodeMetrics.incActiveSinkConnections(sinkConfig.getConnectorType(), "node1");
+        ConnectorNodeMetrics.incActiveSinkConnections(sinkType, "node1");
     }
 }
