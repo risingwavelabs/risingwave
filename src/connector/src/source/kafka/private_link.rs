@@ -43,18 +43,18 @@ struct BrokerAddrRewriter {
 
 impl BrokerAddrRewriter {
     fn rewrite_broker_addr(&self, addr: BrokerAddr) -> BrokerAddr {
-        let reworte_addr = match self.rewrite_map.get(&addr) {
+        let rewrote_addr = match self.rewrite_map.get(&addr) {
             None => addr,
             Some(new_addr) => new_addr.clone(),
         };
-        reworte_addr
+        rewrote_addr
     }
 
     pub fn new(
         role: PrivateLinkContextRole,
         broker_rewrite_map: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Self> {
-        tracing::info!("[{}] rewrite map {:?}", role, broker_rewrite_map);
+        tracing::debug!("[{}] rewrite map {:?}", role, broker_rewrite_map);
         let rewrite_map: anyhow::Result<BTreeMap<BrokerAddr, BrokerAddr>> = broker_rewrite_map
             .map_or(Ok(BTreeMap::new()), |addr_map| {
                 addr_map
