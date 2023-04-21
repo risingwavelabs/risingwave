@@ -58,31 +58,6 @@ impl From<generic::Scan> for PlanRef {
 }
 
 impl LogicalScan {
-    /// Create a `LogicalScan` node. Used internally by optimizer.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
-        table_name: String, // explain-only
-        is_sys_table: bool,
-        output_col_idx: Vec<usize>, // the column index in the table
-        table_desc: Rc<TableDesc>,
-        indexes: Vec<Rc<IndexCatalog>>,
-        ctx: OptimizerContextRef,
-        predicate: Condition, // refers to column indexes of the table
-        for_system_time_as_of_proctime: bool,
-    ) -> Self {
-        generic::Scan::new(
-            table_name,
-            is_sys_table,
-            output_col_idx,
-            table_desc,
-            indexes,
-            ctx,
-            predicate,
-            for_system_time_as_of_proctime,
-        )
-        .into()
-    }
-
     /// Create a [`LogicalScan`] node. Used by planner.
     pub fn create(
         table_name: String, // explain-only
@@ -92,7 +67,7 @@ impl LogicalScan {
         ctx: OptimizerContextRef,
         for_system_time_as_of_proctime: bool,
     ) -> Self {
-        Self::new(
+        generic::Scan::new(
             table_name,
             is_sys_table,
             (0..table_desc.columns.len()).collect(),
@@ -102,14 +77,7 @@ impl LogicalScan {
             Condition::true_cond(),
             for_system_time_as_of_proctime,
         )
-    }
-
-    pub(super) fn column_names(&self) -> Vec<String> {
-        self.core.column_names()
-    }
-
-    pub(super) fn column_names_with_table_prefix(&self) -> Vec<String> {
-        self.core.column_names_with_table_prefix()
+        .into()
     }
 
     pub fn table_name(&self) -> &str {
@@ -280,7 +248,7 @@ impl LogicalScan {
     }
 
     fn clone_with_predicate(&self, predicate: Condition) -> Self {
-        Self::new(
+        generic::Scan::new(
             self.table_name().to_string(),
             self.is_sys_table(),
             self.output_col_idx().to_vec(),
@@ -290,10 +258,11 @@ impl LogicalScan {
             predicate,
             self.for_system_time_as_of_proctime(),
         )
+        .into()
     }
 
     pub fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
-        Self::new(
+        generic::Scan::new(
             self.table_name().to_string(),
             self.is_sys_table(),
             output_col_idx,
@@ -303,6 +272,7 @@ impl LogicalScan {
             self.predicate().clone(),
             self.for_system_time_as_of_proctime(),
         )
+        .into()
     }
 
     pub fn output_col_idx(&self) -> &Vec<usize> {
@@ -320,9 +290,9 @@ impl fmt::Display for LogicalScan {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
         let output_col_names = if verbose {
-            self.column_names_with_table_prefix()
+            self.core.column_names_with_table_prefix()
         } else {
-            self.column_names()
+            self.core.column_names()
         }
         .join(", ");
 
@@ -448,7 +418,8 @@ impl PredicatePushdown for LogicalScan {
 impl LogicalScan {
     fn to_batch_inner_with_required(&self, required_order: &Order) -> Result<PlanRef> {
         if self.predicate().always_true() {
-            required_order.enforce_if_not_satisfies(BatchSeqScan::new(self.core.clone(), vec![]).into())
+            required_order
+                .enforce_if_not_satisfies(BatchSeqScan::new(self.core.clone(), vec![]).into())
         } else {
             let (scan_ranges, predicate) = self.predicate().clone().split_to_scan_ranges(
                 self.core.table_desc.clone(),
