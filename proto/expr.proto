@@ -117,6 +117,8 @@ message ExprNode {
     SQRT = 256;
     DEGREES = 257;
     RADIANS = 258;
+    ENCODE = 259;
+    DECODE = 260;
 
     // Boolean comparison
     IS_TRUE = 301;
