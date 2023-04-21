@@ -14,6 +14,8 @@
 
 use parse_display::{Display, FromStr};
 
+use crate::function::aggregate::AggKind;
+
 /// Kind of window functions.
 #[derive(Debug, Display, FromStr, Copy, Clone, PartialEq, Eq, Hash)]
 #[display(style = "snake_case")]
@@ -26,6 +28,6 @@ pub enum WindowFuncKind {
     // NthValue,
 
     // Aggregate functions that are used with `OVER`.
-    // #[display("{0}")]
-    // Aggregate(AggKind),
+    #[display("{0}")]
+    Aggregate(AggKind),
 }

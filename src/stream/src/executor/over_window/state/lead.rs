@@ -16,11 +16,12 @@ use std::collections::VecDeque;
 
 use risingwave_common::must_match;
 use risingwave_common::types::Datum;
-use risingwave_expr::function::window::Frame;
+use risingwave_expr::function::window::{Frame, FrameBound};
 use smallvec::SmallVec;
 
 use super::{StateKey, StateOutput, StatePos, WindowState};
 use crate::executor::over_window::state::StateEvictHint;
+use crate::executor::StreamExecutorResult;
 
 struct BufferEntry(StateKey, Datum);
 
@@ -31,7 +32,7 @@ pub(super) struct LeadState {
 
 impl LeadState {
     pub fn new(frame: &Frame) -> Self {
-        let offset = must_match!(frame, Frame::Offset(offset) if *offset > 0 => *offset as usize);
+        let offset = must_match!(frame, Frame::Rows(FrameBound::CurrentRow, FrameBound::Following(offset)) => *offset);
         Self {
             offset,
             buffer: Default::default(),
@@ -53,13 +54,18 @@ impl WindowState for LeadState {
         }
     }
 
-    fn slide(&mut self) -> StateOutput {
+    fn output(&mut self) -> StreamExecutorResult<StateOutput> {
         debug_assert!(self.curr_window().is_ready);
         let lead_value = self.buffer[self.offset].1.clone();
         let BufferEntry(key, _) = self.buffer.pop_front().unwrap();
-        StateOutput {
+        Ok(StateOutput {
             return_value: lead_value,
             evict_hint: StateEvictHint::CanEvict(std::iter::once(key).collect()),
-        }
+        })
     }
+}
+
+#[cfg(test)]
+mod tests {
+    // TODO(rc): need to add some unit tests
 }
