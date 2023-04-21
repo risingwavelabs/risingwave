@@ -602,8 +602,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     }
 
     // May start telemetry reporting
-    if let MetaBackend::Etcd = meta_store.meta_store_type() && env.opts.telemetry_enabled && telemetry_env_enabled(){
-        if system_params_reader.telemetry_enabled(){
+    if env.opts.telemetry_enabled && telemetry_env_enabled() {
+        if system_params_reader.telemetry_enabled() {
             mgr.start_telemetry_reporting().await;
         }
         sub_tasks.push(mgr.watch_params_change());
