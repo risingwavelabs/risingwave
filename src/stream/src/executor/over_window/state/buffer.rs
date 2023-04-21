@@ -68,7 +68,9 @@ impl<K: Ord, V> StreamWindowBuffer<K, V> {
                         if start_off >= 0 {
                             true // pure following frame, always preceding-saturated
                         } else {
-                            assert!(self.curr_idx >= self.left_idx);
+                            // FIXME(rc): Clippy rule `clippy::nonminimal_bool` is misreporting that
+                            // the following can be simplified.
+                            // assert!(self.curr_idx >= self.left_idx);
                             self.curr_idx - self.left_idx >= start_off.unsigned_abs()
                         }
                     } else {
@@ -87,9 +89,10 @@ impl<K: Ord, V> StreamWindowBuffer<K, V> {
                         if end_off <= 0 {
                             true // pure preceding frame, always following-saturated
                         } else {
-                            assert!(self.right_excl_idx > 0);
-                            assert!(self.right_excl_idx > self.curr_idx);
-                            assert!(self.right_excl_idx <= self.buffer.len());
+                            // FIXME(rc): Ditto.
+                            // assert!(self.right_excl_idx > 0);
+                            // assert!(self.right_excl_idx > self.curr_idx);
+                            // assert!(self.right_excl_idx <= self.buffer.len());
                             self.right_excl_idx - 1 - self.curr_idx >= end_off as usize
                         }
                     } else {
