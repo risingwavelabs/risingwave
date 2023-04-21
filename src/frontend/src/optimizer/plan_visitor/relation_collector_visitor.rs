@@ -62,8 +62,9 @@ impl PlanVisitor<()> for RelationCollectorVisitor {
     }
 
     fn visit_stream_table_scan(&mut self, plan: &StreamTableScan) {
-        if !plan.logical().is_sys_table() {
-            self.relations.insert(plan.logical().table_desc().table_id);
+        let logical = plan.logical();
+        if !logical.is_sys_table {
+            self.relations.insert(logical.table_desc.table_id);
         }
     }
 

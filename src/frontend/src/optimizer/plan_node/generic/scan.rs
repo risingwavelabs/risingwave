@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 use derivative::Derivative;
@@ -20,7 +20,7 @@ use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 
 use super::GenericPlanNode;
 use crate::catalog::{ColumnId, IndexCatalog};
-use crate::expr::ExprRewriter;
+use crate::expr::{ExprRewriter, FunctionCall};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::Condition;
@@ -52,6 +52,154 @@ pub struct Scan {
 impl Scan {
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.predicate = self.predicate.clone().rewrite_expr(r);
+    }
+
+    /// The mapped distribution key of the scan operator.
+    ///
+    /// The column indices in it is the position in the `output_col_idx`, instead of the position
+    /// in all the columns of the table (which is the table's distribution key).
+    ///
+    /// Return `None` if the table's distribution key are not all in the `output_col_idx`.
+    pub fn distribution_key(&self) -> Option<Vec<usize>> {
+        let tb_idx_to_op_idx = self
+            .output_col_idx
+            .iter()
+            .enumerate()
+            .map(|(op_idx, tb_idx)| (*tb_idx, op_idx))
+            .collect::<HashMap<_, _>>();
+        self.table_desc
+            .distribution_key
+            .iter()
+            .map(|&tb_idx| tb_idx_to_op_idx.get(&tb_idx).cloned())
+            .collect()
+    }
+
+    /// Get the ids of the output columns.
+    pub fn output_column_ids(&self) -> Vec<ColumnId> {
+        self.output_col_idx
+            .iter()
+            .map(|i| self.table_desc().columns[*i].column_id)
+            .collect()
+    }
+
+    /// Get the ids of the output columns and primary key columns.
+    pub fn output_and_pk_column_ids(&self) -> Vec<ColumnId> {
+        let mut ids = self.output_column_ids();
+        for column_order in self.primary_key() {
+            let id = self.table_desc.columns[column_order.column_index].column_id;
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+        ids
+    }
+
+    /// Prerequisite: the caller should guarantee that `primary_to_secondary_mapping` must cover the
+    /// scan.
+    pub fn to_index_scan(
+        &self,
+        index_name: &str,
+        index_table_desc: Rc<TableDesc>,
+        primary_to_secondary_mapping: &BTreeMap<usize, usize>,
+        function_mapping: &HashMap<FunctionCall, usize>,
+    ) -> Self {
+        let new_output_col_idx = self
+            .output_col_idx
+            .iter()
+            .map(|col_idx| *primary_to_secondary_mapping.get(col_idx).unwrap())
+            .collect_vec();
+
+        struct Rewriter<'a> {
+            primary_to_secondary_mapping: &'a BTreeMap<usize, usize>,
+            function_mapping: &'a HashMap<FunctionCall, usize>,
+        }
+        impl ExprRewriter for Rewriter<'_> {
+            fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+                InputRef::new(
+                    *self
+                        .primary_to_secondary_mapping
+                        .get(&input_ref.index)
+                        .unwrap(),
+                    input_ref.return_type(),
+                )
+                .into()
+            }
+
+            fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
+                if let Some(index) = self.function_mapping.get(&func_call) {
+                    return InputRef::new(*index, func_call.return_type()).into();
+                }
+
+                let (func_type, inputs, ret) = func_call.decompose();
+                let inputs = inputs
+                    .into_iter()
+                    .map(|expr| self.rewrite_expr(expr))
+                    .collect();
+                FunctionCall::new_unchecked(func_type, inputs, ret).into()
+            }
+        }
+        let mut rewriter = Rewriter {
+            primary_to_secondary_mapping,
+            function_mapping,
+        };
+
+        let new_predicate = self.predicate.clone().rewrite_expr(&mut rewriter);
+
+        Self::new(
+            index_name.to_string(),
+            false,
+            new_output_col_idx,
+            index_table_desc,
+            vec![],
+            self.ctx,
+            new_predicate,
+            self.for_system_time_as_of_proctime,
+        )
+    }
+
+    /// Create a `LogicalScan` node. Used internally by optimizer.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
+        table_name: String, // explain-only
+        is_sys_table: bool,
+        output_col_idx: Vec<usize>, // the column index in the table
+        table_desc: Rc<TableDesc>,
+        indexes: Vec<Rc<IndexCatalog>>,
+        ctx: OptimizerContextRef,
+        predicate: Condition, // refers to column indexes of the table
+        for_system_time_as_of_proctime: bool,
+    ) -> Self {
+        // here we have 3 concepts
+        // 1. column_id: ColumnId, stored in catalog and a ID to access data from storage.
+        // 2. table_idx: usize, column index in the TableDesc or tableCatalog.
+        // 3. operator_idx: usize, column index in the ScanOperator's schema.
+        // In a query we get the same version of catalog, so the mapping from column_id and
+        // table_idx will not change. And the `required_col_idx` is the `table_idx` of the
+        // required columns, i.e., the mapping from operator_idx to table_idx.
+
+        let mut required_col_idx = output_col_idx.clone();
+        let mut visitor =
+            CollectInputRef::new(FixedBitSet::with_capacity(table_desc.columns.len()));
+        predicate.visit_expr(&mut visitor);
+        let predicate_col_idx: FixedBitSet = visitor.into();
+        predicate_col_idx.ones().for_each(|idx| {
+            if !required_col_idx.contains(&idx) {
+                required_col_idx.push(idx);
+            }
+        });
+
+        Self {
+            table_name,
+            is_sys_table,
+            required_col_idx,
+            output_col_idx,
+            table_desc,
+            indexes,
+            predicate,
+            chunk_size: None,
+            for_system_time_as_of_proctime,
+            ctx,
+        }
     }
 }
 

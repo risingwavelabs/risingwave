@@ -43,6 +43,6 @@ impl PlanVisitor<bool> for SysTableVisitor {
     }
 
     fn visit_stream_table_scan(&mut self, stream_table_scan: &StreamTableScan) -> bool {
-        stream_table_scan.logical().is_sys_table()
+        stream_table_scan.logical().is_sys_table
     }
 }

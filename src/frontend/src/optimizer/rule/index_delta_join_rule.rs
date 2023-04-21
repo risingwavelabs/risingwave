@@ -54,7 +54,7 @@ impl Rule for IndexDeltaJoinRule {
             table_scan: &StreamTableScan,
             chain_type: ChainType,
         ) -> Option<PlanRef> {
-            for index in table_scan.logical().indexes() {
+            for index in table_scan.logical().indexes {
                 // Only full covering index can be used in delta join
                 if !index.full_covering() {
                     continue;
@@ -68,7 +68,7 @@ impl Rule for IndexDeltaJoinRule {
                 // keys here.
                 let join_indices_ref_to_index_table = join_indices
                     .iter()
-                    .map(|&i| *table_scan.logical().output_col_idx().get(i).unwrap())
+                    .map(|&i| *table_scan.logical().output_col_idx[i])
                     .map(|x| *p2s_mapping.get(&x).unwrap())
                     .collect_vec();
 
@@ -107,7 +107,7 @@ impl Rule for IndexDeltaJoinRule {
             if let Some(primary_table_distribution_key) = primary_table.distribution_key()
                 && primary_table_distribution_key == join_indices {
                 // Check join key is prefix of primary table order key
-                let primary_table_order_key_prefix = primary_table.table_desc().pk.iter()
+                let primary_table_order_key_prefix = primary_table.table_desc.pk.iter()
                     .map(|x| x.column_index)
                     .take(primary_table_distribution_key.len())
                     .collect_vec();

@@ -21,7 +21,7 @@ use risingwave_common::catalog::{Field, TableDesc};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
 
-use super::{ExprRewritable, LogicalScan, PlanBase, PlanNodeId, PlanRef, StreamNode};
+use super::{generic, ExprRewritable, LogicalScan, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, FunctionCall};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
@@ -34,20 +34,18 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamTableScan {
     pub base: PlanBase,
-    logical: LogicalScan,
+    logical: generic::Scan,
     batch_plan_id: PlanNodeId,
     chain_type: ChainType,
 }
 
 impl StreamTableScan {
-    pub fn new(logical: LogicalScan) -> Self {
+    pub fn new(logical: generic::Scan) -> Self {
         Self::new_with_chain_type(logical, ChainType::Backfill)
     }
 
-    pub fn new_with_chain_type(logical: LogicalScan, chain_type: ChainType) -> Self {
-        let ctx = logical.base.ctx.clone();
-
-        let batch_plan_id = ctx.next_plan_node_id();
+    pub fn new_with_chain_type(logical: generic::Scan, chain_type: ChainType) -> Self {
+        let batch_plan_id = logical.ctx.next_plan_node_id();
 
         let distribution = {
             match logical.distribution_key() {
@@ -65,13 +63,10 @@ impl StreamTableScan {
                 None => Distribution::SomeShard,
             }
         };
-        let base = PlanBase::new_stream(
-            ctx,
-            logical.schema().clone(),
-            logical.base.logical_pk.clone(),
-            logical.functional_dependency().clone(),
+        let base = PlanBase::new_stream_with_logical(
+            &logical,
             distribution,
-            logical.table_desc().append_only,
+            logical.table_desc.append_only,
             logical.watermark_columns(),
         );
         Self {
@@ -83,10 +78,10 @@ impl StreamTableScan {
     }
 
     pub fn table_name(&self) -> &str {
-        self.logical.table_name()
+        &self.logical.table_name
     }
 
-    pub fn logical(&self) -> &LogicalScan {
+    pub fn logical(&self) -> &generic::Scan {
         &self.logical
     }
 
@@ -183,7 +178,7 @@ impl StreamTableScan {
             .map(|&id| {
                 let col = self
                     .logical
-                    .table_desc()
+                    .table_desc
                     .columns
                     .iter()
                     .find(|c| c.column_id.get_id() == id)
@@ -237,7 +232,7 @@ impl StreamTableScan {
                 output_indices,
                 upstream_column_ids,
                 // The table desc used by backfill executor
-                table_desc: Some(self.logical.table_desc().to_protobuf()),
+                table_desc: Some(self.logical.table_desc.to_protobuf()),
             })),
             stream_key,
             operator_id: self.base.id.0 as u64,
@@ -256,14 +251,8 @@ impl ExprRewritable for StreamTableScan {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self::new_with_chain_type(
-            self.logical
-                .rewrite_exprs(r)
-                .as_logical_scan()
-                .unwrap()
-                .clone(),
-            self.chain_type,
-        )
-        .into()
+        let mut logical = self.logical.clone();
+        logical.rewrite_exprs(r);
+        Self::new_with_chain_type(logical, self.chain_type).into()
     }
 }
