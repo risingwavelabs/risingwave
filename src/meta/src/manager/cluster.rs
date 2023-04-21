@@ -185,13 +185,13 @@ where
                 .await;
         }
 
-        if worker_type != WorkerType::RiseCtl {
-            // Notify local subscribers.
-            self.env
-                .notification_manager()
-                .notify_local_subscribers(LocalNotification::WorkerNodeIsDeleted(worker_node))
-                .await;
-        }
+        // Notify local subscribers.
+        // Note: Any type of workers may pin some hummock resource. So `HummockManager` expect this
+        // local notification.
+        self.env
+            .notification_manager()
+            .notify_local_subscribers(LocalNotification::WorkerNodeIsDeleted(worker_node))
+            .await;
 
         Ok(worker_type)
     }
