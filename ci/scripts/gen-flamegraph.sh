@@ -2,6 +2,7 @@
 
 set -uo pipefail
 
+# FIXME: Can't get this to work ;_;
 upload_logs () {
   EXIT_CODE=$?
   echo ">>> Failed due to $EXIT_CODE, Uploading logs"
@@ -126,6 +127,9 @@ start_kafka() {
   ./kafka_2.13-3.2.1/bin/kafka-server-start.sh ./opt/kafka_2.13-3.4.0/config/server.properties --override num.partitions=8 > kafka.log 2>&1 &
   echo "Should have 2 java process running"
   ps
+  sleep 10
+  buildkite-agent artifact upload ./zookeeper.log
+  buildkite-agent artifact upload ./kafka.log
 }
 
 gen_events() {
@@ -175,10 +179,16 @@ main() {
   echo "--- Spawning nexmark events"
   gen_events
 
+  echo "--- Machine Debug Info After Nexmark events generated"
+  print_machine_debug_info
+
   echo "--- Starting up RW"
   pushd risingwave
   ./risedev d ci-gen-cpu-flamegraph
   popd
+
+  echo "--- Machine Debug Info After RW Start"
+  print_machine_debug_info
 
   echo "--- Running ddl"
   psql -h localhost -p 4566 -d dev -U root -f ci/scripts/sql/nexmark/ddl.sql
