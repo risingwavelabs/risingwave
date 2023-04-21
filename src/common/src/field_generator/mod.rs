@@ -86,8 +86,11 @@ pub enum FieldGeneratorImpl {
     I64Random(I64RandomField),
     F32Random(F32RandomField),
     F64Random(F64RandomField),
-    VarcharRandom(VarcharRandomField),
-    VarcharFixed(VarcharFixedField),
+    VarcharRandomVariableLength(VarcharRandomVariableLengthField),
+    VarcharRandomFixedLength(VarcharRandomFixedLengthField),
+    VarcharConstant(VarcharConstantField),
+    // TODO: Should we add another Varchar variant?
+    // VarcharRandomBoundedLength
     Timestamp(TimestampField),
     Struct(Vec<(String, FieldGeneratorImpl)>),
     List(Box<FieldGeneratorImpl>, usize),
