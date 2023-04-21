@@ -411,11 +411,11 @@ enum BTreeMapOp<V> {
     Delete,
 }
 
-/// A `ValTransaction` that wraps a `BTreeMap`. It supports basic `BTreeMap` operations like `get`,
-/// `get_mut`, `insert` and `remove`. Incremental modification of `insert`, `remove` and `get_mut`
-/// are stored in `staging`. On `commit`, it will apply the changes stored in `staging` to the in
-/// memory btree map. When serve `get` and `get_mut`, it merges the value stored in `staging` and
-/// `tree_ref`.
+/// A `BTreeMapTransaction` that wraps a `BTreeMap`. It supports basic `BTreeMap` operations like
+/// `get`, `get_mut`, `insert` and `remove`. Incremental modification of `insert`, `remove` and
+/// `get_mut` are stored in `staging`. On `commit`, it will apply the changes stored in `staging` to
+/// the in memory btree map. When serve `get` and `get_mut`, it merges the value stored in `staging`
+/// and `tree_ref`.
 pub struct BTreeMapTransaction<'a, K: Ord, V> {
     /// A reference to the original `BTreeMap`. All access to this field should be immutable,
     /// except when we commit the staging changes to the original map.
