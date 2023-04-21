@@ -356,7 +356,7 @@ fn build_fragment(
                             no_op_fragment.fragment_id,
                             StreamFragmentEdge {
                                 // Use `NoShuffle` exhcnage strategy for upstream edge.
-                                dispatch_strategy: no_shuffle_strategy.clone(),
+                                dispatch_strategy: no_shuffle_strategy,
                                 link_id: no_shuffle_exchange_operator_id,
                             },
                         );
