@@ -35,7 +35,7 @@ impl PlanVisitor<bool> for SysTableVisitor {
     }
 
     fn visit_batch_seq_scan(&mut self, batch_seq_scan: &BatchSeqScan) -> bool {
-        batch_seq_scan.logical().is_sys_table()
+        batch_seq_scan.logical().is_sys_table
     }
 
     fn visit_logical_scan(&mut self, logical_scan: &LogicalScan) -> bool {

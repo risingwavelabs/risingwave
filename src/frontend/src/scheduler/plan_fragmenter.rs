@@ -904,11 +904,11 @@ impl BatchPlanFragmenter {
         }
 
         if let Some(scan_node) = node.as_batch_seq_scan() {
-            let name = scan_node.logical().table_name().to_owned();
-            let info = if scan_node.logical().is_sys_table() {
+            let name = scan_node.logical().table_name.to_owned();
+            let info = if scan_node.logical().is_sys_table {
                 TableScanInfo::system_table(name)
             } else {
-                let table_desc = scan_node.logical().table_desc();
+                let table_desc = scan_node.logical().table_desc;
                 let table_catalog = self
                     .catalog_reader
                     .read_guard()
@@ -925,7 +925,7 @@ impl BatchPlanFragmenter {
                         )
                     })?;
                 let partitions =
-                    derive_partitions(scan_node.scan_ranges(), table_desc, &vnode_mapping);
+                    derive_partitions(scan_node.scan_ranges(), &*table_desc, &vnode_mapping);
                 TableScanInfo::new(name, partitions)
             };
             Ok(Some(info))
