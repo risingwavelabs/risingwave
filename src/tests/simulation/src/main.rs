@@ -96,6 +96,10 @@ pub struct Args {
     #[clap(long, default_value = "1.0")]
     kill_rate: f32,
 
+    /// Delay in restart after kill.
+    #[clap(long, default_value = "30")]
+    restart_delay_secs: i32,
+
     /// The directory of kafka source data.
     #[clap(long)]
     kafka_datadir: Option<String>,
@@ -171,6 +175,7 @@ async fn main() {
         kill_compute: args.kill_compute || args.kill,
         kill_compactor: args.kill_compactor || args.kill,
         kill_rate: args.kill_rate,
+        restart_delay_secs: args.restart_delay_secs,
     };
 
     let cluster = Arc::new(
