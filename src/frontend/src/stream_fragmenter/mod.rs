@@ -302,43 +302,52 @@ fn build_fragment(
                         child_fragment.fragment_id,
                         current_fragment.fragment_id,
                         StreamFragmentEdge {
-                            dispatch_strategy: exchange_node_strategy,
+                            dispatch_strategy: exchange_node_strategy.clone(),
+                            // Always use the exchange operator id as the link id.
                             link_id: child_node.operator_id,
                         },
                     );
 
+                    // It's possible that there're mutliple edges between two fragments, while the
+                    // meta service and the compute node does not expect this. In this case, we
+                    // manually insert a fragment of `NoOp` between the two fragments.
                     if result.is_err() {
+                        // Assign a new operator id for the `Exchange`, so we can distinguish it
+                        // from duplicate edges and break the sharing.
                         child_node.operator_id = state.gen_operator_id() as u64;
 
-                        let child_fragment_node = child_fragment.node.as_ref().unwrap();
-                        let strategy = DispatchStrategy {
+                        // Take the upstream plan node as the reference for properties of `NoOp`.
+                        let ref_fragment_node = child_fragment.node.as_ref().unwrap();
+                        let no_shuffle_strategy = DispatchStrategy {
                             r#type: DispatcherType::NoShuffle as i32,
                             dist_key_indices: vec![],
-                            output_indices: (0..child_fragment_node.fields.len() as u32).collect(),
+                            output_indices: (0..ref_fragment_node.fields.len() as u32).collect(),
                         };
 
                         let no_op_operator_id = state.gen_operator_id() as u64;
                         let no_shuffle_exchange_operator_id = state.gen_operator_id() as u64;
 
-                        let node = StreamNode {
-                            operator_id: no_op_operator_id,
-                            identity: "My No-op".into(),
-                            node_body: Some(NodeBody::NoOp(NoOpNode {})),
-                            input: vec![StreamNode {
-                                operator_id: no_shuffle_exchange_operator_id,
-                                identity: "My No-shuffle Exchange".into(),
-                                node_body: Some(NodeBody::Exchange(ExchangeNode {
-                                    strategy: Some(strategy.clone()),
-                                })),
-                                input: vec![],
-                                ..*child_fragment_node.clone()
-                            }],
-                            ..*child_fragment_node.clone()
-                        };
+                        let no_op_fragment = {
+                            let node = StreamNode {
+                                operator_id: no_op_operator_id,
+                                identity: "StreamNoOp".into(),
+                                node_body: Some(NodeBody::NoOp(NoOpNode {})),
+                                input: vec![StreamNode {
+                                    operator_id: no_shuffle_exchange_operator_id,
+                                    identity: "StreamNoShuffleExchange".into(),
+                                    node_body: Some(NodeBody::Exchange(ExchangeNode {
+                                        strategy: Some(no_shuffle_strategy.clone()),
+                                    })),
+                                    input: vec![],
+                                    ..*ref_fragment_node.clone()
+                                }],
+                                ..*ref_fragment_node.clone()
+                            };
 
-                        let mut no_op_fragment = state.new_stream_fragment();
-                        no_op_fragment.node = Some(node.into());
-                        let no_op_fragment = Rc::new(no_op_fragment);
+                            let mut fragment = state.new_stream_fragment();
+                            fragment.node = Some(node.into());
+                            Rc::new(fragment)
+                        };
 
                         state.fragment_graph.add_fragment(no_op_fragment.clone());
 
@@ -346,7 +355,8 @@ fn build_fragment(
                             child_fragment.fragment_id,
                             no_op_fragment.fragment_id,
                             StreamFragmentEdge {
-                                dispatch_strategy: strategy.clone(),
+                                // Use `NoShuffle` exhcnage strategy for upstream edge.
+                                dispatch_strategy: no_shuffle_strategy.clone(),
                                 link_id: no_shuffle_exchange_operator_id,
                             },
                         );
@@ -354,7 +364,8 @@ fn build_fragment(
                             no_op_fragment.fragment_id,
                             current_fragment.fragment_id,
                             StreamFragmentEdge {
-                                dispatch_strategy: strategy,
+                                // Use the original exchange strategy for downstream edge.
+                                dispatch_strategy: exchange_node_strategy,
                                 link_id: child_node.operator_id,
                             },
                         );
