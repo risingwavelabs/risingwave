@@ -62,10 +62,10 @@ impl Binder {
         };
 
         // agg calls
-        if let Ok(kind) = function_name.parse() {
+        if let Some(kind) = AggKind::from_str_name(&function_name.to_uppercase()) {
             if f.over.is_some() {
                 return Err(ErrorCode::NotImplemented(
-                    format!("aggregate function as over window function: {}", kind),
+                    format!("aggregate function as over window function: {:?}", kind),
                     4978.into(),
                 )
                 .into());

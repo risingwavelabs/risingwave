@@ -18,11 +18,11 @@ use risingwave_common::array::{ArrayBuilderImpl, ArrayRef, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::agg::{
+    build as build_agg, create_sorted_grouper, BoxedAggState, BoxedSortedGrouper, EqGroups,
+};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_expr::function::aggregate::AggCall;
-use risingwave_expr::vector_op::agg::{
-    create_sorted_grouper, AggStateFactory, BoxedAggState, BoxedSortedGrouper, EqGroups,
-};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::executor::{
@@ -63,11 +63,7 @@ impl BoxedExecutorBuilder for SortAggExecutor {
         let agg_states: Vec<_> = sort_agg_node
             .get_agg_calls()
             .iter()
-            .map(|agg_call| {
-                AggCall::from_protobuf(agg_call)
-                    .and_then(AggStateFactory::new)
-                    .map(|fac| fac.create_agg_state())
-            })
+            .map(|agg_call| AggCall::from_protobuf(agg_call).and_then(build_agg))
             .try_collect()?;
 
         let group_key: Vec<_> = sort_agg_node
@@ -346,7 +342,7 @@ mod tests {
             filter: None,
         };
 
-        let count_star = AggStateFactory::new(AggCall::from_protobuf(&prost)?)?.create_agg_state();
+        let count_star = build_agg(AggCall::from_protobuf(&prost)?)?;
         let group_exprs: Vec<BoxedExpression> = vec![];
         let sorted_groupers = vec![];
         let agg_states = vec![count_star];
@@ -440,7 +436,7 @@ mod tests {
             filter: None,
         };
 
-        let count_star = AggStateFactory::new(AggCall::from_protobuf(&prost)?)?.create_agg_state();
+        let count_star = build_agg(AggCall::from_protobuf(&prost)?)?;
         let group_exprs: Vec<_> = (1..=2)
             .map(|idx| build_from_pretty(format!("${idx}:int4")))
             .collect();
@@ -560,7 +556,7 @@ mod tests {
             filter: None,
         };
 
-        let sum_agg = AggStateFactory::new(AggCall::from_protobuf(&prost)?)?.create_agg_state();
+        let sum_agg = build_agg(AggCall::from_protobuf(&prost)?)?;
 
         let group_exprs: Vec<BoxedExpression> = vec![];
         let agg_states = vec![sum_agg];
@@ -645,7 +641,7 @@ mod tests {
             filter: None,
         };
 
-        let sum_agg = AggStateFactory::new(AggCall::from_protobuf(&prost)?)?.create_agg_state();
+        let sum_agg = build_agg(AggCall::from_protobuf(&prost)?)?;
         let group_exprs: Vec<_> = (1..=2)
             .map(|idx| build_from_pretty(format!("${idx}:int4")))
             .collect();
@@ -760,7 +756,7 @@ mod tests {
             filter: None,
         };
 
-        let sum_agg = AggStateFactory::new(AggCall::from_protobuf(&prost)?)?.create_agg_state();
+        let sum_agg = build_agg(AggCall::from_protobuf(&prost)?)?;
         let group_exprs: Vec<_> = (1..=2)
             .map(|idx| build_from_pretty(format!("${idx}:int4")))
             .collect();

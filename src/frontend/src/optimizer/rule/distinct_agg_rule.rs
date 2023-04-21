@@ -297,6 +297,7 @@ impl DistinctAggRule {
                     AggKind::ApproxCountDistinct => {
                         agg_call.agg_kind = AggKind::Sum0;
                     }
+                    AggKind::Unspecified => unreachable!(),
                 }
 
                 // the index of non-distinct aggs' subset in `column_subsets` is always 0 if it

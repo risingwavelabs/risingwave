@@ -1227,7 +1227,6 @@ mod tests {
             let mut sig_map = FuncSigMap::default();
             for formals in candidates {
                 sig_map.insert(FuncSign {
-                    name: "add",
                     func: DUMMY_FUNC,
                     inputs_type: formals,
                     ret_type: DUMMY_RET,

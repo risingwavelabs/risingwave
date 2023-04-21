@@ -364,12 +364,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         type_name: String::default(),
                     });
                 }
-                _ => {
-                    panic!(
-                        "state of agg kind `{}` is not supposed to be `TableState`",
-                        agg_kind
-                    );
-                }
+                _ => panic!("state of agg kind `{agg_kind:?}` is not supposed to be `TableState`"),
             }
 
             let mapping =
@@ -444,6 +439,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 AggKind::BitAnd | AggKind::BitOr | AggKind::BitXor => {
                     unimplemented!()
                 }
+                AggKind::Unspecified => unreachable!(),
             })
             .collect()
     }
@@ -605,7 +601,7 @@ pub struct PlanAggCall {
 
 impl fmt::Debug for PlanAggCall {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.agg_kind)?;
+        write!(f, "{:?}", self.agg_kind)?;
         if !self.inputs.is_empty() {
             write!(f, "(")?;
             for (idx, input) in self.inputs.iter().enumerate() {
@@ -655,7 +651,7 @@ impl PlanAggCall {
 
     pub fn to_protobuf(&self) -> PbAggCall {
         PbAggCall {
-            r#type: self.agg_kind.to_protobuf().into(),
+            r#type: self.agg_kind.into(),
             return_type: Some(self.return_type.to_protobuf()),
             args: self.inputs.iter().map(InputRef::to_proto).collect(),
             distinct: self.distinct,
@@ -684,6 +680,7 @@ impl PlanAggCall {
             AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp => {
                 panic!("Stddev/Var aggregation should have been rewritten to Sum, Count and Case")
             }
+            AggKind::Unspecified => panic!("Unspecified aggregation"),
         };
         PlanAggCall {
             agg_kind: total_agg_kind,
@@ -723,7 +720,7 @@ pub struct PlanAggCallDisplay<'a> {
 impl fmt::Debug for PlanAggCallDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let that = self.plan_agg_call;
-        write!(f, "{}", that.agg_kind)?;
+        write!(f, "{:?}", that.agg_kind)?;
         if !that.inputs.is_empty() {
             write!(f, "(")?;
             for (idx, input) in that.inputs.iter().enumerate() {

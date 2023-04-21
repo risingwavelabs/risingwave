@@ -23,8 +23,8 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::agg::{build as build_agg, BoxedAggState};
 use risingwave_expr::function::aggregate::AggCall;
-use risingwave_expr::vector_op::agg::{AggStateFactory, BoxedAggState};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
 
@@ -57,7 +57,7 @@ impl HashKeyDispatcher for HashAggExecutorBuilder {
 }
 
 pub struct HashAggExecutorBuilder {
-    agg_factories: Vec<AggStateFactory>,
+    agg_factories: Vec<BoxedAggState>,
     group_key_columns: Vec<usize>,
     group_key_types: Vec<DataType>,
     child: BoxedExecutor,
@@ -78,7 +78,7 @@ impl HashAggExecutorBuilder {
         let agg_factories: Vec<_> = hash_agg_node
             .get_agg_calls()
             .iter()
-            .map(|agg_call| AggCall::from_protobuf(agg_call).and_then(AggStateFactory::new))
+            .map(|agg_call| AggCall::from_protobuf(agg_call).and_then(build_agg))
             .try_collect()?;
 
         let group_key_columns = hash_agg_node
@@ -97,7 +97,7 @@ impl HashAggExecutorBuilder {
         let fields = group_key_types
             .iter()
             .cloned()
-            .chain(agg_factories.iter().map(|e| e.get_return_type()))
+            .chain(agg_factories.iter().map(|e| e.return_type()))
             .map(Field::unnamed)
             .collect::<Vec<Field>>();
 
@@ -143,7 +143,7 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
 /// `HashAggExecutor` implements the hash aggregate algorithm.
 pub struct HashAggExecutor<K> {
     /// Factories to construct aggregator for each groups
-    agg_factories: Vec<AggStateFactory>,
+    agg_factories: Vec<BoxedAggState>,
     /// Column indexes that specify a group
     group_key_columns: Vec<usize>,
     /// Data types of group key columns
@@ -158,7 +158,7 @@ pub struct HashAggExecutor<K> {
 
 impl<K> HashAggExecutor<K> {
     pub fn new(
-        agg_factories: Vec<AggStateFactory>,
+        agg_factories: Vec<BoxedAggState>,
         group_key_columns: Vec<usize>,
         group_key_types: Vec<DataType>,
         schema: Schema,
@@ -205,12 +205,9 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             let chunk = chunk?.compact();
             let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
             for (row_id, key) in keys.into_iter().enumerate() {
-                let states: &mut Vec<BoxedAggState> = groups.entry(key).or_insert_with(|| {
-                    self.agg_factories
-                        .iter()
-                        .map(AggStateFactory::create_agg_state)
-                        .collect()
-                });
+                let states: &mut Vec<BoxedAggState> = groups
+                    .entry(key)
+                    .or_insert_with(|| self.agg_factories.clone());
 
                 // TODO: currently not a vectorized implementation
                 for state in states {
@@ -232,11 +229,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             let mut agg_builders: Vec<_> = self
                 .agg_factories
                 .iter()
-                .map(|agg_factory| {
-                    agg_factory
-                        .get_return_type()
-                        .create_array_builder(cardinality)
-                })
+                .map(|agg| agg.return_type().create_array_builder(cardinality))
                 .collect();
 
             let mut has_next = false;
