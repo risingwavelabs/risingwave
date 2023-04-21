@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -275,7 +276,7 @@ pub async fn merge_imms_in_memory(
 
     let mut smallest_table_key = vec![];
     let mut smallest_empty = true;
-    let mut largest_table_key = vec![];
+    let mut largest_table_key = Bound::Included(vec![]);
 
     let mut imm_iters = Vec::with_capacity(imms.len());
     for imm in imms {
@@ -300,9 +301,18 @@ pub async fn merge_imms_in_memory(
             smallest_table_key.extend_from_slice(imm.raw_smallest_key());
             smallest_empty = false;
         }
-        if largest_table_key.lt(imm.raw_largest_key()) {
-            largest_table_key.clear();
-            largest_table_key.extend_from_slice(imm.raw_largest_key());
+        let imm_raw_largest_key = imm.raw_largest_key();
+        if match (&largest_table_key, imm_raw_largest_key) {
+            (_, Bound::Unbounded) => true,
+            (Bound::Included(x), Bound::Included(y)) | (Bound::Included(x), Bound::Excluded(y)) => {
+                x < y
+            }
+            (Bound::Excluded(x), Bound::Included(y)) | (Bound::Excluded(x), Bound::Excluded(y)) => {
+                x <= y
+            }
+            (Bound::Unbounded, _) => false,
+        } {
+            largest_table_key = imm_raw_largest_key.as_ref().cloned();
         }
 
         imm_iters.push(imm.into_forward_iter());

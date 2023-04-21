@@ -16,7 +16,7 @@ use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::future::Future;
 use std::marker::PhantomData;
-use std::ops::{Deref, RangeBounds};
+use std::ops::{Bound, Deref, RangeBounds};
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, LazyLock};
@@ -59,7 +59,7 @@ pub(crate) struct SharedBufferBatchInner {
     /// The epochs of the data in batch, sorted in ascending order (old to new)
     epochs: Vec<HummockEpoch>,
     monotonic_tombstone_events: Vec<MonotonicDeleteEvent>,
-    largest_table_key: Vec<u8>,
+    largest_table_key: Bound<Vec<u8>>,
     smallest_table_key: Vec<u8>,
     kv_count: usize,
     /// Total size of all key-value items (excluding the `epoch` of value versions)
@@ -72,6 +72,7 @@ pub(crate) struct SharedBufferBatchInner {
 
 impl SharedBufferBatchInner {
     pub(crate) fn new(
+        table_id: TableId,
         epoch: HummockEpoch,
         payload: Vec<SharedBufferItem>,
         range_tombstone_list: Vec<DeleteRangeTombstone>,
@@ -79,12 +80,15 @@ impl SharedBufferBatchInner {
         _tracker: Option<MemoryTracker>,
     ) -> Self {
         let (smallest_empty, mut smallest_table_key, mut largest_table_key, range_tombstones) =
-            Self::get_table_key_ends(range_tombstone_list);
+            Self::get_table_key_ends(table_id, range_tombstone_list);
 
         if let Some(item) = payload.last() {
-            if item.0.gt(&largest_table_key) {
-                largest_table_key.clear();
-                largest_table_key.extend_from_slice(item.0.as_ref());
+            if match &largest_table_key {
+                Bound::Excluded(x) => x <= &item.0,
+                Bound::Included(x) => x < &item.0,
+                Bound::Unbounded => false,
+            } {
+                largest_table_key = Bound::Included(item.0.to_vec());
             }
         }
         if let Some(item) = payload.first() {
@@ -133,7 +137,7 @@ impl SharedBufferBatchInner {
         epochs: Vec<HummockEpoch>,
         payload: Vec<SharedBufferVersionedEntry>,
         smallest_table_key: Vec<u8>,
-        largest_table_key: Vec<u8>,
+        largest_table_key: Bound<Vec<u8>>,
         num_items: usize,
         imm_ids: Vec<ImmId>,
         range_tombstone_list: Vec<DeleteRangeTombstone>,
@@ -162,9 +166,10 @@ impl SharedBufferBatchInner {
     }
 
     fn get_table_key_ends(
+        table_id: TableId,
         mut range_tombstone_list: Vec<DeleteRangeTombstone>,
-    ) -> (bool, Vec<u8>, Vec<u8>, Vec<DeleteRangeTombstone>) {
-        let mut largest_table_key = vec![];
+    ) -> (bool, Vec<u8>, Bound<Vec<u8>>, Vec<DeleteRangeTombstone>) {
+        let mut largest_table_key = Bound::Included(vec![]);
         let mut smallest_table_key = vec![];
         let mut smallest_empty = true;
         if !range_tombstone_list.is_empty() {
@@ -174,12 +179,17 @@ impl SharedBufferBatchInner {
                 if tombstone.start_user_key.ge(&tombstone.end_user_key) {
                     continue;
                 }
-                // Although `end_user_key` of tombstone is exclusive, we still use it as a boundary
-                // of `SharedBufferBatch` because it just expands an useless query
-                // and does not affect correctness.
-                if largest_table_key.lt(&tombstone.end_user_key.table_key.0) {
-                    largest_table_key.clear();
-                    largest_table_key.extend_from_slice(&tombstone.end_user_key.table_key.0);
+                let tombstone_end_table_id = tombstone.end_user_key.table_id;
+                if tombstone_end_table_id != table_id {
+                    // It means that the right side of the tombstone is +inf.
+                    assert_eq!(tombstone_end_table_id.table_id(), table_id.table_id() + 1);
+                    largest_table_key = Bound::Unbounded;
+                } else if match &largest_table_key {
+                    Bound::Excluded(x) => x <= &tombstone.end_user_key.table_key.0,
+                    Bound::Included(x) => x < &tombstone.end_user_key.table_key.0,
+                    Bound::Unbounded => false,
+                } {
+                    largest_table_key = Bound::Excluded(tombstone.end_user_key.table_key.0.clone());
                 }
                 if smallest_empty || smallest_table_key.gt(&tombstone.start_user_key.table_key.0) {
                     smallest_table_key.clear();
@@ -285,6 +295,7 @@ impl SharedBufferBatch {
 
         Self {
             inner: Arc::new(SharedBufferBatchInner::new(
+                table_id,
                 epoch,
                 sorted_items,
                 vec![],
@@ -328,7 +339,7 @@ impl SharedBufferBatch {
             && range_overlap(
                 &(left, right),
                 &self.start_table_key(),
-                &self.end_table_key(),
+                &self.end_table_key().as_ref(),
             )
     }
 
@@ -431,12 +442,15 @@ impl SharedBufferBatch {
     }
 
     #[inline(always)]
-    pub fn end_table_key(&self) -> TableKey<&[u8]> {
-        TableKey(&self.inner.largest_table_key)
+    pub fn end_table_key(&self) -> Bound<TableKey<&[u8]>> {
+        self.inner
+            .largest_table_key
+            .as_ref()
+            .map(|largest_key| TableKey(largest_key.as_ref()))
     }
 
     #[inline(always)]
-    pub fn raw_largest_key(&self) -> &Vec<u8> {
+    pub fn raw_largest_key(&self) -> &Bound<Vec<u8>> {
         &self.inner.largest_table_key
     }
 
@@ -449,12 +463,6 @@ impl SharedBufferBatch {
     #[inline(always)]
     pub fn has_range_tombstone(&self) -> bool {
         !self.inner.monotonic_tombstone_events.is_empty()
-    }
-
-    /// return inclusive right endpoint, which means that all data in this batch should be smaller
-    /// or equal than this key.
-    pub fn end_user_key(&self) -> UserKey<&[u8]> {
-        UserKey::new(self.table_id, self.end_table_key())
     }
 
     pub fn size(&self) -> usize {
@@ -503,6 +511,7 @@ impl SharedBufferBatch {
             Self::check_tombstone_prefix(table_id, &delete_range_tombstones);
         }
         let inner = SharedBufferBatchInner::new(
+            table_id,
             epoch,
             sorted_items,
             delete_range_tombstones,
@@ -780,6 +789,7 @@ impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
 mod tests {
     use std::ops::Bound::{Excluded, Included};
 
+    use risingwave_common::must_match;
     use risingwave_hummock_sdk::key::map_table_key_range;
 
     use super::*;
@@ -817,7 +827,7 @@ mod tests {
             shared_buffer_items[0].0
         );
         assert_eq!(
-            *shared_buffer_batch.end_table_key(),
+            must_match!(shared_buffer_batch.end_table_key(), Bound::Included(table_key) => *table_key),
             shared_buffer_items[2].0
         );
 
@@ -885,7 +895,10 @@ mod tests {
             None,
         );
         assert_eq!(batch.start_table_key().as_ref(), "a".as_bytes());
-        assert_eq!(batch.end_table_key().as_ref(), "d".as_bytes());
+        assert_eq!(
+            must_match!(batch.end_table_key(), Bound::Excluded(table_key) => *table_key),
+            "d".as_bytes()
+        );
     }
 
     #[tokio::test]
