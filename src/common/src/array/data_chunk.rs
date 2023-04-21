@@ -782,13 +782,6 @@ impl DataChunkTestExt for DataChunk {
         for data_type in data_types {
             let mut array_builder = data_type.create_array_builder(chunk_size);
             for j in 0..chunk_size {
-                // FIXME(kwannoel): This is specific to q17, this should be a configurable
-                // parameter instead.
-                // We overwrite default, we want to simulate a fixed date string.
-                // q17 has a `to_char('YYYY-DD-MM', <timestamp>)`,
-                // and within a short-span of time,
-                // this defaults to a single fixed date. Hence we use that here too.
-                // Currently `gen_data` is only used by q17 bench so it is fine for now.
                 let offset = ((chunk_offset + 1) * (j + 1)) as u64;
                 if *data_type == DataType::Varchar {
                     let datum = FieldGeneratorImpl::with_varchar(varchar_properties, Self::SEED)
