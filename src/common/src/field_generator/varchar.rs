@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Result;
+use std::string::ToString;
+
 use rand::distributions::Alphanumeric;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -31,10 +32,10 @@ impl VarcharRandomVariableLengthField {
     }
 
     pub fn generate_string(&mut self, offset: u64) -> String {
-         StdRng::seed_from_u64(offset ^ self.seed)
+        StdRng::seed_from_u64(offset ^ self.seed)
             .sample_iter(&Alphanumeric)
             .map(char::from)
-            .collect();
+            .collect()
     }
 
     pub fn generate(&mut self, offset: u64) -> Value {
@@ -53,13 +54,13 @@ pub struct VarcharRandomFixedLengthField {
 }
 
 impl VarcharRandomFixedLengthField {
-    pub fn new(length_option: Option<String>, seed: u64) -> Result<Self> {
-        let length = if let Some(length_option) = length_option {
-            length_option.parse::<usize>()?
+    pub fn new(length_option: &Option<usize>, seed: u64) -> Self {
+        let length = if let Some(length) = length_option {
+            *length
         } else {
             DEFAULT_LENGTH
         };
-        Ok(Self { length, seed })
+        Self { length, seed }
     }
 
     pub fn generate(&mut self, offset: u64) -> Value {
@@ -78,5 +79,24 @@ impl VarcharRandomFixedLengthField {
             .map(char::from)
             .collect();
         Some(s.into_boxed_str().to_scalar_value())
+    }
+}
+
+pub struct VarcharConstant {}
+
+impl VarcharConstant {
+    const CONSTANT_STRING: &'static str = "2022-03-03";
+
+    pub fn generate_json() -> Value {
+        json!(Self::CONSTANT_STRING)
+    }
+
+    pub fn generate_datum() -> Datum {
+        Some(
+            Self::CONSTANT_STRING
+                .to_string()
+                .into_boxed_str()
+                .to_scalar_value(),
+        )
     }
 }

@@ -26,7 +26,7 @@ use crate::array::data_chunk_iter::RowRef;
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
-use crate::field_generator::FieldGeneratorImpl;
+use crate::field_generator::{FieldGeneratorImpl, VarcharProperty};
 use crate::hash::HashCode;
 use crate::row::Row;
 use crate::types::struct_type::StructType;
@@ -640,14 +640,19 @@ pub trait DataChunkTestExt {
     fn assert_valid(&self);
 
     /// Generate data chunk when supplied with `chunk_size` and column data types.
-    fn gen_data_chunk(chunk_offset: usize, chunk_size: usize, data_types: &[DataType], string_properties: &StringProperty) -> Self;
+    fn gen_data_chunk(
+        chunk_offset: usize,
+        chunk_size: usize,
+        data_types: &[DataType],
+        string_properties: &VarcharProperty,
+    ) -> Self;
 
     /// Generate data chunks when supplied with `chunk_size` and column data types.
     fn gen_data_chunks(
         num_of_chunks: usize,
         chunk_size: usize,
         data_types: &[DataType],
-        string_properties: &StringProperty,
+        string_properties: &VarcharProperty,
     ) -> Vec<Self>
     where
         Self: Sized;
@@ -766,7 +771,12 @@ impl DataChunkTestExt for DataChunk {
         }
     }
 
-    fn gen_data_chunk(chunk_offset: usize, chunk_size: usize, data_types: &[DataType], string_properties: &StringProperty) -> Self {
+    fn gen_data_chunk(
+        chunk_offset: usize,
+        chunk_size: usize,
+        data_types: &[DataType],
+        varchar_properties: &VarcharProperty,
+    ) -> Self {
         let mut columns = Vec::new();
         // Generate columns of this chunk.
         for data_type in data_types {
@@ -779,8 +789,11 @@ impl DataChunkTestExt for DataChunk {
                 // and within a short-span of time,
                 // this defaults to a single fixed date. Hence we use that here too.
                 // Currently `gen_data` is only used by q17 bench so it is fine for now.
+                let offset = ((chunk_offset + 1) * (j + 1)) as u64;
                 if *data_type == DataType::Varchar {
-                    array_builder.append_datum(&Some("2022-02-02".into()));
+                    let datum = FieldGeneratorImpl::with_varchar(varchar_properties, Self::SEED)
+                        .generate_datum(offset);
+                    array_builder.append_datum(&datum);
                 } else {
                     let mut data_gen = FieldGeneratorImpl::with_number_random(
                         data_type.clone(),
@@ -789,7 +802,7 @@ impl DataChunkTestExt for DataChunk {
                         Self::SEED,
                     )
                     .unwrap();
-                    let datum = data_gen.generate_datum(((chunk_offset + 1) * (j + 1)) as u64);
+                    let datum = data_gen.generate_datum(offset);
                     array_builder.append_datum(datum);
                 }
             }
@@ -802,10 +815,10 @@ impl DataChunkTestExt for DataChunk {
         num_of_chunks: usize,
         chunk_size: usize,
         data_types: &[DataType],
-        string_properties: &StringProperty,
+        varchar_properties: &VarcharProperty,
     ) -> Vec<Self> {
         (0..num_of_chunks)
-            .map(|i| Self::gen_data_chunk(i, chunk_size, data_types, string_properties))
+            .map(|i| Self::gen_data_chunk(i, chunk_size, data_types, varchar_properties))
             .collect()
     }
 }
