@@ -163,7 +163,7 @@ where
             if is_new_user_key && (switch_builder || builder.reach_capacity()) {
                 let monotonic_deletes = self
                     .del_agg
-                    .get_tombstone_between(&self.last_sealed_key.as_ref(), &full_key.user_key);
+                    .get_tombstone_between(self.last_sealed_key.as_ref(), full_key.user_key);
                 self.seal_current(monotonic_deletes).await?;
                 self.last_sealed_key.extend_from_other(&full_key.user_key);
             }
@@ -243,7 +243,7 @@ where
         };
         let monotonic_deletes = self
             .del_agg
-            .get_tombstone_between(&self.last_sealed_key.as_ref(), &largest_user_key.as_ref());
+            .get_tombstone_between(self.last_sealed_key.as_ref(), largest_user_key.as_ref());
         if !monotonic_deletes.is_empty() && self.current_builder.is_none() {
             let builder = self.builder_factory.open_builder().await?;
             self.current_builder = Some(builder);
