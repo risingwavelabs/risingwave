@@ -13,7 +13,7 @@ print_machine_debug_info() {
   echo "Free space on Machine:"
   df -h
   echo "Files on Machine:"
-  ls
+  ls -la
 }
 
 ############## INSTALL
@@ -35,6 +35,7 @@ install_all() {
 
   echo ">>> Installing nexmark bench"
   buildkite-agent artifact download nexmark-server /usr/local/bin
+  echo "nexmark bench should be in path: $(which nexmark-server)"
 
   # FIXME: pin a newer version of nperf.
   echo ">>> Installing nperf"
@@ -53,7 +54,7 @@ install_all() {
 ############## CONFIGURE
 
 configure_nexmark_bench() {
-mkdir nexmark-bench
+mkdir -p nexmark-bench
 pushd nexmark-bench
 cat <<EOF > .env
 KAFKA_HOST="localhost:9092"
@@ -97,7 +98,9 @@ popd
 }
 
 configure_all() {
+  echo ">>> Configuring rw"
   configure_rw
+  echo ">>> Configuring nexmark bench"
   configure_nexmark_bench
 }
 
@@ -107,7 +110,7 @@ start_nperf() {
   ./nperf record -p $(pidof compute-node) -o perf.data
 }
 
-kafka_start() {
+start_kafka() {
   nohup ./kafka_2.13-3.2.1/bin/zookeeper-server-start.sh ./opt/kafka_2.13-3.4.0/config/zookeeper.properties > zookeeper.log 2>&1 &
   nohup ./kafka_2.13-3.2.1/bin/kafka-server-start.sh ./opt/kafka_2.13-3.4.0/config/server.properties --override num.partitions=8 > kafka.log 2>&1 &
 }
@@ -154,12 +157,10 @@ main() {
   print_machine_debug_info
 
   echo "--- Starting kafka"
-  kafka_start
+  start_kafka
 
   echo "--- Spawning nexmark events"
-  pushd nexmark-bench
   gen_events
-  popd
 
   echo "--- Starting up RW"
   pushd risingwave
