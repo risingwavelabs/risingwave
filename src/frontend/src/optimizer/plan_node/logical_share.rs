@@ -144,7 +144,7 @@ impl ToStream for LogicalShare {
         match ctx.get_to_stream_result(self.id()) {
             None => {
                 let new_input = self.input().to_stream(ctx)?;
-                let mut new_logical = self.core.clone();
+                let new_logical = self.core.clone();
                 new_logical.replace_input(new_input);
                 let stream_share_ref: PlanRef = StreamShare::new(new_logical).into();
                 ctx.add_to_stream_result(self.id(), stream_share_ref.clone());

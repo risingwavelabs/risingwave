@@ -230,7 +230,7 @@ impl Scan {
             new_output_col_idx,
             index_table_desc,
             vec![],
-            self.ctx,
+            self.ctx.clone(),
             new_predicate,
             self.for_system_time_as_of_proctime,
         )
