@@ -296,7 +296,9 @@ where
             .await,
         );
         // If the cluster is being created, the object store should be empty.
-        if sys_params_manager.cluster_first_launch() && object_store.list("").await?.len() > 0 {
+        if sys_params_manager.cluster_first_launch()
+            && !object_store.list(state_store_dir).await?.is_empty()
+        {
             return Err(ObjectError::internal(
                 "object store is not empty on cluster creation, existing data might be overwritten",
             )
