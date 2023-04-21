@@ -103,10 +103,12 @@ impl SharedBufferBatchInner {
         for range_tombstone in &range_tombstones {
             monotonic_tombstone_events.push(MonotonicDeleteEvent {
                 event_key: range_tombstone.start_user_key.clone(),
+                is_exclusive: false,
                 new_epoch: range_tombstone.sequence,
             });
             monotonic_tombstone_events.push(MonotonicDeleteEvent {
                 event_key: range_tombstone.end_user_key.clone(),
+                is_exclusive: false,
                 new_epoch: HummockEpoch::MAX,
             });
         }
