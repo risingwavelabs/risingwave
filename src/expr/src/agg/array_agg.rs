@@ -177,6 +177,7 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
+    use crate::function::aggregate::{AggArgs, AggCall, AggKind};
 
     #[tokio::test]
     async fn test_array_agg_basic() -> Result<()> {
@@ -189,7 +190,14 @@ mod tests {
         let return_type = DataType::List {
             datatype: Box::new(DataType::Int32),
         };
-        let mut agg = create_array_agg_state(return_type.clone(), 0, vec![]);
+        let mut agg = crate::agg::build(AggCall {
+            kind: AggKind::ArrayAgg,
+            args: AggArgs::Unary(return_type.clone(), 0),
+            return_type: return_type.clone(),
+            column_orders: vec![],
+            filter: None,
+            distinct: false,
+        })?;
         let mut builder = return_type.create_array_builder(0);
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;
@@ -215,7 +223,14 @@ mod tests {
         let return_type = DataType::List {
             datatype: Box::new(DataType::Int32),
         };
-        let mut agg = create_array_agg_state(return_type.clone(), 0, vec![]);
+        let mut agg = crate::agg::build(AggCall {
+            kind: AggKind::ArrayAgg,
+            args: AggArgs::Unary(return_type.clone(), 0),
+            return_type: return_type.clone(),
+            column_orders: vec![],
+            filter: None,
+            distinct: false,
+        })?;
         let mut builder = return_type.create_array_builder(0);
         agg.output(&mut builder)?;
 
@@ -257,14 +272,17 @@ mod tests {
         let return_type = DataType::List {
             datatype: Box::new(DataType::Int32),
         };
-        let mut agg = create_array_agg_state(
-            return_type.clone(),
-            0,
-            vec![
+        let mut agg = crate::agg::build(AggCall {
+            kind: AggKind::ArrayAgg,
+            args: AggArgs::Unary(return_type.clone(), 0),
+            return_type: return_type.clone(),
+            column_orders: vec![
                 ColumnOrder::new(1, OrderType::ascending()),
                 ColumnOrder::new(0, OrderType::descending()),
             ],
-        );
+            filter: None,
+            distinct: false,
+        })?;
         let mut builder = return_type.create_array_builder(0);
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;

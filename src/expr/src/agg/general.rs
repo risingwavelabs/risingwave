@@ -124,11 +124,11 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::array::column::Column;
-    use risingwave_common::types::Decimal;
+    use risingwave_common::array::*;
+    use risingwave_common::types::{DataType, Decimal};
 
-    use super::*;
-    use crate::function::aggregate::AggKind;
-    use crate::vector_op::agg::aggregator::create_agg_state_unary;
+    use crate::function::aggregate::{AggArgs, AggCall, AggKind};
+    use crate::Result;
 
     async fn eval_agg(
         input_type: DataType,
@@ -139,7 +139,14 @@ mod tests {
     ) -> Result<ArrayImpl> {
         let len = input.len();
         let input_chunk = DataChunk::new(vec![Column::new(input)], len);
-        let mut agg_state = create_agg_state_unary(input_type, 0, agg_kind, return_type, false)?;
+        let mut agg_state = crate::agg::build(AggCall {
+            kind: agg_kind,
+            args: AggArgs::Unary(input_type, 0),
+            return_type,
+            column_orders: vec![],
+            filter: None,
+            distinct: false,
+        })?;
         agg_state
             .update_multi(&input_chunk, 0, input_chunk.cardinality())
             .await?;
@@ -229,12 +236,11 @@ mod tests {
 
     #[tokio::test]
     async fn vec_min_list() -> Result<()> {
-        use risingwave_common::array;
         let input = ListArray::from_iter(
             [
-                Some(array! { I32Array, [Some(0)] }.into()),
-                Some(array! { I32Array, [Some(1)] }.into()),
-                Some(array! { I32Array, [Some(2)] }.into()),
+                Some(I32Array::from_iter([Some(0)]).into()),
+                Some(I32Array::from_iter([Some(1)]).into()),
+                Some(I32Array::from_iter([Some(2)]).into()),
             ],
             DataType::Int32,
         );
@@ -263,7 +269,7 @@ mod tests {
         assert_eq!(
             actual,
             vec![Some(ListRef::ValueRef {
-                val: &ListValue::new(vec![Some(ScalarImpl::Int32(0))])
+                val: &ListValue::new(vec![Some(0i32.into())])
             })]
         );
         Ok(())
@@ -329,7 +335,14 @@ mod tests {
     ) -> Result<ArrayImpl> {
         let len = input.len();
         let input_chunk = DataChunk::new(vec![Column::new(input)], len);
-        let mut agg_state = create_agg_state_unary(input_type, 0, agg_kind, return_type, true)?;
+        let mut agg_state = crate::agg::build(AggCall {
+            kind: agg_kind,
+            args: AggArgs::Unary(input_type, 0),
+            return_type,
+            column_orders: vec![],
+            filter: None,
+            distinct: true,
+        })?;
         agg_state
             .update_multi(&input_chunk, 0, input_chunk.cardinality())
             .await?;

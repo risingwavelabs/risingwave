@@ -190,6 +190,8 @@ pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Option<Data
             datatype: Box::new(input.clone()),
         },
         (AggKind::ArrayAgg, _) => return None,
+
+        (AggKind::Unspecified, _) => return None,
     };
 
     Some(return_type)

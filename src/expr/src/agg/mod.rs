@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use dyn_clone::DynClone;
+use itertools::Itertools;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, DataTypeName};
 
-use crate::function::aggregate::{AggArgs, AggCall, AggKind};
-use crate::Result;
+use crate::function::aggregate::AggCall;
+use crate::{ExprError, Result};
 
 mod approx_count_distinct;
 mod array_agg;
@@ -61,61 +62,28 @@ pub type BoxedAggState = Box<dyn Aggregator>;
 pub fn build(agg_call: AggCall) -> Result<BoxedAggState> {
     // NOTE: The function signature is checked by `AggCall::infer_return_type` in the frontend.
 
+    let args = (agg_call.args.arg_types().iter())
+        .map(|t| t.into())
+        .collect::<Vec<DataTypeName>>();
+    let desc = crate::sig::agg::AGG_FUNC_SIG_MAP
+        .get(agg_call.kind, &args, (&agg_call.return_type).into())
+        .ok_or_else(|| {
+            ExprError::UnsupportedFunction(format!(
+                "{:?}({}) -> {:?}",
+                agg_call.kind,
+                (agg_call.args.arg_types().iter())
+                    .map(|t| format!("{:?}", t))
+                    .join(", "),
+                agg_call.return_type,
+            ))
+        })?;
+    let filter = agg_call.filter.clone();
+    let mut aggregator = (desc.build)(agg_call)?;
+
     // wrap the agg state in a `Filter` if needed
-    let aggregator = match agg_call.filter {
-        Some(ref expr) => Box::new(Filter::new(expr.clone(), aggregator)),
-        None => aggregator,
+    if let Some(expr) = filter {
+        aggregator = Box::new(Filter::new(expr, aggregator));
     };
 
     Ok(aggregator)
-}
-
-#[cfg(test)]
-mod tests {
-    use risingwave_common::types::DataType;
-
-    use super::*;
-
-    #[test]
-    fn test_create_agg_state() {
-        let int64_type = DataType::Int64;
-        let decimal_type = DataType::Decimal;
-        let bool_type = DataType::Boolean;
-        let char_type = DataType::Varchar;
-        macro_rules! test_create {
-            ($input_type:expr, $agg:ident, $return_type:expr, $expected:ident) => {
-                assert!(create_agg_state_unary(
-                    $input_type.clone(),
-                    0,
-                    AggKind::$agg,
-                    $return_type.clone(),
-                    false,
-                )
-                .$expected());
-                assert!(create_agg_state_unary(
-                    $input_type.clone(),
-                    0,
-                    AggKind::$agg,
-                    $return_type.clone(),
-                    true,
-                )
-                .$expected());
-            };
-        }
-
-        test_create! { int64_type, Count, int64_type, is_ok }
-        test_create! { decimal_type, Count, int64_type, is_ok }
-        test_create! { bool_type, Count, int64_type, is_ok }
-        test_create! { char_type, Count, int64_type, is_ok }
-
-        test_create! { int64_type, Sum, decimal_type, is_ok }
-        test_create! { decimal_type, Sum, decimal_type, is_ok }
-        test_create! { bool_type, Sum, bool_type, is_err }
-        test_create! { char_type, Sum, char_type, is_err }
-
-        test_create! { int64_type, Min, int64_type, is_ok }
-        test_create! { decimal_type, Min, decimal_type, is_ok }
-        test_create! { bool_type, Min, bool_type, is_ok } // TODO(#359): revert to is_err
-        test_create! { char_type, Min, char_type, is_ok }
-    }
 }
