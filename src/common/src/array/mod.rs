@@ -72,6 +72,7 @@ pub use crate::array::num256_array::{Int256Array, Int256ArrayBuilder};
 use crate::buffer::Bitmap;
 use crate::estimate_size::EstimateSize;
 use crate::types::*;
+use crate::util::iter_util::ZipEqFast;
 pub type ArrayResult<T> = Result<T, ArrayError>;
 
 pub type I64Array = PrimitiveArray<i64>;
