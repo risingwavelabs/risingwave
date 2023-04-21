@@ -16,6 +16,8 @@ use risingwave_common::catalog::Schema;
 
 use super::{ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, PkIndicesRef};
 
+/// No-op executor directly forwards the input stream. Currently used to break the multiple edges in
+/// the fragment graph.
 pub struct NoOpExecutor {
     _ctx: ActorContextRef,
     identity: String,
