@@ -24,14 +24,14 @@ use risingwave_expr::function::window::{WindowFuncCall, WindowFuncKind};
 use risingwave_expr::vector_op::agg::AggStateFactory;
 use smallvec::SmallVec;
 
-use super::buffer::WindowBuffer;
+use super::buffer::StreamWindowBuffer;
 use super::{StateEvictHint, StateKey, StateOutput, StatePos, WindowState};
 use crate::executor::StreamExecutorResult;
 
 pub(super) struct AggregateState {
     factory: AggStateFactory,
     arg_data_types: Vec<DataType>,
-    buffer: WindowBuffer<StateKey, SmallVec<[Datum; 2]>>,
+    buffer: StreamWindowBuffer<StateKey, SmallVec<[Datum; 2]>>,
 }
 
 impl AggregateState {
@@ -56,7 +56,7 @@ impl AggregateState {
         Ok(Self {
             factory: AggStateFactory::new(agg_call)?,
             arg_data_types,
-            buffer: WindowBuffer::new(call.frame.clone()),
+            buffer: StreamWindowBuffer::new(call.frame.clone()),
         })
     }
 }

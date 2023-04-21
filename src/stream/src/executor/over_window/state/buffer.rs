@@ -24,7 +24,7 @@ struct Entry<K: Ord, V> {
     value: V,
 }
 
-pub(super) struct WindowBuffer<K: Ord, V> {
+pub(super) struct StreamWindowBuffer<K: Ord, V> {
     frame: Frame,
     buffer: VecDeque<Entry<K, V>>,
     curr_idx: usize,
@@ -51,8 +51,9 @@ impl<K> CurrWindow<'_, K> {
     }
 }
 
-impl<K: Ord, V> WindowBuffer<K, V> {
+impl<K: Ord, V> StreamWindowBuffer<K, V> {
     pub fn new(frame: Frame) -> Self {
+        assert!(frame.is_valid());
         let right_idx = match &frame {
             Frame::Rows(start, end) => {
                 let start_off = start.to_offset();
