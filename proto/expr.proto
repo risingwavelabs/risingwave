@@ -147,6 +147,7 @@ message ExprNode {
     ARRAY_REMOVE = 538;
     ARRAY_POSITIONS = 539;
     TRIM_ARRAY = 540;
+    STRING_TO_ARRAY = 541;
 
     // Int256 functions
     HEX_TO_INT256 = 560;
@@ -261,6 +262,9 @@ message AggCall {
     VAR_SAMP = 12;
     STDDEV_POP = 13;
     STDDEV_SAMP = 14;
+    BIT_AND = 15;
+    BIT_OR = 16;
+    BIT_XOR = 17;
   }
   Type type = 1;
   repeated InputRef args = 2;

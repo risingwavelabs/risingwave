@@ -445,6 +445,15 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     ) -> Option<Expr> {
         use AggKind as A;
         match func {
+            A::BitAnd => Some(Expr::Function(make_agg_func(
+                "bit_and", exprs, distinct, filter, order_by,
+            ))),
+            A::BitOr => Some(Expr::Function(make_agg_func(
+                "bit_or", exprs, distinct, filter, order_by,
+            ))),
+            A::BitXor => Some(Expr::Function(make_agg_func(
+                "bit_xor", exprs, distinct, filter, order_by,
+            ))),
             A::Sum | A::Sum0 => Some(Expr::Function(make_agg_func(
                 "sum", exprs, distinct, filter, order_by,
             ))),
