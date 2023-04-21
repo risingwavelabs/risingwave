@@ -423,7 +423,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         AggCallState::ResultValue
                     }
                 }
-                AggKind::Sum
+                AggKind::BitXor
+                | AggKind::Sum
                 | AggKind::Sum0
                 | AggKind::Count
                 | AggKind::Avg
@@ -441,7 +442,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         AggCallState::Table(Box::new(state))
                     }
                 }
-                AggKind::BitAnd | AggKind::BitOr | AggKind::BitXor => {
+                // TODO: is its state a Table?
+                AggKind::BitAnd | AggKind::BitOr => {
                     unimplemented!()
                 }
             })
