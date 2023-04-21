@@ -143,6 +143,11 @@ gen_events() {
     --num-event-generators 8 1>gen_events.log 2>&1 &
   echo "Generated $NEXMARK_EVENTS events"
   popd
+  show_kafka_topics
+}
+
+show_kafka_topics() {
+  ./kafka_2.13-3.4.0/bin/kafka-run-class.sh kafka.tools.GetOffsetShell --topic nexmark --bootstrap-server localhost:9092
 }
 
 gen_cpu_flamegraph() {
@@ -227,6 +232,9 @@ main() {
   echo "--- Cleanup"
   # TODO: cleanup s3 bucket.
   echo "Success!"
+
+  echo "--- Uploading rw logs"
+  buildkite-agent artifact upload risingwave/.risingwave/*.log
 }
 
 main
