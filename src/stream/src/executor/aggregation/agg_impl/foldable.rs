@@ -195,7 +195,7 @@ where
     }
 }
 
-/// `BitXorable` returns the result of bit_xor all the values.
+/// `BitXorable` returns the result of `bit_xor` all the values.
 /// It produces the same type of output as input `S`.
 #[derive(Debug)]
 pub struct BitXorable<S>
