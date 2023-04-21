@@ -1056,7 +1056,7 @@ impl LogicalJoin {
         let new_join_on = new_eq_cond.and(new_other_cond);
         let new_predicate = EqJoinPredicate::create(
             left_schema_len,
-            new_scan.base.schema().len(),
+            new_scan.schema().len(),
             new_join_on.clone(),
         );
 

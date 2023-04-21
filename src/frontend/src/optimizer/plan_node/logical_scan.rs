@@ -22,7 +22,7 @@ use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::ColumnOrder;
 
-use super::generic::GenericPlanRef;
+use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::{
     generic, BatchFilter, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PredicatePushdown, StreamTableScan, ToBatch, ToStream,
@@ -275,10 +275,10 @@ impl LogicalScan {
     }
 
     /// Undo predicate push down when predicate in scan is not supported.
-    pub fn predicate_pull_up(&self) -> (LogicalScan, Condition, Option<Vec<ExprImpl>>) {
+    pub fn predicate_pull_up(&self) -> (generic::Scan, Condition, Option<Vec<ExprImpl>>) {
         let mut predicate = self.predicate().clone();
         if predicate.always_true() {
-            return (self.clone(), Condition::true_cond(), None);
+            return (self.core.clone(), Condition::true_cond(), None);
         }
 
         let mut mapping =
@@ -287,7 +287,7 @@ impl LogicalScan {
                 .expect("must be invertible");
         predicate = predicate.rewrite_expr(&mut mapping);
 
-        let scan_without_predicate = Self::new(
+        let scan_without_predicate = generic::Scan::new(
             self.table_name().to_string(),
             self.is_sys_table(),
             self.required_col_idx().to_vec(),
@@ -489,8 +489,8 @@ impl LogicalScan {
             let (scan, predicate, project_expr) = scan.predicate_pull_up();
 
             if predicate.always_false() {
-                let plan =
-                    LogicalValues::create(vec![], scan.schema().clone(), scan.ctx()).to_batch()?;
+                let plan = LogicalValues::create(vec![], scan.schema().clone(), scan.ctx.clone())
+                    .to_batch()?;
                 assert_eq!(plan.schema(), self.schema());
                 return required_order.enforce_if_not_satisfies(plan);
             }

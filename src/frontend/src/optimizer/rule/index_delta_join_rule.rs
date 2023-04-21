@@ -68,7 +68,7 @@ impl Rule for IndexDeltaJoinRule {
                 // keys here.
                 let join_indices_ref_to_index_table = join_indices
                     .iter()
-                    .map(|&i| *table_scan.logical().output_col_idx[i])
+                    .map(|&i| table_scan.logical().output_col_idx[i])
                     .map(|x| *p2s_mapping.get(&x).unwrap())
                     .collect_vec();
 
