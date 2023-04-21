@@ -35,6 +35,8 @@ use crate::executor::{
 };
 use crate::task::{BatchTaskContext, TaskId};
 
+const SEED: u64 = 0xFF67FEABBAEF76FF;
+
 /// Generate `batch_num` data chunks with type `data_types`, each data chunk has cardinality of
 /// `batch_size`.
 pub fn gen_data(batch_size: usize, batch_num: usize, data_types: &[DataType]) -> Vec<DataChunk> {
