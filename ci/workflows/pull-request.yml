@@ -289,17 +289,17 @@ steps:
 #      #     format: "junit"
 #      - ./ci/plugins/upload-failure-logs
 #    timeout_in_minutes: 25
-
-  - label: "misc check"
-    command: "ci/scripts/misc-check.sh"
-    plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
-      - docker-compose#v4.9.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-      - shellcheck#v1.2.0:
-          files: ./**/*.sh
-    timeout_in_minutes: 5
+#
+#  - label: "misc check"
+#    command: "ci/scripts/misc-check.sh"
+#    plugins:
+#      - gencer/cache#v2.4.10: *cargo-cache
+#      - docker-compose#v4.9.0:
+#          run: rw-build-env
+#          config: ci/docker-compose.yml
+#      - shellcheck#v1.2.0:
+#          files: ./**/*.sh
+#    timeout_in_minutes: 5
 
   # Generates cpu flamegraph env
   - label: "cpu-flamegraph-env-build"

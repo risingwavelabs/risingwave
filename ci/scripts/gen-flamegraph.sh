@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -uo pipefail
 
 upload_logs () {
+  EXIT_CODE="$?"
   buildkite-agent artifact upload zookeeper.log
   buildkite-agent artifact upload kafka.log
+  exit "$EXIT_CODE"
 }
 
 trap upload_logs ERR
