@@ -35,7 +35,6 @@ install_all() {
 
   echo ">>> Installing nexmark bench"
   buildkite-agent artifact download nexmark-server /usr/local/bin
-  echo "nexmark bench should be in path: $(which nexmark-server)"
 
   # FIXME: pin a newer version of nperf.
   echo ">>> Installing nperf"
