@@ -3540,6 +3540,14 @@ dependencies = [
 
 [[package]]
 name = "lru"
+version = "0.7.6"
+source = "git+https://github.com/risingwavelabs/lru-rs.git?rev=cb2d7c7#cb2d7c7149a7f320c5aa73c15a6ec9f46ed5513f"
+dependencies = [
+ "hashbrown 0.12.3",
+]
+
+[[package]]
+name = "lru"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03f1160296536f10c833a82dca22267d5486734230d47bf00bf435885814ba1e"
@@ -5865,7 +5873,7 @@ dependencies = [
  "itertools",
  "itoa",
  "libc",
- "lru 0.7.6",
+ "lru 0.7.6 (git+https://github.com/risingwavelabs/lru-rs.git?rev=769fe6e)",
  "mach2",
  "madsim-tokio",
  "madsim-tonic",
@@ -6511,7 +6519,7 @@ dependencies = [
  "futures",
  "glob",
  "itertools",
- "lru 0.7.6",
+ "lru 0.7.6 (git+https://github.com/risingwavelabs/lru-rs.git?rev=769fe6e)",
  "madsim",
  "madsim-aws-sdk-s3",
  "madsim-etcd-client",
@@ -6717,7 +6725,7 @@ dependencies = [
  "iter-chunks",
  "itertools",
  "local_stats_alloc",
- "lru 0.7.6",
+ "lru 0.7.6 (git+https://github.com/risingwavelabs/lru-rs.git?rev=cb2d7c7)",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
