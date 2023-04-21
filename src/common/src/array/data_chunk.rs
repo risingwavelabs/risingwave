@@ -640,16 +640,17 @@ pub trait DataChunkTestExt {
     fn assert_valid(&self);
 
     /// Generate data chunk when supplied with `chunk_size` and column data types.
-    fn gen_data_chunk(chunk_offset: usize, chunk_size: usize, data_types: &[DataType]) -> Self;
+    fn gen_data_chunk(chunk_offset: usize, chunk_size: usize, data_types: &[DataType], string_properties: &StringProperty) -> Self;
 
     /// Generate data chunks when supplied with `chunk_size` and column data types.
     fn gen_data_chunks(
         num_of_chunks: usize,
         chunk_size: usize,
         data_types: &[DataType],
+        string_properties: &StringProperty,
     ) -> Vec<Self>
     where
-        Self: std::marker::Sized;
+        Self: Sized;
 }
 
 impl DataChunkTestExt for DataChunk {
@@ -765,7 +766,7 @@ impl DataChunkTestExt for DataChunk {
         }
     }
 
-    fn gen_data_chunk(chunk_offset: usize, chunk_size: usize, data_types: &[DataType]) -> Self {
+    fn gen_data_chunk(chunk_offset: usize, chunk_size: usize, data_types: &[DataType], string_properties: &StringProperty) -> Self {
         let mut columns = Vec::new();
         // Generate columns of this chunk.
         for data_type in data_types {
@@ -801,9 +802,10 @@ impl DataChunkTestExt for DataChunk {
         num_of_chunks: usize,
         chunk_size: usize,
         data_types: &[DataType],
+        string_properties: &StringProperty,
     ) -> Vec<Self> {
         (0..num_of_chunks)
-            .map(|i| Self::gen_data_chunk(i, chunk_size, data_types))
+            .map(|i| Self::gen_data_chunk(i, chunk_size, data_types, string_properties))
             .collect()
     }
 }
