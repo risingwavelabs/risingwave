@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt;
+use std::hash::Hash;
 use std::mem::size_of;
 
 use postgres_types::{FromSql as _, ToSql as _, Type};
@@ -62,11 +63,22 @@ impl<'a> ScalarRef<'a> for JsonbRef<'a> {
     }
 
     fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash(state)
+    }
+}
+
+impl Hash for JsonbRef<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         // We do not intend to support hashing `jsonb` type.
         // Before #7981 is done, we do not panic but just hash its string representation.
         // Note that `serde_json` without feature `preserve_order` uses `BTreeMap` for json object.
         // So its string form always have keys sorted.
-        use std::hash::Hash as _;
+        self.0.to_string().hash(state)
+    }
+}
+
+impl Hash for JsonbVal {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.0.to_string().hash(state)
     }
 }

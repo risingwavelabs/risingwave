@@ -309,8 +309,10 @@ impl FunctionAttr {
 
     /// Generate build function for aggregate function.
     fn generate_agg_build_fn(&self) -> Result<TokenStream2> {
-        let arg_type: TokenStream2 = types::variant(&self.args[0]).parse().unwrap();
-        let ret_type: TokenStream2 = types::variant(&self.ret).parse().unwrap();
+        let arg_variant: TokenStream2 = types::variant(&self.args[0]).parse().unwrap();
+        let arg_owned: TokenStream2 = types::owned_type(&self.args[0]).parse().unwrap();
+        let arg_ref: TokenStream2 = types::ref_type(&self.args[0]).parse().unwrap();
+        let ret_variant: TokenStream2 = types::variant(&self.ret).parse().unwrap();
         let state_type: TokenStream2 = types::owned_type(&self.ret).parse().unwrap();
         let fn_name = format_ident!("{}", self.user_fn.name);
         let mut next_state = quote! { #fn_name(state, value) };
@@ -332,18 +334,34 @@ impl FunctionAttr {
 
         Ok(quote! {
             |agg| {
+                use std::collections::HashSet;
                 use risingwave_common::array::*;
                 use risingwave_common::types::*;
                 use risingwave_common::bail;
 
                 #[derive(Clone)]
-                struct Agg {
+                struct Agg<D: MaybeDistinct> {
                     return_type: DataType,
                     state: Option<#state_type>,
+                    distinct: D,
+                }
+
+                trait MaybeDistinct: Clone + Send + 'static {
+                    fn insert(&mut self, value: #arg_ref) -> bool;
+                }
+                impl MaybeDistinct for () {
+                    fn insert(&mut self, _value: #arg_ref) -> bool {
+                        true
+                    }
+                }
+                impl MaybeDistinct for HashSet<#arg_owned> {
+                    fn insert(&mut self, value: #arg_ref) -> bool {
+                        HashSet::insert(self, value.to_owned_scalar())
+                    }
                 }
 
                 #[async_trait::async_trait]
-                impl crate::agg::Aggregator for Agg {
+                impl<D: MaybeDistinct> crate::agg::Aggregator for Agg<D> {
                     fn return_type(&self) -> DataType {
                         self.return_type.clone()
                     }
@@ -353,20 +371,23 @@ impl FunctionAttr {
                         start_row_id: usize,
                         end_row_id: usize,
                     ) -> Result<()> {
-                        let ArrayImpl::#arg_type(input) = input.column_at(0).array_ref() else {
-                            bail!("input type mismatch. expect: {}", stringify!(#arg_type));
+                        let ArrayImpl::#arg_variant(input) = input.column_at(0).array_ref() else {
+                            bail!("input type mismatch. expect: {}", stringify!(#arg_variant));
                         };
                         let mut state = self.state.as_ref().map(|x| x.as_scalar_ref());
                         for row_id in start_row_id..end_row_id {
                             let value = input.value_at(row_id);
+                            if let Some(v) = value && !self.distinct.insert(v) {
+                                continue;
+                            }
                             state = #next_state;
                         }
                         self.state = state.map(|x| x.to_owned_scalar());
                         Ok(())
                     }
                     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-                        let ArrayBuilderImpl::#ret_type(builder) = builder else {
-                            bail!("output type mismatch. expect: {}", stringify!(#ret_type));
+                        let ArrayBuilderImpl::#ret_variant(builder) = builder else {
+                            bail!("output type mismatch. expect: {}", stringify!(#ret_variant));
                         };
                         let res = self.state.take();
                         builder.append(res.as_ref().map(|x| x.as_scalar_ref()));
@@ -374,10 +395,19 @@ impl FunctionAttr {
                     }
                 }
 
-                Ok(Box::new(Agg {
-                    return_type: agg.return_type,
-                    state: None,
-                }))
+                if agg.distinct {
+                    Ok(Box::new(Agg {
+                        return_type: agg.return_type,
+                        state: None,
+                        distinct: HashSet::<#arg_owned>::new(),
+                    }))
+                } else {
+                    Ok(Box::new(Agg {
+                        return_type: agg.return_type,
+                        state: None,
+                        distinct: (),
+                    }))
+                }
             }
         })
     }
