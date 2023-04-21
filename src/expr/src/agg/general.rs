@@ -13,8 +13,10 @@
 // limitations under the License.
 
 use std::convert::From;
+use std::ops::{BitAnd, BitOr, BitXor};
 
 use num_traits::CheckedAdd;
+use risingwave_expr_macro::aggregate;
 
 use crate::{ExprError, Result};
 
@@ -31,7 +33,7 @@ where
     S: From<T> + CheckedAdd<Output = S>,
 {
     state
-        .checked_add(&R::from(input))
+        .checked_add(&S::from(input))
         .ok_or(ExprError::NumericOutOfRange)
 }
 
@@ -62,7 +64,7 @@ fn bit_or<T>(state: T, input: T) -> T
 where
     T: BitOr<Output = T>,
 {
-    state.bitor(i)
+    state.bitor(input)
 }
 
 #[aggregate("bit_xor(int16, int16) -> int16")]
@@ -72,7 +74,7 @@ fn bit_xor<T>(state: T, input: T) -> T
 where
     T: BitXor<Output = T>,
 {
-    state.bitxor(i)
+    state.bitxor(input)
 }
 
 #[aggregate("first_value(*) -> auto")]

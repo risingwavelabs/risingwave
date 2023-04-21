@@ -15,14 +15,15 @@
 use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::types::*;
-use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_expr_macro::build_aggregate;
 
 use super::Aggregator;
+use crate::function::aggregate::AggCall;
 use crate::Result;
 
 #[build_aggregate("count() -> int64")]
-fn build_count_star(_: DataType, _: Vec<ColumnOrder>) -> Box<dyn Aggregator> {
-    Box::new(CountStar::default())
+fn build_count_star(_: AggCall) -> Result<Box<dyn Aggregator>> {
+    Ok(Box::new(CountStar::default()))
 }
 
 #[derive(Clone, Default)]

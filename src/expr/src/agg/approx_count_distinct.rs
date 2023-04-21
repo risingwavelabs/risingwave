@@ -18,9 +18,10 @@ use std::hash::{Hash, Hasher};
 use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::types::*;
-use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_expr_macro::build_aggregate;
 
 use super::Aggregator;
+use crate::function::aggregate::AggCall;
 use crate::Result;
 
 const INDEX_BITS: u8 = 14; // number of bits used for finding the index of each 64-bit hash
@@ -31,9 +32,9 @@ const COUNT_BITS: u8 = 64 - INDEX_BITS; // number of non-index bits in each 64-b
 // near-optimal cardinality estimation algorithm" by Philippe Flajolet et al.
 const BIAS_CORRECTION: f64 = 0.7213 / (1. + (1.079 / NUM_OF_REGISTERS as f64));
 
-#[build_aggregate("approx_count_distinct(list) -> list")]
-fn build(return_type: DataType, _: Vec<ColumnOrder>) -> Box<dyn Aggregator> {
-    Box::new(ApproxCountDistinct::new(return_type))
+#[build_aggregate("approx_count_distinct(*) -> int64")]
+fn build(agg: AggCall) -> Result<Box<dyn Aggregator>> {
+    Ok(Box::new(ApproxCountDistinct::new(agg.return_type)))
 }
 
 /// `ApproxCountDistinct` approximates the count of non-null rows using `HyperLogLog`. The

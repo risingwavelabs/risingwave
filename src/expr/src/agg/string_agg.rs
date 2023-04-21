@@ -22,17 +22,19 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_expr_macro::build_aggregate;
 
 use super::Aggregator;
+use crate::function::aggregate::AggCall;
 use crate::{ExprError, Result};
 
 #[build_aggregate("string_agg(varchar, varchar) -> varchar")]
-fn build_string_agg(_: DataType, column_orders: Vec<ColumnOrder>) -> Box<dyn Aggregator> {
-    if column_orders.is_empty() {
+fn build_string_agg(agg: AggCall) -> Result<Box<dyn Aggregator>> {
+    Ok(if agg.column_orders.is_empty() {
         Box::new(StringAggUnordered::new())
     } else {
-        Box::new(StringAggOrdered::new(column_orders))
-    }
+        Box::new(StringAggOrdered::new(agg.column_orders))
+    })
 }
 
 #[derive(Clone)]

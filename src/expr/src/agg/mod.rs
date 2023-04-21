@@ -13,9 +13,8 @@
 // limitations under the License.
 
 use dyn_clone::DynClone;
-use risingwave_common::array::*;
-use risingwave_common::bail;
-use risingwave_common::types::*;
+use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
+use risingwave_common::types::DataType;
 
 use crate::function::aggregate::{AggArgs, AggCall, AggKind};
 use crate::Result;
@@ -63,12 +62,12 @@ pub fn build(agg_call: AggCall) -> Result<BoxedAggState> {
     // NOTE: The function signature is checked by `AggCall::infer_return_type` in the frontend.
 
     // wrap the agg state in a `Filter` if needed
-    let initial_agg_state = match agg_call.filter {
-        Some(ref expr) => Box::new(Filter::new(expr.clone(), initial_agg_state)),
-        None => initial_agg_state,
+    let aggregator = match agg_call.filter {
+        Some(ref expr) => Box::new(Filter::new(expr.clone(), aggregator)),
+        None => aggregator,
     };
 
-    Ok(initial_agg_state)
+    Ok(aggregator)
 }
 
 #[cfg(test)]

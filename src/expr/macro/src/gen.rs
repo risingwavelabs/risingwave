@@ -21,14 +21,10 @@ use quote::{format_ident, quote};
 use super::*;
 
 impl FunctionAttr {
-    /// Generate descriptors of the function.
-    ///
-    /// If the function arguments or return type contains wildcard, it will generate descriptors for
-    /// each of them.
-    pub fn generate_descriptors(&self, build_fn: bool) -> Result<TokenStream2> {
+    /// Expands the wildcard in function arguments or return type.
+    pub fn expand(&self) -> Vec<Self> {
         let args = self.args.iter().map(|ty| types::expand_type_wildcard(ty));
         let ret = types::expand_type_wildcard(&self.ret);
-        let mut tokens = TokenStream2::new();
         // multi_cartesian_product should emit an empty set if the input is empty.
         let args_cartesian_product =
             args.multi_cartesian_product()
@@ -36,6 +32,7 @@ impl FunctionAttr {
                     true => vec![vec![]],
                     false => vec![],
                 });
+        let mut attrs = Vec::new();
         for (args, mut ret) in args_cartesian_product.cartesian_product(ret) {
             if ret == "auto" {
                 ret = types::min_compatible_type(&args);
@@ -47,32 +44,21 @@ impl FunctionAttr {
                 batch: self.batch.clone(),
                 user_fn: self.user_fn.clone(),
             };
-            tokens.extend(attr.generate_descriptor_one(build_fn)?);
+            attrs.push(attr);
         }
-        Ok(tokens)
+        attrs
     }
 
     /// Generate a descriptor of the function.
     ///
     /// The types of arguments and return value should not contain wildcard.
-    fn generate_descriptor_one(&self, build_fn: bool) -> Result<TokenStream2> {
+    pub fn generate_descriptor(&self, build_fn: bool) -> Result<TokenStream2> {
         let name = self.name.clone();
-
-        fn to_data_type_name(ty: &str) -> Result<TokenStream2> {
-            let variant = format_ident!(
-                "{}",
-                types::to_data_type_name(ty).ok_or_else(|| Error::new(
-                    Span::call_site(),
-                    format!("unknown type: {}", ty),
-                ))?
-            );
-            Ok(quote! { risingwave_common::types::DataTypeName::#variant })
-        }
         let mut args = Vec::with_capacity(self.args.len());
         for ty in &self.args {
-            args.push(to_data_type_name(ty)?);
+            args.push(data_type(ty));
         }
-        let ret = to_data_type_name(&self.ret)?;
+        let ret = data_type(&self.ret);
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
         let ctor_name = format_ident!("{}_{}_{}", self.name, self.args.join("_"), self.ret);
@@ -87,7 +73,6 @@ impl FunctionAttr {
             #[ctor::ctor]
             fn #ctor_name() {
                 unsafe { crate::sig::func::_register(#descriptor_type {
-                    name: #name,
                     func: risingwave_pb::expr::expr_node::Type::#pb_type,
                     inputs_type: &[#(#args),*],
                     ret_type: #ret,
@@ -103,15 +88,13 @@ impl FunctionAttr {
         let arg_arrays = self
             .args
             .iter()
-            .map(|t| format_ident!("{}", types::to_array_type(t)));
-        let ret_array = format_ident!("{}", types::to_array_type(&self.ret));
+            .map(|t| format_ident!("{}", types::array_type(t)));
+        let ret_array = format_ident!("{}", types::array_type(&self.ret));
         let arg_types = self
             .args
             .iter()
-            .map(|t| types::to_data_type(t).parse::<TokenStream2>().unwrap());
-        let ret_type = types::to_data_type(&self.ret)
-            .parse::<TokenStream2>()
-            .unwrap();
+            .map(|t| types::ref_type(t).parse::<TokenStream2>().unwrap());
+        let ret_type = types::ref_type(&self.ret).parse::<TokenStream2>().unwrap();
         let exprs = (0..num_args)
             .map(|i| format_ident!("e{i}"))
             .collect::<Vec<_>>();
@@ -179,7 +162,7 @@ impl FunctionAttr {
                 )))
             }
         } else if self.args.len() == 2 && self.ret == "boolean" && self.user_fn.is_pure() {
-            let compatible_type = types::to_data_type(types::min_compatible_type(&self.args))
+            let compatible_type = types::ref_type(types::min_compatible_type(&self.args))
                 .parse::<TokenStream2>()
                 .unwrap();
             let args = (0..num_args).map(|i| format_ident!("x{i}"));
@@ -221,7 +204,7 @@ impl FunctionAttr {
             let args1 = args.clone();
             let generic = if self.user_fn.generic == 3 {
                 // XXX: for generic compare functions, we need to specify the compatible type
-                let compatible_type = types::to_data_type(types::min_compatible_type(&self.args))
+                let compatible_type = types::ref_type(types::min_compatible_type(&self.args))
                     .parse::<TokenStream2>()
                     .unwrap();
                 quote! { ::<_, _, #compatible_type> }
@@ -289,4 +272,118 @@ impl FunctionAttr {
             }
         })
     }
+
+    /// Generate a descriptor of the aggregate function.
+    ///
+    /// The types of arguments and return value should not contain wildcard.
+    pub fn generate_agg_descriptor(&self, build_fn: bool) -> Result<TokenStream2> {
+        let name = self.name.clone();
+
+        let mut args = Vec::with_capacity(self.args.len());
+        for ty in &self.args {
+            args.push(data_type(ty));
+        }
+        let ret = data_type(&self.ret);
+
+        let pb_type = format_ident!("{}", utils::to_camel_case(&name));
+        let ctor_name = format_ident!("{}_{}_{}", self.name, self.args.join("_"), self.ret);
+        let descriptor_type = quote! { crate::sig::agg::AggFuncSig };
+        let build_fn = if build_fn {
+            let name = format_ident!("{}", self.user_fn.name);
+            quote! { #name }
+        } else {
+            self.generate_agg_build_fn()?
+        };
+        Ok(quote! {
+            #[ctor::ctor]
+            fn #ctor_name() {
+                unsafe { crate::sig::agg::_register(#descriptor_type {
+                    func: risingwave_pb::expr::agg_call::PbType::#pb_type,
+                    inputs_type: &[#(#args),*],
+                    ret_type: #ret,
+                    build: #build_fn,
+                }) };
+            }
+        })
+    }
+
+    /// Generate build function for aggregate function.
+    fn generate_agg_build_fn(&self) -> Result<TokenStream2> {
+        let arg_type: TokenStream2 = types::variant(&self.args[0]).parse().unwrap();
+        let ret_type: TokenStream2 = types::variant(&self.ret).parse().unwrap();
+        let state_type: TokenStream2 = types::owned_type(&self.ret).parse().unwrap();
+        let fn_name = format_ident!("{}", self.user_fn.name);
+        let mut next_state = quote! { #fn_name(state, value) };
+        next_state = match self.user_fn.return_type {
+            ReturnType::T => quote! { Some(#next_state) },
+            ReturnType::Option => next_state,
+            ReturnType::Result => quote! { Some(#next_state?) },
+            ReturnType::ResultOption => quote! { #next_state? },
+        };
+        if !self.user_fn.arg_option {
+            next_state = quote! {
+                match (state, value) {
+                    (Some(state), Some(value)) => #next_state,
+                    (None, Some(value)) => Some(value.into()),
+                    (state, None) => state,
+                }
+            };
+        }
+
+        Ok(quote! {
+            |agg| {
+                use risingwave_common::array::*;
+                use risingwave_common::types::*;
+                use risingwave_common::bail;
+
+                #[derive(Clone)]
+                struct Agg {
+                    return_type: DataType,
+                    state: Option<#state_type>,
+                }
+
+                #[async_trait::async_trait]
+                impl crate::agg::Aggregator for Agg {
+                    fn return_type(&self) -> DataType {
+                        self.return_type.clone()
+                    }
+                    async fn update_multi(
+                        &mut self,
+                        input: &DataChunk,
+                        start_row_id: usize,
+                        end_row_id: usize,
+                    ) -> Result<()> {
+                        let ArrayImpl::#arg_type(input) = input.column_at(0).array_ref() else {
+                            bail!("input type mismatch. expect: {}", stringify!(#arg_type));
+                        };
+                        let mut state = self.state.as_ref().map(|x| x.as_scalar_ref());
+                        for row_id in start_row_id..end_row_id {
+                            let value = input.value_at(row_id);
+                            state = #next_state;
+                        }
+                        self.state = state.map(|x| x.to_owned_scalar());
+                        Ok(())
+                    }
+                    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+                        let ArrayBuilderImpl::#ret_type(builder) = builder else {
+                            bail!("output type mismatch. expect: {}", stringify!(#ret_type));
+                        };
+                        let res = self.state.take();
+                        builder.append(res.as_ref().map(|x| x.as_scalar_ref()));
+                        Ok(())
+                    }
+                }
+
+                Ok(Box::new(Agg {
+                    return_type: agg.return_type,
+                    state: None,
+                }))
+            }
+        })
+    }
+}
+
+fn data_type(ty: &str) -> TokenStream2 {
+    let variant = format_ident!("{}", types::data_type(ty));
+    quote! { risingwave_common::types::DataTypeName::#variant }
 }

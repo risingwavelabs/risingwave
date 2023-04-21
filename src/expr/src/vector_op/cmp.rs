@@ -16,7 +16,6 @@ use std::fmt::Debug;
 
 use risingwave_common::array::{Array, BoolArray};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::types::num256::Int256Ref;
 use risingwave_expr_macro::function;
 
 #[function("equal(*int, *int) -> boolean")]

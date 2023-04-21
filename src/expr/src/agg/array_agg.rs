@@ -19,17 +19,19 @@ use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
 use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_expr_macro::build_aggregate;
 
 use super::Aggregator;
+use crate::function::aggregate::AggCall;
 use crate::{ExprError, Result};
 
 #[build_aggregate("array_agg(list) -> list")]
-fn build_array_agg(return_type: DataType, column_orders: Vec<ColumnOrder>) -> Box<dyn Aggregator> {
-    if column_orders.is_empty() {
-        Box::new(ArrayAggUnordered::new(return_type))
+fn build_array_agg(agg: AggCall) -> Result<Box<dyn Aggregator>> {
+    Ok(if agg.column_orders.is_empty() {
+        Box::new(ArrayAggUnordered::new(agg.return_type))
     } else {
-        Box::new(ArrayAggOrdered::new(return_type, column_orders))
-    }
+        Box::new(ArrayAggOrdered::new(agg.return_type, agg.column_orders))
+    })
 }
 
 #[derive(Clone)]

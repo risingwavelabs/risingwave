@@ -70,7 +70,7 @@ use crate::array::{
     StructValue,
 };
 use crate::error::Result as RwResult;
-use crate::types::num256::{Int256, Int256Ref};
+pub use crate::types::num256::{Int256, Int256Ref};
 
 pub type F32 = ordered_float::OrderedFloat<f32>;
 pub type F64 = ordered_float::OrderedFloat<f64>;

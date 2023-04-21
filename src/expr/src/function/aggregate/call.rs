@@ -17,9 +17,9 @@ use std::sync::Arc;
 use risingwave_common::bail;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+pub use risingwave_pb::expr::agg_call::PbType as AggKind;
 use risingwave_pb::expr::PbAggCall;
 
-use super::AggKind;
 use crate::expr::{build_from_prost, ExpressionRef};
 use crate::function::aggregate::AggArgs;
 use crate::Result;
@@ -46,7 +46,7 @@ pub struct AggCall {
 
 impl AggCall {
     pub fn from_protobuf(agg_call: &PbAggCall) -> Result<Self> {
-        let agg_kind = AggKind::from_protobuf(agg_call.get_type()?)?;
+        let agg_kind = agg_call.get_type()?;
         let args = match &agg_call.get_args()[..] {
             [] => AggArgs::None,
             [arg] if agg_kind != AggKind::StringAgg => {
