@@ -164,6 +164,7 @@ impl ElectionClient for EtcdElectionClient {
                             tracing::error!("keep alive for lease {} failed {}", lease_id, err);
                             continue
                         }
+                        tracing::info!("lease {} keep alive success", lease_id);
 
                         match resp_stream.message().await {
                             Ok(Some(resp)) => {
