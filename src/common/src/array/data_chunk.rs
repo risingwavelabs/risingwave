@@ -226,7 +226,7 @@ impl DataChunk {
         match &self.vis2 {
             Vis::Compact(_) => self,
             Vis::Bitmap(visibility) => {
-                let cardinality = visibility.iter().filter(|&vis| vis).count();
+                let cardinality = visibility.count_ones();
                 let columns = self
                     .columns
                     .into_iter()
