@@ -59,9 +59,7 @@ async fn test_singleton_migration() -> Result<()> {
 
     insert_and_flush!();
 
-    cluster
-        .reschedule(fragment.reschedule([1, 3, 5], [0, 2, 4]))
-        .await?;
+    cluster.reschedule(fragment.reschedule([1], [0, 4])).await?;
 
     insert_and_flush!();
 
