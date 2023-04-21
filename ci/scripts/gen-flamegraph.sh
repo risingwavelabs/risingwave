@@ -2,6 +2,13 @@
 
 set -euo pipefail
 
+upload_logs () {
+  buildkite-agent artifact upload zookeeper.log
+  buildkite-agent artifact upload kafka.log
+}
+
+trap upload_logs ERR
+
 # FIXME(kwannoel): This is a workaround since workdir is `/risingwave` by default.
 pushd ..
 
@@ -112,8 +119,8 @@ start_nperf() {
 }
 
 start_kafka() {
-  nohup ./kafka_2.13-3.2.1/bin/zookeeper-server-start.sh ./opt/kafka_2.13-3.4.0/config/zookeeper.properties > zookeeper.log 2>&1 &
-  nohup ./kafka_2.13-3.2.1/bin/kafka-server-start.sh ./opt/kafka_2.13-3.4.0/config/server.properties --override num.partitions=8 > kafka.log 2>&1 &
+  ./kafka_2.13-3.2.1/bin/zookeeper-server-start.sh ./opt/kafka_2.13-3.4.0/config/zookeeper.properties > zookeeper.log 2>&1 &
+  ./kafka_2.13-3.2.1/bin/kafka-server-start.sh ./opt/kafka_2.13-3.4.0/config/server.properties --override num.partitions=8 > kafka.log 2>&1 &
 }
 
 gen_events() {
