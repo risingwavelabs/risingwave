@@ -157,6 +157,14 @@ impl PlanBase {
         }
     }
 
+    pub fn new_batch_from_logical(
+        logical: &impl GenericPlanNode,
+        dist: Distribution,
+        order: Order,
+    ) -> Self {
+        Self::new_batch(logical.ctx(), logical.schema(), dist, order)
+    }
+
     pub fn new_batch(
         ctx: OptimizerContextRef,
         schema: Schema,

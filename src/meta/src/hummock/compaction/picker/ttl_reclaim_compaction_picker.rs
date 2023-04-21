@@ -95,7 +95,7 @@ impl TtlReclaimCompactionPicker {
                 Some(ttl_second_u32) => {
                     assert!(*ttl_second_u32 != TABLE_OPTION_DUMMY_RETENTION_SECOND);
                     // default to zero.
-                    let ttl_mill = (*ttl_second_u32 * 1000) as u64;
+                    let ttl_mill = *ttl_second_u32 as u64 * 1000;
                     let min_epoch = expire_epoch.subtract_ms(ttl_mill);
                     if Epoch(sst.min_epoch) <= min_epoch {
                         return false;

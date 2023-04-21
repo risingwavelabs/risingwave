@@ -372,6 +372,7 @@ gen_expr_bytes!(QuaternaryBytesExpression, { IA1, IA2, IA3, IA4 });
 
 gen_expr_nullable!(UnaryNullableExpression, { IA1 });
 gen_expr_nullable!(BinaryNullableExpression, { IA1, IA2 });
+gen_expr_nullable!(TernaryNullableExpression, { IA1, IA2, IA3 });
 
 pub struct NullaryExpression<OA, F> {
     return_type: DataType,

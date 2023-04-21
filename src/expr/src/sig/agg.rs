@@ -84,6 +84,9 @@ static AGG_FUNC_SIG_MAP: LazyLock<AggFuncSigMap> = LazyLock::new(|| {
     // Call infer_return_type to check the return type. If it throw error shows that the type is not
     // inferred.
     for agg in [
+        A::BitAnd,
+        A::BitOr,
+        A::BitXor,
         A::Sum,
         A::Min,
         A::Max,
@@ -117,10 +120,25 @@ pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Option<Data
     // The function signatures are aligned with postgres, see
     // https://www.postgresql.org/docs/current/functions-aggregate.html.
     let return_type = match (&agg_kind, inputs) {
-        // Min, Max, FirstValue
-        (AggKind::Min | AggKind::Max | AggKind::FirstValue, [input]) => input.clone(),
-        (AggKind::Min | AggKind::Max | AggKind::FirstValue, _) => return None,
-
+        // Min, Max, FirstValue, BitAnd, BitOr, BitXor
+        (
+            AggKind::Min
+            | AggKind::Max
+            | AggKind::FirstValue
+            | AggKind::BitAnd
+            | AggKind::BitOr
+            | AggKind::BitXor,
+            [input],
+        ) => input.clone(),
+        (
+            AggKind::Min
+            | AggKind::Max
+            | AggKind::FirstValue
+            | AggKind::BitAnd
+            | AggKind::BitOr
+            | AggKind::BitXor,
+            _,
+        ) => return None,
         // Avg
         (AggKind::Avg, [input]) => match input {
             DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Decimal => {
