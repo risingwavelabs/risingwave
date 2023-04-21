@@ -112,17 +112,7 @@ impl LogicalScan {
     }
 
     pub(super) fn order_names_with_table_prefix(&self) -> Vec<String> {
-        self.table_desc()
-            .order_column_indices()
-            .iter()
-            .map(|&i| {
-                format!(
-                    "{}.{}",
-                    self.table_name(),
-                    self.table_desc().columns[i].name
-                )
-            })
-            .collect()
+        self.core.order_names_with_table_prefix()
     }
 
     pub fn table_name(&self) -> &str {
@@ -165,20 +155,7 @@ impl LogicalScan {
     /// Return indices of fields the output is ordered by and
     /// corresponding direction
     pub fn get_out_column_index_order(&self) -> Order {
-        let id_to_tb_idx = self.table_desc().get_id_to_op_idx_mapping();
-        let order = Order::new(
-            self.table_desc()
-                .pk
-                .iter()
-                .map(|order| {
-                    let idx = id_to_tb_idx
-                        .get(&self.table_desc().columns[order.column_index].column_id)
-                        .unwrap();
-                    ColumnOrder::new(*idx, order.order_type)
-                })
-                .collect(),
-        );
-        self.core.i2o_col_mapping().rewrite_provided_order(&order)
+        self.core.get_out_column_index_order()
     }
 
     pub fn distribution_key(&self) -> Option<Vec<usize>> {
