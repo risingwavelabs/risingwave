@@ -165,8 +165,10 @@ impl ElectionClient for EtcdElectionClient {
                             continue
                         }
                         tracing::info!("lease {} keep alive success", lease_id);
+                    }
 
-                        match resp_stream.message().await {
+                    resp = resp_stream.message() => {
+                       match resp {
                             Ok(Some(resp)) => {
                                 if resp.ttl() <= 0 {
                                     tracing::warn!("lease expired or revoked {}", lease_id);
