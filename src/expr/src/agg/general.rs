@@ -26,82 +26,58 @@ use crate::{ExprError, Result};
 #[aggregate("sum(float64) -> float64")]
 #[aggregate("sum(decimal) -> decimal")]
 #[aggregate("sum(interval) -> interval")]
-fn sum<R, T>(result: Option<R>, input: Option<T>) -> Result<Option<R>>
+fn sum<S, T>(state: S, input: T) -> Result<S>
 where
-    R: From<T> + CheckedAdd<Output = R> + Copy,
+    S: From<T> + CheckedAdd<Output = S>,
 {
-    Ok(match (result, input) {
-        (_, None) => result,
-        (None, Some(i)) => Some(R::from(i)),
-        (Some(r), Some(i)) => r
-            .checked_add(&R::from(i))
-            .map_or(Err(ExprError::NumericOutOfRange), |x| Ok(Some(x)))?,
-    })
+    state
+        .checked_add(&R::from(input))
+        .ok_or(ExprError::NumericOutOfRange)
 }
 
 #[aggregate("min(*) -> auto")]
-fn min<T: Ord>(result: Option<T>, input: Option<T>) -> Option<T> {
-    match (result, input) {
-        (None, _) => input,
-        (_, None) => result,
-        (Some(r), Some(i)) => Some(r.min(i)),
-    }
+fn min<T: Ord>(state: T, input: T) -> T {
+    state.min(input)
 }
 
 #[aggregate("max(*) -> auto")]
-fn max<T: Ord>(result: Option<T>, input: Option<T>) -> Option<T> {
-    match (result, input) {
-        (None, _) => input,
-        (_, None) => result,
-        (Some(r), Some(i)) => Some(r.max(i)),
-    }
+fn max<T: Ord>(state: T, input: T) -> T {
+    state.max(input)
 }
 
 #[aggregate("bit_and(int16, int16) -> int16")]
 #[aggregate("bit_and(int32, int32) -> int32")]
 #[aggregate("bit_and(int64, int64) -> int64")]
-fn bit_and<T>(result: Option<T>, input: Option<T>) -> Option<T>
+fn bit_and<T>(state: T, input: T) -> T
 where
     T: BitAnd<Output = T>,
 {
-    match (result, input) {
-        (None, _) => input,
-        (_, None) => result,
-        (Some(r), Some(i)) => Some(r.bitand(i)),
-    }
+    state.bitand(input)
 }
 
 #[aggregate("bit_or(int16, int16) -> int16")]
 #[aggregate("bit_or(int32, int32) -> int32")]
 #[aggregate("bit_or(int64, int64) -> int64")]
-fn bit_or<T>(result: Option<T>, input: Option<T>) -> Option<T>
+fn bit_or<T>(state: T, input: T) -> T
 where
     T: BitOr<Output = T>,
 {
-    match (result, input) {
-        (None, _) => input,
-        (_, None) => result,
-        (Some(r), Some(i)) => Some(r.bitor(i)),
-    }
+    state.bitor(i)
 }
 
 #[aggregate("bit_xor(int16, int16) -> int16")]
 #[aggregate("bit_xor(int32, int32) -> int32")]
 #[aggregate("bit_xor(int64, int64) -> int64")]
-fn bit_xor<T>(result: Option<T>, input: Option<T>) -> Option<T>
+fn bit_xor<T>(state: T, input: T) -> T
 where
     T: BitXor<Output = T>,
 {
-    match (result, input) {
-        (None, _) => input,
-        (_, None) => result,
-        (Some(r), Some(i)) => Some(r.bitxor(i)),
-    }
+    state.bitxor(i)
 }
 
 #[aggregate("first_value(*) -> auto")]
-fn first<T>(result: Option<T>, input: Option<T>) -> Option<T> {
-    result.or(input)
+fn first<T>(state: T, _: T) -> T {
+    state
 }
 
 /// Note the following corner cases:
@@ -132,8 +108,8 @@ fn first<T>(result: Option<T>, input: Option<T>) -> Option<T> {
 /// drop table t;
 /// ```
 #[aggregate("count(*) -> int64")]
-fn count<T>(result: Option<i64>, input: Option<T>) -> Option<i64> {
-    match (result, input) {
+fn count<T>(state: Option<i64>, input: Option<T>) -> Option<i64> {
+    match (state, input) {
         (None, None) => Some(0),
         (Some(r), None) => Some(r),
         (None, Some(_)) => Some(1),
