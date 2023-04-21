@@ -88,9 +88,8 @@ impl WindowState for AggregateState {
             evict_hint: if removed_keys.is_empty() {
                 StateEvictHint::CannotEvict(
                     self.buffer
-                        .curr_window_left()
-                        .expect("sliding without removing, must have window left")
-                        .0
+                        .smallest_key()
+                        .expect("sliding without removing, must have some entry in the buffer")
                         .clone(),
                 )
             } else {

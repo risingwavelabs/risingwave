@@ -120,20 +120,10 @@ impl<K: Ord, V> StreamWindowBuffer<K, V> {
             .map(|Entry { value, .. }| value)
     }
 
-    /// Get the left most value in the current window.
+    /// Get the smallest key that is still kept in the buffer.
     /// Returns `None` if there's nothing yet.
-    pub fn curr_window_left(&self) -> Option<(&K, &V)> {
-        self.buffer
-            .get(LEFT_IDX)
-            .map(|Entry { key, value }| (key, value))
-    }
-
-    /// Get the right most value in the current window.
-    /// Returns `None` if there's nothing yet.
-    pub fn curr_window_right(&self) -> Option<(&K, &V)> {
-        self.buffer
-            .get(self.right_idx)
-            .map(|Entry { key, value }| (key, value))
+    pub fn smallest_key(&self) -> Option<&K> {
+        self.buffer.front().map(|Entry { key, .. }| key)
     }
 
     /// Slide the current window forward.
