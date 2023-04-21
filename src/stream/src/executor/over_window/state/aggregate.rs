@@ -16,9 +16,9 @@ use std::collections::BTreeSet;
 
 use futures::FutureExt;
 use risingwave_common::array::{DataChunk, Vis};
-use risingwave_common::must_match;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::{bail, must_match};
 use risingwave_expr::function::aggregate::{AggArgs, AggCall};
 use risingwave_expr::function::window::{WindowFuncCall, WindowFuncKind};
 use risingwave_expr::vector_op::agg::AggStateFactory;
@@ -36,6 +36,9 @@ pub(super) struct AggregateState {
 
 impl AggregateState {
     pub fn new(call: &WindowFuncCall) -> StreamExecutorResult<Self> {
+        if !call.frame.is_valid() || call.frame.end_is_unbounded() {
+            bail!("the window frame must be valid and end-bounded");
+        }
         let agg_kind = must_match!(call.kind, WindowFuncKind::Aggregate(agg_kind) => agg_kind);
         let arg_data_types = call.args.arg_types().to_vec();
         let agg_call = AggCall {
@@ -70,12 +73,12 @@ impl WindowState for AggregateState {
         let window = self.buffer.curr_window();
         StatePos {
             key: window.key,
-            is_ready: window.is_ready(),
+            is_ready: window.following_saturated,
         }
     }
 
     fn output(&mut self) -> StreamExecutorResult<StateOutput> {
-        assert!(self.buffer.curr_window().is_ready());
+        assert!(self.curr_window().is_ready);
         let wrapper = BatchAggregatorWrapper {
             factory: &self.factory,
             arg_data_types: &self.arg_data_types,
