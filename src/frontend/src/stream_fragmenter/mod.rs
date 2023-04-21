@@ -308,7 +308,7 @@ fn build_fragment(
                         },
                     );
 
-                    // It's possible that there're mutliple edges between two fragments, while the
+                    // It's possible that there're multiple edges between two fragments, while the
                     // meta service and the compute node does not expect this. In this case, we
                     // manually insert a fragment of `NoOp` between the two fragments.
                     if result.is_err() {
