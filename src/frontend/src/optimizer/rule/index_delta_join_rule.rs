@@ -54,7 +54,7 @@ impl Rule for IndexDeltaJoinRule {
             table_scan: &StreamTableScan,
             chain_type: ChainType,
         ) -> Option<PlanRef> {
-            for index in table_scan.logical().indexes {
+            for index in &table_scan.logical().indexes {
                 // Only full covering index can be used in delta join
                 if !index.full_covering() {
                     continue;

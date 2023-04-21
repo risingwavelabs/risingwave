@@ -50,8 +50,8 @@ impl PlanVisitor<()> for RelationCollectorVisitor {
     }
 
     fn visit_batch_seq_scan(&mut self, plan: &crate::optimizer::plan_node::BatchSeqScan) {
-        if !plan.logical().is_sys_table() {
-            self.relations.insert(plan.logical().table_desc().table_id);
+        if !plan.logical().is_sys_table {
+            self.relations.insert(plan.logical().table_desc.table_id);
         }
     }
 
