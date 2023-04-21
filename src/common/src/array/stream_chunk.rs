@@ -172,10 +172,8 @@ impl StreamChunk {
             })
             .collect();
         let mut new_ops = Vec::with_capacity(cardinality);
-        for (op, visible) in ops.into_iter().zip_eq_fast(visibility.iter()) {
-            if visible {
-                new_ops.push(op);
-            }
+        for idx in visibility.iter_ones() {
+            new_ops.push(ops[idx]);
         }
         StreamChunk::new(new_ops, columns, None)
     }
