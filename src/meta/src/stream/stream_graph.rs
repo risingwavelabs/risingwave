@@ -16,9 +16,7 @@ mod actor;
 mod fragment;
 mod id;
 mod schedule;
-mod visit;
 
 pub use actor::{ActorGraphBuildResult, ActorGraphBuilder};
 pub use fragment::{CompleteStreamFragmentGraph, StreamFragmentGraph};
 pub use schedule::Locations;
-pub use visit::{visit_fragment, visit_stream_node, visit_stream_node_internal_tables};

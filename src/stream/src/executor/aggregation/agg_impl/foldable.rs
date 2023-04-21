@@ -678,8 +678,12 @@ mod tests {
         } else {
             None
         };
-        let (ops, data) =
-            rand_stream_chunk::gen_legal_stream_chunk(bitmap.as_ref(), chunk_size, append_only);
+        let (ops, data) = rand_stream_chunk::gen_legal_stream_chunk(
+            bitmap.as_ref(),
+            chunk_size,
+            append_only,
+            666,
+        );
         b.iter(|| {
             for _ in 0..iter_count {
                 agg.apply_batch(&ops, bitmap.as_ref(), &[&data]).unwrap();

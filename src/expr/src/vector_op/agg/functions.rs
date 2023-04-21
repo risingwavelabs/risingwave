@@ -56,6 +56,7 @@ where
 }
 
 use std::convert::From;
+use std::ops::{BitAnd, BitOr, BitXor};
 
 use num_traits::CheckedAdd;
 use risingwave_common::types::ScalarRef;
@@ -222,4 +223,40 @@ pub fn count_list(r: Option<i64>, i: Option<ListRef<'_>>) -> Result<Option<i64>>
 
 pub fn count_int256(r: Option<i64>, i: Option<Int256Ref<'_>>) -> Result<Option<i64>> {
     count(r, i)
+}
+
+pub fn bit_and<'a, T>(result: Option<T>, input: Option<T>) -> Result<Option<T>>
+where
+    T: ScalarRef<'a> + PartialOrd + BitAnd<Output = T>,
+{
+    let res = match (result, input) {
+        (None, _) => input,
+        (_, None) => result,
+        (Some(r), Some(i)) => Some(r.bitand(i)),
+    };
+    Ok(res)
+}
+
+pub fn bit_or<'a, T>(result: Option<T>, input: Option<T>) -> Result<Option<T>>
+where
+    T: ScalarRef<'a> + PartialOrd + BitOr<Output = T>,
+{
+    let res = match (result, input) {
+        (None, _) => input,
+        (_, None) => result,
+        (Some(r), Some(i)) => Some(r.bitor(i)),
+    };
+    Ok(res)
+}
+
+pub fn bit_xor<'a, T>(result: Option<T>, input: Option<T>) -> Result<Option<T>>
+where
+    T: ScalarRef<'a> + PartialOrd + BitXor<Output = T>,
+{
+    let res = match (result, input) {
+        (None, _) => input,
+        (_, None) => result,
+        (Some(r), Some(i)) => Some(r.bitxor(i)),
+    };
+    Ok(res)
 }

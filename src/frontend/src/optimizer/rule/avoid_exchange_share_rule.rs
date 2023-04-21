@@ -28,7 +28,7 @@ impl Rule for AvoidExchangeShareRule {
 
         // Remember to keep the DAG intact.
         let identity = ColIndexMapping::identity(stream_share.schema().len());
-        let logical_project = LogicalProject::with_mapping(input, identity);
+        let logical_project = generic::Project::with_mapping(input, identity);
         let stream_project = StreamProject::new(logical_project);
 
         Some(

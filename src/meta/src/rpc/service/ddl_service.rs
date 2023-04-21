@@ -16,6 +16,7 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::util::stream_graph_visitor::visit_fragment;
 use risingwave_pb::catalog::connection::private_link_service::{
     PbPrivateLinkProvider, PrivateLinkProvider,
 };
@@ -37,7 +38,7 @@ use crate::manager::{
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::ddl_controller::{DdlCommand, DdlController, StreamingJobId};
 use crate::storage::MetaStore;
-use crate::stream::{visit_fragment, GlobalStreamManagerRef, SourceManagerRef};
+use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
 #[derive(Clone)]

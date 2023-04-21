@@ -24,8 +24,8 @@ use risingwave_common::row::{CompactedRow, Row, RowDeserializer, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_storage::StateStore;
 
+use super::{GroupKey, ManagedTopNState};
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::top_n::{GroupKey, ManagedTopNState};
 
 const TOPN_CACHE_HIGH_CAPACITY_FACTOR: usize = 2;
 

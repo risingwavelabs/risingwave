@@ -32,12 +32,9 @@ pub struct BatchFilter {
 
 impl BatchFilter {
     pub fn new(logical: generic::Filter<PlanRef>) -> Self {
-        let base = PlanBase::new_logical_with_core(&logical);
-        let ctx = base.ctx;
         // TODO: derive from input
-        let base = PlanBase::new_batch(
-            ctx,
-            base.schema,
+        let base = PlanBase::new_batch_from_logical(
+            &logical,
             logical.input.distribution().clone(),
             logical.input.order().clone(),
         );
