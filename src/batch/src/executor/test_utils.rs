@@ -22,7 +22,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, DataChunkTestExt};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::field_generator::FieldGeneratorImpl;
+use risingwave_common::field_generator::{FieldGeneratorImpl, VarcharProperty};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, ToOwnedDatum};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
@@ -35,28 +35,15 @@ use crate::executor::{
 };
 use crate::task::{BatchTaskContext, TaskId};
 
-const SEED: u64 = 0xFF67FEABBAEF76FF;
-
 /// Generate `batch_num` data chunks with type `data_types`, each data chunk has cardinality of
 /// `batch_size`.
 pub fn gen_data(batch_size: usize, batch_num: usize, data_types: &[DataType]) -> Vec<DataChunk> {
-    let mut ret = Vec::<DataChunk>::with_capacity(batch_num);
-
-    for i in 0..batch_num {
-        let mut columns = Vec::new();
-        for data_type in data_types {
-            let mut data_gen =
-                FieldGeneratorImpl::with_number_random(data_type.clone(), None, None, SEED)
-                    .unwrap();
-            let mut array_builder = data_type.create_array_builder(batch_size);
-            for j in 0..batch_size {
-                array_builder.append_datum(&data_gen.generate_datum(((i + 1) * (j + 1)) as u64));
-            }
-            columns.push(array_builder.finish().into());
-        }
-        ret.push(DataChunk::new(columns, batch_size));
-    }
-    ret
+    DataChunk::gen_data_chunks(
+        batch_num,
+        batch_size,
+        data_types,
+        &VarcharProperty::RandomFixedLength(None),
+    )
 }
 
 /// Generate `batch_num` sorted data chunks with type `Int64`, each data chunk has cardinality of
