@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 
+trap upload_logs ERR
+
 set -uo pipefail
 
 upload_logs () {
   EXIT_CODE="$?"
+  echo ">>> Failed due to $EXIT_CODE, Uploading logs"
   buildkite-agent artifact upload zookeeper.log
   buildkite-agent artifact upload kafka.log
   exit "$EXIT_CODE"
 }
-
-trap upload_logs ERR
 
 # FIXME(kwannoel): This is a workaround since workdir is `/risingwave` by default.
 pushd ..
@@ -93,7 +94,7 @@ popd
 
 configure_rw() {
 pushd risingwave
-cat <<EOF > .env
+cat <<EOF > risedev-components.user.env
 RISEDEV_CONFIGURED=true
 
 ENABLE_PROMETHEUS_GRAFANA=true
@@ -123,7 +124,8 @@ start_nperf() {
 start_kafka() {
   ./kafka_2.13-3.2.1/bin/zookeeper-server-start.sh ./opt/kafka_2.13-3.4.0/config/zookeeper.properties > zookeeper.log 2>&1 &
   ./kafka_2.13-3.2.1/bin/kafka-server-start.sh ./opt/kafka_2.13-3.4.0/config/server.properties --override num.partitions=8 > kafka.log 2>&1 &
-  sleep 10 # Give some time to kafka to start
+  echo "Should have 2 java process running"
+  ps
 }
 
 gen_events() {
@@ -140,7 +142,7 @@ gen_events() {
 }
 
 gen_cpu_flamegraph() {
-  ~/not-perf/target/release/nperf flamegraph --merge-threads perf.data > perf.svg
+  ./nperf flamegraph --merge-threads perf.data > perf.svg
 }
 
 ############## MONITORING
