@@ -15,7 +15,6 @@ pushd nexmark-bench
 echo "nightly-2023-03-01" > rust-toolchain
 make install
 cp /risingwave/.cargo/bin/nexmark-server ./nexmark-server
-chmod +x ./nexmark-server
 buildkite-agent artifact upload ./nexmark-server
 popd
 popd

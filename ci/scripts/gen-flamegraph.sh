@@ -35,6 +35,8 @@ install_all() {
 
   echo ">>> Installing nexmark bench"
   buildkite-agent artifact download nexmark-server /usr/local/bin
+  # Can't seem to do this in build phase.
+  chmod +x /usr/local/bin/nexmark-server
 
   # FIXME: pin a newer version of nperf.
   echo ">>> Installing nperf"
