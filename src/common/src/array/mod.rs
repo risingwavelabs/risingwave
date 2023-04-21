@@ -320,9 +320,10 @@ trait CompactableArray: Array {
 impl<A: Array> CompactableArray for A {
     fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self {
         let mut builder = A::Builder::with_meta(cardinality, self.array_meta());
-        for (elem, visible) in self.iter().zip_eq_fast(visibility.iter()) {
-            if visible {
-                builder.append(elem);
+        for idx in visibility.iter_ones() {
+            // SAFETY(value_at_unchecked): the idx is always in bound.
+            unsafe {
+                builder.append(self.value_at_unchecked(idx));
             }
         }
         builder.finish()
