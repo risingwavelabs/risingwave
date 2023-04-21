@@ -234,7 +234,9 @@ main() {
   echo "Success!"
 
   echo "--- Uploading rw logs"
-  buildkite-agent artifact upload risingwave/.risingwave/*.log
+  pushd risingwave/.risingwave/log
+  buildkite-agent artifact upload *.log
+  popd
 }
 
 main
