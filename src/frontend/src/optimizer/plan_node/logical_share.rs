@@ -67,8 +67,12 @@ impl LogicalShare {
         LogicalShare::new(input).into()
     }
 
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(f, "{} {{ id = {} }}", name, &self.id().0)
+    pub(super) fn fmt_with_name(
+        base: &PlanBase,
+        f: &mut fmt::Formatter<'_>,
+        name: &str,
+    ) -> fmt::Result {
+        write!(f, "{} {{ id = {} }}", name, &base.id.0)
     }
 }
 
@@ -101,7 +105,7 @@ impl LogicalShare {
 
 impl fmt::Display for LogicalShare {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalShare")
+        Self::fmt_with_name(&self.base, f, "LogicalShare")
     }
 }
 

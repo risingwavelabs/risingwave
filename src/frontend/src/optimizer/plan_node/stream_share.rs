@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode, PbStreamNode};
 
-use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::{LogicalShare, PlanBase, PlanTreeNode};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -27,24 +27,19 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamShare {
     pub base: PlanBase,
-    logical: LogicalShare,
+    logical: generic::Share<PlanRef>,
 }
 
 impl StreamShare {
-    pub fn new(logical: LogicalShare) -> Self {
-        let ctx = logical.base.ctx.clone();
-        let input = logical.input();
-        let pk_indices = logical.base.logical_pk.to_vec();
+    pub fn new(logical: generic::Share<PlanRef>) -> Self {
+        let input = logical.input.borrow();
         let dist = input.distribution().clone();
         // Filter executor won't change the append-only behavior of the stream.
-        let base = PlanBase::new_stream(
-            ctx,
-            logical.schema().clone(),
-            pk_indices,
-            logical.functional_dependency().clone(),
+        let base = PlanBase::new_stream_with_logical(
+            &logical,
             dist,
-            logical.input().append_only(),
-            logical.input().watermark_columns().clone(),
+            input.append_only(),
+            input.watermark_columns().clone(),
         );
         StreamShare { base, logical }
     }
@@ -52,7 +47,7 @@ impl StreamShare {
 
 impl fmt::Display for StreamShare {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "StreamShare")
+        LogicalShare::fmt_with_name(&self.base, f, "StreamShare")
     }
 }
 
