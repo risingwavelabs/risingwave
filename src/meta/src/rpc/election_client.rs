@@ -159,8 +159,9 @@ impl ElectionClient for EtcdElectionClient {
                     }
 
                     _ = ticker.tick() => {
+                        tracing::info!("lease {} keep alive", lease_id);
                         if let Err(err) = keeper.keep_alive().await {
-                            tracing::debug!("keep alive for lease {} failed {}", lease_id, err);
+                            tracing::error!("keep alive for lease {} failed {}", lease_id, err);
                             continue
                         }
 
@@ -175,7 +176,7 @@ impl ElectionClient for EtcdElectionClient {
                                 timeout.reset();
                             },
                             Ok(None) => {
-                                tracing::debug!("lease keeper for lease {} response stream closed unexpected", lease_id);
+                                tracing::info!("lease keeper for lease {} response stream closed unexpected", lease_id);
 
                                 // try to re-create lease keeper, with timeout as ttl / 2
                                 if let Ok(Ok((keeper_, resp_stream_))) = time::timeout(Duration::from_secs((ttl / 2) as u64), lease_client.keep_alive(lease_id)).await {
@@ -244,12 +245,12 @@ impl ElectionClient for EtcdElectionClient {
                 resp = observe_stream.next() => {
                     match resp {
                         None => {
-                            tracing::debug!("observe stream closed unexpected, recreating");
+                            tracing::info!("observe stream closed unexpected, recreating");
 
                             // try to re-create observe stream, with timeout as ttl / 2
                             if let Ok(Ok(stream)) = time::timeout(Duration::from_secs((ttl / 2) as u64), self.client.observe(META_ELECTION_KEY)).await {
                                 observe_stream = stream;
-                                tracing::debug!("recreating observe stream");
+                                tracing::info!("recreating observe stream");
                             }
                         }
                         Some(Ok(leader)) => {
