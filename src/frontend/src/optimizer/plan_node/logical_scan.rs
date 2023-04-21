@@ -112,14 +112,6 @@ impl LogicalScan {
         self.core.column_names_with_table_prefix()
     }
 
-    pub(super) fn order_names(&self) -> Vec<String> {
-        self.core.order_names()
-    }
-
-    pub(super) fn order_names_with_table_prefix(&self) -> Vec<String> {
-        self.core.order_names_with_table_prefix()
-    }
-
     pub fn table_name(&self) -> &str {
         &self.core.table_name
     }
