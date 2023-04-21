@@ -18,8 +18,8 @@ import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.Data;
 import com.risingwave.sourcenode.common.DbzConnectorConfig;
 import com.risingwave.sourcenode.common.PostgresValidator;
-import io.grpc.Status;
-import io.grpc.StatusException;
+import com.risingwave.sourcenode.common.ValidatorUtils;
+import io.grpc.StatusRuntimeException;
 import io.grpc.stub.StreamObserver;
 import java.io.IOException;
 import java.sql.DriverManager;
@@ -44,15 +44,31 @@ public class SourceValidateHandler {
             responseObserver.onNext(
                     ConnectorServiceProto.ValidateSourceResponse.newBuilder().build());
             responseObserver.onCompleted();
+
+        } catch (StatusRuntimeException e) {
+            LOG.warn("Source validation failed", e);
+            responseObserver.onNext(validateResponse(e.getMessage()));
+            responseObserver.onCompleted();
+
         } catch (Exception e) {
-            LOG.error("failed to validate source", e);
-            responseObserver.onError(e);
+            LOG.error("Internal error on source validation", e);
+            responseObserver.onNext(validateResponse("Internal error: " + e.getMessage()));
+            responseObserver.onCompleted();
         }
+    }
+
+    private ConnectorServiceProto.ValidateSourceResponse validateResponse(String message) {
+        return ConnectorServiceProto.ValidateSourceResponse.newBuilder()
+                .setError(
+                        ConnectorServiceProto.ValidationError.newBuilder()
+                                .setErrorMessage(message)
+                                .build())
+                .build();
     }
 
     private void ensurePropNotNull(Map<String, String> props, String name) {
         if (!props.containsKey(name)) {
-            throw new RuntimeException(
+            throw ValidatorUtils.invalidArgument(
                     String.format("'%s' not found, please check the WITH properties", name));
         }
     }
@@ -65,7 +81,7 @@ public class SourceValidateHandler {
             case CITUS:
                 return "jdbc:postgresql";
             default:
-                throw new RuntimeException("unknown source type: " + sourceType);
+                throw ValidatorUtils.invalidArgument("Unknown source type: " + sourceType);
         }
     }
 
@@ -95,7 +111,7 @@ public class SourceValidateHandler {
             sqlStmts.load(input);
         } catch (IOException e) {
             LOG.error("failed to load sql statements", e);
-            throw new RuntimeException(e);
+            throw ValidatorUtils.internalError(e.getMessage());
         }
 
         ensurePropNotNull(props, DbzConnectorConfig.USER);
@@ -175,9 +191,8 @@ public class SourceValidateHandler {
                         var res = stmt.executeQuery(sqlStmts.getProperty("mysql.bin_log"));
                         while (res.next()) {
                             if (!res.getString(2).equalsIgnoreCase("ON")) {
-                                throw new StatusException(
-                                        Status.INTERNAL.withDescription(
-                                                "MySQL doesn't enable binlog.\nPlease set the value of log_bin to 'ON' and restart your MySQL server."));
+                                throw ValidatorUtils.internalError(
+                                        "MySQL doesn't enable binlog.\nPlease set the value of log_bin to 'ON' and restart your MySQL server.");
                             }
                         }
                     }
@@ -186,9 +201,8 @@ public class SourceValidateHandler {
                         var res = stmt.executeQuery(sqlStmts.getProperty("mysql.bin_format"));
                         while (res.next()) {
                             if (!res.getString(2).equalsIgnoreCase("ROW")) {
-                                throw new StatusException(
-                                        Status.INTERNAL.withDescription(
-                                                "MySQL binlog_format should be 'ROW'.\nPlease modify the config and restart your MySQL server."));
+                                throw ValidatorUtils.internalError(
+                                        "MySQL binlog_format should be 'ROW'.\nPlease modify the config and restart your MySQL server.");
                             }
                         }
                     }
@@ -196,9 +210,8 @@ public class SourceValidateHandler {
                         var res = stmt.executeQuery(sqlStmts.getProperty("mysql.bin_row_image"));
                         while (res.next()) {
                             if (!res.getString(2).equalsIgnoreCase("FULL")) {
-                                throw new StatusException(
-                                        Status.INTERNAL.withDescription(
-                                                "MySQL binlog_row_image should be 'FULL'.\nPlease modify the config and restart your MySQL server."));
+                                throw ValidatorUtils.internalError(
+                                        "MySQL binlog_row_image should be 'FULL'.\\nPlease modify the config and restart your MySQL server.");
                             }
                         }
                     }
@@ -210,7 +223,7 @@ public class SourceValidateHandler {
                         while (res.next()) {
                             var ret = res.getInt(1);
                             if (ret == 0) {
-                                throw new RuntimeException("MySQL table doesn't exist");
+                                throw ValidatorUtils.invalidArgument("MySQL table doesn't exist");
                             }
                         }
                     }
@@ -229,18 +242,20 @@ public class SourceValidateHandler {
                             var key = res.getString(3);
 
                             if (index >= sourceSchema.getColumnsCount()) {
-                                throw new RuntimeException(("The number of columns mismatch"));
+                                throw ValidatorUtils.invalidArgument(
+                                        "The number of columns mismatch");
                             }
 
                             var srcCol = sourceSchema.getColumns(index++);
                             if (!srcCol.getName().equals(field)) {
-                                throw new RuntimeException(
+                                throw ValidatorUtils.invalidArgument(
                                         String.format(
                                                 "column name mismatch: %s, [%s]",
                                                 field, srcCol.getName()));
                             }
+
                             if (!isMySQLDataTypeCompatible(dataType, srcCol.getDataType())) {
-                                throw new RuntimeException(
+                                throw ValidatorUtils.invalidArgument(
                                         String.format(
                                                 "incompatible data type of column %s",
                                                 srcCol.getName()));
@@ -251,14 +266,14 @@ public class SourceValidateHandler {
                         }
 
                         if (!isPkMatch(sourceSchema, pkFields)) {
-                            throw new RuntimeException("Primary key mismatch");
+                            throw ValidatorUtils.invalidArgument("Primary key mismatch");
                         }
                     }
                 }
                 break;
             default:
-                LOG.warn("unknown source type");
-                throw new RuntimeException("Unknown source type");
+                LOG.warn("Unknown source type");
+                throw ValidatorUtils.invalidArgument("Unknown source type");
         }
     }
 

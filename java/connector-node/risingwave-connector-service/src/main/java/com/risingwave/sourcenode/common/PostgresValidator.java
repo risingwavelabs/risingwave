@@ -16,8 +16,6 @@ package com.risingwave.sourcenode.common;
 
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.Data;
-import io.grpc.Status;
-import io.grpc.StatusException;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
@@ -63,7 +61,7 @@ public class PostgresValidator implements AutoCloseable {
             while (res.next()) {
                 var ret = res.getString(1);
                 if (!ret.equalsIgnoreCase("distributed")) {
-                    throw new RuntimeException("Citus table is not a distributed table");
+                    throw ValidatorUtils.invalidArgument("Citus table is not a distributed table");
                 }
             }
         }
@@ -80,7 +78,7 @@ public class PostgresValidator implements AutoCloseable {
             while (res.next()) {
                 var ret = res.getString(1);
                 if (ret.equalsIgnoreCase("f") || ret.equalsIgnoreCase("false")) {
-                    throw new RuntimeException("Postgres table or schema doesn't exist");
+                    throw ValidatorUtils.invalidArgument("Postgres table or schema doesn't exist");
                 }
             }
         }
@@ -96,7 +94,7 @@ public class PostgresValidator implements AutoCloseable {
             }
 
             if (!isPkMatch(tableSchema, pkFields)) {
-                throw new RuntimeException("Primary key mismatch");
+                throw ValidatorUtils.invalidArgument("Primary key mismatch");
             }
         }
         // check whether source schema match table schema on upstream
@@ -109,18 +107,17 @@ public class PostgresValidator implements AutoCloseable {
                 var field = res.getString(1);
                 var dataType = res.getString(2);
                 if (index >= tableSchema.getColumnsCount()) {
-                    throw new RuntimeException("The number of columns mismatch");
+                    throw ValidatorUtils.invalidArgument("The number of columns mismatch");
                 }
                 var srcCol = tableSchema.getColumns(index++);
                 if (!srcCol.getName().equals(field)) {
-                    throw new RuntimeException(
-                            String.format(
-                                    "table column defined in the source mismatches upstream column %s",
-                                    field));
+                    throw ValidatorUtils.invalidArgument(
+                            "table column defined in the source mismatches upstream column "
+                                    + field);
                 }
                 if (!isPostgresDataTypeCompatible(dataType, srcCol.getDataType())) {
-                    throw new RuntimeException(
-                            String.format("incompatible data type of column %s", srcCol.getName()));
+                    throw ValidatorUtils.invalidArgument(
+                            "incompatible data type of column " + srcCol.getName());
                 }
             }
         }
@@ -132,9 +129,8 @@ public class PostgresValidator implements AutoCloseable {
             var res = stmt.executeQuery(sqlStmts.getProperty("postgres.wal"));
             while (res.next()) {
                 if (!res.getString(1).equals("logical")) {
-                    throw new StatusException(
-                            Status.INTERNAL.withDescription(
-                                    "Postgres wal_level should be 'logical'.\nPlease modify the config and restart your Postgres server."));
+                    throw ValidatorUtils.internalError(
+                            "Postgres wal_level should be 'logical'.\nPlease modify the config and restart your Postgres server.");
                 }
             }
         }
@@ -159,9 +155,8 @@ public class PostgresValidator implements AutoCloseable {
                 var res = stmt.executeQuery();
                 while (res.next()) {
                     if (!res.getBoolean(1)) {
-                        throw new StatusException(
-                                Status.INTERNAL.withDescription(
-                                        "Postgres user must be superuser or replication role to start walsender."));
+                        throw ValidatorUtils.internalError(
+                                "Postgres user must be superuser or replication role to start walsender.");
                     }
                 }
             }
@@ -173,10 +168,9 @@ public class PostgresValidator implements AutoCloseable {
                 var res = stmt.executeQuery();
                 while (res.next()) {
                     if (!res.getBoolean(1)) {
-                        throw new StatusException(
-                                Status.INTERNAL.withDescription(
-                                        "Postgres user must have select privilege on table "
-                                                + props.get(DbzConnectorConfig.TABLE_NAME)));
+                        throw ValidatorUtils.internalError(
+                                "Postgres user must have select privilege on table "
+                                        + props.get(DbzConnectorConfig.TABLE_NAME));
                     }
                 }
             }
@@ -204,10 +198,9 @@ public class PostgresValidator implements AutoCloseable {
                     for (int i = 0; i < tableSchema.getColumnsCount(); i++) {
                         String columnName = tableSchema.getColumns(i).getName();
                         if (Arrays.stream(columnsPub).noneMatch(columnName::equals)) {
-                            throw new StatusException(
-                                    Status.INTERNAL.withDescription(
-                                            "The publication 'dbz_publication' does not cover all necessary columns in table "
-                                                    + props.get(DbzConnectorConfig.TABLE_NAME)));
+                            throw ValidatorUtils.invalidArgument(
+                                    "The publication 'dbz_publication' does not cover all necessary columns in table "
+                                            + props.get(DbzConnectorConfig.TABLE_NAME));
                         }
                         if (i == tableSchema.getColumnsCount() - 1) {
                             publicationExists = true;
@@ -246,10 +239,9 @@ public class PostgresValidator implements AutoCloseable {
                 var res = stmt.executeQuery();
                 while (res.next()) {
                     if (!res.getBoolean(1)) {
-                        throw new StatusException(
-                                Status.INTERNAL.withDescription(
-                                        "Postgres user must have create privilege on database"
-                                                + props.get(DbzConnectorConfig.DB_NAME)));
+                        throw ValidatorUtils.invalidArgument(
+                                "Postgres user must have create privilege on database"
+                                        + props.get(DbzConnectorConfig.DB_NAME));
                     }
                 }
             }
@@ -287,10 +279,9 @@ public class PostgresValidator implements AutoCloseable {
                 }
             }
             if (!isTableOwner) {
-                throw new StatusException(
-                        Status.INTERNAL.withDescription(
-                                "Postgres user must be owner of table "
-                                        + props.get(DbzConnectorConfig.TABLE_NAME)));
+                throw ValidatorUtils.invalidArgument(
+                        "Postgres user must be owner of table "
+                                + props.get(DbzConnectorConfig.TABLE_NAME));
             }
         }
     }

@@ -87,8 +87,8 @@ impl ConnectorClient {
         source_type: SourceType,
         properties: HashMap<String, String>,
         table_schema: Option<TableSchema>,
-    ) -> Result<ValidateSourceResponse> {
-        Ok(self
+    ) -> Result<()> {
+        let response = self
             .0
             .to_owned()
             .validate_source(ValidateSourceRequest {
@@ -99,13 +99,16 @@ impl ConnectorClient {
             })
             .await
             .inspect_err(|err| {
-                tracing::error!(
-                    "failed to validate source {} properties: {}",
-                    source_id,
-                    err.message()
-                )
+                tracing::error!("failed to validate source#{}: {}", source_id, err.message())
             })?
-            .into_inner())
+            .into_inner();
+
+        response.error.map_or(Ok(()), |err| {
+            Err(RpcError::Internal(anyhow!(format!(
+                "source cannot pass validation: {}",
+                err.error_message
+            ))))
+        })
     }
 
     pub async fn start_sink_stream(
