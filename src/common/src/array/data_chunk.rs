@@ -26,6 +26,7 @@ use crate::array::data_chunk_iter::RowRef;
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
+use crate::field_generator::FieldGeneratorImpl;
 use crate::hash::HashCode;
 use crate::row::Row;
 use crate::types::struct_type::StructType;
@@ -594,6 +595,9 @@ impl EstimateSize for DataChunk {
 
 /// Test utilities for [`DataChunk`].
 pub trait DataChunkTestExt {
+    /// SEED for generating data chunk.
+    const SEED: u64 = 0xFF67FEABBAEF76FF;
+
     /// Parse a chunk from string.
     ///
     /// # Format
@@ -634,6 +638,18 @@ pub trait DataChunkTestExt {
 
     /// Panic if the chunk is invalid.
     fn assert_valid(&self);
+
+    /// Generate data chunk when supplied with `chunk_size` and column data types.
+    fn gen_data_chunk(chunk_offset: usize, chunk_size: usize, data_types: &[DataType]) -> Self;
+
+    /// Generate data chunks when supplied with `chunk_size` and column data types.
+    fn gen_data_chunks(
+        num_of_chunks: usize,
+        chunk_size: usize,
+        data_types: &[DataType],
+    ) -> Vec<Self>
+    where
+        Self: std::marker::Sized;
 }
 
 impl DataChunkTestExt for DataChunk {
@@ -747,6 +763,48 @@ impl DataChunkTestExt for DataChunk {
         for col in cols.iter() {
             assert_eq!(col.array().len(), n);
         }
+    }
+
+    fn gen_data_chunk(chunk_offset: usize, chunk_size: usize, data_types: &[DataType]) -> Self {
+        let mut columns = Vec::new();
+        // Generate columns of this chunk.
+        for data_type in data_types {
+            let mut array_builder = data_type.create_array_builder(chunk_size);
+            for j in 0..chunk_size {
+                // FIXME(kwannoel): This is specific to q17, this should be a configurable
+                // parameter instead.
+                // We overwrite default, we want to simulate a fixed date string.
+                // q17 has a `to_char('YYYY-DD-MM', <timestamp>)`,
+                // and within a short-span of time,
+                // this defaults to a single fixed date. Hence we use that here too.
+                // Currently `gen_data` is only used by q17 bench so it is fine for now.
+                if *data_type == DataType::Varchar {
+                    array_builder.append_datum(&Some("2022-02-02".into()));
+                } else {
+                    let mut data_gen = FieldGeneratorImpl::with_number_random(
+                        data_type.clone(),
+                        None,
+                        None,
+                        Self::SEED,
+                    )
+                    .unwrap();
+                    let datum = data_gen.generate_datum(((chunk_offset + 1) * (j + 1)) as u64);
+                    array_builder.append_datum(datum);
+                }
+            }
+            columns.push(array_builder.finish().into());
+        }
+        DataChunk::new(columns, Bitmap::ones(chunk_size))
+    }
+
+    fn gen_data_chunks(
+        num_of_chunks: usize,
+        chunk_size: usize,
+        data_types: &[DataType],
+    ) -> Vec<Self> {
+        (0..num_of_chunks)
+            .map(|i| Self::gen_data_chunk(i, chunk_size, data_types))
+            .collect()
     }
 }
 
