@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 
-trap upload_logs ERR
-
 set -uo pipefail
 
 upload_logs () {
-  EXIT_CODE="$?"
+  EXIT_CODE=$?
   echo ">>> Failed due to $EXIT_CODE, Uploading logs"
-  buildkite-agent artifact upload zookeeper.log
-  buildkite-agent artifact upload kafka.log
-  exit "$EXIT_CODE"
+  buildkite-agent artifact upload ./zookeeper.log
+  buildkite-agent artifact upload ./kafka.log
+  exit "$(($EXIT_CODE))"
 }
+
+trap upload_logs ERR
 
 # FIXME(kwannoel): This is a workaround since workdir is `/risingwave` by default.
 pushd ..
