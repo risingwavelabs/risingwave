@@ -323,14 +323,22 @@ impl FunctionAttr {
             ReturnType::ResultOption => quote! { #next_state? },
         };
         if !self.user_fn.arg_option {
+            let first_state = match self.name.as_str() {
+                "count" => quote! { unreachable!() }, // XXX: special hack for `count`
+                _ => quote! { Some(value.into()) },
+            };
             next_state = quote! {
                 match (state, value) {
                     (Some(state), Some(value)) => #next_state,
-                    (None, Some(value)) => Some(value.into()),
+                    (None, Some(value)) => #first_state,
                     (state, None) => state,
                 }
             };
         }
+        let init_state = match self.name.as_str() {
+            "count" => quote! { Some(0) }, // XXX: special hack for `count`
+            _ => quote! { None },
+        };
 
         Ok(quote! {
             |agg| {
@@ -398,13 +406,13 @@ impl FunctionAttr {
                 if agg.distinct {
                     Ok(Box::new(Agg {
                         return_type: agg.return_type,
-                        state: None,
+                        state: #init_state,
                         distinct: HashSet::<#arg_owned>::new(),
                     }))
                 } else {
                     Ok(Box::new(Agg {
                         return_type: agg.return_type,
-                        state: None,
+                        state: #init_state,
                         distinct: (),
                     }))
                 }

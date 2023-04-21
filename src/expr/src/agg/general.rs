@@ -109,14 +109,9 @@ fn first<T>(state: T, _: T) -> T {
 /// statement ok
 /// drop table t;
 /// ```
-#[aggregate("count(*) -> int64")]
-fn count<T>(state: Option<i64>, input: Option<T>) -> Option<i64> {
-    match (state, input) {
-        (None, None) => Some(0),
-        (Some(r), None) => Some(r),
-        (None, Some(_)) => Some(1),
-        (Some(r), Some(_)) => Some(r + 1),
-    }
+#[aggregate("count(*) -> int64")] // we have a hack for `count` that the initial state is 0
+fn count<T>(state: i64, _: T) -> i64 {
+    state + 1
 }
 
 #[cfg(test)]
@@ -474,7 +469,7 @@ mod tests {
         test_case(input.into(), expected).await?;
         #[allow(clippy::needless_borrow)]
         let input = I32Array::from_iter(&[]);
-        let expected = &[None];
+        let expected = &[Some(0)];
         test_case(input.into(), expected).await?;
         let input = I32Array::from_iter([None]);
         let expected = &[Some(0)];
