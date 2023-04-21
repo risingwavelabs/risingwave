@@ -61,7 +61,7 @@ use paste::paste;
 use postgres_types::{IsNull, ToSql, Type};
 use strum_macros::EnumDiscriminants;
 
-use self::struct_type::StructType;
+pub use self::struct_type::StructType;
 use self::to_binary::ToBinary;
 use self::to_text::ToText;
 use crate::array::serial_array::Serial;

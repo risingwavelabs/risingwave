@@ -534,7 +534,10 @@ mod tests {
 
         let mut builder = StructArrayBuilder::with_type(
             4,
-            DataType::Struct(Arc::new(vec![DataType::Int32, DataType::Float32].into())),
+            DataType::Struct(Arc::new(StructType::unnamed(vec![
+                DataType::Int32,
+                DataType::Float32,
+            ]))),
         );
         for v in &struct_values {
             builder.append(v.as_ref().map(|s| s.as_scalar_ref()));
@@ -632,8 +635,11 @@ mod tests {
             value
         );
 
-        let mut builder =
-            StructArrayBuilder::with_type(0, DataType::Struct(Arc::new(fields.to_vec().into())));
+        let mut builder = StructArrayBuilder::with_type(
+            0,
+            DataType::Struct(Arc::new(StructType::unnamed(fields.to_vec()))),
+        );
+
         builder.append(Some(struct_ref));
         let array = builder.finish();
         let struct_ref = array.value_at(0).unwrap();
@@ -728,7 +734,7 @@ mod tests {
 
             let mut builder = StructArrayBuilder::with_type(
                 0,
-                DataType::Struct(Arc::new(fields.to_vec().into())),
+                DataType::Struct(Arc::new(StructType::unnamed(fields.to_vec()))),
             );
             builder.append(Some(StructRef::ValueRef { val: &lhs }));
             builder.append(Some(StructRef::ValueRef { val: &rhs }));

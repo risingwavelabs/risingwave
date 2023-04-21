@@ -140,7 +140,9 @@ mod tests {
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_common::types::{DataType, Date, Interval, Scalar, Time, Timestamp, F32};
+    use risingwave_common::types::{
+        DataType, Date, Interval, Scalar, StructType, Time, Timestamp, F32,
+    };
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
@@ -539,7 +541,10 @@ mod tests {
         };
         let mut struct_builder = StructArrayBuilder::with_type(
             0,
-            DataType::Struct(Arc::new(vec![DataType::Varchar, DataType::Float32].into())),
+            DataType::Struct(Arc::new(StructType::unnamed(vec![
+                DataType::Varchar,
+                DataType::Float32,
+            ]))),
         );
         let mut list_builder = ListArrayBuilder::with_type(
             0,
@@ -602,7 +607,10 @@ mod tests {
         );
         let mut struct_builder = StructArrayBuilder::with_type(
             0,
-            DataType::Struct(Arc::new(vec![DataType::Varchar, DataType::Float32].into())),
+            DataType::Struct(Arc::new(StructType::unnamed(vec![
+                DataType::Varchar,
+                DataType::Float32,
+            ]))),
         );
         let mut list_builder = ListArrayBuilder::with_type(
             0,
