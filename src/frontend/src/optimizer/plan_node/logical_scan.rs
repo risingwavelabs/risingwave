@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
 
@@ -28,10 +28,7 @@ use super::{
     PredicatePushdown, StreamTableScan, ToBatch, ToStream,
 };
 use crate::catalog::{ColumnId, IndexCatalog};
-use crate::expr::{
-    CollectInputRef, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall,
-    InputRef,
-};
+use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
@@ -48,6 +45,13 @@ pub struct LogicalScan {
     core: generic::Scan,
 }
 
+impl From<generic::Scan> for LogicalScan {
+    fn from(core: generic::Scan) -> Self {
+        let base = PlanBase::new_logical_with_core(&core);
+        Self { base, core }
+    }
+}
+
 impl LogicalScan {
     /// Create a `LogicalScan` node. Used internally by optimizer.
     #[allow(clippy::too_many_arguments)]
@@ -61,7 +65,7 @@ impl LogicalScan {
         predicate: Condition, // refers to column indexes of the table
         for_system_time_as_of_proctime: bool,
     ) -> Self {
-        let core = generic::Scan::new(
+        generic::Scan::new(
             table_name,
             is_sys_table,
             output_col_idx,
@@ -70,10 +74,8 @@ impl LogicalScan {
             ctx,
             predicate,
             for_system_time_as_of_proctime,
-        );
-        let base = PlanBase::new_logical_with_core(&core);
-
-        Self { base, core }
+        )
+        .into()
     }
 
     /// Create a [`LogicalScan`] node. Used by planner.
@@ -98,31 +100,15 @@ impl LogicalScan {
     }
 
     pub(super) fn column_names(&self) -> Vec<String> {
-        self.output_col_idx()
-            .iter()
-            .map(|i| self.table_desc().columns[*i].name.clone())
-            .collect()
+        self.core.column_names()
     }
 
     pub(super) fn column_names_with_table_prefix(&self) -> Vec<String> {
-        self.output_col_idx()
-            .iter()
-            .map(|i| {
-                format!(
-                    "{}.{}",
-                    self.table_name(),
-                    self.table_desc().columns[*i].name
-                )
-            })
-            .collect()
+        self.core.column_names_with_table_prefix()
     }
 
     pub(super) fn order_names(&self) -> Vec<String> {
-        self.table_desc()
-            .order_column_indices()
-            .iter()
-            .map(|&i| self.table_desc().columns[i].name.clone())
-            .collect()
+        self.core.order_names()
     }
 
     pub(super) fn order_names_with_table_prefix(&self) -> Vec<String> {
@@ -176,14 +162,6 @@ impl LogicalScan {
         &self.core.predicate
     }
 
-    /// get the Mapping of columnIndex from internal column index to output column index
-    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        ColIndexMapping::with_remaining_columns(
-            self.output_col_idx(),
-            self.table_desc().columns.len(),
-        )
-    }
-
     /// Return indices of fields the output is ordered by and
     /// corresponding direction
     pub fn get_out_column_index_order(&self) -> Order {
@@ -200,7 +178,7 @@ impl LogicalScan {
                 })
                 .collect(),
         );
-        self.i2o_col_mapping().rewrite_provided_order(&order)
+        self.core.i2o_col_mapping().rewrite_provided_order(&order)
     }
 
     pub fn distribution_key(&self) -> Option<Vec<usize>> {
@@ -208,8 +186,7 @@ impl LogicalScan {
     }
 
     pub fn watermark_columns(&self) -> FixedBitSet {
-        let watermark_columns = &self.table_desc().watermark_columns;
-        self.i2o_col_mapping().rewrite_bitset(watermark_columns)
+        self.core.watermark_columns()
     }
 
     /// Return indexes can satisfy the required order.
@@ -264,7 +241,7 @@ impl LogicalScan {
                 p2s_mapping,
                 index.function_mapping(),
             );
-            Some(index_scan)
+            Some(index_scan.into())
         } else {
             None
         }
@@ -280,8 +257,8 @@ impl LogicalScan {
         self.core.chunk_size
     }
 
-    pub fn primary_key(&self) -> Vec<ColumnOrder> {
-        self.core.table_desc.pk.clone()
+    pub fn primary_key(&self) -> &[ColumnOrder] {
+        self.core.primary_key()
     }
 
     /// a vec of `InputRef` corresponding to `output_col_idx`, which can represent a pulled project.
@@ -592,7 +569,7 @@ impl ToStream for LogicalScan {
             )));
         }
         if self.predicate().always_true() {
-            Ok(StreamTableScan::new(self.clone()).into())
+            Ok(StreamTableScan::new(self.core.clone()).into())
         } else {
             let (scan, predicate, project_expr) = self.predicate_pull_up();
             let mut plan = LogicalFilter::create(scan.into(), predicate);

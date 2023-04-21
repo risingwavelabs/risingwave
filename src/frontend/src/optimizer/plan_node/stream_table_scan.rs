@@ -21,7 +21,7 @@ use risingwave_common::catalog::{Field, TableDesc};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
 
-use super::{generic, ExprRewritable, LogicalScan, PlanBase, PlanNodeId, PlanRef, StreamNode};
+use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, FunctionCall};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
@@ -56,7 +56,7 @@ impl StreamTableScan {
                         // See also `BatchSeqScan::clone_with_dist`.
                         Distribution::UpstreamHashShard(
                             distribution_key,
-                            logical.table_desc().table_id,
+                            logical.table_desc.table_id,
                         )
                     }
                 }
@@ -123,7 +123,7 @@ impl fmt::Display for StreamTableScan {
         }
         .join(", ");
         builder
-            .field("table", &format_args!("{}", self.logical.table_name()))
+            .field("table", &format_args!("{}", self.logical.table_name))
             .field("columns", &format_args!("[{}]", v));
 
         if verbose {
@@ -200,7 +200,7 @@ impl StreamTableScan {
             .collect_vec();
 
         let batch_plan_node = BatchPlanNode {
-            table_desc: Some(self.logical.table_desc().to_protobuf()),
+            table_desc: Some(self.logical.table_desc.to_protobuf()),
             column_ids: upstream_column_ids.clone(),
         };
 
@@ -226,7 +226,7 @@ impl StreamTableScan {
                 },
             ],
             node_body: Some(PbNodeBody::Chain(ChainNode {
-                table_id: self.logical.table_desc().table_id.table_id,
+                table_id: self.logical.table_desc.table_id.table_id,
                 chain_type: self.chain_type as i32,
                 // The column indices need to be forwarded to the downstream
                 output_indices,

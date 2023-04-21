@@ -16,14 +16,18 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 use derivative::Derivative;
+use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::GenericPlanNode;
 use crate::catalog::{ColumnId, IndexCatalog};
-use crate::expr::{ExprRewriter, FunctionCall};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::CollectInputRef;
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::utils::Condition;
+use crate::utils::{ColIndexMappingRewriteExt, Condition};
 
 /// [`Scan`] returns contents of a table or other equivalent object
 #[derive(Debug, Clone, Derivative)]
@@ -78,8 +82,50 @@ impl Scan {
     pub fn output_column_ids(&self) -> Vec<ColumnId> {
         self.output_col_idx
             .iter()
-            .map(|i| self.table_desc().columns[*i].column_id)
+            .map(|i| self.table_desc.columns[*i].column_id)
             .collect()
+    }
+
+    pub fn primary_key(&self) -> &[ColumnOrder] {
+        &self.table_desc.pk
+    }
+
+    pub fn watermark_columns(&self) -> FixedBitSet {
+        let watermark_columns = &self.table_desc.watermark_columns;
+        self.i2o_col_mapping().rewrite_bitset(watermark_columns)
+    }
+
+    pub(crate) fn column_names_with_table_prefix(&self) -> Vec<String> {
+        self.output_col_idx
+            .iter()
+            .map(|&i| {
+                format!(
+                    "{}.{}",
+                    self.table_name,
+                    self.table_desc.columns[i].name
+                )
+            })
+            .collect()
+    }
+
+    pub(crate) fn column_names(&self) -> Vec<String> {
+        self.output_col_idx
+            .iter()
+            .map(|&i| self.table_desc.columns[i].name.clone())
+            .collect()
+    }
+
+    pub(crate) fn order_names(&self) -> Vec<String> {
+        self.table_desc
+            .order_column_indices()
+            .iter()
+            .map(|&i| self.table_desc.columns[i].name.clone())
+            .collect()
+    }
+
+    /// get the Mapping of columnIndex from internal column index to output column index
+    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
+        ColIndexMapping::with_remaining_columns(&self.output_col_idx, self.table_desc.columns.len())
     }
 
     /// Get the ids of the output columns and primary key columns.
@@ -107,7 +153,7 @@ impl Scan {
             .output_col_idx
             .iter()
             .map(|col_idx| *primary_to_secondary_mapping.get(col_idx).unwrap())
-            .collect_vec();
+            .collect();
 
         struct Rewriter<'a> {
             primary_to_secondary_mapping: &'a BTreeMap<usize, usize>,

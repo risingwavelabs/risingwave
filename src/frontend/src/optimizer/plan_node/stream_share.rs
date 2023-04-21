@@ -53,11 +53,13 @@ impl fmt::Display for StreamShare {
 
 impl PlanTreeNodeUnary for StreamShare {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.borrow().clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let mut logical = self.logical.clone();
+        logical.replace_input(input);
+        Self::new(logical)
     }
 }
 
