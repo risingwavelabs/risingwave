@@ -798,6 +798,7 @@ impl DataChunkTestExt for DataChunk {
                     let datum = data_gen.generate_datum(offset);
                     array_builder.append_datum(datum);
                 }
+                // FIXME(kwannoel): This misses the case where it is neither Varchar or numeric.
             }
             columns.push(array_builder.finish().into());
         }
