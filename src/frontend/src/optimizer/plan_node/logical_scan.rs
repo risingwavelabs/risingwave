@@ -36,7 +36,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::property::Order;
 use crate::optimizer::rule::IndexSelectionRule;
-use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay};
+use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -49,6 +49,11 @@ impl From<generic::Scan> for LogicalScan {
     fn from(core: generic::Scan) -> Self {
         let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
+    }
+}
+impl From<generic::Scan> for PlanRef {
+    fn from(core: generic::Scan) -> Self {
+        LogicalScan::from(core).into()
     }
 }
 
@@ -451,7 +456,7 @@ impl PredicatePushdown for LogicalScan {
 impl LogicalScan {
     fn to_batch_inner_with_required(&self, required_order: &Order) -> Result<PlanRef> {
         if self.predicate().always_true() {
-            required_order.enforce_if_not_satisfies(BatchSeqScan::new(self.clone(), vec![]).into())
+            required_order.enforce_if_not_satisfies(BatchSeqScan::new(self.core.clone(), vec![]).into())
         } else {
             let (scan_ranges, predicate) = self.predicate().clone().split_to_scan_ranges(
                 self.core.table_desc.clone(),

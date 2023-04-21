@@ -26,7 +26,7 @@ use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::CollectInputRef;
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMappingRewriteExt, Condition};
 
 /// [`Scan`] returns contents of a table or other equivalent object
