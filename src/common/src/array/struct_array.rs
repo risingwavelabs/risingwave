@@ -222,13 +222,14 @@ impl StructArray {
             .iter()
             .map(|child| Ok(Arc::new(ArrayImpl::from_protobuf(child, cardinality)?)))
             .collect::<ArrayResult<Vec<ArrayRef>>>()?;
-        let type_ = array_data
-            .children_type
-            .iter()
-            .map(DataType::from)
-            .collect::<Vec<DataType>>()
-            .into();
-        let arr = Self::new(bitmap, children, Arc::new(type_), cardinality);
+        let type_ = Arc::new(StructType::unnamed(
+            array_data
+                .children_type
+                .iter()
+                .map(DataType::from)
+                .collect(),
+        ));
+        let arr = Self::new(bitmap, children, type_, cardinality);
         Ok(arr.into())
     }
 
@@ -256,11 +257,11 @@ impl StructArray {
     ) -> StructArray {
         let cardinality = null_bitmap.len();
         let bitmap = Bitmap::from_iter(null_bitmap.to_vec());
-        let children = children.into_iter().map(Arc::new).collect_vec();
+        let children = children.into_iter().map(Arc::new).collect();
         Self::new(
             bitmap,
             children,
-            Arc::new(children_type.into()),
+            Arc::new(StructType::unnamed(children_type)),
             cardinality,
         )
     }

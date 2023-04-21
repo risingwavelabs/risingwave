@@ -31,6 +31,7 @@ pub struct StructType {
 }
 
 impl StructType {
+    /// Creates a struct type with named fields.
     pub fn new(named_fields: Vec<(DataType, String)>) -> Self {
         let mut fields = Vec::with_capacity(named_fields.len());
         let mut field_names = Vec::with_capacity(named_fields.len());
@@ -43,10 +44,9 @@ impl StructType {
             field_names,
         }
     }
-}
 
-impl From<Vec<DataType>> for StructType {
-    fn from(fields: Vec<DataType>) -> Self {
+    /// Creates a struct type with unnamed fields.
+    pub fn unnamed(fields: Vec<DataType>) -> Self {
         Self {
             fields,
             field_names: Vec::new(),

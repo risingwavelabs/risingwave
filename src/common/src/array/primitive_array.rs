@@ -39,6 +39,7 @@ where
         + Scalar<ScalarRefType<'a> = Self>
         + ScalarRef<'a, ScalarType = Self>,
 {
+    /// The data type.
     const DATA_TYPE: DataType;
     // array methods
     /// A helper to convert a primitive array to `ArrayImpl`.
