@@ -23,7 +23,7 @@ use crate::Result;
 
 #[build_aggregate("count() -> int64")]
 fn build_count_star(_: AggCall) -> Result<Box<dyn Aggregator>> {
-    Ok(Box::new(CountStar::default()))
+    Ok(Box::<CountStar>::default())
 }
 
 #[derive(Clone, Default)]

@@ -20,7 +20,7 @@ pub fn expand_type_wildcard(ty: &str) -> Vec<&str> {
         "*" => TYPE_MATRIX
             .trim()
             .lines()
-            .map(|l| l.trim_start().split_whitespace().next().unwrap())
+            .map(|l| l.split_whitespace().next().unwrap())
             .collect(),
         "*int" => vec!["int16", "int32", "int64"],
         "*numeric" => vec!["decimal"],
@@ -84,7 +84,7 @@ pub fn is_primitive(ty: &str) -> bool {
 
 fn lookup_matrix(ty: &str, idx: usize) -> &str {
     let s = TYPE_MATRIX.trim().lines().find_map(|line| {
-        let mut parts = line.trim().split_whitespace();
+        let mut parts = line.split_whitespace();
         if parts.next() == Some(ty) {
             Some(parts.nth(idx - 1).unwrap())
         } else {
