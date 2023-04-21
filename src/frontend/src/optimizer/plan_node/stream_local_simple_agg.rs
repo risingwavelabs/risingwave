@@ -18,8 +18,8 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::generic::PlanAggCall;
-use super::{ExprRewritable, LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::generic::{self, PlanAggCall};
+use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::ExprRewriter;
 use crate::optimizer::property::RequiredDist;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -33,31 +33,25 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamLocalSimpleAgg {
     pub base: PlanBase,
-    logical: LogicalAgg,
+    logical: generic::Agg<PlanRef>,
 }
 
 impl StreamLocalSimpleAgg {
-    pub fn new(logical: LogicalAgg) -> Self {
-        let ctx = logical.base.ctx.clone();
-        let pk_indices = logical.base.logical_pk.to_vec();
-        let schema = logical.schema().clone();
-        let input = logical.input();
+    pub fn new(logical: generic::Agg<PlanRef>) -> Self {
+        let input = logical.input.clone();
         let input_dist = input.distribution();
         debug_assert!(input_dist.satisfies(&RequiredDist::AnyShard));
 
-        let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
+        let mut watermark_columns = FixedBitSet::with_capacity(logical.output_len());
         // Watermark column(s) must be in group key.
-        for (idx, input_idx) in logical.group_key().iter().enumerate() {
-            if input.watermark_columns().contains(*input_idx) {
+        for (idx, &input_idx) in logical.group_key.iter().enumerate() {
+            if input.watermark_columns().contains(input_idx) {
                 watermark_columns.insert(idx);
             }
         }
 
-        let base = PlanBase::new_stream(
-            ctx,
-            schema,
-            pk_indices,
-            logical.functional_dependency().clone(),
+        let base = PlanBase::new_stream_with_logical(
+            &logical,
             input_dist.clone(),
             input.append_only(),
             watermark_columns,
@@ -66,7 +60,7 @@ impl StreamLocalSimpleAgg {
     }
 
     pub fn agg_calls(&self) -> &[PlanAggCall] {
-        self.logical.agg_calls()
+        &self.logical.agg_calls
     }
 }
 
@@ -79,11 +73,13 @@ impl fmt::Display for StreamLocalSimpleAgg {
 
 impl PlanTreeNodeUnary for StreamLocalSimpleAgg {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let mut logical = self.logical.clone();
+        logical.input = input;
+        Self::new(logical)
     }
 }
 impl_plan_tree_node_for_unary! { StreamLocalSimpleAgg }
@@ -118,13 +114,8 @@ impl ExprRewritable for StreamLocalSimpleAgg {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self::new(
-            self.logical
-                .rewrite_exprs(r)
-                .as_logical_agg()
-                .unwrap()
-                .clone(),
-        )
-        .into()
+        let mut logical = self.logical.clone();
+        logical.rewrite_exprs(r);
+        Self::new(logical).into()
     }
 }

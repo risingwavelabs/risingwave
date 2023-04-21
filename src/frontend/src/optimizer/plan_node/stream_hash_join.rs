@@ -65,8 +65,6 @@ pub struct StreamHashJoin {
 
 impl StreamHashJoin {
     pub fn new(logical: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Self {
-        let base = PlanBase::new_logical_with_core(&logical);
-        let ctx = base.ctx;
         // Inner join won't change the append-only behavior of the stream. The rest might.
         let append_only = match logical.join_type {
             JoinType::Inner => logical.left.append_only() && logical.right.append_only(),
@@ -191,15 +189,8 @@ impl StreamHashJoin {
         };
 
         // TODO: derive from input
-        let base = PlanBase::new_stream(
-            ctx,
-            base.schema,
-            base.logical_pk,
-            base.functional_dependency,
-            dist,
-            append_only,
-            watermark_columns,
-        );
+        let base =
+            PlanBase::new_stream_with_logical(&logical, dist, append_only, watermark_columns);
 
         Self {
             base,

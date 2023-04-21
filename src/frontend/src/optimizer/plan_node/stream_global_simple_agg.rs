@@ -37,10 +37,6 @@ impl StreamGlobalSimpleAgg {
     pub fn new(logical: generic::Agg<PlanRef>, row_count_idx: usize) -> Self {
         assert_eq!(logical.agg_calls[row_count_idx], PlanAggCall::count_star());
 
-        let base = PlanBase::new_logical_with_core(&logical);
-        let ctx = base.ctx;
-        let pk_indices = base.logical_pk;
-        let schema = base.schema;
         let input = logical.input.clone();
         let input_dist = input.distribution();
         let dist = match input_dist {
@@ -50,18 +46,10 @@ impl StreamGlobalSimpleAgg {
 
         // Empty because watermark column(s) must be in group key and global simple agg have no
         // group key.
-        let watermark_columns = FixedBitSet::with_capacity(schema.len());
+        let watermark_columns = FixedBitSet::with_capacity(logical.output_len());
 
         // Simple agg executor might change the append-only behavior of the stream.
-        let base = PlanBase::new_stream(
-            ctx,
-            schema,
-            pk_indices,
-            base.functional_dependency,
-            dist,
-            false,
-            watermark_columns,
-        );
+        let base = PlanBase::new_stream_with_logical(&logical, dist, false, watermark_columns);
         StreamGlobalSimpleAgg {
             base,
             logical,

@@ -72,7 +72,6 @@ pub use crate::array::num256_array::{Int256Array, Int256ArrayBuilder};
 use crate::buffer::Bitmap;
 use crate::estimate_size::EstimateSize;
 use crate::types::*;
-use crate::util::iter_util::ZipEqFast;
 pub type ArrayResult<T> = Result<T, ArrayError>;
 
 pub type I64Array = PrimitiveArray<i64>;
@@ -287,9 +286,10 @@ trait CompactableArray: Array {
 impl<A: Array> CompactableArray for A {
     fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self {
         let mut builder = A::Builder::with_type(cardinality, self.data_type());
-        for (elem, visible) in self.iter().zip_eq_fast(visibility.iter()) {
-            if visible {
-                builder.append(elem);
+        for idx in visibility.iter_ones() {
+            // SAFETY(value_at_unchecked): the idx is always in bound.
+            unsafe {
+                builder.append(self.value_at_unchecked(idx));
             }
         }
         builder.finish()
@@ -714,6 +714,7 @@ impl PartialEq for ArrayImpl {
 mod tests {
 
     use super::*;
+    use crate::util::iter_util::ZipEqFast;
 
     fn filter<'a, A, F>(data: &'a A, pred: F) -> ArrayResult<A>
     where

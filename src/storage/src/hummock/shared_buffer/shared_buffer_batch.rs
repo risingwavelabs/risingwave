@@ -35,8 +35,8 @@ use crate::hummock::store::memtable::ImmId;
 use crate::hummock::utils::{range_overlap, MemoryTracker};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    create_monotonic_events, DeleteRangeTombstone, HummockEpoch, HummockResult,
-    MonotonicDeleteEvent,
+    create_monotonic_events, create_tombstones_to_represent_monotonic_deletes,
+    DeleteRangeTombstone, HummockEpoch, HummockResult, MonotonicDeleteEvent,
 };
 use crate::storage_value::StorageValue;
 use crate::store::ReadOptions;
@@ -58,7 +58,6 @@ pub(crate) struct SharedBufferBatchInner {
     imm_ids: Vec<ImmId>,
     /// The epochs of the data in batch, sorted in ascending order (old to new)
     epochs: Vec<HummockEpoch>,
-    range_tombstone_list: Vec<DeleteRangeTombstone>,
     monotonic_tombstone_events: Vec<MonotonicDeleteEvent>,
     largest_table_key: Vec<u8>,
     smallest_table_key: Vec<u8>,
@@ -104,10 +103,12 @@ impl SharedBufferBatchInner {
         for range_tombstone in &range_tombstones {
             monotonic_tombstone_events.push(MonotonicDeleteEvent {
                 event_key: range_tombstone.start_user_key.clone(),
+                is_exclusive: false,
                 new_epoch: range_tombstone.sequence,
             });
             monotonic_tombstone_events.push(MonotonicDeleteEvent {
                 event_key: range_tombstone.end_user_key.clone(),
+                is_exclusive: false,
                 new_epoch: HummockEpoch::MAX,
             });
         }
@@ -117,7 +118,6 @@ impl SharedBufferBatchInner {
             payload: items,
             imm_ids: vec![batch_id],
             epochs: vec![epoch],
-            range_tombstone_list: range_tombstones,
             monotonic_tombstone_events,
             kv_count,
             size,
@@ -151,7 +151,6 @@ impl SharedBufferBatchInner {
             payload,
             epochs,
             imm_ids,
-            range_tombstone_list,
             monotonic_tombstone_events,
             largest_table_key,
             smallest_table_key,
@@ -449,7 +448,7 @@ impl SharedBufferBatch {
 
     #[inline(always)]
     pub fn has_range_tombstone(&self) -> bool {
-        !self.inner.range_tombstone_list.is_empty()
+        !self.inner.monotonic_tombstone_events.is_empty()
     }
 
     /// return inclusive right endpoint, which means that all data in this batch should be smaller
@@ -518,7 +517,7 @@ impl SharedBufferBatch {
     }
 
     pub fn get_delete_range_tombstones(&self) -> Vec<DeleteRangeTombstone> {
-        self.inner.range_tombstone_list.clone()
+        create_tombstones_to_represent_monotonic_deletes(&self.inner.monotonic_tombstone_events)
     }
 
     #[cfg(test)]

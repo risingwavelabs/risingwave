@@ -236,3 +236,7 @@ pub fn create_cache_key_serde(
     );
     (first_key_serde, second_key_serde, order_by_len)
 }
+
+use risingwave_common::row;
+pub trait GroupKey = row::Row + Send + Sync;
+pub const NO_GROUP_KEY: Option<row::Empty> = None;

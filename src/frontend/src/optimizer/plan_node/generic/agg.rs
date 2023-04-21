@@ -54,7 +54,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         });
     }
 
-    fn output_len(&self) -> usize {
+    pub(crate) fn output_len(&self) -> usize {
         self.group_key.len() + self.agg_calls.len()
     }
 
@@ -441,6 +441,9 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         AggCallState::Table(Box::new(state))
                     }
                 }
+                AggKind::BitAnd | AggKind::BitOr | AggKind::BitXor => {
+                    unimplemented!()
+                }
             })
             .collect()
     }
@@ -663,7 +666,13 @@ impl PlanAggCall {
 
     pub fn partial_to_total_agg_call(&self, partial_output_idx: usize) -> PlanAggCall {
         let total_agg_kind = match &self.agg_kind {
-            AggKind::Min | AggKind::Max | AggKind::StringAgg | AggKind::FirstValue => self.agg_kind,
+            AggKind::BitAnd
+            | AggKind::BitOr
+            | AggKind::BitXor
+            | AggKind::Min
+            | AggKind::Max
+            | AggKind::StringAgg
+            | AggKind::FirstValue => self.agg_kind,
             AggKind::Count | AggKind::ApproxCountDistinct | AggKind::Sum0 => AggKind::Sum0,
             AggKind::Sum => AggKind::Sum,
             AggKind::Avg => {

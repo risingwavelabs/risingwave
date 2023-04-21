@@ -639,7 +639,7 @@ impl LogicalScan {
                 plan = BatchFilter::new(generic::Filter::new(predicate, plan)).into();
             }
             if let Some(exprs) = project_expr {
-                plan = BatchProject::new(LogicalProject::new(plan, exprs)).into()
+                plan = BatchProject::new(generic::Project::new(exprs, plan)).into()
             }
             assert_eq!(plan.schema(), self.schema());
             required_order.enforce_if_not_satisfies(plan)

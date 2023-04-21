@@ -350,7 +350,7 @@ pub fn gen_min_epoch(base_epoch: u64, retention_seconds: Option<&u32>) -> u64 {
     match retention_seconds {
         Some(retention_seconds_u32) => {
             base_epoch
-                .subtract_ms((retention_seconds_u32 * 1000) as u64)
+                .subtract_ms(*retention_seconds_u32 as u64 * 1000)
                 .0
         }
         None => 0,

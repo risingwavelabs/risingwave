@@ -84,8 +84,15 @@ pub enum SinkState {
 pub const BLACKHOLE_SINK: &str = "blackhole";
 
 impl SinkConfig {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
+    pub fn from_hashmap(mut properties: HashMap<String, String>) -> Result<Self> {
         const CONNECTOR_TYPE_KEY: &str = "connector";
+        const CONNECTION_NAME_KEY: &str = "connection.name";
+        const PRIVATE_LINK_TARGET_KEY: &str = "privatelink.targets";
+
+        // remove privatelink related properties if any
+        properties.remove(PRIVATE_LINK_TARGET_KEY);
+        properties.remove(CONNECTION_NAME_KEY);
+
         let sink_type = properties
             .get(CONNECTOR_TYPE_KEY)
             .ok_or_else(|| SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY)))?;

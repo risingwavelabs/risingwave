@@ -25,6 +25,7 @@ use prometheus::{
     register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
     HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_internal_tables;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::common::WorkerType;
 use tokio::sync::oneshot::Sender;
@@ -33,7 +34,6 @@ use tokio::task::JoinHandle;
 use crate::manager::{ClusterManagerRef, FragmentManagerRef};
 use crate::rpc::server::ElectionClientRef;
 use crate::storage::MetaStore;
-use crate::stream::visit_stream_node_internal_tables;
 
 pub struct MetaMetrics {
     pub registry: Registry,
