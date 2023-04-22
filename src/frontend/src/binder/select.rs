@@ -22,16 +22,20 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::AggKind;
-use risingwave_sqlparser::ast::{DataType as AstDataType, Distinct, Expr, Select, SelectItem};
+use risingwave_pb::plan_common::JoinType;
+use risingwave_sqlparser::ast::{
+    BinaryOperator, DataType as AstDataType, Distinct, Expr, Ident, Join, JoinConstraint,
+    JoinOperator, ObjectName, Select, SelectItem, TableFactor, TableWithJoins,
+};
 use risingwave_sqlparser::parser::Parser;
 use risingwave_sqlparser::tokenizer::{Token, Tokenizer};
 
 use super::bind_context::{Clause, ColumnBinding};
 use super::statement::RewriteExprsRecursive;
-use super::{BoundBaseTable, UNNAMED_COLUMN};
+use super::{expr, BoundBaseTable, BoundJoin, UNNAMED_COLUMN};
 use crate::binder::{Binder, Relation};
 use crate::catalog::system_catalog::pg_catalog::{
-    PG_USER_ID_INDEX, PG_USER_NAME_INDEX, PG_USER_TABLE_NAME,
+    PG_INDEX_COLUMNS, PG_INDEX_TABLE_NAME, PG_USER_ID_INDEX, PG_USER_NAME_INDEX, PG_USER_TABLE_NAME,
 };
 use crate::catalog::system_catalog::rw_catalog::{
     RW_TABLE_STATS_KEY_SIZE_INDEX, RW_TABLE_STATS_TABLE_ID_INDEX, RW_TABLE_STATS_TABLE_NAME,
@@ -390,8 +394,11 @@ impl Binder {
         let arg = table.as_literal().ok_or_else(|| {
             ErrorCode::BindError("pg_indexes_size only supports literals as arguments".to_string())
         })?;
-        // Get list of indexes on this table
-        let indexes = self.get_indexes_on_table_by_literal(arg)?;
+
+        // select sum(total_key_size + total_value_size)
+        // FROM rw_catalog.rw_table_stats as stats
+        // JOIN pg_index on stats.id = pg_index.indexrelid
+        // where pg_index.indrelid = 'test'::regclass
 
         // Get the size of each index
         // define the output schema
@@ -403,29 +410,73 @@ impl Binder {
         };
 
         // Get table stats data
-        let from = Some(self.bind_relation_by_name_inner(
-            Some(RW_CATALOG_SCHEMA_NAME),
-            RW_TABLE_STATS_TABLE_NAME,
-            None,
-            false,
-        )?);
-
-        // Construct operand for ExprType::In operator: this will return only stats for
-        // indexes that are in the list Indexes on the target table.
-        let mut indices_on_table: Vec<ExprImpl> =
-            vec![InputRef::new(RW_TABLE_STATS_TABLE_ID_INDEX, DataType::Int32).into()];
-        indices_on_table.extend(indexes.into_iter().map(|id| {
-            ExprImpl::Literal(Box::new(Literal::new(
-                Some(ScalarImpl::Int32(id.index_id as i32)),
-                DataType::Int32,
-            )))
-        }));
+        // let table_stats = Some(self.bind_relation_by_name_inner(
+        // Some(RW_CATALOG_SCHEMA_NAME),
+        // RW_TABLE_STATS_TABLE_NAME,
+        // None,
+        // false,
+        // )?);
+        //
+        // let pg_index = Some(self.bind_relation_by_name_inner(
+        // Some(PG_CATALOG_SCHEMA_NAME),
+        // PG_INDEX_TABLE_NAME,
+        // None,
+        // false,
+        // )?);
 
         // Filter to only the Indexes on this table
-        let where_clause: Option<ExprImpl> =
-            Some(FunctionCall::new(ExprType::In, indices_on_table)?.into());
+        let table_id = self.table_id_query(table)?;
+        println!("idx on: {table_id:?}");
+        let where_clause: Option<ExprImpl> = Some(
+            FunctionCall::new(
+                ExprType::Equal,
+                vec![
+                    InputRef::new(RW_TABLE_STATS_TABLE_ID_INDEX, DataType::Int32).into(),
+                    table_id,
+                ],
+            )?
+            .into(),
+        );
 
-        // Get the sum of the total sizes of all the indexes on this table
+        // let join_on_clause: ExprImpl = FunctionCall::new(
+        // ExprType::Equal,
+        // vec![
+        // InputRef::new(RW_TABLE_STATS_TABLE_ID_INDEX, DataType::Int32).into(),
+        // InputRef::new(0, DataType::Int32).into(),
+        // ],
+        // )?
+        // .into();
+        let constraint = JoinConstraint::On(Expr::BinaryOp {
+            left: Box::new(Expr::Identifier(Ident::new_unchecked("id"))),
+            op: BinaryOperator::Eq,
+            right: Box::new(Expr::Identifier(Ident::new_unchecked("indexrelid"))),
+        });
+        let j = self
+            .bind_table_with_joins(TableWithJoins {
+                relation: TableFactor::Table {
+                    name: ObjectName(vec![RW_CATALOG_SCHEMA_NAME.into(), "rw_table_stats".into()]),
+                    alias: None,
+                    for_system_time_as_of_now: false,
+                },
+                joins: vec![Join {
+                    relation: TableFactor::Table {
+                        name: ObjectName(vec![PG_CATALOG_SCHEMA_NAME.into(), "pg_index".into()]),
+                        alias: None,
+                        for_system_time_as_of_now: false,
+                    },
+                    join_operator: JoinOperator::Inner(constraint),
+                    // join_operator: JoinOperator::Inner(JoinConstraint::None),
+                }],
+            })
+            .unwrap();
+        // let join = Box::new(BoundJoin {
+        // join_type: JoinType::Inner,
+        // left: table_stats.unwrap(),
+        // right: pg_index.unwrap(),
+        // cond: join_on_clause,
+        // });
+
+        // Get the size of an index by adding the size of the keys and the size of the values
         let sum = FunctionCall::new(
             ExprType::Add,
             vec![
@@ -435,7 +486,8 @@ impl Binder {
         )?
         .into();
 
-        let select_items = vec![AggCall::new(
+        // There could be multiple indexes on a table so aggregate the sizes of all indexes
+        let select_items: Vec<ExprImpl> = vec![AggCall::new(
             AggKind::Sum0,
             vec![sum],
             false,
@@ -448,7 +500,7 @@ impl Binder {
             distinct: BoundDistinct::All,
             select_items,
             aliases: vec![None],
-            from,
+            from: Some(j),
             where_clause,
             group_by: vec![],
             having: None,
@@ -461,18 +513,6 @@ impl Binder {
         output_name: &str,
         table: &ExprImpl,
     ) -> Result<BoundSelect> {
-        let arg = table.as_literal().ok_or_else(|| {
-            ErrorCode::BindError(format!(
-                "{output_name} only supports varchar or int literals as arguments"
-            ))
-        })?;
-        let table_id = self.get_table_by_literal(arg)?.table_id;
-
-        let table_id_expr = ExprImpl::Literal(Box::new(Literal::new(
-            Some(ScalarImpl::Int32(table_id.table_id as i32)),
-            DataType::Int32,
-        )));
-
         // define the output schema
         let result_schema = Schema {
             fields: vec![Field::with_name(DataType::Int64, output_name.to_string())],
@@ -486,12 +526,14 @@ impl Binder {
             false,
         )?);
 
-        // Filter by the table id to only get the stats for the specified table
-        let where_clause = Some(
+        let table_id = self.table_id_query(table)?;
+
+        // Filter to only the Indexes on this table
+        let where_clause: Option<ExprImpl> = Some(
             FunctionCall::new(
                 ExprType::Equal,
                 vec![
-                    table_id_expr,
+                    table_id.into(),
                     InputRef::new(RW_TABLE_STATS_TABLE_ID_INDEX, DataType::Int32).into(),
                 ],
             )?
@@ -520,6 +562,23 @@ impl Binder {
             having: None,
             schema: result_schema,
         })
+    }
+
+    fn table_id_query(&mut self, table: &ExprImpl) -> Result<ExprImpl> {
+        let table_name = table
+            .as_literal()
+            .unwrap()
+            .get_data()
+            .as_ref()
+            .unwrap()
+            .as_utf8();
+
+        self.bind_cast(
+            Expr::Value(risingwave_sqlparser::ast::Value::SingleQuotedString(
+                table_name.to_string(),
+            )),
+            AstDataType::Regclass,
+        )
     }
 
     pub fn iter_bound_columns<'a>(
