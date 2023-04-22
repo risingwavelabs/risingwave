@@ -123,7 +123,7 @@ impl CompactorRunner {
                 );
                 range_tombstone_list.retain(|tombstone| {
                     !filter.should_delete(FullKey::from_user_key(
-                        tombstone.start_user_key.as_ref(),
+                        tombstone.start_user_key.user_key.as_ref(),
                         tombstone.sequence,
                     ))
                 });
@@ -200,8 +200,18 @@ mod tests {
         let sstable_store = mock_sstable_store();
         let kv_pairs = vec![];
         let range_tombstones = vec![
-            DeleteRangeTombstone::new(TableId::new(1), b"abc".to_vec(), b"cde".to_vec(), 1),
-            DeleteRangeTombstone::new(TableId::new(2), b"abc".to_vec(), b"def".to_vec(), 1),
+            DeleteRangeTombstone::new_for_test(
+                TableId::new(1),
+                b"abc".to_vec(),
+                b"cde".to_vec(),
+                1,
+            ),
+            DeleteRangeTombstone::new_for_test(
+                TableId::new(2),
+                b"abc".to_vec(),
+                b"def".to_vec(),
+                1,
+            ),
         ];
         let sstable_info = gen_test_sstable_with_range_tombstone(
             default_builder_opt_for_test(),

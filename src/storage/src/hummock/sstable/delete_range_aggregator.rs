@@ -17,7 +17,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_hummock_sdk::key::UserKey;
+use risingwave_hummock_sdk::key::{ExtendedUserKey, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
 
 use super::{create_monotonic_events, DeleteRangeTombstone, MonotonicDeleteEvent};
@@ -68,7 +68,7 @@ pub(crate) struct TombstoneEnterExitEvent {
 
 type CompactionDeleteRangeEvent = (
     // event key
-    UserKey<Vec<u8>>,
+    ExtendedUserKey<Vec<u8>>,
     // Old tombstones which exits at the event key
     Vec<TombstoneEnterExitEvent>,
     // New tombstones which enters at the event key
@@ -204,16 +204,19 @@ impl CompactionDeleteRanges {
         }
 
         let mut tombstones = Vec::with_capacity(self.delete_tombstones.len());
+        let extended_smallest_user_key = ExtendedUserKey::from_user_key(smallest_user_key, false);
+        let extended_largest_user_key = ExtendedUserKey::from_user_key(largest_user_key, false);
         for tombstone in &self.delete_tombstones {
             let mut candidate = tombstone.clone();
-            if !smallest_user_key.is_empty()
-                && smallest_user_key.gt(&candidate.start_user_key.as_ref())
+            if !extended_smallest_user_key.is_empty()
+                && extended_smallest_user_key.gt(&candidate.start_user_key.as_ref())
             {
-                candidate.start_user_key = smallest_user_key.to_vec();
+                candidate.start_user_key = extended_smallest_user_key.to_vec();
             }
-            if !largest_user_key.is_empty() && largest_user_key.lt(&candidate.end_user_key.as_ref())
+            if !extended_largest_user_key.is_empty()
+                && extended_largest_user_key.lt(&candidate.end_user_key.as_ref())
             {
-                candidate.end_user_key = largest_user_key.to_vec();
+                candidate.end_user_key = extended_largest_user_key.to_vec();
             }
             if candidate.start_user_key < candidate.end_user_key {
                 tombstones.push(candidate);
@@ -248,7 +251,8 @@ impl CompactionDeleteRangeIterator {
         target_user_key: UserKey<&[u8]>,
         epoch: HummockEpoch,
     ) -> HummockEpoch {
-        while let Some((user_key, ..)) = self.events.events.get(self.seek_idx) && user_key.as_ref().le(&target_user_key) {
+        let target_extended_user_key = ExtendedUserKey::from_user_key(target_user_key, false);
+        while let Some((extended_user_key, ..)) = self.events.events.get(self.seek_idx) && extended_user_key.as_ref().le(&target_extended_user_key) {
             self.apply(self.seek_idx);
             self.seek_idx += 1;
         }
@@ -263,10 +267,13 @@ impl CompactionDeleteRangeIterator {
     }
 
     pub(crate) fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
+        let target_extended_user_key = ExtendedUserKey::from_user_key(target_user_key, false);
         self.seek_idx = self
             .events
             .events
-            .partition_point(|(user_key, ..)| user_key.as_ref().le(&target_user_key));
+            .partition_point(|(extended_user_key, ..)| {
+                extended_user_key.as_ref().le(&target_extended_user_key)
+            });
         self.epochs.clear();
         for idx in 0..self.seek_idx {
             self.apply(idx);
@@ -291,7 +298,7 @@ impl SstableDeleteRangeIterator {
 }
 
 impl DeleteRangeIterator for SstableDeleteRangeIterator {
-    fn next_user_key(&self) -> UserKey<&[u8]> {
+    fn next_extended_user_key(&self) -> ExtendedUserKey<&[u8]> {
         self.table.value().meta.monotonic_tombstone_events[self.next_idx]
             .event_key
             .as_ref()
@@ -314,13 +321,14 @@ impl DeleteRangeIterator for SstableDeleteRangeIterator {
     }
 
     fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
+        let target_extended_user_key = ExtendedUserKey::from_user_key(target_user_key, false);
         self.next_idx = self
             .table
             .value()
             .meta
             .monotonic_tombstone_events
             .partition_point(|MonotonicDeleteEvent { event_key, .. }| {
-                event_key.as_ref().le(&target_user_key)
+                event_key.as_ref().le(&target_extended_user_key)
             });
     }
 
@@ -333,8 +341,9 @@ pub fn get_min_delete_range_epoch_from_sstable(
     table: &Sstable,
     query_user_key: UserKey<&[u8]>,
 ) -> HummockEpoch {
+    let query_extended_user_key = ExtendedUserKey::from_user_key(query_user_key, false);
     let idx = table.meta.monotonic_tombstone_events.partition_point(
-        |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(&query_user_key),
+        |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(&query_extended_user_key),
     );
     if idx == 0 {
         HummockEpoch::MAX
@@ -359,12 +368,22 @@ mod tests {
         let mut builder = CompactionDeleteRangesBuilder::default();
         let table_id = TableId::default();
         builder.add_tombstone(vec![
-            DeleteRangeTombstone::new(table_id, b"aaaaaa".to_vec(), b"bbbccc".to_vec(), 12),
-            DeleteRangeTombstone::new(table_id, b"aaaaaa".to_vec(), b"bbbddd".to_vec(), 9),
-            DeleteRangeTombstone::new(table_id, b"bbbaab".to_vec(), b"bbbdddf".to_vec(), 6),
-            DeleteRangeTombstone::new(table_id, b"bbbeee".to_vec(), b"eeeeee".to_vec(), 8),
-            DeleteRangeTombstone::new(table_id, b"bbbfff".to_vec(), b"ffffff".to_vec(), 9),
-            DeleteRangeTombstone::new(table_id, b"gggggg".to_vec(), b"hhhhhh".to_vec(), 9),
+            DeleteRangeTombstone::new_for_test(
+                table_id,
+                b"aaaaaa".to_vec(),
+                b"bbbccc".to_vec(),
+                12,
+            ),
+            DeleteRangeTombstone::new_for_test(table_id, b"aaaaaa".to_vec(), b"bbbddd".to_vec(), 9),
+            DeleteRangeTombstone::new_for_test(
+                table_id,
+                b"bbbaab".to_vec(),
+                b"bbbdddf".to_vec(),
+                6,
+            ),
+            DeleteRangeTombstone::new_for_test(table_id, b"bbbeee".to_vec(), b"eeeeee".to_vec(), 8),
+            DeleteRangeTombstone::new_for_test(table_id, b"bbbfff".to_vec(), b"ffffff".to_vec(), 9),
+            DeleteRangeTombstone::new_for_test(table_id, b"gggggg".to_vec(), b"hhhhhh".to_vec(), 9),
         ]);
         let compaction_delete_ranges = builder.build_for_compaction(false);
         let mut iter = compaction_delete_ranges.iter();
@@ -422,11 +441,11 @@ mod tests {
         let table_id = TableId::default();
         let mut builder = CompactionDeleteRangesBuilder::default();
         builder.add_tombstone(vec![
-            DeleteRangeTombstone::new(table_id, b"aaaa".to_vec(), b"bbbb".to_vec(), 12),
-            DeleteRangeTombstone::new(table_id, b"aaaa".to_vec(), b"cccc".to_vec(), 12),
-            DeleteRangeTombstone::new(table_id, b"cccc".to_vec(), b"dddd".to_vec(), 10),
-            DeleteRangeTombstone::new(table_id, b"cccc".to_vec(), b"eeee".to_vec(), 12),
-            DeleteRangeTombstone::new(table_id, b"eeee".to_vec(), b"ffff".to_vec(), 12),
+            DeleteRangeTombstone::new_for_test(table_id, b"aaaa".to_vec(), b"bbbb".to_vec(), 12),
+            DeleteRangeTombstone::new_for_test(table_id, b"aaaa".to_vec(), b"cccc".to_vec(), 12),
+            DeleteRangeTombstone::new_for_test(table_id, b"cccc".to_vec(), b"dddd".to_vec(), 10),
+            DeleteRangeTombstone::new_for_test(table_id, b"cccc".to_vec(), b"eeee".to_vec(), 12),
+            DeleteRangeTombstone::new_for_test(table_id, b"eeee".to_vec(), b"ffff".to_vec(), 12),
         ]);
         let compaction_delete_range = builder.build_for_compaction(false);
         let split_ranges = compaction_delete_range.get_tombstone_between(
@@ -434,10 +453,22 @@ mod tests {
             test_user_key(b"eeeeee").as_ref(),
         );
         assert_eq!(4, split_ranges.len());
-        assert_eq!(test_user_key(b"bbbb"), split_ranges[0].event_key);
-        assert_eq!(test_user_key(b"cccc"), split_ranges[1].event_key);
-        assert_eq!(test_user_key(b"dddd"), split_ranges[2].event_key);
-        assert_eq!(test_user_key(b"eeeeee"), split_ranges[3].event_key);
+        assert_eq!(
+            ExtendedUserKey::from_user_key(test_user_key(b"bbbb"), false),
+            split_ranges[0].event_key
+        );
+        assert_eq!(
+            ExtendedUserKey::from_user_key(test_user_key(b"cccc"), false),
+            split_ranges[1].event_key
+        );
+        assert_eq!(
+            ExtendedUserKey::from_user_key(test_user_key(b"dddd"), false),
+            split_ranges[2].event_key
+        );
+        assert_eq!(
+            ExtendedUserKey::from_user_key(test_user_key(b"eeeeee"), false),
+            split_ranges[3].event_key
+        );
     }
 
     #[tokio::test]

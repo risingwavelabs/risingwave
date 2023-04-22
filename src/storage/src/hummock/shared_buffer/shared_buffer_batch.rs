@@ -24,7 +24,7 @@ use std::sync::{Arc, LazyLock};
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
+use risingwave_hummock_sdk::key::{ExtendedUserKey, FullKey, TableKey, TableKeyRange, UserKey};
 
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::iterator::{
@@ -107,12 +107,10 @@ impl SharedBufferBatchInner {
         for range_tombstone in range_tombstones {
             monotonic_tombstone_events.push(MonotonicDeleteEvent {
                 event_key: range_tombstone.start_user_key,
-                is_exclusive: false,
                 new_epoch: range_tombstone.sequence,
             });
             monotonic_tombstone_events.push(MonotonicDeleteEvent {
                 event_key: range_tombstone.end_user_key,
-                is_exclusive: false,
                 new_epoch: HummockEpoch::MAX,
             });
         }
@@ -179,21 +177,28 @@ impl SharedBufferBatchInner {
                 if tombstone.start_user_key.ge(&tombstone.end_user_key) {
                     continue;
                 }
-                let tombstone_end_table_id = tombstone.end_user_key.table_id;
+                let tombstone_end_table_id = tombstone.end_user_key.user_key.table_id;
                 if tombstone_end_table_id != table_id {
                     // It means that the right side of the tombstone is +inf.
                     assert_eq!(tombstone_end_table_id.table_id(), table_id.table_id() + 1);
                     largest_table_key = Bound::Unbounded;
                 } else if match &largest_table_key {
-                    Bound::Excluded(x) => x <= &tombstone.end_user_key.table_key.0,
-                    Bound::Included(x) => x < &tombstone.end_user_key.table_key.0,
+                    Bound::Excluded(x) => x <= &tombstone.end_user_key.user_key.table_key.0,
+                    Bound::Included(x) => x < &tombstone.end_user_key.user_key.table_key.0,
                     Bound::Unbounded => false,
                 } {
-                    largest_table_key = Bound::Excluded(tombstone.end_user_key.table_key.0.clone());
+                    largest_table_key = if tombstone.end_user_key.is_exclusive {
+                        Bound::Included(tombstone.end_user_key.user_key.table_key.0.clone())
+                    } else {
+                        Bound::Excluded(tombstone.end_user_key.user_key.table_key.0.clone())
+                    };
                 }
-                if smallest_empty || smallest_table_key.gt(&tombstone.start_user_key.table_key.0) {
+                if smallest_empty
+                    || smallest_table_key.gt(&tombstone.start_user_key.user_key.table_key.0)
+                {
                     smallest_table_key.clear();
-                    smallest_table_key.extend_from_slice(&tombstone.start_user_key.table_key.0);
+                    smallest_table_key
+                        .extend_from_slice(&tombstone.start_user_key.user_key.table_key.0);
                     smallest_empty = false;
                 }
                 if let Some(last) = range_tombstones.last_mut() {
@@ -249,8 +254,11 @@ impl SharedBufferBatchInner {
     }
 
     fn get_min_delete_range_epoch(&self, query_user_key: UserKey<&[u8]>) -> HummockEpoch {
+        let query_extended_user_key = ExtendedUserKey::from_user_key(query_user_key, false);
         let idx = self.monotonic_tombstone_events.partition_point(
-            |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(&query_user_key),
+            |MonotonicDeleteEvent { event_key, .. }| {
+                event_key.as_ref().le(&query_extended_user_key)
+            },
         );
         if idx == 0 {
             HummockEpoch::MAX
@@ -501,7 +509,9 @@ impl SharedBufferBatch {
                 DeleteRangeTombstone::new(
                     table_id,
                     start_table_key.to_vec(),
+                    false,
                     end_table_key.to_vec(),
+                    false,
                     epoch,
                 )
             })
@@ -533,12 +543,12 @@ impl SharedBufferBatch {
     fn check_tombstone_prefix(table_id: TableId, tombstones: &[DeleteRangeTombstone]) {
         for tombstone in tombstones {
             assert_eq!(
-                tombstone.start_user_key.table_id, table_id,
+                tombstone.start_user_key.user_key.table_id, table_id,
                 "delete range tombstone in a shared buffer batch must begin with the same table id"
             );
-            assert_eq!(
-                tombstone.end_user_key.table_id, table_id,
-                "delete range tombstone in a shared buffer batch must begin with the same table id"
+            assert!(
+                (tombstone.end_user_key.user_key.table_id == table_id) || ((tombstone.end_user_key.user_key.table_id.table_id() == table_id.table_id() + 1) && tombstone.end_user_key.user_key.is_empty() && !tombstone.end_user_key.is_exclusive),
+                "delete range tombstone in a shared buffer batch must end with the same table id or end with inf"
             );
         }
     }
@@ -752,7 +762,7 @@ impl SharedBufferDeleteRangeIterator {
 }
 
 impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
-    fn next_user_key(&self) -> UserKey<&[u8]> {
+    fn next_extended_user_key(&self) -> ExtendedUserKey<&[u8]> {
         self.inner.monotonic_tombstone_events[self.next_idx]
             .event_key
             .as_ref()
@@ -775,8 +785,11 @@ impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
     }
 
     fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
+        let target_extended_user_key = ExtendedUserKey::from_user_key(target_user_key, false);
         self.next_idx = self.inner.monotonic_tombstone_events.partition_point(
-            |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(&target_user_key),
+            |MonotonicDeleteEvent { event_key, .. }| {
+                event_key.as_ref().le(&target_extended_user_key)
+            },
         );
     }
 
