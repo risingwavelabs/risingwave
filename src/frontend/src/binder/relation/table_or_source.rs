@@ -21,6 +21,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_sqlparser::ast::{Statement, TableAlias};
 use risingwave_sqlparser::parser::Parser;
+use risingwave_sqlparser::tokenizer::{Token, Tokenizer};
 
 use super::BoundShare;
 use crate::binder::relation::BoundSubquery;
@@ -365,9 +366,42 @@ impl Binder {
     }
 
     pub(crate) fn resolve_regclass(&self, class_name: &str) -> Result<u32> {
-        let schema_path = SchemaPath::Path(&self.search_path, &self.auth_context.user_name);
-        Ok(self
-            .catalog
-            .get_id_by_class_name(&self.db_name, schema_path, class_name)?)
+        let obj = Self::parse_object_name(class_name)?;
+
+        if obj.0.len() == 1 {
+            let class_name = obj.0[0].real_value();
+            let schema_path = SchemaPath::Path(&self.search_path, &self.auth_context.user_name);
+            Ok(self
+                .catalog
+                .get_id_by_class_name(&self.db_name, schema_path, &class_name)?)
+        } else {
+            let schema = obj.0[0].real_value();
+            let class_name = obj.0[1].real_value();
+            let schema_path = SchemaPath::Name(&schema);
+            Ok(self
+                .catalog
+                .get_id_by_class_name(&self.db_name, schema_path, &class_name)?)
+        }
+    }
+
+    /// Attempt to parse the value of a varchar Literal into an
+    /// [`ObjectName`](risingwave_sqlparser::ast::ObjectName).
+    fn parse_object_name(name: &str) -> Result<risingwave_sqlparser::ast::ObjectName> {
+        // We use the full parser here because this function needs to accept every legal way
+        // of identifying an object in PG SQL as a valid value for the varchar
+        // literal.  For example: 'foo', 'public.foo', '"my table"', and
+        // '"my schema".foo' must all work as values passed pg_table_size.
+        let mut tokenizer = Tokenizer::new(name);
+        let tokens = tokenizer
+            .tokenize_with_location()
+            .map_err(|e| ErrorCode::BindError(e.to_string()))?;
+        let mut parser = Parser::new(tokens);
+        let object = parser
+            .parse_object_name()
+            .map_err(|e| ErrorCode::BindError(e.to_string()))?;
+        if parser.next_token().token != Token::EOF {
+            Err(ErrorCode::BindError("Invalid name syntax".to_string()))?
+        }
+        Ok(object)
     }
 }

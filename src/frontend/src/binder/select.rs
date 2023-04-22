@@ -15,36 +15,31 @@
 use std::fmt::Debug;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{
-    Field, IndexId, Schema, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME,
-};
+use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::AggKind;
-use risingwave_pb::plan_common::JoinType;
 use risingwave_sqlparser::ast::{
     BinaryOperator, DataType as AstDataType, Distinct, Expr, Ident, Join, JoinConstraint,
     JoinOperator, ObjectName, Select, SelectItem, TableFactor, TableWithJoins,
 };
-use risingwave_sqlparser::parser::Parser;
-use risingwave_sqlparser::tokenizer::{Token, Tokenizer};
 
 use super::bind_context::{Clause, ColumnBinding};
 use super::statement::RewriteExprsRecursive;
-use super::{expr, BoundBaseTable, BoundJoin, UNNAMED_COLUMN};
+use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, Relation};
+use crate::catalog::check_valid_column_name;
 use crate::catalog::system_catalog::pg_catalog::{
-    PG_INDEX_COLUMNS, PG_INDEX_TABLE_NAME, PG_USER_ID_INDEX, PG_USER_NAME_INDEX, PG_USER_TABLE_NAME,
+    PG_USER_ID_INDEX, PG_USER_NAME_INDEX, PG_USER_TABLE_NAME,
 };
 use crate::catalog::system_catalog::rw_catalog::{
     RW_TABLE_STATS_KEY_SIZE_INDEX, RW_TABLE_STATS_TABLE_ID_INDEX, RW_TABLE_STATS_TABLE_NAME,
     RW_TABLE_STATS_VALUE_SIZE_INDEX,
 };
-use crate::catalog::{check_valid_column_name, TableId};
 use crate::expr::{
     AggCall, CorrelatedId, CorrelatedInputRef, Depth, Expr as _, ExprImpl, ExprType, FunctionCall,
-    InputRef, Literal, OrderBy,
+    InputRef, OrderBy,
 };
 use crate::utils::Condition;
 
@@ -607,27 +602,6 @@ impl Binder {
                 BoundDistinct::DistinctOn(bound_exprs)
             }
         })
-    }
-
-    /// Attempt to parse the value of a varchar Literal into an
-    /// [`ObjectName`](risingwave_sqlparser::ast::ObjectName).
-    fn parse_object_name(name: &str) -> Result<risingwave_sqlparser::ast::ObjectName> {
-        // We use the full parser here because this function needs to accept every legal way
-        // of identifying an object in PG SQL as a valid value for the varchar
-        // literal.  For example: 'foo', 'public.foo', '"my table"', and
-        // '"my schema".foo' must all work as values passed pg_table_size.
-        let mut tokenizer = Tokenizer::new(name);
-        let tokens = tokenizer
-            .tokenize_with_location()
-            .map_err(|e| ErrorCode::BindError(e.to_string()))?;
-        let mut parser = Parser::new(tokens);
-        let object = parser
-            .parse_object_name()
-            .map_err(|e| ErrorCode::BindError(e.to_string()))?;
-        if parser.next_token().token != Token::EOF {
-            Err(ErrorCode::BindError("Invalid name syntax".to_string()))?
-        }
-        Ok(object)
     }
 }
 
