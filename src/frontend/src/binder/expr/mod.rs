@@ -419,6 +419,9 @@ impl Binder {
                             }
                         }
                     }
+                    ExprImpl::Literal(literal) if literal.return_type().is_int() => {
+                        return Ok(ExprImpl::Literal(literal.clone()))
+                    }
                     _ => {
                         return Err(
                             ErrorCode::BindError("Unsupported input type".to_string()).into()
