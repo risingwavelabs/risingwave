@@ -395,7 +395,7 @@ impl Binder {
         //     SELECT sum(total_key_size + total_value_size)
         //     FROM rw_catalog.rw_table_stats as stats
         //     JOIN pg_index on stats.id = pg_index.indexrelid
-        //     WHERE id = 'test'::regclass
+        //     WHERE pg_index.indrelid = 'test'::regclass
 
         // Get the size of each index
         // define the output schema
@@ -412,7 +412,9 @@ impl Binder {
         let where_clause: Option<ExprImpl> = Some(
             FunctionCall::new(
                 ExprType::Equal,
-                vec![InputRef::new(5, DataType::Int32).into(), table_id],
+                vec![InputRef::new(5, DataType::Int32).into(), table_id], /* TODO: get rid of
+                                                                           * hardcoded number
+                                                                           * here. */
             )?
             .into(),
         );
@@ -436,7 +438,6 @@ impl Binder {
                         for_system_time_as_of_now: false,
                     },
                     join_operator: JoinOperator::Inner(constraint),
-                    // join_operator: JoinOperator::Inner(JoinConstraint::None),
                 }],
             })
             .unwrap();
