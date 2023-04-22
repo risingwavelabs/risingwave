@@ -105,3 +105,106 @@ drop table t;
 # This is different from PostgreSQL, we may want to change this in the future.
 statement ok
 select array[array[1,2], array[3]];
+
+# array range access
+query T
+select array[1,NULL,2][-1:134124523];
+----
+{1,NULL,2}
+
+query T
+select (array[1,NULL,2])[3:1];
+----
+NULL
+
+query T
+select array[array[1],array[2],array[3]][-21432315:134124523];
+----
+{{1},{2},{3}}
+
+query T
+select array[array[1],array[2],array[3]][-21432315:134124523][1];
+----
+{1}
+
+query T
+select array[array[1],array[2],array[3]][-21432315:134124523][1:2];
+----
+{{1},{2}}
+
+query T
+select array[array[1],array[2],array[3]][-21432315:134124523][1];
+----
+{1}
+
+query I
+select array[array[1],array[2],array[3]][-21432315:134124523][1][1];
+----
+1
+
+query T
+select (array[1,NULL,2])[:3];
+----
+{1,NULL,2}
+
+query T
+select (array[1,NULL,2])[:2];
+----
+{1,NULL}
+
+query T
+select (array[1,NULL,2])[:1];
+----
+{1}
+
+query T
+select (array[1,NULL,2])[:999];
+----
+{1,NULL,2}
+
+# TODO: PG returns `{}` in this case
+query T
+select (array[1,NULL,2])[:0];
+----
+NULL
+
+query T
+select (array[1,NULL,2])[:-1];
+----
+NULL
+
+query T
+select (array[1,NULL,2])[-1:];
+----
+{1,NULL,2}
+
+query T
+select (array[1,NULL,2])[0:];
+----
+{1,NULL,2}
+
+query T
+select (array[1,NULL,2])[1:];
+----
+{1,NULL,2}
+
+query T
+select (array[1,NULL,2])[2:];
+----
+{NULL,2}
+
+query T
+select (array[1,NULL,2])[3:];
+----
+{2}
+
+# TODO: PG returns `{}` in this case
+query T
+select (array[1,NULL,2])[4:];
+----
+NULL
+
+query T
+select (array[1,NULL,2])[5:];
+----
+NULL
