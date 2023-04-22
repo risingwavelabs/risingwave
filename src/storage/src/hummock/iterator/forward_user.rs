@@ -91,7 +91,6 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         while self.iterator.is_valid() {
             let full_key = self.iterator.key();
             let epoch = full_key.epoch;
-            let key = &full_key.user_key;
 
             // handle multi-version
             if epoch <= self.min_epoch || epoch > self.read_epoch {

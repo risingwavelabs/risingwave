@@ -98,31 +98,39 @@ impl DeleteRangeTombstone {
     pub fn new(
         table_id: TableId,
         start_table_key: Vec<u8>,
+        is_left_open: bool,
         end_table_key: Vec<u8>,
+        is_right_close: bool,
         sequence: HummockEpoch,
     ) -> Self {
         Self {
-            start_user_key: UserKey::new(table_id, TableKey(start_table_key)),
-            end_user_key: UserKey::new(table_id, TableKey(end_table_key)),
+            start_user_key: ExtendedUserKey::from_user_key(
+                UserKey::new(table_id, TableKey(start_table_key)),
+                is_left_open,
+            ),
+            end_user_key: ExtendedUserKey::from_user_key(
+                UserKey::new(table_id, TableKey(end_table_key)),
+                is_right_close,
+            ),
             sequence,
         }
     }
 
-    pub fn encode(&self, buf: &mut Vec<u8>) {
-        self.start_user_key.encode_length_prefixed(buf);
-        self.end_user_key.encode_length_prefixed(buf);
-        buf.put_u64_le(self.sequence);
-    }
-
-    pub fn decode(buf: &mut &[u8]) -> Self {
-        let start_user_key = UserKey::decode_length_prefixed(buf);
-        let end_user_key = UserKey::decode_length_prefixed(buf);
-        let sequence = buf.get_u64_le();
-        Self {
-            start_user_key,
-            end_user_key,
+    #[cfg(test)]
+    pub fn new_for_test(
+        table_id: TableId,
+        start_table_key: Vec<u8>,
+        end_table_key: Vec<u8>,
+        sequence: HummockEpoch,
+    ) -> Self {
+        Self::new(
+            table_id,
+            start_table_key,
+            false,
+            end_table_key,
+            false,
             sequence,
-        }
+        )
     }
 }
 

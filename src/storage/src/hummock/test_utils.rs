@@ -20,7 +20,7 @@ use futures::{Stream, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::must_match;
-use risingwave_hummock_sdk::key::{FullKey, UserKey};
+use risingwave_hummock_sdk::key::{ExtendedUserKey, FullKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
@@ -235,15 +235,13 @@ pub async fn gen_test_sstable_inner<B: AsRef<[u8]> + Clone + Default + Eq>(
         }
 
         let mut earliest_delete_epoch = HummockEpoch::MAX;
+        let extended_user_key = ExtendedUserKey::from_user_key(key.user_key.as_ref(), false);
         for range_tombstone in &range_tombstones {
             if range_tombstone
                 .start_user_key
                 .as_ref()
-                .le(&key.user_key.as_ref())
-                && range_tombstone
-                    .end_user_key
-                    .as_ref()
-                    .gt(&key.user_key.as_ref())
+                .le(&extended_user_key)
+                && range_tombstone.end_user_key.as_ref().gt(&extended_user_key)
                 && range_tombstone.sequence >= key.epoch
                 && range_tombstone.sequence < earliest_delete_epoch
             {

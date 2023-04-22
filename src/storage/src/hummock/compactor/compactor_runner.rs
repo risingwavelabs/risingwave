@@ -200,8 +200,18 @@ mod tests {
         let sstable_store = mock_sstable_store();
         let kv_pairs = vec![];
         let range_tombstones = vec![
-            DeleteRangeTombstone::new(TableId::new(1), b"abc".to_vec(), b"cde".to_vec(), 1),
-            DeleteRangeTombstone::new(TableId::new(2), b"abc".to_vec(), b"def".to_vec(), 1),
+            DeleteRangeTombstone::new_for_test(
+                TableId::new(1),
+                b"abc".to_vec(),
+                b"cde".to_vec(),
+                1,
+            ),
+            DeleteRangeTombstone::new_for_test(
+                TableId::new(2),
+                b"abc".to_vec(),
+                b"def".to_vec(),
+                1,
+            ),
         ];
         let sstable_info = gen_test_sstable_with_range_tombstone(
             default_builder_opt_for_test(),
@@ -232,8 +242,8 @@ mod tests {
         .await
         .unwrap();
         let ret = collector.get_tombstone_between(
-            &UserKey::<Bytes>::default().as_ref(),
-            &UserKey::<Bytes>::default().as_ref(),
+            UserKey::<Bytes>::default().as_ref(),
+            UserKey::<Bytes>::default().as_ref(),
         );
         assert_eq!(
             ret,

@@ -747,11 +747,11 @@ impl<T: AsRef<[u8]>> ExtendedUserKey<T> {
 }
 
 impl<'a> ExtendedUserKey<&'a [u8]> {
-    pub fn to_vec(self) -> ExtendedUserKey<Vec<u8>> {
+    pub fn to_vec(&self) -> ExtendedUserKey<Vec<u8>> {
         self.copy_into()
     }
 
-    pub fn copy_into<T: CopyFromSlice + AsRef<[u8]>>(self) -> ExtendedUserKey<T> {
+    pub fn copy_into<T: CopyFromSlice + AsRef<[u8]>>(&self) -> ExtendedUserKey<T> {
         ExtendedUserKey {
             user_key: self.user_key.copy_into(),
             is_exclusive: self.is_exclusive,

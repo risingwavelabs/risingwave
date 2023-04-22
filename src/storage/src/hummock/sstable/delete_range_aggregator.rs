@@ -213,7 +213,8 @@ impl CompactionDeleteRanges {
             {
                 candidate.start_user_key = extended_smallest_user_key.to_vec();
             }
-            if !extended_largest_user_key.is_empty() && extended_largest_user_key.lt(&candidate.end_user_key.as_ref())
+            if !extended_largest_user_key.is_empty()
+                && extended_largest_user_key.lt(&candidate.end_user_key.as_ref())
             {
                 candidate.end_user_key = extended_largest_user_key.to_vec();
             }
@@ -243,10 +244,11 @@ impl CompactionDeleteRangeIterator {
     /// Target-key must be given in order.
     pub(crate) fn earliest_delete_which_can_see_key(
         &mut self,
-        target_user_key: &UserKey<&[u8]>,
+        target_user_key: UserKey<&[u8]>,
         epoch: HummockEpoch,
     ) -> HummockEpoch {
-        while let Some((user_key, ..)) = self.events.events.get(self.seek_idx) && user_key.as_ref().le(target_user_key) {
+        let target_extended_user_key = ExtendedUserKey::from_user_key(target_user_key, false);
+        while let Some((extended_user_key, ..)) = self.events.events.get(self.seek_idx) && extended_user_key.as_ref().le(&target_extended_user_key) {
             self.apply(self.seek_idx);
             self.seek_idx += 1;
         }
@@ -261,10 +263,13 @@ impl CompactionDeleteRangeIterator {
     }
 
     pub(crate) fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
+        let target_extended_user_key = ExtendedUserKey::from_user_key(target_user_key, false);
         self.seek_idx = self
             .events
             .events
-            .partition_point(|(user_key, ..)| user_key.as_ref().le(&target_user_key));
+            .partition_point(|(extended_user_key, ..)| {
+                extended_user_key.as_ref().le(&target_extended_user_key)
+            });
         self.epochs.clear();
         for idx in 0..self.seek_idx {
             self.apply(idx);
@@ -359,60 +364,70 @@ mod tests {
         let mut builder = CompactionDeleteRangesBuilder::default();
         let table_id = TableId::default();
         builder.add_tombstone(vec![
-            DeleteRangeTombstone::new(table_id, b"aaaaaa".to_vec(), b"bbbccc".to_vec(), 12),
-            DeleteRangeTombstone::new(table_id, b"aaaaaa".to_vec(), b"bbbddd".to_vec(), 9),
-            DeleteRangeTombstone::new(table_id, b"bbbaab".to_vec(), b"bbbdddf".to_vec(), 6),
-            DeleteRangeTombstone::new(table_id, b"bbbeee".to_vec(), b"eeeeee".to_vec(), 8),
-            DeleteRangeTombstone::new(table_id, b"bbbfff".to_vec(), b"ffffff".to_vec(), 9),
-            DeleteRangeTombstone::new(table_id, b"gggggg".to_vec(), b"hhhhhh".to_vec(), 9),
+            DeleteRangeTombstone::new_for_test(
+                table_id,
+                b"aaaaaa".to_vec(),
+                b"bbbccc".to_vec(),
+                12,
+            ),
+            DeleteRangeTombstone::new_for_test(table_id, b"aaaaaa".to_vec(), b"bbbddd".to_vec(), 9),
+            DeleteRangeTombstone::new_for_test(
+                table_id,
+                b"bbbaab".to_vec(),
+                b"bbbdddf".to_vec(),
+                6,
+            ),
+            DeleteRangeTombstone::new_for_test(table_id, b"bbbeee".to_vec(), b"eeeeee".to_vec(), 8),
+            DeleteRangeTombstone::new_for_test(table_id, b"bbbfff".to_vec(), b"ffffff".to_vec(), 9),
+            DeleteRangeTombstone::new_for_test(table_id, b"gggggg".to_vec(), b"hhhhhh".to_vec(), 9),
         ]);
         let compaction_delete_ranges = builder.build_for_compaction(false);
         let mut iter = compaction_delete_ranges.iter();
 
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(&test_user_key(b"bbb").as_ref(), 13),
+            iter.earliest_delete_which_can_see_key(test_user_key(b"bbb").as_ref(), 13),
             HummockEpoch::MAX
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(&test_user_key(b"bbb").as_ref(), 11),
+            iter.earliest_delete_which_can_see_key(test_user_key(b"bbb").as_ref(), 11),
             12
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(&test_user_key(b"bbb").as_ref(), 8),
+            iter.earliest_delete_which_can_see_key(test_user_key(b"bbb").as_ref(), 8),
             9
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(&test_user_key(b"bbbaaa").as_ref(), 8),
+            iter.earliest_delete_which_can_see_key(test_user_key(b"bbbaaa").as_ref(), 8),
             9
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(&test_user_key(b"bbbccd").as_ref(), 8),
+            iter.earliest_delete_which_can_see_key(test_user_key(b"bbbccd").as_ref(), 8),
             9
         );
 
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(&test_user_key(b"bbbddd").as_ref(), 8),
+            iter.earliest_delete_which_can_see_key(test_user_key(b"bbbddd").as_ref(), 8),
             HummockEpoch::MAX
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(&test_user_key(b"bbbeee").as_ref(), 8),
+            iter.earliest_delete_which_can_see_key(test_user_key(b"bbbeee").as_ref(), 8),
             8
         );
 
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(&test_user_key(b"bbbeef").as_ref(), 10),
+            iter.earliest_delete_which_can_see_key(test_user_key(b"bbbeef").as_ref(), 10),
             HummockEpoch::MAX
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(&test_user_key(b"eeeeee").as_ref(), 9),
+            iter.earliest_delete_which_can_see_key(test_user_key(b"eeeeee").as_ref(), 9),
             9
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(&test_user_key(b"gggggg").as_ref(), 8),
+            iter.earliest_delete_which_can_see_key(test_user_key(b"gggggg").as_ref(), 8),
             9
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(&test_user_key(b"hhhhhh").as_ref(), 8),
+            iter.earliest_delete_which_can_see_key(test_user_key(b"hhhhhh").as_ref(), 8),
             HummockEpoch::MAX
         );
     }
@@ -422,16 +437,16 @@ mod tests {
         let table_id = TableId::default();
         let mut builder = CompactionDeleteRangesBuilder::default();
         builder.add_tombstone(vec![
-            DeleteRangeTombstone::new(table_id, b"aaaa".to_vec(), b"bbbb".to_vec(), 12),
-            DeleteRangeTombstone::new(table_id, b"aaaa".to_vec(), b"cccc".to_vec(), 12),
-            DeleteRangeTombstone::new(table_id, b"cccc".to_vec(), b"dddd".to_vec(), 10),
-            DeleteRangeTombstone::new(table_id, b"cccc".to_vec(), b"eeee".to_vec(), 12),
-            DeleteRangeTombstone::new(table_id, b"eeee".to_vec(), b"ffff".to_vec(), 12),
+            DeleteRangeTombstone::new_for_test(table_id, b"aaaa".to_vec(), b"bbbb".to_vec(), 12),
+            DeleteRangeTombstone::new_for_test(table_id, b"aaaa".to_vec(), b"cccc".to_vec(), 12),
+            DeleteRangeTombstone::new_for_test(table_id, b"cccc".to_vec(), b"dddd".to_vec(), 10),
+            DeleteRangeTombstone::new_for_test(table_id, b"cccc".to_vec(), b"eeee".to_vec(), 12),
+            DeleteRangeTombstone::new_for_test(table_id, b"eeee".to_vec(), b"ffff".to_vec(), 12),
         ]);
         let compaction_delete_range = builder.build_for_compaction(false);
         let split_ranges = compaction_delete_range.get_tombstone_between(
-            &test_user_key(b"bbbb").as_ref(),
-            &test_user_key(b"eeeeee").as_ref(),
+            test_user_key(b"bbbb").as_ref(),
+            test_user_key(b"eeeeee").as_ref(),
         );
         assert_eq!(4, split_ranges.len());
         assert_eq!(
