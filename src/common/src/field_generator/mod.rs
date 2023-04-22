@@ -75,6 +75,12 @@ pub enum FieldKind {
     Random,
 }
 
+pub enum VarcharProperty {
+    RandomVariableLength,
+    RandomFixedLength(Option<usize>),
+    Constant,
+}
+
 pub enum FieldGeneratorImpl {
     I16Sequence(I16SequenceField),
     I32Sequence(I32SequenceField),
@@ -86,7 +92,9 @@ pub enum FieldGeneratorImpl {
     I64Random(I64RandomField),
     F32Random(F32RandomField),
     F64Random(F64RandomField),
-    Varchar(VarcharField),
+    VarcharRandomVariableLength(VarcharRandomVariableLengthField),
+    VarcharRandomFixedLength(VarcharRandomFixedLengthField),
+    VarcharConstant,
     Timestamp(TimestampField),
     Struct(Vec<(String, FieldGeneratorImpl)>),
     List(Box<FieldGeneratorImpl>, usize),
@@ -181,10 +189,21 @@ impl FieldGeneratorImpl {
         )?))
     }
 
-    pub fn with_varchar(length: Option<String>, seed: u64) -> Result<Self> {
-        Ok(FieldGeneratorImpl::Varchar(VarcharField::new(
-            length, seed,
-        )?))
+    pub fn with_varchar(varchar_property: &VarcharProperty, seed: u64) -> Self {
+        match varchar_property {
+            VarcharProperty::RandomFixedLength(length_option) => {
+                FieldGeneratorImpl::VarcharRandomFixedLength(VarcharRandomFixedLengthField::new(
+                    length_option,
+                    seed,
+                ))
+            }
+            VarcharProperty::RandomVariableLength => {
+                FieldGeneratorImpl::VarcharRandomVariableLength(
+                    VarcharRandomVariableLengthField::new(seed),
+                )
+            }
+            VarcharProperty::Constant => FieldGeneratorImpl::VarcharConstant,
+        }
     }
 
     pub fn with_struct_fields(fields: Vec<(String, FieldGeneratorImpl)>) -> Result<Self> {
@@ -212,7 +231,9 @@ impl FieldGeneratorImpl {
             FieldGeneratorImpl::I64Random(f) => f.generate(offset),
             FieldGeneratorImpl::F32Random(f) => f.generate(offset),
             FieldGeneratorImpl::F64Random(f) => f.generate(offset),
-            FieldGeneratorImpl::Varchar(f) => f.generate(offset),
+            FieldGeneratorImpl::VarcharRandomFixedLength(f) => f.generate(offset),
+            FieldGeneratorImpl::VarcharRandomVariableLength(f) => f.generate(offset),
+            FieldGeneratorImpl::VarcharConstant => VarcharConstant::generate_json(),
             FieldGeneratorImpl::Timestamp(f) => f.generate(offset),
             FieldGeneratorImpl::Struct(fields) => {
                 let map = fields
@@ -242,7 +263,9 @@ impl FieldGeneratorImpl {
             FieldGeneratorImpl::I64Random(f) => f.generate_datum(offset),
             FieldGeneratorImpl::F32Random(f) => f.generate_datum(offset),
             FieldGeneratorImpl::F64Random(f) => f.generate_datum(offset),
-            FieldGeneratorImpl::Varchar(f) => f.generate_datum(offset),
+            FieldGeneratorImpl::VarcharRandomFixedLength(f) => f.generate_datum(offset),
+            FieldGeneratorImpl::VarcharRandomVariableLength(f) => f.generate_datum(offset),
+            FieldGeneratorImpl::VarcharConstant => VarcharConstant::generate_datum(),
             FieldGeneratorImpl::Timestamp(f) => f.generate_datum(offset),
             FieldGeneratorImpl::Struct(fields) => {
                 let data = fields
@@ -307,7 +330,10 @@ mod tests {
             DataType::Timestamp,
         ] {
             let mut generator = match data_type {
-                DataType::Varchar => FieldGeneratorImpl::with_varchar(None, seed).unwrap(),
+                DataType::Varchar => FieldGeneratorImpl::with_varchar(
+                    &VarcharProperty::RandomFixedLength(None),
+                    seed,
+                ),
                 DataType::Timestamp => {
                     FieldGeneratorImpl::with_timestamp(None, None, None, seed).unwrap()
                 }

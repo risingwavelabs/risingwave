@@ -23,6 +23,7 @@ use crate::array::column::Column;
 use crate::array::{DataChunk, Vis};
 use crate::buffer::Bitmap;
 use crate::estimate_size::EstimateSize;
+use crate::field_generator::VarcharProperty;
 use crate::row::{OwnedRow, Row};
 use crate::types::to_text::ToText;
 use crate::types::DataType;
@@ -309,6 +310,17 @@ pub trait StreamChunkTestExt: Sized {
 
     /// Sort rows.
     fn sort_rows(self) -> Self;
+
+    /// Build stream chunk from data chunk
+    fn new_from_data_chunk(ops: Vec<Op>, chunk: DataChunk) -> Self;
+
+    /// Generate stream chunks
+    fn gen_stream_chunks(
+        num_of_chunks: usize,
+        chunk_size: usize,
+        data_types: &[DataType],
+        varchar_properties: &VarcharProperty,
+    ) -> Vec<Self>;
 }
 
 impl StreamChunkTestExt for StreamChunk {
@@ -430,6 +442,28 @@ impl StreamChunkTestExt for StreamChunk {
             ops: idx.iter().map(|&i| self.ops[i]).collect(),
             data: self.data.reorder_rows(&idx),
         }
+    }
+
+    fn new_from_data_chunk(ops: Vec<Op>, chunk: DataChunk) -> Self {
+        StreamChunk { ops, data: chunk }
+    }
+
+    /// Generate `num_of_chunks` data chunks with type `data_types`,
+    /// where each data chunk has cardinality of `chunk_size`.
+    /// TODO(kwannoel): Generate different types of op, different vis.
+    fn gen_stream_chunks(
+        num_of_chunks: usize,
+        chunk_size: usize,
+        data_types: &[DataType],
+        varchar_properties: &VarcharProperty,
+    ) -> Vec<StreamChunk> {
+        DataChunk::gen_data_chunks(num_of_chunks, chunk_size, data_types, varchar_properties)
+            .into_iter()
+            .map(|chunk| {
+                let ops = vec![Op::Insert; chunk_size];
+                StreamChunk::new_from_data_chunk(ops, chunk)
+            })
+            .collect()
     }
 }
 
