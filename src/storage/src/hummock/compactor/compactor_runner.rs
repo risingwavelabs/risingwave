@@ -123,7 +123,7 @@ impl CompactorRunner {
                 );
                 range_tombstone_list.retain(|tombstone| {
                     !filter.should_delete(FullKey::from_user_key(
-                        tombstone.start_user_key.as_ref(),
+                        tombstone.start_user_key.user_key.as_ref(),
                         tombstone.sequence,
                     ))
                 });

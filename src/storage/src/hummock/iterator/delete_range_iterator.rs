@@ -148,7 +148,8 @@ impl DeleteRangeIterator for RangeIteratorTyped {
 
 impl PartialEq<Self> for RangeIteratorTyped {
     fn eq(&self, other: &Self) -> bool {
-        self.next_extended_user_key().eq(&other.next_extended_user_key())
+        self.next_extended_user_key()
+            .eq(&other.next_extended_user_key())
     }
 }
 
@@ -162,7 +163,9 @@ impl Eq for RangeIteratorTyped {}
 
 impl Ord for RangeIteratorTyped {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        other.next_extended_user_key().cmp(&self.next_extended_user_key())
+        other
+            .next_extended_user_key()
+            .cmp(&self.next_extended_user_key())
     }
 }
 

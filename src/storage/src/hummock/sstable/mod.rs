@@ -74,8 +74,8 @@ const VERSION: u32 = 1;
 #[derive(Clone, PartialEq, Eq, Debug)]
 // delete keys located in [start_user_key, end_user_key)
 pub struct DeleteRangeTombstone {
-    pub start_user_key: UserKey<Vec<u8>>,
-    pub end_user_key: UserKey<Vec<u8>>,
+    pub start_user_key: ExtendedUserKey<Vec<u8>>,
+    pub end_user_key: ExtendedUserKey<Vec<u8>>,
     pub sequence: HummockEpoch,
 }
 
@@ -194,11 +194,15 @@ pub(crate) fn create_monotonic_events(
         apply_event(&mut epochs, &event);
         monotonic_tombstone_events.push(MonotonicDeleteEvent {
             event_key: event.0,
-            is_exclusive: false,
             new_epoch: epochs.first().map_or(HummockEpoch::MAX, |epoch| *epoch),
         });
     }
-    monotonic_tombstone_events.dedup_by_key(|MonotonicDeleteEvent { new_epoch, .. }| *new_epoch);
+    monotonic_tombstone_events.dedup_by_key(
+        |MonotonicDeleteEvent {
+             event_key,
+             new_epoch,
+         }| (event_key.user_key.table_id, *new_epoch),
+    );
 
     monotonic_tombstone_events
 }

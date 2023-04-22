@@ -740,6 +740,23 @@ impl<T: AsRef<[u8]>> ExtendedUserKey<T> {
     pub fn as_ref(&self) -> ExtendedUserKey<&[u8]> {
         ExtendedUserKey::from_user_key(self.user_key.as_ref(), self.is_exclusive)
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.user_key.is_empty()
+    }
+}
+
+impl<'a> ExtendedUserKey<&'a [u8]> {
+    pub fn to_vec(self) -> ExtendedUserKey<Vec<u8>> {
+        self.copy_into()
+    }
+
+    pub fn copy_into<T: CopyFromSlice + AsRef<[u8]>>(self) -> ExtendedUserKey<T> {
+        ExtendedUserKey {
+            user_key: self.user_key.copy_into(),
+            is_exclusive: self.is_exclusive,
+        }
+    }
 }
 
 pub trait EmptySliceRef {

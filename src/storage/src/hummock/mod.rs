@@ -360,12 +360,11 @@ pub async fn get_from_sstable_info(
 ) -> HummockResult<Option<HummockValue<Bytes>>> {
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
     let min_epoch = gen_min_epoch(full_key.epoch, read_options.retention_seconds.as_ref());
-    let ukey = &full_key.user_key;
 
     // Bloom filter key is the distribution key, which is no need to be the prefix of pk, and do not
     // contain `TablePrefix` and `VnodePrefix`.
     if let Some(hash) = dist_key_hash && !hit_sstable_bloom_filter(sstable.value(), hash, local_stats) {
-        if !read_options.ignore_range_tombstone && get_min_delete_range_epoch_from_sstable(sstable.value().as_ref(), ukey) <= full_key.epoch {
+        if !read_options.ignore_range_tombstone && get_min_delete_range_epoch_from_sstable(sstable.value().as_ref(), full_key.user_key) <= full_key.epoch {
             return Ok(Some(HummockValue::Delete));
         }
 
@@ -383,8 +382,10 @@ pub async fn get_from_sstable_info(
     // Iterator has sought passed the borders.
     if !iter.is_valid() {
         if !read_options.ignore_range_tombstone
-            && get_min_delete_range_epoch_from_sstable(iter.sst().value().as_ref(), ukey)
-                <= full_key.epoch
+            && get_min_delete_range_epoch_from_sstable(
+                iter.sst().value().as_ref(),
+                full_key.user_key,
+            ) <= full_key.epoch
         {
             return Ok(Some(HummockValue::Delete));
         }
@@ -393,14 +394,14 @@ pub async fn get_from_sstable_info(
 
     // Iterator gets us the key, we tell if it's the key we want
     // or key next to it.
-    let value = if iter.key().user_key == *ukey {
+    let value = if iter.key().user_key == full_key.user_key {
         if iter.key().epoch <= min_epoch {
             None
         } else {
             Some(iter.value().to_bytes())
         }
     } else if !read_options.ignore_range_tombstone
-        && get_min_delete_range_epoch_from_sstable(iter.sst().value().as_ref(), ukey)
+        && get_min_delete_range_epoch_from_sstable(iter.sst().value().as_ref(), full_key.user_key)
             <= full_key.epoch
     {
         Some(HummockValue::Delete)
