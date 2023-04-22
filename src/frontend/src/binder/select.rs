@@ -391,14 +391,11 @@ impl Binder {
 
     /// This returns the size of all the indexes that are on the specified table.
     pub fn bind_get_indexes_size_select(&mut self, table: &ExprImpl) -> Result<BoundSelect> {
-        let arg = table.as_literal().ok_or_else(|| {
-            ErrorCode::BindError("pg_indexes_size only supports literals as arguments".to_string())
-        })?;
-
-        // select sum(total_key_size + total_value_size)
-        // FROM rw_catalog.rw_table_stats as stats
-        // JOIN pg_index on stats.id = pg_index.indexrelid
-        // where pg_index.indrelid = 'test'::regclass
+        // this function is implemented with the following query:
+        //     SELECT sum(total_key_size + total_value_size)
+        //     FROM rw_catalog.rw_table_stats as stats
+        //     JOIN pg_index on stats.id = pg_index.indexrelid
+        //     WHERE id = 'test'::regclass
 
         // Get the size of each index
         // define the output schema
@@ -409,43 +406,17 @@ impl Binder {
             )],
         };
 
-        // Get table stats data
-        // let table_stats = Some(self.bind_relation_by_name_inner(
-        // Some(RW_CATALOG_SCHEMA_NAME),
-        // RW_TABLE_STATS_TABLE_NAME,
-        // None,
-        // false,
-        // )?);
-        //
-        // let pg_index = Some(self.bind_relation_by_name_inner(
-        // Some(PG_CATALOG_SCHEMA_NAME),
-        // PG_INDEX_TABLE_NAME,
-        // None,
-        // false,
-        // )?);
-
         // Filter to only the Indexes on this table
         let table_id = self.table_id_query(table)?;
         println!("idx on: {table_id:?}");
         let where_clause: Option<ExprImpl> = Some(
             FunctionCall::new(
                 ExprType::Equal,
-                vec![
-                    InputRef::new(RW_TABLE_STATS_TABLE_ID_INDEX, DataType::Int32).into(),
-                    table_id,
-                ],
+                vec![InputRef::new(5, DataType::Int32).into(), table_id],
             )?
             .into(),
         );
 
-        // let join_on_clause: ExprImpl = FunctionCall::new(
-        // ExprType::Equal,
-        // vec![
-        // InputRef::new(RW_TABLE_STATS_TABLE_ID_INDEX, DataType::Int32).into(),
-        // InputRef::new(0, DataType::Int32).into(),
-        // ],
-        // )?
-        // .into();
         let constraint = JoinConstraint::On(Expr::BinaryOp {
             left: Box::new(Expr::Identifier(Ident::new_unchecked("id"))),
             op: BinaryOperator::Eq,
@@ -469,12 +440,6 @@ impl Binder {
                 }],
             })
             .unwrap();
-        // let join = Box::new(BoundJoin {
-        // join_type: JoinType::Inner,
-        // left: table_stats.unwrap(),
-        // right: pg_index.unwrap(),
-        // cond: join_on_clause,
-        // });
 
         // Get the size of an index by adding the size of the keys and the size of the values
         let sum = FunctionCall::new(
