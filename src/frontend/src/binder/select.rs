@@ -609,36 +609,6 @@ impl Binder {
         })
     }
 
-    fn get_indexes_on_table_by_literal(&mut self, arg: &Literal) -> Result<Vec<IndexId>> {
-        self.get_table_by_literal(arg)
-            .map(|table| table.table_indexes.iter().map(|idx| idx.id).collect())
-    }
-
-    /// Uses a [`Literal`] value to attempt to find a [`Table`](BoundBaseTable). Will return an
-    /// error if no table is found which matches the given [`Literal`].
-    fn get_table_by_literal(&mut self, arg: &Literal) -> Result<BoundBaseTable> {
-        match arg
-            .get_data()
-            .as_ref()
-            .ok_or_else(|| ErrorCode::BindError("No Value".to_string()))?
-        {
-            ScalarImpl::Int16(id) => self.get_table_by_id(&TableId::new(*id as u32)),
-            ScalarImpl::Int32(id) => self.get_table_by_id(&TableId::new(*id as u32)),
-            ScalarImpl::Int64(id) => self.get_table_by_id(&TableId::new(*id as u32)),
-            ScalarImpl::Utf8(name) => {
-                let object_name = Self::parse_object_name(name)?;
-                let (schema_name, table_name) =
-                    Self::resolve_schema_qualified_name(&self.db_name, object_name)?;
-
-                self.get_table_by_name(schema_name.as_deref(), &table_name)
-            }
-            _ => Err(ErrorCode::BindError(
-                "This only supports Object Names (varchar) literals.".to_string(),
-            )
-            .into()),
-        }
-    }
-
     /// Attempt to parse the value of a varchar Literal into an
     /// [`ObjectName`](risingwave_sqlparser::ast::ObjectName).
     fn parse_object_name(name: &str) -> Result<risingwave_sqlparser::ast::ObjectName> {

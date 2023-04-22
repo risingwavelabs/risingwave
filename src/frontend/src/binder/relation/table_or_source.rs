@@ -284,26 +284,6 @@ impl Binder {
         table_name: &str,
         alias: Option<TableAlias>,
     ) -> Result<BoundBaseTable> {
-        let table = self.get_table_by_name(schema_name, table_name)?;
-
-        let columns = table.table_catalog.columns.clone();
-
-        self.bind_table_to_context(
-            columns
-                .iter()
-                .map(|c| (c.is_hidden, (&c.column_desc).into())),
-            table_name.to_string(),
-            alias,
-        )?;
-
-        Ok(table)
-    }
-
-    pub(crate) fn get_table_by_name(
-        &mut self,
-        schema_name: Option<&str>,
-        table_name: &str,
-    ) -> Result<BoundBaseTable> {
         let db_name = &self.db_name;
         let schema_path = match schema_name {
             Some(schema_name) => SchemaPath::Name(schema_name),
@@ -316,36 +296,24 @@ impl Binder {
 
         let table_id = table_catalog.id();
         let table_indexes = self.resolve_table_indexes(schema_name, table_id)?;
-
-        // TODO: This type name implies that the table is bound to the query context, should this
-        // return a different type?
-        Ok(BoundBaseTable {
+        let table = BoundBaseTable {
             table_id,
             table_catalog,
             table_indexes,
             for_system_time_as_of_now: false,
-        })
-    }
+        };
 
-    pub(crate) fn get_table_by_id(&mut self, table_id: &TableId) -> Result<BoundBaseTable> {
-        let db = &self.db_name;
-        // Find the schema catalog that contains this TableId
-        let schema = self.catalog.get_schema_by_table_id(db, table_id)?;
-        // Get the Indexes for this table
-        let table_indexes = schema.get_indexes_by_table_id(table_id);
-        // Get the table catalog for this table
-        let table_catalog = self.catalog.get_table_by_id(table_id)?;
+        let columns = table.table_catalog.columns.clone();
 
-        // Create a BoundBaseTable
+        self.bind_table_to_context(
+            columns
+                .iter()
+                .map(|c| (c.is_hidden, (&c.column_desc).into())),
+            table_name.to_string(),
+            alias,
+        )?;
 
-        // TODO: This type name implies that the table is bound to the query context, should this
-        // return a different type?
-        Ok(BoundBaseTable {
-            table_id: *table_id,
-            table_catalog,
-            table_indexes,
-            for_system_time_as_of_now: false,
-        })
+        Ok(table)
     }
 
     pub(crate) fn resolve_dml_table<'a>(
