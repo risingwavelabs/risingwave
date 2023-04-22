@@ -458,7 +458,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             key_range.left,
-            FullKey::for_test(table_id, b"aaa", 200).encode()
+            FullKey::for_test(table_id, b"aaa", u64::MAX).encode()
         );
         assert_eq!(
             key_range.right,

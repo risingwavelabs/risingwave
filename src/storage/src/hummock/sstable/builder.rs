@@ -332,23 +332,21 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                     )
                     .encode();
                 }
-            } else {
-                if largest_key.is_empty()
-                    || KeyComparator::encoded_less_than_unencoded(
-                        user_key(&largest_key),
-                        &monotonic_delete.event_key.user_key,
-                    )
-                {
-                    // use MAX as epoch because the last monotonic delete must be
-                    // `HummockEpoch::MAX`, so we can not include any version of
-                    // this key.
-                    largest_key = FullKey::from_user_key(
-                        monotonic_delete.event_key.user_key.clone(),
-                        HummockEpoch::MAX,
-                    )
-                    .encode();
-                    right_exclusive = true;
-                }
+            } else if largest_key.is_empty()
+                || KeyComparator::encoded_less_than_unencoded(
+                    user_key(&largest_key),
+                    &monotonic_delete.event_key.user_key,
+                )
+            {
+                // use MAX as epoch because the last monotonic delete must be
+                // `HummockEpoch::MAX`, so we can not include any version of
+                // this key.
+                largest_key = FullKey::from_user_key(
+                    monotonic_delete.event_key.user_key.clone(),
+                    HummockEpoch::MAX,
+                )
+                .encode();
+                right_exclusive = true;
             }
         }
         if let Some(monotonic_delete) = self.monotonic_deletes.first() {
