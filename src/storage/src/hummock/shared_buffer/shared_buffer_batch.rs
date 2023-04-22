@@ -24,7 +24,7 @@ use std::sync::{Arc, LazyLock};
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey, ExtendedUserKey};
 
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::iterator::{
@@ -249,6 +249,7 @@ impl SharedBufferBatchInner {
     }
 
     fn get_min_delete_range_epoch(&self, query_user_key: &UserKey<&[u8]>) -> HummockEpoch {
+        let query_extended_user_key = ExtendedUserKey::from_user_key(query_user_key, false);
         let idx = self.monotonic_tombstone_events.partition_point(
             |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(query_user_key),
         );
@@ -752,7 +753,7 @@ impl SharedBufferDeleteRangeIterator {
 }
 
 impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
-    fn next_user_key(&self) -> UserKey<&[u8]> {
+    fn next_extended_user_key(&self) -> ExtendedUserKey<&[u8]> {
         self.inner.monotonic_tombstone_events[self.next_idx]
             .event_key
             .as_ref()
@@ -775,8 +776,9 @@ impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
     }
 
     fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
+        let target_extended_user_key = ExtendedUserKey::from_user_key(target_user_key, false);
         self.next_idx = self.inner.monotonic_tombstone_events.partition_point(
-            |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(&target_user_key),
+            |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(&target_extended_user_key),
         );
     }
 

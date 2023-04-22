@@ -17,7 +17,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_hummock_sdk::key::UserKey;
+use risingwave_hummock_sdk::key::{ExtendedUserKey, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
 
 use super::{create_monotonic_events, DeleteRangeTombstone, MonotonicDeleteEvent};
@@ -287,7 +287,7 @@ impl SstableDeleteRangeIterator {
 }
 
 impl DeleteRangeIterator for SstableDeleteRangeIterator {
-    fn next_user_key(&self) -> UserKey<&[u8]> {
+    fn next_extended_user_key(&self) -> ExtendedUserKey<&[u8]> {
         self.table.value().meta.monotonic_tombstone_events[self.next_idx]
             .event_key
             .as_ref()
@@ -310,13 +310,14 @@ impl DeleteRangeIterator for SstableDeleteRangeIterator {
     }
 
     fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
+        let target_extended_user_key = ExtendedUserKey::from_user_key(target_user_key, false);
         self.next_idx = self
             .table
             .value()
             .meta
             .monotonic_tombstone_events
             .partition_point(|MonotonicDeleteEvent { event_key, .. }| {
-                event_key.as_ref().le(&target_user_key)
+                event_key.as_ref().le(&target_extended_user_key)
             });
     }
 

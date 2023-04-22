@@ -41,7 +41,7 @@ use bytes::{Buf, BufMut};
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
-use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{ExtendedUserKey, FullKey, KeyPayloadType, TableKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 #[cfg(test)]
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -141,8 +141,7 @@ impl DeleteRangeTombstone {
 /// `HummockEpoch::MAX`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MonotonicDeleteEvent {
-    pub event_key: UserKey<Vec<u8>>,
-    pub is_exclusive: bool,
+    pub event_key: ExtendedUserKey<Vec<u8>>,
     pub new_epoch: HummockEpoch,
 }
 
@@ -150,20 +149,22 @@ impl MonotonicDeleteEvent {
     #[cfg(test)]
     pub fn new(table_id: TableId, event_key: Vec<u8>, new_epoch: HummockEpoch) -> Self {
         Self {
-            event_key: UserKey::new(table_id, TableKey(event_key)),
-            is_exclusive: false,
+            event_key: ExtendedUserKey::from_user_key(
+                UserKey::new(table_id, TableKey(event_key)),
+                false,
+            ),
             new_epoch,
         }
     }
 
     pub fn encode(&self, buf: &mut Vec<u8>) {
-        self.event_key.encode_length_prefixed(buf);
-        buf.put_u8(if self.is_exclusive { 1 } else { 0 });
+        self.event_key.user_key.encode_length_prefixed(buf);
+        buf.put_u8(if self.event_key.is_exclusive { 1 } else { 0 });
         buf.put_u64_le(self.new_epoch);
     }
 
     pub fn decode(buf: &mut &[u8]) -> Self {
-        let event_key = UserKey::decode_length_prefixed(buf);
+        let user_key = UserKey::decode_length_prefixed(buf);
         let exclusive_flag = buf.get_u8();
         let is_exclusive = match exclusive_flag {
             0 => false,
@@ -172,15 +173,14 @@ impl MonotonicDeleteEvent {
         };
         let new_epoch = buf.get_u64_le();
         Self {
-            event_key,
-            is_exclusive,
+            event_key: ExtendedUserKey::from_user_key(user_key, is_exclusive),
             new_epoch,
         }
     }
 
     #[inline]
     pub fn encoded_size(&self) -> usize {
-        4 + self.event_key.encoded_len() + 1 + 8
+        4 + self.event_key.user_key.encoded_len() + 1 + 8
     }
 }
 

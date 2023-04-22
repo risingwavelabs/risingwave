@@ -719,6 +719,29 @@ impl<T: AsRef<[u8]> + Ord + Eq> PartialOrd for FullKey<T> {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ExtendedUserKey<T: AsRef<[u8]>> {
+    // When comparing `ExtendedUserKey`, we first compare `user_key`, then `is_exclusive`.
+    // Therefore the order of declaration matters.
+    pub user_key: UserKey<T>,
+    /// `ExtendedUserKey` represents the user key itself if `is_exclusive==false` while
+    /// represents the right δ Neighborhood of the user key if `is_exclusive==true`.
+    pub is_exclusive: bool,
+}
+
+impl<T: AsRef<[u8]>> ExtendedUserKey<T> {
+    pub fn from_user_key(user_key: UserKey<T>, is_exclusive: bool) -> Self {
+        Self {
+            user_key,
+            is_exclusive,
+        }
+    }
+
+    pub fn as_ref(&self) -> ExtendedUserKey<&[u8]> {
+        ExtendedUserKey::from_user_key(self.user_key.as_ref(), self.is_exclusive)
+    }
+}
+
 pub trait EmptySliceRef {
     fn empty_slice_ref<'a>() -> &'a Self;
 }
