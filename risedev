@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-if [[ $(cargo make --version) != "cargo-make 0.36"* ]]; then
+if [ -z "$(which cargo-make)" ]; then
     echo "Installing cargo-make..."
     cargo install cargo-make --version "^0.36" --locked
 fi
