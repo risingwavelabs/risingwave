@@ -30,7 +30,7 @@ import {
 } from "@chakra-ui/react"
 import * as d3 from "d3"
 import { dagStratify } from "d3-dag"
-import { toLower } from "lodash"
+import _ from "lodash"
 import Head from "next/head"
 import { useRouter } from "next/router"
 import { Fragment, useCallback, useEffect, useState } from "react"
@@ -42,7 +42,6 @@ import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
 import { Dispatcher, StreamNode } from "../proto/gen/stream_plan"
 import useFetch from "./api/fetch"
 import { getFragments, getStreamingJobs } from "./api/streaming"
-import _ from "lodash"
 
 interface DispatcherNode {
   [actorId: number]: Dispatcher[]
@@ -78,7 +77,9 @@ function buildPlanNodeDependency(
         (d) => d.type === firstActor.dispatcher[0].type
       )
     ) {
-      dispatcherName = `${_.camelCase(firstActor.dispatcher[0].type)}Dispatchers`
+      dispatcherName = `${_.camelCase(
+        firstActor.dispatcher[0].type
+      )}Dispatchers`
     } else {
       dispatcherName = "multipleDispatchers"
     }
