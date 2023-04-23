@@ -357,7 +357,7 @@ impl SharedBufferBatch {
             && range_overlap(
                 &(left, right),
                 &self.start_table_key(),
-                &self.end_table_key().as_ref(),
+                self.end_table_key().as_ref(),
             )
     }
 

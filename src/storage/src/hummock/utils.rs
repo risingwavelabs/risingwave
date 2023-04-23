@@ -38,7 +38,7 @@ use crate::store::{ReadOptions, StateStoreRead};
 pub fn range_overlap<R, B>(
     search_key_range: &R,
     inclusive_start_key: &B,
-    end_key: &Bound<&B>,
+    end_key: Bound<&B>,
 ) -> bool
 where
     R: RangeBounds<B>,
@@ -108,7 +108,7 @@ where
     range_overlap(
         &(left, right),
         &table_start,
-        &if table_range.right_exclusive {
+        if table_range.right_exclusive {
             Bound::Excluded(&table_end)
         } else {
             Bound::Included(&table_end)

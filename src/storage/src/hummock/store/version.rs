@@ -169,7 +169,7 @@ impl StagingVersion {
                     && range_overlap(
                         &(left, right),
                         &imm.start_table_key(),
-                        &imm.end_table_key().as_ref(),
+                        imm.end_table_key().as_ref(),
                     )
             });
 
