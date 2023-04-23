@@ -185,7 +185,7 @@ impl Binder {
         // of the array.
         let end = match end {
             None => ExprImpl::literal_int(i32::MAX),
-            Some(expr) => self.bind_expr(*expr)?,
+            Some(expr) => self.bind_expr(*expr)?.cast_implicit(DataType::Int32)?,
         };
         match obj.return_type() {
             DataType::List {
