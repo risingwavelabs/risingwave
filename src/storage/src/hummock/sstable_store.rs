@@ -434,7 +434,7 @@ impl SstableStore {
             .map_err(HummockError::object_io_error)
     }
 
-    pub async fn create_sst_writer(
+    pub fn create_sst_writer(
         self: Arc<Self>,
         object_id: HummockSstableObjectId,
         options: SstableWriterOptions,
@@ -763,7 +763,6 @@ impl StreamingSstableWriterFactory {
         StreamingSstableWriterFactory { sstable_store }
     }
 }
-
 
 #[async_trait::async_trait]
 impl SstableWriterFactory for StreamingSstableWriterFactory {

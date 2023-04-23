@@ -211,12 +211,6 @@ macro_rules! dispatch_async {
     }
 }
 
-macro_rules! dispatch_sync {
-    ($object_store:expr, $method_name:ident $(, $args:expr)*) => {
-        $object_store.$method_name($($args, )*)
-    }
-}
-
 /// This macro routes the object store operation to the real implementation by the `ObjectStoreImpl`
 /// enum type and the `path`.
 ///

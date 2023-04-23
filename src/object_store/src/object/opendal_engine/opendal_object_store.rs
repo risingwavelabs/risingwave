@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 use fail::fail_point;
 use futures::future::try_join_all;
-use futures::Future;
 use futures::StreamExt;
 use itertools::Itertools;
 use opendal::services::Memory;
@@ -74,10 +73,9 @@ impl ObjectStore for OpendalObjectStore {
     }
 
     async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
-        Ok(Box::new(OpenDalStreamingUploader::new(
-            self.op.clone(),
-            path.to_string(),
-        ).await?))
+        Ok(Box::new(
+            OpenDalStreamingUploader::new(self.op.clone(), path.to_string()).await?,
+        ))
     }
 
     async fn read(&self, path: &str, block: Option<BlockLocation>) -> ObjectResult<Bytes> {
@@ -198,21 +196,16 @@ pub struct OpenDalStreamingUploader {
     writer: Writer,
 }
 impl OpenDalStreamingUploader {
-
-
     pub async fn new(op: Operator, path: String) -> ObjectResult<Self> {
         let writer = op.writer(&path).await?;
-        Ok(Self {
-            writer
-        })
-        
+        Ok(Self { writer })
     }
 }
 
 unsafe impl Send for OpenDalStreamingUploader {}
 unsafe impl Sync for OpenDalStreamingUploader {}
 #[async_trait::async_trait]
-impl StreamingUploader for OpenDalStreamingUploader{
+impl StreamingUploader for OpenDalStreamingUploader {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
         self.writer.write(data).await?;
         // self.buffer.put(data);
@@ -220,7 +213,10 @@ impl StreamingUploader for OpenDalStreamingUploader{
     }
 
     async fn finish(mut self: Box<Self>) -> ObjectResult<()> {
-        self.writer.close().await?;
+        match self.writer.close().await {
+            Ok(_) => (),
+            Err(_) => self.writer.abort().await?,
+        };
 
         Ok(())
     }
