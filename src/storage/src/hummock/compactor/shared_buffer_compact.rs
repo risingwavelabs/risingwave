@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Bound;
 use std::sync::Arc;
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use futures::future::try_join_all;
 use futures::{stream, StreamExt, TryFutureExt};
 use itertools::Itertools;
@@ -274,9 +274,9 @@ pub async fn merge_imms_in_memory(
     let mut merged_size = 0;
     let mut merged_imm_ids = Vec::with_capacity(imms.len());
 
-    let mut smallest_table_key = vec![];
+    let mut smallest_table_key = BytesMut::new();
     let mut smallest_empty = true;
-    let mut largest_table_key = Bound::Included(vec![]);
+    let mut largest_table_key = Bound::Included(Bytes::new());
 
     let mut imm_iters = Vec::with_capacity(imms.len());
     for imm in imms {
@@ -296,7 +296,7 @@ pub async fn merge_imms_in_memory(
         merged_size += imm.size();
         range_tombstone_list.extend(imm.get_delete_range_tombstones());
 
-        if smallest_empty || smallest_table_key.gt(imm.raw_smallest_key()) {
+        if smallest_empty || smallest_table_key.as_ref().gt(imm.raw_smallest_key()) {
             smallest_table_key.clear();
             smallest_table_key.extend_from_slice(imm.raw_smallest_key());
             smallest_empty = false;
@@ -393,7 +393,7 @@ pub async fn merge_imms_in_memory(
         inner: Arc::new(SharedBufferBatchInner::new_with_multi_epoch_batches(
             epochs,
             merged_payload,
-            smallest_table_key,
+            smallest_table_key.freeze(),
             largest_table_key,
             kv_count,
             merged_imm_ids,

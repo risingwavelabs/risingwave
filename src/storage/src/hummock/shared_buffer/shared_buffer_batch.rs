@@ -21,7 +21,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, LazyLock};
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
@@ -64,8 +64,8 @@ pub type SharedBufferVersionedEntry = (Bytes, Vec<(HummockEpoch, HummockValue<By
 struct SharedBufferDeleteRangeMeta {
     // smallest/largest keys below are only inferred from tombstones.
     smallest_empty: bool,
-    smallest_table_key: Vec<u8>,
-    largest_table_key: Bound<Vec<u8>>,
+    smallest_table_key: BytesMut,
+    largest_table_key: Bound<Bytes>,
     range_tombstones: Vec<DeleteRangeTombstone>,
 }
 
@@ -78,8 +78,8 @@ pub(crate) struct SharedBufferBatchInner {
     /// The epochs of the data in batch, sorted in ascending order (old to new)
     epochs: Vec<HummockEpoch>,
     monotonic_tombstone_events: Vec<MonotonicDeleteEvent>,
-    largest_table_key: Bound<Vec<u8>>,
-    smallest_table_key: Vec<u8>,
+    largest_table_key: Bound<Bytes>,
+    smallest_table_key: Bytes,
     kv_count: usize,
     /// Total size of all key-value items (excluding the `epoch` of value versions)
     size: usize,
@@ -107,11 +107,11 @@ impl SharedBufferBatchInner {
 
         if let Some(item) = payload.last() {
             if whether_update_largest_key(&largest_table_key, &item.0) {
-                largest_table_key = Bound::Included(item.0.to_vec());
+                largest_table_key = Bound::Included(item.0.clone());
             }
         }
         if let Some(item) = payload.first() {
-            if smallest_empty || item.0.lt(&smallest_table_key) {
+            if smallest_empty || item.0.lt(&smallest_table_key.as_ref()) {
                 smallest_table_key.clear();
                 smallest_table_key.extend_from_slice(item.0.as_ref());
             }
@@ -145,7 +145,7 @@ impl SharedBufferBatchInner {
             kv_count,
             size,
             largest_table_key,
-            smallest_table_key,
+            smallest_table_key: smallest_table_key.freeze(),
             _tracker,
             batch_id,
         }
@@ -155,8 +155,8 @@ impl SharedBufferBatchInner {
     pub(crate) fn new_with_multi_epoch_batches(
         epochs: Vec<HummockEpoch>,
         payload: Vec<SharedBufferVersionedEntry>,
-        smallest_table_key: Vec<u8>,
-        largest_table_key: Bound<Vec<u8>>,
+        smallest_table_key: Bytes,
+        largest_table_key: Bound<Bytes>,
         num_items: usize,
         imm_ids: Vec<ImmId>,
         range_tombstone_list: Vec<DeleteRangeTombstone>,
@@ -188,8 +188,8 @@ impl SharedBufferBatchInner {
         table_id: TableId,
         mut range_tombstone_list: Vec<DeleteRangeTombstone>,
     ) -> SharedBufferDeleteRangeMeta {
-        let mut largest_table_key = Bound::Included(vec![]);
-        let mut smallest_table_key = vec![];
+        let mut largest_table_key = Bound::Included(Bytes::new());
+        let mut smallest_table_key = BytesMut::new();
         let mut smallest_empty = true;
         if !range_tombstone_list.is_empty() {
             range_tombstone_list.sort();
@@ -207,7 +207,8 @@ impl SharedBufferBatchInner {
                     &largest_table_key,
                     &tombstone.end_user_key.table_key.0,
                 ) {
-                    largest_table_key = Bound::Excluded(tombstone.end_user_key.table_key.0.clone());
+                    largest_table_key =
+                        Bound::Excluded(Bytes::from(tombstone.end_user_key.table_key.0.clone()));
                 }
                 if smallest_empty || smallest_table_key.gt(&tombstone.start_user_key.table_key.0) {
                     smallest_table_key.clear();
@@ -455,7 +456,7 @@ impl SharedBufferBatch {
     }
 
     #[inline(always)]
-    pub fn raw_smallest_key(&self) -> &Vec<u8> {
+    pub fn raw_smallest_key(&self) -> &Bytes {
         &self.inner.smallest_table_key
     }
 
@@ -468,7 +469,7 @@ impl SharedBufferBatch {
     }
 
     #[inline(always)]
-    pub fn raw_largest_key(&self) -> &Bound<Vec<u8>> {
+    pub fn raw_largest_key(&self) -> &Bound<Bytes> {
         &self.inner.largest_table_key
     }
 
