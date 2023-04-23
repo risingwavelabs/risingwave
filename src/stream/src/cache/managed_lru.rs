@@ -29,7 +29,7 @@ pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Globa
     pub(super) inner: EstimatedLruCache<K, V, S, A>,
     /// The entry with epoch less than water should be evicted.
     /// Should only be updated by the `GlobalMemoryManager`.
-    pub(super) watermark_epoch: Arc<AtomicU64>,
+    pub watermark_epoch: Arc<AtomicU64>,
 }
 
 impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Allocator>

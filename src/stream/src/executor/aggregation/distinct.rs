@@ -159,6 +159,10 @@ impl<S: StateStore> ColumnDeduplicater<S> {
             }
         }
 
+        // if we determine to flush to the table when processing every chunk instead of barrier
+        // coming, we can evict all including current epoch data.
+        self.cache.evict_except_cur_epoch();
+
         Ok(())
     }
 
