@@ -65,10 +65,8 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
                             .withDescription("Sink is already initialized")
                             .asRuntimeException();
                 }
-                bindSink(
-                        sinkTask.getStart().getSinkId(),
-                        sinkTask.getStart().getSinkConfig(),
-                        sinkTask.getStart().getFormat());
+                sinkId = sinkTask.getStart().getSinkId();
+                bindSink(sinkTask.getStart().getSinkConfig(), sinkTask.getStart().getFormat());
                 LOG.debug("Sink initialized");
                 responseObserver.onNext(
                         ConnectorServiceProto.SinkResponse.newBuilder()
@@ -200,11 +198,10 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
         ConnectorNodeMetrics.decActiveSinkConnections(connectorType, "node1");
     }
 
-    private void bindSink(
-            long sinkId, SinkConfig sinkConfig, ConnectorServiceProto.SinkPayloadFormat format) {
-        this.tableSchema = TableSchema.fromProto(sinkConfig.getTableSchema());
+    private void bindSink(SinkConfig sinkConfig, ConnectorServiceProto.SinkPayloadFormat format) {
+        tableSchema = TableSchema.fromProto(sinkConfig.getTableSchema());
         SinkFactory sinkFactory = SinkUtils.getSinkFactory(sinkConfig.getConnectorType());
-        this.sink = sinkFactory.create(tableSchema, sinkConfig.getPropertiesMap());
+        sink = sinkFactory.create(tableSchema, sinkConfig.getPropertiesMap());
         switch (format) {
             case FORMAT_UNSPECIFIED:
             case UNRECOGNIZED:
@@ -212,14 +209,13 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
                         .withDescription("should specify payload format in request")
                         .asRuntimeException();
             case JSON:
-                this.deserializer = new JsonDeserializer(tableSchema);
+                deserializer = new JsonDeserializer(tableSchema);
                 break;
             case STREAM_CHUNK:
-                this.deserializer = new StreamChunkDeserializer(tableSchema);
+                deserializer = new StreamChunkDeserializer(tableSchema);
                 break;
         }
-        this.connectorType = sinkConfig.getConnectorType().toUpperCase();
-        this.sinkId = sinkId;
+        connectorType = sinkConfig.getConnectorType().toUpperCase();
         ConnectorNodeMetrics.incActiveSinkConnections(connectorType, "node1");
     }
 }
