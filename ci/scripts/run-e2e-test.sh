@@ -30,6 +30,7 @@ chmod +x ./target/debug/risingwave_e2e_extended_mode_test
 
 
 echo "--- e2e, ci-3cn-1fe, streaming"
+export RW_QUERY_LOG_PATH="./e2e_test_log/streaming/"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-3cn-1fe
 # Please make sure the regression is expected before increasing the timeout.
@@ -39,6 +40,7 @@ echo "--- Kill cluster"
 cargo make ci-kill
 
 echo "--- e2e, ci-3cn-1fe, batch"
+export RW_QUERY_LOG_PATH="./e2e_test_log/batch/"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-3cn-1fe
 sqllogictest -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profile}"
