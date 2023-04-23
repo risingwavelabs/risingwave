@@ -36,7 +36,7 @@ impl MemoryControl for JemallocMemoryControl {
     fn apply(
         &self,
         total_compute_memory_bytes: usize,
-        barrier_interval_ms: u32,
+        interval_ms: u32,
         prev_memory_stats: MemoryControlStats,
         _batch_manager: Arc<BatchManager>,
         _stream_manager: Arc<LocalStreamManager>,
@@ -59,7 +59,7 @@ impl MemoryControl for JemallocMemoryControl {
             jemalloc_allocated_mib,
             stream_memory_threshold_graceful,
             stream_memory_threshold_aggressive,
-            barrier_interval_ms,
+            interval_ms,
             prev_memory_stats,
         );
         set_lru_watermark_time_ms(watermark_epoch, lru_watermark_time_ms);
@@ -99,7 +99,7 @@ fn calculate_lru_watermark(
     cur_used_memory_bytes: usize,
     threshold_graceful: usize,
     threshold_aggressive: usize,
-    barrier_interval_ms: u32,
+    interval_ms: u32,
     prev_memory_stats: MemoryControlStats,
 ) -> (u64, u64, u64) {
     let mut watermark_time_ms = prev_memory_stats.lru_watermark_time_ms;
@@ -143,15 +143,13 @@ fn calculate_lru_watermark(
     };
 
     let physical_now = Epoch::physical_now();
-    if (physical_now - prev_memory_stats.lru_watermark_time_ms) / (barrier_interval_ms as u64)
-        < step
-    {
+    if (physical_now - prev_memory_stats.lru_watermark_time_ms) / (interval_ms as u64) < step {
         // We do not increase the step and watermark here to prevent a too-advanced watermark. The
-        // original condition is `prev_watermark_time_ms + barrier_interval_ms * step > now`.
+        // original condition is `prev_watermark_time_ms + interval_ms * step > now`.
         step = last_step;
         watermark_time_ms = physical_now;
     } else {
-        watermark_time_ms += barrier_interval_ms as u64 * step;
+        watermark_time_ms += interval_ms as u64 * step;
     }
 
     (step, watermark_time_ms, physical_now)

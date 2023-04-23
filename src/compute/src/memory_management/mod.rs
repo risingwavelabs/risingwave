@@ -62,7 +62,7 @@ pub trait MemoryControl: Send + Sync {
     fn apply(
         &self,
         total_compute_memory_bytes: usize,
-        barrier_interval_ms: u32,
+        interval_ms: u32,
         prev_memory_stats: MemoryControlStats,
         batch_manager: Arc<BatchManager>,
         stream_manager: Arc<LocalStreamManager>,
@@ -107,7 +107,7 @@ impl MemoryControl for DummyPolicy {
     fn apply(
         &self,
         _total_compute_memory_bytes: usize,
-        _barrier_interval_ms: u32,
+        _interval_ms: u32,
         _prev_memory_stats: MemoryControlStats,
         _batch_manager: Arc<BatchManager>,
         _stream_manager: Arc<LocalStreamManager>,

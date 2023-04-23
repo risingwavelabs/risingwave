@@ -31,8 +31,8 @@ pub struct GlobalMemoryManager {
     /// Total memory that can be allocated by the compute node for computing tasks (stream & batch)
     /// in bytes.
     total_compute_memory_bytes: usize,
-    /// Barrier interval.
-    barrier_interval_ms: u32,
+    /// Loop interval of running control policy
+    interval_ms: u32,
     metrics: Arc<StreamingMetrics>,
     /// The memory control policy for computing tasks.
     memory_control_policy: MemoryControlRef,
@@ -43,13 +43,13 @@ pub type GlobalMemoryManagerRef = Arc<GlobalMemoryManager>;
 impl GlobalMemoryManager {
     pub fn new(
         total_compute_memory_bytes: usize,
-        barrier_interval_ms: u32,
+        interval_ms: u32,
         metrics: Arc<StreamingMetrics>,
         memory_control_policy: MemoryControlRef,
     ) -> Arc<Self> {
         // Arbitrarily set a minimal barrier interval in case it is too small,
         // especially when it's 0.
-        let barrier_interval_ms = std::cmp::max(barrier_interval_ms, 10);
+        let interval_ms = std::cmp::max(interval_ms, 10);
 
         tracing::info!(
             "memory control policy: {}",
@@ -59,7 +59,7 @@ impl GlobalMemoryManager {
         Arc::new(Self {
             watermark_epoch: Arc::new(0.into()),
             total_compute_memory_bytes,
-            barrier_interval_ms,
+            interval_ms,
             metrics,
             memory_control_policy,
         })
@@ -78,7 +78,7 @@ impl GlobalMemoryManager {
     ) {
         // Keep same interval with the barrier interval
         let mut tick_interval =
-            tokio::time::interval(Duration::from_millis(self.barrier_interval_ms as u64));
+            tokio::time::interval(Duration::from_millis(self.interval_ms as u64));
 
         let mut memory_control_stats = MemoryControlStats {
             jemalloc_allocated_mib: 0,
@@ -93,7 +93,7 @@ impl GlobalMemoryManager {
 
             memory_control_stats = self.memory_control_policy.apply(
                 self.total_compute_memory_bytes,
-                self.barrier_interval_ms,
+                self.interval_ms,
                 memory_control_stats,
                 batch_manager.clone(),
                 stream_manager.clone(),
