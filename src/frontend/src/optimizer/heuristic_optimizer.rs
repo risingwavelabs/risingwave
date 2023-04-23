@@ -87,6 +87,7 @@ impl<'a> HeuristicOptimizer<'a> {
         &self.stats
     }
 
+    #[cfg(debug_assertions)]
     fn check_equivalent_plan(rule: &BoxedRule, input_plan: &PlanRef, output_plan: &PlanRef) {
         let fail = || {
             panic!("{} fails to generate equivalent plan.\nInput schema: {:?}\nInput plan: \n{}\nOutput schema: {:?}\nOutput plan: \n{}\nSQL: {}",
