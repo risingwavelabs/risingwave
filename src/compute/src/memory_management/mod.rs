@@ -27,8 +27,6 @@ use risingwave_common::config::{StorageConfig, StorageMemoryConfig};
 use risingwave_common::error::Result;
 use risingwave_stream::task::LocalStreamManager;
 
-use crate::ComputeNodeOpts;
-
 /// The minimal memory requirement of computing tasks in megabytes.
 pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
 /// The memory reserved for system usage (stack and code segment of processes, allocation
@@ -58,41 +56,26 @@ pub struct MemoryControlStats {
 
 pub type MemoryControlRef = Box<dyn MemoryControl>;
 
-pub trait MemoryControl: Send + Sync {
+pub trait MemoryControl: Send + Sync + std::fmt::Debug {
     fn apply(
         &self,
-        total_compute_memory_bytes: usize,
         interval_ms: u32,
         prev_memory_stats: MemoryControlStats,
         batch_manager: Arc<BatchManager>,
         stream_manager: Arc<LocalStreamManager>,
         watermark_epoch: Arc<AtomicU64>,
     ) -> MemoryControlStats;
-
-    fn describe(&self, total_compute_memory_bytes: usize) -> String;
 }
 
 #[cfg(target_os = "linux")]
-pub fn memory_control_policy_from_config(opts: &ComputeNodeOpts) -> Result<MemoryControlRef> {
-    use anyhow::anyhow;
-
+pub fn build_memory_control_policy(total_memory_bytes: usize) -> Result<MemoryControlRef> {
     use self::policy::JemallocMemoryControl;
 
-    let input_policy = &opts.memory_control_policy;
-    if input_policy == "streaming-only" || input_policy == "jemalloc-stats" {
-        Ok(Box::new(JemallocMemoryControl))
-    } else {
-        let valid_values = ["jemalloc-stats"];
-        Err(anyhow!(format!(
-            "invalid memory control policy in configuration: {}, valid values: {:?}",
-            input_policy, valid_values,
-        ))
-        .into())
-    }
+    Ok(Box::new(JemallocMemoryControl::new(total_memory_bytes)))
 }
 
 #[cfg(not(target_os = "linux"))]
-pub fn memory_control_policy_from_config(_opts: &ComputeNodeOpts) -> Result<MemoryControlRef> {
+pub fn build_memory_control_policy(_total_memory_bytes: usize) -> Result<MemoryControlRef> {
     // We disable memory control on operating systems other than Linux now because jemalloc
     // stats do not work well.
     tracing::warn!("memory control is only enabled on Linux now");
@@ -101,12 +84,12 @@ pub fn memory_control_policy_from_config(_opts: &ComputeNodeOpts) -> Result<Memo
 
 /// `DummyPolicy` is used for operarting systems other than Linux. It does nothing as memory control
 /// is disabled on non-Linux OS.
+#[derive(Debug)]
 pub struct DummyPolicy;
 
 impl MemoryControl for DummyPolicy {
     fn apply(
         &self,
-        _total_compute_memory_bytes: usize,
         _interval_ms: u32,
         _prev_memory_stats: MemoryControlStats,
         _batch_manager: Arc<BatchManager>,
@@ -114,10 +97,6 @@ impl MemoryControl for DummyPolicy {
         _watermark_epoch: Arc<AtomicU64>,
     ) -> MemoryControlStats {
         MemoryControlStats::default()
-    }
-
-    fn describe(&self, _total_compute_memory_bytes: usize) -> String {
-        "DummyPolicy".to_string()
     }
 }
 

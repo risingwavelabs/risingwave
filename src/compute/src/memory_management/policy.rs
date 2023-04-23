@@ -17,7 +17,6 @@ use std::sync::Arc;
 
 use risingwave_batch::task::BatchManager;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_common::util::pretty_bytes::convert;
 use risingwave_stream::task::LocalStreamManager;
 
 use super::{MemoryControl, MemoryControlStats};
@@ -25,17 +24,29 @@ use super::{MemoryControl, MemoryControlStats};
 /// `JemallocMemoryControl` is a memory control policy that uses jemalloc statistics to control. It
 /// assumes that most memory is used by streaming engine and does memory control over LRU watermark
 /// based on jemalloc statistics.
-pub struct JemallocMemoryControl;
+#[derive(Debug)]
+pub struct JemallocMemoryControl {
+    threshold_graceful: usize,
+    threshold_aggressive: usize,
+}
 
 impl JemallocMemoryControl {
-    const STREAM_EVICTION_THRESHOLD_AGGRESSIVE: f64 = 0.9;
-    const STREAM_EVICTION_THRESHOLD_GRACEFUL: f64 = 0.7;
+    const THRESHOLD_AGGRESSIVE: f64 = 0.9;
+    const THRESHOLD_GRACEFUL: f64 = 0.7;
+
+    pub fn new(total_memory: usize) -> Self {
+        let threshold_graceful = (total_memory as f64 * Self::THRESHOLD_GRACEFUL) as usize;
+        let threshold_aggressive = (total_memory as f64 * Self::THRESHOLD_AGGRESSIVE) as usize;
+        Self {
+            threshold_graceful,
+            threshold_aggressive,
+        }
+    }
 }
 
 impl MemoryControl for JemallocMemoryControl {
     fn apply(
         &self,
-        total_compute_memory_bytes: usize,
         interval_ms: u32,
         prev_memory_stats: MemoryControlStats,
         _batch_manager: Arc<BatchManager>,
@@ -44,11 +55,6 @@ impl MemoryControl for JemallocMemoryControl {
     ) -> MemoryControlStats {
         let jemalloc_allocated_mib =
             advance_jemalloc_epoch(prev_memory_stats.jemalloc_allocated_mib);
-        let stream_memory_threshold_graceful =
-            (total_compute_memory_bytes as f64 * Self::STREAM_EVICTION_THRESHOLD_GRACEFUL) as usize;
-        let stream_memory_threshold_aggressive = (total_compute_memory_bytes as f64
-            * Self::STREAM_EVICTION_THRESHOLD_AGGRESSIVE)
-            as usize;
 
         // Streaming memory control
         //
@@ -57,11 +63,12 @@ impl MemoryControl for JemallocMemoryControl {
 
         let (lru_watermark_step, lru_watermark_time_ms, lru_physical_now) = calculate_lru_watermark(
             jemalloc_allocated_mib,
-            stream_memory_threshold_graceful,
-            stream_memory_threshold_aggressive,
+            self.threshold_graceful,
+            self.threshold_aggressive,
             interval_ms,
             prev_memory_stats,
         );
+
         set_lru_watermark_time_ms(watermark_epoch, lru_watermark_time_ms);
 
         MemoryControlStats {
@@ -70,13 +77,6 @@ impl MemoryControl for JemallocMemoryControl {
             lru_watermark_time_ms,
             lru_physical_now_ms: lru_physical_now,
         }
-    }
-
-    fn describe(&self, total_compute_memory_bytes: usize) -> String {
-        format!(
-            "JemallocMemoryControl: total available streaming memory is {}",
-            convert(total_compute_memory_bytes as f64)
-        )
     }
 }
 
@@ -122,7 +122,7 @@ fn calculate_lru_watermark(
     //   - Otherwise, we set the step to last_step * 2.
 
     let mut step = if cur_used_memory_bytes < threshold_graceful {
-        // Do not evict if the memory usage is lower than `stream_memory_threshold_graceful`
+        // Do not evict if the memory usage is lower than `threshold_graceful`
         0
     } else if cur_used_memory_bytes < threshold_aggressive {
         // Gracefully evict
