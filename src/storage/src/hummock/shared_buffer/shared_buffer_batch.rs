@@ -35,8 +35,8 @@ use crate::hummock::store::memtable::ImmId;
 use crate::hummock::utils::{range_overlap, MemoryTracker};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    create_monotonic_events, DeleteRangeTombstone, HummockEpoch, HummockResult,
-    MonotonicDeleteEvent,
+    create_monotonic_events, create_tombstones_to_represent_monotonic_deletes,
+    DeleteRangeTombstone, HummockEpoch, HummockResult, MonotonicDeleteEvent,
 };
 use crate::storage_value::StorageValue;
 use crate::store::ReadOptions;
@@ -58,7 +58,6 @@ pub(crate) struct SharedBufferBatchInner {
     imm_ids: Vec<ImmId>,
     /// The epochs of the data in batch, sorted in ascending order (old to new)
     epochs: Vec<HummockEpoch>,
-    range_tombstone_list: Vec<DeleteRangeTombstone>,
     monotonic_tombstone_events: Vec<MonotonicDeleteEvent>,
     largest_table_key: Vec<u8>,
     smallest_table_key: Vec<u8>,
@@ -101,13 +100,15 @@ impl SharedBufferBatchInner {
             .collect_vec();
 
         let mut monotonic_tombstone_events = Vec::with_capacity(range_tombstones.len() * 2);
-        for range_tombstone in &range_tombstones {
+        for range_tombstone in range_tombstones {
             monotonic_tombstone_events.push(MonotonicDeleteEvent {
-                event_key: range_tombstone.start_user_key.clone(),
+                event_key: range_tombstone.start_user_key,
+                is_exclusive: false,
                 new_epoch: range_tombstone.sequence,
             });
             monotonic_tombstone_events.push(MonotonicDeleteEvent {
-                event_key: range_tombstone.end_user_key.clone(),
+                event_key: range_tombstone.end_user_key,
+                is_exclusive: false,
                 new_epoch: HummockEpoch::MAX,
             });
         }
@@ -117,7 +118,6 @@ impl SharedBufferBatchInner {
             payload: items,
             imm_ids: vec![batch_id],
             epochs: vec![epoch],
-            range_tombstone_list: range_tombstones,
             monotonic_tombstone_events,
             kv_count,
             size,
@@ -151,7 +151,6 @@ impl SharedBufferBatchInner {
             payload,
             epochs,
             imm_ids,
-            range_tombstone_list,
             monotonic_tombstone_events,
             largest_table_key,
             smallest_table_key,
@@ -231,7 +230,7 @@ impl SharedBufferBatchInner {
         }
 
         if !read_options.ignore_range_tombstone
-            && self.get_min_delete_range_epoch(&UserKey::new(table_id, table_key)) <= read_epoch
+            && self.get_min_delete_range_epoch(UserKey::new(table_id, table_key)) <= read_epoch
         {
             Some(HummockValue::Delete)
         } else {
@@ -239,9 +238,9 @@ impl SharedBufferBatchInner {
         }
     }
 
-    fn get_min_delete_range_epoch(&self, query_user_key: &UserKey<&[u8]>) -> HummockEpoch {
+    fn get_min_delete_range_epoch(&self, query_user_key: UserKey<&[u8]>) -> HummockEpoch {
         let idx = self.monotonic_tombstone_events.partition_point(
-            |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(query_user_key),
+            |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(&query_user_key),
         );
         if idx == 0 {
             HummockEpoch::MAX
@@ -370,7 +369,7 @@ impl SharedBufferBatch {
             .get_value(self.table_id, table_key, read_epoch, read_options)
     }
 
-    pub fn get_min_delete_range_epoch(&self, user_key: &UserKey<&[u8]>) -> HummockEpoch {
+    pub fn get_min_delete_range_epoch(&self, user_key: UserKey<&[u8]>) -> HummockEpoch {
         self.inner.get_min_delete_range_epoch(user_key)
     }
 
@@ -449,7 +448,7 @@ impl SharedBufferBatch {
 
     #[inline(always)]
     pub fn has_range_tombstone(&self) -> bool {
-        !self.inner.range_tombstone_list.is_empty()
+        !self.inner.monotonic_tombstone_events.is_empty()
     }
 
     /// return inclusive right endpoint, which means that all data in this batch should be smaller
@@ -518,7 +517,7 @@ impl SharedBufferBatch {
     }
 
     pub fn get_delete_range_tombstones(&self) -> Vec<DeleteRangeTombstone> {
-        self.inner.range_tombstone_list.clone()
+        create_tombstones_to_represent_monotonic_deletes(&self.inner.monotonic_tombstone_events)
     }
 
     #[cfg(test)]
@@ -1049,22 +1048,22 @@ mod tests {
         assert_eq!(
             epoch,
             shared_buffer_batch
-                .get_min_delete_range_epoch(&UserKey::new(Default::default(), TableKey(b"aaa"),))
+                .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"aaa"),))
         );
         assert_eq!(
             HummockEpoch::MAX,
             shared_buffer_batch
-                .get_min_delete_range_epoch(&UserKey::new(Default::default(), TableKey(b"bbb"),))
+                .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"bbb"),))
         );
         assert_eq!(
             epoch,
             shared_buffer_batch
-                .get_min_delete_range_epoch(&UserKey::new(Default::default(), TableKey(b"ddd"),))
+                .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"ddd"),))
         );
         assert_eq!(
             HummockEpoch::MAX,
             shared_buffer_batch
-                .get_min_delete_range_epoch(&UserKey::new(Default::default(), TableKey(b"eee"),))
+                .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"eee"),))
         );
     }
 
@@ -1368,15 +1367,15 @@ mod tests {
 
         assert_eq!(
             1,
-            merged_imm.get_min_delete_range_epoch(&UserKey::new(table_id, TableKey(b"111")))
+            merged_imm.get_min_delete_range_epoch(UserKey::new(table_id, TableKey(b"111")))
         );
         assert_eq!(
             1,
-            merged_imm.get_min_delete_range_epoch(&UserKey::new(table_id, TableKey(b"555")))
+            merged_imm.get_min_delete_range_epoch(UserKey::new(table_id, TableKey(b"555")))
         );
         assert_eq!(
             2,
-            merged_imm.get_min_delete_range_epoch(&UserKey::new(table_id, TableKey(b"888")))
+            merged_imm.get_min_delete_range_epoch(UserKey::new(table_id, TableKey(b"888")))
         );
 
         assert_eq!(

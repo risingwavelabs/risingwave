@@ -38,6 +38,7 @@ pub mod replace;
 pub mod round;
 pub mod split_part;
 pub mod string;
+pub mod string_to_array;
 pub mod substr;
 pub mod timestamptz;
 pub mod to_char;
