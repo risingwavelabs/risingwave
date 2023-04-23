@@ -89,15 +89,19 @@ sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check.slt'
 
 # kill cluster
 cargo make kill
-# insert new rows
-mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc_insert.sql
-psql -h db -U postgres -d cdc_test < ./e2e_test/source/cdc/postgres_cdc_insert.sql
+echo "cluster killed "
 
+echo "start cluster again"
 # start cluster w/o clean-data
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make dev ci-1cn-1fe-with-recovery
 echo "wait for recovery finish"
-sleep 20
+sleep 15
+
+echo "insert new rows into mysql & postgres"
+mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc_insert.sql
+psql -h db -U postgres -d cdc_test < ./e2e_test/source/cdc/postgres_cdc_insert.sql
+sleep 5
 echo "check mviews after cluster recovery"
 # check results
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check_new_rows.slt'
