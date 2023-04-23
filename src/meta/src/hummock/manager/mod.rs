@@ -1124,19 +1124,6 @@ where
             }
         }
 
-        match compact_statuses.get_mut(compact_task.compaction_group_id) {
-            Some(mut compact_status) => {
-                compact_status.report_compact_task(compact_task);
-            }
-            None => {
-                compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
-            }
-        }
-
-        debug_assert!(
-            compact_task.task_status() != TaskStatus::Pending,
-            "report pending compaction task"
-        );
         {
             // The compaction task is finished.
             let mut versioning_guard = write_lock!(self, versioning).await;
@@ -1148,6 +1135,20 @@ where
                     compact_statuses.remove(group_id);
                 }
             }
+
+            match compact_statuses.get_mut(compact_task.compaction_group_id) {
+                Some(mut compact_status) => {
+                    compact_status.report_compact_task(compact_task);
+                }
+                None => {
+                    compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
+                }
+            }
+
+            debug_assert!(
+                compact_task.task_status() != TaskStatus::Pending,
+                "report pending compaction task"
+            );
             let is_success = if let TaskStatus::Success = compact_task.task_status() {
                 // if member_table_ids changes, the data of sstable may stale.
                 let is_expired =
