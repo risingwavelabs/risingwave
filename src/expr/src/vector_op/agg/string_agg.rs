@@ -12,17 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::anyhow;
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, RowRef,
 };
 use risingwave_common::bail;
+use risingwave_common::row::RowExt;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::memcmp_encoding;
-use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use crate::vector_op::agg::aggregator::Aggregator;
-use crate::Result;
+use crate::{ExprError, Result};
 
 #[derive(Clone)]
 struct StringAggUnordered {
@@ -124,22 +126,30 @@ struct StringAggData {
 struct StringAggOrdered {
     agg_col_idx: usize,
     delim_col_idx: usize,
-    column_orders: Vec<ColumnOrder>,
+    order_col_indices: Vec<usize>,
+    order_types: Vec<OrderType>,
     unordered_values: Vec<(OrderKey, StringAggData)>,
 }
 
 impl StringAggOrdered {
     fn new(agg_col_idx: usize, delim_col_idx: usize, column_orders: Vec<ColumnOrder>) -> Self {
+        let (order_col_indices, order_types) = column_orders
+            .into_iter()
+            .map(|c| (c.column_index, c.order_type))
+            .unzip();
         Self {
             agg_col_idx,
             delim_col_idx,
-            column_orders,
+            order_col_indices,
+            order_types,
             unordered_values: vec![],
         }
     }
 
-    fn push_row(&mut self, value: &str, delim: &str, row: RowRef<'_>) {
-        let key = memcmp_encoding::encode_row(row, &self.column_orders);
+    fn push_row(&mut self, value: &str, delim: &str, row: RowRef<'_>) -> Result<()> {
+        let key =
+            memcmp_encoding::encode_row(row.project(&self.order_col_indices), &self.order_types)
+                .map_err(|e| ExprError::Internal(anyhow!("failed to encode row, error: {}", e)))?;
         self.unordered_values.push((
             key,
             StringAggData {
@@ -147,6 +157,7 @@ impl StringAggOrdered {
                 delim: delim.to_string(),
             },
         ));
+        Ok(())
     }
 
     fn get_result_and_reset(&mut self) -> Option<String> {
@@ -181,7 +192,7 @@ impl Aggregator for StringAggOrdered {
                 let delim = delim_col.value_at(row_id).unwrap_or("");
                 let (row_ref, vis) = input.row_at(row_id);
                 assert!(vis);
-                self.push_row(value, delim, row_ref);
+                self.push_row(value, delim, row_ref)?;
             }
             Ok(())
         } else {
@@ -209,7 +220,7 @@ impl Aggregator for StringAggOrdered {
             {
                 let (row_ref, vis) = input.row_at(row_id);
                 assert!(vis);
-                self.push_row(value.unwrap(), delim.unwrap_or(""), row_ref);
+                self.push_row(value.unwrap(), delim.unwrap_or(""), row_ref)?;
             }
             Ok(())
         } else {
@@ -232,18 +243,15 @@ pub fn create_string_agg_state(
     agg_col_idx: usize,
     delim_col_idx: usize,
     column_orders: Vec<ColumnOrder>,
-) -> Result<Box<dyn Aggregator>> {
+) -> Box<dyn Aggregator> {
     if column_orders.is_empty() {
-        Ok(Box::new(StringAggUnordered::new(
-            agg_col_idx,
-            delim_col_idx,
-        )))
+        Box::new(StringAggUnordered::new(agg_col_idx, delim_col_idx))
     } else {
-        Ok(Box::new(StringAggOrdered::new(
+        Box::new(StringAggOrdered::new(
             agg_col_idx,
             delim_col_idx,
             column_orders,
-        )))
+        ))
     }
 }
 
@@ -263,7 +271,7 @@ mod tests {
              ccc ,
              ddd ,",
         );
-        let mut agg = create_string_agg_state(0, 1, vec![])?;
+        let mut agg = create_string_agg_state(0, 1, vec![]);
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;
@@ -284,7 +292,7 @@ mod tests {
              ccc _
              ddd .",
         );
-        let mut agg = create_string_agg_state(0, 1, vec![])?;
+        let mut agg = create_string_agg_state(0, 1, vec![]);
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;
@@ -313,7 +321,7 @@ mod tests {
                 ColumnOrder::new(3, OrderType::descending()),
                 ColumnOrder::new(1, OrderType::descending()),
             ],
-        )?;
+        );
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;

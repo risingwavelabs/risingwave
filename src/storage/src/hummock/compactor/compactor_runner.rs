@@ -18,20 +18,21 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::can_concat;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_pb::hummock::{CompactTask, LevelType};
 
+use super::compaction_utils::estimate_task_memory_capacity;
 use super::task_progress::TaskProgress;
 use super::TaskConfig;
+use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::{CompactOutput, CompactionFilter, Compactor, CompactorContext};
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
-use crate::hummock::sstable::DeleteRangeAggregatorBuilder;
+use crate::hummock::sstable::CompactionDeleteRangesBuilder;
 use crate::hummock::{
-    CachePolicy, CompressionAlgorithm, HummockResult, RangeTombstonesCollector,
-    SstableBuilderOptions, SstableStoreRef,
+    create_tombstones_to_represent_monotonic_deletes, CachePolicy, CompactionDeleteRanges,
+    CompressionAlgorithm, HummockResult, SstableBuilderOptions, SstableStoreRef,
 };
 use crate::monitor::StoreLocalStatistic;
 
@@ -45,25 +46,14 @@ pub struct CompactorRunner {
 
 impl CompactorRunner {
     pub fn new(split_index: usize, context: Arc<CompactorContext>, task: CompactTask) -> Self {
-        let max_target_file_size = context.storage_opts.sstable_size_mb as usize * (1 << 20);
-        let total_file_size = task
-            .input_ssts
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
-            .map(|table| table.file_size)
-            .sum::<u64>();
-
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
-        options.capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
         options.compression_algorithm = match task.compression_algorithm {
             0 => CompressionAlgorithm::None,
             1 => CompressionAlgorithm::Lz4,
             _ => CompressionAlgorithm::Zstd,
         };
-        let total_file_size = (total_file_size as f64 * 1.2).round() as usize;
-        if options.compression_algorithm == CompressionAlgorithm::None {
-            options.capacity = std::cmp::min(options.capacity, total_file_size);
-        }
+        options.capacity = estimate_task_memory_capacity(context.clone(), &task);
+
         let key_range = KeyRange {
             left: Bytes::copy_from_slice(task.splits[split_index].get_left()),
             right: Bytes::copy_from_slice(task.splits[split_index].get_right()),
@@ -97,7 +87,7 @@ impl CompactorRunner {
         &self,
         compaction_filter: impl CompactionFilter,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
-        del_agg: Arc<RangeTombstonesCollector>,
+        del_agg: Arc<CompactionDeleteRanges>,
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<CompactOutput> {
         let iter = self.build_sst_iter()?;
@@ -118,8 +108,8 @@ impl CompactorRunner {
         compact_task: &CompactTask,
         sstable_store: &SstableStoreRef,
         filter: &mut F,
-    ) -> HummockResult<Arc<RangeTombstonesCollector>> {
-        let mut builder = DeleteRangeAggregatorBuilder::default();
+    ) -> HummockResult<Arc<CompactionDeleteRanges>> {
+        let mut builder = CompactionDeleteRangesBuilder::default();
         let mut local_stats = StoreLocalStatistic::default();
         for level in &compact_task.input_ssts {
             if level.table_infos.is_empty() {
@@ -128,23 +118,19 @@ impl CompactorRunner {
 
             for table_info in &level.table_infos {
                 let table = sstable_store.sstable(table_info, &mut local_stats).await?;
-                let range_tombstone_list = table
-                    .value()
-                    .meta
-                    .range_tombstone_list
-                    .iter()
-                    .filter(|tombstone| {
-                        !filter.should_delete(FullKey::from_user_key(
-                            tombstone.start_user_key.as_ref(),
-                            tombstone.sequence,
-                        ))
-                    })
-                    .cloned()
-                    .collect_vec();
+                let mut range_tombstone_list = create_tombstones_to_represent_monotonic_deletes(
+                    &table.value().meta.monotonic_tombstone_events,
+                );
+                range_tombstone_list.retain(|tombstone| {
+                    !filter.should_delete(FullKey::from_user_key(
+                        tombstone.start_user_key.as_ref(),
+                        tombstone.sequence,
+                    ))
+                });
                 builder.add_tombstone(range_tombstone_list);
             }
         }
-        let aggregator = builder.build(compact_task.watermark, compact_task.gc_delete_keys);
+        let aggregator = builder.build_for_compaction(compact_task.gc_delete_keys);
         Ok(aggregator)
     }
 
@@ -207,7 +193,7 @@ mod tests {
     use crate::hummock::test_utils::{
         default_builder_opt_for_test, gen_test_sstable_with_range_tombstone,
     };
-    use crate::hummock::DeleteRangeTombstone;
+    use crate::hummock::{create_monotonic_events, DeleteRangeTombstone};
 
     #[tokio::test]
     async fn test_delete_range_aggregator_with_filter() {
@@ -249,7 +235,9 @@ mod tests {
             &UserKey::<Bytes>::default().as_ref(),
             &UserKey::<Bytes>::default().as_ref(),
         );
-        assert_eq!(ret.len(), 1);
-        assert_eq!(ret[0], range_tombstones[1]);
+        assert_eq!(
+            ret,
+            create_monotonic_events(&vec![range_tombstones[1].clone()])
+        );
     }
 }

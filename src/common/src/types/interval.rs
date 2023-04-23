@@ -730,12 +730,7 @@ impl Serialize for Interval {
         S: serde::Serializer,
     {
         let cmp_value = IntervalCmpValue::from(*self);
-        // split i128 as (i64, u64), which is equivalent
-        (
-            (cmp_value.0 >> 64) as i64,
-            cmp_value.0 as u64, // truncate to get the lower part
-        )
-            .serialize(serializer)
+        cmp_value.0.serialize(serializer)
     }
 }
 
@@ -811,8 +806,7 @@ impl<'de> Deserialize<'de> for Interval {
     where
         D: serde::Deserializer<'de>,
     {
-        let (hi, lo) = <(i64, u64)>::deserialize(deserializer)?;
-        let cmp_value = IntervalCmpValue(((hi as i128) << 64) | (lo as i128));
+        let cmp_value = IntervalCmpValue(i128::deserialize(deserializer)?);
         let interval = cmp_value
             .as_justified()
             .or_else(|| cmp_value.as_alternate());
@@ -1265,15 +1259,15 @@ fn convert_hms(c: &mut Vec<String>, t: &mut Vec<TimeStrToken>) -> Option<()> {
         t.push(TimeStrToken::TimeUnit(DateTimeField::Minute))
     }
     if let Some(s) = c.get(2) {
-        let mut v: F64 = s.parse().ok()?;
+        let mut v: f64 = s.parse().ok()?;
         // PostgreSQL allows '60.x' for seconds.
-        if !(0f64 <= *v && *v < 61f64) {
+        if !(0f64..61f64).contains(&v) {
             return None;
         }
         if is_neg {
-            v = v.checked_neg()?;
+            v = -v;
         }
-        t.push(TimeStrToken::Second(v));
+        t.push(TimeStrToken::Second(v.into()));
         t.push(TimeStrToken::TimeUnit(DateTimeField::Second))
     }
     Some(())

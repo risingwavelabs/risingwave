@@ -16,9 +16,13 @@ use std::fmt::Debug;
 
 use risingwave_common::array::{Array, BoolArray};
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::types::num256::Int256Ref;
 use risingwave_expr_macro::function;
 
-#[function("equal(*number, *number) -> boolean")]
+#[function("equal(*int, *int) -> boolean")]
+#[function("equal(*numeric, *numeric) -> boolean")]
+#[function("equal(*float, *float) -> boolean")]
+#[function("equal(int256, int256) -> boolean")]
 #[function("equal(serial, serial) -> boolean")]
 #[function("equal(date, date) -> boolean")]
 #[function("equal(time, time) -> boolean")]
@@ -41,7 +45,10 @@ where
     l.into() == r.into()
 }
 
-#[function("not_equal(*number, *number) -> boolean")]
+#[function("not_equal(*int, *int) -> boolean")]
+#[function("not_equal(*numeric, *numeric) -> boolean")]
+#[function("not_equal(*float, *float) -> boolean")]
+#[function("not_equal(int256, int256) -> boolean")]
 #[function("not_equal(serial, serial) -> boolean")]
 #[function("not_equal(date, date) -> boolean")]
 #[function("not_equal(time, time) -> boolean")]
@@ -64,8 +71,11 @@ where
     l.into() != r.into()
 }
 
-#[function("greater_than_or_equal(*number, *number) -> boolean")]
+#[function("greater_than_or_equal(*int, *int) -> boolean")]
+#[function("greater_than_or_equal(*numeric, *numeric) -> boolean")]
+#[function("greater_than_or_equal(*float, *float) -> boolean")]
 #[function("greater_than_or_equal(serial, serial) -> boolean")]
+#[function("greater_than_or_equal(int256, int256) -> boolean")]
 #[function("greater_than_or_equal(date, date) -> boolean")]
 #[function("greater_than_or_equal(time, time) -> boolean")]
 #[function("greater_than_or_equal(interval, interval) -> boolean")]
@@ -87,8 +97,11 @@ where
     l.into() >= r.into()
 }
 
-#[function("greater_than(*number, *number) -> boolean")]
+#[function("greater_than(*int, *int) -> boolean")]
+#[function("greater_than(*numeric, *numeric) -> boolean")]
+#[function("greater_than(*float, *float) -> boolean")]
 #[function("greater_than(serial, serial) -> boolean")]
+#[function("greater_than(int256, int256) -> boolean")]
 #[function("greater_than(date, date) -> boolean")]
 #[function("greater_than(time, time) -> boolean")]
 #[function("greater_than(interval, interval) -> boolean")]
@@ -110,8 +123,11 @@ where
     l.into() > r.into()
 }
 
-#[function("less_than_or_equal(*number, *number) -> boolean")]
+#[function("less_than_or_equal(*int, *int) -> boolean")]
+#[function("less_than_or_equal(*numeric, *numeric) -> boolean")]
+#[function("less_than_or_equal(*float, *float) -> boolean")]
 #[function("less_than_or_equal(serial, serial) -> boolean")]
+#[function("less_than_or_equal(int256, int256) -> boolean")]
 #[function("less_than_or_equal(date, date) -> boolean")]
 #[function("less_than_or_equal(time, time) -> boolean")]
 #[function("less_than_or_equal(interval, interval) -> boolean")]
@@ -133,8 +149,11 @@ where
     l.into() <= r.into()
 }
 
-#[function("less_than(*number, *number) -> boolean")]
+#[function("less_than(*int, *int) -> boolean")]
+#[function("less_than(*numeric, *numeric) -> boolean")]
+#[function("less_than(*float, *float) -> boolean")]
 #[function("less_than(serial, serial) -> boolean")]
+#[function("less_than(int256, int256) -> boolean")]
 #[function("less_than(date, date) -> boolean")]
 #[function("less_than(time, time) -> boolean")]
 #[function("less_than(interval, interval) -> boolean")]
@@ -156,8 +175,11 @@ where
     l.into() < r.into()
 }
 
-#[function("is_distinct_from(*number, *number) -> boolean")]
+#[function("is_distinct_from(*int, *int) -> boolean")]
+#[function("is_distinct_from(*numeric, *numeric) -> boolean")]
+#[function("is_distinct_from(*float, *float) -> boolean")]
 #[function("is_distinct_from(serial, serial) -> boolean")]
+#[function("is_distinct_from(int256, int256) -> boolean")]
 #[function("is_distinct_from(date, date) -> boolean")]
 #[function("is_distinct_from(time, time) -> boolean")]
 #[function("is_distinct_from(interval, interval) -> boolean")]
@@ -179,8 +201,11 @@ where
     l.map(Into::into) != r.map(Into::into)
 }
 
-#[function("is_not_distinct_from(*number, *number) -> boolean")]
+#[function("is_not_distinct_from(*int, *int) -> boolean")]
+#[function("is_not_distinct_from(*numeric, *numeric) -> boolean")]
+#[function("is_not_distinct_from(*float, *float) -> boolean")]
 #[function("is_not_distinct_from(serial, serial) -> boolean")]
+#[function("is_not_distinct_from(int256, int256) -> boolean")]
 #[function("is_not_distinct_from(date, date) -> boolean")]
 #[function("is_not_distinct_from(time, time) -> boolean")]
 #[function("is_not_distinct_from(interval, interval) -> boolean")]

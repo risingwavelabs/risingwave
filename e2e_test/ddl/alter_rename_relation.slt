@@ -89,6 +89,11 @@ public.mv2 CREATE MATERIALIZED VIEW mv2 AS SELECT v1, (t.v2).v1 AS v21 FROM t2 A
 statement ok
 ALTER SINK sink RENAME TO sink1;
 
+query TT
+SHOW CREATE SINK sink1;
+----
+public.sink1 CREATE SINK sink1 AS SELECT mv3.v1 AS v1, mv3.v21 AS v2 FROM mv2 AS mv3 WITH (connector = 'blackhole')
+
 # alter mview rename with alias conflict, used by sink1
 statement ok
 ALTER MATERIALIZED VIEW mv2 RENAME TO mv3;
@@ -146,6 +151,11 @@ CREATE MATERIALIZED VIEW mv4 AS SELECT * FROM src;
 
 statement ok
 ALTER SOURCE src RENAME TO src1;
+
+query TT
+SHOW CREATE SOURCE src1;
+----
+public.src1 CREATE SOURCE src1 (v INT) WITH (connector = 'datagen', fields.v.kind = 'sequence', fields.v.start = '1', fields.v.end = '10', datagen.rows.per.second = '15', datagen.split.num = '1') ROW FORMAT JSON
 
 query TT
 SHOW CREATE MATERIALIZED VIEW mv4;

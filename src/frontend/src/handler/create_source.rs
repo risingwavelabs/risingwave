@@ -27,7 +27,9 @@ use risingwave_common::types::DataType;
 use risingwave_connector::parser::{
     AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
 };
-use risingwave_connector::source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR};
+use risingwave_connector::source::cdc::{
+    CITUS_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
+};
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::filesystem::S3_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
@@ -45,16 +47,20 @@ use risingwave_sqlparser::ast::{
 use super::create_table::bind_sql_table_column_constraints;
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::connection_catalog::resolve_private_link_connection;
 use crate::catalog::ColumnId;
 use crate::expr::Expr;
 use crate::handler::create_table::{
     bind_sql_column_constraints, bind_sql_columns, ColumnIdGenerator,
 };
+use crate::handler::util::{get_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
 use crate::session::SessionImpl;
+use crate::WithOptions;
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
+pub(crate) const CONNECTION_NAME_KEY: &str = "connection.name";
 
 /// Map an Avro schema to a relational schema.
 async fn extract_avro_table_schema(
@@ -173,19 +179,10 @@ async fn extract_protobuf_table_schema(
 }
 
 #[inline(always)]
-fn get_connector(with_properties: &HashMap<String, String>) -> Option<String> {
+fn get_connection_name(with_properties: &HashMap<String, String>) -> Option<String> {
     with_properties
-        .get(UPSTREAM_SOURCE_KEY)
+        .get(CONNECTION_NAME_KEY)
         .map(|s| s.to_lowercase())
-}
-
-#[inline(always)]
-pub(crate) fn is_kafka_source(with_properties: &HashMap<String, String>) -> bool {
-    let Some(connector) = get_connector(with_properties) else {
-        return false;
-    };
-
-    connector == KAFKA_CONNECTOR
 }
 
 pub(crate) async fn resolve_source_schema(
@@ -199,7 +196,7 @@ pub(crate) async fn resolve_source_schema(
     validate_compatibility(&source_schema, with_properties)?;
     check_nexmark_schema(with_properties, *row_id_index, columns)?;
 
-    let is_kafka = is_kafka_source(with_properties);
+    let is_kafka = is_kafka_connector(with_properties);
 
     let source_info = match &source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
@@ -456,7 +453,7 @@ fn check_and_add_timestamp_column(
     column_descs: &mut Vec<ColumnDesc>,
     col_id_gen: &mut ColumnIdGenerator,
 ) {
-    if is_kafka_source(with_properties) {
+    if is_kafka_connector(with_properties) {
         let kafka_timestamp_column = ColumnDesc {
             data_type: DataType::Timestamptz,
             column_id: col_id_gen.generate(KAFKA_TIMESTAMP_COLUMN_NAME),
@@ -475,7 +472,7 @@ pub(super) fn bind_source_watermark(
     source_watermarks: Vec<SourceWatermark>,
     column_catalogs: &[ColumnCatalog],
 ) -> Result<Vec<WatermarkDesc>> {
-    let mut binder = Binder::new(session);
+    let mut binder = Binder::new_for_ddl(session);
     binder.bind_columns_to_context(name.clone(), column_catalogs.to_vec())?;
 
     let watermark_descs = source_watermarks
@@ -507,6 +504,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, Vec<RowFormatType
                 S3_CONNECTOR => vec![RowFormatType::Csv, RowFormatType::Json],
                 MYSQL_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson],
                 POSTGRES_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson],
+                CITUS_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson],
         ))
     },
 );
@@ -642,7 +640,8 @@ pub async fn handle_create_source(
 
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, stmt.source_name)?;
-    let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
+    let (database_id, schema_id) =
+        session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
     if handler_args.with_options.is_empty() {
         return Err(RwError::from(InvalidInputSyntax(
@@ -650,12 +649,7 @@ pub async fn handle_create_source(
         )));
     }
 
-    let mut with_properties = handler_args
-        .with_options
-        .inner()
-        .clone()
-        .into_iter()
-        .collect();
+    let mut with_properties = handler_args.with_options.into_inner().into_iter().collect();
 
     let mut col_id_gen = ColumnIdGenerator::new_initial();
 
@@ -705,6 +699,27 @@ pub async fn handle_create_source(
 
     let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
 
+    let connection_name = get_connection_name(&with_properties);
+    let is_kafka_connector = is_kafka_connector(&with_properties);
+    let mut with_options = WithOptions::new(with_properties);
+    let connection_id = match connection_name {
+        Some(connection_name) => {
+            let connection = session
+                .get_connection_by_name(schema_name, &connection_name)
+                .map_err(|_| ErrorCode::ItemNotFound(connection_name))?;
+            if !is_kafka_connector {
+                return Err(RwError::from(ErrorCode::ProtocolError(
+                    "Create source with connection is only supported for kafka connectors."
+                        .to_string(),
+                )));
+            }
+            resolve_private_link_connection(&connection, with_options.inner_mut())?;
+            Some(connection.id)
+        }
+        None => None,
+    };
+    let definition = handler_args.normalized_sql;
+
     let source = PbSource {
         id: TableId::placeholder().table_id,
         schema_id,
@@ -713,10 +728,12 @@ pub async fn handle_create_source(
         row_id_index,
         columns,
         pk_column_ids,
-        properties: with_properties.into_iter().collect(),
+        properties: with_options.into_inner().into_iter().collect(),
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs,
+        definition,
+        connection_id,
         optional_associated_table_id: None,
     };
 

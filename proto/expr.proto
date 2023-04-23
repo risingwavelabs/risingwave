@@ -9,9 +9,6 @@ option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message ExprNode {
-  // a "pure function" will be defined as having `1 < expr_node as i32 <= 600`.
-  // Please modify this definition if adding a pure function that does not belong
-  // to this range.
   enum Type {
     UNSPECIFIED = 0;
     INPUT_REF = 1;
@@ -102,7 +99,7 @@ message ExprNode {
     LPAD = 238;
     RPAD = 239;
     REVERSE = 240;
-    STRPOS = 241;
+    STRPOS = 241 [deprecated = true]; // duplicated with POSITION
     TO_ASCII = 242;
     TO_HEX = 243;
     QUOTE_IDENT = 244;
@@ -114,6 +111,12 @@ message ExprNode {
     ACOS = 250;
     ATAN = 251;
     ATAN2 = 252;
+    SIND = 253;
+    COSD = 254;
+    TAND = 255;
+    SQRT = 256;
+    DEGREES = 257;
+    RADIANS = 258;
 
     // Boolean comparison
     IS_TRUE = 301;
@@ -141,6 +144,13 @@ message ExprNode {
     ARRAY_DISTINCT = 535;
     ARRAY_LENGTH = 536;
     CARDINALITY = 537;
+    ARRAY_REMOVE = 538;
+    ARRAY_POSITIONS = 539;
+    TRIM_ARRAY = 540;
+    STRING_TO_ARRAY = 541;
+
+    // Int256 functions
+    HEX_TO_INT256 = 560;
 
     // Jsonb functions
 
@@ -160,6 +170,7 @@ message ExprNode {
     VNODE = 1101;
     // Non-deterministic functions
     NOW = 2022;
+    PROCTIME = 2023;
     // User defined functions
     UDF = 3000;
   }
@@ -251,6 +262,9 @@ message AggCall {
     VAR_SAMP = 12;
     STDDEV_POP = 13;
     STDDEV_SAMP = 14;
+    BIT_AND = 15;
+    BIT_OR = 16;
+    BIT_XOR = 17;
   }
   Type type = 1;
   repeated InputRef args = 2;

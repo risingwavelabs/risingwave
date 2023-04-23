@@ -19,7 +19,7 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::{DataType, DataTypeName};
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::function::aggregate::AggKind;
 use risingwave_frontend::expr::{agg_func_sigs, cast_sigs, func_sigs, CastContext, ExprType};
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName, OrderByExpr,
@@ -239,12 +239,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let casts = EXPLICIT_CAST_TABLE.get(ret)?;
         let cast_sig = casts.choose(&mut self.rng).unwrap();
 
-        use CastContext as T;
         match cast_sig.context {
-            T::Explicit => {
-                let expr = self
-                    .gen_expr(&cast_sig.from_type, context.set_inside_explicit_cast())
-                    .into();
+            CastContext::Explicit => {
+                let expr = self.gen_expr(&cast_sig.from_type, context).into();
                 let data_type = data_type_to_ast_data_type(&cast_sig.to_type);
                 Some(Expr::Cast { expr, data_type })
             }
@@ -448,41 +445,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     ) -> Option<Expr> {
         use AggKind as A;
         match func {
-            A::Sum | A::Sum0 => Some(Expr::Function(make_agg_func(
-                "sum", exprs, distinct, filter, order_by,
-            ))),
-            A::Min => Some(Expr::Function(make_agg_func(
-                "min", exprs, distinct, filter, order_by,
-            ))),
-            A::Max => Some(Expr::Function(make_agg_func(
-                "max", exprs, distinct, filter, order_by,
-            ))),
-            A::Count => Some(Expr::Function(make_agg_func(
-                "count", exprs, distinct, filter, order_by,
-            ))),
-            A::Avg => Some(Expr::Function(make_agg_func(
-                "avg", exprs, distinct, filter, order_by,
-            ))),
-            A::VarSamp => Some(Expr::Function(make_agg_func(
-                "var_samp", exprs, distinct, filter, order_by,
-            ))),
-            A::VarPop => Some(Expr::Function(make_agg_func(
-                "var_pop", exprs, distinct, filter, order_by,
-            ))),
-            A::StddevSamp => Some(Expr::Function(make_agg_func(
-                "stddev_samp",
-                exprs,
-                distinct,
-                filter,
-                order_by,
-            ))),
-            A::StddevPop => Some(Expr::Function(make_agg_func(
-                "stddev_pop",
-                exprs,
-                distinct,
-                filter,
-                order_by,
-            ))),
             A::StringAgg => {
                 // distinct and non_distinct_string_agg are incompatible according to
                 // https://github.com/risingwavelabs/risingwave/blob/a703dc7d725aa995fecbaedc4e9569bc9f6ca5ba/src/frontend/src/optimizer/plan_node/logical_agg.rs#L394
@@ -514,8 +476,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                     )))
                 }
             }
-            A::ArrayAgg => Some(Expr::Function(make_agg_func(
-                "array_agg",
+            other => Some(Expr::Function(make_agg_func(
+                &other.to_string(),
                 exprs,
                 distinct,
                 filter,
@@ -550,7 +512,7 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
         E::IsNotTrue => Some(Expr::IsNotTrue(Box::new(exprs[0].clone()))),
         E::IsFalse => Some(Expr::IsFalse(Box::new(exprs[0].clone()))),
         E::IsNotFalse => Some(Expr::IsNotFalse(Box::new(exprs[0].clone()))),
-        E::Position => Some(Expr::Function(make_simple_func("position", &exprs))),
+        E::Position => Some(Expr::Function(make_simple_func("strpos", &exprs))),
         E::RoundDigit => Some(Expr::Function(make_simple_func("round", &exprs))),
         E::Pow => Some(Expr::Function(make_simple_func("pow", &exprs))),
         E::Repeat => Some(Expr::Function(make_simple_func("repeat", &exprs))),
@@ -579,14 +541,15 @@ fn make_trim(func: ExprType, exprs: Vec<Expr>) -> Expr {
         E::Rtrim => TrimWhereField::Trailing,
         _ => unreachable!(),
     };
-    let trim_where = if exprs.len() > 1 {
-        Some((trim_type, Box::new(exprs[1].clone())))
+    let trim_what = if exprs.len() > 1 {
+        Some(Box::new(exprs[1].clone()))
     } else {
         None
     };
     Expr::Trim {
         expr: Box::new(exprs[0].clone()),
-        trim_where,
+        trim_where: Some(trim_type),
+        trim_what,
     }
 }
 
@@ -693,6 +656,9 @@ pub(crate) fn sql_null() -> Expr {
     Expr::Value(Value::Null)
 }
 
+// TODO(kwannoel):
+// Add variadic function signatures. Can add these functions
+// to a FUNC_TABLE too.
 pub fn print_function_table() -> String {
     let func_str = func_sigs()
         .map(|sign| {

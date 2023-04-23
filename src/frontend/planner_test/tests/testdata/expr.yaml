@@ -170,7 +170,7 @@
   batch_plan: |
     BatchValues { rows: [[4:Int32]] }
 - sql: |
-    select position(replace('1','1','2'),'123') where '12' like '%1';
+    select position('123' in replace('1','1','2')) where '12' like '%1';
   batch_plan: |
     BatchValues { rows: [] }
 - name: case searched form with else
@@ -199,7 +199,7 @@
     select (case v1 when 1 then 1 when 2.0 then 2 else 0.0 end) from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [Case((t.v1 = 1:Int32), 1:Decimal, (t.v1 = 2.0:Decimal), 2:Decimal, 0.0:Decimal) as $expr1] }
+    └─BatchProject { exprs: [Case((t.v1 = 1:Int32), 1:Decimal, (t.v1::Decimal = 2.0:Decimal), 2:Decimal, 0.0:Decimal) as $expr1] }
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - name: case misaligned result types
   sql: |

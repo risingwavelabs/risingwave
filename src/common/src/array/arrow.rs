@@ -13,11 +13,16 @@
 // limitations under the License.
 
 //! Converts between arrays and Apache Arrow arrays.
-use arrow_schema::Field;
+
+use std::fmt::Write;
+
+use arrow_schema::{Field, DECIMAL256_MAX_PRECISION};
 use chrono::{NaiveDateTime, NaiveTime};
+use itertools::Itertools;
 
 use super::column::Column;
 use super::*;
+use crate::types::num256::Int256;
 use crate::types::struct_type::StructType;
 use crate::util::iter_util::ZipEqFast;
 
@@ -35,16 +40,16 @@ impl From<&DataChunk> for arrow_array::RecordBatch {
     }
 }
 
-impl From<&arrow_array::RecordBatch> for DataChunk {
-    fn from(batch: &arrow_array::RecordBatch) -> Self {
-        DataChunk::new(
-            batch
-                .columns()
-                .iter()
-                .map(|array| Column::new(Arc::new(array.into())))
-                .collect(),
-            batch.num_rows(),
-        )
+impl TryFrom<&arrow_array::RecordBatch> for DataChunk {
+    type Error = ArrayError;
+
+    fn try_from(batch: &arrow_array::RecordBatch) -> Result<Self, Self::Error> {
+        let mut columns = Vec::with_capacity(batch.num_columns());
+        for array in batch.columns() {
+            let column = Column::new(Arc::new(array.try_into()?));
+            columns.push(column);
+        }
+        Ok(DataChunk::new(columns, batch.num_rows()))
     }
 }
 
@@ -61,20 +66,21 @@ macro_rules! converts_generic {
             }
         }
         // Arrow array -> RisingWave array
-        impl From<&arrow_array::ArrayRef> for ArrayImpl {
-            fn from(array: &arrow_array::ArrayRef) -> Self {
+        impl TryFrom<&arrow_array::ArrayRef> for ArrayImpl {
+            type Error = ArrayError;
+            fn try_from(array: &arrow_array::ArrayRef) -> Result<Self, Self::Error> {
                 use arrow_schema::DataType::*;
                 use arrow_schema::IntervalUnit::*;
                 use arrow_schema::TimeUnit::*;
                 match array.data_type() {
-                    $($ArrowPattern => $ArrayImplPattern(
+                    $($ArrowPattern => Ok($ArrayImplPattern(
                         array
                             .as_any()
                             .downcast_ref::<$ArrowType>()
                             .unwrap()
-                            .into(),
-                    ),)*
-                    t => todo!("Unsupported arrow data type: {t:?}"),
+                            .try_into()?,
+                    )),)*
+                    t => Err(ArrayError::FromArrow(format!("unsupported data type: {t:?}"))),
                 }
             }
         }
@@ -89,13 +95,15 @@ converts_generic! {
     { arrow_array::StringArray, Utf8, ArrayImpl::Utf8 },
     { arrow_array::BooleanArray, Boolean, ArrayImpl::Bool },
     { arrow_array::Decimal128Array, Decimal128(_, _), ArrayImpl::Decimal },
+    { arrow_array::Decimal256Array, Decimal256(_, _), ArrayImpl::Int256 },
     { arrow_array::IntervalMonthDayNanoArray, Interval(MonthDayNano), ArrayImpl::Interval },
     { arrow_array::Date32Array, Date32, ArrayImpl::Date },
     { arrow_array::TimestampNanosecondArray, Timestamp(Nanosecond, _), ArrayImpl::Timestamp },
     { arrow_array::Time64NanosecondArray, Time64(Nanosecond), ArrayImpl::Time },
     { arrow_array::StructArray, Struct(_), ArrayImpl::Struct },
     { arrow_array::ListArray, List(_), ArrayImpl::List },
-    { arrow_array::BinaryArray, Binary, ArrayImpl::Bytea }
+    { arrow_array::BinaryArray, Binary, ArrayImpl::Bytea },
+    { arrow_array::LargeStringArray, LargeUtf8, ArrayImpl::Jsonb }    // we use LargeUtf8 to represent Jsonb in arrow
 }
 
 // Arrow Datatype -> Risingwave Datatype
@@ -115,6 +123,7 @@ impl From<&arrow_schema::DataType> for DataType {
             Interval(_) => Self::Interval, // TODO: check time unit
             Binary => Self::Bytea,
             Utf8 => Self::Varchar,
+            LargeUtf8 => Self::Jsonb,
             Struct(field) => Self::Struct(Arc::new(struct_type::StructType {
                 fields: field.iter().map(|f| f.data_type().into()).collect(),
                 field_names: field.iter().map(|f| f.name().clone()).collect(),
@@ -123,6 +132,7 @@ impl From<&arrow_schema::DataType> for DataType {
                 datatype: Box::new(field.data_type().into()),
             },
             Decimal128(_, _) => Self::Decimal,
+            Decimal256(_, _) => Self::Int256,
             _ => todo!("Unsupported arrow data type: {value:?}"),
         }
     }
@@ -141,6 +151,7 @@ impl From<&DataType> for arrow_schema::DataType {
             DataType::Int16 => Self::Int16,
             DataType::Int32 => Self::Int32,
             DataType::Int64 => Self::Int64,
+            DataType::Int256 => Self::Decimal256(DECIMAL256_MAX_PRECISION, 0),
             DataType::Float32 => Self::Float32,
             DataType::Float64 => Self::Float64,
             DataType::Date => Self::Date32,
@@ -148,6 +159,7 @@ impl From<&DataType> for arrow_schema::DataType {
             DataType::Time => Self::Time64(arrow_schema::TimeUnit::Millisecond),
             DataType::Interval => Self::Interval(arrow_schema::IntervalUnit::DayTime),
             DataType::Varchar => Self::Utf8,
+            DataType::Jsonb => Self::LargeUtf8,
             DataType::Bytea => Self::Binary,
             DataType::Decimal => Self::Decimal128(28, 0), // arrow precision can not be 0
             DataType::Struct(struct_type) => {
@@ -198,6 +210,11 @@ macro_rules! converts {
                 array.iter().collect()
             }
         }
+        impl From<&[$ArrowType]> for $ArrayType {
+            fn from(arrays: &[$ArrowType]) -> Self {
+                arrays.iter().flat_map(|a| a.iter()).collect()
+            }
+        }
     };
     // convert values using FromIntoArrow
     ($ArrayType:ty, $ArrowType:ty, @map) => {
@@ -210,6 +227,19 @@ macro_rules! converts {
             fn from(array: &$ArrowType) -> Self {
                 array
                     .iter()
+                    .map(|o| {
+                        o.map(|v| {
+                            <<$ArrayType as Array>::RefItem<'_> as FromIntoArrow>::from_arrow(v)
+                        })
+                    })
+                    .collect()
+            }
+        }
+        impl From<&[$ArrowType]> for $ArrayType {
+            fn from(arrays: &[$ArrowType]) -> Self {
+                arrays
+                    .iter()
+                    .flat_map(|a| a.iter())
                     .map(|o| {
                         o.map(|v| {
                             <<$ArrayType as Array>::RefItem<'_> as FromIntoArrow>::from_arrow(v)
@@ -387,6 +417,60 @@ impl From<&arrow_array::Decimal128Array> for DecimalArray {
     }
 }
 
+impl From<&JsonbArray> for arrow_array::LargeStringArray {
+    fn from(array: &JsonbArray) -> Self {
+        let mut builder =
+            arrow_array::builder::LargeStringBuilder::with_capacity(array.len(), array.len() * 16);
+        for value in array.iter() {
+            match value {
+                Some(jsonb) => {
+                    write!(&mut builder, "{}", jsonb).unwrap();
+                    builder.append_value("");
+                }
+                None => builder.append_null(),
+            }
+        }
+        builder.finish()
+    }
+}
+
+impl TryFrom<&arrow_array::LargeStringArray> for JsonbArray {
+    type Error = ArrayError;
+
+    fn try_from(array: &arrow_array::LargeStringArray) -> Result<Self, Self::Error> {
+        array
+            .iter()
+            .map(|o| {
+                o.map(|s| {
+                    s.parse()
+                        .map_err(|_| ArrayError::FromArrow(format!("invalid json: {s}")))
+                })
+                .transpose()
+            })
+            .try_collect()
+    }
+}
+
+impl From<&Int256Array> for arrow_array::Decimal256Array {
+    fn from(array: &Int256Array) -> Self {
+        array
+            .iter()
+            .map(|o| o.map(arrow_buffer::i256::from))
+            .collect()
+    }
+}
+
+impl From<&arrow_array::Decimal256Array> for Int256Array {
+    fn from(array: &arrow_array::Decimal256Array) -> Self {
+        let values = array.iter().map(|o| o.map(Int256::from)).collect_vec();
+
+        values
+            .iter()
+            .map(|i| i.as_ref().map(|v| v.as_scalar_ref()))
+            .collect()
+    }
+}
+
 impl From<&ListArray> for arrow_array::ListArray {
     fn from(array: &ListArray) -> Self {
         use arrow_array::builder::*;
@@ -420,6 +504,7 @@ impl From<&ListArray> for arrow_array::ListArray {
             ArrayImpl::Int64(a) => build(array, a, Int64Builder::with_capacity(a.len()), |b, v| {
                 b.append_option(v)
             }),
+
             ArrayImpl::Float32(a) => {
                 build(array, a, Float32Builder::with_capacity(a.len()), |b, v| {
                     b.append_option(v.map(|f| f.0))
@@ -435,6 +520,14 @@ impl From<&ListArray> for arrow_array::ListArray {
                 a,
                 StringBuilder::with_capacity(a.len(), a.data().len()),
                 |b, v| b.append_option(v),
+            ),
+            ArrayImpl::Int256(a) => build(
+                array,
+                a,
+                Decimal256Builder::with_capacity(a.len()).with_data_type(
+                    arrow_schema::DataType::Decimal256(DECIMAL256_MAX_PRECISION, 0),
+                ),
+                |b, v| b.append_option(v.map(Into::into)),
             ),
             ArrayImpl::Bool(a) => {
                 build(array, a, BooleanBuilder::with_capacity(a.len()), |b, v| {
@@ -476,7 +569,12 @@ impl From<&ListArray> for arrow_array::ListArray {
                 Time64NanosecondBuilder::with_capacity(a.len()),
                 |b, v| b.append_option(v.map(|d| d.into_arrow())),
             ),
-            ArrayImpl::Jsonb(_) => todo!("list of jsonb"),
+            ArrayImpl::Jsonb(a) => build(
+                array,
+                a,
+                LargeStringBuilder::with_capacity(a.len(), a.len() * 16),
+                |b, v| b.append_option(v.map(|j| j.to_string())),
+            ),
             ArrayImpl::Serial(_) => todo!("list of serial"),
             ArrayImpl::Struct(_) => todo!("list of struct"),
             ArrayImpl::List(_) => todo!("list of list"),
@@ -490,10 +588,15 @@ impl From<&ListArray> for arrow_array::ListArray {
     }
 }
 
-impl From<&arrow_array::ListArray> for ListArray {
-    fn from(array: &arrow_array::ListArray) -> Self {
-        let iter = array.iter().map(|o| o.map(|a| ArrayImpl::from(&a)));
-        ListArray::from_iter(iter, (&array.value_type()).into())
+impl TryFrom<&arrow_array::ListArray> for ListArray {
+    type Error = ArrayError;
+
+    fn try_from(array: &arrow_array::ListArray) -> Result<Self, Self::Error> {
+        let iter: Vec<_> = array
+            .iter()
+            .map(|o| o.map(|a| ArrayImpl::try_from(&a)).transpose())
+            .try_collect()?;
+        Ok(ListArray::from_iter(iter, (&array.value_type()).into()))
     }
 }
 
@@ -520,16 +623,22 @@ impl From<&StructArray> for arrow_array::StructArray {
     }
 }
 
-impl From<&arrow_array::StructArray> for StructArray {
-    fn from(array: &arrow_array::StructArray) -> Self {
+impl TryFrom<&arrow_array::StructArray> for StructArray {
+    type Error = ArrayError;
+
+    fn try_from(array: &arrow_array::StructArray) -> Result<Self, Self::Error> {
         let mut null_bitmap = Vec::new();
         for i in 0..arrow_array::Array::len(&array) {
             null_bitmap.push(!arrow_array::Array::is_null(&array, i))
         }
-        match arrow_array::Array::data_type(&array) {
+        Ok(match arrow_array::Array::data_type(&array) {
             arrow_schema::DataType::Struct(fields) => StructArray::from_slices_with_field_names(
                 &(null_bitmap),
-                array.columns().iter().map(ArrayImpl::from).collect(),
+                array
+                    .columns()
+                    .iter()
+                    .map(ArrayImpl::try_from)
+                    .try_collect()?,
                 fields
                     .iter()
                     .map(|f| DataType::from(f.data_type()))
@@ -537,7 +646,7 @@ impl From<&arrow_array::StructArray> for StructArray {
                 array.column_names().into_iter().map(String::from).collect(),
             ),
             _ => panic!("nested field types cannot be determined."),
-        }
+        })
     }
 }
 
@@ -632,6 +741,45 @@ mod tests {
         let arrow = arrow_array::Decimal128Array::from(&array);
         assert_eq!(DecimalArray::from(&arrow), array);
     }
+
+    #[test]
+    fn jsonb() {
+        let array = JsonbArray::from_iter([
+            None,
+            Some("null".parse().unwrap()),
+            Some("false".parse().unwrap()),
+            Some("1".parse().unwrap()),
+            Some("[1, 2, 3]".parse().unwrap()),
+            Some(r#"{ "a": 1, "b": null }"#.parse().unwrap()),
+        ]);
+        let arrow = arrow_array::LargeStringArray::from(&array);
+        assert_eq!(JsonbArray::try_from(&arrow).unwrap(), array);
+    }
+
+    #[test]
+    fn int256() {
+        let values = vec![
+            None,
+            Some(Int256::from(1)),
+            Some(Int256::from(i64::MAX)),
+            Some(Int256::from(i64::MAX) * Int256::from(i64::MAX)),
+            Some(Int256::from(i64::MAX) * Int256::from(i64::MAX) * Int256::from(i64::MAX)),
+            Some(
+                Int256::from(i64::MAX)
+                    * Int256::from(i64::MAX)
+                    * Int256::from(i64::MAX)
+                    * Int256::from(i64::MAX),
+            ),
+            Some(Int256::min_value()),
+            Some(Int256::max_value()),
+        ];
+
+        let array =
+            Int256Array::from_iter(values.iter().map(|r| r.as_ref().map(|x| x.as_scalar_ref())));
+        let arrow = arrow_array::Decimal256Array::from(&array);
+        assert_eq!(Int256Array::from(&arrow), array);
+    }
+
     #[test]
     fn struct_array() {
         use arrow_array::Array as _;
@@ -642,7 +790,7 @@ mod tests {
 
         // Empty array - arrow to risingwave conversion.
         let test_arr_2 = arrow_array::StructArray::from(vec![]);
-        assert_eq!(StructArray::from(&test_arr_2).len(), 0);
+        assert_eq!(StructArray::try_from(&test_arr_2).unwrap().len(), 0);
 
         // Struct array with primitive types. arrow to risingwave conversion.
         let test_arrow_struct_array = arrow_array::StructArray::try_from(vec![
@@ -666,7 +814,8 @@ mod tests {
             ),
         ])
         .unwrap();
-        let actual_risingwave_struct_array = StructArray::from(&test_arrow_struct_array);
+        let actual_risingwave_struct_array =
+            StructArray::try_from(&test_arrow_struct_array).unwrap();
         let expected_risingwave_struct_array = StructArray::from_slices_with_field_names(
             &[true, true, true, false],
             vec![
@@ -694,6 +843,6 @@ mod tests {
             DataType::Int32,
         );
         let arrow = arrow_array::ListArray::from(&array);
-        assert_eq!(ListArray::from(&arrow), array);
+        assert_eq!(ListArray::try_from(&arrow).unwrap(), array);
     }
 }

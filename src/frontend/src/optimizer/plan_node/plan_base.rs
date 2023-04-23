@@ -79,6 +79,11 @@ impl stream::StreamPlanRef for PlanBase {
         self.append_only
     }
 }
+impl batch::BatchPlanRef for PlanBase {
+    fn order(&self) -> &Order {
+        &self.order
+    }
+}
 impl PlanBase {
     pub fn new_logical(
         ctx: OptimizerContextRef,
@@ -111,6 +116,23 @@ impl PlanBase {
         )
     }
 
+    pub fn new_stream_with_logical(
+        logical: &impl GenericPlanNode,
+        dist: Distribution,
+        append_only: bool,
+        watermark_columns: FixedBitSet,
+    ) -> Self {
+        Self::new_stream(
+            logical.ctx(),
+            logical.schema(),
+            logical.logical_pk().unwrap_or_default().to_vec(),
+            logical.functional_dependency(),
+            dist,
+            append_only,
+            watermark_columns,
+        )
+    }
+
     pub fn new_stream(
         ctx: OptimizerContextRef,
         schema: Schema,
@@ -133,6 +155,14 @@ impl PlanBase {
             functional_dependency,
             watermark_columns,
         }
+    }
+
+    pub fn new_batch_from_logical(
+        logical: &impl GenericPlanNode,
+        dist: Distribution,
+        order: Order,
+    ) -> Self {
+        Self::new_batch(logical.ctx(), logical.schema(), dist, order)
     }
 
     pub fn new_batch(

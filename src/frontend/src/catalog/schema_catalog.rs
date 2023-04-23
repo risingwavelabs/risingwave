@@ -19,19 +19,18 @@ use std::sync::Arc;
 use risingwave_common::catalog::{valid_table_name, FunctionId, IndexId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
-use risingwave_pb::catalog::{PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView};
+use risingwave_pb::catalog::{
+    PbConnection, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
+};
 
-use super::source_catalog::SourceCatalog;
-use super::ViewId;
+use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::catalog::index_catalog::IndexCatalog;
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
-use crate::catalog::SchemaId;
-
-pub type SourceId = u32;
-pub type SinkId = u32;
+use crate::catalog::{ConnectionId, SchemaId, SinkId, SourceId, ViewId};
 
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {
@@ -50,6 +49,8 @@ pub struct SchemaCatalog {
     view_by_id: HashMap<ViewId, Arc<ViewCatalog>>,
     function_by_name: HashMap<String, HashMap<Vec<DataType>, Arc<FunctionCatalog>>>,
     function_by_id: HashMap<FunctionId, Arc<FunctionCatalog>>,
+    connection_by_name: HashMap<String, Arc<ConnectionCatalog>>,
+    connection_by_id: HashMap<ConnectionId, Arc<ConnectionCatalog>>,
 
     // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
     system_table_by_name: HashMap<String, SystemCatalog>,
@@ -57,7 +58,7 @@ pub struct SchemaCatalog {
 }
 
 impl SchemaCatalog {
-    pub fn create_table(&mut self, prost: &PbTable) {
+    pub fn create_table(&mut self, prost: &PbTable) -> Arc<TableCatalog> {
         let name = prost.name.clone();
         let id = prost.id.into();
         let table: TableCatalog = prost.into();
@@ -66,7 +67,8 @@ impl SchemaCatalog {
         self.table_by_name
             .try_insert(name, table_ref.clone())
             .unwrap();
-        self.table_by_id.try_insert(id, table_ref).unwrap();
+        self.table_by_id.try_insert(id, table_ref.clone()).unwrap();
+        table_ref
     }
 
     pub fn create_sys_table(&mut self, sys_table: SystemCatalog) {
@@ -75,7 +77,7 @@ impl SchemaCatalog {
             .unwrap();
     }
 
-    pub fn update_table(&mut self, prost: &PbTable) {
+    pub fn update_table(&mut self, prost: &PbTable) -> Arc<TableCatalog> {
         let name = prost.name.clone();
         let id = prost.id.into();
         let table: TableCatalog = prost.into();
@@ -87,7 +89,8 @@ impl SchemaCatalog {
             self.table_by_name.remove(old_table.name());
         }
         self.table_by_name.insert(name, table_ref.clone());
-        self.table_by_id.insert(id, table_ref);
+        self.table_by_id.insert(id, table_ref.clone());
+        table_ref
     }
 
     pub fn update_index(&mut self, prost: &PbIndex) {
@@ -298,6 +301,33 @@ impl SchemaCatalog {
             .expect("function not found by argument types");
     }
 
+    pub fn create_connection(&mut self, prost: &PbConnection) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let connection = ConnectionCatalog::from(prost);
+        let connection_ref = Arc::new(connection);
+        self.connection_by_name
+            .try_insert(name, connection_ref.clone())
+            .unwrap();
+        self.connection_by_id
+            .try_insert(id, connection_ref)
+            .unwrap();
+    }
+
+    pub fn drop_connection(&mut self, connection_id: ConnectionId) {
+        let connection_ref = self
+            .connection_by_id
+            .remove(&connection_id)
+            .expect("connection not found by id");
+        self.connection_by_name
+            .remove(&connection_ref.name)
+            .expect("connection not found by name");
+    }
+
+    pub fn iter_all(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
+        self.table_by_name.values()
+    }
+
     pub fn iter_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
             .iter()
@@ -342,6 +372,10 @@ impl SchemaCatalog {
 
     pub fn iter_view(&self) -> impl Iterator<Item = &Arc<ViewCatalog>> {
         self.view_by_name.values()
+    }
+
+    pub fn iter_connections(&self) -> impl Iterator<Item = &Arc<ConnectionCatalog>> {
+        self.connection_by_name.values()
     }
 
     pub fn iter_system_tables(&self) -> impl Iterator<Item = &SystemCatalog> {
@@ -401,6 +435,10 @@ impl SchemaCatalog {
         self.function_by_name.get(name)?.get(args)
     }
 
+    pub fn get_connection_by_name(&self, connection_name: &str) -> Option<&Arc<ConnectionCatalog>> {
+        self.connection_by_name.get(connection_name)
+    }
+
     pub fn id(&self) -> SchemaId {
         self.id
     }
@@ -434,6 +472,8 @@ impl From<&PbSchema> for SchemaCatalog {
             view_by_id: HashMap::new(),
             function_by_name: HashMap::new(),
             function_by_id: HashMap::new(),
+            connection_by_name: HashMap::new(),
+            connection_by_id: HashMap::new(),
         }
     }
 }

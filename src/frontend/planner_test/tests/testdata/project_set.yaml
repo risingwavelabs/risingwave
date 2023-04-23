@@ -94,7 +94,7 @@
           └─BatchProjectSet { select_list: [Unnest($0)] }
             └─BatchScan { table: t, columns: [t.x, t._row_id], distribution: UpstreamHashShard(t._row_id) }
   stream_plan: |
-    StreamMaterialize { columns: [projected_row_id(hidden), unnest, t._row_id(hidden)], stream_key: [t._row_id, projected_row_id], pk_columns: [projected_row_id, t._row_id], pk_conflict: "NoCheck" }
+    StreamMaterialize { columns: [projected_row_id(hidden), unnest, t._row_id(hidden)], stream_key: [], pk_columns: [projected_row_id], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [projected_row_id, Unnest($0), t._row_id] }
       └─StreamTopN { order: "[projected_row_id ASC]", limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
@@ -155,13 +155,13 @@
     └─StreamHashJoin { type: Inner, predicate: Unnest($0) = Unnest($0), output: [Unnest($0), t._row_id, projected_row_id, t._row_id, projected_row_id] }
       ├─StreamExchange { dist: HashShard(Unnest($0)) }
       | └─StreamProject { exprs: [Unnest($0), t._row_id, projected_row_id] }
-      |   └─StreamShare { id = 5 }
+      |   └─StreamShare { id = 3 }
       |     └─StreamProject { exprs: [Unnest($0), t._row_id, projected_row_id] }
       |       └─StreamProjectSet { select_list: [Unnest($0), $1] }
       |         └─StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: HashShard(Unnest($0)) }
         └─StreamProject { exprs: [Unnest($0), t._row_id, projected_row_id] }
-          └─StreamShare { id = 5 }
+          └─StreamShare { id = 3 }
             └─StreamProject { exprs: [Unnest($0), t._row_id, projected_row_id] }
               └─StreamProjectSet { select_list: [Unnest($0), $1] }
                 └─StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }

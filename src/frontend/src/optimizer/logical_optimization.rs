@@ -118,7 +118,7 @@ lazy_static! {
             // Pull correlated predicates up the algebra tree to unnest simple subquery.
             PullUpCorrelatedPredicateRule::create(),
         ],
-        ApplyOrder::TopDown,
+        ApplyOrder::BottomUp,
     );
 
     static ref UNION_MERGE: OptimizationStage = OptimizationStage::new(
@@ -253,6 +253,12 @@ lazy_static! {
     static ref ALWAYS_FALSE_FILTER: OptimizationStage = OptimizationStage::new(
         "Void always-false filter's downstream",
         vec![AlwaysFalseFilterRule::create()],
+        ApplyOrder::TopDown,
+    );
+
+    static ref LIMIT_PUSH_DOWN: OptimizationStage = OptimizationStage::new(
+        "Push Down Limit",
+        vec![LimitPushDownRule::create()],
         ApplyOrder::TopDown,
     );
 
@@ -502,6 +508,8 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&DEDUP_GROUP_KEYS);
 
         plan = plan.optimize_by_rules(&TOP_N_AGG_ON_INDEX);
+
+        plan = plan.optimize_by_rules(&LIMIT_PUSH_DOWN);
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());

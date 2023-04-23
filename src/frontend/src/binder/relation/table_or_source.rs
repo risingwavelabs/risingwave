@@ -38,7 +38,7 @@ pub struct BoundBaseTable {
     pub table_id: TableId,
     pub table_catalog: TableCatalog,
     pub table_indexes: Vec<Arc<IndexCatalog>>,
-    pub for_system_time_as_of_now: bool,
+    pub for_system_time_as_of_proctime: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -65,7 +65,7 @@ impl Binder {
         schema_name: Option<&str>,
         table_name: &str,
         alias: Option<TableAlias>,
-        for_system_time_as_of_now: bool,
+        for_system_time_as_of_proctime: bool,
     ) -> Result<Relation> {
         fn is_system_schema(schema_name: &str) -> bool {
             SYSTEM_SCHEMAS.iter().any(|s| *s == schema_name)
@@ -121,7 +121,7 @@ impl Binder {
                         self.resolve_table_relation(
                             &table_catalog.clone(),
                             schema_name,
-                            for_system_time_as_of_now,
+                            for_system_time_as_of_proctime,
                         )?
                     } else if let Ok((source_catalog, _)) =
                         self.catalog
@@ -166,7 +166,7 @@ impl Binder {
                                     return self.resolve_table_relation(
                                         &table_catalog.clone(),
                                         &schema_name.clone(),
-                                        for_system_time_as_of_now,
+                                        for_system_time_as_of_proctime,
                                     );
                                 } else if let Some(source_catalog) =
                                     schema.get_source_by_name(table_name)
@@ -196,7 +196,7 @@ impl Binder {
         &mut self,
         table_catalog: &TableCatalog,
         schema_name: &str,
-        for_system_time_as_of_now: bool,
+        for_system_time_as_of_proctime: bool,
     ) -> Result<(Relation, Vec<(bool, Field)>)> {
         let table_id = table_catalog.id();
         let table_catalog = table_catalog.clone();
@@ -212,7 +212,7 @@ impl Binder {
             table_id,
             table_catalog,
             table_indexes,
-            for_system_time_as_of_now,
+            for_system_time_as_of_proctime,
         };
 
         Ok::<_, RwError>((Relation::BaseTable(Box::new(table)), columns))
@@ -297,14 +297,8 @@ impl Binder {
 
         let table_id = table_catalog.id();
         let table_indexes = self.resolve_table_indexes(schema_name, table_id)?;
-        let table = BoundBaseTable {
-            table_id,
-            table_catalog,
-            table_indexes,
-            for_system_time_as_of_now: false,
-        };
 
-        let columns = table.table_catalog.columns.clone();
+        let columns = table_catalog.columns.clone();
 
         self.bind_table_to_context(
             columns
@@ -314,7 +308,12 @@ impl Binder {
             alias,
         )?;
 
-        Ok(table)
+        Ok(BoundBaseTable {
+            table_id,
+            table_catalog,
+            table_indexes,
+            for_system_time_as_of_proctime: false,
+        })
     }
 
     pub(crate) fn resolve_dml_table<'a>(

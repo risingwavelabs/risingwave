@@ -14,8 +14,6 @@
 
 package com.risingwave.connector;
 
-import static io.grpc.Status.INVALID_ARGUMENT;
-
 import com.risingwave.connector.api.TableSchema;
 import io.delta.standalone.DeltaLog;
 import io.delta.standalone.Operation;
@@ -25,6 +23,7 @@ import io.delta.standalone.types.IntegerType;
 import io.delta.standalone.types.StringType;
 import io.delta.standalone.types.StructField;
 import io.delta.standalone.types.StructType;
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -39,9 +38,11 @@ public class DeltaLakeSinkFactoryTest {
 
     public static void createMockTable(String location) {
         if (Files.exists(Paths.get(location))) {
-            throw INVALID_ARGUMENT
-                    .withDescription("Test path should not exist")
-                    .asRuntimeException();
+            try {
+                FileUtils.deleteDirectory(new File(location));
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
         }
 
         Configuration conf = new Configuration();

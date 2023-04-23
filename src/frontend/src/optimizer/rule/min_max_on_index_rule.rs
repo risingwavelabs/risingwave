@@ -22,10 +22,11 @@ use std::collections::BTreeMap;
 use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::function::aggregate::AggKind;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalFilter, LogicalLimit, LogicalScan, PlanAggCall, PlanTreeNodeUnary,
 };
@@ -107,7 +108,7 @@ impl MinMaxOnIndexRule {
 
                 let limit = LogicalLimit::create(non_null_filter, 1, 0);
 
-                let formatting_agg = LogicalAgg::new(
+                let formatting_agg = Agg::new(
                     vec![PlanAggCall {
                         agg_kind: logical_agg.agg_calls().first()?.agg_kind,
                         return_type: logical_agg.schema().fields[0].data_type.clone(),
@@ -176,7 +177,7 @@ impl MinMaxOnIndexRule {
 
             let limit = LogicalLimit::create(non_null_filter, 1, 0);
 
-            let formatting_agg = LogicalAgg::new(
+            let formatting_agg = Agg::new(
                 vec![PlanAggCall {
                     agg_kind: logical_agg.agg_calls().first()?.agg_kind,
                     return_type: logical_agg.schema().fields[0].data_type.clone(),

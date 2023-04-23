@@ -659,4 +659,131 @@ impl SysCatalogReaderImpl {
     pub(super) fn read_stat_activity(&self) -> Result<Vec<OwnedRow>> {
         Ok(vec![])
     }
+
+    pub(super) async fn read_relation_info(&self) -> Result<Vec<OwnedRow>> {
+        let mut table_ids = Vec::new();
+        {
+            let reader = self.catalog_reader.read_guard();
+            let schemas = reader.get_all_schema_names(&self.auth_context.database)?;
+            for schema in &schemas {
+                let schema_catalog =
+                    reader.get_schema_by_name(&self.auth_context.database, schema)?;
+
+                schema_catalog.iter_mv().for_each(|t| {
+                    table_ids.push(t.id.table_id);
+                });
+
+                schema_catalog.iter_table().for_each(|t| {
+                    table_ids.push(t.id.table_id);
+                });
+
+                schema_catalog.iter_sink().for_each(|t| {
+                    table_ids.push(t.id.sink_id);
+                });
+
+                schema_catalog.iter_index().for_each(|t| {
+                    table_ids.push(t.index_table.id.table_id);
+                });
+            }
+        }
+
+        let table_fragments = self.meta_client.list_table_fragments(&table_ids).await?;
+        let mut rows = Vec::new();
+        let reader = self.catalog_reader.read_guard();
+        let schemas = reader.get_all_schema_names(&self.auth_context.database)?;
+        for schema in &schemas {
+            let schema_catalog = reader.get_schema_by_name(&self.auth_context.database, schema)?;
+            schema_catalog.iter_mv().for_each(|t| {
+                if let Some(fragments) = table_fragments.get(&t.id.table_id) {
+                    rows.push(OwnedRow::new(vec![
+                        Some(ScalarImpl::Utf8(schema.clone().into())),
+                        Some(ScalarImpl::Utf8(t.name.clone().into())),
+                        Some(ScalarImpl::Int32(t.owner as i32)),
+                        Some(ScalarImpl::Utf8(t.definition.clone().into())),
+                        Some(ScalarImpl::Utf8("MATERIALIZED VIEW".into())),
+                        Some(ScalarImpl::Int32(t.id.table_id as i32)),
+                        Some(ScalarImpl::Utf8(
+                            fragments.get_env().unwrap().get_timezone().clone().into(),
+                        )),
+                        Some(ScalarImpl::Utf8(
+                            json!(fragments.get_fragments()).to_string().into(),
+                        )),
+                    ]));
+                }
+            });
+
+            schema_catalog.iter_table().for_each(|t| {
+                if let Some(fragments) = table_fragments.get(&t.id.table_id) {
+                    rows.push(OwnedRow::new(vec![
+                        Some(ScalarImpl::Utf8(schema.clone().into())),
+                        Some(ScalarImpl::Utf8(t.name.clone().into())),
+                        Some(ScalarImpl::Int32(t.owner as i32)),
+                        Some(ScalarImpl::Utf8(t.definition.clone().into())),
+                        Some(ScalarImpl::Utf8("TABLE".into())),
+                        Some(ScalarImpl::Int32(t.id.table_id as i32)),
+                        Some(ScalarImpl::Utf8(
+                            fragments.get_env().unwrap().get_timezone().clone().into(),
+                        )),
+                        Some(ScalarImpl::Utf8(
+                            json!(fragments.get_fragments()).to_string().into(),
+                        )),
+                    ]));
+                }
+            });
+
+            schema_catalog.iter_sink().for_each(|t| {
+                if let Some(fragments) = table_fragments.get(&t.id.sink_id) {
+                    rows.push(OwnedRow::new(vec![
+                        Some(ScalarImpl::Utf8(schema.clone().into())),
+                        Some(ScalarImpl::Utf8(t.name.clone().into())),
+                        Some(ScalarImpl::Int32(t.owner.user_id as i32)),
+                        Some(ScalarImpl::Utf8(t.definition.clone().into())),
+                        Some(ScalarImpl::Utf8("SINK".into())),
+                        Some(ScalarImpl::Int32(t.id.sink_id as i32)),
+                        Some(ScalarImpl::Utf8(
+                            fragments.get_env().unwrap().get_timezone().clone().into(),
+                        )),
+                        Some(ScalarImpl::Utf8(
+                            json!(fragments.get_fragments()).to_string().into(),
+                        )),
+                    ]));
+                }
+            });
+
+            schema_catalog.iter_index().for_each(|t| {
+                if let Some(fragments) = table_fragments.get(&t.index_table.id.table_id) {
+                    rows.push(OwnedRow::new(vec![
+                        Some(ScalarImpl::Utf8(schema.clone().into())),
+                        Some(ScalarImpl::Utf8(t.name.clone().into())),
+                        Some(ScalarImpl::Int32(t.index_table.owner as i32)),
+                        Some(ScalarImpl::Utf8(t.index_table.definition.clone().into())),
+                        Some(ScalarImpl::Utf8("INDEX".into())),
+                        Some(ScalarImpl::Int32(t.index_table.id.table_id as i32)),
+                        Some(ScalarImpl::Utf8(
+                            fragments.get_env().unwrap().get_timezone().clone().into(),
+                        )),
+                        Some(ScalarImpl::Utf8(
+                            json!(fragments.get_fragments()).to_string().into(),
+                        )),
+                    ]));
+                }
+            });
+
+            // Sources have no fragments.
+            schema_catalog.iter_source().for_each(|t| {
+                rows.push(OwnedRow::new(vec![
+                    Some(ScalarImpl::Utf8(schema.clone().into())),
+                    Some(ScalarImpl::Utf8(t.name.clone().into())),
+                    Some(ScalarImpl::Int32(t.owner as i32)),
+                    Some(ScalarImpl::Utf8(t.definition.clone().into())),
+                    Some(ScalarImpl::Utf8("SOURCE".into())),
+                    Some(ScalarImpl::Int32(t.id as i32)),
+                    Some(ScalarImpl::Utf8("".into())),
+                    None,
+                ]));
+            });
+        }
+
+        Ok(rows)
+    }
 }

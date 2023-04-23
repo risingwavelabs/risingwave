@@ -18,7 +18,6 @@ use std::iter::empty;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use fixedbitset::FixedBitSet;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Array, DataChunk, RowRef};
@@ -37,6 +36,7 @@ use super::{ChunkedData, JoinType, RowId};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
+use crate::risingwave_common::hash::NullBitmap;
 use crate::task::BatchTaskContext;
 
 /// Hash Join Executor
@@ -232,13 +232,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
             JoinHashMap::with_capacity_and_hasher(build_row_count, PrecomputedBuildHasher);
         let mut next_build_row_with_same_key =
             ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
-        let null_matched = {
-            let mut null_matched = FixedBitSet::with_capacity(self.null_matched.len());
-            for (idx, col_null_matched) in self.null_matched.into_iter().enumerate() {
-                null_matched.set(idx, col_null_matched);
-            }
-            null_matched
-        };
+
+        let null_matched = K::Bitmap::from_bool_vec(self.null_matched);
 
         // Build hash map
         for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {

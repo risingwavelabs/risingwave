@@ -19,7 +19,7 @@ use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME, RW_CATAL
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::function::aggregate::AggKind;
 use risingwave_sqlparser::ast::{
     BinaryOperator, DataType as AstDataType, Distinct, Expr, Ident, Join, JoinConstraint,
     JoinOperator, ObjectName, Select, SelectItem, TableFactor, TableWithJoins,
@@ -424,13 +424,13 @@ impl Binder {
                 relation: TableFactor::Table {
                     name: ObjectName(vec![RW_CATALOG_SCHEMA_NAME.into(), "rw_table_stats".into()]),
                     alias: None,
-                    for_system_time_as_of_now: false,
+                    for_system_time_as_of_proctime: false,
                 },
                 joins: vec![Join {
                     relation: TableFactor::Table {
                         name: ObjectName(vec![PG_CATALOG_SCHEMA_NAME.into(), "pg_index".into()]),
                         alias: None,
-                        for_system_time_as_of_now: false,
+                        for_system_time_as_of_proctime: false,
                     },
                     join_operator: JoinOperator::Inner(constraint),
                 }],

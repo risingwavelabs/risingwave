@@ -18,9 +18,8 @@ use itertools::Itertools;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_pb::catalog::{PbDatabase, PbSchema};
 
-use super::TableId;
 use crate::catalog::schema_catalog::SchemaCatalog;
-use crate::catalog::{DatabaseId, SchemaId};
+use crate::catalog::{DatabaseId, SchemaId, TableId};
 
 #[derive(Clone, Debug)]
 pub struct DatabaseCatalog {
@@ -50,6 +49,12 @@ impl DatabaseCatalog {
 
     pub fn get_all_schema_names(&self) -> Vec<String> {
         self.schema_by_name.keys().cloned().collect_vec()
+    }
+
+    pub fn iter_all_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
+        self.schema_by_name
+            .values()
+            .flat_map(|schema| schema.iter_all().map(|t| t.id()))
     }
 
     pub fn get_all_schema_info(&self) -> Vec<PbSchema> {

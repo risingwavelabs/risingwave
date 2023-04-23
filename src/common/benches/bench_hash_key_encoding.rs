@@ -14,14 +14,9 @@
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::serial_array::SerialArray;
-use risingwave_common::array::{
-    ArrayBuilderImpl, BoolArray, DataChunk, DateArray, DecimalArray, F32Array, F64Array, I16Array,
-    I32Array, I64Array, IntervalArray, TimeArray, TimestampArray, Utf8Array,
-};
+use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
-use risingwave_common::test_utils::rand_array::seed_rand_array_ref;
+use risingwave_common::test_utils::rand_chunk;
 use risingwave_common::types::DataType;
 
 static SEED: u64 = 998244353u64;
@@ -50,13 +45,14 @@ impl HashKeyDispatcher for HashKeyBenchCaseBuilder {
         for null_ratio in NULL_RATIOS {
             for chunk_size in CHUNK_SIZES {
                 let id = format!(
-                    "{} {:?}, {} rows, Pr[null]={}",
+                    "{} rows, {} {:?}, Pr[null]={}",
+                    chunk_size,
                     self.describe,
                     calc_hash_key_kind(self.data_types()),
-                    chunk_size,
                     null_ratio
                 );
-                let input_chunk = gen_chunk(self.data_types(), *chunk_size, SEED, *null_ratio);
+                let input_chunk =
+                    rand_chunk::gen_chunk(self.data_types(), *chunk_size, SEED, *null_ratio);
                 ret.push(Box::new(HashKeyBenchCase::<K>::new(
                     id,
                     input_chunk,
@@ -139,37 +135,6 @@ impl<K: HashKey> Case for HashKeyBenchCase<K> {
     }
 }
 
-fn gen_chunk(data_types: &[DataType], size: usize, seed: u64, null_ratio: f64) -> DataChunk {
-    let mut columns = vec![];
-
-    for d in data_types {
-        columns.push(Column::new(match d {
-            DataType::Boolean => seed_rand_array_ref::<BoolArray>(size, seed, null_ratio),
-            DataType::Int16 => seed_rand_array_ref::<I16Array>(size, seed, null_ratio),
-            DataType::Int32 => seed_rand_array_ref::<I32Array>(size, seed, null_ratio),
-            DataType::Int64 => seed_rand_array_ref::<I64Array>(size, seed, null_ratio),
-            DataType::Float32 => seed_rand_array_ref::<F32Array>(size, seed, null_ratio),
-            DataType::Float64 => seed_rand_array_ref::<F64Array>(size, seed, null_ratio),
-            DataType::Decimal => seed_rand_array_ref::<DecimalArray>(size, seed, null_ratio),
-            DataType::Date => seed_rand_array_ref::<DateArray>(size, seed, null_ratio),
-            DataType::Varchar => seed_rand_array_ref::<Utf8Array>(size, seed, null_ratio),
-            DataType::Time => seed_rand_array_ref::<TimeArray>(size, seed, null_ratio),
-            DataType::Serial => seed_rand_array_ref::<SerialArray>(size, seed, null_ratio),
-            DataType::Timestamp => seed_rand_array_ref::<TimestampArray>(size, seed, null_ratio),
-            DataType::Timestamptz => seed_rand_array_ref::<I64Array>(size, seed, null_ratio),
-            DataType::Interval => seed_rand_array_ref::<IntervalArray>(size, seed, null_ratio),
-            DataType::Struct(_) | DataType::Bytea | DataType::Jsonb => {
-                todo!()
-            }
-            DataType::List { datatype: _ } => {
-                todo!()
-            }
-        }));
-    }
-    risingwave_common::util::schema_check::schema_check(data_types, &columns).unwrap();
-    DataChunk::new(columns, size)
-}
-
 fn case_builders() -> Vec<HashKeyBenchCaseBuilder> {
     vec![
         HashKeyBenchCaseBuilder {
@@ -194,11 +159,11 @@ fn case_builders() -> Vec<HashKeyBenchCaseBuilder> {
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int32, DataType::Int32, DataType::Int32],
-            describe: "composite fixed".to_string(),
+            describe: "composite fixed, case 1".to_string(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int32, DataType::Int64, DataType::Int32],
-            describe: "composite fixed".to_string(),
+            describe: "composite fixed, case 2".to_string(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int32, DataType::Varchar],
@@ -231,6 +196,22 @@ fn case_builders() -> Vec<HashKeyBenchCaseBuilder> {
                 v
             },
             describe: "large mixed".to_string(),
+        },
+        // These benchmark cases will test unaligned key sizes.
+        // For instance five keys of Int64 cannot fit within Key256 (5 * 64 = 320 > 256),
+        // so it has to go to next largest keysize, Key512.
+        // This means 24 bytes of wasted memory.
+        HashKeyBenchCaseBuilder {
+            data_types: vec![DataType::Int64; 5],
+            describe: "unaligned small fixed".to_string(),
+        },
+        HashKeyBenchCaseBuilder {
+            data_types: vec![DataType::Int64; 9],
+            describe: "unaligned medium fixed".to_string(),
+        },
+        HashKeyBenchCaseBuilder {
+            data_types: vec![DataType::Int64; 17],
+            describe: "unaligned large fixed".to_string(),
         },
     ]
 }

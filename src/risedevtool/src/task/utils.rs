@@ -51,8 +51,8 @@ pub enum HummockInMemoryStrategy {
     Disallowed,
 }
 
-/// Add a storage backend to the parameters. Returns whether this is a shared backend.
-pub fn add_storage_backend(
+/// Add a hummock storage backend to the parameters. Returns whether this is a shared backend.
+pub fn add_hummock_backend(
     id: &str,
     provide_opendal: &[OpendalConfig],
     provide_minio: &[MinioConfig],

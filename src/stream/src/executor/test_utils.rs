@@ -15,9 +15,7 @@
 use async_trait::async_trait;
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::array::Op;
 use risingwave_common::catalog::Schema;
-use risingwave_common::field_generator::FieldGeneratorImpl;
 use risingwave_common::types::{DataType, ScalarImpl};
 use tokio::sync::mpsc;
 
@@ -255,7 +253,7 @@ pub mod agg_executor {
     use risingwave_common::hash::SerializedKey;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::expr::AggKind;
+    use risingwave_expr::function::aggregate::{AggCall, AggKind};
     use risingwave_storage::StateStore;
 
     use crate::common::table::state_table::StateTable;
@@ -263,7 +261,7 @@ pub mod agg_executor {
     use crate::executor::agg_common::{
         AggExecutorArgs, GroupAggExecutorExtraArgs, SimpleAggExecutorExtraArgs,
     };
-    use crate::executor::aggregation::{AggCall, AggStateStorage};
+    use crate::executor::aggregation::AggStateStorage;
     use crate::executor::monitor::StreamingMetrics;
     use crate::executor::{
         ActorContext, ActorContextRef, BoxedExecutor, Executor, GlobalSimpleAggExecutor,
@@ -279,9 +277,10 @@ pub mod agg_executor {
         group_key_indices: &[usize],
         pk_indices: &[usize],
         input_ref: &dyn Executor,
+        is_append_only: bool,
     ) -> AggStateStorage<S> {
         match agg_call.kind {
-            AggKind::Min | AggKind::Max if !agg_call.append_only => {
+            AggKind::Min | AggKind::Max if !is_append_only => {
                 let input_fields = input_ref.schema().fields();
 
                 let mut column_descs = Vec::new();
@@ -384,6 +383,7 @@ pub mod agg_executor {
     pub async fn new_boxed_hash_agg_executor<S: StateStore>(
         store: S,
         input: Box<dyn Executor>,
+        is_append_only: bool,
         agg_calls: Vec<AggCall>,
         row_count_index: usize,
         group_key_indices: Vec<usize>,
@@ -402,6 +402,7 @@ pub mod agg_executor {
                     &group_key_indices,
                     &pk_indices,
                     input.as_ref(),
+                    is_append_only,
                 )
                 .await,
             )
@@ -442,10 +443,12 @@ pub mod agg_executor {
         .boxed()
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn new_boxed_simple_agg_executor<S: StateStore>(
         actor_ctx: ActorContextRef,
         store: S,
         input: BoxedExecutor,
+        is_append_only: bool,
         agg_calls: Vec<AggCall>,
         row_count_index: usize,
         pk_indices: PkIndices,
@@ -461,6 +464,7 @@ pub mod agg_executor {
                     &[],
                     &pk_indices,
                     input.as_ref(),
+                    is_append_only,
                 )
                 .await,
             )
@@ -540,38 +544,4 @@ pub mod top_n_executor {
         )
         .await
     }
-}
-
-/// Generate `num_of_chunks` data chunks with type `data_types`,
-/// where each data chunk has cardinality of `chunk_size`.
-/// TODO(kwannoel): Generate different types of op, different vis.
-pub fn gen_data(
-    num_of_chunks: usize,
-    chunk_size: usize,
-    data_types: &[DataType],
-) -> Vec<StreamChunk> {
-    const SEED: u64 = 0xFF67FEABBAEF76FF;
-
-    let mut ret = Vec::<StreamChunk>::with_capacity(num_of_chunks);
-
-    for i in 0..num_of_chunks {
-        let mut ops = Vec::new();
-        let mut columns = Vec::new();
-        for _ in 0..chunk_size {
-            ops.push(Op::Insert);
-        }
-        for data_type in data_types {
-            let mut data_gen =
-                FieldGeneratorImpl::with_number_random(data_type.clone(), None, None, SEED)
-                    .unwrap();
-            let mut array_builder = data_type.create_array_builder(chunk_size);
-            for j in 0..chunk_size {
-                array_builder.append_datum(&data_gen.generate_datum(((i + 1) * (j + 1)) as u64));
-            }
-            columns.push(array_builder.finish().into());
-        }
-        let chunk = StreamChunk::new(ops, columns, None);
-        ret.push(chunk);
-    }
-    ret
 }

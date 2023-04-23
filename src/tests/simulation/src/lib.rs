@@ -15,7 +15,7 @@
 #![cfg(madsim)]
 #![feature(trait_alias)]
 #![feature(lint_reasons)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 
 pub mod client;
 pub mod cluster;

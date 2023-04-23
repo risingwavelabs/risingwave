@@ -13,44 +13,44 @@
 // limitations under the License.
 
 use std::alloc::{Allocator, Global};
+use std::cmp::min;
 use std::hash::{BuildHasher, Hash};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use lru::{DefaultHasher, LruCache};
+use lru::DefaultHasher;
+use risingwave_common::estimate_size::collections::lru::EstimatedLruCache;
+use risingwave_common::estimate_size::EstimateSize;
 
 /// The managed cache is a lru cache that bounds the memory usage by epoch.
 /// Should be used with `GlobalMemoryManager`.
 pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Global> {
-    pub(super) inner: LruCache<K, V, S, A>,
+    pub(super) inner: EstimatedLruCache<K, V, S, A>,
     /// The entry with epoch less than water should be evicted.
     /// Should only be updated by the `GlobalMemoryManager`.
     pub(super) watermark_epoch: Arc<AtomicU64>,
 }
 
-impl<K: Hash + Eq, V, S: BuildHasher, A: Clone + Allocator> ManagedLruCache<K, V, S, A> {
+impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Allocator>
+    ManagedLruCache<K, V, S, A>
+{
     /// Evict epochs lower than the watermark
     pub fn evict(&mut self) {
         let epoch = self.watermark_epoch.load(Ordering::Relaxed);
         self.inner.evict_by_epoch(epoch);
     }
 
-    /// An iterator visiting all values in most-recently used order. The iterator element type is
-    /// &V.
-    pub fn values(&self) -> impl Iterator<Item = &V> {
-        self.iter().map(|(_k, v)| v)
-    }
-
-    /// An iterator visiting all values mutably in most-recently used order. The iterator element
-    /// type is &mut V.
-    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut V> {
-        self.iter_mut().map(|(_k, v)| v)
+    /// Evict epochs lower than the watermark, except those entry which touched in this epoch
+    pub fn evict_except_cur_epoch(&mut self) {
+        let epoch = self.watermark_epoch.load(Ordering::Relaxed);
+        let epoch = min(epoch, self.inner.current_epoch());
+        self.inner.evict_by_epoch(epoch);
     }
 }
 
 impl<K, V, S, A: Clone + Allocator> Deref for ManagedLruCache<K, V, S, A> {
-    type Target = LruCache<K, V, S, A>;
+    type Target = EstimatedLruCache<K, V, S, A>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -63,30 +63,37 @@ impl<K, V, S, A: Clone + Allocator> DerefMut for ManagedLruCache<K, V, S, A> {
     }
 }
 
-pub fn new_unbounded<K: Hash + Eq, V>(watermark_epoch: Arc<AtomicU64>) -> ManagedLruCache<K, V> {
+pub fn new_unbounded<K: Hash + Eq + EstimateSize, V: EstimateSize>(
+    watermark_epoch: Arc<AtomicU64>,
+) -> ManagedLruCache<K, V> {
     ManagedLruCache {
-        inner: LruCache::unbounded(),
+        inner: EstimatedLruCache::unbounded(),
         watermark_epoch,
     }
 }
 
-pub fn new_with_hasher_in<K: Hash + Eq, V, S: BuildHasher, A: Clone + Allocator>(
+pub fn new_with_hasher_in<
+    K: Hash + Eq + EstimateSize,
+    V: EstimateSize,
+    S: BuildHasher,
+    A: Clone + Allocator,
+>(
     watermark_epoch: Arc<AtomicU64>,
     hasher: S,
     alloc: A,
 ) -> ManagedLruCache<K, V, S, A> {
     ManagedLruCache {
-        inner: LruCache::unbounded_with_hasher_in(hasher, alloc),
+        inner: EstimatedLruCache::unbounded_with_hasher_in(hasher, alloc),
         watermark_epoch,
     }
 }
 
-pub fn new_with_hasher<K: Hash + Eq, V, S: BuildHasher>(
+pub fn new_with_hasher<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher>(
     watermark_epoch: Arc<AtomicU64>,
     hasher: S,
 ) -> ManagedLruCache<K, V, S> {
     ManagedLruCache {
-        inner: LruCache::unbounded_with_hasher(hasher),
+        inner: EstimatedLruCache::unbounded_with_hasher(hasher),
         watermark_epoch,
     }
 }

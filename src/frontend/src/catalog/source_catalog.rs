@@ -18,7 +18,7 @@ use risingwave_common::catalog::ColumnCatalog;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 
-use super::{ColumnId, RelationCatalog, SourceId};
+use super::{ColumnId, OwnedByUserCatalog, SourceId};
 use crate::catalog::TableId;
 use crate::user::UserId;
 use crate::WithOptions;
@@ -38,6 +38,14 @@ pub struct SourceCatalog {
     pub properties: BTreeMap<String, String>,
     pub watermark_descs: Vec<WatermarkDesc>,
     pub associated_table_id: Option<TableId>,
+    pub definition: String,
+}
+
+impl SourceCatalog {
+    /// Returns the SQL statement that can be used to create this source.
+    pub fn create_sql(&self) -> String {
+        self.definition.clone()
+    }
 }
 
 impl From<&PbSource> for SourceCatalog {
@@ -78,11 +86,12 @@ impl From<&PbSource> for SourceCatalog {
             properties: with_options.into_inner(),
             watermark_descs,
             associated_table_id: associated_table_id.map(|x| x.into()),
+            definition: prost.definition.clone(),
         }
     }
 }
 
-impl RelationCatalog for SourceCatalog {
+impl OwnedByUserCatalog for SourceCatalog {
     fn owner(&self) -> UserId {
         self.owner
     }
