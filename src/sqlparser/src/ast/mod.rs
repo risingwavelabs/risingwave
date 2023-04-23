@@ -2403,12 +2403,6 @@ impl fmt::Display for SetVariableValue {
 mod tests {
     use super::*;
 
-    // #[test]
-    // fn test_window_frame_default() {
-    //     let window_frame = WindowFrame::default();
-    //     assert_eq!(WindowFrameBound::Preceding(None), window_frame.start_bound);
-    // }
-
     #[test]
     fn test_grouping_sets_display() {
         // a and b in different group
