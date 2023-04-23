@@ -26,10 +26,10 @@ use risingwave_common::estimate_size::EstimateSize;
 /// The managed cache is a lru cache that bounds the memory usage by epoch.
 /// Should be used with `GlobalMemoryManager`.
 pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Global> {
-    pub(super) inner: EstimatedLruCache<K, V, S, A>,
+    inner: EstimatedLruCache<K, V, S, A>,
     /// The entry with epoch less than water should be evicted.
     /// Should only be updated by the `GlobalMemoryManager`.
-    pub watermark_epoch: Arc<AtomicU64>,
+    watermark_epoch: Arc<AtomicU64>,
 }
 
 impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Allocator>
