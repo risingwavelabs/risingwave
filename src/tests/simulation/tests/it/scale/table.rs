@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg(madsim)]
-
 use std::iter::{repeat, repeat_with};
 use std::time::Duration;
 
@@ -29,7 +27,7 @@ use risingwave_simulation::utils::AssertResult;
 const ROOT_TABLE_CREATE: &str = "create table t (v1 int);";
 
 #[madsim::test]
-async fn test_singleton_migration() -> Result<()> {
+async fn test_table() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     cluster.run(ROOT_TABLE_CREATE).await?;
 
