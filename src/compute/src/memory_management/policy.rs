@@ -38,7 +38,7 @@ impl MemoryControl for JemallocMemoryControl {
         total_compute_memory_bytes: usize,
         barrier_interval_ms: u32,
         prev_memory_stats: MemoryControlStats,
-        batch_manager: Arc<BatchManager>,
+        _batch_manager: Arc<BatchManager>,
         _stream_manager: Arc<LocalStreamManager>,
         watermark_epoch: Arc<AtomicU64>,
     ) -> MemoryControlStats {
