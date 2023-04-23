@@ -208,3 +208,20 @@ query T
 select (array[1,NULL,2])[5:];
 ----
 NULL
+
+query T
+select (array[1,NULL,2])[:];
+----
+{1,NULL,2}
+
+# TODO: PG returns `{}` in this case
+query T
+select (array[1,NULL,2])[5:-1];
+----
+NULL
+
+# TODO: PG returns `{}` in this case
+query T
+select (array[1,NULL,2])[2:1];
+----
+NULL
