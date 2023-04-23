@@ -404,15 +404,6 @@ impl Binder {
         // Filter to only the Indexes on this table
         let table_id = self.table_id_query(table)?;
         println!("idx on: {table_id:?}");
-        let where_clause: Option<ExprImpl> = Some(
-            FunctionCall::new(
-                ExprType::Equal,
-                vec![InputRef::new(5, DataType::Int32).into(), table_id], /* TODO: get rid of
-                                                                           * hardcoded number
-                                                                           * here. */
-            )?
-            .into(),
-        );
 
         let constraint = JoinConstraint::On(Expr::BinaryOp {
             left: Box::new(Expr::Identifier(Ident::new_unchecked("id"))),
@@ -456,6 +447,16 @@ impl Binder {
             Condition::true_cond(),
         )?
         .into()];
+
+        let indrelid_ref = self.bind_column(&["indrelid".into()])?;
+        let where_clause: Option<ExprImpl> = Some(
+            FunctionCall::new(
+                ExprType::Equal,
+                vec![indrelid_ref, table_id],
+                // vec![InputRef::new(5, DataType::Int32).into(), table_id],
+            )?
+            .into(),
+        );
 
         Ok(BoundSelect {
             distinct: BoundDistinct::All,
