@@ -139,6 +139,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::ArrayDistinct
             | expr_node::Type::ArrayLength
             | expr_node::Type::Cardinality
+            | expr_node::Type::TrimArray
             | expr_node::Type::ArrayRemove
             | expr_node::Type::HexToInt256
             | expr_node::Type::JsonbAccessInner
@@ -149,7 +150,8 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Sind
             | expr_node::Type::Cosd
             | expr_node::Type::Tand
-            | expr_node::Type::ArrayPositions =>
+            | expr_node::Type::ArrayPositions
+            | expr_node::Type::StringToArray =>
             // expression output is deterministic(same result for the same input)
             {
                 let x = func_call

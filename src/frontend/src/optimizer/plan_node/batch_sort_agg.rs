@@ -36,8 +36,6 @@ pub struct BatchSortAgg {
 
 impl BatchSortAgg {
     pub fn new(logical: generic::Agg<PlanRef>) -> Self {
-        let base = PlanBase::new_logical_with_core(&logical);
-        let ctx = base.ctx;
         let input = logical.input.clone();
         let input_dist = input.distribution();
         let dist = match input_dist {
@@ -62,7 +60,7 @@ impl BatchSortAgg {
             .i2o_col_mapping()
             .rewrite_provided_order(&input_order);
 
-        let base = PlanBase::new_batch(ctx, base.schema, dist, order);
+        let base = PlanBase::new_batch_from_logical(&logical, dist, order);
 
         BatchSortAgg {
             base,

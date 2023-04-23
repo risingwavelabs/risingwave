@@ -29,3 +29,4 @@ mod nexmark_recovery;
 mod nexmark_source;
 mod singleton_migration;
 mod streaming_parallelism;
+mod table;

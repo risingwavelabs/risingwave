@@ -82,7 +82,7 @@ impl CompactionFilter for TtlCompactionFilter {
             Some(ttl_second_u32) => {
                 assert!(*ttl_second_u32 != TABLE_OPTION_DUMMY_RETENTION_SECOND);
                 // default to zero.
-                let ttl_mill = (*ttl_second_u32 * 1000) as u64;
+                let ttl_mill = *ttl_second_u32 as u64 * 1000;
                 let min_epoch = Epoch(self.expire_epoch).subtract_ms(ttl_mill);
                 self.last_table_and_ttl = Some((table_id, ttl_mill));
                 Epoch(epoch) <= min_epoch
@@ -118,5 +118,21 @@ impl CompactionFilter for MultiCompactionFilter {
 impl MultiCompactionFilter {
     pub fn register(&mut self, filter: Box<dyn CompactionFilter>) {
         self.filter_vec.push(filter);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::key::{FullKey, TableKey};
+
+    use super::{CompactionFilter, TtlCompactionFilter};
+
+    #[test]
+    fn test_ttl_u32() {
+        let mut ttl_filter = TtlCompactionFilter::new(HashMap::from_iter([(1, 4000000000)]), 1);
+        ttl_filter.should_delete(FullKey::new(TableId::new(1), TableKey(vec![]), 1).to_ref());
     }
 }

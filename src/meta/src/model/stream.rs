@@ -24,7 +24,7 @@ use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
 use risingwave_pb::meta::PbTableFragments;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    FragmentTypeFlag, PbStreamEnvironment, SourceNode, StreamActor, StreamNode,
+    FragmentTypeFlag, PbStreamEnvironment, StreamActor, StreamNode, StreamSource,
 };
 
 use super::{ActorId, FragmentId};
@@ -300,16 +300,16 @@ impl TableFragments {
         .collect()
     }
 
-    /// Find the source node that contains an external stream source inside the stream node, if any.
-    pub fn find_source_node_with_stream_source(stream_node: &StreamNode) -> Option<&SourceNode> {
+    /// Find the external stream source info inside the stream node, if any.
+    pub fn find_stream_source(stream_node: &StreamNode) -> Option<&StreamSource> {
         if let Some(NodeBody::Source(source)) = stream_node.node_body.as_ref() {
-            if source.source_inner.is_some() {
-                return Some(source);
+            if let Some(inner) = &source.source_inner {
+                return Some(inner);
             }
         }
 
         for child in &stream_node.input {
-            if let Some(source) = Self::find_source_node_with_stream_source(child) {
+            if let Some(source) = Self::find_stream_source(child) {
                 return Some(source);
             }
         }
@@ -324,10 +324,9 @@ impl TableFragments {
 
         for fragment in self.fragments() {
             for actor in &fragment.actors {
-                if let Some(source_id) = TableFragments::find_source_node_with_stream_source(
-                    actor.nodes.as_ref().unwrap(),
-                )
-                .map(|s| s.source_inner.as_ref().unwrap().source_id)
+                if let Some(source_id) =
+                    TableFragments::find_stream_source(actor.nodes.as_ref().unwrap())
+                        .map(|s| s.source_id)
                 {
                     source_fragments
                         .entry(source_id)

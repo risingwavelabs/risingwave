@@ -25,8 +25,7 @@ use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFun
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::Order;
-use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
+use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalProjectSet` projects one row multiple times according to `select_list`.
 ///
@@ -178,26 +177,7 @@ impl LogicalProjectSet {
         let _verbose = self.base.ctx.is_explain_verbose();
         // TODO: add verbose display like Project
 
-        let mut builder = f.debug_struct(name);
-        builder.field("select_list", self.select_list());
-        builder.finish()
-    }
-}
-
-impl LogicalProjectSet {
-    pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        self.core.o2i_col_mapping()
-    }
-
-    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        self.core.i2o_col_mapping()
-    }
-
-    /// Map the order of the input to use the updated indices
-    pub fn get_out_column_index_order(&self) -> Order {
-        self.core
-            .i2o_col_mapping()
-            .rewrite_provided_order(self.input().order())
+        self.core.fmt_with_name(f, name)
     }
 }
 
@@ -279,8 +259,8 @@ impl PredicatePushdown for LogicalProjectSet {
 
 impl ToBatch for LogicalProjectSet {
     fn to_batch(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_batch()?;
-        let new_logical = self.clone_with_input(new_input);
+        let mut new_logical = self.core.clone();
+        new_logical.input = self.input().to_batch()?;
         Ok(BatchProjectSet::new(new_logical).into())
     }
 }
@@ -324,7 +304,8 @@ impl ToStream for LogicalProjectSet {
 
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         let new_input = self.input().to_stream(ctx)?;
-        let new_logical = self.clone_with_input(new_input);
+        let mut new_logical = self.core.clone();
+        new_logical.input = new_input;
         Ok(StreamProjectSet::new(new_logical).into())
     }
 }

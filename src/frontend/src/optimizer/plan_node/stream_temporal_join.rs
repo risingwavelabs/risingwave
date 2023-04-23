@@ -55,8 +55,6 @@ impl StreamTemporalJoin {
             .expect("should be a stream table scan");
         assert!(scan.logical().for_system_time_as_of_proctime());
 
-        let base = PlanBase::new_logical_with_core(&logical);
-        let ctx = base.ctx;
         let l2o = logical
             .l2i_col_mapping()
             .composite(&logical.i2o_col_mapping());
@@ -69,15 +67,7 @@ impl StreamTemporalJoin {
                 .rewrite_bitset(logical.left.watermark_columns()),
         );
 
-        let base = PlanBase::new_stream(
-            ctx,
-            base.schema,
-            base.logical_pk,
-            base.functional_dependency,
-            dist,
-            true,
-            watermark_columns,
-        );
+        let base = PlanBase::new_stream_with_logical(&logical, dist, true, watermark_columns);
 
         Self {
             base,

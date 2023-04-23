@@ -16,24 +16,24 @@ use std::collections::VecDeque;
 
 use risingwave_common::must_match;
 use risingwave_common::types::Datum;
-use risingwave_expr::function::window::Frame;
+use risingwave_expr::function::window::{Frame, FrameBound};
 use smallvec::SmallVec;
 
 use super::{StateKey, StateOutput, StatePos, WindowState};
 use crate::executor::over_window::state::StateEvictHint;
+use crate::executor::StreamExecutorResult;
 
 struct BufferEntry(StateKey, Datum);
 
 pub(super) struct LagState {
     offset: usize,
-    // TODO(rc): may move buffer maintenance to a common structure.
     buffer: VecDeque<BufferEntry>,
     curr_idx: usize,
 }
 
 impl LagState {
     pub fn new(frame: &Frame) -> Self {
-        let offset = must_match!(frame, Frame::Offset(offset) if *offset < 0 => -offset as usize);
+        let offset = must_match!(frame, Frame::Rows(FrameBound::Preceding(offset), FrameBound::CurrentRow) => *offset);
         Self {
             offset,
             buffer: Default::default(),
@@ -63,9 +63,9 @@ impl WindowState for LagState {
         }
     }
 
-    fn slide(&mut self) -> StateOutput {
+    fn output(&mut self) -> StreamExecutorResult<StateOutput> {
         debug_assert!(self.curr_window().is_ready);
-        if self.curr_idx < self.offset {
+        Ok(if self.curr_idx < self.offset {
             // the ready window doesn't have enough preceding rows, just return NULL
             self.curr_idx += 1;
             StateOutput {
@@ -80,6 +80,11 @@ impl WindowState for LagState {
                 return_value: value,
                 evict_hint: StateEvictHint::CanEvict(std::iter::once(key).collect()),
             }
-        }
+        })
     }
+}
+
+#[cfg(test)]
+mod tests {
+    // TODO(rc): need to add some unit tests
 }
