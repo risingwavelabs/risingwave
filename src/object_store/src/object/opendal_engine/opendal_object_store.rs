@@ -204,6 +204,8 @@ impl OpenDalStreamingUploader {
 
 unsafe impl Send for OpenDalStreamingUploader {}
 unsafe impl Sync for OpenDalStreamingUploader {}
+
+const OPENDAL_BUFFER_SIZE: u64 = 8 * 1024 * 1024;
 #[async_trait::async_trait]
 impl StreamingUploader for OpenDalStreamingUploader {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
@@ -222,7 +224,8 @@ impl StreamingUploader for OpenDalStreamingUploader {
     }
 
     fn get_memory_usage(&self) -> u64 {
-        0
+        // todo: refactor this after https://github.com/apache/incubator-opendal/issues/2087 is implemented.
+        OPENDAL_BUFFER_SIZE
     }
 }
 
@@ -343,11 +346,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_memory_streaming_upload() {
+    async fn test_streaming_upload_via_fs_engine() {
         let blocks = vec![Bytes::from("123"), Bytes::from("456"), Bytes::from("789")];
         let obj = Bytes::from("123456789");
 
-        let store = OpendalObjectStore::new_memory_engine().unwrap();
+        let store = OpendalObjectStore::new_fs_engine("unit_test".to_string()).unwrap();
         let mut uploader = store.streaming_upload("/temp").await.unwrap();
 
         for block in blocks {
