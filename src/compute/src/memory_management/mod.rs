@@ -47,7 +47,7 @@ pub const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.5;
 pub const STORAGE_FILE_CACHE_MEMORY_PROPORTION: f64 = 0.1;
 pub const STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO: usize = 70;
 
-/// `MemoryControlStats` contains the necessary information for memory control
+/// `MemoryControlStats` contains the state from previous control loop
 #[derive(Default)]
 pub struct MemoryControlStats {
     pub jemalloc_allocated_mib: usize,
@@ -56,7 +56,7 @@ pub struct MemoryControlStats {
     pub lru_physical_now_ms: u64,
 }
 
-pub type MemoryControlPolicy = Box<dyn MemoryControl>;
+pub type MemoryControlRef = Box<dyn MemoryControl>;
 
 pub trait MemoryControl: Send + Sync {
     fn apply(
@@ -73,23 +73,16 @@ pub trait MemoryControl: Send + Sync {
 }
 
 #[cfg(target_os = "linux")]
-pub fn memory_control_policy_from_config(opts: &ComputeNodeOpts) -> Result<MemoryControlPolicy> {
+pub fn memory_control_policy_from_config(opts: &ComputeNodeOpts) -> Result<MemoryControlRef> {
     use anyhow::anyhow;
 
-    use self::policy::{FixedProportionPolicy, StreamingOnlyPolicy};
+    use self::policy::JemallocMemoryControl;
 
     let input_policy = &opts.memory_control_policy;
-    if input_policy == FixedProportionPolicy::CONFIG_STR {
-        Ok(Box::new(FixedProportionPolicy::new(
-            opts.streaming_memory_proportion,
-        )?))
-    } else if input_policy == StreamingOnlyPolicy::CONFIG_STR {
-        Ok(Box::new(StreamingOnlyPolicy))
+    if input_policy == "streaming-only" || input_policy == "jemalloc-stats" {
+        Ok(Box::new(JemallocMemoryControl))
     } else {
-        let valid_values = [
-            FixedProportionPolicy::CONFIG_STR,
-            StreamingOnlyPolicy::CONFIG_STR,
-        ];
+        let valid_values = ["jemalloc-stats"];
         Err(anyhow!(format!(
             "invalid memory control policy in configuration: {}, valid values: {:?}",
             input_policy, valid_values,
@@ -99,7 +92,7 @@ pub fn memory_control_policy_from_config(opts: &ComputeNodeOpts) -> Result<Memor
 }
 
 #[cfg(not(target_os = "linux"))]
-pub fn memory_control_policy_from_config(_opts: &ComputeNodeOpts) -> Result<MemoryControlPolicy> {
+pub fn memory_control_policy_from_config(_opts: &ComputeNodeOpts) -> Result<MemoryControlRef> {
     // We disable memory control on operating systems other than Linux now because jemalloc
     // stats do not work well.
     tracing::warn!("memory control is only enabled on Linux now");

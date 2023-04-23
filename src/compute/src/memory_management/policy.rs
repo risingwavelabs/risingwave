@@ -15,9 +15,7 @@
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use risingwave_batch::task::BatchManager;
-use risingwave_common::error::Result;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::pretty_bytes::convert;
 use risingwave_stream::task::LocalStreamManager;
@@ -30,7 +28,6 @@ use super::{MemoryControl, MemoryControlStats};
 pub struct JemallocMemoryControl;
 
 impl JemallocMemoryControl {
-    pub const CONFIG_STR: &str = "streaming-only";
     const STREAM_EVICTION_THRESHOLD_AGGRESSIVE: f64 = 0.9;
     const STREAM_EVICTION_THRESHOLD_GRACEFUL: f64 = 0.7;
 }
@@ -42,7 +39,7 @@ impl MemoryControl for JemallocMemoryControl {
         barrier_interval_ms: u32,
         prev_memory_stats: MemoryControlStats,
         batch_manager: Arc<BatchManager>,
-        stream_manager: Arc<LocalStreamManager>,
+        _stream_manager: Arc<LocalStreamManager>,
         watermark_epoch: Arc<AtomicU64>,
     ) -> MemoryControlStats {
         let jemalloc_allocated_mib =
@@ -68,8 +65,6 @@ impl MemoryControl for JemallocMemoryControl {
         set_lru_watermark_time_ms(watermark_epoch, lru_watermark_time_ms);
 
         MemoryControlStats {
-            batch_memory_usage: batch_manager.total_mem_usage(),
-            streaming_memory_usage: stream_manager.total_mem_usage(),
             jemalloc_allocated_mib,
             lru_watermark_step,
             lru_watermark_time_ms,
@@ -101,15 +96,15 @@ fn advance_jemalloc_epoch(prev_jemalloc_allocated_mib: usize) -> usize {
 }
 
 fn calculate_lru_watermark(
-    cur_stream_used_memory_bytes: usize,
-    stream_memory_threshold_graceful: usize,
-    stream_memory_threshold_aggressive: usize,
+    cur_used_memory_bytes: usize,
+    threshold_graceful: usize,
+    threshold_aggressive: usize,
     barrier_interval_ms: u32,
     prev_memory_stats: MemoryControlStats,
 ) -> (u64, u64, u64) {
     let mut watermark_time_ms = prev_memory_stats.lru_watermark_time_ms;
     let last_step = prev_memory_stats.lru_watermark_step;
-    let last_stream_used_memory_bytes = prev_memory_stats.streaming_memory_usage;
+    let last_used_memory_bytes = prev_memory_stats.jemalloc_allocated_mib;
 
     // The watermark calculation works in the following way:
     //
@@ -126,17 +121,17 @@ fn calculate_lru_watermark(
     //     last_step.
     //   - Otherwise, we set the step to last_step * 2.
 
-    let mut step = if cur_stream_used_memory_bytes < stream_memory_threshold_graceful {
+    let mut step = if cur_used_memory_bytes < threshold_graceful {
         // Do not evict if the memory usage is lower than `stream_memory_threshold_graceful`
         0
-    } else if cur_stream_used_memory_bytes < stream_memory_threshold_aggressive {
+    } else if cur_used_memory_bytes < threshold_aggressive {
         // Gracefully evict
-        if last_stream_used_memory_bytes > cur_stream_used_memory_bytes {
+        if last_used_memory_bytes > cur_used_memory_bytes {
             1
         } else {
             last_step + 1
         }
-    } else if last_stream_used_memory_bytes < cur_stream_used_memory_bytes {
+    } else if last_used_memory_bytes < cur_used_memory_bytes {
         // Aggressively evict
         if last_step == 0 {
             2

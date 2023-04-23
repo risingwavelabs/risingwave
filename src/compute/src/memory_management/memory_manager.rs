@@ -21,7 +21,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::LocalStreamManager;
 
-use super::MemoryControlPolicy;
+use super::MemoryControlRef;
 use crate::memory_management::MemoryControlStats;
 
 /// Compute node uses [`GlobalMemoryManager`] to limit the memory usage.
@@ -35,7 +35,7 @@ pub struct GlobalMemoryManager {
     barrier_interval_ms: u32,
     metrics: Arc<StreamingMetrics>,
     /// The memory control policy for computing tasks.
-    memory_control_policy: MemoryControlPolicy,
+    memory_control_policy: MemoryControlRef,
 }
 
 pub type GlobalMemoryManagerRef = Arc<GlobalMemoryManager>;
@@ -45,7 +45,7 @@ impl GlobalMemoryManager {
         total_compute_memory_bytes: usize,
         barrier_interval_ms: u32,
         metrics: Arc<StreamingMetrics>,
-        memory_control_policy: MemoryControlPolicy,
+        memory_control_policy: MemoryControlRef,
     ) -> Arc<Self> {
         // Arbitrarily set a minimal barrier interval in case it is too small,
         // especially when it's 0.
@@ -81,8 +81,6 @@ impl GlobalMemoryManager {
             tokio::time::interval(Duration::from_millis(self.barrier_interval_ms as u64));
 
         let mut memory_control_stats = MemoryControlStats {
-            batch_memory_usage: 0,
-            streaming_memory_usage: 0,
             jemalloc_allocated_mib: 0,
             lru_watermark_step: 0,
             lru_watermark_time_ms: Epoch::physical_now(),
