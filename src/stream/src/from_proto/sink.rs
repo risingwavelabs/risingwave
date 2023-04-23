@@ -37,6 +37,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
 
         let sink_desc = node.sink_desc.as_ref().unwrap();
         let sink_type = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
+        let sink_id = sink_desc.get_id().into();
         let mut properties = sink_desc.get_properties().clone();
         let pk_indices = sink_desc
             .downstream_pk
@@ -52,8 +53,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 format!("sink-{:?}", params.executor_id),
             );
         }
-        let config = SinkConfig::from_hashmap(sink_desc.id.into(), properties)
-            .map_err(StreamExecutorError::from)?;
+        let config = SinkConfig::from_hashmap(properties).map_err(StreamExecutorError::from)?;
 
         Ok(Box::new(
             SinkExecutor::new(
@@ -65,6 +65,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 schema,
                 pk_indices,
                 sink_type,
+                sink_id,
                 params.actor_context,
                 BoundedInMemLogStoreFactory::new(1),
             )

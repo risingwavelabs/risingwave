@@ -84,7 +84,7 @@ pub enum SinkState {
 pub const BLACKHOLE_SINK: &str = "blackhole";
 
 impl SinkConfig {
-    pub fn from_hashmap(sink_id: u64, mut properties: HashMap<String, String>) -> Result<Self> {
+    pub fn from_hashmap(mut properties: HashMap<String, String>) -> Result<Self> {
         const CONNECTOR_TYPE_KEY: &str = "connector";
         const CONNECTION_NAME_KEY: &str = "connection.name";
         const PRIVATE_LINK_TARGET_KEY: &str = "privatelink.targets";
@@ -101,9 +101,7 @@ impl SinkConfig {
                 properties,
             )?))),
             BLACKHOLE_SINK => Ok(SinkConfig::BlackHole),
-            _ => Ok(SinkConfig::Remote(RemoteConfig::from_hashmap(
-                sink_id, properties,
-            )?)),
+            _ => Ok(SinkConfig::Remote(RemoteConfig::from_hashmap(properties)?)),
         }
     }
 
@@ -134,6 +132,7 @@ impl SinkImpl {
         pk_indices: Vec<usize>,
         connector_params: ConnectorParams,
         sink_type: SinkType,
+        sink_id: u64,
     ) -> Result<Self> {
         Ok(match cfg {
             SinkConfig::Redis(cfg) => SinkImpl::Redis(Box::new(RedisSink::new(cfg, schema)?)),
@@ -154,12 +153,20 @@ impl SinkImpl {
                 if sink_type.is_append_only() {
                     // Append-only remote sink
                     SinkImpl::Remote(Box::new(
-                        RemoteSink::<true>::new(cfg, schema, pk_indices, connector_params).await?,
+                        RemoteSink::<true>::new(cfg, schema, pk_indices, connector_params, sink_id)
+                            .await?,
                     ))
                 } else {
                     // Upsert remote sink
                     SinkImpl::UpsertRemote(Box::new(
-                        RemoteSink::<false>::new(cfg, schema, pk_indices, connector_params).await?,
+                        RemoteSink::<false>::new(
+                            cfg,
+                            schema,
+                            pk_indices,
+                            connector_params,
+                            sink_id,
+                        )
+                        .await?,
                     ))
                 }
             }
