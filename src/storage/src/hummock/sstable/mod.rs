@@ -61,7 +61,7 @@ pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
 use xxhash_rust::{xxh32, xxh64};
 
-use self::delete_range_aggregator::apply_event;
+use self::delete_range_aggregator::{apply_event, CompactionDeleteRangeEvent};
 use self::utils::{xxhash64_checksum, xxhash64_verify};
 use super::{HummockError, HummockResult};
 use crate::hummock::CachePolicy;
@@ -167,13 +167,12 @@ impl MonotonicDeleteEvent {
     }
 }
 
-pub(crate) fn create_monotonic_events(
-    delete_range_tombstones: &Vec<DeleteRangeTombstone>,
+pub(crate) fn create_monotonic_events_from_compaction_delete_events(
+    compaction_delete_range_events: Vec<CompactionDeleteRangeEvent>,
 ) -> Vec<MonotonicDeleteEvent> {
-    let events = CompactionDeleteRangesBuilder::build_events(delete_range_tombstones);
     let mut epochs = BTreeSet::new();
-    let mut monotonic_tombstone_events = Vec::with_capacity(events.len());
-    for event in events {
+    let mut monotonic_tombstone_events = Vec::with_capacity(compaction_delete_range_events.len());
+    for event in compaction_delete_range_events {
         apply_event(&mut epochs, &event);
         monotonic_tombstone_events.push(MonotonicDeleteEvent {
             event_key: event.0,
@@ -184,6 +183,13 @@ pub(crate) fn create_monotonic_events(
     monotonic_tombstone_events.dedup_by_key(|MonotonicDeleteEvent { new_epoch, .. }| *new_epoch);
 
     monotonic_tombstone_events
+}
+
+pub(crate) fn create_monotonic_events(
+    delete_range_tombstones: &Vec<DeleteRangeTombstone>,
+) -> Vec<MonotonicDeleteEvent> {
+    let events = CompactionDeleteRangesBuilder::build_events(delete_range_tombstones);
+    create_monotonic_events_from_compaction_delete_events(events)
 }
 
 pub(crate) fn create_tombstones_to_represent_monotonic_deletes(

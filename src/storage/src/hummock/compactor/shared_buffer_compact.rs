@@ -44,7 +44,8 @@ use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    CachePolicy, CompactionDeleteRanges, HummockError, HummockResult, SstableBuilderOptions,
+    create_monotonic_events_from_compaction_delete_events, CachePolicy, CompactionDeleteRanges,
+    HummockError, HummockResult, SstableBuilderOptions,
 };
 
 const GC_DELETE_KEYS_FOR_FLUSH: bool = false;
@@ -387,7 +388,9 @@ pub async fn merge_imms_in_memory(
     }
 
     drop(del_iter);
-    let range_tombstone_list = Arc::unwrap_or_clone(compaction_delete_ranges).into_tombstones();
+    let compaction_delete_events = Arc::unwrap_or_clone(compaction_delete_ranges).into_events();
+    let monotonic_tombstone_events =
+        create_monotonic_events_from_compaction_delete_events(compaction_delete_events);
 
     Ok(SharedBufferBatch {
         inner: Arc::new(SharedBufferBatchInner::new_with_multi_epoch_batches(
@@ -397,7 +400,7 @@ pub async fn merge_imms_in_memory(
             largest_table_key,
             kv_count,
             merged_imm_ids,
-            range_tombstone_list,
+            monotonic_tombstone_events,
             merged_size,
             memory_tracker,
         )),

@@ -35,8 +35,8 @@ use crate::hummock::store::memtable::ImmId;
 use crate::hummock::utils::{range_overlap, MemoryTracker};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    create_monotonic_events, create_tombstones_to_represent_monotonic_deletes,
-    DeleteRangeTombstone, HummockEpoch, HummockResult, MonotonicDeleteEvent,
+    create_tombstones_to_represent_monotonic_deletes, DeleteRangeTombstone, HummockEpoch,
+    HummockResult, MonotonicDeleteEvent,
 };
 use crate::storage_value::StorageValue;
 use crate::store::ReadOptions;
@@ -159,7 +159,7 @@ impl SharedBufferBatchInner {
         largest_table_key: Bound<Bytes>,
         num_items: usize,
         imm_ids: Vec<ImmId>,
-        range_tombstone_list: Vec<DeleteRangeTombstone>,
+        monotonic_tombstone_events: Vec<MonotonicDeleteEvent>,
         size: usize,
         tracker: Option<MemoryTracker>,
     ) -> Self {
@@ -169,7 +169,6 @@ impl SharedBufferBatchInner {
 
         let max_imm_id = *imm_ids.iter().max().unwrap();
 
-        let monotonic_tombstone_events = create_monotonic_events(&range_tombstone_list);
         Self {
             payload,
             epochs,
