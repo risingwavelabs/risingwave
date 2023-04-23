@@ -120,7 +120,7 @@ impl std::fmt::Debug for WindowFunction {
             if let Some(frame) = &self.frame {
                 builder.field("frame", &format_args!("{}", frame));
             } else {
-                builder.field("frame", &format!("None"));
+                builder.field("frame", &"None".to_string());
             }
             builder.finish()
         } else {

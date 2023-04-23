@@ -103,9 +103,9 @@ pub trait ExprRewriter {
             .map(|expr| self.rewrite_expr(expr))
             .collect();
         WindowFunction {
+            kind,
             args,
             return_type,
-            kind,
             partition_by,
             order_by,
             frame,
