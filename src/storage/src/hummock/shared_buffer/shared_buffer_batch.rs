@@ -50,6 +50,14 @@ pub type SharedBufferBatchId = u64;
 /// and sort them in descending order, aka newest to oldest.
 pub type SharedBufferVersionedEntry = (Bytes, Vec<(HummockEpoch, HummockValue<Bytes>)>);
 
+struct SharedBufferDeleteRangeMeta {
+    // smallest/largest keys below are only inferred from tombstones.
+    smallest_empty: bool,
+    smallest_table_key: Vec<u8>,
+    largest_table_key: Bound<Vec<u8>>,
+    range_tombstones: Vec<DeleteRangeTombstone>,
+}
+
 #[derive(Debug)]
 pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferVersionedEntry>,
@@ -79,8 +87,12 @@ impl SharedBufferBatchInner {
         size: usize,
         _tracker: Option<MemoryTracker>,
     ) -> Self {
-        let (smallest_empty, mut smallest_table_key, mut largest_table_key, range_tombstones) =
-            Self::get_table_key_ends(table_id, range_tombstone_list);
+        let SharedBufferDeleteRangeMeta {
+            smallest_empty,
+            mut smallest_table_key,
+            mut largest_table_key,
+            range_tombstones,
+        } = Self::get_table_key_ends(table_id, range_tombstone_list);
 
         if let Some(item) = payload.last() {
             if match &largest_table_key {
@@ -168,7 +180,7 @@ impl SharedBufferBatchInner {
     fn get_table_key_ends(
         table_id: TableId,
         mut range_tombstone_list: Vec<DeleteRangeTombstone>,
-    ) -> (bool, Vec<u8>, Bound<Vec<u8>>, Vec<DeleteRangeTombstone>) {
+    ) -> SharedBufferDeleteRangeMeta {
         let mut largest_table_key = Bound::Included(vec![]);
         let mut smallest_table_key = vec![];
         let mut smallest_empty = true;
@@ -208,12 +220,12 @@ impl SharedBufferBatchInner {
             }
             range_tombstone_list = range_tombstones;
         }
-        (
+        SharedBufferDeleteRangeMeta {
             smallest_empty,
             smallest_table_key,
             largest_table_key,
-            range_tombstone_list,
-        )
+            range_tombstones: range_tombstone_list,
+        }
     }
 
     // If the key is deleted by a epoch greater than the read epoch, return None
