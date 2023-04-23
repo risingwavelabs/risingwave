@@ -36,7 +36,7 @@ pub enum WindowFuncKind {
 }
 
 impl WindowFuncKind {
-    pub fn is_rank_function(&self) -> bool {
+    pub fn is_rank(&self) -> bool {
         matches!(self, Self::RowNumber | Self::Rank | Self::DenseRank)
     }
 }

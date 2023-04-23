@@ -85,8 +85,22 @@ impl Binder {
             .try_collect()?;
 
         // window function
-        if let Some(window_spec) = f.over {
-            return self.bind_window_function(window_spec, function_name, inputs);
+        let window_func_kind = WindowFuncKind::from_str(function_name.as_str());
+        if let Ok(kind) = window_func_kind {
+            if let Some(window_spec) = f.over {
+                return self.bind_window_function(kind, inputs, window_spec);
+            }
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "Window function `{}` must have OVER clause",
+                function_name
+            ))
+            .into());
+        } else if f.over.is_some() {
+            return Err(ErrorCode::NotImplemented(
+                format!("Unrecognized window function: {}", function_name),
+                8961.into(),
+            )
+            .into());
         }
 
         // table function
@@ -215,21 +229,15 @@ impl Binder {
 
     pub(super) fn bind_window_function(
         &mut self,
+        kind: WindowFuncKind,
+        inputs: Vec<ExprImpl>,
         WindowSpec {
             partition_by,
             order_by,
             window_frame,
         }: WindowSpec,
-        function_name: String,
-        inputs: Vec<ExprImpl>,
     ) -> Result<ExprImpl> {
         self.ensure_window_function_allowed()?;
-        let kind = WindowFuncKind::from_str(&function_name).map_err(|_| {
-            ErrorCode::NotImplemented(
-                format!("Unrecognized window function: {}", function_name),
-                8961.into(),
-            )
-        })?;
         let partition_by = partition_by
             .into_iter()
             .map(|arg| self.bind_expr(arg))

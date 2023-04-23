@@ -162,7 +162,7 @@ impl LogicalOverAgg {
             }
         }
         for f in &window_funcs {
-            if f.kind.is_rank_function() {
+            if f.kind.is_rank() {
                 if f.order_by.sort_exprs.is_empty() {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "window rank function without order by: {:?}",

@@ -53,7 +53,7 @@ impl Rule for OverAggToTopNRule {
         }
 
         let f = &over_agg.window_functions[0];
-        if !f.kind.is_rank_function() {
+        if !f.kind.is_rank() {
             // Only rank functions can be converted to TopN.
             return None;
         }
