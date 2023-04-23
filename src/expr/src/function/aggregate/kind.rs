@@ -22,6 +22,9 @@ use crate::Result;
 #[derive(Debug, Display, FromStr, Copy, Clone, PartialEq, Eq, Hash)]
 #[display(style = "snake_case")]
 pub enum AggKind {
+    BitAnd,
+    BitOr,
+    BitXor,
     Min,
     Max,
     Sum,
@@ -41,6 +44,9 @@ pub enum AggKind {
 impl AggKind {
     pub fn from_protobuf(pb_type: PbType) -> Result<Self> {
         match pb_type {
+            PbType::BitAnd => Ok(AggKind::BitAnd),
+            PbType::BitOr => Ok(AggKind::BitOr),
+            PbType::BitXor => Ok(AggKind::BitXor),
             PbType::Min => Ok(AggKind::Min),
             PbType::Max => Ok(AggKind::Max),
             PbType::Sum => Ok(AggKind::Sum),
@@ -61,6 +67,9 @@ impl AggKind {
 
     pub fn to_protobuf(self) -> PbType {
         match self {
+            Self::BitAnd => PbType::BitAnd,
+            Self::BitOr => PbType::BitOr,
+            Self::BitXor => PbType::BitXor,
             Self::Min => PbType::Min,
             Self::Max => PbType::Max,
             Self::Sum => PbType::Sum,

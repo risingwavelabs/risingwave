@@ -1293,12 +1293,13 @@ where
         } else {
             database_core.mark_creating(&key);
             user_core.increase_ref(source.owner);
+            // We have validate the status of connection before starting the procedure.
             if let Some(connection_id) = source.connection_id {
                 if let Some(_conn) = database_core.get_connection(connection_id) {
                     // TODO(weili): wait for yezizp to refactor ref cnt
                     database_core.increase_ref_count(connection_id);
                 } else {
-                    bail!("connection not found");
+                    bail!("connection {} not found.", connection_id);
                 }
             }
             Ok(())
@@ -1314,7 +1315,7 @@ where
         database_core
             .get_connection(connection_id)
             .cloned()
-            .ok_or_else(|| anyhow!(format!("could not find connection by the given name")).into())
+            .ok_or_else(|| anyhow!(format!("could not find connection {}", connection_id)).into())
     }
 
     pub async fn finish_create_source_procedure(
@@ -1798,6 +1799,15 @@ where
                 database_core.increase_ref_count(dependent_relation_id);
             }
             user_core.increase_ref(sink.owner);
+            // We have validate the status of connection before starting the procedure.
+            if let Some(connection_id) = sink.connection_id {
+                if let Some(_conn) = database_core.get_connection(connection_id) {
+                    // TODO(siyuan): wait for yezizp to refactor ref cnt
+                    database_core.increase_ref_count(connection_id);
+                } else {
+                    bail!("connection {} not found.", connection_id);
+                }
+            }
             Ok(())
         }
     }
@@ -1865,6 +1875,10 @@ where
             database_core.decrease_ref_count(dependent_relation_id);
         }
         user_core.decrease_ref(sink.owner);
+        if let Some(connection_id) = sink.connection_id {
+            // TODO(siyuan): wait for yezizp to refactor ref cnt
+            database_core.decrease_ref_count(connection_id);
+        }
     }
 
     pub async fn drop_sink(

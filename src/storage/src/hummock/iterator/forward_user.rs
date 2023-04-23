@@ -91,7 +91,6 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         while self.iterator.is_valid() {
             let full_key = self.iterator.key();
             let epoch = full_key.epoch;
-            let key = &full_key.user_key;
 
             // handle multi-version
             if epoch <= self.min_epoch || epoch > self.read_epoch {
@@ -99,12 +98,12 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                 continue;
             }
 
-            if &self.last_key.user_key.as_ref() != key {
+            if self.last_key.user_key.as_ref() != full_key.user_key {
                 self.last_key = full_key.copy_into();
                 // handle delete operation
                 match self.iterator.value() {
                     HummockValue::Put(val) => {
-                        self.delete_range_iter.next_until(key);
+                        self.delete_range_iter.next_until(full_key.user_key);
                         if self.delete_range_iter.current_epoch() >= epoch {
                             self.stats.skip_delete_key_count += 1;
                         } else {
@@ -113,10 +112,10 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                             // handle range scan
                             match &self.key_range.1 {
                                 Included(end_key) => {
-                                    self.out_of_range = key > &end_key.as_ref();
+                                    self.out_of_range = full_key.user_key > end_key.as_ref();
                                 }
                                 Excluded(end_key) => {
-                                    self.out_of_range = key >= &end_key.as_ref();
+                                    self.out_of_range = full_key.user_key >= end_key.as_ref();
                                 }
                                 Unbounded => {}
                             };

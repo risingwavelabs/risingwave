@@ -17,15 +17,16 @@ use risingwave_common::estimate_size::EstimateSize;
 use risingwave_expr::function::window::WindowFuncCall;
 
 use super::state::{create_window_state, StateKey, WindowState};
+use crate::executor::StreamExecutorResult;
 
 pub(super) struct Partition {
     pub states: Vec<Box<dyn WindowState + Send>>,
 }
 
 impl Partition {
-    pub fn new(calls: &[WindowFuncCall]) -> Self {
-        let states = calls.iter().map(create_window_state).collect();
-        Self { states }
+    pub fn new(calls: &[WindowFuncCall]) -> StreamExecutorResult<Self> {
+        let states = calls.iter().map(create_window_state).try_collect()?;
+        Ok(Self { states })
     }
 
     pub fn is_aligned(&self) -> bool {

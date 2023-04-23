@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::alloc::{Allocator, Global};
+use std::cmp::min;
 use std::hash::{BuildHasher, Hash};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -37,6 +38,13 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
     /// Evict epochs lower than the watermark
     pub fn evict(&mut self) {
         let epoch = self.watermark_epoch.load(Ordering::Relaxed);
+        self.inner.evict_by_epoch(epoch);
+    }
+
+    /// Evict epochs lower than the watermark, except those entry which touched in this epoch
+    pub fn evict_except_cur_epoch(&mut self) {
+        let epoch = self.watermark_epoch.load(Ordering::Relaxed);
+        let epoch = min(epoch, self.inner.current_epoch());
         self.inner.evict_by_epoch(epoch);
     }
 }

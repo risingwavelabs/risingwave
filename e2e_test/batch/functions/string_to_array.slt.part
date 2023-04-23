@@ -1,0 +1,34 @@
+query I
+select string_to_array('a b c', ' ');
+----
+{a,b,c}
+
+query I
+select string_to_array('a b c', ' ', NULL);
+----
+{a,b,c}
+
+query I
+select string_to_array('a b c', ' ', 'a');
+----
+{NULL,b,c}
+
+query I
+select string_to_array('a b c', '');
+----
+{"a b c"}
+
+query I
+select string_to_array('a b c', NULL);
+----
+{a," ",b," ",c}
+
+query I
+select string_to_array('a b c', NULL, NULL);
+----
+{a," ",b," ",c}
+
+query I
+select string_to_array('a b c', NULL, 'a');
+----
+{NULL," ",b," ",c}

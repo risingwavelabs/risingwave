@@ -191,7 +191,7 @@ async fn compact_shared_buffer(
     let mut output_ssts = Vec::with_capacity(parallelism);
     let mut compaction_futures = vec![];
 
-    let agg = builder.build_for_compaction(GC_WATERMARK_FOR_FLUSH, GC_DELETE_KEYS_FOR_FLUSH);
+    let agg = builder.build_for_compaction(GC_DELETE_KEYS_FOR_FLUSH);
     for (split_index, key_range) in splits.into_iter().enumerate() {
         let compactor = SharedBufferCompactRunner::new(
             split_index,
@@ -308,9 +308,8 @@ pub async fn merge_imms_in_memory(
         imm_iters.push(imm.into_forward_iter());
     }
     let mut builder = CompactionDeleteRangesBuilder::default();
-    builder.add_tombstone(range_tombstone_list.clone());
-    let compaction_delete_ranges =
-        builder.build_for_compaction(GC_WATERMARK_FOR_FLUSH, GC_DELETE_KEYS_FOR_FLUSH);
+    builder.add_tombstone(range_tombstone_list);
+    let compaction_delete_ranges = builder.build_for_compaction(GC_DELETE_KEYS_FOR_FLUSH);
     let mut del_iter = compaction_delete_ranges.iter();
     del_iter.rewind();
     epochs.sort();
@@ -326,9 +325,12 @@ pub async fn merge_imms_in_memory(
     }
 
     let mut merged_payload: Vec<SharedBufferVersionedEntry> = Vec::new();
-    let mut pivot = items.first().map(|((k, _), _)| k.clone()).unwrap();
+    let mut pivot = items
+        .first()
+        .map(|((k, _), _)| k.clone())
+        .unwrap_or_default();
     del_iter.earliest_delete_which_can_see_key(
-        &UserKey::new(table_id, TableKey(pivot.as_ref())),
+        UserKey::new(table_id, TableKey(pivot.as_ref())),
         HummockEpoch::MAX,
     );
     let mut versions: Vec<(HummockEpoch, HummockValue<Bytes>)> = Vec::new();
@@ -345,7 +347,7 @@ pub async fn merge_imms_in_memory(
             pivot_last_delete_epoch = HummockEpoch::MAX;
             versions = vec![];
             del_iter.earliest_delete_which_can_see_key(
-                &UserKey::new(table_id, TableKey(pivot.as_ref())),
+                UserKey::new(table_id, TableKey(pivot.as_ref())),
                 epoch,
             )
         };
@@ -375,6 +377,7 @@ pub async fn merge_imms_in_memory(
     }
 
     drop(del_iter);
+    let range_tombstone_list = Arc::unwrap_or_clone(compaction_delete_ranges).into_tombstones();
 
     Ok(SharedBufferBatch {
         inner: Arc::new(SharedBufferBatchInner::new_with_multi_epoch_batches(

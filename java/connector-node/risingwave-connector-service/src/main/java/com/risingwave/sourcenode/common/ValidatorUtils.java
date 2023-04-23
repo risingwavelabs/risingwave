@@ -12,10 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod top_n_state;
+package com.risingwave.sourcenode.common;
 
-use risingwave_common::row::{self, Row};
-pub use top_n_state::{ManagedTopNState, TopNStateRow};
+import io.grpc.Status;
 
-pub trait GroupKey = Row + Send + Sync;
-pub(crate) const NO_GROUP_KEY: Option<row::Empty> = None;
+public abstract class ValidatorUtils {
+    public static RuntimeException invalidArgument(String description) {
+        return Status.INVALID_ARGUMENT.withDescription(description).asRuntimeException();
+    }
+
+    public static RuntimeException internalError(String description) {
+        return Status.INTERNAL.withDescription(description).asRuntimeException();
+    }
+}

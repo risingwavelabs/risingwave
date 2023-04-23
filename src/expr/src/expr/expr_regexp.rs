@@ -18,8 +18,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use regex::{Regex, RegexBuilder};
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayMeta, ArrayRef, DataChunk, ListArrayBuilder, ListRef, ListValue,
-    Utf8Array,
+    Array, ArrayBuilder, ArrayRef, DataChunk, ListArrayBuilder, ListRef, ListValue, Utf8Array,
 };
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
@@ -200,9 +199,9 @@ impl Expression for RegexpMatchExpression {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let text_arr = self.child.eval_checked(input).await?;
         let text_arr: &Utf8Array = text_arr.as_ref().into();
-        let mut output = ListArrayBuilder::with_meta(
+        let mut output = ListArrayBuilder::with_type(
             input.capacity(),
-            ArrayMeta::List {
+            DataType::List {
                 datatype: Box::new(DataType::Varchar),
             },
         );
