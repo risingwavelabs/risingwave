@@ -20,7 +20,7 @@ use std::process::Command;
 use anyhow::Result;
 
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_meta_node, CompactorConfig, ExecuteContext, Task};
+use crate::{add_meta_node, CompactorConfig, DEFAULT_QUERY_LOG_PATH, ExecuteContext, Task};
 
 pub struct CompactorService {
     config: CompactorConfig,
@@ -80,6 +80,7 @@ impl Task for CompactorService {
         let mut cmd = self.compactor()?;
 
         cmd.env("RUST_BACKTRACE", "1");
+        cmd.env("RW_QUERY_LOG_PATH", DEFAULT_QUERY_LOG_PATH);
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(
                 "RW_PROFILE_PATH",
