@@ -187,14 +187,18 @@ macro_rules! impl_try_from_decimal {
 
 macro_rules! impl_try_from_float {
     ($from_ty:ty, $to_ty:ty, $convert:path) => {
-        impl core::convert::From<$from_ty> for $to_ty {
-            fn from(value: $from_ty) -> Self {
-                $convert(value).expect("f32/f64 to decimal should not fail")
+        impl core::convert::TryFrom<$from_ty> for $to_ty {
+            type Error = Error;
+
+            fn try_from(value: $from_ty) -> Result<Self, Self::Error> {
+                $convert(value).ok_or_else(|| Error::ConversionTo("".into()))
             }
         }
-        impl core::convert::From<OrderedFloat<$from_ty>> for $to_ty {
-            fn from(value: OrderedFloat<$from_ty>) -> Self {
-                $convert(value.0).expect("f32/f64 to decimal should not fail")
+        impl core::convert::TryFrom<OrderedFloat<$from_ty>> for $to_ty {
+            type Error = Error;
+
+            fn try_from(value: OrderedFloat<$from_ty>) -> Result<Self, Self::Error> {
+                $convert(value.0).ok_or_else(|| Error::ConversionTo("".into()))
             }
         }
     };
