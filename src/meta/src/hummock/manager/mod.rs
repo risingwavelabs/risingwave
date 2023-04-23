@@ -1156,6 +1156,9 @@ where
                     compact_task.set_task_status(TaskStatus::InputOutdatedCanceled);
                     false
                 } else {
+                    assert!(current_version
+                        .levels
+                        .contains_key(&compact_task.compaction_group_id));
                     true
                 }
             } else {

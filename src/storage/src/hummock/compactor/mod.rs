@@ -179,7 +179,8 @@ impl Compactor {
 
         let mut multi_filter = build_multi_compaction_filter(&compact_task);
 
-        let existing_table_ids = HashSet::from_iter(compact_task.existing_table_ids.clone());
+        let existing_table_ids: HashSet<u32> =
+            HashSet::from_iter(compact_task.existing_table_ids.clone());
         let mut compact_table_ids = compact_task
             .input_ssts
             .iter()
