@@ -61,6 +61,7 @@ use crate::WithOptions;
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 pub(crate) const CONNECTION_NAME_KEY: &str = "connection.name";
+pub(crate) const KEY_AS_COLUMN_KEY: &str = "key_as_column";
 
 /// Map an Avro schema to a relational schema.
 async fn extract_avro_table_schema(
@@ -89,6 +90,7 @@ async fn extract_avro_table_schema(
 async fn extract_upsert_avro_table_schema(
     schema: &AvroSchema,
     with_properties: &HashMap<String, String>,
+    key_as_column: bool,
 ) -> Result<(Vec<ColumnCatalog>, Vec<ColumnId>)> {
     let conf = AvroParserConfig::new(
         with_properties,
@@ -230,6 +232,13 @@ pub(crate) async fn resolve_source_schema(
         }
 
         SourceSchema::Avro(avro_schema) => {
+            if let Some(key_as_column) = with_properties.get(KEY_AS_COLUMN_KEY) {
+                if key_as_column.eq_ignore_ascii_case("true") {
+                    return Err(RwError::from(ProtocolError(
+                        "Key as column is not allowed with row format avro. Please use row format UPSERT_AVRO.".to_string(),
+                    )));
+                }
+            }
             let (expected_column_len, expected_row_id_index) = if is_kafka && !is_materialized {
                 // The first column is `_rw_kafka_timestamp`.
                 (2, 1)
@@ -260,9 +269,19 @@ pub(crate) async fn resolve_source_schema(
         }
 
         SourceSchema::UpsertAvro(avro_schema) => {
+            let key_as_column = if let Some(key_as_column) = with_properties.get(KEY_AS_COLUMN_KEY) {
+                key_as_column.eq_ignore_ascii_case("true")
+            } else {
+                false
+            };
             let mut upsert_avro_primary_key = Default::default();
             if row_id_index.is_none() {
                 // user specify pk(s)
+                if key_as_column {
+                    return Err(RwError::from(ProtocolError(
+                        "key_as_column does not work with pk specified in sql.".to_string(),
+                    )));
+                }
                 if columns.len() != pk_column_ids.len() || pk_column_ids.len() != 1 {
                     return Err(RwError::from(ProtocolError(
                         "You can specify single primary key column or leave the columns and primary key fields empty.".to_string(),
@@ -290,7 +309,7 @@ pub(crate) async fn resolve_source_schema(
                 )));
                 }
                 let (columns_extracted, pks_extracted) =
-                    extract_upsert_avro_table_schema(avro_schema, with_properties).await?;
+                    extract_upsert_avro_table_schema(avro_schema, with_properties, key_as_column).await?;
 
                 *columns = columns_extracted;
                 *pk_column_ids = pks_extracted;
