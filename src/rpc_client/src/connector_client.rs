@@ -134,8 +134,8 @@ impl ConnectorClient {
                         connector_type,
                         properties,
                         table_schema,
-                        sink_id,
                     }),
+                    sink_id,
                 })),
             })
             .map_err(|err| RpcError::Internal(anyhow!(err.to_string())))?;
@@ -154,7 +154,6 @@ impl ConnectorClient {
     pub async fn validate_sink_properties(
         &self,
         connector_type: String,
-        sink_id: u64,
         properties: HashMap<String, String>,
         table_schema: Option<TableSchema>,
         sink_type: SinkType,
@@ -167,7 +166,6 @@ impl ConnectorClient {
                     connector_type,
                     properties,
                     table_schema,
-                    sink_id,
                 }),
                 sink_type: sink_type as i32,
             })

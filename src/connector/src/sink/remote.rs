@@ -243,7 +243,6 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
         client
             .validate_sink_properties(
                 config.connector_type,
-                config.sink_id,
                 config.properties,
                 Some(table_schema),
                 sink_catalog.sink_type.to_proto(),
