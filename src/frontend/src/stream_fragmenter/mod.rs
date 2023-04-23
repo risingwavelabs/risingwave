@@ -220,6 +220,7 @@ pub(self) fn build_and_add_fragment(
         None => {
             let mut fragment = state.new_stream_fragment();
             let node = build_fragment(state, &mut fragment, stream_node)?;
+            let operator_id = node.operator_id as u32;
 
             assert!(fragment.node.is_none());
             fragment.node = Some(Box::new(node));
