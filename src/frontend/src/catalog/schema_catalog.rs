@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry::{Occupied, Vacant};
+use std::collections::hash_map::Entry::Occupied;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -54,7 +54,8 @@ pub struct SchemaCatalog {
 
     // This field is currently used only for `show connections`
     connection_source_ref: HashMap<ConnectionId, Vec<Arc<SourceCatalog>>>,
-
+    // This field is currently used only for `show connections`
+    connection_sink_ref: HashMap<ConnectionId, Vec<Arc<SinkCatalog>>>,
     // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
     system_table_by_name: HashMap<String, SystemCatalog>,
     owner: u32,
@@ -197,13 +198,16 @@ impl SchemaCatalog {
 
     pub fn drop_source(&mut self, id: SourceId) {
         let source_ref = self.source_by_id.remove(&id).unwrap();
-        if let Some(connection_id) = source_ref.connection_id {
-            self.connection_source_ref
-                .entry(connection_id)
-                .and_modify(|sources| sources.retain(|s| s.id != id))
-                .or_insert(vec![source_ref.clone()]);
-        }
         self.source_by_name.remove(&source_ref.name).unwrap();
+        if let Some(connection_id) = source_ref.connection_id {
+            if let Occupied(mut e) = self.connection_source_ref.entry(connection_id) {
+                let sources = e.get_mut();
+                sources.retain_mut(|s| s.id != id);
+                if sources.is_empty() {
+                    e.remove_entry();
+                }
+            }
+        }
     }
 
     pub fn update_source(&mut self, prost: &PbSource) {
@@ -228,6 +232,13 @@ impl SchemaCatalog {
         let sink = SinkCatalog::from(prost);
         let sink_ref = Arc::new(sink);
 
+        if let Some(connection_id) = sink_ref.connection_id {
+            self.connection_sink_ref
+                .entry(connection_id.0)
+                .and_modify(|sinks| sinks.push(sink_ref.clone()))
+                .or_insert(vec![sink_ref.clone()]);
+        }
+
         self.sink_by_name
             .try_insert(name, sink_ref.clone())
             .unwrap();
@@ -237,6 +248,15 @@ impl SchemaCatalog {
     pub fn drop_sink(&mut self, id: SinkId) {
         let sink_ref = self.sink_by_id.remove(&id).unwrap();
         self.sink_by_name.remove(&sink_ref.name).unwrap();
+        if let Some(connection_id) = sink_ref.connection_id {
+            if let Occupied(mut e) = self.connection_sink_ref.entry(connection_id.0) {
+                let sinks = e.get_mut();
+                sinks.retain_mut(|s| s.id != id);
+                if sinks.is_empty() {
+                    e.remove_entry();
+                }
+            }
+        }
     }
 
     pub fn update_sink(&mut self, prost: &PbSink) {
@@ -501,6 +521,7 @@ impl From<&PbSchema> for SchemaCatalog {
             connection_by_name: HashMap::new(),
             connection_by_id: HashMap::new(),
             connection_source_ref: HashMap::new(),
+            connection_sink_ref: HashMap::new(),
         }
     }
 }
