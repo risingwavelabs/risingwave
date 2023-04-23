@@ -41,6 +41,17 @@ use crate::hummock::{
 use crate::storage_value::StorageValue;
 use crate::store::ReadOptions;
 
+fn whether_update_largest_key<P: AsRef<[u8]>, Q: AsRef<[u8]>>(
+    current_largest_key: &Bound<P>,
+    key_to_update: &Q,
+) -> bool {
+    match current_largest_key {
+        Bound::Excluded(x) => x.as_ref() <= key_to_update.as_ref(),
+        Bound::Included(x) => x.as_ref() < key_to_update.as_ref(),
+        Bound::Unbounded => false,
+    }
+}
+
 /// The key is `table_key`, which does not contain table id or epoch.
 pub(crate) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 pub type SharedBufferBatchId = u64;
@@ -95,11 +106,7 @@ impl SharedBufferBatchInner {
         } = Self::get_table_key_ends(table_id, range_tombstone_list);
 
         if let Some(item) = payload.last() {
-            if match &largest_table_key {
-                Bound::Excluded(x) => x <= &item.0,
-                Bound::Included(x) => x < &item.0,
-                Bound::Unbounded => false,
-            } {
+            if whether_update_largest_key(&largest_table_key, &item.0) {
                 largest_table_key = Bound::Included(item.0.to_vec());
             }
         }
@@ -196,11 +203,10 @@ impl SharedBufferBatchInner {
                     // It means that the right side of the tombstone is +inf.
                     assert_eq!(tombstone_end_table_id.table_id(), table_id.table_id() + 1);
                     largest_table_key = Bound::Unbounded;
-                } else if match &largest_table_key {
-                    Bound::Excluded(x) => x <= &tombstone.end_user_key.table_key.0,
-                    Bound::Included(x) => x < &tombstone.end_user_key.table_key.0,
-                    Bound::Unbounded => false,
-                } {
+                } else if whether_update_largest_key(
+                    &largest_table_key,
+                    &tombstone.end_user_key.table_key.0,
+                ) {
                     largest_table_key = Bound::Excluded(tombstone.end_user_key.table_key.0.clone());
                 }
                 if smallest_empty || smallest_table_key.gt(&tombstone.start_user_key.table_key.0) {
