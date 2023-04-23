@@ -129,7 +129,7 @@ public class PostgresValidator implements AutoCloseable {
             var res = stmt.executeQuery(sqlStmts.getProperty("postgres.wal"));
             while (res.next()) {
                 if (!res.getString(1).equals("logical")) {
-                    throw ValidatorUtils.internalError(
+                    throw ValidatorUtils.invalidArgument(
                             "Postgres wal_level should be 'logical'.\nPlease modify the config and restart your Postgres server.");
                 }
             }
@@ -155,7 +155,7 @@ public class PostgresValidator implements AutoCloseable {
                 var res = stmt.executeQuery();
                 while (res.next()) {
                     if (!res.getBoolean(1)) {
-                        throw ValidatorUtils.internalError(
+                        throw ValidatorUtils.invalidArgument(
                                 "Postgres user must be superuser or replication role to start walsender.");
                     }
                 }
@@ -168,7 +168,7 @@ public class PostgresValidator implements AutoCloseable {
                 var res = stmt.executeQuery();
                 while (res.next()) {
                     if (!res.getBoolean(1)) {
-                        throw ValidatorUtils.internalError(
+                        throw ValidatorUtils.invalidArgument(
                                 "Postgres user must have select privilege on table "
                                         + props.get(DbzConnectorConfig.TABLE_NAME));
                     }
