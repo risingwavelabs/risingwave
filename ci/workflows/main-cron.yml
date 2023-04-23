@@ -131,7 +131,18 @@ steps:
     timeout_in_minutes: 15
 
   - label: "scaling test (deterministic simulation)"
-    command: "TEST_NUM=60 timeout 70m ci/scripts/deterministic-scale-test.sh"
+    command: "TEST_NUM=60 timeout 70m ci/scripts/deterministic-it-test.sh scale::"
+    depends_on: "build-simulation"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 70
+
+  - label: "recovery integration test (deterministic simulation)"
+    command: "TEST_NUM=60 timeout 70m ci/scripts/deterministic-it-test.sh recovery::"
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
