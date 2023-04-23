@@ -138,15 +138,22 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
                         .into_iter()
                         .map(|c| c.name.clone())
                         .collect_vec();
+                    let sink_names = schema
+                        .get_sinks_by_connection(c.id)
+                        .unwrap_or(Vec::new())
+                        .into_iter()
+                        .map(|c| c.name.clone())
+                        .collect_vec();
                     let properties = match &c.info {
                         connection::Info::PrivateLinkService(i) => {
                             format!(
-                                "provider: {}\nservice_name: {}\nendpoint_id: {}\navailability_zones: {}\nsources: {}",
+                                "provider: {}\nservice_name: {}\nendpoint_id: {}\navailability_zones: {}\nsources: {}\nsinks: {}",
                                 i.get_provider().unwrap().as_str_name(),
                                 i.service_name,
                                 i.endpoint_id,
                                 serde_json::to_string(&i.dns_entries.keys().collect_vec()).unwrap(),
                                 serde_json::to_string(&source_names).unwrap(),
+                                serde_json::to_string(&sink_names).unwrap(),
                             )
                         }
                     };

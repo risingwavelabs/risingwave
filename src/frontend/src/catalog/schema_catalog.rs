@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry::Occupied;
+use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -251,7 +251,7 @@ impl SchemaCatalog {
         if let Some(connection_id) = sink_ref.connection_id {
             if let Occupied(mut e) = self.connection_sink_ref.entry(connection_id.0) {
                 let sinks = e.get_mut();
-                sinks.retain_mut(|s| s.id != id);
+                sinks.retain_mut(|s| s.id.sink_id != id);
                 if sinks.is_empty() {
                     e.remove_entry();
                 }
@@ -481,6 +481,16 @@ impl SchemaCatalog {
         connection_id: ConnectionId,
     ) -> Option<Vec<Arc<SourceCatalog>>> {
         self.connection_source_ref
+            .get(&connection_id)
+            .map(|c| c.to_owned())
+    }
+
+    /// get all sinks referencing the connection
+    pub fn get_sinks_by_connection(
+        &self,
+        connection_id: ConnectionId,
+    ) -> Option<Vec<Arc<SinkCatalog>>> {
+        self.connection_sink_ref
             .get(&connection_id)
             .map(|c| c.to_owned())
     }
