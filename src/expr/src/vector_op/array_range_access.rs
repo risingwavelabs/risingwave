@@ -29,7 +29,7 @@ pub fn array_range_access(list: ListRef<'_>, start: i32, end: i32) -> Result<Opt
     if start > end {
         return Ok(None);
     }
-    for datumref in &list_all_values[(start as usize - 1)..end] {
+    for datumref in &list_all_values[(start - 1)..end] {
         data.push(datumref.to_owned_datum());
     }
     if data.is_empty() {
