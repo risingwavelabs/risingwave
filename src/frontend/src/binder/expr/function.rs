@@ -240,13 +240,6 @@ impl Binder {
                 .map(|order_by_expr| self.bind_order_by_expr(order_by_expr))
                 .collect::<Result<_>>()?,
         );
-        if let Some(window_frame) = &window_frame && kind.is_rank_function() {
-            return Err(ErrorCode::NotImplemented(
-                format!("window frame: {}", window_frame),
-                None.into(),
-            )
-            .into());
-        }
         let frame = if let Some(frame) = window_frame {
             Some(match frame.units {
                 WindowFrameUnits::Rows => {

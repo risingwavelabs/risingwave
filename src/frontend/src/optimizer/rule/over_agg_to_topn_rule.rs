@@ -54,6 +54,12 @@ impl Rule for OverAggToTopNRule {
 
         let f = &over_agg.window_functions[0];
         if !f.kind.is_rank_function() {
+            // Only rank functions can be converted to TopN.
+            return None;
+        }
+
+        if !f.frame.start_is_unbounded() || !f.frame.end_is_unbounded() {
+            // Only unbounded frame can be converted to TopN.
             return None;
         }
 
