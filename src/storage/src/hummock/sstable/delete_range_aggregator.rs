@@ -66,7 +66,7 @@ pub(crate) struct TombstoneEnterExitEvent {
     tombstone_epoch: HummockEpoch,
 }
 
-type CompactionDeleteRangeEvent = (
+pub(crate) type CompactionDeleteRangeEvent = (
     // event key
     UserKey<Vec<u8>>,
     // Old tombstones which exits at the event key
@@ -223,8 +223,8 @@ impl CompactionDeleteRanges {
         create_monotonic_events(&tombstones)
     }
 
-    pub(crate) fn into_tombstones(self) -> Vec<DeleteRangeTombstone> {
-        self.delete_tombstones
+    pub(crate) fn into_events(self) -> Vec<CompactionDeleteRangeEvent> {
+        self.events
     }
 }
 

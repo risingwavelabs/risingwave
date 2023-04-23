@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::must_match;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -87,14 +89,17 @@ pub fn gen_dummy_sst_info(
     epoch: HummockEpoch,
 ) -> SstableInfo {
     let mut min_table_key: Vec<u8> = batches[0].start_table_key().to_vec();
-    let mut max_table_key: Vec<u8> = batches[0].end_table_key().to_vec();
+    let mut max_table_key: Vec<u8> =
+        must_match!(batches[0].end_table_key(), Bound::Included(table_key) => table_key.to_vec());
     let mut file_size = 0;
     for batch in batches.iter().skip(1) {
         if min_table_key.as_slice() > *batch.start_table_key() {
             min_table_key = batch.start_table_key().to_vec();
         }
-        if max_table_key.as_slice() < *batch.end_table_key() {
-            max_table_key = batch.end_table_key().to_vec();
+        if max_table_key.as_slice()
+            < must_match!(batch.end_table_key(), Bound::Included(table_key) => *table_key)
+        {
+            max_table_key = must_match!(batch.end_table_key(), Bound::Included(table_key) => table_key.to_vec());
         }
         file_size += batch.size() as u64;
     }
