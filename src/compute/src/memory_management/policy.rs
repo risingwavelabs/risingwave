@@ -24,115 +24,18 @@ use risingwave_stream::task::LocalStreamManager;
 
 use super::{MemoryControl, MemoryControlStats};
 
-/// `FixedProportionPolicy` performs memory control by limiting the memory usage of both batch and
-/// streaming to a fixed proportion.
-pub struct FixedProportionPolicy {
-    /// The proportion of streaming memory to all available memory for computing. This should
-    /// always fall in (0, 1). The proportion of batch memory will be 1
-    /// -`streaming_memory_proportion`.
-    streaming_memory_proportion: f64,
-}
+/// `JemallocMemoryControl` is a memory control policy that uses jemalloc statistics to control. It
+/// assumes that most memory is used by streaming engine and does memory control over LRU watermark
+/// based on jemalloc statistics.
+pub struct JemallocMemoryControl;
 
-impl FixedProportionPolicy {
-    const BATCH_KILL_QUERY_THRESHOLD: f64 = 0.8;
-    pub const CONFIG_STR: &str = "streaming-batch";
-    const STREAM_EVICTION_THRESHOLD_AGGRESSIVE: f64 = 0.9;
-    const STREAM_EVICTION_THRESHOLD_GRACEFUL: f64 = 0.7;
-
-    pub fn new(streaming_memory_proportion: f64) -> Result<Self> {
-        if streaming_memory_proportion <= 0.0 || streaming_memory_proportion >= 1.0 {
-            return Err(anyhow!("streaming memory proportion should fall in (0, 1)").into());
-        }
-        Ok(Self {
-            streaming_memory_proportion,
-        })
-    }
-}
-
-impl MemoryControl for FixedProportionPolicy {
-    fn apply(
-        &self,
-        total_compute_memory_bytes: usize,
-        barrier_interval_ms: u32,
-        prev_memory_stats: MemoryControlStats,
-        batch_manager: Arc<BatchManager>,
-        stream_manager: Arc<LocalStreamManager>,
-        watermark_epoch: Arc<AtomicU64>,
-    ) -> MemoryControlStats {
-        let batch_memory_proportion = 1.0 - self.streaming_memory_proportion;
-        let total_batch_memory_bytes = total_compute_memory_bytes as f64 * batch_memory_proportion;
-        let batch_memory_threshold =
-            (total_batch_memory_bytes * Self::BATCH_KILL_QUERY_THRESHOLD) as usize;
-        let total_stream_memory_bytes =
-            total_compute_memory_bytes as f64 * self.streaming_memory_proportion;
-        let stream_memory_threshold_graceful =
-            (total_stream_memory_bytes * Self::STREAM_EVICTION_THRESHOLD_GRACEFUL) as usize;
-        let stream_memory_threshold_aggressive =
-            (total_stream_memory_bytes * Self::STREAM_EVICTION_THRESHOLD_AGGRESSIVE) as usize;
-
-        let jemalloc_allocated_mib =
-            advance_jemalloc_epoch(prev_memory_stats.jemalloc_allocated_mib);
-
-        // Batch memory control
-        //
-        // When the batch memory usage exceeds the threshold, we choose the query that uses the
-        // most memory and kill it.
-
-        let batch_used_memory_bytes = batch_manager.total_mem_usage();
-        if batch_used_memory_bytes > batch_memory_threshold {
-            batch_manager.kill_queries("excessive batch memory usage".to_string());
-        }
-
-        // Streaming memory control
-        //
-        // We calculate the watermark of the LRU cache, which provides hints for streaming executors
-        // on cache eviction.
-
-        let stream_used_memory_bytes = stream_manager.total_mem_usage();
-        let (lru_watermark_step, lru_watermark_time_ms, lru_physical_now) = calculate_lru_watermark(
-            stream_used_memory_bytes,
-            stream_memory_threshold_graceful,
-            stream_memory_threshold_aggressive,
-            barrier_interval_ms,
-            prev_memory_stats,
-        );
-        set_lru_watermark_time_ms(watermark_epoch, lru_watermark_time_ms);
-
-        MemoryControlStats {
-            batch_memory_usage: batch_used_memory_bytes,
-            streaming_memory_usage: stream_used_memory_bytes,
-            jemalloc_allocated_mib,
-            lru_watermark_step,
-            lru_watermark_time_ms,
-            lru_physical_now_ms: lru_physical_now,
-        }
-    }
-
-    fn describe(&self, total_compute_memory_bytes: usize) -> String {
-        let total_stream_memory_bytes =
-            total_compute_memory_bytes as f64 * self.streaming_memory_proportion;
-        let total_batch_memory_bytes =
-            total_compute_memory_bytes as f64 * (1.0 - self.streaming_memory_proportion);
-        format!(
-            "FixedProportionPolicy: total available streaming memory is {}, total available batch memory is {}",
-            convert(total_stream_memory_bytes),
-            convert(total_batch_memory_bytes)
-        )
-    }
-}
-/// `StreamingOnlyPolicy` only performs memory control on streaming tasks. It differs from
-/// `FixedProportionPolicy` in that it calculates the memory usage based on jemalloc statistics,
-/// which actually contains system usage other than computing tasks. This is the default memory
-/// control policy.
-pub struct StreamingOnlyPolicy;
-
-impl StreamingOnlyPolicy {
+impl JemallocMemoryControl {
     pub const CONFIG_STR: &str = "streaming-only";
     const STREAM_EVICTION_THRESHOLD_AGGRESSIVE: f64 = 0.9;
     const STREAM_EVICTION_THRESHOLD_GRACEFUL: f64 = 0.7;
 }
 
-impl MemoryControl for StreamingOnlyPolicy {
+impl MemoryControl for JemallocMemoryControl {
     fn apply(
         &self,
         total_compute_memory_bytes: usize,
@@ -176,7 +79,7 @@ impl MemoryControl for StreamingOnlyPolicy {
 
     fn describe(&self, total_compute_memory_bytes: usize) -> String {
         format!(
-            "StreamingOnlyPolicy: total available streaming memory is {}",
+            "JemallocMemoryControl: total available streaming memory is {}",
             convert(total_compute_memory_bytes as f64)
         )
     }

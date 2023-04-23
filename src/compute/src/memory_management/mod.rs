@@ -47,12 +47,9 @@ pub const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.5;
 pub const STORAGE_FILE_CACHE_MEMORY_PROPORTION: f64 = 0.1;
 pub const STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO: usize = 70;
 
-/// `MemoryControlStats` contains the necessary information for memory control, including both batch
-/// and streaming.
+/// `MemoryControlStats` contains the necessary information for memory control
 #[derive(Default)]
 pub struct MemoryControlStats {
-    pub batch_memory_usage: usize,
-    pub streaming_memory_usage: usize,
     pub jemalloc_allocated_mib: usize,
     pub lru_watermark_step: u64,
     pub lru_watermark_time_ms: u64,
