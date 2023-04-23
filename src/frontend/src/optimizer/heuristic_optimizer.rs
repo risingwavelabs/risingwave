@@ -17,11 +17,13 @@ use std::collections::HashMap;
 use std::fmt;
 
 use itertools::Itertools;
+#[cfg(debug_assertions)]
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use crate::optimizer::plan_node::PlanTreeNode;
 use crate::optimizer::rule::BoxedRule;
 use crate::optimizer::PlanRef;
+#[cfg(debug_assertions)]
 use crate::Explain;
 
 /// Traverse order of [`HeuristicOptimizer`]
