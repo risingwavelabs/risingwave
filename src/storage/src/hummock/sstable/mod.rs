@@ -107,23 +107,6 @@ impl DeleteRangeTombstone {
             sequence,
         }
     }
-
-    pub fn encode(&self, buf: &mut Vec<u8>) {
-        self.start_user_key.encode_length_prefixed(buf);
-        self.end_user_key.encode_length_prefixed(buf);
-        buf.put_u64_le(self.sequence);
-    }
-
-    pub fn decode(buf: &mut &[u8]) -> Self {
-        let start_user_key = UserKey::decode_length_prefixed(buf);
-        let end_user_key = UserKey::decode_length_prefixed(buf);
-        let sequence = buf.get_u64_le();
-        Self {
-            start_user_key,
-            end_user_key,
-            sequence,
-        }
-    }
 }
 
 /// Assume that watermark1 is 5, watermark2 is 7, watermark3 is 11, delete ranges

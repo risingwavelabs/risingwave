@@ -653,7 +653,7 @@ impl Compactor {
             }
 
             let earliest_range_delete_which_can_see_iter_key =
-                del_iter.earliest_delete_which_can_see_key(&iter_key.user_key, epoch);
+                del_iter.earliest_delete_which_can_see_key(iter_key.user_key, epoch);
 
             // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`.
             // If there is no keys whose epoch is equal or greater than `watermark`, keep the latest

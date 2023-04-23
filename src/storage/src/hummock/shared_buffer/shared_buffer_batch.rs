@@ -100,14 +100,14 @@ impl SharedBufferBatchInner {
             .collect_vec();
 
         let mut monotonic_tombstone_events = Vec::with_capacity(range_tombstones.len() * 2);
-        for range_tombstone in &range_tombstones {
+        for range_tombstone in range_tombstones {
             monotonic_tombstone_events.push(MonotonicDeleteEvent {
-                event_key: range_tombstone.start_user_key.clone(),
+                event_key: range_tombstone.start_user_key,
                 is_exclusive: false,
                 new_epoch: range_tombstone.sequence,
             });
             monotonic_tombstone_events.push(MonotonicDeleteEvent {
-                event_key: range_tombstone.end_user_key.clone(),
+                event_key: range_tombstone.end_user_key,
                 is_exclusive: false,
                 new_epoch: HummockEpoch::MAX,
             });
@@ -230,7 +230,7 @@ impl SharedBufferBatchInner {
         }
 
         if !read_options.ignore_range_tombstone
-            && self.get_min_delete_range_epoch(&UserKey::new(table_id, table_key)) <= read_epoch
+            && self.get_min_delete_range_epoch(UserKey::new(table_id, table_key)) <= read_epoch
         {
             Some(HummockValue::Delete)
         } else {
@@ -238,9 +238,9 @@ impl SharedBufferBatchInner {
         }
     }
 
-    fn get_min_delete_range_epoch(&self, query_user_key: &UserKey<&[u8]>) -> HummockEpoch {
+    fn get_min_delete_range_epoch(&self, query_user_key: UserKey<&[u8]>) -> HummockEpoch {
         let idx = self.monotonic_tombstone_events.partition_point(
-            |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(query_user_key),
+            |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(&query_user_key),
         );
         if idx == 0 {
             HummockEpoch::MAX
@@ -369,7 +369,7 @@ impl SharedBufferBatch {
             .get_value(self.table_id, table_key, read_epoch, read_options)
     }
 
-    pub fn get_min_delete_range_epoch(&self, user_key: &UserKey<&[u8]>) -> HummockEpoch {
+    pub fn get_min_delete_range_epoch(&self, user_key: UserKey<&[u8]>) -> HummockEpoch {
         self.inner.get_min_delete_range_epoch(user_key)
     }
 
@@ -1048,22 +1048,22 @@ mod tests {
         assert_eq!(
             epoch,
             shared_buffer_batch
-                .get_min_delete_range_epoch(&UserKey::new(Default::default(), TableKey(b"aaa"),))
+                .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"aaa"),))
         );
         assert_eq!(
             HummockEpoch::MAX,
             shared_buffer_batch
-                .get_min_delete_range_epoch(&UserKey::new(Default::default(), TableKey(b"bbb"),))
+                .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"bbb"),))
         );
         assert_eq!(
             epoch,
             shared_buffer_batch
-                .get_min_delete_range_epoch(&UserKey::new(Default::default(), TableKey(b"ddd"),))
+                .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"ddd"),))
         );
         assert_eq!(
             HummockEpoch::MAX,
             shared_buffer_batch
-                .get_min_delete_range_epoch(&UserKey::new(Default::default(), TableKey(b"eee"),))
+                .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"eee"),))
         );
     }
 
@@ -1367,15 +1367,15 @@ mod tests {
 
         assert_eq!(
             1,
-            merged_imm.get_min_delete_range_epoch(&UserKey::new(table_id, TableKey(b"111")))
+            merged_imm.get_min_delete_range_epoch(UserKey::new(table_id, TableKey(b"111")))
         );
         assert_eq!(
             1,
-            merged_imm.get_min_delete_range_epoch(&UserKey::new(table_id, TableKey(b"555")))
+            merged_imm.get_min_delete_range_epoch(UserKey::new(table_id, TableKey(b"555")))
         );
         assert_eq!(
             2,
-            merged_imm.get_min_delete_range_epoch(&UserKey::new(table_id, TableKey(b"888")))
+            merged_imm.get_min_delete_range_epoch(UserKey::new(table_id, TableKey(b"888")))
         );
 
         assert_eq!(
