@@ -74,6 +74,7 @@ async fn extract_avro_table_schema(
         schema.use_schema_registry,
         false,
         None,
+        false,
     )
     .await?;
     let vec_column_desc = conf.map_to_columns()?;
@@ -98,6 +99,7 @@ async fn extract_upsert_avro_table_schema(
         schema.use_schema_registry,
         true,
         None,
+        key_as_column,
     )
     .await?;
     let vec_column_desc = conf.map_to_columns()?;
@@ -269,7 +271,8 @@ pub(crate) async fn resolve_source_schema(
         }
 
         SourceSchema::UpsertAvro(avro_schema) => {
-            let key_as_column = if let Some(key_as_column) = with_properties.get(KEY_AS_COLUMN_KEY) {
+            let key_as_column = if let Some(key_as_column) = with_properties.get(KEY_AS_COLUMN_KEY)
+            {
                 key_as_column.eq_ignore_ascii_case("true")
             } else {
                 false
@@ -309,7 +312,8 @@ pub(crate) async fn resolve_source_schema(
                 )));
                 }
                 let (columns_extracted, pks_extracted) =
-                    extract_upsert_avro_table_schema(avro_schema, with_properties, key_as_column).await?;
+                    extract_upsert_avro_table_schema(avro_schema, with_properties, key_as_column)
+                        .await?;
 
                 *columns = columns_extracted;
                 *pk_column_ids = pks_extracted;

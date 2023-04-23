@@ -37,6 +37,8 @@ use crate::source::{SourceColumnDesc, SourceContextRef};
 
 impl_common_parser_logic!(AvroParser);
 
+const AVRO_DEFAULT_KEY_COLUMN_NAME: &str = "key_field";
+
 #[derive(Debug)]
 pub struct AvroParser {
     schema: Arc<Schema>,
@@ -53,6 +55,7 @@ pub struct AvroParserConfig {
     pub key_schema: Option<Arc<Schema>>,
     pub schema_resolver: Option<Arc<ConfluentSchemaResolver>>,
     pub upsert_primary_key_column_name: Option<String>,
+    pub key_as_column: bool,
 }
 
 impl AvroParserConfig {
@@ -62,6 +65,7 @@ impl AvroParserConfig {
         use_schema_registry: bool,
         enable_upsert: bool,
         upsert_primary_key_column_name: Option<String>,
+        key_as_column: bool,
     ) -> Result<Self> {
         let url = Url::parse(schema_location).map_err(|e| {
             InternalError(format!("failed to parse url ({}): {}", schema_location, e))
@@ -86,6 +90,7 @@ impl AvroParserConfig {
                 },
                 schema_resolver: Some(Arc::new(resolver)),
                 upsert_primary_key_column_name,
+                key_as_column,
             })
         } else {
             if enable_upsert {
@@ -110,22 +115,31 @@ impl AvroParserConfig {
                 key_schema: None,
                 schema_resolver: None,
                 upsert_primary_key_column_name: None,
+                key_as_column,
             })
         }
     }
 
     pub fn extract_pks(&self) -> Result<Vec<ColumnDesc>> {
-        if let Some(Schema::Record { fields, .. }) = self.key_schema.as_deref() {
-            let mut index = 0;
-            let fields = fields
-                .iter()
-                .map(|field| avro_field_to_column_desc(&field.name, &field.schema, &mut index))
-                .collect::<Result<Vec<_>>>()?;
-            Ok(fields)
-        } else {
-            Err(RwError::from(InternalError(
-                "schema invalid, record required".into(),
-            )))
+        match (self.key_schema.as_deref(), self.key_as_column) {
+            (Some(Schema::Record { fields, .. }), false) => {
+                let mut index = 0;
+                let fields = fields
+                    .iter()
+                    .map(|field| avro_field_to_column_desc(&field.name, &field.schema, &mut index))
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(fields)
+            }
+            (Some(schema), true) => {
+                let mut index = 0;
+                let fields =
+                    avro_field_to_column_desc(AVRO_DEFAULT_KEY_COLUMN_NAME, schema, &mut index)?;
+                Ok(vec![fields])
+            }
+            (schema, key_as_column) => Err(RwError::from(InternalError(format!(
+                "invalid operation with key schema {:?} and key_as_column {}",
+                schema, key_as_column
+            )))),
         }
     }
 
@@ -133,10 +147,23 @@ impl AvroParserConfig {
         // there must be a record at top level
         if let Schema::Record { fields, .. } = self.schema.as_ref() {
             let mut index = 0;
-            let fields = fields
+            let mut pk_column_desc: Option<ColumnDesc> = None;
+
+            if self.key_as_column {
+                pk_column_desc = Some(avro_field_to_column_desc(
+                    AVRO_DEFAULT_KEY_COLUMN_NAME,
+                    self.key_schema.as_ref().unwrap(),
+                    &mut index,
+                )?);
+            }
+
+            let mut fields = fields
                 .iter()
                 .map(|field| avro_field_to_column_desc(&field.name, &field.schema, &mut index))
                 .collect::<Result<Vec<_>>>()?;
+            if let Some(pk_column_desc) = pk_column_desc {
+                fields.push(pk_column_desc);
+            }
             Ok(fields)
         } else {
             Err(RwError::from(InternalError(
@@ -158,6 +185,7 @@ impl AvroParser {
             key_schema,
             schema_resolver,
             upsert_primary_key_column_name,
+            ..
         } = config;
         Ok(Self {
             schema,
@@ -362,7 +390,16 @@ mod test {
 
     async fn new_avro_conf_from_local(file_name: &str) -> error::Result<AvroParserConfig> {
         let schema_path = "file://".to_owned() + &test_data_path(file_name);
-        AvroParserConfig::new(&HashMap::new(), schema_path.as_str(), false, false, None).await
+        // key_as_column must be used with schema registry
+        AvroParserConfig::new(
+            &HashMap::new(),
+            schema_path.as_str(),
+            false,
+            false,
+            None,
+            false,
+        )
+        .await
     }
 
     async fn new_avro_parser_from_local(file_name: &str) -> error::Result<AvroParser> {
