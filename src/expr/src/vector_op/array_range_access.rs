@@ -27,14 +27,10 @@ pub fn array_range_access(list: ListRef<'_>, start: i32, end: i32) -> Result<Opt
     let start = std::cmp::max(start, 1) as usize;
     let end = std::cmp::min(std::cmp::max(0, end), list_all_values.len() as i32) as usize;
     if start > end {
-        return Ok(None);
+        return Ok(Some(ListValue::new(data)));
     }
     for datumref in &list_all_values[(start - 1)..end] {
         data.push(datumref.to_owned_datum());
     }
-    if data.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(ListValue::new(data)))
-    }
+    Ok(Some(ListValue::new(data)))
 }

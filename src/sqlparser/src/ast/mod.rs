@@ -406,7 +406,7 @@ pub enum Expr {
     Array(Array),
     /// An array index expression e.g. `(ARRAY[1, 2])[1]` or `(current_schemas(FALSE))[1]`
     ArrayIndex { obj: Box<Expr>, index: Box<Expr> },
-    /// An array range index expression e.g. `(Array[1, 2, 3, 4][1:3])`
+    /// An array range index expression e.g. `(Array[1, 2, 3, 4])[1:3]`
     ArrayRangeIndex {
         obj: Box<Expr>,
         start: Option<Box<Expr>>,

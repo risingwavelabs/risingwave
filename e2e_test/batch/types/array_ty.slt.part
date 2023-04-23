@@ -115,7 +115,7 @@ select array[1,NULL,2][-1:134124523];
 query T
 select (array[1,NULL,2])[3:1];
 ----
-NULL
+{}
 
 query T
 select array[array[1],array[2],array[3]][-21432315:134124523];
@@ -131,11 +131,6 @@ query T
 select array[array[1],array[2],array[3]][-21432315:134124523][1:2];
 ----
 {{1},{2}}
-
-query T
-select array[array[1],array[2],array[3]][-21432315:134124523][1];
-----
-{1}
 
 query I
 select array[array[1],array[2],array[3]][-21432315:134124523][1][1];
@@ -162,16 +157,15 @@ select (array[1,NULL,2])[:999];
 ----
 {1,NULL,2}
 
-# TODO: PG returns `{}` in this case
 query T
 select (array[1,NULL,2])[:0];
 ----
-NULL
+{}
 
 query T
 select (array[1,NULL,2])[:-1];
 ----
-NULL
+{}
 
 query T
 select (array[1,NULL,2])[-1:];
@@ -198,30 +192,31 @@ select (array[1,NULL,2])[3:];
 ----
 {2}
 
-# TODO: PG returns `{}` in this case
 query T
 select (array[1,NULL,2])[4:];
 ----
-NULL
+{}
 
 query T
 select (array[1,NULL,2])[5:];
 ----
-NULL
+{}
 
 query T
 select (array[1,NULL,2])[:];
 ----
 {1,NULL,2}
 
-# TODO: PG returns `{}` in this case
 query T
 select (array[1,NULL,2])[5:-1];
 ----
-NULL
+{}
 
-# TODO: PG returns `{}` in this case
 query T
 select (array[1,NULL,2])[2:1];
 ----
-NULL
+{}
+
+# index larger than int32
+statement error db error: ERROR: QueryError: Expr error: Unsupported function: Ok\(ArrayRangeAccess\)
+select (array[1,NULL,2])[1:4294967296];

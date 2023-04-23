@@ -179,7 +179,7 @@ impl Binder {
         let obj = self.bind_expr(obj)?;
         let start = match start {
             None => ExprImpl::literal_int(1),
-            Some(expr) => self.bind_expr(*expr)?,
+            Some(expr) => self.bind_expr(*expr)?.cast_implicit(DataType::Int32)?,
         };
         // Don't worry, the backend implementation will stop iterating once it encounters the end
         // of the array.

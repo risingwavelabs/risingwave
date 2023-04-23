@@ -86,7 +86,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         E::ArrayRemove => ArrayRemoveExpression::try_from(prost).map(Expression::boxed),
         E::Proctime => ProcTimeExpression::try_from(prost).map(Expression::boxed),
         _ => Err(ExprError::UnsupportedFunction(format!(
-            "!!!{:?}",
+            "{:?}",
             prost.get_expr_type()
         ))),
     }
