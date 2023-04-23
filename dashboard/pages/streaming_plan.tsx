@@ -42,6 +42,7 @@ import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
 import { Dispatcher, StreamNode } from "../proto/gen/stream_plan"
 import useFetch from "./api/fetch"
 import { getFragments, getStreamingJobs } from "./api/streaming"
+import _ from "lodash"
 
 interface DispatcherNode {
   [actorId: number]: Dispatcher[]
@@ -72,9 +73,17 @@ function buildPlanNodeDependency(
 
   let dispatcherName = "noDispatcher"
   if (firstActor.dispatcher.length > 1) {
-    dispatcherName = "multipleDispatchers"
+    if (
+      firstActor.dispatcher.every(
+        (d) => d.type === firstActor.dispatcher[0].type
+      )
+    ) {
+      dispatcherName = `${_.camelCase(firstActor.dispatcher[0].type)}Dispatchers`
+    } else {
+      dispatcherName = "multipleDispatchers"
+    }
   } else if (firstActor.dispatcher.length === 1) {
-    dispatcherName = `${toLower(firstActor.dispatcher[0].type)}Dispatcher`
+    dispatcherName = `${_.camelCase(firstActor.dispatcher[0].type)}Dispatcher`
   }
 
   const dispatcherNode = fragment.actors.reduce((obj, actor) => {
