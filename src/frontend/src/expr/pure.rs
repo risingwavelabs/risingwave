@@ -130,6 +130,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Field
             | expr_node::Type::Array
             | expr_node::Type::ArrayAccess
+            | expr_node::Type::ArrayRangeAccess
             | expr_node::Type::Row
             | expr_node::Type::ArrayToString
             | expr_node::Type::ArrayCat
