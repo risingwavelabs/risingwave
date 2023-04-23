@@ -251,12 +251,12 @@ impl ElectionClient for EtcdElectionClient {
                 resp = observe_stream.next() => {
                     match resp {
                         None => {
-                            tracing::info!("observe stream closed unexpected, recreating");
+                            tracing::debug!("observe stream closed unexpected, recreating");
 
                             // try to re-create observe stream, with timeout as ttl / 2
                             if let Ok(Ok(stream)) = time::timeout(Duration::from_secs((ttl / 2) as u64), self.client.observe(META_ELECTION_KEY)).await {
                                 observe_stream = stream;
-                                tracing::info!("recreating observe stream");
+                                tracing::debug!("recreating observe stream");
                             }
                         }
                         Some(Ok(leader)) => {
