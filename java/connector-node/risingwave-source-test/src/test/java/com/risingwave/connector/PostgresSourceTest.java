@@ -140,11 +140,16 @@ public class PostgresSourceTest {
         Future<Integer> countResult = executorService.submit(countTask);
         int count = countResult.get();
         LOG.info("number of cdc messages received: {}", count);
-        assertEquals(10000, count);
-        // cleanup
-        query = "DROP TABLE orders";
-        SourceTestClient.performQuery(connection, query);
-        connection.close();
+        try {
+            assertEquals(10000, count);
+        } catch (Exception e) {
+            Assert.fail("validate rpc fail: " + e.getMessage());
+        } finally {
+            // cleanup
+            query = "DROP TABLE orders";
+            SourceTestClient.performQuery(connection, query);
+            connection.close();
+        }
     }
 
     // test whether validation catches permission errors
@@ -198,17 +203,13 @@ public class PostgresSourceTest {
             assertEquals(
                     "INVALID_ARGUMENT: The publication 'dbz_publication' does not cover all necessary columns in table orders",
                     resp.getError().getErrorMessage());
-        } catch (Exception e) {
-            Assert.fail("validate rpc fail: " + e.getMessage());
-        }
+            query = "DROP PUBLICATION dbz_publication";
+            SourceTestClient.performQuery(connDbz, query);
+            // revoke superuser and replication, check if reports error
+            query = "ALTER USER debezium nosuperuser noreplication";
+            SourceTestClient.performQuery(connDbz, query);
 
-        query = "DROP PUBLICATION dbz_publication";
-        SourceTestClient.performQuery(connDbz, query);
-        // revoke superuser and replication, check if reports error
-        query = "ALTER USER debezium nosuperuser noreplication";
-        SourceTestClient.performQuery(connDbz, query);
-        try {
-            var resp =
+            resp =
                     testClient.validateSource(
                             pg.getJdbcUrl(),
                             pg.getHost(),
@@ -224,15 +225,15 @@ public class PostgresSourceTest {
                     resp.getError().getErrorMessage());
         } catch (Exception e) {
             Assert.fail("validate rpc fail: " + e.getMessage());
+        } finally {
+            // cleanup
+            query = "DROP TABLE orders";
+            SourceTestClient.performQuery(connDbz, query);
+            query = "DROP USER debezium";
+            SourceTestClient.performQuery(connPg, query);
+            connDbz.close();
+            connPg.close();
         }
-
-        // cleanup
-        query = "DROP TABLE orders";
-        SourceTestClient.performQuery(connDbz, query);
-        query = "DROP USER debezium";
-        SourceTestClient.performQuery(connPg, query);
-        connDbz.close();
-        connPg.close();
     }
 
     // generates test cases for the risingwave debezium parser
