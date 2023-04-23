@@ -249,8 +249,8 @@
         ├── right table: 3
         ├── left degree table: 2
         ├── right degree table: 4
-        ├──  StreamExchange NoShuffle from 2
-        └──  StreamExchange NoShuffle from 4
+        ├──  StreamExchange Hash([0]) from 2
+        └──  StreamExchange Hash([0]) from 4
 
     Fragment 2
     StreamProject { exprs: [t.a] }

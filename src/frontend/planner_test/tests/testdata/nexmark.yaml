@@ -423,7 +423,7 @@
 
     Fragment 1
     StreamNoOp
-    └──  StreamExchange NoShuffle from 2
+    └──  StreamExchange Hash([0, 1]) from 2
 
     Fragment 2
     StreamAppendOnlyHashAgg { group_key: [bid.auction, window_start], aggs: [count] } { result table: 4, state tables: [], distinct tables: [] }
@@ -438,7 +438,7 @@
 
     Fragment 4
     StreamNoOp
-    └──  StreamExchange NoShuffle from 2
+    └──  StreamExchange Hash([0, 1]) from 2
 
     Table 0 { columns: [ bid_auction, window_start, count ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
