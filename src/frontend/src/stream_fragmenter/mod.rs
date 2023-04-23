@@ -220,6 +220,10 @@ pub(self) fn build_and_add_fragment(
         None => {
             let mut fragment = state.new_stream_fragment();
             let node = build_fragment(state, &mut fragment, stream_node)?;
+
+            // It's possible that the stream node is rewritten while building the fragment, for
+            // example, empty fragment to no-op fragment. We get the operator id again instead of
+            // using the original one.
             let operator_id = node.operator_id as u32;
 
             assert!(fragment.node.is_none());
