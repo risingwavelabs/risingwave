@@ -190,7 +190,8 @@ impl LogicalOverAgg {
     }
 
     fn convert_window_function(window_function: WindowFunction) -> Result<PlanWindowFunction> {
-        // TODO: rewrite expressions to `InputRef` like in `LogicalAgg`
+        // TODO: rewrite expressions in `ORDER BY`, `PARTITION BY` and arguments to `InputRef` like
+        // in `LogicalAgg`
         let order_by = window_function
             .order_by
             .sort_exprs
@@ -237,9 +238,7 @@ impl LogicalOverAgg {
                 };
 
                 // override the frame
-                // FIXME(rc): This is not truly correct. The semantics of `lag` and `lead`
-                // is to select the value from the row before or after current row, but the
-                // behavior is orthogonal to the frame definition.
+                // TODO(rc): We can only do the optimization for constant offset.
                 if window_function.function_type == WindowFunctionType::Lag {
                     Frame::Rows(FrameBound::Preceding(offset), FrameBound::CurrentRow)
                 } else {

@@ -47,7 +47,7 @@ impl Rule for OverAggToTopNRule {
         let over_agg = plan.as_logical_over_agg()?;
 
         if over_agg.window_functions.len() != 1 {
-            // TopN with other window function calls is not supported yet.
+            // Queries with multiple window function calls are not supported yet.
             return None;
         }
 
