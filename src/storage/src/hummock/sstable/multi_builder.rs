@@ -296,7 +296,7 @@ impl TableBuilderFactory for LocalTableBuilderFactory {
         let writer = self
             .sstable_store
             .clone()
-            .create_sst_writer(id, writer_options);
+            .create_sst_writer(id, writer_options).await;
         let builder = SstableBuilder::for_test(id, writer, self.options.clone());
 
         Ok(builder)

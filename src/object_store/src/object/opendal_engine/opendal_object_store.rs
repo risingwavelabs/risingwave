@@ -73,11 +73,11 @@ impl ObjectStore for OpendalObjectStore {
         }
     }
 
-    fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
+    async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
         Ok(Box::new(OpenDalStreamingUploader::new(
             self.op.clone(),
             path.to_string(),
-        )))
+        ).await?))
     }
 
     async fn read(&self, path: &str, block: Option<BlockLocation>) -> ObjectResult<Bytes> {
@@ -195,43 +195,38 @@ impl ObjectStore for OpendalObjectStore {
 
 /// Store multiple parts in a map, and concatenate them on finish.
 pub struct OpenDalStreamingUploader {
-    op: Operator,
-    path: String,
-    buffer: BytesMut,
+    writer: Writer,
 }
 impl OpenDalStreamingUploader {
 
 
-    pub fn new(op: Operator, path: String) -> Self {
- 
-        Self {
-            op,
-            path,
-            buffer: BytesMut::new(),
-        }
+    pub async fn new(op: Operator, path: String) -> ObjectResult<Self> {
+        let writer = op.writer(&path).await?;
+        Ok(Self {
+            writer
+        })
+        
     }
 }
 
-
+unsafe impl Send for OpenDalStreamingUploader {}
+unsafe impl Sync for OpenDalStreamingUploader {}
 #[async_trait::async_trait]
-impl StreamingUploader for OpenDalStreamingUploader {
+impl StreamingUploader for OpenDalStreamingUploader{
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
-        let mut writer = self.op.writer(&self.path).await?;
-        writer.write(data).await?;
+        self.writer.write(data).await?;
         // self.buffer.put(data);
         Ok(())
     }
 
     async fn finish(mut self: Box<Self>) -> ObjectResult<()> {
-        let mut writer = self.op.writer(&self.path).await?;
-        writer.close().await?;
-        // self.op.write(&self.path, self.buffer).await?;
+        self.writer.close().await?;
 
         Ok(())
     }
 
     fn get_memory_usage(&self) -> u64 {
-        self.buffer.capacity() as u64
+        0
     }
 }
 
@@ -357,7 +352,7 @@ mod tests {
         let obj = Bytes::from("123456789");
 
         let store = OpendalObjectStore::new_memory_engine().unwrap();
-        let mut uploader = store.streaming_upload("/temp").unwrap();
+        let mut uploader = store.streaming_upload("/temp").await.unwrap();
 
         for block in blocks {
             uploader.write_bytes(block).await.unwrap();

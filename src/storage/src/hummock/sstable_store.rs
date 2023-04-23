@@ -434,7 +434,7 @@ impl SstableStore {
             .map_err(HummockError::object_io_error)
     }
 
-    pub fn create_sst_writer(
+    pub async fn create_sst_writer(
         self: Arc<Self>,
         object_id: HummockSstableObjectId,
         options: SstableWriterOptions,
@@ -536,11 +536,11 @@ pub struct SstableWriterOptions {
     pub tracker: Option<MemoryTracker>,
     pub policy: CachePolicy,
 }
-
+#[async_trait::async_trait]
 pub trait SstableWriterFactory: Send + Sync {
     type Writer: SstableWriter<Output = UploadJoinHandle>;
 
-    fn create_sst_writer(
+    async fn create_sst_writer(
         &self,
         object_id: HummockSstableObjectId,
         options: SstableWriterOptions,
@@ -557,10 +557,11 @@ impl BatchSstableWriterFactory {
     }
 }
 
+#[async_trait::async_trait]
 impl SstableWriterFactory for BatchSstableWriterFactory {
     type Writer = BatchUploadWriter;
 
-    fn create_sst_writer(
+    async fn create_sst_writer(
         &self,
         object_id: HummockSstableObjectId,
         options: SstableWriterOptions,
@@ -763,16 +764,18 @@ impl StreamingSstableWriterFactory {
     }
 }
 
+
+#[async_trait::async_trait]
 impl SstableWriterFactory for StreamingSstableWriterFactory {
     type Writer = StreamingUploadWriter;
 
-    fn create_sst_writer(
+    async fn create_sst_writer(
         &self,
         object_id: HummockSstableObjectId,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer> {
         let path = self.sstable_store.get_sst_data_path(object_id);
-        let uploader = self.sstable_store.store.streaming_upload(&path)?;
+        let uploader = self.sstable_store.store.streaming_upload(&path).await?;
         Ok(StreamingUploadWriter::new(
             object_id,
             self.sstable_store.clone(),

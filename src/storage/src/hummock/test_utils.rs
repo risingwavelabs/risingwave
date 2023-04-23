@@ -168,7 +168,7 @@ pub async fn put_sst(
     options.policy = CachePolicy::NotFill;
     let mut writer = sstable_store
         .clone()
-        .create_sst_writer(sst_object_id, options);
+        .create_sst_writer(sst_object_id, options).await;
     for block_meta in &meta.block_metas {
         let offset = block_meta.offset as usize;
         let end_offset = offset + block_meta.len as usize;
@@ -215,7 +215,7 @@ pub async fn gen_test_sstable_inner<B: AsRef<[u8]> + Clone + Default + Eq>(
     };
     let writer = sstable_store
         .clone()
-        .create_sst_writer(object_id, writer_opts);
+        .create_sst_writer(object_id, writer_opts).await;
     let mut b = SstableBuilder::for_test(object_id, writer, opts);
 
     let mut last_key = FullKey::<B>::default();
