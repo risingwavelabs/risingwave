@@ -161,14 +161,12 @@ impl ElectionClient for EtcdElectionClient {
                     }
 
                     _ = ticker.tick(), if !keep_alive_sending => {
-                        tracing::info!("lease {} keep alive", lease_id);
                         if let Err(err) = keeper.keep_alive().await {
-                            tracing::error!("keep alive for lease {} failed {}", lease_id, err);
+                            tracing::debug!("keep alive for lease {} failed {}", lease_id, err);
                             continue
                         }
 
                         keep_alive_sending = true;
-                        tracing::info!("lease {} keep alive success", lease_id);
                     }
 
                     resp = resp_stream.message() => {
@@ -176,7 +174,7 @@ impl ElectionClient for EtcdElectionClient {
                         match resp {
                             Ok(Some(resp)) => {
                                 if resp.ttl() <= 0 {
-                                    tracing::warn!("lease expired or revoked {}", lease_id);
+                                    tracing::error!("lease expired or revoked {}", lease_id);
                                     keep_alive_fail_tx.send(()).unwrap();
                                     break;
                                 }
@@ -184,7 +182,7 @@ impl ElectionClient for EtcdElectionClient {
                                 timeout.reset();
                             },
                             Ok(None) => {
-                                tracing::info!("lease keeper for lease {} response stream closed unexpected", lease_id);
+                                tracing::debug!("lease keeper for lease {} response stream closed unexpected", lease_id);
 
                                 // try to re-create lease keeper, with timeout as ttl / 2
                                 if let Ok(Ok((keeper_, resp_stream_))) = time::timeout(Duration::from_secs((ttl / 2) as u64), lease_client.keep_alive(lease_id)).await {
