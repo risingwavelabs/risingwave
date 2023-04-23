@@ -28,7 +28,7 @@ use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use tokio::sync::mpsc::Sender;
 use tonic::Status;
 
-use crate::executor::BatchManagerMetrics;
+use crate::monitor::BatchManagerMetrics;
 use crate::rpc::service::exchange::GrpcExchangeWriter;
 use crate::task::{
     BatchTaskExecution, ComputeNodeContext, StateReporter, TaskId, TaskOutput, TaskOutputId,
@@ -150,7 +150,7 @@ impl BatchManager {
                 // Use `cancel` rather than `abort` here since this is not an error which should be
                 // propagated to upstream.
                 task.cancel();
-                self.metrics.task_num.dec()
+                self.metrics.task_num.dec();
             }
             None => {
                 warn!("Task id not found for abort task")
@@ -264,7 +264,7 @@ mod tests {
     use risingwave_pb::expr::TableFunction;
     use tonic::Code;
 
-    use crate::executor::BatchManagerMetrics;
+    use crate::monitor::BatchManagerMetrics;
     use crate::task::{BatchManager, ComputeNodeContext, StateReporter, TaskId};
 
     #[test]
