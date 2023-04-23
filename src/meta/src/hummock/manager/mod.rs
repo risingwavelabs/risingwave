@@ -1150,12 +1150,8 @@ where
             }
             let is_success = if let TaskStatus::Success = compact_task.task_status() {
                 // if member_table_ids changes, the data of sstable may stale.
-                let is_expired = current_version
-                    .levels
-                    .get(&compact_task.compaction_group_id)
-                    .map(|group| group.member_table_ids != compact_task.existing_table_ids)
-                    .unwrap_or(true)
-                    || Self::is_compact_task_expired(compact_task, &versioning.branched_ssts);
+                let is_expired =
+                    Self::is_compact_task_expired(compact_task, &versioning.branched_ssts);
                 if is_expired {
                     compact_task.set_task_status(TaskStatus::InputOutdatedCanceled);
                     false
