@@ -308,7 +308,7 @@ pub async fn merge_imms_in_memory(
         imm_iters.push(imm.into_forward_iter());
     }
     let mut builder = CompactionDeleteRangesBuilder::default();
-    builder.add_tombstone(range_tombstone_list.clone());
+    builder.add_tombstone(range_tombstone_list);
     let compaction_delete_ranges = builder.build_for_compaction(GC_DELETE_KEYS_FOR_FLUSH);
     let mut del_iter = compaction_delete_ranges.iter();
     del_iter.rewind();
@@ -327,7 +327,7 @@ pub async fn merge_imms_in_memory(
     let mut merged_payload: Vec<SharedBufferVersionedEntry> = Vec::new();
     let mut pivot = items.first().map(|((k, _), _)| k.clone()).unwrap();
     del_iter.earliest_delete_which_can_see_key(
-        &UserKey::new(table_id, TableKey(pivot.as_ref())),
+        UserKey::new(table_id, TableKey(pivot.as_ref())),
         HummockEpoch::MAX,
     );
     let mut versions: Vec<(HummockEpoch, HummockValue<Bytes>)> = Vec::new();
@@ -344,7 +344,7 @@ pub async fn merge_imms_in_memory(
             pivot_last_delete_epoch = HummockEpoch::MAX;
             versions = vec![];
             del_iter.earliest_delete_which_can_see_key(
-                &UserKey::new(table_id, TableKey(pivot.as_ref())),
+                UserKey::new(table_id, TableKey(pivot.as_ref())),
                 epoch,
             )
         };
@@ -374,6 +374,7 @@ pub async fn merge_imms_in_memory(
     }
 
     drop(del_iter);
+    let range_tombstone_list = Arc::unwrap_or_clone(compaction_delete_ranges).into_tombstones();
 
     Ok(SharedBufferBatch {
         inner: Arc::new(SharedBufferBatchInner::new_with_multi_epoch_batches(
