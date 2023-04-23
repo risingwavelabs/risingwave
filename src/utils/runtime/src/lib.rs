@@ -180,6 +180,12 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
     if query_log_path.is_ok() || ENABLE_QUERY_LOG_FILE {
         let query_log_path = query_log_path.unwrap_or(".risingwave/log".to_string());
         let query_log_path = PathBuf::from(query_log_path);
+        std::fs::create_dir_all(query_log_path.clone()).unwrap_or_else(|e| {
+            panic!(
+                "failed to create directory '{}': {e}",
+                query_log_path.display()
+            )
+        });
         let file = std::fs::OpenOptions::new()
             .create(true)
             .write(true)
