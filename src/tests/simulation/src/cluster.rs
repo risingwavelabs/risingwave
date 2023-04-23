@@ -603,6 +603,6 @@ impl KillOpts {
         kill_frontend: true,
         kill_compute: true,
         kill_compactor: true,
-        restart_delay_secs: 30,
+        restart_delay_secs: 25,
     };
 }
