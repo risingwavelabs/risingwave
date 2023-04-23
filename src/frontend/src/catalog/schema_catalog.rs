@@ -53,9 +53,9 @@ pub struct SchemaCatalog {
     connection_by_id: HashMap<ConnectionId, Arc<ConnectionCatalog>>,
 
     // This field is currently used only for `show connections`
-    connection_source_ref: HashMap<ConnectionId, Vec<Arc<SourceCatalog>>>,
+    connection_source_ref: HashMap<ConnectionId, Vec<SourceId>>,
     // This field is currently used only for `show connections`
-    connection_sink_ref: HashMap<ConnectionId, Vec<Arc<SinkCatalog>>>,
+    connection_sink_ref: HashMap<ConnectionId, Vec<SinkId>>,
     // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
     system_table_by_name: HashMap<String, SystemCatalog>,
     owner: u32,
@@ -186,8 +186,8 @@ impl SchemaCatalog {
         if let Some(connection_id) = source_ref.connection_id {
             self.connection_source_ref
                 .entry(connection_id)
-                .and_modify(|sources| sources.push(source_ref.clone()))
-                .or_insert(vec![source_ref.clone()]);
+                .and_modify(|sources| sources.push(source_ref.id))
+                .or_insert(vec![source_ref.id]);
         }
 
         self.source_by_name
@@ -201,9 +201,9 @@ impl SchemaCatalog {
         self.source_by_name.remove(&source_ref.name).unwrap();
         if let Some(connection_id) = source_ref.connection_id {
             if let Occupied(mut e) = self.connection_source_ref.entry(connection_id) {
-                let sources = e.get_mut();
-                sources.retain_mut(|s| s.id != id);
-                if sources.is_empty() {
+                let source_ids = e.get_mut();
+                source_ids.retain_mut(|sid| *sid != id);
+                if source_ids.is_empty() {
                     e.remove_entry();
                 }
             }
@@ -235,8 +235,8 @@ impl SchemaCatalog {
         if let Some(connection_id) = sink_ref.connection_id {
             self.connection_sink_ref
                 .entry(connection_id.0)
-                .and_modify(|sinks| sinks.push(sink_ref.clone()))
-                .or_insert(vec![sink_ref.clone()]);
+                .and_modify(|sinks| sinks.push(id))
+                .or_insert(vec![id]);
         }
 
         self.sink_by_name
@@ -250,9 +250,9 @@ impl SchemaCatalog {
         self.sink_by_name.remove(&sink_ref.name).unwrap();
         if let Some(connection_id) = sink_ref.connection_id {
             if let Occupied(mut e) = self.connection_sink_ref.entry(connection_id.0) {
-                let sinks = e.get_mut();
-                sinks.retain_mut(|s| s.id.sink_id != id);
-                if sinks.is_empty() {
+                let sink_ids = e.get_mut();
+                sink_ids.retain_mut(|sid| *sid != id);
+                if sink_ids.is_empty() {
                     e.remove_entry();
                 }
             }
@@ -430,8 +430,16 @@ impl SchemaCatalog {
         self.source_by_name.get(source_name)
     }
 
+    pub fn get_source_by_id(&self, source_id: &SourceId) -> Option<&Arc<SourceCatalog>> {
+        self.source_by_id.get(source_id)
+    }
+
     pub fn get_sink_by_name(&self, sink_name: &str) -> Option<&Arc<SinkCatalog>> {
         self.sink_by_name.get(sink_name)
+    }
+
+    pub fn get_sink_by_id(&self, sink_id: &SinkId) -> Option<&Arc<SinkCatalog>> {
+        self.sink_by_id.get(sink_id)
     }
 
     pub fn get_index_by_name(&self, index_name: &str) -> Option<&Arc<IndexCatalog>> {
@@ -476,23 +484,20 @@ impl SchemaCatalog {
     }
 
     /// get all sources referencing the connection
-    pub fn get_sources_by_connection(
+    pub fn get_source_ids_by_connection(
         &self,
         connection_id: ConnectionId,
-    ) -> Option<Vec<Arc<SourceCatalog>>> {
+    ) -> Option<Vec<SourceId>> {
         self.connection_source_ref
             .get(&connection_id)
             .map(|c| c.to_owned())
     }
 
     /// get all sinks referencing the connection
-    pub fn get_sinks_by_connection(
-        &self,
-        connection_id: ConnectionId,
-    ) -> Option<Vec<Arc<SinkCatalog>>> {
+    pub fn get_sink_ids_by_connection(&self, connection_id: ConnectionId) -> Option<Vec<SinkId>> {
         self.connection_sink_ref
             .get(&connection_id)
-            .map(|c| c.to_owned())
+            .map(|s| s.to_owned())
     }
 
     pub fn id(&self) -> SchemaId {
