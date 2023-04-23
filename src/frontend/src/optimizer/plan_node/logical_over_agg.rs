@@ -124,8 +124,7 @@ impl LogicalOverAgg {
 
         let logical_pk = input.logical_pk().to_vec();
 
-        let mapping =
-            ColIndexMapping::identity_or_none(input.schema().len(), input.schema().len() + 1);
+        let mapping = ColIndexMapping::identity_or_none(input.schema().len(), schema.len());
         let fd_set = input.functional_dependency().clone();
         let fd_set = mapping.rewrite_functional_dependency_set(fd_set);
 
@@ -145,13 +144,14 @@ impl LogicalOverAgg {
         let input_len = input.schema().len();
         let mut window_funcs = vec![];
         for expr in &mut select_exprs {
-            if let ExprImpl::WindowFunction(f) = expr {
-                window_funcs.push(*(f.clone()));
-                *expr = InputRef::new(
-                    input_len + window_funcs.len() - 1,
-                    expr.return_type().clone(),
-                )
-                .into();
+            if let ExprImpl::WindowFunction(_) = expr {
+                let new_expr =
+                    InputRef::new(input_len + window_funcs.len(), expr.return_type().clone())
+                        .into();
+                let f = std::mem::replace(expr, new_expr)
+                    .into_window_function()
+                    .unwrap();
+                window_funcs.push(*f);
             }
             if expr.has_window_function() {
                 return Err(ErrorCode::NotImplemented(
@@ -303,7 +303,7 @@ impl ColPrunable for LogicalOverAgg {
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
         let new_input = {
             let input = self.input();
-            let required = (0..input.schema().len()).collect_vec();
+            let required = (0..input.schema().len()).collect_vec(); // TODO(rc): real pruning
             input.prune_col(&required, ctx)
         };
         LogicalProject::with_mapping(self.clone_with_input(new_input).into(), mapping).into()
@@ -319,7 +319,7 @@ impl PredicatePushdown for LogicalOverAgg {
         ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
         let mut window_col = FixedBitSet::with_capacity(self.schema().len());
-        window_col.insert(self.schema().len() - 1);
+        window_col.insert_range(self.input.schema().len()..self.schema().len());
         let (window_pred, other_pred) = predicate.split_disjoint(&window_col);
         gen_filter_and_pushdown(self, window_pred, other_pred, ctx)
     }
