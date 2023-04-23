@@ -15,10 +15,11 @@
 use bytes::{BufMut, Bytes, BytesMut};
 use fail::fail_point;
 use futures::future::try_join_all;
+use futures::Future;
 use futures::StreamExt;
 use itertools::Itertools;
 use opendal::services::Memory;
-use opendal::{Metakey, Operator};
+use opendal::{Metakey, Operator, Writer};
 use tokio::io::AsyncRead;
 
 use crate::object::{
@@ -114,7 +115,6 @@ impl ObjectStore for OpendalObjectStore {
         fail_point!("opendal_streaming_read_err", |_| Err(
             ObjectError::internal("opendal streaming read error")
         ));
-
         let reader = match start_pos {
             Some(start_position) => self.op.range_reader(path, start_position as u64..).await?,
             None => self.op.reader(path).await?,
@@ -127,7 +127,7 @@ impl ObjectStore for OpendalObjectStore {
         let opendal_metadata = self.op.stat(path).await?;
         let key = path.to_string();
         let last_modified = match opendal_metadata.last_modified() {
-            Some(t) => t.unix_timestamp() as f64,
+            Some(t) => t.timestamp() as f64,
             None => 0_f64,
         };
 
@@ -165,7 +165,7 @@ impl ObjectStore for OpendalObjectStore {
                 .await?;
 
             let last_modified = match om.last_modified() {
-                Some(t) => t.unix_timestamp() as f64,
+                Some(t) => t.timestamp() as f64,
                 None => 0_f64,
             };
 
@@ -200,7 +200,10 @@ pub struct OpenDalStreamingUploader {
     buffer: BytesMut,
 }
 impl OpenDalStreamingUploader {
+
+
     pub fn new(op: Operator, path: String) -> Self {
+ 
         Self {
             op,
             path,
@@ -208,15 +211,21 @@ impl OpenDalStreamingUploader {
         }
     }
 }
+
+
 #[async_trait::async_trait]
 impl StreamingUploader for OpenDalStreamingUploader {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
-        self.buffer.put(data);
+        let mut writer = self.op.writer(&self.path).await?;
+        writer.write(data).await?;
+        // self.buffer.put(data);
         Ok(())
     }
 
     async fn finish(mut self: Box<Self>) -> ObjectResult<()> {
-        self.op.write(&self.path, self.buffer).await?;
+        let mut writer = self.op.writer(&self.path).await?;
+        writer.close().await?;
+        // self.op.write(&self.path, self.buffer).await?;
 
         Ok(())
     }
