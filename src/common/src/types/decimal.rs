@@ -220,6 +220,12 @@ impl_try_from_decimal!(Decimal, f64, Decimal::to_f64, "Failed to convert to f64"
 impl_try_from_float!(f32, Decimal, Decimal::from_f32);
 impl_try_from_float!(f64, Decimal, Decimal::from_f64);
 
+impl From<crate::types::Decimal> for OrderedFloat<f64> {
+    fn from(n: crate::types::Decimal) -> Self {
+        n.to_f64().map_or(Self(f64::NAN), Self)
+    }
+}
+
 impl FromPrimitive for Decimal {
     impl_from_integer!([
         (u8, from_u8),
