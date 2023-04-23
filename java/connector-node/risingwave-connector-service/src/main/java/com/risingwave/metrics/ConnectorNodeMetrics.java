@@ -68,7 +68,7 @@ public class ConnectorNodeMetrics {
     private static final Counter sinkRowsReceived =
             Counter.build()
                     .name("connector_sink_rows_received")
-                    .labelNames("sink_type", "sink_id")
+                    .labelNames("connector_type", "sink_id")
                     .help("Number of rows received by sink")
                     .register();
 
