@@ -327,19 +327,19 @@ impl PredicatePushdown for LogicalOverAgg {
 
 impl ToBatch for LogicalOverAgg {
     fn to_batch(&self) -> Result<PlanRef> {
-        Err(ErrorCode::NotImplemented("OverAgg to batch".to_string(), 4847.into()).into())
+        Err(ErrorCode::NotImplemented("OverAgg to batch".to_string(), 9124.into()).into())
     }
 }
 
 impl ToStream for LogicalOverAgg {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        Err(ErrorCode::NotImplemented("OverAgg to stream".to_string(), 4847.into()).into())
+        Err(ErrorCode::NotImplemented("OverAgg to stream".to_string(), 9124.into()).into())
     }
 
     fn logical_rewrite_for_stream(
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        Err(ErrorCode::NotImplemented("OverAgg to stream".to_string(), 4847.into()).into())
+        Err(ErrorCode::NotImplemented("OverAgg to stream".to_string(), 9124.into()).into())
     }
 }
