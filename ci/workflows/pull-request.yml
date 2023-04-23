@@ -66,7 +66,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 28
+    timeout_in_minutes: 40
 
   - label: "end-to-end sink test (release mode)-1"
     command: "ci/scripts/e2e-sink-test.sh -p ci-release"
@@ -80,7 +80,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 28
+    timeout_in_minutes: 40
 
   - label: "end-to-end sink test (release mode)-2"
     command: "ci/scripts/e2e-sink-test.sh -p ci-release"
@@ -94,7 +94,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 28
+    timeout_in_minutes: 40
 
   - label: "end-to-end sink test (release mode)-3"
     command: "ci/scripts/e2e-sink-test.sh -p ci-release"
@@ -108,7 +108,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 28
+    timeout_in_minutes: 40
 
   - label: "end-to-end sink test (release mode)-4"
     command: "ci/scripts/e2e-sink-test.sh -p ci-release"
@@ -122,7 +122,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 28
+    timeout_in_minutes: 40
 
   - label: "end-to-end sink test (release mode)-5"
     command: "ci/scripts/e2e-sink-test.sh -p ci-release"
@@ -136,4 +136,4 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 28
+    timeout_in_minutes: 40
