@@ -148,6 +148,8 @@ impl ElectionClient for EtcdElectionClient {
             let mut timeout = time::interval(Duration::from_secs((ttl / 2) as u64));
             timeout.reset();
 
+            let mut sending = false;
+
             loop {
                 tokio::select! {
                     biased;
@@ -159,16 +161,21 @@ impl ElectionClient for EtcdElectionClient {
                     }
 
                     _ = ticker.tick() => {
-                        tracing::info!("lease {} keep alive", lease_id);
-                        if let Err(err) = keeper.keep_alive().await {
-                            tracing::error!("keep alive for lease {} failed {}", lease_id, err);
-                            continue
+                        if !sending {
+                            tracing::info!("lease {} keep alive", lease_id);
+                            if let Err(err) = keeper.keep_alive().await {
+                                tracing::error!("keep alive for lease {} failed {}", lease_id, err);
+                                continue
+                            }
+
+                            sending = true;
+                            tracing::info!("lease {} keep alive success", lease_id);
                         }
-                        tracing::info!("lease {} keep alive success", lease_id);
                     }
 
                     resp = resp_stream.message() => {
-                       match resp {
+                        sending = false;
+                        match resp {
                             Ok(Some(resp)) => {
                                 if resp.ttl() <= 0 {
                                     tracing::warn!("lease expired or revoked {}", lease_id);
