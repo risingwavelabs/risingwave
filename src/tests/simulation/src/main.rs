@@ -97,7 +97,7 @@ pub struct Args {
     kill_rate: f32,
 
     /// Delay in restart after kill.
-    #[clap(long, default_value = "30")]
+    #[clap(long, default_value = "25")]
     restart_delay_secs: u32,
 
     /// The directory of kafka source data.
