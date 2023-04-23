@@ -14,9 +14,10 @@
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::types::DataType;
+use risingwave_expr::function::window::WindowFuncKind;
 
 use super::Rule;
-use crate::expr::{ExprImpl, ExprType, WindowFunctionType};
+use crate::expr::{ExprImpl, ExprType};
 use crate::optimizer::plan_node::{LogicalFilter, LogicalTopN, PlanTreeNodeUnary};
 use crate::optimizer::property::Order;
 use crate::planner::LIMIT_ALL_COUNT;
@@ -52,7 +53,7 @@ impl Rule for OverAggToTopNRule {
         }
 
         let f = &over_agg.window_functions[0];
-        if !f.function_type.is_rank_function() {
+        if !f.kind.is_rank_function() {
             return None;
         }
 
@@ -68,11 +69,11 @@ impl Rule for OverAggToTopNRule {
             return None;
         }
 
-        let with_ties = match f.function_type {
+        let with_ties = match f.kind {
             // Only `ROW_NUMBER` and `RANK` can be optimized to TopN now.
-            WindowFunctionType::RowNumber => false,
-            WindowFunctionType::Rank => true,
-            WindowFunctionType::DenseRank => unimplemented!("should be banned in planner"),
+            WindowFuncKind::RowNumber => false,
+            WindowFuncKind::Rank => true,
+            WindowFuncKind::DenseRank => unimplemented!("should be banned in planner"),
             _ => unreachable!("window functions other than rank functions should not reach here"),
         };
 

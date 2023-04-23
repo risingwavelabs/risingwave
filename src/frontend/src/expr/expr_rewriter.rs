@@ -93,7 +93,7 @@ pub trait ExprRewriter {
         let WindowFunction {
             args,
             return_type,
-            function_type,
+            kind,
             partition_by,
             order_by,
             frame,
@@ -105,7 +105,7 @@ pub trait ExprRewriter {
         WindowFunction {
             args,
             return_type,
-            function_type,
+            kind,
             partition_by,
             order_by,
             frame,

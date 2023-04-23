@@ -20,13 +20,13 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay};
-use risingwave_expr::function::window::{Frame, FrameBound};
+use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncKind};
 
 use super::{
     gen_filter_and_pushdown, ColPrunable, ExprRewritable, LogicalProject, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprImpl, InputRef, InputRefDisplay, WindowFunction, WindowFunctionType};
+use crate::expr::{Expr, ExprImpl, InputRef, InputRefDisplay, WindowFunction};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -35,7 +35,7 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 /// Rewritten version of [`WindowFunction`] which uses `InputRef` instead of `ExprImpl`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PlanWindowFunction {
-    pub function_type: WindowFunctionType, // TODO(): change to `WindowFuncKind`
+    pub kind: WindowFuncKind,
     pub return_type: DataType,
     pub args: Vec<InputRef>,
     pub partition_by: Vec<InputRef>,
@@ -53,14 +53,14 @@ impl<'a> std::fmt::Debug for PlanWindowFunctionDisplay<'a> {
         let window_function = self.window_function;
         if f.alternate() {
             f.debug_struct("WindowFunction")
-                .field("function_type", &window_function.function_type)
+                .field("kind", &window_function.kind)
                 .field("return_type", &window_function.return_type)
                 .field("partition_by", &window_function.partition_by)
                 .field("order_by", &window_function.order_by)
                 .field("frame", &window_function.frame)
                 .finish()
         } else {
-            write!(f, "{}() OVER(", window_function.function_type)?;
+            write!(f, "{}() OVER(", window_function.kind)?;
 
             let mut delim = "";
             if !window_function.partition_by.is_empty() {
@@ -118,7 +118,7 @@ impl LogicalOverAgg {
         window_functions.iter().for_each(|func| {
             schema.fields.push(Field::with_name(
                 func.return_type.clone(),
-                func.function_type.to_string(),
+                func.kind.to_string(),
             ));
         });
 
@@ -162,7 +162,7 @@ impl LogicalOverAgg {
             }
         }
         for f in &window_funcs {
-            if f.function_type.is_rank_function() {
+            if f.kind.is_rank_function() {
                 if f.order_by.sort_exprs.is_empty() {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "window rank function without order by: {:?}",
@@ -170,9 +170,9 @@ impl LogicalOverAgg {
                     ))
                     .into());
                 }
-                if f.function_type == WindowFunctionType::DenseRank {
+                if f.kind == WindowFuncKind::DenseRank {
                     return Err(ErrorCode::NotImplemented(
-                        format!("window rank function: {}", f.function_type),
+                        format!("window rank function: {}", f.kind),
                         4847.into(),
                     )
                     .into());
@@ -217,14 +217,14 @@ impl LogicalOverAgg {
             .try_collect()?;
 
         let mut args = window_function.args;
-        let frame = match window_function.function_type {
-            WindowFunctionType::Lag | WindowFunctionType::Lead => {
+        let frame = match window_function.kind {
+            WindowFuncKind::Lag | WindowFuncKind::Lead => {
                 let offset = if args.len() > 1 {
                     let offset_expr = args.remove(1);
                     if !offset_expr.return_type().is_int() {
                         return Err(ErrorCode::InvalidInputSyntax(format!(
                             "the `offset` of `{}` function should be integer",
-                            window_function.function_type
+                            window_function.kind
                         ))
                         .into());
                     }
@@ -239,7 +239,7 @@ impl LogicalOverAgg {
 
                 // override the frame
                 // TODO(rc): We can only do the optimization for constant offset.
-                if window_function.function_type == WindowFunctionType::Lag {
+                if window_function.kind == WindowFuncKind::Lag {
                     Frame::Rows(FrameBound::Preceding(offset), FrameBound::CurrentRow)
                 } else {
                     Frame::Rows(FrameBound::CurrentRow, FrameBound::Following(offset))
@@ -260,7 +260,7 @@ impl LogicalOverAgg {
             .try_collect()?;
 
         Ok(PlanWindowFunction {
-            function_type: window_function.function_type,
+            kind: window_function.kind,
             return_type: window_function.return_type,
             args,
             partition_by,

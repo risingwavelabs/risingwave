@@ -26,7 +26,7 @@ use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_expr::function::aggregate::AggKind;
-use risingwave_expr::function::window::{Frame, FrameBound};
+use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncKind};
 use risingwave_sqlparser::ast::{
     Function, FunctionArg, FunctionArgExpr, WindowFrameBound, WindowFrameUnits, WindowSpec,
 };
@@ -35,7 +35,7 @@ use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprType, FunctionCall, Literal, OrderBy, Subquery, SubqueryKind,
-    TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction, WindowFunctionType,
+    TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
 };
 use crate::utils::Condition;
 
@@ -224,7 +224,12 @@ impl Binder {
         inputs: Vec<ExprImpl>,
     ) -> Result<ExprImpl> {
         self.ensure_window_function_allowed()?;
-        let window_function_type = WindowFunctionType::from_str(&function_name)?;
+        let kind = WindowFuncKind::from_str(&function_name).map_err(|_| {
+            ErrorCode::NotImplemented(
+                format!("Unrecognized window function: {}", function_name),
+                8961.into(),
+            )
+        })?;
         let partition_by = partition_by
             .into_iter()
             .map(|arg| self.bind_expr(arg))
@@ -235,7 +240,7 @@ impl Binder {
                 .map(|order_by_expr| self.bind_order_by_expr(order_by_expr))
                 .collect::<Result<_>>()?,
         );
-        if let Some(window_frame) = &window_frame && window_function_type.is_rank_function() {
+        if let Some(window_frame) = &window_frame && kind.is_rank_function() {
             return Err(ErrorCode::NotImplemented(
                 format!("window frame: {}", window_frame),
                 None.into(),
@@ -275,10 +280,7 @@ impl Binder {
         } else {
             None
         };
-        Ok(
-            WindowFunction::new(window_function_type, partition_by, order_by, inputs, frame)?
-                .into(),
-        )
+        Ok(WindowFunction::new(kind, partition_by, order_by, inputs, frame)?.into())
     }
 
     fn bind_builtin_scalar_function(
