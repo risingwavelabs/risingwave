@@ -67,3 +67,73 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 28
+
+  - label: "end-to-end sink test (release mode)-1"
+    command: "ci/scripts/e2e-sink-test.sh -p ci-release"
+    depends_on:
+      - "build-release"
+      - "build-other"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v4.9.0:
+          run: sink-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 28
+
+  - label: "end-to-end sink test (release mode)-2"
+    command: "ci/scripts/e2e-sink-test.sh -p ci-release"
+    depends_on:
+      - "build-release"
+      - "build-other"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v4.9.0:
+          run: sink-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 28
+
+  - label: "end-to-end sink test (release mode)-3"
+    command: "ci/scripts/e2e-sink-test.sh -p ci-release"
+    depends_on:
+      - "build-release"
+      - "build-other"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v4.9.0:
+          run: sink-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 28
+
+  - label: "end-to-end sink test (release mode)-4"
+    command: "ci/scripts/e2e-sink-test.sh -p ci-release"
+    depends_on:
+      - "build-release"
+      - "build-other"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v4.9.0:
+          run: sink-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 28
+
+  - label: "end-to-end sink test (release mode)-5"
+    command: "ci/scripts/e2e-sink-test.sh -p ci-release"
+    depends_on:
+      - "build-release"
+      - "build-other"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v4.9.0:
+          run: sink-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 28
