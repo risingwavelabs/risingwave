@@ -117,8 +117,6 @@ message ExprNode {
     SQRT = 256;
     DEGREES = 257;
     RADIANS = 258;
-    ENCODE = 259;
-    DECODE = 260;
 
     // Boolean comparison
     IS_TRUE = 301;
@@ -129,6 +127,11 @@ message ExprNode {
     IS_NOT_NULL = 306;
     IS_DISTINCT_FROM = 307;
     IS_NOT_DISTINCT_FROM = 308;
+
+    // string/bytea expressions
+    ENCODE = 310;
+    DECODE = 311;
+
     // Unary operators
     NEG = 401;
     // Nested selection operators

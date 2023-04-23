@@ -651,7 +651,8 @@ select md5('12345678901234567890123456789012345678901234567890123456789012345678
 SELECT encode('\x1234567890abcdef00', 'hex');
 SELECT decode('1234567890abcdef00', 'hex');
 SELECT encode(('\x' || repeat('1234567890abcdef0001', 7))::bytea, 'base64');
-SELECT decode(encode(('\x' || repeat('1234567890abcdef0001', 7))::bytea, 'base64'), 'base64');
+SELECT decode(encode(('\x' || repeat('1234567890abcdef0001', 7))::bytea,
+                     'base64'), 'base64');
 SELECT encode('\x1234567890abcdef00', 'escape');
 SELECT decode(encode('\x1234567890abcdef00', 'escape'), 'escape');
 
