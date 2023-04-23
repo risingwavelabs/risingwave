@@ -166,7 +166,11 @@ impl StagingVersion {
                 imm.min_epoch() <= max_epoch_inclusive
                     && imm.table_id == table_id
                     && imm.min_epoch() > min_epoch_exclusive
-                    && range_overlap(&(left, right), &imm.start_table_key(), &imm.end_table_key())
+                    && range_overlap(
+                        &(left, right),
+                        &imm.start_table_key(),
+                        imm.end_table_key().as_ref(),
+                    )
             });
 
         // TODO: Remove duplicate sst based on sst id

@@ -12,22 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_expr_macro::function;
+package com.risingwave.sourcenode.common;
 
-#[function("ascii(varchar) -> int32")]
-pub fn ascii(s: &str) -> i32 {
-    s.chars().next().map(|x| x as i32).unwrap_or(0)
-}
+import io.grpc.Status;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+public abstract class ValidatorUtils {
+    public static RuntimeException invalidArgument(String description) {
+        return Status.INVALID_ARGUMENT.withDescription(description).asRuntimeException();
+    }
 
-    #[test]
-    fn test_ascii() {
-        let cases = [("hello", 104), ("你好", 20320), ("", 0)];
-        for (s, expected) in cases {
-            assert_eq!(ascii(s), expected)
-        }
+    public static RuntimeException internalError(String description) {
+        return Status.INTERNAL.withDescription(description).asRuntimeException();
     }
 }

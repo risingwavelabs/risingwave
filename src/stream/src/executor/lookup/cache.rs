@@ -54,9 +54,8 @@ impl LookupCache {
         }
     }
 
-    /// Flush the cache and evict the items.
-    pub fn flush(&mut self) {
-        self.data.evict();
+    pub fn evict(&mut self) {
+        self.data.evict()
     }
 
     /// Update the current epoch.

@@ -232,8 +232,8 @@ mod tests {
         .await
         .unwrap();
         let ret = collector.get_tombstone_between(
-            &UserKey::<Bytes>::default().as_ref(),
-            &UserKey::<Bytes>::default().as_ref(),
+            UserKey::<Bytes>::default().as_ref(),
+            UserKey::<Bytes>::default().as_ref(),
         );
         assert_eq!(
             ret,

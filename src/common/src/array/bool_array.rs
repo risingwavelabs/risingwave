@@ -14,8 +14,7 @@
 
 use risingwave_pb::data::{ArrayType, PbArray};
 
-use super::{Array, ArrayBuilder, ArrayMeta};
-use crate::array::ArrayBuilderImpl;
+use super::{Array, ArrayBuilder, DataType};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
 
@@ -111,9 +110,8 @@ impl Array for BoolArray {
         self.bitmap = bitmap;
     }
 
-    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
-        let array_builder = BoolArrayBuilder::new(capacity);
-        ArrayBuilderImpl::Bool(array_builder)
+    fn data_type(&self) -> DataType {
+        DataType::Boolean
     }
 }
 
@@ -127,11 +125,16 @@ pub struct BoolArrayBuilder {
 impl ArrayBuilder for BoolArrayBuilder {
     type ArrayType = BoolArray;
 
-    fn with_meta(capacity: usize, _meta: ArrayMeta) -> Self {
+    fn new(capacity: usize) -> Self {
         Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: BitmapBuilder::with_capacity(capacity),
         }
+    }
+
+    fn with_type(capacity: usize, ty: DataType) -> Self {
+        assert_eq!(ty, DataType::Boolean);
+        Self::new(capacity)
     }
 
     fn append_n(&mut self, n: usize, value: Option<bool>) {

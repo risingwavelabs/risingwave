@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::alloc::{Allocator, Global};
+use std::cmp::min;
 use std::hash::{BuildHasher, Hash};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -25,10 +26,10 @@ use risingwave_common::estimate_size::EstimateSize;
 /// The managed cache is a lru cache that bounds the memory usage by epoch.
 /// Should be used with `GlobalMemoryManager`.
 pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Global> {
-    pub(super) inner: EstimatedLruCache<K, V, S, A>,
+    inner: EstimatedLruCache<K, V, S, A>,
     /// The entry with epoch less than water should be evicted.
     /// Should only be updated by the `GlobalMemoryManager`.
-    pub(super) watermark_epoch: Arc<AtomicU64>,
+    watermark_epoch: Arc<AtomicU64>,
 }
 
 impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Allocator>
@@ -37,6 +38,13 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
     /// Evict epochs lower than the watermark
     pub fn evict(&mut self) {
         let epoch = self.watermark_epoch.load(Ordering::Relaxed);
+        self.inner.evict_by_epoch(epoch);
+    }
+
+    /// Evict epochs lower than the watermark, except those entry which touched in this epoch
+    pub fn evict_except_cur_epoch(&mut self) {
+        let epoch = self.watermark_epoch.load(Ordering::Relaxed);
+        let epoch = min(epoch, self.inner.current_epoch());
         self.inner.evict_by_epoch(epoch);
     }
 }
