@@ -21,7 +21,7 @@ use itertools::Itertools;
 
 use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{DEFAULT_QUERY_LOG_PATH, FrontendConfig};
+use crate::{FrontendConfig, DEFAULT_QUERY_LOG_PATH};
 
 pub struct FrontendService {
     config: FrontendConfig,

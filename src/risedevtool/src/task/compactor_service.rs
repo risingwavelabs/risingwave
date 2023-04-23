@@ -20,7 +20,7 @@ use std::process::Command;
 use anyhow::Result;
 
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_meta_node, CompactorConfig, DEFAULT_QUERY_LOG_PATH, ExecuteContext, Task};
+use crate::{add_meta_node, CompactorConfig, ExecuteContext, Task, DEFAULT_QUERY_LOG_PATH};
 
 pub struct CompactorService {
     config: CompactorConfig,
