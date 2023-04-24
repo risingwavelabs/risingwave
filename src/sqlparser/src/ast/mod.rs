@@ -406,6 +406,12 @@ pub enum Expr {
     Array(Array),
     /// An array index expression e.g. `(ARRAY[1, 2])[1]` or `(current_schemas(FALSE))[1]`
     ArrayIndex { obj: Box<Expr>, index: Box<Expr> },
+    /// An array range index expression e.g. `(Array[1, 2, 3, 4])[1:3]`
+    ArrayRangeIndex {
+        obj: Box<Expr>,
+        start: Option<Box<Expr>>,
+        end: Option<Box<Expr>>,
+    },
 }
 
 impl fmt::Display for Expr {
@@ -603,6 +609,18 @@ impl fmt::Display for Expr {
             ),
             Expr::ArrayIndex { obj, index } => {
                 write!(f, "{}[{}]", obj, index)?;
+                Ok(())
+            }
+            Expr::ArrayRangeIndex { obj, start, end } => {
+                let start_str = match start {
+                    None => "".to_string(),
+                    Some(start) => format!("{}", start),
+                };
+                let end_str = match end {
+                    None => "".to_string(),
+                    Some(end) => format!("{}", end),
+                };
+                write!(f, "{}[{}:{}]", obj, start_str, end_str)?;
                 Ok(())
             }
             Expr::Array(exprs) => write!(f, "{}", exprs),

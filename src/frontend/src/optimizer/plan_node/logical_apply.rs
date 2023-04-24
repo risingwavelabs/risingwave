@@ -46,7 +46,8 @@ pub struct LogicalApply {
     correlated_id: CorrelatedId,
     /// The indices of `CorrelatedInputRef`s in `right`.
     correlated_indices: Vec<usize>,
-    /// If the subquery produces more than one result we have to report an error.
+    /// Whether we require the subquery to produce at most one row. If `true`, we have to report an
+    /// error if the subquery produces more than one row.
     max_one_row: bool,
 }
 

@@ -19,7 +19,6 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SourceNode;
 
-use super::generic::GenericPlanNode;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
@@ -35,9 +34,8 @@ pub struct BatchSource {
 
 impl BatchSource {
     pub fn new(logical: generic::Source) -> Self {
-        let base = PlanBase::new_batch(
-            logical.ctx.clone(),
-            logical.schema(),
+        let base = PlanBase::new_batch_from_logical(
+            &logical,
             // Use `Single` by default, will be updated later with `clone_with_dist`.
             Distribution::Single,
             Order::any(),
@@ -46,11 +44,11 @@ impl BatchSource {
         Self { base, logical }
     }
 
-    pub fn column_names(&self) -> Vec<String> {
+    pub fn column_names(&self) -> Vec<&str> {
         self.schema()
             .fields()
             .iter()
-            .map(|f| f.name.clone())
+            .map(|f| f.name.as_str())
             .collect()
     }
 

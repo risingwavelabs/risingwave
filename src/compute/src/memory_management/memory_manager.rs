@@ -21,45 +21,37 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::LocalStreamManager;
 
-use super::MemoryControlPolicy;
+use super::MemoryControlRef;
 use crate::memory_management::MemoryControlStats;
 
 /// Compute node uses [`GlobalMemoryManager`] to limit the memory usage.
 pub struct GlobalMemoryManager {
     /// All cached data before the watermark should be evicted.
     watermark_epoch: Arc<AtomicU64>,
-    /// Total memory that can be allocated by the compute node for computing tasks (stream & batch)
-    /// in bytes.
-    total_compute_memory_bytes: usize,
-    /// Barrier interval.
-    barrier_interval_ms: u32,
+    /// Loop interval of running control policy
+    interval_ms: u32,
     metrics: Arc<StreamingMetrics>,
     /// The memory control policy for computing tasks.
-    memory_control_policy: MemoryControlPolicy,
+    memory_control_policy: MemoryControlRef,
 }
 
 pub type GlobalMemoryManagerRef = Arc<GlobalMemoryManager>;
 
 impl GlobalMemoryManager {
     pub fn new(
-        total_compute_memory_bytes: usize,
-        barrier_interval_ms: u32,
+        interval_ms: u32,
         metrics: Arc<StreamingMetrics>,
-        memory_control_policy: MemoryControlPolicy,
+        memory_control_policy: MemoryControlRef,
     ) -> Arc<Self> {
         // Arbitrarily set a minimal barrier interval in case it is too small,
         // especially when it's 0.
-        let barrier_interval_ms = std::cmp::max(barrier_interval_ms, 10);
+        let interval_ms = std::cmp::max(interval_ms, 10);
 
-        tracing::debug!(
-            "memory control policy: {}",
-            memory_control_policy.describe(total_compute_memory_bytes)
-        );
+        tracing::info!("memory control policy: {:?}", &memory_control_policy);
 
         Arc::new(Self {
             watermark_epoch: Arc::new(0.into()),
-            total_compute_memory_bytes,
-            barrier_interval_ms,
+            interval_ms,
             metrics,
             memory_control_policy,
         })
@@ -76,10 +68,11 @@ impl GlobalMemoryManager {
         batch_manager: Arc<BatchManager>,
         stream_manager: Arc<LocalStreamManager>,
     ) {
-        let mut tick_interval = tokio::time::interval(Duration::from_millis(50));
+        // Keep same interval with the barrier interval
+        let mut tick_interval =
+            tokio::time::interval(Duration::from_millis(self.interval_ms as u64));
+
         let mut memory_control_stats = MemoryControlStats {
-            batch_memory_usage: 0,
-            streaming_memory_usage: 0,
             jemalloc_allocated_mib: 0,
             lru_watermark_step: 0,
             lru_watermark_time_ms: Epoch::physical_now(),
@@ -91,8 +84,7 @@ impl GlobalMemoryManager {
             tick_interval.tick().await;
 
             memory_control_stats = self.memory_control_policy.apply(
-                self.total_compute_memory_bytes,
-                self.barrier_interval_ms,
+                self.interval_ms,
                 memory_control_stats,
                 batch_manager.clone(),
                 stream_manager.clone(),

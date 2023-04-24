@@ -38,8 +38,6 @@ pub struct BatchHashAgg {
 
 impl BatchHashAgg {
     pub fn new(logical: generic::Agg<PlanRef>) -> Self {
-        let base = PlanBase::new_logical_with_core(&logical);
-        let ctx = base.ctx;
         let input = logical.input.clone();
         let input_dist = input.distribution();
         let dist = match input_dist {
@@ -48,7 +46,7 @@ impl BatchHashAgg {
                 .rewrite_provided_distribution(input_dist),
             d => d.clone(),
         };
-        let base = PlanBase::new_batch(ctx, base.schema, dist, Order::any());
+        let base = PlanBase::new_batch_from_logical(&logical, dist, Order::any());
         BatchHashAgg { base, logical }
     }
 

@@ -274,7 +274,10 @@ impl DistinctAggRule {
                 // final agg so we use exhaustive match here to make compiler remind
                 // people adding new `AggKind` to update it.
                 match agg_call.agg_kind {
-                    AggKind::Min
+                    AggKind::BitAnd
+                    | AggKind::BitOr
+                    | AggKind::BitXor
+                    | AggKind::Min
                     | AggKind::Max
                     | AggKind::Sum
                     | AggKind::Sum0

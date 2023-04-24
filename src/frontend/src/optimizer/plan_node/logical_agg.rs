@@ -22,7 +22,7 @@ use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::function::aggregate::AggKind;
 
-use super::generic::{Agg, AggCallState, GenericPlanRef, PlanAggCall, ProjectBuilder};
+use super::generic::{self, Agg, AggCallState, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg,
@@ -76,7 +76,9 @@ impl LogicalAgg {
     /// Should only be used iff input is distributed. Input must be converted to stream form.
     fn gen_stateless_two_phase_streaming_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         debug_assert!(self.group_key().is_empty());
-        let local_agg = StreamLocalSimpleAgg::new(self.clone_with_input(stream_input));
+        let mut logical = self.core.clone();
+        logical.input = stream_input;
+        let local_agg = StreamLocalSimpleAgg::new(logical);
         let exchange =
             RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
         let global_agg = new_stream_global_simple_agg(Agg::new(
@@ -122,7 +124,7 @@ impl LogicalAgg {
         );
         let vnode_col_idx = exprs.len() - 1;
         // TODO(kwannoel): We should apply Project optimization rules here.
-        let project = StreamProject::new(LogicalProject::new(stream_input, exprs));
+        let project = StreamProject::new(generic::Project::new(exprs, stream_input));
 
         // Generate local agg step
         let mut local_group_key = self.group_key().clone();
@@ -900,14 +902,6 @@ impl LogicalAgg {
         Agg::new(agg_calls, group_key, input).into()
     }
 
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        self.core.fmt_with_name(f, name)
-    }
-
-    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
-        self.core.fmt_fields_with_builder(builder)
-    }
-
     fn to_batch_simple_agg(&self) -> Result<PlanRef> {
         let input = self.input().to_batch()?;
         let new_logical = Agg {
@@ -944,7 +938,7 @@ impl_plan_tree_node_for_unary! {LogicalAgg}
 
 impl fmt::Display for LogicalAgg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalAgg")
+        self.core.fmt_with_name(f, "LogicalAgg")
     }
 }
 
@@ -1162,7 +1156,7 @@ impl ToStream for LogicalAgg {
             Ok(stream_agg)
         } else {
             // a `count(*)` is appended, should project the output
-            Ok(StreamProject::new(LogicalProject::with_out_col_idx(
+            Ok(StreamProject::new(generic::Project::with_out_col_idx(
                 stream_agg,
                 0..self.schema().len(),
             ))

@@ -164,6 +164,32 @@
         └─BatchExchange { order: [], dist: Single }
           └─BatchScan { table: t2, columns: [], distribution: SomeShard }
 - sql: |
+    SELECT (SELECT pg_catalog.pg_get_userbyid(1))
+  logical_plan: |
+    LogicalProject { exprs: [pg_user.name] }
+    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+      ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+      └─LogicalProject { exprs: [pg_user.name] }
+        └─LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
+          ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+          └─LogicalProject { exprs: [pg_user.name] }
+            └─LogicalFilter { predicate: (1:Int32 = pg_user.usesysid) }
+              └─LogicalScan { table: pg_user, columns: [pg_user.usesysid, pg_user.name, pg_user.usecreatedb, pg_user.usesuper, pg_user.passwd] }
+  optimized_logical_plan_for_batch: |
+    LogicalJoin { type: LeftOuter, on: true, output: all }
+    ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    └─LogicalJoin { type: LeftOuter, on: true, output: all }
+      ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+      └─LogicalScan { table: pg_user, output_columns: [pg_user.name], required_columns: [pg_user.name, pg_user.usesysid], predicate: (1:Int32 = pg_user.usesysid) }
+  batch_plan: |
+    BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
+    ├─BatchValues { rows: [[]] }
+    └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
+      ├─BatchValues { rows: [[]] }
+      └─BatchProject { exprs: [pg_user.name] }
+        └─BatchFilter { predicate: (1:Int32 = pg_user.usesysid) }
+          └─BatchScan { table: pg_user, columns: [pg_user.name, pg_user.usesysid], distribution: Single }
+- sql: |
     SELECT n.nspname as "Schema",
     c.relname as "Name",
     CASE c.relkind WHEN 'r' THEN 'table' WHEN 'v' THEN 'view' WHEN 'm' THEN 'materialized view' WHEN 'i' THEN 'index' WHEN 'S' THEN 'sequence' WHEN 's' THEN 'special' WHEN 't' THEN 'TOAST table' WHEN 'f' THEN 'foreign table' WHEN 'p' THEN 'partitioned table' WHEN 'I' THEN 'partitioned index' END as "Type",

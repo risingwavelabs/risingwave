@@ -59,6 +59,7 @@ skip_core_tasks = true
 skip_git_env_info = true
 skip_rust_env_info = false
 skip_crate_env_info = true
+min_version = "0.36.6"
 
 [tasks.clean-full]
 category = "Misc"
@@ -667,8 +668,13 @@ cargo nextest run \
 """
 
 [tasks.sscale-test]
-category = "RiseDev - Simulation scaling tests"
-description = "Run integration scaling tests in deterministic simulation mode"
+category = "RiseDev - Simulation integration tests"
+description = "Run scaling tests in deterministic simulation mode"
+deprecated = "Please use `risedev sit-test scale::` instead."
+
+[tasks.sit-test]
+category = "RiseDev - Simulation integration tests"
+description = "Run integration tests in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
 env = { CARGO_TARGET_DIR = "target/sim" }
 script = """
@@ -681,9 +687,9 @@ cargo nextest run \
   "$@"
 """
 
-[tasks.sarchive-scale-test]
-category = "RiseDev - Simulation scaling tests"
-description = "Archive integration scaling tests in deterministic simulation mode"
+[tasks.sarchive-it-test]
+category = "RiseDev - Simulation integration tests"
+description = "Archive integration tests in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
 env = { CARGO_TARGET_DIR = "target/sim" }
 script = """
@@ -693,7 +699,7 @@ set -e
 cargo nextest archive \
   --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
   -p risingwave_simulation \
-  --archive-file scale-test.tar.zst \
+  --archive-file simulation-it-test.tar.zst \
   "$@"
 """
 
