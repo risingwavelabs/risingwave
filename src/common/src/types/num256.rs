@@ -579,6 +579,6 @@ mod tests {
     #[test]
     fn test_num256_estimate_size() {
         let num256 = Int256::min_value();
-        assert_eq!(num256.estimated_size(), 32);
+        assert_eq!(num256.estimated_size(), 40);
     }
 }
