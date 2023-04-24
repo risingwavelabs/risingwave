@@ -52,7 +52,10 @@ impl Rule for AggProjectMergeRule {
             let out_col_idx = new_agg_group_keys_in_vec
                 .into_iter()
                 .map(|x| new_agg_group_keys.ones().position(|y| y == x).unwrap())
-                .chain(new_agg_group_keys_cardinality..new_agg_group_keys_cardinality + agg_calls.len());
+                .chain(
+                    new_agg_group_keys_cardinality
+                        ..new_agg_group_keys_cardinality + agg_calls.len(),
+                );
             Some(
                 LogicalProject::with_out_col_idx(
                     Agg::new(agg_calls, new_agg_group_keys.clone(), new_input).into(),

@@ -237,7 +237,11 @@ impl DistinctAggRule {
                 agg_call.distinct = false;
 
                 agg_call.inputs.iter_mut().for_each(|input_ref| {
-                    input_ref.index = mid_agg.group_key.ones().position(|x| x == input_ref.index).unwrap();
+                    input_ref.index = mid_agg
+                        .group_key
+                        .ones()
+                        .position(|x| x == input_ref.index)
+                        .unwrap();
                 });
 
                 // distinct-agg with real filter has its corresponding middle agg, which is count(*)
