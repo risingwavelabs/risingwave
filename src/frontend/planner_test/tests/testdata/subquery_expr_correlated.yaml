@@ -210,7 +210,7 @@
     create table t1(x int, y int);
     create table t2(x int, y int);
     select x from t1 where y in (select y, x from t2 where t1.x > t2.x + 1000);
-  binder_error: 'Bind error: Subquery must return only one column'
+  binder_error: 'Bind error: failed to bind expression: y IN (SELECT y, x FROM t2 WHERE t1.x > t2.x + 1000), Bind error: Subquery must return only one column'
 - name: correlated outer subquery with an uncorrelated inner subquery
   sql: |
     create table t1(x int, y int);

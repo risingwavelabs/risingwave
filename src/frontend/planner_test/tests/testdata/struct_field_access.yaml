@@ -2,7 +2,7 @@
 - sql: |
     create table t(c STRUCT<x INTEGER, y INTEGER>);
     select t.c.x from t
-  binder_error: 'Item not found: Invalid column: x'
+  binder_error: 'Bind error: failed to bind expression: t.c.x, Item not found: Invalid column: x'
 - sql: |
     create table t(c STRUCT<x INTEGER, y INTEGER>);
     select (t.c).x from t
@@ -45,7 +45,7 @@
     create table t1(c STRUCT<x INTEGER, y INTEGER>);
     create table t2(c STRUCT<x INTEGER, y INTEGER>);
     select (c).x from t1 cross join t2;
-  binder_error: 'internal error: Ambiguous column name: c'
+  binder_error: 'Bind error: failed to bind expression: (c).x, Bind error: failed to bind expression: c, internal error: Ambiguous column name: c'
 - sql: |
     create table t1(c STRUCT<x INTEGER, y INTEGER>);
     create table t2(c STRUCT<x INTEGER, y INTEGER>);

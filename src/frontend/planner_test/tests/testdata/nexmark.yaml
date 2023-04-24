@@ -820,7 +820,7 @@
     FROM bid B
     GROUP BY B.bidder, SESSION(B.date_time, INTERVAL '10' SECOND);
   binder_error: |-
-    Feature is not yet implemented: unsupported function: "session_start"
+    Bind error: failed to bind expression: SESSION_START(B.date_time, INTERVAL '10' SECOND), Feature is not yet implemented: unsupported function: "session_start"
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
 - id: nexmark_q12
   before:
@@ -833,7 +833,7 @@
         TUMBLE_END(B.p_time, INTERVAL '10' SECOND) as endtime
     FROM (SELECT *, PROCTIME() as p_time FROM bid) B
     GROUP BY B.bidder, TUMBLE(B.p_time, INTERVAL '10' SECOND);
-  binder_error: 'Invalid input syntax: Function `PROCTIME()` is only allowed in CREATE TABLE/SOURCE. Is `NOW()` what you want?'
+  binder_error: 'Bind error: failed to bind expression: PROCTIME(), Invalid input syntax: Function `PROCTIME()` is only allowed in CREATE TABLE/SOURCE. Is `NOW()` what you want?'
 - id: nexmark_q13
   before:
   - create_tables
@@ -1290,7 +1290,7 @@
         where REGEXP_EXTRACT(url, '(&|^)channel_id=([^&]*)', 2) is not null or
               lower(channel) in ('apple', 'google', 'facebook', 'baidu');
   binder_error: |-
-    Feature is not yet implemented: unsupported function: "regexp_extract"
+    Bind error: failed to bind expression: CASE WHEN lower(channel) = 'apple' THEN '0' WHEN lower(channel) = 'google' THEN '1' WHEN lower(channel) = 'facebook' THEN '2' WHEN lower(channel) = 'baidu' THEN '3' ELSE REGEXP_EXTRACT(url, '(&|^)channel_id=([^&]*)', 2) END, Bind error: failed to bind expression: REGEXP_EXTRACT(url, '(&|^)channel_id=([^&]*)', 2), Feature is not yet implemented: unsupported function: "regexp_extract"
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
 - id: nexmark_q22
   before:

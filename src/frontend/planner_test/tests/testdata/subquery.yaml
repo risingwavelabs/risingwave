@@ -20,7 +20,7 @@
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select v1 from (select v2, v1 as v3 from t) where v2 > 1;
-  binder_error: 'Item not found: Invalid column: v1'
+  binder_error: 'Bind error: failed to bind expression: v1, Item not found: Invalid column: v1'
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select v3 from (select v2, v1 as v3 from t) where v2 > 1;
@@ -87,15 +87,15 @@
 - sql: |
     create table t(x int);
     select * from t, (select * from t as t2 order by t.x desc) as t3;
-  binder_error: 'Item not found: Invalid column: x'
+  binder_error: 'Bind error: failed to bind expression: t.x, Item not found: Invalid column: x'
 - sql: |
     create table t(x int);
     select * from t, (select t.x) as t1;
-  binder_error: 'Item not found: Invalid column: x'
+  binder_error: 'Bind error: failed to bind expression: t.x, Item not found: Invalid column: x'
 - sql: |
     create table t(x int);
     select * from t CROSS JOIN (select t.x) as t1;
-  binder_error: 'Item not found: Invalid column: x'
+  binder_error: 'Bind error: failed to bind expression: t.x, Item not found: Invalid column: x'
 - sql: |
     create table ab (a int, b int);
     create table bc (b int, c int);
@@ -121,7 +121,7 @@
           select * from t where v1 = c
       ) as t0
     );
-  binder_error: 'Item not found: Invalid column: c'
+  binder_error: 'Bind error: failed to bind expression: EXISTS (SELECT * FROM bc, (SELECT * FROM t WHERE v1 = c) AS t0), Bind error: failed to bind expression: v1 = c, Bind error: failed to bind expression: c, Item not found: Invalid column: c'
 - name: We need to ensure doubly nested reference to a left table is not permitted
   sql: |
     create table ab (a int, b int);
@@ -132,7 +132,7 @@
           select * from t where v1 = a
       ) as t0
     );
-  binder_error: 'Item not found: Invalid column: a'
+  binder_error: 'Bind error: failed to bind expression: v1 = a, Bind error: failed to bind expression: a, Item not found: Invalid column: a'
 - sql: |
     create table t1 (x int, y int);
     create table t2 (x int, y int);

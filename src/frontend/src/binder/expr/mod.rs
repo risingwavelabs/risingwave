@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::zip_eq_fast;
 use risingwave_sqlparser::ast::{
@@ -34,7 +34,7 @@ mod value;
 
 impl Binder {
     pub fn bind_expr(&mut self, expr: Expr) -> Result<ExprImpl> {
-        match expr {
+        let res = match expr.clone() {
             // literal
             Expr::Value(v) => Ok(ExprImpl::Literal(Box::new(self.bind_value(v)?))),
             Expr::TypedString { data_type, value } => {
@@ -137,7 +137,12 @@ impl Binder {
                 112.into(),
             )
             .into()),
-        }
+        };
+        res.map_err(|e| {
+            RwError::from(
+                ErrorCode::BindError(format!("failed to bind expression: {}, {}", expr, e)),
+            )
+        })
     }
 
     pub(super) fn bind_extract(&mut self, field: String, expr: Expr) -> Result<ExprImpl> {

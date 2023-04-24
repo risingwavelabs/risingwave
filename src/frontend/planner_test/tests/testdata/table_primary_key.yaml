@@ -31,7 +31,7 @@
   - create_table_t2
   sql: |
     select _row_id from t2;
-  binder_error: 'Item not found: Invalid column: _row_id'
+  binder_error: 'Bind error: failed to bind expression: _row_id, Item not found: Invalid column: _row_id'
 - name: selecting on pk should generate range scan
   before:
   - create_table_t2

@@ -20,4 +20,4 @@
 - name: select proctime()
   sql: |
     select proctime();
-  binder_error: 'Invalid input syntax: Function `PROCTIME()` is only allowed in CREATE TABLE/SOURCE. Is `NOW()` what you want?'
+  binder_error: 'Bind error: failed to bind expression: proctime(), Invalid input syntax: Function `PROCTIME()` is only allowed in CREATE TABLE/SOURCE. Is `NOW()` what you want?'
