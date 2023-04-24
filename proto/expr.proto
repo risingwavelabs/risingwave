@@ -128,6 +128,11 @@ message ExprNode {
     IS_NOT_NULL = 306;
     IS_DISTINCT_FROM = 307;
     IS_NOT_DISTINCT_FROM = 308;
+
+    // string/bytea expressions
+    ENCODE = 310;
+    DECODE = 311;
+
     // Unary operators
     NEG = 401;
     // Nested selection operators
@@ -137,6 +142,7 @@ message ExprNode {
     ARRAY_ACCESS = 522;
     ROW = 523;
     ARRAY_TO_STRING = 524;
+    ARRAY_RANGE_ACCESS = 525;
     // Array functions
     ARRAY_CAT = 531;
     ARRAY_APPEND = 532;
@@ -148,6 +154,7 @@ message ExprNode {
     ARRAY_REMOVE = 538;
     ARRAY_POSITIONS = 539;
     TRIM_ARRAY = 540;
+    STRING_TO_ARRAY = 541;
 
     // Int256 functions
     HEX_TO_INT256 = 560;
@@ -262,6 +269,9 @@ message AggCall {
     VAR_SAMP = 12;
     STDDEV_POP = 13;
     STDDEV_SAMP = 14;
+    BIT_AND = 15;
+    BIT_OR = 16;
+    BIT_XOR = 17;
   }
   Type type = 1;
   repeated InputRef args = 2;

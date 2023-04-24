@@ -18,7 +18,7 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::field_generator::FieldGeneratorImpl;
+use risingwave_common::field_generator::{FieldGeneratorImpl, VarcharProperty};
 use risingwave_common::util::iter_util::zip_eq_fast;
 
 use super::generator::DatagenEventGenerator;
@@ -239,8 +239,14 @@ fn generator_from_data_type(
         }
         DataType::Varchar => {
             let length_key = format!("fields.{}.length", name);
-            let length_value = fields_option_map.get(&length_key).map(|s| s.to_string());
-            FieldGeneratorImpl::with_varchar(length_value, random_seed)
+            let length_value = fields_option_map
+                .get(&length_key)
+                .map(|s| s.parse::<usize>())
+                .transpose()?;
+            Ok(FieldGeneratorImpl::with_varchar(
+                &VarcharProperty::RandomFixedLength(length_value),
+                random_seed,
+            ))
         }
         DataType::Struct(struct_type) => {
             let struct_fields =

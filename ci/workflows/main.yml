@@ -208,7 +208,7 @@ steps:
     timeout_in_minutes: 15
 
   - label: "scaling test (deterministic simulation)"
-    command: "TEST_NUM=30 ci/scripts/deterministic-scale-test.sh"
+    command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh scale::"
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -216,7 +216,18 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 40 # TODO: split into multiple jobs
+    timeout_in_minutes: 40
+
+  - label: "recovery integration test (deterministic simulation)"
+    command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh recovery::"
+    depends_on: "build-simulation"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 40
 
   - label: "end-to-end test (deterministic simulation)"
     command: "TEST_NUM=32 ci/scripts/deterministic-e2e-test.sh"
@@ -265,7 +276,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 28
+    timeout_in_minutes: 35
 
   - label: "end-to-end iceberg sink test (release mode)"
     command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-release"

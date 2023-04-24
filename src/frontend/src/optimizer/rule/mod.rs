@@ -93,8 +93,6 @@ mod union_input_values_merge_rule;
 pub use union_input_values_merge_rule::*;
 mod rewrite_like_expr_rule;
 pub use rewrite_like_expr_rule::*;
-mod avoid_exchange_share_rule;
-pub use avoid_exchange_share_rule::*;
 mod min_max_on_index_rule;
 pub use min_max_on_index_rule::*;
 mod always_false_filter_rule;
@@ -143,7 +141,6 @@ macro_rules! for_all_rules {
             , { TrivialProjectToValuesRule }
             , { UnionInputValuesMergeRule }
             , { RewriteLikeExprRule }
-            , { AvoidExchangeShareRule }
             , { MinMaxOnIndexRule }
             , { AlwaysFalseFilterRule }
             , { BushyTreeJoinOrderingRule }

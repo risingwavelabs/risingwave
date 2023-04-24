@@ -130,6 +130,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Field
             | expr_node::Type::Array
             | expr_node::Type::ArrayAccess
+            | expr_node::Type::ArrayRangeAccess
             | expr_node::Type::Row
             | expr_node::Type::ArrayToString
             | expr_node::Type::ArrayCat
@@ -150,8 +151,11 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Sind
             | expr_node::Type::Cosd
             | expr_node::Type::Cotd
+            | expr_node::Type::Decode
+            | expr_node::Type::Encode
             | expr_node::Type::Tand
-            | expr_node::Type::ArrayPositions =>
+            | expr_node::Type::ArrayPositions
+            | expr_node::Type::StringToArray =>
             // expression output is deterministic(same result for the same input)
             {
                 let x = func_call

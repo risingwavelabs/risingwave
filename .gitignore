@@ -67,3 +67,4 @@ e2e_test/generated/*
 !e2e_test/generated/README.md
 # generated scale tests by `cargo nextest`
 scale-test.tar.zst
+simulation-it-test.tar.zst

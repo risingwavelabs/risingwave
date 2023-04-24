@@ -2369,6 +2369,16 @@ def section_connector_node(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_rowsps(
+                    "Connector Sink Throughput(rows)",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('connector_sink_rows_received')}[$__interval])",
+                            "{{connector_type}} @ {{sink_id}}",
+                        ),
+                    ],
+                ),
             ],
         )
     ]

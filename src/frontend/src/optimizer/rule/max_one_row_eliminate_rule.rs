@@ -14,7 +14,7 @@
 
 use super::{BoxedRule, Rule};
 use crate::optimizer::plan_node::LogicalApply;
-use crate::optimizer::plan_visitor::{MaxOneRowVisitor, PlanVisitor};
+use crate::optimizer::plan_visitor::LogicalCardinalityExt;
 use crate::optimizer::PlanRef;
 
 /// Eliminate max one row restriction from `LogicalApply`.
@@ -26,7 +26,7 @@ impl Rule for MaxOneRowEliminateRule {
             apply.clone().decompose();
 
         // Try to eliminate max one row.
-        if max_one_row && MaxOneRowVisitor.visit(right.clone()) {
+        if max_one_row && right.max_one_row() {
             Some(LogicalApply::create(
                 left,
                 right,

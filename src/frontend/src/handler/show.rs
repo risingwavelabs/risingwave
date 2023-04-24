@@ -121,8 +121,9 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
             ));
         }
         ShowObject::Connection { schema } => {
-            let rows = catalog_reader
-                .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+            let schema = catalog_reader
+                .get_schema_by_name(session.database(), &schema_or_default(&schema))?;
+            let rows = schema
                 .iter_connections()
                 .map(|c| {
                     let name = c.name.clone();
@@ -131,14 +132,28 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
                             PRIVATELINK_CONNECTION.to_string()
                         },
                     };
+                    let source_names = schema
+                        .get_source_ids_by_connection(c.id)
+                        .unwrap_or(Vec::new())
+                        .into_iter()
+                        .filter_map(|sid| schema.get_source_by_id(&sid).map(|catalog| catalog.name.as_str()))
+                        .collect_vec();
+                    let sink_names = schema
+                        .get_sink_ids_by_connection(c.id)
+                        .unwrap_or(Vec::new())
+                        .into_iter()
+                        .filter_map(|sid| schema.get_sink_by_id(&sid).map(|catalog| catalog.name.as_str()))
+                        .collect_vec();
                     let properties = match &c.info {
                         connection::Info::PrivateLinkService(i) => {
                             format!(
-                                "provider: {}\nservice_name: {}\nendpoint_id: {}\navailability_zones: {}",
+                                "provider: {}\nservice_name: {}\nendpoint_id: {}\navailability_zones: {}\nsources: {}\nsinks: {}",
                                 i.get_provider().unwrap().as_str_name(),
                                 i.service_name,
                                 i.endpoint_id,
-                                serde_json::to_string(&i.dns_entries.keys().collect_vec()).unwrap()
+                                serde_json::to_string(&i.dns_entries.keys().collect_vec()).unwrap(),
+                                serde_json::to_string(&source_names).unwrap(),
+                                serde_json::to_string(&sink_names).unwrap(),
                             )
                         }
                     };
