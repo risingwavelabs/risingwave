@@ -165,10 +165,7 @@ impl CompactionDeleteRangesBuilder {
         result
     }
 
-    pub(crate) fn build_for_compaction(
-        self,
-        gc_delete_keys: bool,
-    ) -> Arc<CompactionDeleteRanges> {
+    pub(crate) fn build_for_compaction(self, gc_delete_keys: bool) -> Arc<CompactionDeleteRanges> {
         let mut ret: BTreeMap<
             UserKey<Vec<u8>>,
             (Vec<TombstoneEnterExitEvent>, Vec<TombstoneEnterExitEvent>),

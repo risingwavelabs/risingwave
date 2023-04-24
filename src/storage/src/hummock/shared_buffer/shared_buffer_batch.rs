@@ -63,7 +63,7 @@ struct SharedBufferDeleteRangeMeta {
     smallest_empty: bool,
     smallest_table_key: BytesMut,
     largest_table_key: Bound<Bytes>,
-    range_tombstones: Vec<DeleteRangeTombstone>,
+    delete_ranges: Vec<(Bytes, Bytes)>,
 }
 
 #[derive(Debug)]
@@ -91,7 +91,7 @@ impl SharedBufferBatchInner {
         table_id: TableId,
         epoch: HummockEpoch,
         payload: Vec<SharedBufferItem>,
-        range_tombstone_list: Vec<DeleteRangeTombstone>,
+        delete_ranges: Vec<(Bytes, Bytes)>,
         size: usize,
         _tracker: Option<MemoryTracker>,
     ) -> Self {
@@ -99,8 +99,8 @@ impl SharedBufferBatchInner {
             smallest_empty,
             mut smallest_table_key,
             mut largest_table_key,
-            range_tombstones,
-        } = Self::get_table_key_ends(table_id, range_tombstone_list);
+            delete_ranges,
+        } = Self::get_table_key_ends(delete_ranges);
 
         if let Some(item) = payload.last() {
             if whether_update_largest_key(&largest_table_key, &item.0) {
@@ -120,14 +120,14 @@ impl SharedBufferBatchInner {
             .collect_vec();
 
         let mut monotonic_tombstone_events = Vec::with_capacity(range_tombstones.len() * 2);
-        for range_tombstone in range_tombstones {
+        for (start_key, end_key) in delete_ranges {
             monotonic_tombstone_events.push(MonotonicDeleteEvent {
-                event_key: range_tombstone.start_user_key,
+                event_key: UserKey::new(table_id, TableKey(start_key.to_vec())),
                 is_exclusive: false,
-                new_epoch: range_tombstone.sequence,
+                new_epoch: epoch,
             });
             monotonic_tombstone_events.push(MonotonicDeleteEvent {
-                event_key: range_tombstone.end_user_key,
+                event_key: UserKey::new(table_id, TableKey(end_key.to_vec())),
                 is_exclusive: false,
                 new_epoch: HummockEpoch::MAX,
             });
@@ -181,45 +181,36 @@ impl SharedBufferBatchInner {
     }
 
     fn get_table_key_ends(
-        table_id: TableId,
-        mut range_tombstone_list: Vec<DeleteRangeTombstone>,
+        mut range_tombstone_list: Vec<(Bytes, Bytes)>,
     ) -> SharedBufferDeleteRangeMeta {
         let mut largest_table_key = Bound::Included(Bytes::new());
         let mut smallest_table_key = BytesMut::new();
         let mut smallest_empty = true;
         if !range_tombstone_list.is_empty() {
-            range_tombstone_list.sort();
-            let mut range_tombstones: Vec<DeleteRangeTombstone> = vec![];
-            for tombstone in range_tombstone_list {
-                if tombstone.start_user_key.ge(&tombstone.end_user_key) {
+            range_tombstone_list.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)));
+            let mut range_tombstones: Vec<(Bytes, Bytes)> = vec![];
+            for (start_table_key, end_table_key) in range_tombstone_list {
+                if start_table_key.ge(&end_table_key) {
                     continue;
                 }
-                let tombstone_end_table_id = tombstone.end_user_key.table_id;
-                if tombstone_end_table_id != table_id {
-                    // It means that the right side of the tombstone is +inf.
-                    assert_eq!(tombstone_end_table_id.table_id(), table_id.table_id() + 1);
-                    largest_table_key = Bound::Unbounded;
-                } else if whether_update_largest_key(
-                    &largest_table_key,
-                    &tombstone.end_user_key.table_key.0,
-                ) {
-                    largest_table_key =
-                        Bound::Excluded(Bytes::from(tombstone.end_user_key.table_key.0.clone()));
+                // TODO: check whether end-table-key is ubounded
+                if whether_update_largest_key(&largest_table_key, &end_table_key) {
+                    largest_table_key = Bound::Excluded(end_table_key.clone());
                 }
-                if smallest_empty || smallest_table_key.gt(&tombstone.start_user_key.table_key.0) {
+                if smallest_empty || smallest_table_key.as_ref().gt(start_table_key.as_ref()) {
                     smallest_table_key.clear();
-                    smallest_table_key.extend_from_slice(&tombstone.start_user_key.table_key.0);
+                    smallest_table_key.extend_from_slice(&start_table_key);
                     smallest_empty = false;
                 }
                 if let Some(last) = range_tombstones.last_mut() {
-                    if last.end_user_key.ge(&tombstone.start_user_key) {
-                        if last.end_user_key.lt(&tombstone.end_user_key) {
-                            last.end_user_key = tombstone.end_user_key;
+                    if last.1.ge(&start_table_key) {
+                        if last.1.lt(&end_table_key) {
+                            last.1 = end_table_key;
                         }
                         continue;
                     }
                 }
-                range_tombstones.push(tombstone);
+                range_tombstones.push((start_table_key, end_table_key));
             }
             range_tombstone_list = range_tombstones;
         }
@@ -227,7 +218,7 @@ impl SharedBufferBatchInner {
             smallest_empty,
             smallest_table_key,
             largest_table_key,
-            range_tombstones: range_tombstone_list,
+            delete_ranges: range_tombstone_list,
         }
     }
 
@@ -510,17 +501,6 @@ impl SharedBufferBatch {
         instance_id: Option<LocalInstanceId>,
         tracker: Option<MemoryTracker>,
     ) -> Self {
-        let delete_range_tombstones = delete_ranges
-            .into_iter()
-            .map(|(start_table_key, end_table_key)| {
-                DeleteRangeTombstone::new(
-                    table_id,
-                    start_table_key.to_vec(),
-                    end_table_key.to_vec(),
-                    epoch,
-                )
-            })
-            .collect_vec();
         #[cfg(test)]
         {
             Self::check_tombstone_prefix(table_id, &delete_range_tombstones);
@@ -529,7 +509,7 @@ impl SharedBufferBatch {
             table_id,
             epoch,
             sorted_items,
-            delete_range_tombstones,
+            delete_ranges,
             size,
             tracker,
         );
