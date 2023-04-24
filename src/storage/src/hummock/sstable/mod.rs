@@ -61,7 +61,7 @@ pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
 use xxhash_rust::{xxh32, xxh64};
 
-use self::delete_range_aggregator::apply_event;
+use self::delete_range_aggregator::{apply_event, CompactionDeleteRangeEvent};
 use self::utils::{xxhash64_checksum, xxhash64_verify};
 use super::{HummockError, HummockResult};
 use crate::hummock::CachePolicy;
@@ -104,23 +104,6 @@ impl DeleteRangeTombstone {
         Self {
             start_user_key: UserKey::new(table_id, TableKey(start_table_key)),
             end_user_key: UserKey::new(table_id, TableKey(end_table_key)),
-            sequence,
-        }
-    }
-
-    pub fn encode(&self, buf: &mut Vec<u8>) {
-        self.start_user_key.encode_length_prefixed(buf);
-        self.end_user_key.encode_length_prefixed(buf);
-        buf.put_u64_le(self.sequence);
-    }
-
-    pub fn decode(buf: &mut &[u8]) -> Self {
-        let start_user_key = UserKey::decode_length_prefixed(buf);
-        let end_user_key = UserKey::decode_length_prefixed(buf);
-        let sequence = buf.get_u64_le();
-        Self {
-            start_user_key,
-            end_user_key,
             sequence,
         }
     }
@@ -184,13 +167,12 @@ impl MonotonicDeleteEvent {
     }
 }
 
-pub(crate) fn create_monotonic_events(
-    delete_range_tombstones: &Vec<DeleteRangeTombstone>,
+pub(crate) fn create_monotonic_events_from_compaction_delete_events(
+    compaction_delete_range_events: Vec<CompactionDeleteRangeEvent>,
 ) -> Vec<MonotonicDeleteEvent> {
-    let events = CompactionDeleteRangesBuilder::build_events(delete_range_tombstones);
     let mut epochs = BTreeSet::new();
-    let mut monotonic_tombstone_events = Vec::with_capacity(events.len());
-    for event in events {
+    let mut monotonic_tombstone_events = Vec::with_capacity(compaction_delete_range_events.len());
+    for event in compaction_delete_range_events {
         apply_event(&mut epochs, &event);
         monotonic_tombstone_events.push(MonotonicDeleteEvent {
             event_key: event.0,
@@ -201,6 +183,13 @@ pub(crate) fn create_monotonic_events(
     monotonic_tombstone_events.dedup_by_key(|MonotonicDeleteEvent { new_epoch, .. }| *new_epoch);
 
     monotonic_tombstone_events
+}
+
+pub(crate) fn create_monotonic_events(
+    delete_range_tombstones: &Vec<DeleteRangeTombstone>,
+) -> Vec<MonotonicDeleteEvent> {
+    let events = CompactionDeleteRangesBuilder::build_events(delete_range_tombstones);
+    create_monotonic_events_from_compaction_delete_events(events)
 }
 
 pub(crate) fn create_tombstones_to_represent_monotonic_deletes(

@@ -68,6 +68,9 @@ impl Binder {
             Expr::Nested(expr) => self.bind_expr(*expr),
             Expr::Array(Array { elem: exprs, .. }) => self.bind_array(exprs),
             Expr::ArrayIndex { obj, index } => self.bind_array_index(*obj, *index),
+            Expr::ArrayRangeIndex { obj, start, end } => {
+                self.bind_array_range_index(*obj, start, end)
+            }
             Expr::Function(f) => self.bind_function(f),
             // subquery
             Expr::Subquery(q) => self.bind_subquery_expr(*q, SubqueryKind::Scalar),

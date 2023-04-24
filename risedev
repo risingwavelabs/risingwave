@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 
+if [ -z "$(which cargo-binstall)" ]; then
+    cargo install cargo-quickinstall --locked
+    cargo quickinstall cargo-binstall
+fi
+
 if [ -z "$(which cargo-make)" ]; then
     echo "Installing cargo-make..."
-    cargo install cargo-make --version "^0.35" --locked
+    cargo binstall cargo-make --version "^0.36.6" --locked # >= 0.36.6, < 0.37.0
 fi
 
 touch risedev-components.user.env

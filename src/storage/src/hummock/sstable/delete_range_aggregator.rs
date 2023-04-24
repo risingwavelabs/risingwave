@@ -66,7 +66,7 @@ pub(crate) struct TombstoneEnterExitEvent {
     tombstone_epoch: HummockEpoch,
 }
 
-type CompactionDeleteRangeEvent = (
+pub(crate) type CompactionDeleteRangeEvent = (
     // event key
     UserKey<Vec<u8>>,
     // Old tombstones which exits at the event key
@@ -196,8 +196,8 @@ impl CompactionDeleteRanges {
 
     pub(crate) fn get_tombstone_between(
         &self,
-        smallest_user_key: &UserKey<&[u8]>,
-        largest_user_key: &UserKey<&[u8]>,
+        smallest_user_key: UserKey<&[u8]>,
+        largest_user_key: UserKey<&[u8]>,
     ) -> Vec<MonotonicDeleteEvent> {
         if self.gc_delete_keys {
             return vec![];
@@ -222,6 +222,10 @@ impl CompactionDeleteRanges {
 
         create_monotonic_events(&tombstones)
     }
+
+    pub(crate) fn into_events(self) -> Vec<CompactionDeleteRangeEvent> {
+        self.events
+    }
 }
 
 pub(crate) struct CompactionDeleteRangeIterator {
@@ -241,10 +245,10 @@ impl CompactionDeleteRangeIterator {
     /// Target-key must be given in order.
     pub(crate) fn earliest_delete_which_can_see_key(
         &mut self,
-        target_user_key: &UserKey<&[u8]>,
+        target_user_key: UserKey<&[u8]>,
         epoch: HummockEpoch,
     ) -> HummockEpoch {
-        while let Some((user_key, ..)) = self.events.events.get(self.seek_idx) && user_key.as_ref().le(target_user_key) {
+        while let Some((user_key, ..)) = self.events.events.get(self.seek_idx) && user_key.as_ref().le(&target_user_key) {
             self.apply(self.seek_idx);
             self.seek_idx += 1;
         }
@@ -327,10 +331,10 @@ impl DeleteRangeIterator for SstableDeleteRangeIterator {
 
 pub fn get_min_delete_range_epoch_from_sstable(
     table: &Sstable,
-    query_user_key: &UserKey<&[u8]>,
+    query_user_key: UserKey<&[u8]>,
 ) -> HummockEpoch {
     let idx = table.meta.monotonic_tombstone_events.partition_point(
-        |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(query_user_key),
+        |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(&query_user_key),
     );
     if idx == 0 {
         HummockEpoch::MAX
@@ -366,49 +370,49 @@ mod tests {
         let mut iter = compaction_delete_ranges.iter();
 
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(&test_user_key(b"bbb").as_ref(), 13),
+            iter.earliest_delete_which_can_see_key(test_user_key(b"bbb").as_ref(), 13),
             HummockEpoch::MAX
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(&test_user_key(b"bbb").as_ref(), 11),
+            iter.earliest_delete_which_can_see_key(test_user_key(b"bbb").as_ref(), 11),
             12
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(&test_user_key(b"bbb").as_ref(), 8),
+            iter.earliest_delete_which_can_see_key(test_user_key(b"bbb").as_ref(), 8),
             9
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(&test_user_key(b"bbbaaa").as_ref(), 8),
+            iter.earliest_delete_which_can_see_key(test_user_key(b"bbbaaa").as_ref(), 8),
             9
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(&test_user_key(b"bbbccd").as_ref(), 8),
+            iter.earliest_delete_which_can_see_key(test_user_key(b"bbbccd").as_ref(), 8),
             9
         );
 
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(&test_user_key(b"bbbddd").as_ref(), 8),
+            iter.earliest_delete_which_can_see_key(test_user_key(b"bbbddd").as_ref(), 8),
             HummockEpoch::MAX
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(&test_user_key(b"bbbeee").as_ref(), 8),
+            iter.earliest_delete_which_can_see_key(test_user_key(b"bbbeee").as_ref(), 8),
             8
         );
 
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(&test_user_key(b"bbbeef").as_ref(), 10),
+            iter.earliest_delete_which_can_see_key(test_user_key(b"bbbeef").as_ref(), 10),
             HummockEpoch::MAX
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(&test_user_key(b"eeeeee").as_ref(), 9),
+            iter.earliest_delete_which_can_see_key(test_user_key(b"eeeeee").as_ref(), 9),
             9
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(&test_user_key(b"gggggg").as_ref(), 8),
+            iter.earliest_delete_which_can_see_key(test_user_key(b"gggggg").as_ref(), 8),
             9
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(&test_user_key(b"hhhhhh").as_ref(), 8),
+            iter.earliest_delete_which_can_see_key(test_user_key(b"hhhhhh").as_ref(), 8),
             HummockEpoch::MAX
         );
     }
@@ -426,8 +430,8 @@ mod tests {
         ]);
         let compaction_delete_range = builder.build_for_compaction(false);
         let split_ranges = compaction_delete_range.get_tombstone_between(
-            &test_user_key(b"bbbb").as_ref(),
-            &test_user_key(b"eeeeee").as_ref(),
+            test_user_key(b"bbbb").as_ref(),
+            test_user_key(b"eeeeee").as_ref(),
         );
         assert_eq!(4, split_ranges.len());
         assert_eq!(test_user_key(b"bbbb"), split_ranges[0].event_key);
@@ -449,27 +453,27 @@ mod tests {
         .await;
         let ret = get_min_delete_range_epoch_from_sstable(
             &sstable,
-            &iterator_test_user_key_of(0).as_ref(),
+            iterator_test_user_key_of(0).as_ref(),
         );
         assert_eq!(ret, 300);
         let ret = get_min_delete_range_epoch_from_sstable(
             &sstable,
-            &iterator_test_user_key_of(1).as_ref(),
+            iterator_test_user_key_of(1).as_ref(),
         );
         assert_eq!(ret, 150);
         let ret = get_min_delete_range_epoch_from_sstable(
             &sstable,
-            &iterator_test_user_key_of(3).as_ref(),
+            iterator_test_user_key_of(3).as_ref(),
         );
         assert_eq!(ret, 50);
         let ret = get_min_delete_range_epoch_from_sstable(
             &sstable,
-            &iterator_test_user_key_of(6).as_ref(),
+            iterator_test_user_key_of(6).as_ref(),
         );
         assert_eq!(ret, 150);
         let ret = get_min_delete_range_epoch_from_sstable(
             &sstable,
-            &iterator_test_user_key_of(8).as_ref(),
+            iterator_test_user_key_of(8).as_ref(),
         );
         assert_eq!(ret, HummockEpoch::MAX);
     }

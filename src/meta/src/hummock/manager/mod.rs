@@ -1124,19 +1124,6 @@ where
             }
         }
 
-        match compact_statuses.get_mut(compact_task.compaction_group_id) {
-            Some(mut compact_status) => {
-                compact_status.report_compact_task(compact_task);
-            }
-            None => {
-                compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
-            }
-        }
-
-        debug_assert!(
-            compact_task.task_status() != TaskStatus::Pending,
-            "report pending compaction task"
-        );
         {
             // The compaction task is finished.
             let mut versioning_guard = write_lock!(self, versioning).await;
@@ -1148,18 +1135,31 @@ where
                     compact_statuses.remove(group_id);
                 }
             }
+
+            match compact_statuses.get_mut(compact_task.compaction_group_id) {
+                Some(mut compact_status) => {
+                    compact_status.report_compact_task(compact_task);
+                }
+                None => {
+                    compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
+                }
+            }
+
+            debug_assert!(
+                compact_task.task_status() != TaskStatus::Pending,
+                "report pending compaction task"
+            );
             let is_success = if let TaskStatus::Success = compact_task.task_status() {
                 // if member_table_ids changes, the data of sstable may stale.
-                let is_expired = current_version
-                    .levels
-                    .get(&compact_task.compaction_group_id)
-                    .map(|group| group.member_table_ids != compact_task.existing_table_ids)
-                    .unwrap_or(true)
-                    || Self::is_compact_task_expired(compact_task, &versioning.branched_ssts);
+                let is_expired =
+                    Self::is_compact_task_expired(compact_task, &versioning.branched_ssts);
                 if is_expired {
                     compact_task.set_task_status(TaskStatus::InputOutdatedCanceled);
                     false
                 } else {
+                    assert!(current_version
+                        .levels
+                        .contains_key(&compact_task.compaction_group_id));
                     true
                 }
             } else {
