@@ -14,6 +14,7 @@
 
 #![allow(dead_code)]
 
+use std::collections::VecDeque;
 use std::marker::PhantomData;
 
 use futures::StreamExt;
@@ -38,7 +39,6 @@ use super::state::{create_window_state, WindowState};
 use super::MemcmpEncoded;
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::table::state_table::StateTable;
-use crate::common::StateTableColumnMapping;
 use crate::executor::over_window::state::{StateEvictHint, StateKey};
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
@@ -49,12 +49,16 @@ use crate::task::AtomicU64Ref;
 
 struct Partition {
     states: Vec<Box<dyn WindowState + Send>>,
+    curr_row_buffer: VecDeque<OwnedRow>,
 }
 
 impl Partition {
     fn new(calls: &[WindowFuncCall]) -> StreamExecutorResult<Self> {
         let states = calls.iter().map(create_window_state).try_collect()?;
-        Ok(Self { states })
+        Ok(Self {
+            states,
+            curr_row_buffer: Default::default(),
+        })
     }
 
     fn is_aligned(&self) -> bool {
@@ -100,18 +104,6 @@ type PartitionCache = ManagedLruCache<MemcmpEncoded, Partition>; // TODO(rc): us
 ///
 /// [`SortBuffer`]: crate::executor::sort_buffer::SortBuffer
 ///
-/// State table schema:
-///
-/// ```ignore
-/// partition key | order key | pk | window function arguments
-/// ```
-///
-/// Output schema:
-///
-/// ```ignore
-/// partition key | order key | pk | window function results
-/// ```
-///
 /// Basic idea:
 ///
 /// ```ignore
@@ -130,10 +122,12 @@ type PartitionCache = ManagedLruCache<MemcmpEncoded, Partition>; // TODO(rc): us
 /// (2): additional delay (already able to output) for some window
 /// ```
 ///
-/// - Rows in range (`curr evict row`, `curr input row`] are in `state_table`.
+/// - State table schema = input schema, pk = `partition key | order key | input pk`.
+/// - Output schema = input schema + window function results.
+/// - Rows in range (`curr evict row`, `curr input row`] are in state table.
 /// - `curr evict row` <= min(last evict rows of all `WindowState`s).
 /// - `WindowState` should output agg result for `curr output row`.
-/// - Recover: iterate through `state_table`, push rows to `WindowState`, ignore ready windows.
+/// - Recover: iterate through state table, push rows to `WindowState`, ignore ready windows.
 pub struct EowcOverWindowExecutor<S: StateStore> {
     input: Box<dyn Executor>,
     inner: ExecutorInner<S>,
@@ -145,26 +139,11 @@ struct ExecutorInner<S: StateStore> {
 
     calls: Vec<WindowFuncCall>,
     state_table: StateTable<S>,
-    col_mapping: StateTableColumnMapping,
     pk_data_types: Vec<DataType>,
     input_pk_indices: Vec<usize>,
     partition_key_indices: Vec<usize>,
     order_key_index: usize,
     watermark_epoch: AtomicU64Ref,
-}
-
-impl<S: StateStore> ExecutorInner<S> {
-    fn output_partition_key_index(&self) -> usize {
-        0
-    }
-
-    fn output_order_key_index(&self) -> usize {
-        self.output_partition_key_index() + self.partition_key_indices.len()
-    }
-
-    fn _output_pk_index(&self) -> usize {
-        self.output_order_key_index() + 1
-    }
 }
 
 struct ExecutionVars<S: StateStore> {
@@ -200,7 +179,6 @@ pub struct EowcOverWindowExecutorArgs<S: StateStore> {
 
     pub calls: Vec<WindowFuncCall>,
     pub state_table: StateTable<S>,
-    pub col_mapping: StateTableColumnMapping,
     pub partition_key_indices: Vec<usize>,
     pub order_key_index: usize,
     pub watermark_epoch: AtomicU64Ref,
@@ -210,19 +188,13 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
     pub fn new(args: EowcOverWindowExecutorArgs<S>) -> Self {
         let input_info = args.input.info();
 
-        let fields = args
-            .partition_key_indices
-            .iter()
-            .chain(std::iter::once(&args.order_key_index))
-            .chain(&input_info.pk_indices)
-            .map(|&i| input_info.schema.fields()[i].clone())
-            .chain(
-                args.calls
-                    .iter()
-                    .map(|call| Field::unnamed(call.return_type.clone())),
-            )
-            .collect();
-        let schema = Schema::new(fields);
+        let schema = {
+            let mut schema = input_info.schema.clone();
+            args.calls.iter().for_each(|call| {
+                schema.fields.push(Field::unnamed(call.return_type.clone()));
+            });
+            schema
+        };
 
         let pk_data_types = input_info
             .pk_indices
@@ -241,7 +213,6 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 },
                 calls: args.calls,
                 state_table: args.state_table,
-                col_mapping: args.col_mapping,
                 pk_data_types,
                 input_pk_indices: input_info.pk_indices,
                 partition_key_indices: args.partition_key_indices,
@@ -273,21 +244,11 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         for row in table_iter {
             let row: OwnedRow = row?;
             let order_key = row
-                .datum_at(
-                    this.col_mapping
-                        .upstream_to_state_table(this.order_key_index)
-                        .unwrap(),
-                )
+                .datum_at(this.order_key_index)
                 .expect("order key column must be non-NULL")
                 .into_scalar_impl();
             let encoded_pk = memcmp_encoding::encode_row(
-                (&row).project(
-                    &this
-                        .input_pk_indices
-                        .iter()
-                        .map(|idx| this.col_mapping.upstream_to_state_table(*idx).unwrap())
-                        .collect::<Vec<_>>(),
-                ),
+                (&row).project(&this.input_pk_indices),
                 &vec![OrderType::ascending(); this.input_pk_indices.len()],
             )?
             .into_boxed_slice();
@@ -299,19 +260,13 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 state.append(
                     key.clone(),
                     (&row)
-                        .project(
-                            &call
-                                .args
-                                .val_indices()
-                                .iter()
-                                .map(|idx| this.col_mapping.upstream_to_state_table(*idx).unwrap())
-                                .collect::<Vec<_>>(),
-                        )
+                        .project(&call.args.val_indices())
                         .into_owned_row()
                         .into_inner()
                         .into(),
                 );
             }
+            partition.curr_row_buffer.push_back(row);
         }
 
         // Ensure states correctness.
@@ -322,6 +277,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             for state in &mut partition.states {
                 state.output()?;
             }
+            partition.curr_row_buffer.pop_front();
         }
 
         cache.put(encoded_partition_key.clone(), partition);
@@ -359,8 +315,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             let mut partition = vars.partitions.get_mut(&encoded_partition_key).unwrap();
 
             // Materialize input to state table.
-            this.state_table
-                .insert(input_row.project(this.col_mapping.upstream_columns()));
+            this.state_table.insert(input_row);
 
             // Feed the row to all window states.
             let order_key = input_row
@@ -386,18 +341,12 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                         .into(),
                 );
             }
+            partition
+                .curr_row_buffer
+                .push_back(input_row.into_owned_row());
 
             while partition.is_ready() {
                 // The partition is ready to output, so we can produce a row.
-                let key = partition
-                    .curr_window_key()
-                    .cloned()
-                    .expect("ready window must have state key");
-                let pk = memcmp_encoding::decode_row(
-                    &key.encoded_pk,
-                    &this.pk_data_types,
-                    &vec![OrderType::ascending(); this.input_pk_indices.len()],
-                )?;
 
                 // Get all outputs.
                 let (ret_values, evict_hints): (Vec<_>, Vec<_>) = {
@@ -408,13 +357,14 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                         .try_collect()?;
                     tmp.into_iter().unzip()
                 };
+                let curr_row = partition
+                    .curr_row_buffer
+                    .pop_front()
+                    .expect("ready window must have corresponding current row");
 
                 // Append to output builders.
-                let key_part = (&partition_key)
-                    .chain(row::once(Some(key.order_key)))
-                    .chain(pk);
                 for (builder, datum) in builders.iter_mut().zip_eq_debug(
-                    key_part
+                    curr_row
                         .iter()
                         .chain(ret_values.iter().map(|v| v.to_datum_ref())),
                 ) {
@@ -489,8 +439,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 Message::Chunk(chunk) => {
                     let output_chunk = Self::apply_chunk(&mut this, &mut vars, chunk).await?;
                     if let Some(chunk) = output_chunk {
-                        let output_order_key_idx = this.output_order_key_index();
-                        let first_order_key = chunk.columns()[output_order_key_idx]
+                        let first_order_key = chunk.columns()[this.order_key_index]
                             .array_ref()
                             .datum_at(0)
                             .expect("order key must not be NULL");
@@ -500,8 +449,8 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                         {
                             vars.last_watermark = Some(first_order_key.clone());
                             yield Message::Watermark(Watermark::new(
-                                output_order_key_idx,
-                                this.info.schema.fields()[output_order_key_idx].data_type(),
+                                this.order_key_index,
+                                this.info.schema.fields()[this.order_key_index].data_type(),
                                 first_order_key,
                             ));
                         }
@@ -547,7 +496,6 @@ mod tests {
 
     use super::{EowcOverWindowExecutor, EowcOverWindowExecutorArgs};
     use crate::common::table::state_table::StateTable;
-    use crate::common::StateTableColumnMapping;
     use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
     use crate::executor::{ActorContext, BoxedMessageStream, Executor};
 
@@ -566,18 +514,17 @@ mod tests {
         let order_key_index = 0;
 
         let table_columns = vec![
-            ColumnDesc::unnamed(ColumnId::new(0), DataType::Varchar), // partition key
-            ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),   // order key
-            ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64),   // pk
-            ColumnDesc::unnamed(ColumnId::new(3), DataType::Int32),   // x
+            ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64), // order key
+            ColumnDesc::unnamed(ColumnId::new(1), DataType::Varchar), // partition key
+            ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64), // pk
+            ColumnDesc::unnamed(ColumnId::new(3), DataType::Int32), // x
         ];
-        let table_pk_indices = vec![0, 1, 2];
+        let table_pk_indices = vec![1, 0, 2];
         let table_order_types = vec![
             OrderType::ascending(),
             OrderType::ascending(),
             OrderType::ascending(),
         ];
-        let col_mapping = StateTableColumnMapping::new(vec![1, 0, 2, 3], None);
 
         let output_pk_indices = vec![2];
 
@@ -598,7 +545,6 @@ mod tests {
             executor_id: 1,
             calls,
             state_table,
-            col_mapping,
             partition_key_indices,
             order_key_index,
             watermark_epoch: Arc::new(AtomicU64::new(0)),
@@ -641,8 +587,8 @@ mod tests {
             assert_eq!(
                 over_window.expect_chunk().await,
                 StreamChunk::from_pretty(
-                    " T  I I   i  i
-                    + p1 1 100 .  16"
+                    " I T  I   i  i  i
+                    + 1 p1 100 10 .  16"
                 )
             );
 
@@ -656,9 +602,9 @@ mod tests {
             assert_eq!(
                 over_window.expect_chunk().await,
                 StreamChunk::from_pretty(
-                    " T  I I   i  i
-                    + p1 1 101 10 18
-                    + p2 4 200 .  22"
+                    " I T  I   i  i  i
+                    + 1 p1 101 16 10 18
+                    + 4 p2 200 20 .  22"
                 )
             );
 
@@ -683,10 +629,10 @@ mod tests {
             assert_eq!(
                 over_window.expect_chunk().await,
                 StreamChunk::from_pretty(
-                    " T  I I   i  i
-                    + p1 5 102 16 13
-                    + p2 7 201 20 28
-                    + p3 8 300 .  39"
+                    " I T  I   i  i  i
+                    + 5 p1 102 18 16 13
+                    + 7 p2 201 22 20 28
+                    + 8 p3 300 33 .  39"
                 )
             );
 
@@ -718,13 +664,12 @@ mod tests {
         ));
         assert_eq!(1, over_window.expect_watermark().await.val.into_int64());
         let chunk = over_window.expect_chunk().await;
-        println!("{}", chunk.to_pretty_string());
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                " T  I I   I
-                + p1 1 100 26
-                + p1 1 101 46"
+                " I T  I   i  I
+                + 1 p1 100 10 26
+                + 1 p1 101 16 46"
             )
         );
     }
