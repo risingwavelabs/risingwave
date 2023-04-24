@@ -105,6 +105,8 @@ popd
 }
 
 configure_rw() {
+# FIXME(kwannoel): Workaround
+git config --global --add safe.directory /risingwave
 pushd risingwave
 cat <<EOF > risedev-components.user.env
 RISEDEV_CONFIGURED=true
