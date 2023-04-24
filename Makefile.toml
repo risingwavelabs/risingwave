@@ -508,15 +508,20 @@ category = "RiseDev - Stop"
 description = "Kill RisingWave dev cluster and clean the data"
 dependencies = ["k", "clean-data"]
 
+[tasks.install-nextest]
+category = "RiseDev - Check"
+install_crate = { min_version = "0.9.51", crate_name = "cargo-nextest", binary = "cargo", test_arg = ["nextest", "--help"], install_command = "binstall" }
+
+[tasks.install-llvm-cov]
+category = "RiseDev - Check"
+install_crate = { min_version = "0.5.17", crate_name = "cargo-llvm-cov", binary = "cargo", test_arg = ["llvm-cov", "--help"], install_command = "binstall" }
+
 [tasks.install-tools]
 category = "RiseDev - Check"
 script = """
 #!/usr/bin/env bash
 
 set -e
-
-cargo install cargo-quickinstall --locked
-cargo quickinstall cargo-binstall
 
 for tool in cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-make
 do
@@ -565,7 +570,7 @@ echo "If any command is not found, run $(tput setaf 4)./risedev install-tools$(t
 
 [tasks.test-cov]
 category = "RiseDev - Test"
-dependencies = ["warn-on-missing-tools"]
+dependencies = ["install-llvm-cov", "install-nextest"]
 script = """
 #!/usr/bin/env bash
 set -e
@@ -577,7 +582,7 @@ description = "Run unit tests and report coverage"
 
 [tasks.test]
 category = "RiseDev - Test"
-dependencies = ["warn-on-missing-tools"]
+dependencies = ["install-nextest"]
 script = """
 #!/usr/bin/env bash
 set -e
@@ -645,7 +650,7 @@ cargo build \
 [tasks.stest]
 category = "RiseDev - Deterministic Simulation Test"
 description = "Run unit tests in deterministic simulation mode"
-dependencies = ["warn-on-missing-tools"]
+dependencies = ["install-nextest"]
 env = { CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/usr/bin/env bash
@@ -675,7 +680,7 @@ deprecated = "Please use `risedev sit-test scale::` instead."
 [tasks.sit-test]
 category = "RiseDev - Simulation integration tests"
 description = "Run integration tests in deterministic simulation mode"
-dependencies = ["warn-on-missing-tools"]
+dependencies = ["install-nextest"]
 env = { CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/usr/bin/env bash
@@ -690,7 +695,7 @@ cargo nextest run \
 [tasks.sarchive-it-test]
 category = "RiseDev - Simulation integration tests"
 description = "Archive integration tests in deterministic simulation mode"
-dependencies = ["warn-on-missing-tools"]
+dependencies = ["install-nextest"]
 env = { CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/usr/bin/env bash
@@ -749,7 +754,7 @@ cargo build \
 [tasks.sslt-cov]
 category = "RiseDev - Deterministic Simulation End-to-end Test"
 description = "Run e2e tests in deterministic simulation mode and report code coverage"
-dependencies = ["warn-on-missing-tools"]
+dependencies = ["install-llvm-cov"]
 env = { CARGO_TARGET_DIR = "target/sim-cov" }
 script = """
 #!/usr/bin/env bash
@@ -802,6 +807,7 @@ cd "${JAVA_DIR}"
 [tasks.check-hakari]
 category = "RiseDev - Check"
 description = "Run cargo hakari check and attempt to fix"
+install_crate = { min_version = "0.9.24", crate_name = "cargo-hakari", binary = "cargo", test_arg = ["hakari", "--help"], install_command = "binstall" }
 script = """
 #!/usr/bin/env bash
 
@@ -815,6 +821,7 @@ test $? -eq 0 || exit 1
 [tasks.check-dep-sort]
 category = "RiseDev - Check"
 description = "Run cargo sort check and attempt to fix"
+install_crate = { min_version = "1.0.9", crate_name = "cargo-sort", binary = "cargo", test_arg = ["sort", "--help"], install_command = "binstall" }
 script = """
 #!/usr/bin/env bash
 
@@ -870,12 +877,10 @@ fi
 [tasks.check-typos]
 category = "RiseDev - Check"
 description = "Run cargo typos-cli check"
+install_crate = { min_version = "1.14.8", crate_name = "typos-cli", binary = "typos", test_arg = ["--help"], install_command = "binstall" }
 script = """
 #!/usr/bin/env bash
-if ! [ -x "$(command -v typos)" ]; then
-  echo "Error: 'typos-cli' is not installed, please run './risedev install-tools'." >&2
-  exit 1
-fi
+
 if ! typos ; then
   echo "Hint: use 'typos -w' to fix."
 fi
@@ -885,6 +890,7 @@ fi
 category = "RiseDev - Check"
 description = "Check unused dependencies"
 env = { RUSTFLAGS = "--cfg tokio_unstable" }
+install_crate = { min_version = "0.1.35", crate_name = "cargo-udeps", binary = "cargo", test_arg = ["udeps", "--help"], install_command = "binstall" }
 script = """
 #!/usr/bin/env bash
 
@@ -987,7 +993,7 @@ description = "Kill cluster, dump logs and check logs"
 
 [tasks.slt]
 category = "RiseDev - SQLLogicTest"
-dependencies = ["warn-on-missing-tools"]
+install_crate = { min_version = "0.1.13", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = ["--help"] }
 command = "sqllogictest"
 args = ["${@}"]
 description = "Run SQLLogicTest"
