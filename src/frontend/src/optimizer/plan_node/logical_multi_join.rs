@@ -496,7 +496,6 @@ impl LogicalMultiJoin {
     ///   ii. nodes with a join tree higher than the temporal optimal join tree will be pruned.
     pub fn as_bushy_tree_join(&self) -> Result<PlanRef> {
         let (nodes, condition) = self.get_join_graph()?;
-        println!("nodes: {:?}", nodes);
 
         if nodes.is_empty() {
             return Err(RwError::from(ErrorCode::InternalError(
@@ -509,8 +508,6 @@ impl LogicalMultiJoin {
             VecDeque::from([(nodes, vec![])]);
 
         while let Some((mut nodes, mut isolated)) = que.pop_front() {
-            println!("74753: {:?}", nodes);
-
             if nodes.len() == 1 {
                 let node = nodes.into_values().next().unwrap();
 
@@ -637,7 +634,6 @@ impl LogicalMultiJoin {
         };
 
         let total_col_num = self.inner2output.source_size();
-        println!("114514:{:?}", join_ordering);
         let reorder_mapping = {
             let mut reorder_mapping = vec![None; total_col_num];
 
