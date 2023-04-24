@@ -673,20 +673,18 @@ impl LogicalMultiJoin {
                     )
                     .into(),
                 );
-            } else {
-                if let Some(r) = que.pop_front() {
-                    que.push_back(
-                        LogicalJoin::new(
-                            self.inputs[chunk[0]].clone(),
-                            r,
-                            JoinType::Inner,
-                            Condition::true_cond(),
-                        )
-                        .into(),
+            } else if let Some(r) = que.pop_front() {
+                que.push_back(
+                    LogicalJoin::new(
+                        self.inputs[chunk[0]].clone(),
+                        r,
+                        JoinType::Inner,
+                        Condition::true_cond(),
                     )
-                } else {
-                    return self.inputs[chunk[0]].clone();
-                }
+                    .into(),
+                )
+            } else {
+                return self.inputs[chunk[0]].clone();
             }
         }
 
