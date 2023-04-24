@@ -1927,7 +1927,7 @@ where
                     // TODO(siyuan): wait for yezizp to refactor ref cnt
                     database_core.decrease_ref_count(connection_id);
                 }
-                
+
                 user_core.decrease_ref(sink.owner);
 
                 for user in users_need_update {
