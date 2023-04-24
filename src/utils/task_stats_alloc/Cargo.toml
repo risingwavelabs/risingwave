@@ -3,8 +3,8 @@ name = "task_stats_alloc"
 version = "0.1.11"
 edition = "2021"
 description = "Allocator with statistics"
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [package.metadata.cargo-machete]
 ignored = ["workspace-hack"]
 
@@ -12,18 +12,13 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "fs",
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-] }
+
+[dependencies.tokio]
+version = "0.2"
+package = "madsim-tokio"
+features = ["fs", "rt", "rt-multi-thread", "sync", "macros", "time", "signal"]
 
 [dev-dependencies]
 
-
-[target.'cfg(loom)'.dependencies]
-loom = {version = "0.5", features = ["futures", "checkpoint"]}
+[target.'cfg(loom)' .dependencies]
+loom = { version = "0.5", features = ["futures", "checkpoint"] }

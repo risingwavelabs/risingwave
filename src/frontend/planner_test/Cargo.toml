@@ -6,8 +6,8 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [package.metadata.cargo-machete]
 ignored = ["workspace-hack"]
 
@@ -25,18 +25,14 @@ risingwave_sqlparser = { path = "../../sqlparser" }
 serde = { version = "1", features = ["derive"] }
 serde_with = "2"
 serde_yaml = "0.9"
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-    "fs",
-] }
 walkdir = "2"
 
-[target.'cfg(not(madsim))'.dependencies]
+[dependencies.tokio]
+version = "0.2"
+package = "madsim-tokio"
+features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"]
+
+[target.'cfg(not(madsim))' .dependencies]
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
@@ -52,5 +48,5 @@ name = "planner-test-apply"
 path = "src/bin/apply.rs"
 
 [[test]]
-name = "planner_test_runner"
 harness = false
+name = "planner_test_runner"

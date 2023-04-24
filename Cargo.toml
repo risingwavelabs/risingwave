@@ -1,52 +1,67 @@
 [workspace]
 members = [
-  "scripts/source/prepare_ci_pubsub",
-  "src/batch",
-  "src/bench",
-  "src/cmd",
-  "src/cmd_all",
-  "src/common",
-  "src/common/common_service",
-  "src/compute",
-  "src/connector",
-  "src/ctl",
-  "src/expr",
-  "src/expr/macro",
-  "src/frontend",
-  "src/frontend/planner_test",
-  "src/java_binding",
-  "src/meta",
-  "src/object_store",
-  "src/prost",
-  "src/prost/helpers",
-  "src/risedevtool",
-  "src/rpc_client",
-  "src/source",
-  "src/sqlparser",
-  "src/sqlparser/test_runner",
-  "src/storage",
-  "src/storage/backup",
-  "src/storage/backup/cmd",
-  "src/storage/compactor",
-  "src/storage/hummock_sdk",
-  "src/storage/hummock_test",
-  "src/stream",
-  "src/test_runner",
-  "src/tests/compaction_test",
-  "src/tests/e2e_extended_mode",
-  "src/tests/regress",
-  "src/tests/simulation",
-  "src/tests/sqlsmith",
-  "src/tests/state_cleaning_test",
-  "src/tracing",
-  "src/udf",
-  "src/utils/local_stats_alloc",
-  "src/utils/pgwire",
-  "src/utils/runtime",
-  "src/utils/sync-point",
-  "src/utils/workspace-config",
-  "src/workspace-hack",
+    "scripts/source/prepare_ci_pubsub",
+    "src/batch",
+    "src/bench",
+    "src/cmd",
+    "src/cmd_all",
+    "src/common",
+    "src/common/common_service",
+    "src/compute",
+    "src/connector",
+    "src/ctl",
+    "src/expr",
+    "src/expr/macro",
+    "src/frontend",
+    "src/frontend/planner_test",
+    "src/java_binding",
+    "src/meta",
+    "src/object_store",
+    "src/prost",
+    "src/prost/helpers",
+    "src/risedevtool",
+    "src/rpc_client",
+    "src/source",
+    "src/sqlparser",
+    "src/sqlparser/test_runner",
+    "src/storage",
+    "src/storage/backup",
+    "src/storage/backup/cmd",
+    "src/storage/compactor",
+    "src/storage/hummock_sdk",
+    "src/storage/hummock_test",
+    "src/stream",
+    "src/test_runner",
+    "src/tests/compaction_test",
+    "src/tests/e2e_extended_mode",
+    "src/tests/regress",
+    "src/tests/simulation",
+    "src/tests/sqlsmith",
+    "src/tests/state_cleaning_test",
+    "src/tracing",
+    "src/udf",
+    "src/utils/local_stats_alloc",
+    "src/utils/pgwire",
+    "src/utils/runtime",
+    "src/utils/sync-point",
+    "src/utils/workspace-config",
+    "src/workspace-hack"
 ]
+
+[workspace.dependencies]
+aws-config = { version = "0.51", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-sdk-s3 = { version = "0.21", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-sdk-ec2 = { version = "0.21", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-sdk-sqs = { version = "0.21", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-smithy-http = "0.51"
+aws-smithy-types = "0.51"
+aws-endpoint = "0.51"
+aws-types = { version = "0.51", features = ["hardcoded-credentials"] }
+
+[workspace.dependencies.aws-sdk-kinesis]
+version = "0.21"
+default-features = false
+features = ["rt-tokio", "native-tls"]
 
 [workspace.package]
 version = "1.0.0-alpha"
@@ -56,33 +71,37 @@ keywords = ["sql", "database", "streaming"]
 license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
-[workspace.dependencies]
-aws-config = { version = "0.51", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-kinesis = { version = "0.21", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-s3 = { version = "0.21", default-features = false, features = ["rt-tokio","native-tls"] }
-aws-sdk-ec2 = { version = "0.21", default-features = false, features = ["rt-tokio","native-tls"] }
-aws-sdk-sqs = { version = "0.21", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-smithy-http = "0.51"
-aws-smithy-types = "0.51"
-aws-endpoint = "0.51"
-aws-types = { version = "0.51", features = ["hardcoded-credentials"] }
-
-[profile.dev]
-lto = 'off'
-
-[profile.release]
-debug = 1 # line tables only
-lto = 'thin'
-
 [profile.bench]
 opt-level = 3
 debug = false
 codegen-units = 1
-lto = 'thin'
+lto = "thin"
 incremental = false
 debug-assertions = false
 overflow-checks = false
 rpath = false
+
+# The profile used for CI in pull requests.
+# External dependencies are built with optimization enabled, while crates in this workspace are built
+# with `dev` profile and full debug info. This is a trade-off between build time and e2e test time.
+[profile.ci-dev]
+inherits = "dev"
+incremental = false
+
+[profile.ci-dev.package."*" ] # external dependencies
+opt-level = 1
+
+[profile.ci-dev.package.await-tree]
+opt-level = 3
+
+[profile.ci-dev.package.indextree]
+opt-level = 3
+
+[profile.ci-dev.package.task_stats_alloc]
+opt-level = 3
+
+[profile.ci-dev.package.tokio]
+opt-level = 3
 
 # The profile used for CI in main branch.
 # This profile inherits from the release profile, but turns on some checks and assertions for us to
@@ -92,23 +111,6 @@ inherits = "release"
 debug-assertions = true
 overflow-checks = true
 
-# The profile used for CI in pull requests.
-# External dependencies are built with optimization enabled, while crates in this workspace are built
-# with `dev` profile and full debug info. This is a trade-off between build time and e2e test time.
-[profile.ci-dev]
-inherits = "dev"
-incremental = false
-[profile.ci-dev.package."*"] # external dependencies
-opt-level = 1
-[profile.ci-dev.package."tokio"]
-opt-level = 3
-[profile.ci-dev.package."await-tree"]
-opt-level = 3
-[profile.ci-dev.package."indextree"]
-opt-level = 3
-[profile.ci-dev.package."task_stats_alloc"]
-opt-level = 3
-
 # The profile used for deterministic simulation tests in CI.
 # The simulator can only run single-threaded, so optimization is required to make the running time
 # reasonable. The optimization level is customized to speed up the build.
@@ -116,6 +118,13 @@ opt-level = 3
 inherits = "dev"
 opt-level = 2
 incremental = false
+
+[profile.dev]
+lto = "off"
+
+[profile.release]
+debug = 1 # line tables only
+lto = "thin"
 
 # Patch third-party crates for deterministic simulation.
 [patch.crates-io]

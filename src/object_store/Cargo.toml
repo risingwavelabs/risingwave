@@ -6,8 +6,8 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
 async-trait = "0.1"
 await-tree = "0.1.1"
@@ -28,10 +28,9 @@ risingwave_common = { path = "../common" }
 spin = "0.9"
 tempfile = "3"
 thiserror = "1"
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "fs",
-] }
+tokio = { version = "0.2", package = "madsim-tokio", features = ["fs"] }
 tracing = "0.1"
+
 # This crate is excluded from hakari (see hakari.toml) after hdfs is introduced...
 #
 # [target.'cfg(not(madsim))'.dependencies]
@@ -42,6 +41,5 @@ tracing = "0.1"
 #
 # [package.metadata.cargo-udeps.ignore]
 # normal = ["workspace-hack"]
-
 # [features]
 # hdfs-backend = ["opendal/services-hdfs"]

@@ -6,8 +6,8 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [package.metadata.cargo-machete]
 ignored = ["workspace-hack"]
 
@@ -34,15 +34,12 @@ risingwave_storage = { path = "..", features = ["test"] }
 risingwave_tracing = { path = "../../tracing" }
 tokio = { version = "0.2", package = "madsim-tokio" }
 
-[target.'cfg(not(madsim))'.dependencies]
+[target.'cfg(not(madsim))' .dependencies]
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["async_futures"] }
-futures = { version = "0.3", default-features = false, features = [
-    "alloc",
-    "executor",
-] }
+futures = { version = "0.3", default-features = false, features = ["alloc", "executor"] }
 risingwave_test_runner = { path = "../../test_runner" }
 serial_test = "0.9"
 sync-point = { path = "../../utils/sync-point" }
@@ -53,6 +50,6 @@ sync_point = ["sync-point/sync_point"]
 test = []
 
 [[bench]]
-name = "bench_hummock_iter"
 harness = false
+name = "bench_hummock_iter"
 required-features = ["test"]

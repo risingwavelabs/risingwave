@@ -29,7 +29,7 @@ tokio-stream = { version = "0.1", features = ["fs"] }
 toml = "0.7"
 tracing = "0.1"
 
-[target.'cfg(not(madsim))'.dependencies]
+[target.'cfg(not(madsim))' .dependencies]
 workspace-hack = { path = "../../workspace-hack" }
 
 [[bin]]

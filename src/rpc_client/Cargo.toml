@@ -25,20 +25,17 @@ risingwave_common = { path = "../common" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_pb = { path = "../prost" }
 thiserror = "1"
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-] }
 tokio-retry = "0.3"
 tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 url = "2.3.1"
 
-[target.'cfg(not(madsim))'.dependencies]
+[dependencies.tokio]
+version = "0.2"
+package = "madsim-tokio"
+features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"]
+
+[target.'cfg(not(madsim))' .dependencies]
 moka = { version = "0.10", features = ["future"] }
 workspace-hack = { path = "../workspace-hack" }

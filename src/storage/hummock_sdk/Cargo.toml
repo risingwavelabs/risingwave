@@ -21,15 +21,12 @@ parking_lot = "0.12"
 parse-display = "0.6"
 risingwave_common = { path = "../../common" }
 risingwave_pb = { path = "../../prost" }
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-] }
 tracing = "0.1"
 
-[target.'cfg(not(madsim))'.dependencies]
+[dependencies.tokio]
+version = "0.2"
+package = "madsim-tokio"
+features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"]
+
+[target.'cfg(not(madsim))' .dependencies]
 workspace-hack = { path = "../../workspace-hack" }

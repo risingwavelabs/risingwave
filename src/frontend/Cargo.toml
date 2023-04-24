@@ -6,8 +6,8 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [package.metadata.cargo-machete]
 ignored = ["workspace-hack"]
 
@@ -65,21 +65,17 @@ sha2 = "0.10.2"
 smallvec = { version = "1.6.1", features = ["serde"] }
 tempfile = "3"
 thiserror = "1"
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-    "fs",
-] }
 tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 uuid = "1"
 
-[target.'cfg(not(madsim))'.dependencies]
+[dependencies.tokio]
+version = "0.2"
+package = "madsim-tokio"
+features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"]
+
+[target.'cfg(not(madsim))' .dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]

@@ -15,14 +15,18 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = { version = "1", features = ["backtrace"] }
-chrono = { version = "0.4", features = ['serde'] }
+chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 pg_interval = "0.4"
-rust_decimal ={ version = "1.25", features = ["db-postgres"] }
-tokio = { version = "0.2.15", package = "madsim-tokio", features = ["rt", "macros","rt-multi-thread"] }
+rust_decimal = { version = "1.25", features = ["db-postgres"] }
 tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"] }
 tracing = "0.1"
 tracing-subscriber = "0.3.16"
+
+[dependencies.tokio]
+version = "0.2.15"
+package = "madsim-tokio"
+features = ["rt", "macros", "rt-multi-thread"]
 
 [[bin]]
 name = "risingwave_e2e_extended_mode_test"

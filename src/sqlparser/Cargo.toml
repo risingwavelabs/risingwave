@@ -1,15 +1,24 @@
 [package]
 name = "risingwave_sqlparser"
-license = "Apache-2.0"
-include = [
-    "src/**/*.rs",
-    "Cargo.toml",
-]
 version = { workspace = true }
 edition = { workspace = true }
 homepage = { workspace = true }
+include = ["src/**/*.rs", "Cargo.toml"]
 keywords = { workspace = true }
+license = "Apache-2.0"
 repository = { workspace = true }
+
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
+[package.metadata.release]
+# Instruct `cargo release` to not run `cargo publish` locally:
+# https://github.com/sunng87/cargo-release/blob/master/docs/reference.md#config-fields
+# See docs/releasing.md for details.
+disable-publish = true
 
 [lib]
 path = "src/lib.rs"
@@ -18,25 +27,13 @@ path = "src/lib.rs"
 default = ["std"]
 std = []
 
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack"]
-
 [dependencies]
 itertools = "0.10"
 serde = { version = "1.0", features = ["derive"], optional = true }
 tracing = "0.1"
 
-[target.'cfg(not(madsim))'.dependencies]
+[target.'cfg(not(madsim))' .dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 matches = "0.1"
-
-[package.metadata.release]
-# Instruct `cargo release` to not run `cargo publish` locally:
-# https://github.com/sunng87/cargo-release/blob/master/docs/reference.md#config-fields
-# See docs/releasing.md for details.
-disable-publish = true

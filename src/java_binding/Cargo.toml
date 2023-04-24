@@ -22,21 +22,17 @@ risingwave_object_store = { path = "../object_store" }
 risingwave_pb = { path = "../prost" }
 risingwave_storage = { path = "../storage" }
 thiserror = "1"
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "fs",
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-] }
 tracing = "0.1"
+
+[dependencies.tokio]
+version = "0.2"
+package = "madsim-tokio"
+features = ["fs", "rt", "rt-multi-thread", "sync", "macros", "time", "signal"]
 
 [lib]
 crate_type = ["cdylib"]
 
 [[bin]]
+bench = false
 name = "data-chunk-payload-generator"
 test = false
-bench = false

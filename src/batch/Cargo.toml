@@ -39,63 +39,59 @@ risingwave_source = { path = "../source" }
 risingwave_storage = { path = "../storage" }
 serde_json = "1"
 thiserror = "1"
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-    "fs",
-] }
 tokio-metrics = "0.1.0"
 tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 uuid = "1"
 
-[target.'cfg(enable_task_local_alloc)'.dependencies]
+[dependencies.tokio]
+version = "0.2"
+package = "madsim-tokio"
+features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"]
+
+[target.'cfg(enable_task_local_alloc)' .dependencies]
 task_stats_alloc = { path = "../utils/task_stats_alloc" }
 
-[target.'cfg(not(madsim))'.dependencies]
+[target.'cfg(not(madsim))' .dependencies]
 workspace-hack = { path = "../workspace-hack" }
+
+[target.'cfg(unix)' .dev-dependencies]
+tikv-jemallocator = "0.5"
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["async_tokio", "async"] }
 rand = "0.8"
 tempfile = "3"
 
-[target.'cfg(unix)'.dev-dependencies]
-tikv-jemallocator = "0.5"
-
 [[bench]]
+harness = false
 name = "filter"
-harness = false
 
 [[bench]]
+harness = false
 name = "nested_loop_join"
-harness = false
 
 [[bench]]
+harness = false
 name = "hash_join"
-harness = false
 
 [[bench]]
+harness = false
 name = "sort"
-harness = false
 
 [[bench]]
+harness = false
 name = "top_n"
-harness = false
 
 [[bench]]
+harness = false
 name = "hash_agg"
-harness = false
 
 [[bench]]
+harness = false
 name = "expand"
-harness = false
 
 [[bench]]
-name = "limit"
 harness = false
+name = "limit"

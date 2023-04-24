@@ -18,16 +18,11 @@ clap = { version = "4", features = ["derive"] }
 risingwave_backup = { path = "../../backup" }
 risingwave_meta = { path = "../../../meta" }
 risingwave_rt = { path = "../../../utils/runtime" }
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-    "fs",
-    "tracing",
-] }
+
+[dependencies.tokio]
+version = "0.2"
+package = "madsim-tokio"
+features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs", "tracing"]
 
 [[bin]]
 name = "backup-restore"

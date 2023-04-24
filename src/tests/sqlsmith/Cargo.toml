@@ -30,7 +30,7 @@ tokio-postgres = "0.7"
 tracing = "0.1"
 tracing-subscriber = "0.3.16"
 
-[target.'cfg(not(madsim))'.dependencies]
+[target.'cfg(not(madsim))' .dependencies]
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
@@ -44,5 +44,5 @@ path = "src/bin/main.rs"
 enable_sqlsmith_unit_test = []
 
 [[test]]
-name = "test_runner"
 harness = false
+name = "test_runner"

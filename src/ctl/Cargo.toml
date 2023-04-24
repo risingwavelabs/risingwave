@@ -34,17 +34,13 @@ risingwave_stream = { path = "../stream" }
 risingwave_tracing = { path = "../tracing" }
 serde_json = "1"
 size = "0.4"
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-    "fs",
-] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 
-[target.'cfg(not(madsim))'.dependencies]
+[dependencies.tokio]
+version = "0.2"
+package = "madsim-tokio"
+features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"]
+
+[target.'cfg(not(madsim))' .dependencies]
 workspace-hack = { path = "../workspace-hack" }
