@@ -187,6 +187,53 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
                 ],
             ));
         }
+        ShowObject::Function { schema } => {
+            let rows = catalog_reader
+                .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+                .iter_function()
+                .map(|t| {
+                    Row::new(vec![
+                        Some(t.name.clone().into()),
+                        Some(t.arg_types.iter().map(|t| t.to_string()).join(", ").into()),
+                        Some(t.return_type.to_string().into()),
+                        Some(t.language.clone().into()),
+                        Some(t.link.clone().into()),
+                    ])
+                })
+                .collect_vec();
+            return Ok(PgResponse::new_for_stream(
+                StatementType::SHOW_COMMAND,
+                None,
+                rows.into(),
+                vec![
+                    PgFieldDescriptor::new(
+                        "Name".to_owned(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
+                    ),
+                    PgFieldDescriptor::new(
+                        "Arguments".to_owned(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
+                    ),
+                    PgFieldDescriptor::new(
+                        "Return Type".to_owned(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
+                    ),
+                    PgFieldDescriptor::new(
+                        "Language".to_owned(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
+                    ),
+                    PgFieldDescriptor::new(
+                        "Link".to_owned(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
+                    ),
+                ],
+            ));
+        }
     };
 
     let rows = names

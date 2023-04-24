@@ -5731,6 +5731,7 @@ dependencies = [
  "minitrace",
  "num-traits",
  "parking_lot 0.12.1",
+ "paste",
  "prometheus",
  "rand 0.8.5",
  "risingwave_common",

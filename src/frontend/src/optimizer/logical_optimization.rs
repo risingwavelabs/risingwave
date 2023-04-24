@@ -228,13 +228,6 @@ lazy_static! {
         ApplyOrder::TopDown,
     );
 
-
-    static ref DEDUP_GROUP_KEYS: OptimizationStage = OptimizationStage::new(
-        "Dedup Group keys",
-        vec![AggDedupGroupKeyRule::create()],
-        ApplyOrder::TopDown,
-    );
-
     static ref REWRITE_LIKE_EXPR: OptimizationStage = OptimizationStage::new(
         "Rewrite Like Expr",
         vec![RewriteLikeExprRule::create()],
@@ -423,8 +416,6 @@ impl LogicalOptimizer {
 
         plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
 
-        plan = plan.optimize_by_rules(&DEDUP_GROUP_KEYS);
-
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 
@@ -486,8 +477,6 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&PULL_UP_HOP);
 
         plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
-
-        plan = plan.optimize_by_rules(&DEDUP_GROUP_KEYS);
 
         plan = plan.optimize_by_rules(&TOP_N_AGG_ON_INDEX);
 

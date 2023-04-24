@@ -380,7 +380,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             trace!("Executing plan [{:?}]", task_id);
             let sender = sender;
             let mut state_tx = state_tx;
-            let task_metrics = t_1.context.task_metrics();
+            let batch_metrics = t_1.context.batch_metrics();
 
             let task = |task_id: TaskId| async move {
                 // We should only pass a reference of sender to execution because we should only
@@ -396,15 +396,15 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     .await;
             };
 
-            if let Some(task_metrics) = task_metrics {
+            if let Some(batch_metrics) = batch_metrics {
                 let monitor = TaskMonitor::new();
                 let instrumented_task = AssertUnwindSafe(monitor.instrument(task(task_id.clone())));
                 if let Err(error) = instrumented_task.catch_unwind().await {
                     error!("Batch task {:?} panic: {:?}", task_id, error);
                 }
                 let cumulative = monitor.cumulative();
-                let labels = &task_metrics.task_labels();
-                let task_metrics = &task_metrics.metrics;
+                let labels = &batch_metrics.task_labels();
+                let task_metrics = batch_metrics.get_task_metrics();
                 task_metrics
                     .task_first_poll_delay
                     .with_label_values(labels)
