@@ -145,8 +145,10 @@ impl ElectionClient for EtcdElectionClient {
 
             // timeout controller, when keep alive fails for more than a certain period of time
             // before it is considered a complete failure
-            let mut timeout = time::interval(Duration::from_secs((ttl / 2) as u64));
+            let mut timeout = time::interval(Duration::from_secs_f64(ttl as f64 / 2.0));
             timeout.reset();
+
+            let mut keep_alive_sending = false;
 
             loop {
                 tokio::select! {
@@ -158,16 +160,21 @@ impl ElectionClient for EtcdElectionClient {
                         break;
                     }
 
-                    _ = ticker.tick() => {
+                    _ = ticker.tick(), if !keep_alive_sending => {
                         if let Err(err) = keeper.keep_alive().await {
                             tracing::debug!("keep alive for lease {} failed {}", lease_id, err);
                             continue
                         }
 
-                        match resp_stream.message().await {
+                        keep_alive_sending = true;
+                    }
+
+                    resp = resp_stream.message() => {
+                        keep_alive_sending = false;
+                        match resp {
                             Ok(Some(resp)) => {
                                 if resp.ttl() <= 0 {
-                                    tracing::warn!("lease expired or revoked {}", lease_id);
+                                    tracing::error!("lease expired or revoked {}", lease_id);
                                     keep_alive_fail_tx.send(()).unwrap();
                                     break;
                                 }
@@ -178,7 +185,7 @@ impl ElectionClient for EtcdElectionClient {
                                 tracing::debug!("lease keeper for lease {} response stream closed unexpected", lease_id);
 
                                 // try to re-create lease keeper, with timeout as ttl / 2
-                                if let Ok(Ok((keeper_, resp_stream_))) = time::timeout(Duration::from_secs((ttl / 2) as u64), lease_client.keep_alive(lease_id)).await {
+                                if let Ok(Ok((keeper_, resp_stream_))) = time::timeout(Duration::from_secs_f64(ttl as f64 / 2.0), lease_client.keep_alive(lease_id)).await {
                                     keeper = keeper_;
                                     resp_stream = resp_stream_;
                                 };
@@ -247,7 +254,7 @@ impl ElectionClient for EtcdElectionClient {
                             tracing::debug!("observe stream closed unexpected, recreating");
 
                             // try to re-create observe stream, with timeout as ttl / 2
-                            if let Ok(Ok(stream)) = time::timeout(Duration::from_secs((ttl / 2) as u64), self.client.observe(META_ELECTION_KEY)).await {
+                            if let Ok(Ok(stream)) = time::timeout(Duration::from_secs_f64(ttl as f64 / 2.0), self.client.observe(META_ELECTION_KEY)).await {
                                 observe_stream = stream;
                                 tracing::debug!("recreating observe stream");
                             }
@@ -386,7 +393,7 @@ mod tests {
                 let mut ticker = time::interval(Duration::from_secs(1));
                 loop {
                     ticker.tick().await;
-                    if let Ok(_) = client_.run_once(3, stop.clone()).await {
+                    if let Ok(_) = client_.run_once(5, stop.clone()).await {
                         break;
                     }
                 }

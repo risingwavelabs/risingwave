@@ -57,6 +57,7 @@ pub mod expr_regexp;
 mod expr_some_all;
 mod expr_to_char_const_tmpl;
 mod expr_to_timestamp_const_tmpl;
+mod expr_trim_array;
 mod expr_udf;
 mod expr_unary;
 mod expr_vnode;

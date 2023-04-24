@@ -48,6 +48,7 @@ impl DataType {
     pub fn from_oid(oid: i32) -> crate::error::Result<Self> {
         match oid {
             16 => Ok(DataType::Boolean),
+            17 => Ok(DataType::Bytea),
             21 => Ok(DataType::Int16),
             23 => Ok(DataType::Int32),
             20 => Ok(DataType::Int64),

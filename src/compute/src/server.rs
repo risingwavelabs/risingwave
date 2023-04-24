@@ -16,7 +16,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use pretty_bytes::converter::convert;
 use risingwave_batch::executor::{BatchManagerMetrics, BatchTaskMetrics};
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
@@ -29,6 +28,7 @@ use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::pretty_bytes::convert;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
@@ -62,8 +62,7 @@ use tokio::task::JoinHandle;
 
 use crate::memory_management::memory_manager::GlobalMemoryManager;
 use crate::memory_management::{
-    memory_control_policy_from_config, reserve_memory_bytes, storage_memory_config,
-    MIN_COMPUTE_MEMORY_MB,
+    build_memory_control_policy, reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB,
 };
 use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
@@ -131,9 +130,18 @@ pub async fn compute_node_serve(
         storage_memory_bytes,
         &storage_memory_config,
         embedded_compactor_enabled,
+        reserved_memory_bytes,
     );
 
-    let memory_control_policy = memory_control_policy_from_config(&opts).unwrap();
+    // NOTE: Due to some limits, we use `compute_memory_bytes + storage_memory_bytes` as
+    // `total_compute_memory_bytes` for memory control. This is just a workaround for some
+    // memory control issues and should be modified as soon as we figure out a better solution.
+    //
+    // Related issues:
+    // - https://github.com/risingwavelabs/risingwave/issues/8696
+    // - https://github.com/risingwavelabs/risingwave/issues/8822
+    let total_memory_bytes = compute_memory_bytes + storage_memory_bytes;
+    let memory_control_policy = build_memory_control_policy(total_memory_bytes).unwrap();
 
     let storage_opts = Arc::new(StorageOpts::from((
         &config,
@@ -275,15 +283,7 @@ pub async fn compute_node_serve(
     let batch_mgr_clone = batch_mgr.clone();
     let stream_mgr_clone = stream_mgr.clone();
 
-    // NOTE: Due to some limits, we use `total_memory_bytes` as `total_compute_memory_bytes` for
-    // memory control. This is just a workaround for some memory control issues and should be
-    // modified as soon as we figure out a better solution.
-    //
-    // Related issues:
-    // - https://github.com/risingwavelabs/risingwave/issues/8696
-    // - https://github.com/risingwavelabs/risingwave/issues/8822
     let memory_mgr = GlobalMemoryManager::new(
-        opts.total_memory_bytes,
         system_params.barrier_interval_ms(),
         streaming_metrics.clone(),
         memory_control_policy,
@@ -493,6 +493,7 @@ fn print_memory_config(
     storage_memory_bytes: usize,
     storage_memory_config: &StorageMemoryConfig,
     embedded_compactor_enabled: bool,
+    reserved_memory_bytes: usize,
 ) {
     info!("Memory outline: ");
     info!("> total_memory: {}", convert(cn_total_memory_bytes as _));
@@ -525,5 +526,9 @@ fn print_memory_config(
     info!(
         ">     compute_memory: {}",
         convert(compute_memory_bytes as _)
+    );
+    info!(
+        ">     reserved_memory: {}",
+        convert(reserved_memory_bytes as _)
     );
 }

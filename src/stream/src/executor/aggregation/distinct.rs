@@ -159,12 +159,18 @@ impl<S: StateStore> ColumnDeduplicater<S> {
             }
         }
 
+        // if we determine to flush to the table when processing every chunk instead of barrier
+        // coming, we can evict all including current epoch data.
+        self.cache.evict();
+
         Ok(())
     }
 
     /// Flush the deduplication table.
     fn flush(&mut self, _dedup_table: &mut StateTable<S>) {
         // TODO(rc): now we flush the table in `dedup` method.
+        // WARN: if you want to change to batching the write to table. please remember to change
+        // `self.cache.evict()` too.
         self.cache.evict();
     }
 }

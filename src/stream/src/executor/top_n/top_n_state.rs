@@ -18,10 +18,9 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
+use super::{serialize_pk_to_cache_key, CacheKey, CacheKeySerde, GroupKey, TopNCache};
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::top_n::GroupKey;
-use crate::executor::top_n::{serialize_pk_to_cache_key, CacheKey, CacheKeySerde, TopNCache};
 
 /// * For TopN, the storage key is: `[ order_by + remaining columns of pk ]`
 /// * For group TopN, the storage key is: `[ group_key + order_by + remaining columns of pk ]`
@@ -253,11 +252,9 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
-    // use std::collections::BTreeMap;
     use super::*;
-    use crate::executor::managed_state::top_n::NO_GROUP_KEY;
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
-    use crate::executor::top_n::create_cache_key_serde;
+    use crate::executor::top_n::{create_cache_key_serde, NO_GROUP_KEY};
     use crate::row_nonnull;
 
     fn cache_key_serde() -> CacheKeySerde {

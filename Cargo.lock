@@ -3533,7 +3533,7 @@ dependencies = [
 [[package]]
 name = "lru"
 version = "0.7.6"
-source = "git+https://github.com/risingwavelabs/lru-rs.git?rev=769fe6e#769fe6e6d1d9a86b36bbb290edd04ddb20f5aadb"
+source = "git+https://github.com/risingwavelabs/lru-rs.git?rev=cb2d7c7#cb2d7c7149a7f320c5aa73c15a6ec9f46ed5513f"
 dependencies = [
  "hashbrown 0.12.3",
 ]
@@ -3669,7 +3669,7 @@ dependencies = [
 [[package]]
 name = "madsim-rdkafka"
 version = "0.2.14-alpha"
-source = "git+https://github.com/madsim-rs/madsim.git?rev=52adb98#52adb98d33939dc841dd6d0c616238edc4fb6db3"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=6d342a9#6d342a98df0916ad115e06fd848a8f460730253f"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -4945,16 +4945,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pretty-bytes"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "009d6edd2c1dbf2e1c0cd48a2f7766e03498d49ada7109a01c6911815c685316"
-dependencies = [
- "atty",
- "getopts",
-]
-
-[[package]]
 name = "pretty-xmlish"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5476,6 +5466,7 @@ dependencies = [
  "openssl-sys",
  "pkg-config",
  "sasl2-sys",
+ "zstd-sys",
 ]
 
 [[package]]
@@ -5881,6 +5872,7 @@ dependencies = [
  "memcomparable",
  "more-asserts",
  "num-traits",
+ "number_prefix",
  "parking_lot 0.12.1",
  "parse-display",
  "paste",
@@ -6011,7 +6003,6 @@ dependencies = [
  "madsim-tonic",
  "maplit",
  "pprof",
- "pretty-bytes",
  "prometheus",
  "rand 0.8.5",
  "risingwave_batch",
@@ -6166,6 +6157,7 @@ dependencies = [
  "dyn-clone",
  "either",
  "futures-util",
+ "hex",
  "itertools",
  "madsim-tokio",
  "md5",

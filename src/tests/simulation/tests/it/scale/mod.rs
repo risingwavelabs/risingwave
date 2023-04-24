@@ -12,19 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg(madsim)]
-
-use anyhow::Result;
-use risingwave_simulation::cluster::{Cluster, Configuration};
-use risingwave_simulation::utils::AssertResult;
-
-#[madsim::test]
-async fn test_hello() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
-    cluster
-        .run("select concat_ws(', ', 'hello', 'world');")
-        .await?
-        .assert_result_eq("hello, world");
-
-    Ok(())
-}
+mod cascade_materialized_view;
+mod delta_join;
+mod dynamic_filter;
+mod nexmark_chaos;
+mod nexmark_q4;
+mod nexmark_source;
+mod singleton_migration;
+mod streaming_parallelism;
+mod table;

@@ -67,6 +67,11 @@ fn is_neg_substr_error(db_error: &str) -> bool {
     db_error.contains("negative substring length not allowed")
 }
 
+/// Zero or negative overlay start error
+fn is_overlay_start_error(db_error: &str) -> bool {
+    db_error.contains("Invalid parameter start") && db_error.contains("is not positive")
+}
+
 /// Certain errors are permitted to occur. This is because:
 /// 1. It is more complex to generate queries without these errors.
 /// 2. These errors seldom occur, skipping them won't affect overall effectiveness of sqlsmith.
@@ -80,4 +85,5 @@ pub fn is_permissible_error(db_error: &str) -> bool {
         || is_subquery_unnesting_error(db_error)
         || is_numeric_overflow_error(db_error)
         || is_neg_substr_error(db_error)
+        || is_overlay_start_error(db_error)
 }

@@ -44,7 +44,7 @@ pub mod expr;
 pub mod handler;
 pub use handler::PgResponseStream;
 mod observer;
-mod optimizer;
+pub mod optimizer;
 pub use optimizer::{Explain, OptimizerContext, OptimizerContextRef, PlanRef};
 mod planner;
 pub use planner::Planner;
