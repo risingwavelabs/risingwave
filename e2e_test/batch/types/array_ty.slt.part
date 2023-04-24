@@ -235,8 +235,8 @@ select (array[1,NULL,2])[2:1];
 {}
 
 # index larger than int32
-statement error db error: ERROR: QueryError: Bind error: cannot cast type "bigint" to "integer" in Implicit context
+statement error cannot cast type "bigint" to "integer" in Implicit context
 select (array[1,NULL,2])[1:4294967296];
 
-statement error db error: ERROR: QueryError: Bind error: cannot cast type "bigint" to "integer" in Implicit context
+statement error cannot cast type "bigint" to "integer" in Implicit context
 select (array[1,NULL,2])[4294967296:3];
