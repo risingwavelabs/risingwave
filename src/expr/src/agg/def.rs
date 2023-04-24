@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Aggregation function definitions.
+
 use std::sync::Arc;
 
 use risingwave_common::bail;
@@ -21,7 +23,6 @@ pub use risingwave_pb::expr::agg_call::PbType as AggKind;
 use risingwave_pb::expr::PbAggCall;
 
 use crate::expr::{build_from_prost, ExpressionRef};
-use crate::function::aggregate::AggArgs;
 use crate::Result;
 
 /// Represents an aggregation function.
@@ -82,5 +83,38 @@ impl AggCall {
             filter,
             distinct: agg_call.distinct,
         })
+    }
+}
+
+/// An aggregation function may accept 0, 1 or 2 arguments.
+#[derive(Clone, Debug)]
+pub enum AggArgs {
+    /// `None` is used for function calls that accept 0 argument, e.g. `count(*)`.
+    None,
+    /// `Unary` is used for function calls that accept 1 argument, e.g. `sum(x)`.
+    Unary(DataType, usize),
+    /// `Binary` is used for function calls that accept 2 arguments, e.g. `string_agg(x, delim)`.
+    Binary([DataType; 2], [usize; 2]),
+}
+
+impl AggArgs {
+    /// return the types of arguments.
+    pub fn arg_types(&self) -> &[DataType] {
+        use AggArgs::*;
+        match self {
+            None => &[],
+            Unary(typ, _) => std::slice::from_ref(typ),
+            Binary(typs, _) => typs,
+        }
+    }
+
+    /// return the indices of the arguments in [`risingwave_common::array::StreamChunk`].
+    pub fn val_indices(&self) -> &[usize] {
+        use AggArgs::*;
+        match self {
+            None => &[],
+            Unary(_, val_idx) => std::slice::from_ref(val_idx),
+            Binary(_, val_indices) => val_indices,
+        }
     }
 }

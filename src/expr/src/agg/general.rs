@@ -122,7 +122,7 @@ mod tests {
     use risingwave_common::array::*;
     use risingwave_common::types::{DataType, Decimal};
 
-    use crate::function::aggregate::{AggArgs, AggCall, AggKind};
+    use crate::agg::{AggArgs, AggCall, AggKind};
     use crate::Result;
 
     async fn eval_agg(

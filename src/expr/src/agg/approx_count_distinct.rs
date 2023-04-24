@@ -21,7 +21,7 @@ use risingwave_common::types::*;
 use risingwave_expr_macro::build_aggregate;
 
 use super::Aggregator;
-use crate::function::aggregate::AggCall;
+use crate::agg::AggCall;
 use crate::Result;
 
 const INDEX_BITS: u8 = 14; // number of bits used for finding the index of each 64-bit hash

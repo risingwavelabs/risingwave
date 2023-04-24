@@ -15,7 +15,7 @@
 use risingwave_common::types::DataType;
 
 use super::WindowFuncKind;
-use crate::function::aggregate::AggArgs;
+use crate::agg::AggArgs;
 
 #[derive(Clone)]
 pub enum Frame {

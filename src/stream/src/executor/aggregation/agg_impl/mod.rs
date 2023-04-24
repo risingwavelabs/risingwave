@@ -30,7 +30,7 @@ use risingwave_common::array::{
 };
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_expr::function::aggregate::AggKind;
+use risingwave_expr::agg::AggKind;
 use risingwave_expr::*;
 pub use row_count::*;
 

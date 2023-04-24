@@ -28,9 +28,8 @@ use risingwave_common::types::test_utils::IntervalTestExt;
 use risingwave_common::types::{
     DataType, DataTypeName, Date, Decimal, Interval, Time, Timestamp, F32, F64,
 };
-use risingwave_expr::agg::build as build_agg;
+use risingwave_expr::agg::{build as build_agg, AggArgs, AggCall};
 use risingwave_expr::expr::*;
-use risingwave_expr::function::aggregate::{AggArgs, AggCall};
 use risingwave_expr::sig::agg::agg_func_sigs;
 use risingwave_expr::sig::func::func_sigs;
 use risingwave_expr::ExprError;

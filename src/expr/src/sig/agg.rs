@@ -18,8 +18,7 @@ use std::sync::LazyLock;
 use itertools::Itertools;
 use risingwave_common::types::{DataType, DataTypeName};
 
-use crate::agg::BoxedAggState;
-use crate::function::aggregate::{AggCall, AggKind};
+use crate::agg::{AggCall, AggKind, BoxedAggState};
 use crate::Result;
 
 pub static AGG_FUNC_SIG_MAP: LazyLock<AggFuncSigMap> = LazyLock::new(|| unsafe {

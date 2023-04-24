@@ -30,7 +30,7 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarRef};
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
-    use crate::function::aggregate::{AggArgs, AggCall, AggKind};
+    use crate::agg::{AggArgs, AggCall, AggKind};
     use crate::Result;
 
     #[tokio::test]

@@ -17,17 +17,18 @@ use itertools::Itertools;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
 use risingwave_common::types::{DataType, DataTypeName};
 
-use crate::function::aggregate::AggCall;
 use crate::{ExprError, Result};
 
 mod approx_count_distinct;
 mod array_agg;
 mod count_star;
+mod def;
 mod filter;
 mod general;
 mod general_sorted_grouper;
 mod string_agg;
 
+pub use self::def::*;
 use self::filter::*;
 pub use self::general_sorted_grouper::{create_sorted_grouper, BoxedSortedGrouper, EqGroups};
 

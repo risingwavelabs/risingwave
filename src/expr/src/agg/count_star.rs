@@ -18,7 +18,7 @@ use risingwave_common::types::*;
 use risingwave_expr_macro::build_aggregate;
 
 use super::Aggregator;
-use crate::function::aggregate::AggCall;
+use crate::agg::AggCall;
 use crate::Result;
 
 #[build_aggregate("count() -> int64")]
