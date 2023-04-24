@@ -166,10 +166,10 @@ impl CompactionDeleteRangesBuilder {
     }
 
     pub(crate) fn build_for_compaction(self, gc_delete_keys: bool) -> Arc<CompactionDeleteRanges> {
-        let mut ret: BTreeMap<
+        let mut ret = BTreeMap::<
             UserKey<Vec<u8>>,
             (Vec<TombstoneEnterExitEvent>, Vec<TombstoneEnterExitEvent>),
-        > = BTreeMap::default();
+        >::default();
         for monotonic_deletes in self.events {
             let mut last_exit_epoch = HummockEpoch::MAX;
             for delete_event in monotonic_deletes {
@@ -178,13 +178,13 @@ impl CompactionDeleteRangesBuilder {
                     entry.0.push(TombstoneEnterExitEvent {
                         tombstone_epoch: last_exit_epoch,
                     });
-                };
+                }
                 if delete_event.new_epoch != HummockEpoch::MAX {
                     let entry = ret.entry(delete_event.event_key).or_default();
                     entry.1.push(TombstoneEnterExitEvent {
                         tombstone_epoch: delete_event.new_epoch,
                     });
-                };
+                }
                 last_exit_epoch = delete_event.new_epoch;
             }
         }
