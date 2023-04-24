@@ -1,3 +1,5 @@
+# Arithmetic
+
 query TT
 select v::varchar, pg_typeof(v) from (select '1.0'::decimal + '-1'::float4) as t(v);
 ----
@@ -34,6 +36,8 @@ query T
 select pg_typeof(array[1::real, 1::decimal]);
 ----
 real[]
+
+# Comparison
 
 query TTT
 select a < b, a::float8, b::float8 from (select '1.1'::decimal, '1.1'::float4) as t(a, b);
@@ -89,3 +93,13 @@ query T
 select null::decimal is distinct from null::float4;
 ----
 f
+
+# Out of range
+statement error
+select '1e29'::float4::decimal;
+
+statement error
+select '1e29'::jsonb::decimal;
+
+statement error
+select '1e309'::decimal > '1'::float4;
