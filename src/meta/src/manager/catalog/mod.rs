@@ -1923,6 +1923,11 @@ where
 
                 commit_meta!(self, sinks, tables, users)?;
 
+                if let Some(connection_id) = sink.connection_id {
+                    // TODO(siyuan): wait for yezizp to refactor ref cnt
+                    database_core.decrease_ref_count(connection_id);
+                }
+                
                 user_core.decrease_ref(sink.owner);
 
                 for user in users_need_update {
