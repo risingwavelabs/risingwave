@@ -390,7 +390,7 @@ impl Binder {
         //     SELECT sum(total_key_size + total_value_size)
         //     FROM rw_catalog.rw_table_stats as stats
         //     JOIN pg_index on stats.id = pg_index.indexrelid
-        //     WHERE pg_index.indrelid = 'test'::regclass
+        //     WHERE pg_index.indrelid = 'table_name'::regclass
 
         let indexrelid_col = PG_INDEX_COLUMNS[0].1;
         let tbl_stats_id_col = RW_TABLE_STATS_COLUMNS[0].1;
@@ -526,24 +526,28 @@ impl Binder {
         })
     }
 
+    /// Given literal varchar this will return the Object ID of the table or index whose
+    /// name matches the varchar.  Given a literal integer, this will return the integer regardless
+    /// of whether an object exists with an Object ID that matches the integer.
     fn table_id_query(&mut self, table: &ExprImpl) -> Result<ExprImpl> {
-        let table_lit = table
-            .as_literal()
-            .ok_or_else(|| ErrorCode::ExprError("Expected an integer or varchar literal".into()))?;
-        if table_lit.return_type().is_int() {
-            Ok(table.clone())
-        } else if table_lit.return_type() == DataType::Varchar {
-            let table_name = table_lit.get_data().as_ref().unwrap().as_utf8();
-            self.bind_cast(
-                Expr::Value(risingwave_sqlparser::ast::Value::SingleQuotedString(
-                    table_name.to_string(),
-                )),
-                AstDataType::Regclass,
-            )
-        } else {
-            Err(RwError::from(ErrorCode::ExprError(
+        match table.as_literal() {
+            Some(literal) if literal.return_type().is_int() => Ok(table.clone()),
+            Some(literal) if literal.return_type() == DataType::Varchar => {
+                let table_name = literal
+                    .get_data()
+                    .as_ref()
+                    .expect("ExprImpl value is a Literal but cannot get ref")
+                    .as_utf8();
+                self.bind_cast(
+                    Expr::Value(risingwave_sqlparser::ast::Value::SingleQuotedString(
+                        table_name.to_string(),
+                    )),
+                    AstDataType::Regclass,
+                )
+            }
+            _ => Err(RwError::from(ErrorCode::ExprError(
                 "Expected an integer or varchar literal".into(),
-            )))
+            ))),
         }
     }
 
