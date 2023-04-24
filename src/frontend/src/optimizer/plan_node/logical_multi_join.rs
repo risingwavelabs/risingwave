@@ -612,32 +612,19 @@ impl LogicalMultiJoin {
             let mut output =
                 self.create_logical_join(optimized_bushy_tree.join_tree, &mut join_ordering)?;
 
-            output = isolated.into_iter().fold(output, |chain, n| {
-                join_ordering.push(n);
-                LogicalJoin::new(
-                    chain,
-                    self.inputs[n].clone(),
+            if !isolated.is_empty() {
+                output = LogicalJoin::new(
+                    output,
+                    self.make_tree(isolated),
                     JoinType::Inner,
                     Condition::true_cond(),
                 )
-                .into()
-            });
+                .into();
+            }
+
             output
         } else if !isolated.is_empty() {
-            let base = isolated[0];
-            join_ordering.push(isolated[0]);
-            isolated[1..]
-                .iter()
-                .fold(self.inputs[base].clone(), |chain, n| {
-                    join_ordering.push(*n);
-                    LogicalJoin::new(
-                        chain,
-                        self.inputs[*n].clone(),
-                        JoinType::Inner,
-                        Condition::true_cond(),
-                    )
-                    .into()
-                })
+            self.make_tree(isolated)
         } else {
             return Err(RwError::from(ErrorCode::InternalError(
                 "no plan remain".into(),
@@ -671,6 +658,44 @@ impl LogicalMultiJoin {
 
     pub(crate) fn input_col_nums(&self) -> Vec<usize> {
         self.inputs.iter().map(|i| i.schema().len()).collect()
+    }
+
+    fn make_tree(&self, v: Vec<usize>) -> PlanRef {
+        let mut que = VecDeque::new();
+        for chunk in v.chunks(2) {
+            if chunk.len() == 2 {
+                que.push_back(
+                    LogicalJoin::new(
+                        self.inputs[chunk[0]].clone(),
+                        self.inputs[chunk[1]].clone(),
+                        JoinType::Inner,
+                        Condition::true_cond(),
+                    )
+                    .into(),
+                );
+            } else {
+                if let Some(r) = que.pop_front() {
+                    que.push_back(
+                        LogicalJoin::new(
+                            self.inputs[chunk[0]].clone(),
+                            r,
+                            JoinType::Inner,
+                            Condition::true_cond(),
+                        )
+                        .into(),
+                    )
+                } else {
+                    return self.inputs[chunk[0]].clone();
+                }
+            }
+        }
+
+        while que.len() > 1 {
+            let l = que.pop_front().unwrap();
+            let r = que.pop_front().unwrap();
+            que.push_back(LogicalJoin::new(l, r, JoinType::Inner, Condition::true_cond()).into());
+        }
+        que.pop_front().unwrap()
     }
 
     /// get join graph from `self.on`, return the join graph and the new join condition.
