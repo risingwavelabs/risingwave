@@ -1,0 +1,13 @@
+statement ok
+create table sz_test(v1 int);
+
+statement ok
+create index sz_test_idx on sz_test (v1);
+
+statement ok
+insert into sz_test values (1);
+
+query T
+SELECT pg_table_size('sz_test');
+----
+64

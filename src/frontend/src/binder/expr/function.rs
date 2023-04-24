@@ -558,31 +558,6 @@ impl Binder {
                         ))))
                     }
                 ))),
-                ("pg_relation_size",raw(|binder, inputs|{
-                        if !inputs.is_empty() && inputs.len() <= 2{
-                            Err(ErrorCode::ExprError("pg_relation_size takes 1 or 2 arguments".into()))?
-                        }
-                        let input = &inputs[0];
-
-                        // This function, on Postgres, offers the ability to get the size of forks of a 
-                        // table in addition to the main fork. RW's HummockVersionStats does not provide
-                        // such data so this is currently implemented as an alias for `pg_table_size`.
-                        //
-                        // See: https://stackoverflow.com/a/41991566 and https://pgpedia.info/p/pg_relation_size.html
-                        let bound_query = binder.bind_get_table_size_select("pg_relation_size", input)?;
-                        Ok(ExprImpl::Subquery(Box::new(Subquery::new(
-                            BoundQuery {
-                                body: BoundSetExpr::Select(Box::new(bound_query)),
-                                order: vec![],
-                                limit: None,
-                                offset: None,
-                                with_ties: false,
-                                extra_order_exprs: vec![],
-                            },
-                            SubqueryKind::Scalar,
-                        ))))
-                    }
-                )),
                 ("pg_indexes_size", guard_by_len(1, raw(|binder, inputs|{
                         let input = &inputs[0];
                         let bound_query = binder.bind_get_indexes_size_select(input)?;
