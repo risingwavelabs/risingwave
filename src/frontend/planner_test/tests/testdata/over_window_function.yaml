@@ -140,10 +140,7 @@
     create table t(x int);
     select x from t group by (row_number(x) over());
   binder_error: |-
-    Bind error: failed to bind expression: (row_number(x) OVER ())
-
-    Caused by:
-      Bind error: failed to bind expression: row_number(x) OVER ()
+    Bind error: failed to bind expression: row_number(x) OVER ()
 
     Caused by:
       Invalid input syntax: window functions are not allowed in GROUP BY
@@ -151,10 +148,7 @@
     create table t(x int);
     select x from t having (row_number(x) over() > 1);
   binder_error: |-
-    Bind error: failed to bind expression: (row_number(x) OVER () > 1)
-
-    Caused by:
-      Bind error: failed to bind expression: row_number(x) OVER () > 1
+    Bind error: failed to bind expression: row_number(x) OVER () > 1
 
     Caused by:
       Bind error: failed to bind expression: row_number(x) OVER ()
@@ -165,10 +159,7 @@
     create table t(x int);
     select x from t where (row_number(x) over() > 1);
   binder_error: |-
-    Bind error: failed to bind expression: (row_number(x) OVER () > 1)
-
-    Caused by:
-      Bind error: failed to bind expression: row_number(x) OVER () > 1
+    Bind error: failed to bind expression: row_number(x) OVER () > 1
 
     Caused by:
       Bind error: failed to bind expression: row_number(x) OVER ()

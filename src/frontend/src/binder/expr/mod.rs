@@ -65,14 +65,15 @@ impl Binder {
             // operators & functions
             Expr::UnaryOp { op, expr } => self.bind_unary_expr(op, *expr),
             Expr::BinaryOp { left, op, right } => self.bind_binary_op(*left, op, *right),
-            Expr::Nested(expr) => self.bind_expr(*expr),
+            // Note: here we return directly to avoid too verbose error message.
+            // Other branches should be handled at the end of this function.
+            Expr::Nested(expr) => return self.bind_expr(*expr),
             Expr::Array(Array { elem: exprs, .. }) => self.bind_array(exprs),
             Expr::ArrayIndex { obj, index } => self.bind_array_index(*obj, *index),
             Expr::ArrayRangeIndex { obj, start, end } => {
                 self.bind_array_range_index(*obj, start, end)
             }
             Expr::Function(f) => self.bind_function(f),
-            // subquery
             Expr::Subquery(q) => self.bind_subquery_expr(*q, SubqueryKind::Scalar),
             Expr::Exists(q) => self.bind_subquery_expr(*q, SubqueryKind::Existential),
             Expr::InSubquery {
