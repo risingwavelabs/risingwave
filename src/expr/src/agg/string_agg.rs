@@ -12,202 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
-use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, RowRef,
-};
 use risingwave_common::bail;
-use risingwave_common::row::RowExt;
-use risingwave_common::types::DataType;
-use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::memcmp_encoding;
-use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_expr_macro::build_aggregate;
+use risingwave_expr_macro::aggregate;
 
-use super::Aggregator;
-use crate::function::aggregate::AggCall;
-use crate::{ExprError, Result};
-
-#[build_aggregate("string_agg(varchar, varchar) -> varchar")]
-fn build_string_agg(agg: AggCall) -> Result<Box<dyn Aggregator>> {
-    Ok(if agg.column_orders.is_empty() {
-        Box::new(StringAggUnordered::new())
-    } else {
-        Box::new(StringAggOrdered::new(agg.column_orders))
-    })
-}
-
-#[derive(Clone)]
-struct StringAggUnordered {
-    result: Option<String>,
-}
-
-impl StringAggUnordered {
-    fn new() -> Self {
-        Self { result: None }
-    }
-
-    fn push(&mut self, value: &str, delim: &str) {
-        if let Some(result) = &mut self.result {
-            result.push_str(delim);
-            result.push_str(value);
-        } else {
-            self.result = Some(value.to_string());
-        }
-    }
-
-    fn get_result_and_reset(&mut self) -> Option<String> {
-        std::mem::take(&mut self.result)
-    }
-}
-
-#[async_trait::async_trait]
-impl Aggregator for StringAggUnordered {
-    fn return_type(&self) -> DataType {
-        DataType::Varchar
-    }
-
-    async fn update_multi(
-        &mut self,
-        input: &DataChunk,
-        start_row_id: usize,
-        end_row_id: usize,
-    ) -> Result<()> {
-        let (ArrayImpl::Utf8(agg_col), ArrayImpl::Utf8(delim_col)) = (
-            input.column_at(0).array_ref(),
-            input.column_at(1).array_ref(),
-        ) else {
-            bail!("Input fail to match {}.", stringify!(Utf8))
-        };
-        for (value, delim) in agg_col
-            .iter()
-            .zip_eq_fast(delim_col.iter())
-            .skip(start_row_id)
-            .take(end_row_id - start_row_id)
-            .filter(|(v, _)| v.is_some())
-        {
-            self.push(value.unwrap(), delim.unwrap_or(""));
-        }
-        Ok(())
-    }
-
-    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-        let ArrayBuilderImpl::Utf8(builder) = builder else {
-            bail!("Builder fail to match {}.", stringify!(Utf8))
-        };
-        let res = self.get_result_and_reset();
-        builder.append(res.as_deref());
-        Ok(())
-    }
-}
-
-type OrderKey = Vec<u8>;
-
-#[derive(Clone)]
-struct StringAggData {
-    value: String,
-    delim: String,
-}
-
-#[derive(Clone)]
-struct StringAggOrdered {
-    order_col_indices: Vec<usize>,
-    order_types: Vec<OrderType>,
-    unordered_values: Vec<(OrderKey, StringAggData)>,
-}
-
-impl StringAggOrdered {
-    fn new(column_orders: Vec<ColumnOrder>) -> Self {
-        let (order_col_indices, order_types) = column_orders
-            .into_iter()
-            .map(|c| (c.column_index, c.order_type))
-            .unzip();
-        Self {
-            order_col_indices,
-            order_types,
-            unordered_values: vec![],
-        }
-    }
-
-    fn push_row(&mut self, value: &str, delim: &str, row: RowRef<'_>) -> Result<()> {
-        let key =
-            memcmp_encoding::encode_row(row.project(&self.order_col_indices), &self.order_types)
-                .map_err(|e| ExprError::Internal(anyhow!("failed to encode row, error: {}", e)))?;
-        self.unordered_values.push((
-            key,
-            StringAggData {
-                value: value.to_string(),
-                delim: delim.to_string(),
-            },
-        ));
-        Ok(())
-    }
-
-    fn get_result_and_reset(&mut self) -> Option<String> {
-        let mut rows = std::mem::take(&mut self.unordered_values);
-        if rows.is_empty() {
-            return None;
-        }
-        rows.sort_unstable_by(|(key_a, _), (key_b, _)| key_a.cmp(key_b));
-        let mut rows_iter = rows.into_iter();
-        let mut result = rows_iter.next().unwrap().1.value;
-        for (_, data) in rows_iter {
-            result.push_str(&data.delim);
-            result.push_str(&data.value);
-        }
-        Some(result)
-    }
-}
-
-#[async_trait::async_trait]
-impl Aggregator for StringAggOrdered {
-    fn return_type(&self) -> DataType {
-        DataType::Varchar
-    }
-
-    async fn update_multi(
-        &mut self,
-        input: &DataChunk,
-        start_row_id: usize,
-        end_row_id: usize,
-    ) -> Result<()> {
-        let (ArrayImpl::Utf8(agg_col), ArrayImpl::Utf8(delim_col)) = (
-            input.column_at(0).array_ref(),
-            input.column_at(1).array_ref(),
-        ) else {
-            bail!("Input fail to match {}.", stringify!(Utf8))
-        };
-        for (row_id, (value, delim)) in agg_col
-            .iter()
-            .zip_eq_fast(delim_col.iter())
-            .enumerate()
-            .skip(start_row_id)
-            .take(end_row_id - start_row_id)
-            .filter(|(_, (v, _))| v.is_some())
-        {
-            let (row_ref, vis) = input.row_at(row_id);
-            assert!(vis);
-            self.push_row(value.unwrap(), delim.unwrap_or(""), row_ref)?;
-        }
-        Ok(())
-    }
-
-    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-        let ArrayBuilderImpl::Utf8(builder) = builder else {
-            bail!("Builder fail to match {}.", stringify!(Utf8))
-        };
-        let res = self.get_result_and_reset();
-        builder.append(res.as_deref());
-        Ok(())
-    }
+#[aggregate("string_agg(varchar, varchar) -> varchar", state = "String")]
+fn string_agg(
+    state: Option<String>,
+    value: Option<&str>,
+    delimiter: Option<&str>,
+) -> Option<String> {
+    let Some(value) = value else { return state };
+    let Some(mut state) = state else { return Some(value.into()) };
+    state += delimiter.unwrap_or("");
+    state += value;
+    Some(state)
 }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{DataChunk, DataChunkTestExt, Utf8ArrayBuilder};
+    use risingwave_common::array::*;
+    use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
-    use super::*;
+    use crate::function::aggregate::{AggArgs, AggCall, AggKind};
+    use crate::Result;
 
     #[tokio::test]
     async fn test_string_agg_basic() -> Result<()> {
@@ -218,7 +46,14 @@ mod tests {
              ccc ,
              ddd ,",
         );
-        let mut agg = StringAggUnordered::new();
+        let mut agg = crate::agg::build(AggCall {
+            kind: AggKind::StringAgg,
+            args: AggArgs::Binary([DataType::Varchar, DataType::Varchar], [0, 1]),
+            return_type: DataType::Varchar,
+            column_orders: vec![],
+            filter: None,
+            distinct: false,
+        })?;
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;
@@ -239,7 +74,14 @@ mod tests {
              ccc _
              ddd .",
         );
-        let mut agg = StringAggUnordered::new();
+        let mut agg = crate::agg::build(AggCall {
+            kind: AggKind::StringAgg,
+            args: AggArgs::Binary([DataType::Varchar, DataType::Varchar], [0, 1]),
+            return_type: DataType::Varchar,
+            column_orders: vec![],
+            filter: None,
+            distinct: false,
+        })?;
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;
@@ -260,11 +102,18 @@ mod tests {
              ccc _ 0 8
              ddd _ 1 3",
         );
-        let mut agg = StringAggOrdered::new(vec![
-            ColumnOrder::new(2, OrderType::ascending()),
-            ColumnOrder::new(3, OrderType::descending()),
-            ColumnOrder::new(0, OrderType::descending()),
-        ]);
+        let mut agg = crate::agg::build(AggCall {
+            kind: AggKind::StringAgg,
+            args: AggArgs::Binary([DataType::Varchar, DataType::Varchar], [0, 1]),
+            return_type: DataType::Varchar,
+            column_orders: vec![
+                ColumnOrder::new(2, OrderType::ascending()),
+                ColumnOrder::new(3, OrderType::descending()),
+                ColumnOrder::new(0, OrderType::descending()),
+            ],
+            filter: None,
+            distinct: false,
+        })?;
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;

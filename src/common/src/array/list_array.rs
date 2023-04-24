@@ -331,6 +331,12 @@ pub fn display_for_explain(list: &ListValue) -> String {
     )
 }
 
+impl From<Vec<Datum>> for ListValue {
+    fn from(data: Vec<Datum>) -> Self {
+        ListValue::new(data)
+    }
+}
+
 impl ListValue {
     pub fn new(values: Vec<Datum>) -> Self {
         Self {

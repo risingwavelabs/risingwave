@@ -38,11 +38,9 @@ impl FunctionAttr {
                 ret = types::min_compatible_type(&args);
             }
             let attr = FunctionAttr {
-                name: self.name.clone(),
                 args: args.iter().map(|s| s.to_string()).collect(),
                 ret: ret.to_string(),
-                batch: self.batch.clone(),
-                user_fn: self.user_fn.clone(),
+                ..self.clone()
             };
             attrs.push(attr);
         }
@@ -309,13 +307,38 @@ impl FunctionAttr {
 
     /// Generate build function for aggregate function.
     fn generate_agg_build_fn(&self) -> Result<TokenStream2> {
-        let arg_variant: TokenStream2 = types::variant(&self.args[0]).parse().unwrap();
-        let arg_owned: TokenStream2 = types::owned_type(&self.args[0]).parse().unwrap();
-        let arg_ref: TokenStream2 = types::ref_type(&self.args[0]).parse().unwrap();
         let ret_variant: TokenStream2 = types::variant(&self.ret).parse().unwrap();
-        let state_type: TokenStream2 = types::owned_type(&self.ret).parse().unwrap();
+        let ret_owned: TokenStream2 = types::owned_type(&self.ret).parse().unwrap();
+        let state_type: TokenStream2 = match &self.state {
+            Some(state) => state.parse().unwrap(),
+            None => types::owned_type(&self.ret).parse().unwrap(),
+        };
+        let args = (0..self.args.len()).map(|i| format_ident!("v{i}"));
+        let args = quote! { #(#args),* };
+        let let_arrays = self.args.iter().enumerate().map(|(i, arg)| {
+            let array = format_ident!("a{i}");
+            let variant: TokenStream2 = types::variant(arg).parse().unwrap();
+            quote! {
+                let ArrayImpl::#variant(#array) = input.column_at(#i).array_ref() else {
+                    bail!("input type mismatch. expect: {}", stringify!(#variant));
+                };
+            }
+        });
+        let let_values = (0..self.args.len()).map(|i| {
+            let v = format_ident!("v{i}");
+            let a = format_ident!("a{i}");
+            quote! { let #v = #a.value_at(row_id); }
+        });
+        let let_state = match &self.state {
+            Some(_) => quote! { let mut state = self.state.take(); },
+            None => quote! { let mut state = self.state.as_ref().map(|x| x.as_scalar_ref()); },
+        };
+        let assign_state = match &self.state {
+            Some(_) => quote! { self.state = state; },
+            None => quote! { self.state = state.map(|x| x.to_owned_scalar()); },
+        };
         let fn_name = format_ident!("{}", self.user_fn.name);
-        let mut next_state = quote! { #fn_name(state, value) };
+        let mut next_state = quote! { #fn_name(state, #args) };
         next_state = match self.user_fn.return_type {
             ReturnType::T => quote! { Some(#next_state) },
             ReturnType::Option => next_state,
@@ -323,14 +346,17 @@ impl FunctionAttr {
             ReturnType::ResultOption => quote! { #next_state? },
         };
         if !self.user_fn.arg_option {
+            if self.args.len() > 1 {
+                todo!("support multiple arguments for non-option functions");
+            }
             let first_state = match self.name.as_str() {
                 "count" => quote! { unreachable!() }, // XXX: special hack for `count`
-                _ => quote! { Some(value.into()) },
+                _ => quote! { Some(v0.into()) },
             };
             next_state = quote! {
-                match (state, value) {
-                    (Some(state), Some(value)) => #next_state,
-                    (None, Some(value)) => #first_state,
+                match (state, v0) {
+                    (Some(state), Some(v0)) => #next_state,
+                    (None, Some(v0)) => #first_state,
                     (state, None) => state,
                 }
             };
@@ -346,30 +372,17 @@ impl FunctionAttr {
                 use risingwave_common::array::*;
                 use risingwave_common::types::*;
                 use risingwave_common::bail;
+                use risingwave_common::buffer::Bitmap;
+                use crate::Result;
 
                 #[derive(Clone)]
-                struct Agg<D: MaybeDistinct> {
+                struct Agg {
                     return_type: DataType,
                     state: Option<#state_type>,
-                    distinct: D,
-                }
-
-                trait MaybeDistinct: Clone + Send + 'static {
-                    fn insert(&mut self, value: #arg_ref) -> bool;
-                }
-                impl MaybeDistinct for () {
-                    fn insert(&mut self, _value: #arg_ref) -> bool {
-                        true
-                    }
-                }
-                impl MaybeDistinct for HashSet<#arg_owned> {
-                    fn insert(&mut self, value: #arg_ref) -> bool {
-                        HashSet::insert(self, value.to_owned_scalar())
-                    }
                 }
 
                 #[async_trait::async_trait]
-                impl<D: MaybeDistinct> crate::agg::Aggregator for Agg<D> {
+                impl crate::agg::Aggregator for Agg {
                     fn return_type(&self) -> DataType {
                         self.return_type.clone()
                     }
@@ -379,43 +392,38 @@ impl FunctionAttr {
                         start_row_id: usize,
                         end_row_id: usize,
                     ) -> Result<()> {
-                        let ArrayImpl::#arg_variant(input) = input.column_at(0).array_ref() else {
-                            bail!("input type mismatch. expect: {}", stringify!(#arg_variant));
+                        let mut bitmap = match input.visibility() {
+                            Some(vis) => vis.clone(),
+                            None => Bitmap::ones(input.capacity()),
                         };
-                        let mut state = self.state.as_ref().map(|x| x.as_scalar_ref());
+                        #(#let_arrays)*
+                        #let_state
                         for row_id in start_row_id..end_row_id {
-                            let value = input.value_at(row_id);
-                            if let Some(v) = value && !self.distinct.insert(v) {
+                            if !bitmap.is_set(row_id) {
                                 continue;
                             }
+                            #(#let_values)*
                             state = #next_state;
                         }
-                        self.state = state.map(|x| x.to_owned_scalar());
+                        #assign_state
                         Ok(())
                     }
                     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
                         let ArrayBuilderImpl::#ret_variant(builder) = builder else {
                             bail!("output type mismatch. expect: {}", stringify!(#ret_variant));
                         };
-                        let res = self.state.take();
-                        builder.append(res.as_ref().map(|x| x.as_scalar_ref()));
+                        match self.state.take() {
+                            Some(state) => builder.append(Some(<#ret_owned>::from(state).as_scalar_ref())),
+                            None => builder.append_null(),
+                        }
                         Ok(())
                     }
                 }
 
-                if agg.distinct {
-                    Ok(Box::new(Agg {
-                        return_type: agg.return_type,
-                        state: #init_state,
-                        distinct: HashSet::<#arg_owned>::new(),
-                    }))
-                } else {
-                    Ok(Box::new(Agg {
-                        return_type: agg.return_type,
-                        state: #init_state,
-                        distinct: (),
-                    }))
-                }
+                Ok(Box::new(Agg {
+                    return_type: agg.return_type,
+                    state: #init_state,
+                }))
             }
         })
     }

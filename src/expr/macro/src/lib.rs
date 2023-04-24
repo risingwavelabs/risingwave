@@ -104,12 +104,13 @@ pub fn build_aggregate(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct FunctionAttr {
     name: String,
     args: Vec<String>,
     ret: String,
     batch: Option<String>,
+    state: Option<String>,
     user_fn: UserFunctionAttr,
 }
 

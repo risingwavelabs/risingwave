@@ -41,15 +41,6 @@ impl FunctionAttr {
             .ok_or_else(|| Error::new_spanned(sig, "expected '('"))?;
         let args = args.trim_start().trim_end_matches([')', ' ']);
 
-        let batch = attr.iter().find_map(|n| {
-            let syn::NestedMeta::Meta(syn::Meta::NameValue(nv)) = n else { return None };
-            if !nv.path.is_ident("batch") {
-                return None;
-            };
-            let syn::Lit::Str(ref lit_str) = nv.lit else { return None };
-            Some(lit_str.value())
-        });
-
         let user_fn = UserFunctionAttr::parse(item)?;
 
         Ok(FunctionAttr {
@@ -60,7 +51,8 @@ impl FunctionAttr {
                 args.split(',').map(|s| s.trim().to_string()).collect()
             },
             ret: ret.trim().to_string(),
-            batch,
+            batch: find_argument(attr, "batch"),
+            state: find_argument(attr, "state"),
             user_fn,
         })
     }
@@ -157,4 +149,16 @@ fn _extract_prebuild_arg(item: &mut syn::ItemFn) -> Option<(usize, String)> {
         }
     }
     None
+}
+
+/// Find argument `#[xxx(.., name = "value")]`.
+fn find_argument(attr: &syn::AttributeArgs, name: &str) -> Option<String> {
+    attr.iter().find_map(|n| {
+        let syn::NestedMeta::Meta(syn::Meta::NameValue(nv)) = n else { return None };
+        if !nv.path.is_ident(name) {
+            return None;
+        }
+        let syn::Lit::Str(ref lit_str) = nv.lit else { return None };
+        Some(lit_str.value())
+    })
 }
