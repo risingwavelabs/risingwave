@@ -331,10 +331,10 @@ steps:
           env:
             GITHUB_TOKEN: github-token
       - gencer/cache#v2.4.10: *cargo-cache
-      - docker-compose#v4.9.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-          environment:
-            - GITHUB_TOKEN
+#      - docker-compose#v4.9.0:
+#          run: rw-build-env
+#          config: ci/docker-compose.yml
+#          mount-buildkite-agent: true
+#          environment:
+#            - GITHUB_TOKEN
     timeout_in_minutes: 20
