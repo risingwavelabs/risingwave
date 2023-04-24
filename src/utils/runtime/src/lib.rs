@@ -209,35 +209,32 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
     }
 
     let slow_query_log_path = std::env::var("RW_QUERY_LOG_PATH");
-    if ENABLE_QUERY_LOG_FILE {
-        let slow_query_log_path = slow_query_log_path.unwrap_or(default_query_log_path);
-        let slow_query_log_path = PathBuf::from(slow_query_log_path);
-        // Because if slow query log is enabled whenever query log is enabled,
-        // we don't need to create all the directories on the path again.
-        // also dump slow query log
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(slow_query_log_path.join("slow_query.log"))
-            .unwrap_or_else(|e| {
-                panic!(
-                    "failed to create '{}/slow_query.log': {e}",
-                    slow_query_log_path.display()
-                )
-            });
-        let layer = tracing_subscriber::fmt::layer()
-            .with_ansi(false)
-            .with_level(false)
-            .with_file(false)
-            .with_target(false)
-            .with_writer(std::sync::Mutex::new(file))
-            .with_filter(
-                filter::Targets::new()
-                    .with_target("risingwave_frontend_slow_query_log", Level::TRACE),
-            );
-        layers.push(layer.boxed());
-    };
+    let slow_query_log_path = slow_query_log_path.unwrap_or(default_query_log_path);
+    let slow_query_log_path = PathBuf::from(slow_query_log_path);
+    // Because if slow query log is enabled whenever query log is enabled,
+    // we don't need to create all the directories on the path again.
+    // also dump slow query log
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(slow_query_log_path.join("slow_query.log"))
+        .unwrap_or_else(|e| {
+            panic!(
+                "failed to create '{}/slow_query.log': {e}",
+                slow_query_log_path.display()
+            )
+        });
+    let layer = tracing_subscriber::fmt::layer()
+        .with_ansi(false)
+        .with_level(false)
+        .with_file(false)
+        .with_target(false)
+        .with_writer(std::sync::Mutex::new(file))
+        .with_filter(
+            filter::Targets::new().with_target("risingwave_frontend_slow_query_log", Level::TRACE),
+        );
+    layers.push(layer.boxed());
 
     if settings.enable_tokio_console {
         let (console_layer, server) = console_subscriber::ConsoleLayer::builder()
