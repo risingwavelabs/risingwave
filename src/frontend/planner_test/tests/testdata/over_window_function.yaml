@@ -15,7 +15,11 @@
 - sql: |
     create table t(x int);
     select lag(x) from t;
-  binder_error: 'Bind error: failed to bind expression: lag(x), Invalid input syntax: Window function `lag` must have OVER clause'
+  binder_error: |-
+    Bind error: failed to bind expression: lag(x)
+
+    Caused by:
+      Invalid input syntax: Window function `lag` must have OVER clause
 - sql: |
     create table t(x int);
     select lead(x, 2) over() from t;
@@ -33,7 +37,10 @@
     create table t(x int);
     select lead(x, x + 1) over() from t;
   binder_error: |-
-    Bind error: failed to bind expression: lead(x, x + 1) OVER (), Feature is not yet implemented: non-const `offset` of `lead` function is not supported yet
+    Bind error: failed to bind expression: lead(x, x + 1) OVER ()
+
+    Caused by:
+      Feature is not yet implemented: non-const `offset` of `lead` function is not supported yet
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     create table t(x int);
@@ -77,7 +84,11 @@
 - sql: |
     create table t(x int, y int);
     select x, y, min(x) over(PARTITION BY y ROWS UNBOUNDED FOLLOWING) from t;
-  binder_error: 'Bind error: failed to bind expression: min(x) OVER (PARTITION BY y ROWS UNBOUNDED FOLLOWING), Invalid input syntax: window frame `ROWS BETWEEN UNBOUNDED FOLLOWING AND CURRENT ROW` is not valid'
+  binder_error: |-
+    Bind error: failed to bind expression: min(x) OVER (PARTITION BY y ROWS UNBOUNDED FOLLOWING)
+
+    Caused by:
+      Invalid input syntax: window frame `ROWS BETWEEN UNBOUNDED FOLLOWING AND CURRENT ROW` is not valid
 - sql: |
     create table t(x int, y int);
     select x, y, lag(x) over(PARTITION BY y ORDER BY x) from t;
@@ -95,7 +106,10 @@
     create table t(x int, y int);
     select x, y, max(x) over(PARTITION BY y ORDER BY x RANGE 100 PRECEDING) from t;
   binder_error: |-
-    Bind error: failed to bind expression: max(x) OVER (PARTITION BY y ORDER BY x RANGE 100 PRECEDING), Feature is not yet implemented: window frame in `RANGE` mode is not supported
+    Bind error: failed to bind expression: max(x) OVER (PARTITION BY y ORDER BY x RANGE 100 PRECEDING)
+
+    Caused by:
+      Feature is not yet implemented: window frame in `RANGE` mode is not supported
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
 - sql: |
     create table t(x int);
@@ -125,19 +139,56 @@
 - sql: |
     create table t(x int);
     select x from t group by (row_number(x) over());
-  binder_error: 'Bind error: failed to bind expression: (row_number(x) OVER ()), Bind error: failed to bind expression: row_number(x) OVER (), Invalid input syntax: window functions are not allowed in GROUP BY'
+  binder_error: |-
+    Bind error: failed to bind expression: (row_number(x) OVER ())
+
+    Caused by:
+      Bind error: failed to bind expression: row_number(x) OVER ()
+
+    Caused by:
+      Invalid input syntax: window functions are not allowed in GROUP BY
 - sql: |
     create table t(x int);
     select x from t having (row_number(x) over() > 1);
-  binder_error: 'Bind error: failed to bind expression: (row_number(x) OVER () > 1), Bind error: failed to bind expression: row_number(x) OVER () > 1, Bind error: failed to bind expression: row_number(x) OVER (), Invalid input syntax: window functions are not allowed in HAVING'
+  binder_error: |-
+    Bind error: failed to bind expression: (row_number(x) OVER () > 1)
+
+    Caused by:
+      Bind error: failed to bind expression: row_number(x) OVER () > 1
+
+    Caused by:
+      Bind error: failed to bind expression: row_number(x) OVER ()
+
+    Caused by:
+      Invalid input syntax: window functions are not allowed in HAVING
 - sql: |
     create table t(x int);
     select x from t where (row_number(x) over() > 1);
-  binder_error: 'Bind error: failed to bind expression: (row_number(x) OVER () > 1), Bind error: failed to bind expression: row_number(x) OVER () > 1, Bind error: failed to bind expression: row_number(x) OVER (), Invalid input syntax: window functions are not allowed in WHERE'
+  binder_error: |-
+    Bind error: failed to bind expression: (row_number(x) OVER () > 1)
+
+    Caused by:
+      Bind error: failed to bind expression: row_number(x) OVER () > 1
+
+    Caused by:
+      Bind error: failed to bind expression: row_number(x) OVER ()
+
+    Caused by:
+      Invalid input syntax: window functions are not allowed in WHERE
 - sql: |
     create table t(x int);
     select sum(x) filter (where row_number() over () > 1) from t;
-  binder_error: 'Bind error: failed to bind expression: sum(x) FILTER(WHERE row_number() OVER () > 1), Bind error: failed to bind expression: row_number() OVER () > 1, Bind error: failed to bind expression: row_number() OVER (), Invalid input syntax: window functions are not allowed in FILTER'
+  binder_error: |-
+    Bind error: failed to bind expression: sum(x) FILTER(WHERE row_number() OVER () > 1)
+
+    Caused by:
+      Bind error: failed to bind expression: row_number() OVER () > 1
+
+    Caused by:
+      Bind error: failed to bind expression: row_number() OVER ()
+
+    Caused by:
+      Invalid input syntax: window functions are not allowed in FILTER
 - name: TopN with rank output
   sql: |
     create table t(x int);
