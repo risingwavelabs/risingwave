@@ -56,6 +56,10 @@ services:
 
   ci-flamegraph-env:
     image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230407
+    # NOTE(kwannoel): This is used in order to permit
+    # syscalls for `nperf` (perf_event_open),
+    # so it can do CPU profiling.
+    # These options should NOT be used for other services.
     privileged: true
     userns_mode: host
     volumes:
