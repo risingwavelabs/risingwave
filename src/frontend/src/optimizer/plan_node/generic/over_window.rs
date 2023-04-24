@@ -110,8 +110,15 @@ impl<PlanRef: GenericPlanRef> OverWindow<PlanRef> {
         }
     }
 
-    fn output_len(&self) -> usize {
+    pub fn output_len(&self) -> usize {
         self.input.schema().len() + self.window_functions.len()
+    }
+
+    pub fn funcs_have_same_partition_and_order(&self) -> bool {
+        self.window_functions
+            .iter()
+            .map(|f| (&f.partition_by, &f.order_by))
+            .all_equal()
     }
 }
 
