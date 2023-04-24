@@ -16,7 +16,6 @@ use std::borrow::Cow;
 use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
-use num_traits::FromPrimitive;
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::types::num256::Int256;
 use risingwave_common::types::{DataType, Date, Datum, Decimal, ScalarImpl, Time};
@@ -79,8 +78,8 @@ fn do_parse_simd_json_value(
         }
         DataType::Float64 => simd_json_ensure_float!(v, f64).into(),
         // FIXME: decimal should have more precision than f64
-        DataType::Decimal => Decimal::from_f64(simd_json_ensure_float!(v, Decimal))
-            .ok_or_else(|| anyhow!("expect decimal"))?
+        DataType::Decimal => Decimal::try_from(simd_json_ensure_float!(v, Decimal))
+            .map_err(|_| anyhow!("expect decimal"))?
             .into(),
         DataType::Varchar => ensure_str!(v, "varchar").to_string().into(),
         DataType::Bytea => ensure_str!(v, "bytea").to_string().into(),

@@ -62,7 +62,6 @@ pub fn round_decimal(input: Decimal) -> Decimal {
 mod tests {
     use std::str::FromStr;
 
-    use num_traits::FromPrimitive;
     use risingwave_common::types::{Decimal, F64};
 
     use super::ceil_f64;
@@ -113,6 +112,6 @@ mod tests {
     }
 
     fn dec(f: f64) -> Decimal {
-        Decimal::from_f64(f).unwrap()
+        Decimal::try_from(f).unwrap()
     }
 }
