@@ -119,14 +119,12 @@ where
             }
             return Ok(worker.to_protobuf());
         }
-
         // Generate worker id.
         let worker_id = self
             .env
             .id_gen_manager()
             .generate::<{ IdCategory::Worker }>()
             .await? as WorkerId;
-
         // Generate parallel units.
         let parallel_units = if r#type == WorkerType::ComputeNode {
             self.generate_cn_parallel_units(worker_node_parallelism, worker_id)
@@ -134,7 +132,6 @@ where
         } else {
             vec![]
         };
-
         // Construct worker.
         let worker_node = WorkerNode {
             id: worker_id,
@@ -144,15 +141,11 @@ where
             parallel_units,
             property,
         };
-
         let worker = Worker::from_protobuf(worker_node.clone());
-
         // Persist worker node.
         worker.insert(self.env.meta_store()).await?;
-
         // Update core.
         core.add_worker_node(worker);
-
         Ok(worker_node)
     }
 
