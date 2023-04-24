@@ -17,9 +17,9 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
-use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
+use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use risingwave_pb::hummock::{CompactTask, LevelType};
 
 use super::compaction_utils::estimate_task_memory_capacity;
@@ -31,8 +31,8 @@ use crate::hummock::compactor::{CompactOutput, CompactionFilter, Compactor, Comp
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
 use crate::hummock::sstable::CompactionDeleteRangesBuilder;
 use crate::hummock::{
-    create_tombstones_to_represent_monotonic_deletes, CachePolicy, CompactionDeleteRanges,
-    CompressionAlgorithm, HummockResult, SstableBuilderOptions, SstableStoreRef,
+    CachePolicy, CompactionDeleteRanges, CompressionAlgorithm, HummockResult,
+    SstableBuilderOptions, SstableStoreRef,
 };
 use crate::monitor::StoreLocalStatistic;
 
@@ -115,19 +115,19 @@ impl CompactorRunner {
             if level.table_infos.is_empty() {
                 continue;
             }
-
             for table_info in &level.table_infos {
                 let table = sstable_store.sstable(table_info, &mut local_stats).await?;
-                let mut range_tombstone_list = create_tombstones_to_represent_monotonic_deletes(
-                    &table.value().meta.monotonic_tombstone_events,
-                );
-                range_tombstone_list.retain(|tombstone| {
-                    !filter.should_delete(FullKey::from_user_key(
-                        tombstone.start_user_key.as_ref(),
-                        tombstone.sequence,
-                    ))
+                let mut range_tombstone_list =
+                    table.value().meta.monotonic_tombstone_events.clone();
+                range_tombstone_list.iter_mut().for_each(|tombstone| {
+                    if filter.should_delete(FullKey::from_user_key(
+                        tombstone.event_key.as_ref(),
+                        tombstone.new_epoch,
+                    )) {
+                        tombstone.new_epoch = HummockEpoch::MAX;
+                    }
                 });
-                builder.add_tombstone(range_tombstone_list);
+                builder.add_delete_events(range_tombstone_list);
             }
         }
         let aggregator = builder.build_for_compaction(compact_task.gc_delete_keys);

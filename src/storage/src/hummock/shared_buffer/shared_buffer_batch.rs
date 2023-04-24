@@ -34,10 +34,7 @@ use crate::hummock::iterator::{
 use crate::hummock::store::memtable::ImmId;
 use crate::hummock::utils::{range_overlap, MemoryTracker};
 use crate::hummock::value::HummockValue;
-use crate::hummock::{
-    create_tombstones_to_represent_monotonic_deletes, DeleteRangeTombstone, HummockEpoch,
-    HummockResult, MonotonicDeleteEvent,
-};
+use crate::hummock::{DeleteRangeTombstone, HummockEpoch, HummockResult, MonotonicDeleteEvent};
 use crate::storage_value::StorageValue;
 use crate::store::ReadOptions;
 
@@ -543,8 +540,8 @@ impl SharedBufferBatch {
         }
     }
 
-    pub fn get_delete_range_tombstones(&self) -> Vec<DeleteRangeTombstone> {
-        create_tombstones_to_represent_monotonic_deletes(&self.inner.monotonic_tombstone_events)
+    pub fn get_delete_range_tombstones(&self) -> Vec<MonotonicDeleteEvent> {
+        self.inner.monotonic_tombstone_events.clone()
     }
 
     #[cfg(test)]
