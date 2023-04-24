@@ -28,7 +28,12 @@ use risingwave_simulation::utils::AssertResult;
 // Result<String> {}
 
 /// Setup a nexmark stream, inject failures, and verify results.
-async fn nexmark_scaling_up_common(create: &str, select: &str, drop: &str, number_of_nodes: usize) -> Result<()> {
+async fn nexmark_scaling_up_common(
+    create: &str,
+    select: &str,
+    drop: &str,
+    number_of_nodes: usize,
+) -> Result<()> {
     // tracing_subscriber::fmt()
     //     .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
     //     .init();
@@ -44,17 +49,6 @@ async fn nexmark_scaling_up_common(create: &str, select: &str, drop: &str, numbe
     cluster.run(create).await?;
 
     cluster.add_compute_node(number_of_nodes);
-    sleep(Duration::from_secs(2)).await;
-
-    cluster.kill_node(opts)
-
-    // TODO: How is scaling down different from killing?
-    // kill nodes and trigger recovery
-    // for _ in 0..5 {
-    //     sleep(Duration::from_secs(2)).await;
-    //     cluster.kill_node(&KillOpts::ALL).await;
-    // }
-    // wait enough time to make sure the stream is end
     sleep(Duration::from_secs(60)).await;
 
     cluster.run(select).await?.assert_result_eq(&expected);
@@ -62,8 +56,70 @@ async fn nexmark_scaling_up_common(create: &str, select: &str, drop: &str, numbe
     Ok(())
 }
 
+/// Setup a nexmark stream, inject failures, and verify results.
+async fn nexmark_scaling_down_common(
+    create: &str,
+    select: &str,
+    drop: &str,
+    number_of_nodes: usize,
+) -> Result<()> {
+    // tracing_subscriber::fmt()
+    //     .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+    //     .init();
 
+    let mut cluster =
+        NexmarkCluster::new(Configuration::for_scale(), 6, Some(THROUGHPUT * 20), false).await?;
+    cluster.run(create).await?;
+    sleep(Duration::from_secs(30)).await;
+    let expected = cluster.run(select).await?;
+    cluster.run(drop).await?;
+    sleep(Duration::from_secs(5)).await;
 
+    cluster.run(create).await?;
+
+    for _ in 0..number_of_nodes {
+        cluster.remove_rand_compute_node().await;
+        sleep(Duration::from_secs(60)).await;
+    }
+
+    cluster.run(select).await?.assert_result_eq(&expected);
+
+    Ok(())
+}
+
+/// Setup a nexmark stream, inject failures, and verify results.
+async fn nexmark_scaling_up_down_common(
+    create: &str,
+    select: &str,
+    drop: &str,
+    number_of_nodes: usize,
+) -> Result<()> {
+    // tracing_subscriber::fmt()
+    //     .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+    //     .init();
+
+    let mut cluster =
+        NexmarkCluster::new(Configuration::for_scale(), 6, Some(THROUGHPUT * 20), false).await?;
+    cluster.run(create).await?;
+    sleep(Duration::from_secs(30)).await;
+    let expected = cluster.run(select).await?;
+    cluster.run(drop).await?;
+    sleep(Duration::from_secs(5)).await;
+
+    cluster.run(create).await?;
+
+    cluster.add_compute_node(number_of_nodes);
+    sleep(Duration::from_secs(60)).await;
+
+    for _ in 0..number_of_nodes {
+        cluster.remove_rand_compute_node().await;
+        sleep(Duration::from_secs(60)).await;
+    }
+
+    cluster.run(select).await?.assert_result_eq(&expected);
+
+    Ok(())
+}
 
 // TODO: rename this to nexmark_scaling
 macro_rules! test {
@@ -81,23 +137,42 @@ macro_rules! test {
                 nexmark_scaling_up_common(CREATE, SELECT, DROP, 2)
                 .await
             }
+            #[madsim::test]
+            async fn [< nexmark_scaling_down_ $query >]() -> Result<()> {
+                use risingwave_simulation::nexmark::queries::$query::*;
+                nexmark_scaling_down_common(CREATE, SELECT, DROP, 1)
+                .await
+            }
+            #[madsim::test]
+            async fn [< nexmark_scaling_down_2_ $query >]() -> Result<()> {
+                use risingwave_simulation::nexmark::queries::$query::*;
+                nexmark_scaling_down_common(CREATE, SELECT, DROP, 2)
+                .await
+            }
+            #[madsim::test]
+            async fn [< nexmark_scaling_up_down_2_ $query >]() -> Result<()> {
+                use risingwave_simulation::nexmark::queries::$query::*;
+                nexmark_scaling_up_down_common(CREATE, SELECT, DROP, 2)
+                .await
+            }
         }
     };
 }
 
 // q0, q1, q2: too trivial
 test!(q3);
-test!(q4);
-test!(q5);
-// q6: cannot plan
-test!(q7);
-test!(q8);
-test!(q9);
-// q10+: duplicated or unsupported
-
-// Self made queries.
-test!(q101);
-test!(q102);
-test!(q103);
-test!(q104);
-test!(q105);
+// test!(q4);
+// test!(q5);
+// // q6: cannot plan
+// test!(q7);
+// test!(q8);
+// test!(q9);
+// // q10+: duplicated or unsupported
+// 
+// // Self made queries.
+// test!(q101);
+// test!(q102);
+// test!(q103);
+// test!(q104);
+// test!(q105);
+// 

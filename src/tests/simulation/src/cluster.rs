@@ -27,9 +27,12 @@ use futures::{SinkExt, StreamExt};
 use itertools::Itertools;
 use madsim::net::ipvs::*;
 use madsim::runtime::{Handle, NodeHandle};
+use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
+use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
+use risingwave_pb::meta::{DeleteWorkerNodeRequest, ListAllNodesRequest};
 use risingwave_rpc_client;
 use risingwave_rpc_client::error::RpcError;
 use sqllogictest::AsyncDB;
@@ -538,6 +541,8 @@ impl Cluster {
 
     // Copy of the implementation in meta_client
     pub async fn try_build_rpc_channel(addrs: Vec<String>) -> Result<(Channel, String)> {
+        assert!(addrs.len() > 0, "Unable to connect without addresses");
+        
         let endpoints: Vec<_> = addrs
             .into_iter()
             .map(|addr| Self::addr_to_endpoint(addr.clone()).map(|endpoint| (endpoint, addr)))
@@ -565,22 +570,29 @@ impl Cluster {
     }
 
     async fn connect_to_endpoint(endpoint: Endpoint) -> Result<Channel> {
-      let res =   endpoint
+        let res = endpoint
             .http2_keep_alive_interval(Duration::from_secs(60)) // Self::ENDPOINT_KEEP_ALIVE_INTERVAL_SEC
             .keep_alive_timeout(Duration::from_secs(60)) // Self::ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC
             .connect_timeout(Duration::from_secs(5))
             .connect()
-            .await; 
+            .await;
         match res {
-            Ok(c) => Ok(c), 
+            Ok(c) => Ok(c),
             Err(_) => Err(anyhow!("unable to connect to endpoint")),
         }
     }
 
+    /// TODO: return a result here
     /// remove node from cluster gracefully by informing meta that node is no longer available.
-    pub async fn remove_node(&self) {
+    pub async fn remove_rand_compute_node(&self) {
         // where do I get the  client from?
         // ClusterServiceClient.DeleteWorkerNode
+
+        // TODO:
+        // cannot use advertising meta addr? 
+        // How do we resolve the address?
+        // 192, 168, 1, i as u8
+
         let meta_addrs = (1..self.config.meta_nodes)
             .map(|i| format!("http://meta-{i}:5690"))
             .collect::<Vec<String>>();
@@ -590,11 +602,28 @@ impl Cluster {
             .await
             .expect("Unable to remove node");
 
-        let cluster_client = ClusterServiceClient::new(channel);
-        // let WorkerNode here
+        let mut cluster_client = ClusterServiceClient::new(channel);
+        let nodes = cluster_client
+            .list_all_nodes(ListAllNodesRequest {
+                worker_type: WorkerType::ComputeNode as i32,
+                include_starting_nodes: true,
+            })
+            .await
+            .expect("Unable to retrieve nodes")
+            .into_inner()
+            .nodes;
+        let rand_node = nodes.choose(&mut rand::thread_rng()).unwrap();
+        let host = rand_node.host.clone().expect("expected node to have host");
+        let req = DeleteWorkerNodeRequest {
+            host: rand_node.host.clone(),
+        };
 
-        let request = worker_node.host.unwrap(); // HostAddress
-        cluster_client.delete_worker_node(request);
+        cluster_client
+            .delete_worker_node(req)
+            .await
+            .expect(format!("Deleting node {:?} failed", host).as_str());
+
+        // TODO: Do I have to shut down the worker node after this or does delete_worker_node do it all?
     }
 
     /// Create a node for kafka producer and prepare data.
