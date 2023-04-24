@@ -230,16 +230,13 @@ impl CompactionDeleteRanges {
         let mut epochs = BTreeSet::new();
         let mut idx = 0;
         while idx < self.events.len() {
-            if self.events[idx].0.as_ref().ge(&smallest_user_key) {
+            if self.events[idx].0.as_ref().gt(&smallest_user_key) {
                 if let Some(epoch) = epochs.first() {
                     monotonic_events.push(MonotonicDeleteEvent {
                         event_key: smallest_user_key.to_vec(),
                         new_epoch: *epoch,
                         is_exclusive: false,
                     });
-                    if self.events[idx].0.as_ref().eq(&smallest_user_key) {
-                        idx += 1;
-                    }
                 }
                 break;
             }
@@ -411,10 +408,10 @@ mod tests {
         let data = vec![
             DeleteRangeTombstone::new(table_id, b"aaaaaa".to_vec(), b"bbbccc".to_vec(), 12),
             DeleteRangeTombstone::new(table_id, b"aaaaaa".to_vec(), b"bbbddd".to_vec(), 9),
-            DeleteRangeTombstone::new(table_id, b"bbbaab".to_vec(), b"bbbdddf".to_vec(), 6),
-            DeleteRangeTombstone::new(table_id, b"bbbeee".to_vec(), b"eeeeee".to_vec(), 8),
             DeleteRangeTombstone::new(table_id, b"bbbfff".to_vec(), b"ffffff".to_vec(), 9),
             DeleteRangeTombstone::new(table_id, b"gggggg".to_vec(), b"hhhhhh".to_vec(), 9),
+            DeleteRangeTombstone::new(table_id, b"bbbeee".to_vec(), b"eeeeee".to_vec(), 8),
+            DeleteRangeTombstone::new(table_id, b"bbbaab".to_vec(), b"bbbdddf".to_vec(), 6),
         ];
         for range in data {
             builder.add_delete_events(create_monotonic_events(vec![range]));
@@ -475,7 +472,6 @@ mod tests {
         let table_id = TableId::default();
         let mut builder = CompactionDeleteRangesBuilder::default();
         let data = vec![
-            DeleteRangeTombstone::new(table_id, b"aaaa".to_vec(), b"bbbb".to_vec(), 12),
             DeleteRangeTombstone::new(table_id, b"aaaa".to_vec(), b"cccc".to_vec(), 12),
             DeleteRangeTombstone::new(table_id, b"cccc".to_vec(), b"dddd".to_vec(), 10),
             DeleteRangeTombstone::new(table_id, b"cccc".to_vec(), b"eeee".to_vec(), 12),
