@@ -21,6 +21,20 @@ select v::varchar, pg_typeof(v) from (select '0.0'::decimal / '1'::float4) as t(
 statement error
 select '0.0'::decimal % '1'::float4;
 
+# Although arithmetic (and comparison) between decimal and float4 is handled by float8,
+# their union is still float4
+
+query T
+with t(v) as (values (1::real), (1::decimal)) select pg_typeof(v) from t;
+----
+real
+real
+
+query T
+select pg_typeof(array[1::real, 1::decimal]);
+----
+real[]
+
 query TTT
 select a < b, a::float8, b::float8 from (select '1.1'::decimal, '1.1'::float4) as t(a, b);
 ----
