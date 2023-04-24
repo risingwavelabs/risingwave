@@ -3,25 +3,15 @@
 # FIXME: enable -e.
 set -uo pipefail
 
+# TODO(kwannoel): This is a workaround since workdir is `/risingwave` in the docker container.
+# Perhaps we should have a new docker container just for benchmarking?
+pushd ..
+
 install_aws_cli() {
   echo ">>> Install aws cli"
   curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
   unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
 }
-
-# FIXME: Can't get this to work ;_;
-upload_logs () {
-  EXIT_CODE=$?
-  echo ">>> Failed due to $EXIT_CODE, Uploading logs"
-  buildkite-agent artifact upload ./zookeeper.log
-  buildkite-agent artifact upload ./kafka.log
-  exit "$(($EXIT_CODE))"
-}
-
-trap upload_logs ERR
-
-# FIXME(kwannoel): This is a workaround since workdir is `/risingwave` by default.
-pushd ..
 
 ############## DEBUG INFO
 
@@ -36,6 +26,7 @@ print_machine_debug_info() {
 
 ############## INSTALL
 
+# NOTE(kwannoel) we can mirror the artifacts here in an s3 bucket if there are errors with access.
 install_all() {
   echo ">>> Installing aws"
   install_aws_cli
@@ -48,9 +39,8 @@ install_all() {
   tar -xvf promql-v0.3.0-linux-arm64.tar.gz
   chmod +x ./promql
   mv ./promql /usr/local/bin/promql
-  # FIXME(kwannoel): For some reason this hangs...
-  # echo ">>> Run Sanity check that PromQL is installed"
-  # promql --help
+  echo ">>> Run Sanity check that PromQL is installed"
+  promql --help
 
   echo ">>> Installing Kafka"
   wget https://downloads.apache.org/kafka/3.4.0/kafka_2.13-3.4.0.tgz
@@ -61,7 +51,7 @@ install_all() {
   # Can't seem to do this in build phase.
   chmod +x /usr/local/bin/nexmark-server
 
-  # FIXME: pin a newer version of nperf.
+  # TODO(kwannoel): eventually pin a newer version of nperf. This one works good enough for now.
   echo ">>> Installing nperf"
   wget https://github.com/koute/not-perf/releases/download/0.1.1/not-perf-x86_64-unknown-linux-gnu.tgz
   tar -xvf not-perf-x86_64-unknown-linux-gnu.tgz
@@ -163,7 +153,7 @@ gen_cpu_flamegraph() {
 
 ############## MONITORING
 
-# TODO
+# TODO: promql
 
 ############## LIB
 
