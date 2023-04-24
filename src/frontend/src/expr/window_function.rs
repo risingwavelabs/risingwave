@@ -71,7 +71,7 @@ impl WindowFunction {
                     ))
                     .into());
                 }
-                if offset.as_literal().is_none() {
+                if offset.is_const() {
                     return Err(ErrorCode::NotImplemented(
                         format!("non-const `offset` of `{kind}` function is not supported yet"),
                         None.into(),
