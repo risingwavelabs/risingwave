@@ -266,6 +266,16 @@ impl CompactionDeleteRanges {
         monotonic_events.dedup_by(|a, b| {
             a.event_key.table_id == b.event_key.table_id && a.new_epoch == b.new_epoch
         });
+        if !monotonic_events.is_empty() {
+            assert_ne!(
+                monotonic_events.first().unwrap().new_epoch,
+                HummockEpoch::MAX
+            );
+            assert_eq!(
+                monotonic_events.last().unwrap().new_epoch,
+                HummockEpoch::MAX
+            );
+        }
         monotonic_events
     }
 
