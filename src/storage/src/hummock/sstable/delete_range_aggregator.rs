@@ -260,7 +260,9 @@ impl CompactionDeleteRanges {
             });
             idx += 1;
         }
-        monotonic_events.dedup_by_key(|MonotonicDeleteEvent { new_epoch, .. }| *new_epoch);
+        monotonic_events.dedup_by(|a, b| {
+            a.event_key.table_id == b.event_key.table_id && a.new_epoch == b.new_epoch
+        });
         monotonic_events
     }
 

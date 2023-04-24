@@ -180,7 +180,9 @@ pub(crate) fn create_monotonic_events_from_compaction_delete_events(
             new_epoch: epochs.first().map_or(HummockEpoch::MAX, |epoch| *epoch),
         });
     }
-    monotonic_tombstone_events.dedup_by_key(|MonotonicDeleteEvent { new_epoch, .. }| *new_epoch);
+    monotonic_tombstone_events.dedup_by(|a, b| {
+        a.event_key.table_id == b.event_key.table_id && a.new_epoch == b.new_epoch
+    });
 
     monotonic_tombstone_events
 }
