@@ -21,24 +21,16 @@ popd
 
 ############# SETUP RW
 
-# FIXME(kwannoel): Probably can merge this with `gen_flamegraph.sh`.
-# FIXME(kwannoel): Not sure if risingwave_java_binding is needed
-echo "--- Build Rust components"
-cargo build \
-    -p risingwave_cmd_all \
-    -p risedev \
-    -p risingwave_java_binding \
-    --features "static-link static-log-level" --profile release
-
-# the file name suffix of artifact for risingwave_java_binding is so only for linux. It is dylib for MacOS
-artifacts=(risingwave risedev-dev librisingwave_java_binding.so)
-
-echo "--- Show link info"
-ldd target/release/risingwave
-
-# Namespacing is required (by suffixing bench: XXX-bench), so we can upload and download buildkite artifacts.
-echo "--- Upload artifacts"
-echo -n "${artifacts[*]}" | parallel -d ' ' "mv target/release/{} ./{}-bench && buildkite-agent artifact upload ./{}-bench"
-
-echo "--- Show sccache stats"
-sccache --show-stats
+# FIXME(kwannoel): Currently these are in `gen-flamegraph.sh`.
+#
+# That's sub-optimal as it takes up disk space, which could otherwise
+# be used to store more nexmark events.
+# This happens because we rely on `risedev` to start the cluster.
+#
+# To fix we need to decouple build and run steps for `risedev`,
+# so they can run in separate buildkite steps.
+#
+# Specifically: Setup downloaded artifacts built by `risedev`
+# such that they can be used directly by `risedev` when starting the cluster.
+# Currently even when these artifacts are present in `target/release`,
+# `risedev` still rebuilds them.
