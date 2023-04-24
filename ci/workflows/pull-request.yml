@@ -332,7 +332,7 @@ steps:
             GITHUB_TOKEN: github-token
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
-          run: rw-build-env
+          run: ci-flamegraph-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
           environment:
