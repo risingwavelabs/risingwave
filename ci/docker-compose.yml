@@ -54,6 +54,13 @@ services:
     volumes:
       - ..:/risingwave
 
+  ci-flamegraph-env:
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230407
+    security_opt:
+      - seccomp:unconfined
+    volumes:
+      - ..:/risingwave
+
   regress-test-env:
     image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230407
     depends_on:
