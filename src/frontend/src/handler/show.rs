@@ -136,13 +136,13 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
                         .get_source_ids_by_connection(c.id)
                         .unwrap_or(Vec::new())
                         .into_iter()
-                        .map(|sid| schema.get_source_by_id(&sid).unwrap().name.as_str())
+                        .filter_map(|sid| schema.get_source_by_id(&sid).map(|catalog| catalog.name.as_str()))
                         .collect_vec();
                     let sink_names = schema
                         .get_sink_ids_by_connection(c.id)
                         .unwrap_or(Vec::new())
                         .into_iter()
-                        .map(|sid| schema.get_sink_by_id(&sid).unwrap().name.as_str())
+                        .filter_map(|sid| schema.get_sink_by_id(&sid).map(|catalog| catalog.name.as_str()))
                         .collect_vec();
                     let properties = match &c.info {
                         connection::Info::PrivateLinkService(i) => {
