@@ -536,7 +536,7 @@ impl Binder {
                 let table_name = literal
                     .get_data()
                     .as_ref()
-                    .expect("ExprImpl value is a Literal but cannot get ref")
+                    .expect("ExprImpl value is a Literal but cannot get ref to data")
                     .as_utf8();
                 self.bind_cast(
                     Expr::Value(risingwave_sqlparser::ast::Value::SingleQuotedString(
