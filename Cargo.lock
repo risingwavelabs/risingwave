@@ -6157,6 +6157,7 @@ dependencies = [
  "dyn-clone",
  "either",
  "futures-util",
+ "hex",
  "itertools",
  "madsim-tokio",
  "md5",
