@@ -523,7 +523,7 @@ impl LogicalMultiJoin {
                 }
                 continue;
             } else if nodes.is_empty() {
-                if let None = optimized_bushy_tree {
+                if optimized_bushy_tree.is_none() {
                     let base = isolated.pop().unwrap();
                     optimized_bushy_tree = Some((base, isolated));
                 }
