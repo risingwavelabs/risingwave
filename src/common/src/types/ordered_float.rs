@@ -1146,7 +1146,8 @@ mod tests {
         assert_eq!(ret, OrderedFloat::<f64>::from(5_f64));
 
         // decimal -> f64.
-        let ret: OrderedFloat<f64> = OrderedFloat::<f64>::from(crate::types::Decimal::from(5));
+        let ret: OrderedFloat<f64> =
+            OrderedFloat::<f64>::try_from(crate::types::Decimal::from(5)).unwrap();
         assert_eq!(ret, OrderedFloat::<f64>::from(5_f64));
     }
 

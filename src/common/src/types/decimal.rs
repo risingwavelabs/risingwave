@@ -162,43 +162,68 @@ macro_rules! impl_from_float {
     }
 }
 
-macro_rules! impl_from {
-    ($T:ty, $from_ty:path) => {
+macro_rules! impl_convert_int {
+    ($T:ty) => {
         impl core::convert::From<$T> for Decimal {
             #[inline]
             fn from(t: $T) -> Self {
-                $from_ty(t).unwrap()
+                Self::Normalized(t.into())
+            }
+        }
+
+        impl core::convert::TryFrom<Decimal> for $T {
+            type Error = Error;
+
+            #[inline]
+            fn try_from(d: Decimal) -> Result<Self, Self::Error> {
+                match d {
+                    Decimal::Normalized(d) => d.try_into(),
+                    _ => Err(Error::ConversionTo(std::any::type_name::<$T>().into())),
+                }
             }
         }
     };
 }
 
-macro_rules! impl_try_from_decimal {
-    ($from_ty:ty, $to_ty:ty, $convert:path, $err:expr) => {
-        impl core::convert::TryFrom<$from_ty> for $to_ty {
+macro_rules! impl_convert_float {
+    ($T:ty) => {
+        impl core::convert::TryFrom<$T> for Decimal {
             type Error = Error;
 
-            fn try_from(value: $from_ty) -> Result<Self, Self::Error> {
-                $convert(&value).ok_or_else(|| Error::from($err))
+            fn try_from(num: $T) -> Result<Self, Self::Error> {
+                match num {
+                    num if num.is_nan() => Ok(Decimal::NaN),
+                    num if num.is_infinite() && num.is_sign_positive() => Ok(Decimal::PositiveInf),
+                    num if num.is_infinite() && num.is_sign_negative() => Ok(Decimal::NegativeInf),
+                    num => num.try_into().map(Decimal::Normalized),
+                }
             }
         }
-    };
-}
-
-macro_rules! impl_try_from_float {
-    ($from_ty:ty, $to_ty:ty, $convert:path) => {
-        impl core::convert::TryFrom<$from_ty> for $to_ty {
+        impl core::convert::TryFrom<OrderedFloat<$T>> for Decimal {
             type Error = Error;
 
-            fn try_from(value: $from_ty) -> Result<Self, Self::Error> {
-                $convert(value).ok_or_else(|| Error::ConversionTo("decimal".into()))
+            fn try_from(value: OrderedFloat<$T>) -> Result<Self, Self::Error> {
+                value.0.try_into()
             }
         }
-        impl core::convert::TryFrom<OrderedFloat<$from_ty>> for $to_ty {
+
+        impl core::convert::TryFrom<Decimal> for $T {
             type Error = Error;
 
-            fn try_from(value: OrderedFloat<$from_ty>) -> Result<Self, Self::Error> {
-                $convert(value.0).ok_or_else(|| Error::ConversionTo("decimal".into()))
+            fn try_from(d: Decimal) -> Result<Self, Self::Error> {
+                match d {
+                    Decimal::Normalized(d) => d.try_into(),
+                    Decimal::NaN => Ok(<$T>::NAN),
+                    Decimal::PositiveInf => Ok(<$T>::INFINITY),
+                    Decimal::NegativeInf => Ok(<$T>::NEG_INFINITY),
+                }
+            }
+        }
+        impl core::convert::TryFrom<Decimal> for OrderedFloat<$T> {
+            type Error = Error;
+
+            fn try_from(d: Decimal) -> Result<Self, Self::Error> {
+                d.try_into().map(Self)
             }
         }
     };
@@ -219,16 +244,8 @@ macro_rules! checked_proxy {
     }
 }
 
-impl_try_from_decimal!(Decimal, f32, Decimal::to_f32, "Failed to convert to f32");
-impl_try_from_decimal!(Decimal, f64, Decimal::to_f64, "Failed to convert to f64");
-impl_try_from_float!(f32, Decimal, Decimal::from_f32);
-impl_try_from_float!(f64, Decimal, Decimal::from_f64);
-
-impl From<crate::types::Decimal> for OrderedFloat<f64> {
-    fn from(n: crate::types::Decimal) -> Self {
-        n.to_f64().map_or(Self(f64::NAN), Self)
-    }
-}
+impl_convert_float!(f32);
+impl_convert_float!(f64);
 
 impl FromPrimitive for Decimal {
     impl_from_integer!([
@@ -245,16 +262,16 @@ impl FromPrimitive for Decimal {
     impl_from_float!([(f32, from_f32), (f64, from_f64)]);
 }
 
-impl_from!(isize, FromPrimitive::from_isize);
-impl_from!(i8, FromPrimitive::from_i8);
-impl_from!(i16, FromPrimitive::from_i16);
-impl_from!(i32, FromPrimitive::from_i32);
-impl_from!(i64, FromPrimitive::from_i64);
-impl_from!(usize, FromPrimitive::from_usize);
-impl_from!(u8, FromPrimitive::from_u8);
-impl_from!(u16, FromPrimitive::from_u16);
-impl_from!(u32, FromPrimitive::from_u32);
-impl_from!(u64, FromPrimitive::from_u64);
+impl_convert_int!(isize);
+impl_convert_int!(i8);
+impl_convert_int!(i16);
+impl_convert_int!(i32);
+impl_convert_int!(i64);
+impl_convert_int!(usize);
+impl_convert_int!(u8);
+impl_convert_int!(u16);
+impl_convert_int!(u32);
+impl_convert_int!(u64);
 
 checked_proxy!(CheckedRem, checked_rem, %);
 checked_proxy!(CheckedSub, checked_sub, -);
