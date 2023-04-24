@@ -76,6 +76,10 @@
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
 - sql: |
     create table t(x int, y int);
+    select x, y, min(x) over(PARTITION BY y ROWS UNBOUNDED FOLLOWING) from t;
+  binder_error: 'Invalid input syntax: window frame `ROWS BETWEEN UNBOUNDED FOLLOWING AND CURRENT ROW` is not valid'
+- sql: |
+    create table t(x int, y int);
     select x, y, lag(x) over(PARTITION BY y ORDER BY x) from t;
   logical_plan: |
     LogicalProject { exprs: [t.x, t.y, lag] }

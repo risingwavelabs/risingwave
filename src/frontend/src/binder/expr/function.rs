@@ -249,7 +249,7 @@ impl Binder {
                 .collect::<Result<_>>()?,
         );
         let frame = if let Some(frame) = window_frame {
-            Some(match frame.units {
+            let frame = match frame.units {
                 WindowFrameUnits::Rows => {
                     let convert_bound = |bound| match bound {
                         WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
@@ -277,7 +277,14 @@ impl Binder {
                     )
                     .into());
                 }
-            })
+            };
+            if !frame.is_valid() {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "window frame `{frame}` is not valid",
+                ))
+                .into());
+            }
+            Some(frame)
         } else {
             None
         };
