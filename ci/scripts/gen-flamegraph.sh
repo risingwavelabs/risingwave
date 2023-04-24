@@ -196,7 +196,7 @@ main() {
   psql -h localhost -p 4566 -d dev -U root -f risingwave/ci/scripts/sql/nexmark/ddl.sql
 
   echo "--- Running Benchmarks"
-  # TODO(kwannoel): Allow users to configure which query they want to run.
+  # FIXME(kwannoel): Allow users to configure which query they want to run.
   psql -h localhost -p 4566 -d dev -U root -f risingwave/ci/scripts/sql/nexmark/q17.sql
 
   echo "--- Start Profiling"
@@ -206,7 +206,7 @@ main() {
   # Most nexmark queries (q4-q20) will have a runtime of 10+ min.
   # We can just let flamegraph profile 5min slice.
   # TODO(kwannoel): Use promql to monitor when throughput hits 0 with 1-minute intervals.
-  echo "--- Monitoring Benchmark"
+  echo "--- Monitoring Benchmark for 5 minutes"
   sleep $((5 * 60))
   pkill nperf
 
