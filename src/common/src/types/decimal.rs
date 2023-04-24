@@ -187,14 +187,18 @@ macro_rules! impl_try_from_decimal {
 
 macro_rules! impl_try_from_float {
     ($from_ty:ty, $to_ty:ty, $convert:path) => {
-        impl core::convert::From<$from_ty> for $to_ty {
-            fn from(value: $from_ty) -> Self {
-                $convert(value).expect("f32/f64 to decimal should not fail")
+        impl core::convert::TryFrom<$from_ty> for $to_ty {
+            type Error = Error;
+
+            fn try_from(value: $from_ty) -> Result<Self, Self::Error> {
+                $convert(value).ok_or_else(|| Error::ConversionTo("decimal".into()))
             }
         }
-        impl core::convert::From<OrderedFloat<$from_ty>> for $to_ty {
-            fn from(value: OrderedFloat<$from_ty>) -> Self {
-                $convert(value.0).expect("f32/f64 to decimal should not fail")
+        impl core::convert::TryFrom<OrderedFloat<$from_ty>> for $to_ty {
+            type Error = Error;
+
+            fn try_from(value: OrderedFloat<$from_ty>) -> Result<Self, Self::Error> {
+                $convert(value.0).ok_or_else(|| Error::ConversionTo("decimal".into()))
             }
         }
     };
@@ -219,6 +223,12 @@ impl_try_from_decimal!(Decimal, f32, Decimal::to_f32, "Failed to convert to f32"
 impl_try_from_decimal!(Decimal, f64, Decimal::to_f64, "Failed to convert to f64");
 impl_try_from_float!(f32, Decimal, Decimal::from_f32);
 impl_try_from_float!(f64, Decimal, Decimal::from_f64);
+
+impl From<crate::types::Decimal> for OrderedFloat<f64> {
+    fn from(n: crate::types::Decimal) -> Self {
+        n.to_f64().map_or(Self(f64::NAN), Self)
+    }
+}
 
 impl FromPrimitive for Decimal {
     impl_from_integer!([
