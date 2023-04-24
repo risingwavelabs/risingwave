@@ -21,7 +21,7 @@ popd
 
 ############# SETUP RW
 
-# FIXME(kwannoel): Probably can merge this with `gen_flamegraph.sh` will build it.
+# FIXME(kwannoel): Probably can merge this with `gen_flamegraph.sh`.
 # FIXME(kwannoel): Not sure if risingwave_java_binding is needed
 echo "--- Build Rust components"
 cargo build \
