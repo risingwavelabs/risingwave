@@ -139,9 +139,10 @@ impl Binder {
             .into()),
         };
         res.map_err(|e| {
-            RwError::from(
-                ErrorCode::BindError(format!("failed to bind expression: {}\n\nCaused by:\n  {}", expr, e)),
-            )
+            RwError::from(ErrorCode::BindError(format!(
+                "failed to bind expression: {}\n\nCaused by:\n  {}",
+                expr, e
+            )))
         })
     }
 
