@@ -131,8 +131,7 @@ configure_all() {
 
 start_nperf() {
   # echo '1' | tee /proc/sys/kernel/perf_event_paranoid
-  pgrep compute-node
-  ./nperf record -p "$(pidof compute-node)" -o perf.data
+  ./nperf record -p `pidof compute-node` -o perf.data
 }
 
 start_kafka() {
