@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+# FIXME: enable -e.
 set -uo pipefail
 
 install_aws_cli() {
@@ -149,8 +150,7 @@ start_kafka() {
 gen_events() {
   pushd nexmark-bench
   nexmark-server -c
-  # FIXME: NEXMARK_EVENTS=$((1000 * 1000 * 1000))
-  NEXMARK_EVENTS=$((1000 * 1000 * 10))
+  NEXMARK_EVENTS=$((100 * 1000 * 1000))
   echo "Generating $NEXMARK_EVENTS events"
   nexmark-server \
     --event-rate 500000 \
