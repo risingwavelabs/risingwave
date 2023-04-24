@@ -216,7 +216,7 @@ main() {
 
   echo "--- Start Profiling"
   # Ensure we can run profiling
-  echo '1' | sudo tee /proc/sys/kernel/perf_event_paranoid
+  echo '1' | tee /proc/sys/kernel/perf_event_paranoid
   start_nperf
 
   # NOTE(kwannoel): Can stub first if promql gives us issues.
