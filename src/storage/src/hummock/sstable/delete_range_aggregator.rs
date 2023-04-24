@@ -260,6 +260,7 @@ impl CompactionDeleteRanges {
             });
             idx += 1;
         }
+        monotonic_events.dedup_by_key(|MonotonicDeleteEvent { new_epoch, .. }| *new_epoch);
         monotonic_events
     }
 
