@@ -3676,6 +3676,11 @@ impl Parser {
                         schema: self.parse_from_and_identifier()?,
                     }));
                 }
+                Keyword::FUNCTIONS => {
+                    return Ok(Statement::ShowObjects(ShowObject::Function {
+                        schema: self.parse_from_and_identifier()?,
+                    }));
+                }
                 _ => {}
             }
         }
