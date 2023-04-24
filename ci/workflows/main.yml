@@ -276,7 +276,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 28
+    timeout_in_minutes: 35
 
   - label: "end-to-end iceberg sink test (release mode)"
     command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-release"

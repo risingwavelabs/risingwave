@@ -525,6 +525,8 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
         E::Md5 => Some(Expr::Function(make_simple_func("md5", &exprs))),
         E::ToChar => Some(Expr::Function(make_simple_func("to_char", &exprs))),
         E::SplitPart => Some(Expr::Function(make_simple_func("split_part", &exprs))),
+        E::Encode => Some(Expr::Function(make_simple_func("encode", &exprs))),
+        E::Decode => Some(Expr::Function(make_simple_func("decode", &exprs))),
         // TODO: Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
         // E::Translate => Some(Expr::Function(make_simple_func("translate", &exprs))),
         E::Overlay => Some(make_overlay(exprs)),

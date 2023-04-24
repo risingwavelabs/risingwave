@@ -15,6 +15,7 @@
 pub mod agg;
 pub mod arithmetic_op;
 pub mod array_access;
+pub mod array_range_access;
 pub mod ascii;
 pub mod bitwise_op;
 pub mod cast;
@@ -22,6 +23,7 @@ pub mod cmp;
 pub mod concat_op;
 pub mod conjunction;
 pub mod date_trunc;
+pub mod encdec;
 pub mod exp;
 pub mod extract;
 pub mod format_type;

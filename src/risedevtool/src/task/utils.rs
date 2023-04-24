@@ -19,6 +19,9 @@ use itertools::Itertools;
 
 use crate::{AwsS3Config, MetaNodeConfig, MinioConfig, OpendalConfig};
 
+#[allow(dead_code)]
+pub(crate) const DEFAULT_QUERY_LOG_PATH: &str = ".risingwave/log/";
+
 /// Add a meta node to the parameters.
 pub fn add_meta_node(provide_meta_node: &[MetaNodeConfig], cmd: &mut Command) -> Result<()> {
     match provide_meta_node {

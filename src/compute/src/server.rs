@@ -62,8 +62,7 @@ use tokio::task::JoinHandle;
 
 use crate::memory_management::memory_manager::GlobalMemoryManager;
 use crate::memory_management::{
-    memory_control_policy_from_config, reserve_memory_bytes, storage_memory_config,
-    MIN_COMPUTE_MEMORY_MB,
+    build_memory_control_policy, reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB,
 };
 use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
@@ -134,7 +133,15 @@ pub async fn compute_node_serve(
         reserved_memory_bytes,
     );
 
-    let memory_control_policy = memory_control_policy_from_config(&opts).unwrap();
+    // NOTE: Due to some limits, we use `compute_memory_bytes + storage_memory_bytes` as
+    // `total_compute_memory_bytes` for memory control. This is just a workaround for some
+    // memory control issues and should be modified as soon as we figure out a better solution.
+    //
+    // Related issues:
+    // - https://github.com/risingwavelabs/risingwave/issues/8696
+    // - https://github.com/risingwavelabs/risingwave/issues/8822
+    let total_memory_bytes = compute_memory_bytes + storage_memory_bytes;
+    let memory_control_policy = build_memory_control_policy(total_memory_bytes).unwrap();
 
     let storage_opts = Arc::new(StorageOpts::from((
         &config,
@@ -276,15 +283,7 @@ pub async fn compute_node_serve(
     let batch_mgr_clone = batch_mgr.clone();
     let stream_mgr_clone = stream_mgr.clone();
 
-    // NOTE: Due to some limits, we use `compute_memory_bytes + storage_memory_bytes` as
-    // `total_compute_memory_bytes` for memory control. This is just a workaround for some
-    // memory control issues and should be modified as soon as we figure out a better solution.
-    //
-    // Related issues:
-    // - https://github.com/risingwavelabs/risingwave/issues/8696
-    // - https://github.com/risingwavelabs/risingwave/issues/8822
     let memory_mgr = GlobalMemoryManager::new(
-        compute_memory_bytes + storage_memory_bytes,
         system_params.barrier_interval_ms(),
         streaming_metrics.clone(),
         memory_control_policy,
