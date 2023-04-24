@@ -21,6 +21,9 @@ use crate::function::aggregate::AggKind;
 #[display(style = "snake_case")]
 pub enum WindowFuncKind {
     // General-purpose window functions.
+    RowNumber,
+    Rank,
+    DenseRank,
     Lag,
     Lead,
     // FirstValue,
@@ -30,4 +33,10 @@ pub enum WindowFuncKind {
     // Aggregate functions that are used with `OVER`.
     #[display("{0}")]
     Aggregate(AggKind),
+}
+
+impl WindowFuncKind {
+    pub fn is_rank(&self) -> bool {
+        matches!(self, Self::RowNumber | Self::Rank | Self::DenseRank)
+    }
 }
