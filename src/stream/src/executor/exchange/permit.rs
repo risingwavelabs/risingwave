@@ -32,36 +32,54 @@ pub struct MessageWithPermits {
     pub permits: Permits,
 }
 
+const BARRIER_PERMITS: usize = 2;
+
 /// Create a channel for the exchange service
 pub fn channel(initial_permits: usize, batched_permits: usize) -> (Sender, Receiver) {
     // Use an unbounded channel since we manage the permits manually.
     let (tx, rx) = mpsc::unbounded_channel();
+
     let permits = Arc::new(Semaphore::new(initial_permits));
     let max_chunk_permits: usize = initial_permits - batched_permits;
+
+    let barrier_permits = Arc::new(Semaphore::new(BARRIER_PERMITS));
     (
         Sender {
             tx,
             permits: permits.clone(),
+            barrier_permits: barrier_permits.clone(),
             max_chunk_permits,
         },
-        Receiver { rx, permits },
+        Receiver {
+            rx,
+            permits,
+            barrier_permits,
+        },
     )
 }
 
 pub fn channel_for_test() -> (Sender, Receiver) {
     // Use an unbounded channel since we manage the permits manually.
     let (tx, rx) = mpsc::unbounded_channel();
+
     const INITIAL_PERMITS: usize = 8192;
     const BATCHED_PERMITS: usize = 1024;
     let permits = Arc::new(Semaphore::new(INITIAL_PERMITS));
     let max_chunk_permits: usize = INITIAL_PERMITS - BATCHED_PERMITS;
+
+    let barrier_permits = Arc::new(Semaphore::new(BARRIER_PERMITS));
     (
         Sender {
             tx,
             permits: permits.clone(),
+            barrier_permits: barrier_permits.clone(),
             max_chunk_permits,
         },
-        Receiver { rx, permits },
+        Receiver {
+            rx,
+            permits,
+            barrier_permits,
+        },
     )
 }
 
@@ -69,6 +87,7 @@ pub fn channel_for_test() -> (Sender, Receiver) {
 pub struct Sender {
     tx: mpsc::UnboundedSender<MessageWithPermits>,
     permits: Arc<Semaphore>,
+    barrier_permits: Arc<Semaphore>,
     /// The maximum permits required by a chunk. If there're too many rows in a chunk, we only
     /// acquire these permits. [`BATCHED_PERMITS`] is subtracted to avoid deadlock with
     /// batching.
@@ -92,7 +111,13 @@ impl Sender {
         } as Permits;
 
         // The semaphore should never be closed.
-        self.permits.acquire_many(permits).await.unwrap().forget();
+        if permits > 0 {
+            self.permits.acquire_many(permits).await.unwrap().forget();
+        }
+
+        if message.as_barrier().is_some() {
+            self.barrier_permits.acquire().await.unwrap().forget();
+        }
 
         self.tx
             .send(MessageWithPermits { message, permits })
@@ -104,6 +129,7 @@ impl Sender {
 pub struct Receiver {
     rx: mpsc::UnboundedReceiver<MessageWithPermits>,
     permits: Arc<Semaphore>,
+    barrier_permits: Arc<Semaphore>,
 }
 
 impl Receiver {
@@ -114,6 +140,9 @@ impl Receiver {
     pub async fn recv(&mut self) -> Option<Message> {
         let MessageWithPermits { message, permits } = self.recv_raw().await?;
         self.permits.add_permits(permits as usize);
+        if message.as_barrier().is_some() {
+            self.barrier_permits.add_permits(1);
+        }
         Some(message)
     }
 
@@ -124,6 +153,9 @@ impl Receiver {
     pub fn try_recv(&mut self) -> Result<Message, mpsc::error::TryRecvError> {
         let MessageWithPermits { message, permits } = self.rx.try_recv()?;
         self.permits.add_permits(permits as usize);
+        if message.as_barrier().is_some() {
+            self.barrier_permits.add_permits(1);
+        }
         Ok(message)
     }
 
