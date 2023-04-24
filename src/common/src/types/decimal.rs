@@ -129,7 +129,7 @@ macro_rules! impl_convert_int {
 
             #[inline]
             fn try_from(d: Decimal) -> Result<Self, Self::Error> {
-                match d {
+                match d.round_dp_ties_away(0) {
                     Decimal::Normalized(d) => d.try_into(),
                     _ => Err(Error::ConversionTo(std::any::type_name::<$T>().into())),
                 }
@@ -446,7 +446,7 @@ impl Decimal {
     }
 
     #[must_use]
-    pub fn round_dp(&self, dp: u32) -> Self {
+    pub fn round_dp_ties_away(&self, dp: u32) -> Self {
         match self {
             Self::Normalized(d) => {
                 let new_d = d.round_dp_with_strategy(dp, RoundingStrategy::MidpointAwayFromZero);
@@ -473,7 +473,7 @@ impl Decimal {
     }
 
     #[must_use]
-    pub fn round(&self) -> Self {
+    pub fn round_ties_even(&self) -> Self {
         match self {
             Self::Normalized(d) => Self::Normalized(d.round()),
             d => *d,
