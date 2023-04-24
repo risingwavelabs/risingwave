@@ -134,9 +134,6 @@ configure_all() {
 start_nperf() {
   # echo '1' | tee /proc/sys/kernel/perf_event_paranoid
   ./nperf record -p `pidof compute-node` -o perf.data &
-  # Run profiling for 5 min
-  sleep $((5 * 60))
-  pkill nperf
 }
 
 start_kafka() {
@@ -214,11 +211,11 @@ main() {
   print_machine_debug_info
 
   echo "--- Running ddl"
-  psql -h localhost -p 4566 -d dev -U root -f ci/scripts/sql/nexmark/ddl.sql
+  psql -h localhost -p 4566 -d dev -U root -f risingwave/ci/scripts/sql/nexmark/ddl.sql
 
   echo "--- Running Benchmarks"
   # TODO(kwannoel): Allow users to configure which query they want to run.
-  psql -h localhost -p 4566 -d dev -U root -f ci/scripts/sql/nexmark/q17.sql
+  psql -h localhost -p 4566 -d dev -U root -f risingwave/ci/scripts/sql/nexmark/q17.sql
 
   echo "--- Start Profiling"
   start_nperf
@@ -229,6 +226,7 @@ main() {
   # TODO(kwannoel): Use promql to monitor when throughput hits 0 with 1-minute intervals.
   echo "--- Monitoring Benchmark"
   sleep $((5 * 60))
+  pkill nperf
 
   echo "--- Benchmark finished"
   echo "Success!"
@@ -248,7 +246,7 @@ main() {
   buildkite-agent artifact upload ./perf.svg
 
   echo "--- Cleanup"
-  # TODO: cleanup s3 bucket.
+  aws s3 rm s3://rw-ci-benchmark
   echo "Success!"
 
   echo "--- Uploading rw logs"
