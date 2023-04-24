@@ -438,7 +438,7 @@ impl DataChunk {
     /// As such we can compute the size for it just once for the column.
     ///
     /// Otherwise, for variable sized datatypes, such as `varchar`,
-    /// we have to individually compute their lengths per row.
+    /// we have to individually compute their sizes per row.
     fn partition_sizes(&self) -> (usize, Vec<&Column>) {
         let mut col_variable: Vec<&Column> = vec![];
         let mut row_len_fixed: usize = 0;
