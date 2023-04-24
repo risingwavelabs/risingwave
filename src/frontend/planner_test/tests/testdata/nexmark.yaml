@@ -394,23 +394,21 @@
       └─StreamFilter { predicate: (count >= max(count)) }
         └─StreamHashJoin { type: Inner, predicate: window_start = window_start, output: all }
           ├─StreamExchange { dist: HashShard(window_start) }
-          | └─StreamProject { exprs: [bid.auction, window_start, count] }
-          |   └─StreamShare { id = 5 }
-          |     └─StreamAppendOnlyHashAgg { group_key: [bid.auction, window_start], aggs: [count] }
-          |       └─StreamExchange { dist: HashShard(bid.auction, window_start) }
-          |         └─StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
-          |           └─StreamFilter { predicate: IsNotNull(bid.date_time) }
-          |             └─StreamTableScan { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+          | └─StreamShare { id = 5 }
+          |   └─StreamAppendOnlyHashAgg { group_key: [bid.auction, window_start], aggs: [count] }
+          |     └─StreamExchange { dist: HashShard(bid.auction, window_start) }
+          |       └─StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
+          |         └─StreamFilter { predicate: IsNotNull(bid.date_time) }
+          |           └─StreamTableScan { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
           └─StreamProject { exprs: [window_start, max(count)] }
             └─StreamHashAgg { group_key: [window_start], aggs: [max(count), count] }
               └─StreamExchange { dist: HashShard(window_start) }
-                └─StreamProject { exprs: [bid.auction, window_start, count] }
-                  └─StreamShare { id = 5 }
-                    └─StreamAppendOnlyHashAgg { group_key: [bid.auction, window_start], aggs: [count] }
-                      └─StreamExchange { dist: HashShard(bid.auction, window_start) }
-                        └─StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
-                          └─StreamFilter { predicate: IsNotNull(bid.date_time) }
-                            └─StreamTableScan { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+                └─StreamShare { id = 5 }
+                  └─StreamAppendOnlyHashAgg { group_key: [bid.auction, window_start], aggs: [count] }
+                    └─StreamExchange { dist: HashShard(bid.auction, window_start) }
+                      └─StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
+                        └─StreamFilter { predicate: IsNotNull(bid.date_time) }
+                          └─StreamTableScan { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], stream_key: [auction, window_start, window_start#1], pk_columns: [auction, window_start, window_start#1], pk_conflict: "NoCheck" }
@@ -424,7 +422,7 @@
                         └──  StreamExchange Hash([1]) from 4
 
     Fragment 1
-    StreamProject { exprs: [bid.auction, window_start, count] }
+    StreamNoOp
     └──  StreamExchange Hash([0, 1]) from 2
 
     Fragment 2
@@ -439,7 +437,7 @@
             └──  BatchPlanNode
 
     Fragment 4
-    StreamProject { exprs: [bid.auction, window_start, count] }
+    StreamNoOp
     └──  StreamExchange Hash([0, 1]) from 2
 
     Table 0 { columns: [ bid_auction, window_start, count ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
@@ -473,9 +471,7 @@
         WHERE A.id = B.auction and B.date_time between A.date_time and A.expires
         GROUP BY A.id, A.seller
     ) AS Q;
-  binder_error: |-
-    Feature is not yet implemented: aggregate function as over window function: avg
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4978
+  planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause or be used in an aggregate function'
 - id: nexmark_q7
   before:
   - create_tables
@@ -680,9 +676,9 @@
     WHERE rownum <= 1;
   logical_plan: |
     LogicalProject { exprs: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.date_time] }
-    └─LogicalFilter { predicate: (ROW_NUMBER <= 1:Int32) }
-      └─LogicalProject { exprs: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.date_time, ROW_NUMBER] }
-        └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY auction.id ORDER BY bid.price DESC, bid.date_time ASC) }
+    └─LogicalFilter { predicate: (row_number <= 1:Int32) }
+      └─LogicalProject { exprs: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.date_time, row_number] }
+        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY auction.id ORDER BY bid.price DESC, bid.date_time ASC)] }
           └─LogicalFilter { predicate: (auction.id = bid.auction) AND (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
             └─LogicalJoin { type: Inner, on: true, output: all }
               ├─LogicalScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category] }
@@ -1103,9 +1099,9 @@
     WHERE rank_number <= 1;
   logical_plan: |
     LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra] }
-    └─LogicalFilter { predicate: (ROW_NUMBER <= 1:Int32) }
-      └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, ROW_NUMBER] }
-        └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY bid.bidder, bid.auction ORDER BY bid.date_time DESC) }
+    └─LogicalFilter { predicate: (row_number <= 1:Int32) }
+      └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, row_number] }
+        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY bid.bidder, bid.auction ORDER BY bid.date_time DESC)] }
           └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
@@ -1156,9 +1152,9 @@
     WHERE rank_number <= 1;
   logical_plan: |
     LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra] }
-    └─LogicalFilter { predicate: (RANK <= 1:Int32) }
-      └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, RANK] }
-        └─LogicalOverAgg { window_function: RANK() OVER(PARTITION BY bid.bidder, bid.auction ORDER BY bid.date_time DESC) }
+    └─LogicalFilter { predicate: (rank <= 1:Int32) }
+      └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, rank] }
+        └─LogicalOverAgg { window_functions: [rank() OVER(PARTITION BY bid.bidder, bid.auction ORDER BY bid.date_time DESC)] }
           └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
@@ -1211,17 +1207,11 @@
     (SELECT *, ROW_NUMBER() OVER (PARTITION BY auction ORDER BY price DESC) AS rank_number FROM bid)
     WHERE rank_number <= 10;
   logical_plan: |
-    LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, ROW_NUMBER] }
-    └─LogicalFilter { predicate: (ROW_NUMBER <= 10:Int32) }
-      └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, ROW_NUMBER] }
-        └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY bid.auction ORDER BY bid.price DESC) }
+    LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, row_number] }
+    └─LogicalFilter { predicate: (row_number <= 10:Int32) }
+      └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, row_number] }
+        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY bid.auction ORDER BY bid.price DESC)] }
           └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
-  optimizer_error: |
-    internal error: OverAgg can not be transformed. Plan:
-    LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, ROW_NUMBER] }
-    └─LogicalFilter { predicate: (ROW_NUMBER <= 10:Int32) }
-      └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY bid.auction ORDER BY bid.price DESC) }
-        └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
 - id: nexmark_q20
   before:
   - create_tables

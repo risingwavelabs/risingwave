@@ -85,6 +85,7 @@ pub static CAST_MAP: LazyLock<CastMap> = LazyLock::new(|| {
         T::Time,
         T::Interval,
         T::Jsonb,
+        T::Bytea,
     ] {
         m.insert((t, T::Varchar), CastContext::Assign);
         m.insert((T::Varchar, t), CastContext::Explicit);

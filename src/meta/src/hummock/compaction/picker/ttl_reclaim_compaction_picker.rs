@@ -97,7 +97,7 @@ impl TtlReclaimCompactionPicker {
                     // default to zero.
                     let ttl_mill = *ttl_second_u32 as u64 * 1000;
                     let min_epoch = expire_epoch.subtract_ms(ttl_mill);
-                    if Epoch(sst.min_epoch) <= min_epoch {
+                    if Epoch(sst.min_epoch) < min_epoch {
                         return false;
                     }
                 }
