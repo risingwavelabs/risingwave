@@ -30,6 +30,7 @@ use serde::{Deserialize, Serialize};
 use to_text::ToText;
 
 use crate::array::ArrayResult;
+use crate::estimate_size::EstimateSize;
 use crate::types::to_binary::ToBinary;
 use crate::types::{to_text, Buf, DataType, Scalar, ScalarRef, F64};
 
@@ -360,6 +361,12 @@ impl<'a> From<Int256Ref<'a>> for arrow_buffer::i256 {
     }
 }
 
+impl EstimateSize for Int256 {
+    fn estimated_heap_size(&self) -> usize {
+        mem::size_of::<i128>() * 2
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -567,5 +574,11 @@ mod tests {
             .unwrap(),
             Int256::min_value(),
         );
+    }
+
+    #[test]
+    fn test_num256_estimate_size() {
+        let num256 = Int256::min_value();
+        assert_eq!(num256.estimated_size(), 32);
     }
 }

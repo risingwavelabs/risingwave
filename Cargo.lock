@@ -5883,6 +5883,7 @@ dependencies = [
  "rand 0.8.5",
  "regex",
  "reqwest",
+ "risingwave_common_proc_macro",
  "risingwave_pb",
  "rust_decimal",
  "ryu",

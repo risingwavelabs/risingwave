@@ -61,6 +61,7 @@ prost = "0.11"
 rand = "0.8"
 regex = "1"
 reqwest = { version = "0.11", features = ["json"] }
+risingwave_common_proc_macro = { path = "./proc_macro" }
 risingwave_pb = { path = "../prost" }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 ryu = "1.0"
