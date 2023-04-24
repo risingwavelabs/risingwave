@@ -65,14 +65,6 @@ install_all() {
   echo ">>> Installing nperf"
   wget https://github.com/koute/not-perf/releases/download/0.1.1/not-perf-x86_64-unknown-linux-gnu.tgz
   tar -xvf not-perf-x86_64-unknown-linux-gnu.tgz
-
-  echo ">>> Installing RisingWave components (includes other components installed by risedev (prometheus + grafana + etcd)"
-  pushd risingwave
-  artifacts=(risingwave risedev-dev librisingwave_java_binding.so)
-  # Create this so `risedev` tool can locate the binaries.
-  mkdir -p target/release
-  echo -n "${artifacts[*]}" | parallel -d ' ' "buildkite-agent artifact download {}-bench . && mv ./{}-bench target/release/{}"
-  popd
 }
 
 ############## CONFIGURE
