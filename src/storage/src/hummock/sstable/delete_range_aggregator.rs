@@ -243,7 +243,8 @@ impl CompactionDeleteRanges {
             idx += 1;
         }
         while idx < self.events.len() {
-            if self.events[idx].0.as_ref().gt(&largest_user_key) {
+            // TODO: replace it with Bound
+            if !largest_user_key.is_empty() && self.events[idx].0.as_ref().gt(&largest_user_key) {
                 monotonic_events.push(MonotonicDeleteEvent {
                     event_key: largest_user_key.to_vec(),
                     new_epoch: HummockEpoch::MAX,
@@ -257,6 +258,7 @@ impl CompactionDeleteRanges {
                 is_exclusive: false,
                 new_epoch: epochs.first().map_or(HummockEpoch::MAX, |epoch| *epoch),
             });
+            idx += 1;
         }
         monotonic_events
     }
@@ -397,7 +399,7 @@ mod tests {
     pub fn test_compaction_delete_range_iterator() {
         let mut builder = CompactionDeleteRangesBuilder::default();
         let table_id = TableId::default();
-        builder.add_delete_events(create(&vec![
+        builder.add_delete_events(create_monotonic_events(&vec![
             DeleteRangeTombstone::new(table_id, b"aaaaaa".to_vec(), b"bbbccc".to_vec(), 12),
             DeleteRangeTombstone::new(table_id, b"aaaaaa".to_vec(), b"bbbddd".to_vec(), 9),
             DeleteRangeTombstone::new(table_id, b"bbbaab".to_vec(), b"bbbdddf".to_vec(), 6),

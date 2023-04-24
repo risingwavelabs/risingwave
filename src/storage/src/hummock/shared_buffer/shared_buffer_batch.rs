@@ -34,7 +34,7 @@ use crate::hummock::iterator::{
 use crate::hummock::store::memtable::ImmId;
 use crate::hummock::utils::{range_overlap, MemoryTracker};
 use crate::hummock::value::HummockValue;
-use crate::hummock::{DeleteRangeTombstone, HummockEpoch, HummockResult, MonotonicDeleteEvent};
+use crate::hummock::{HummockEpoch, HummockResult, MonotonicDeleteEvent};
 use crate::storage_value::StorageValue;
 use crate::store::ReadOptions;
 
@@ -119,7 +119,7 @@ impl SharedBufferBatchInner {
             .map(|(k, v)| (k, vec![(epoch, v)]))
             .collect_vec();
 
-        let mut monotonic_tombstone_events = Vec::with_capacity(range_tombstones.len() * 2);
+        let mut monotonic_tombstone_events = Vec::with_capacity(delete_ranges.len() * 2);
         for (start_key, end_key) in delete_ranges {
             monotonic_tombstone_events.push(MonotonicDeleteEvent {
                 event_key: UserKey::new(table_id, TableKey(start_key.to_vec())),
@@ -501,10 +501,6 @@ impl SharedBufferBatch {
         instance_id: Option<LocalInstanceId>,
         tracker: Option<MemoryTracker>,
     ) -> Self {
-        #[cfg(test)]
-        {
-            Self::check_tombstone_prefix(table_id, &delete_range_tombstones);
-        }
         let inner = SharedBufferBatchInner::new(
             table_id,
             epoch,
@@ -522,20 +518,6 @@ impl SharedBufferBatch {
 
     pub fn get_delete_range_tombstones(&self) -> Vec<MonotonicDeleteEvent> {
         self.inner.monotonic_tombstone_events.clone()
-    }
-
-    #[cfg(test)]
-    fn check_tombstone_prefix(table_id: TableId, tombstones: &[DeleteRangeTombstone]) {
-        for tombstone in tombstones {
-            assert_eq!(
-                tombstone.start_user_key.table_id, table_id,
-                "delete range tombstone in a shared buffer batch must begin with the same table id"
-            );
-            assert_eq!(
-                tombstone.end_user_key.table_id, table_id,
-                "delete range tombstone in a shared buffer batch must begin with the same table id"
-            );
-        }
     }
 }
 
