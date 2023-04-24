@@ -215,8 +215,6 @@ main() {
   psql -h localhost -p 4566 -d dev -U root -f ci/scripts/sql/nexmark/q17.sql
 
   echo "--- Start Profiling"
-  # Ensure we can run profiling
-  echo '1' | tee /proc/sys/kernel/perf_event_paranoid
   start_nperf
 
   # NOTE(kwannoel): Can stub first if promql gives us issues.
