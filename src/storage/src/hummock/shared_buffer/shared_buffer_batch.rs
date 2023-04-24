@@ -234,14 +234,15 @@ impl SharedBufferBatchInner {
         }
     }
 
-    // If the key is deleted by a epoch greater than the read epoch, return None
+    /// Return `None` if cannot find a visible version
+    /// Return `HummockValue::Delete` if the key has been deleted by some epoch <= `read_epoch`
     fn get_value(
         &self,
         table_id: TableId,
         table_key: TableKey<&[u8]>,
         read_epoch: HummockEpoch,
         read_options: &ReadOptions,
-    ) -> Option<HummockValue<Bytes>> {
+    ) -> Option<(HummockValue<Bytes>, HummockEpoch)> {
         // Perform binary search on table key to find the corresponding entry
         if let Ok(i) = self.payload.binary_search_by(|m| (m.0[..]).cmp(*table_key)) {
             let item = &self.payload[i];
@@ -252,15 +253,18 @@ impl SharedBufferBatchInner {
                 if read_epoch < *e {
                     continue;
                 }
-                return Some(v.clone());
+                return Some((v.clone(), *e));
             }
             // cannot find a visible version
         }
 
-        if !read_options.ignore_range_tombstone
-            && self.get_min_delete_range_epoch(UserKey::new(table_id, table_key)) <= read_epoch
-        {
-            Some(HummockValue::Delete)
+        if !read_options.ignore_range_tombstone {
+            let delete_epoch = self.get_min_delete_range_epoch(UserKey::new(table_id, table_key));
+            if delete_epoch <= read_epoch {
+                Some((HummockValue::Delete, delete_epoch))
+            } else {
+                None
+            }
         } else {
             None
         }
@@ -386,14 +390,12 @@ impl SharedBufferBatch {
         self.inner.kv_count
     }
 
-    /// Return `None` if the key doesn't exist
-    /// Return `HummockValue::Delete` if the key has been deleted by some epoch >= `read_epoch`
     pub fn get(
         &self,
         table_key: TableKey<&[u8]>,
         read_epoch: HummockEpoch,
         read_options: &ReadOptions,
-    ) -> Option<HummockValue<Bytes>> {
+    ) -> Option<(HummockValue<Bytes>, HummockEpoch)> {
         self.inner
             .get_value(self.table_id, table_key, read_epoch, read_options)
     }
@@ -852,8 +854,11 @@ mod tests {
         // Point lookup
         for (k, v) in &shared_buffer_items {
             assert_eq!(
-                shared_buffer_batch.get(TableKey(k.as_slice()), epoch, &ReadOptions::default()),
-                Some(v.clone())
+                shared_buffer_batch
+                    .get(TableKey(k.as_slice()), epoch, &ReadOptions::default())
+                    .unwrap()
+                    .0,
+                v.clone()
             );
         }
         assert_eq!(
@@ -1234,12 +1239,15 @@ mod tests {
         for (i, items) in batch_items.iter().enumerate() {
             for (key, value) in items {
                 assert_eq!(
-                    merged_imm.get(
-                        TableKey(key.as_slice()),
-                        i as u64 + 1,
-                        &ReadOptions::default()
-                    ),
-                    Some(value.clone()),
+                    merged_imm
+                        .get(
+                            TableKey(key.as_slice()),
+                            i as u64 + 1,
+                            &ReadOptions::default()
+                        )
+                        .unwrap()
+                        .0,
+                    value.clone(),
                     "epoch: {}, key: {:?}",
                     i + 1,
                     String::from_utf8(key.clone())
@@ -1410,37 +1418,55 @@ mod tests {
         );
 
         assert_eq!(
-            Some(HummockValue::put(Bytes::from("value12"))),
-            merged_imm.get(TableKey(b"111"), 2, &ReadOptions::default())
+            HummockValue::put(Bytes::from("value12")),
+            merged_imm
+                .get(TableKey(b"111"), 2, &ReadOptions::default())
+                .unwrap()
+                .0
         );
 
         // 555 is deleted in epoch=1
         assert_eq!(
-            Some(HummockValue::Delete),
-            merged_imm.get(TableKey(b"555"), 1, &ReadOptions::default())
+            HummockValue::Delete,
+            merged_imm
+                .get(TableKey(b"555"), 1, &ReadOptions::default())
+                .unwrap()
+                .0
         );
 
         // 555 is inserted again in epoch=2
         assert_eq!(
-            Some(HummockValue::put(Bytes::from("value52"))),
-            merged_imm.get(TableKey(b"555"), 2, &ReadOptions::default())
+            HummockValue::put(Bytes::from("value52")),
+            merged_imm
+                .get(TableKey(b"555"), 2, &ReadOptions::default())
+                .unwrap()
+                .0
         );
 
         // "666" is deleted in epoch=1 and isn't inserted in later epochs
         assert_eq!(
-            Some(HummockValue::Delete),
-            merged_imm.get(TableKey(b"666"), 2, &ReadOptions::default())
+            HummockValue::Delete,
+            merged_imm
+                .get(TableKey(b"666"), 2, &ReadOptions::default())
+                .unwrap()
+                .0
         );
         // "888" is deleted in epoch=2
         assert_eq!(
-            Some(HummockValue::Delete),
-            merged_imm.get(TableKey(b"888"), 2, &ReadOptions::default())
+            HummockValue::Delete,
+            merged_imm
+                .get(TableKey(b"888"), 2, &ReadOptions::default())
+                .unwrap()
+                .0
         );
 
         // 888 exists in the snapshot of epoch=1
         assert_eq!(
-            Some(HummockValue::put(Bytes::from("value8"))),
-            merged_imm.get(TableKey(b"888"), 1, &ReadOptions::default())
+            HummockValue::put(Bytes::from("value8")),
+            merged_imm
+                .get(TableKey(b"888"), 1, &ReadOptions::default())
+                .unwrap()
+                .0
         );
     }
 }

@@ -93,7 +93,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             let epoch = full_key.epoch;
 
             // handle multi-version
-            if epoch <= self.min_epoch || epoch > self.read_epoch {
+            if epoch < self.min_epoch || epoch > self.read_epoch {
                 self.iterator.next().await?;
                 continue;
             }
@@ -891,13 +891,13 @@ mod tests {
         while ui.is_valid() {
             let key = ui.key();
             let key_epoch = key.epoch;
-            assert!(key_epoch > min_epoch);
+            assert!(key_epoch >= min_epoch);
 
             i += 1;
             ui.next().await.unwrap();
         }
 
-        let expect_count = TEST_KEYS_COUNT - min_epoch as usize;
+        let expect_count = TEST_KEYS_COUNT - min_epoch as usize + 1;
         assert_eq!(i, expect_count);
     }
 
