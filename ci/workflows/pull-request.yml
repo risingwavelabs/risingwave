@@ -337,4 +337,4 @@ steps:
           mount-buildkite-agent: true
           environment:
             - GITHUB_TOKEN
-    timeout_in_minutes: 20
+    timeout_in_minutes: 30

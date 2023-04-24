@@ -133,7 +133,10 @@ configure_all() {
 
 start_nperf() {
   # echo '1' | tee /proc/sys/kernel/perf_event_paranoid
-  ./nperf record -p `pidof compute-node` -o perf.data
+  ./nperf record -p `pidof compute-node` -o perf.data &
+  # Run profiling for 5 min
+  sleep $((5 * 60))
+  pkill nperf
 }
 
 start_kafka() {
