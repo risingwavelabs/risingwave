@@ -95,7 +95,6 @@ where
 
 #[function("modulus(*int, *int) -> auto")]
 #[function("modulus(*numeric, *numeric) -> auto")]
-#[function("modulus(*float, *float) -> auto")]
 #[function("modulus(int256, int256) -> int256")]
 pub fn general_mod<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
@@ -452,22 +451,6 @@ mod tests {
         assert_eq!(general_mod::<i16, i32, i32>(1i16, 1i32).unwrap(), 0i32);
         assert_eq!(general_neg::<i16>(1i16).unwrap(), -1i16);
 
-        assert_eq!(
-            general_add::<Decimal, F32, F64>(dec("1.0"), (-1f32).into()).unwrap(),
-            0.0f64
-        );
-        assert_eq!(
-            general_sub::<Decimal, F32, F64>(dec("1.0"), 1f32.into()).unwrap(),
-            0.0f64
-        );
-        assert_eq!(
-            general_div::<Decimal, F32, F64>(dec("0.0"), 1f32.into()).unwrap(),
-            0.0f64
-        );
-        assert_eq!(
-            general_mul::<Decimal, F32, F64>(dec("0.0"), 1f32.into()).unwrap(),
-            0.0f64
-        );
         assert!(general_add::<i32, F32, F64>(-1i32, 1f32.into())
             .unwrap()
             .is_zero());

@@ -1,0 +1,77 @@
+query TT
+select v::varchar, pg_typeof(v) from (select '1.0'::decimal + '-1'::float4) as t(v);
+----
+0 double precision
+
+query TT
+select v::varchar, pg_typeof(v) from (select '1.0'::decimal - '1'::float4) as t(v);
+----
+0 double precision
+
+query TT
+select v::varchar, pg_typeof(v) from (select '0.0'::decimal * '1'::float4) as t(v);
+----
+0 double precision
+
+query TT
+select v::varchar, pg_typeof(v) from (select '0.0'::decimal / '1'::float4) as t(v);
+----
+0 double precision
+
+statement error
+select '0.0'::decimal % '1'::float4;
+
+query TTT
+select a < b, a::float8, b::float8 from (select '1.1'::decimal, '1.1'::float4) as t(a, b);
+----
+t 1.1 1.100000023841858
+
+query T
+select '1.0'::decimal = '1.0'::float4;
+----
+t
+
+query T
+select '1.0'::decimal <> '1.0'::float4;
+----
+f
+
+query T
+select '1.0'::decimal > '2.0'::float4;
+----
+f
+
+query T
+select '1.0'::decimal <= '2.1'::float4;
+----
+t
+
+query T
+select '1.0'::decimal >= '2.1'::float4;
+----
+f
+
+query T
+select '1.0'::decimal < '2.1'::float4;
+----
+t
+
+query T
+select '1.0'::decimal is distinct from '2.0'::float4;
+----
+t
+
+query T
+select '1.0'::decimal is distinct from null::float4;
+----
+t
+
+query T
+select '1.0'::decimal is distinct from '1.0'::float4;
+----
+f
+
+query T
+select null::decimal is distinct from null::float4;
+----
+f

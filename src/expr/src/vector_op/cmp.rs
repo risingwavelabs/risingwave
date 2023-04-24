@@ -376,39 +376,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_deci_f() {
-        // A subtle case that 1.1f32 -> f64 is larger than 1.1f64
-        assert!(general_lt::<Decimal, F32, F64>(
-            Decimal::from_str("1.1").unwrap(),
-            1.1f32.into(),
-        ))
-    }
-
-    #[test]
     fn test_comparison() {
         assert!(general_eq::<Decimal, i32, Decimal>(dec("1.0"), 1));
-        assert!(general_eq::<Decimal, F32, F64>(dec("1.0"), 1.0.into()));
         assert!(!general_ne::<Decimal, i32, Decimal>(dec("1.0"), 1));
-        assert!(!general_ne::<Decimal, F32, F64>(dec("1.0"), 1.0.into()));
         assert!(!general_gt::<Decimal, i32, Decimal>(dec("1.0"), 2));
-        assert!(!general_gt::<Decimal, F32, F64>(dec("1.0"), 2.0.into()));
         assert!(general_le::<Decimal, i32, Decimal>(dec("1.0"), 2));
-        assert!(general_le::<Decimal, F32, F64>(dec("1.0"), 2.1.into()));
         assert!(!general_ge::<Decimal, i32, Decimal>(dec("1.0"), 2));
-        assert!(!general_ge::<Decimal, F32, F64>(dec("1.0"), 2.1.into()));
         assert!(general_lt::<Decimal, i32, Decimal>(dec("1.0"), 2));
-        assert!(general_lt::<Decimal, F32, F64>(dec("1.0"), 2.1.into()));
         assert!(general_is_distinct_from::<Decimal, i32, Decimal>(
             Some(dec("1.0")),
             Some(2)
-        ));
-        assert!(general_is_distinct_from::<Decimal, F32, F64>(
-            Some(dec("1.0")),
-            Some(2.0.into())
-        ));
-        assert!(general_is_distinct_from::<Decimal, F32, F64>(
-            Some(dec("1.0")),
-            None
         ));
         assert!(general_is_distinct_from::<Decimal, i32, Decimal>(
             None,
@@ -418,11 +395,6 @@ mod tests {
             Some(dec("1.0")),
             Some(1)
         ));
-        assert!(!general_is_distinct_from::<Decimal, F32, F64>(
-            Some(dec("1.0")),
-            Some(1.0.into())
-        ));
-        assert!(!general_is_distinct_from::<Decimal, F32, F64>(None, None));
         assert!(general_eq::<F32, i32, F64>(1.0.into(), 1));
         assert!(!general_ne::<F32, i32, F64>(1.0.into(), 1));
         assert!(!general_lt::<F32, i32, F64>(1.0.into(), 1));
