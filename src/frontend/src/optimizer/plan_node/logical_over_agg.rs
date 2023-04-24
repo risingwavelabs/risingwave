@@ -40,7 +40,7 @@ pub struct PlanWindowFunction {
     pub args: Vec<InputRef>,
     pub partition_by: Vec<InputRef>,
     pub order_by: Vec<ColumnOrder>,
-    pub frame: Frame,
+    pub frame: Option<Frame>,
 }
 
 struct PlanWindowFunctionDisplay<'a> {
@@ -91,8 +91,8 @@ impl<'a> std::fmt::Debug for PlanWindowFunctionDisplay<'a> {
                     })
                 )?;
             }
-            if window_function.frame != Frame::default() {
-                write!(f, "{delim}{}", &window_function.frame)?;
+            if let Some(frame) = &window_function.frame {
+                write!(f, "{delim}{}", frame)?;
             }
             f.write_str(")")?;
 
@@ -192,7 +192,7 @@ impl LogicalOverAgg {
     fn convert_window_function(window_function: WindowFunction) -> Result<PlanWindowFunction> {
         // TODO: rewrite expressions in `ORDER BY`, `PARTITION BY` and arguments to `InputRef` like
         // in `LogicalAgg`
-        let order_by = window_function
+        let order_by: Vec<_> = window_function
             .order_by
             .sort_exprs
             .into_iter()
@@ -204,7 +204,7 @@ impl LogicalOverAgg {
                 )),
             })
             .try_collect()?;
-        let partition_by = window_function
+        let partition_by: Vec<_> = window_function
             .partition_by
             .into_iter()
             .map(|e| match e.as_input_ref() {
@@ -218,6 +218,10 @@ impl LogicalOverAgg {
 
         let mut args = window_function.args;
         let frame = match window_function.kind {
+            WindowFuncKind::RowNumber | WindowFuncKind::Rank | WindowFuncKind::DenseRank => {
+                // ignore frame for rank functions
+                None
+            }
             WindowFuncKind::Lag | WindowFuncKind::Lead => {
                 let offset = if args.len() > 1 {
                     let offset_expr = args.remove(1);
@@ -239,13 +243,13 @@ impl LogicalOverAgg {
 
                 // override the frame
                 // TODO(rc): We can only do the optimization for constant offset.
-                if window_function.kind == WindowFuncKind::Lag {
+                Some(if window_function.kind == WindowFuncKind::Lag {
                     Frame::Rows(FrameBound::Preceding(offset), FrameBound::CurrentRow)
                 } else {
                     Frame::Rows(FrameBound::CurrentRow, FrameBound::Following(offset))
-                }
+                })
             }
-            _ => window_function.frame.unwrap_or_default(),
+            _ => window_function.frame,
         };
 
         let args = args

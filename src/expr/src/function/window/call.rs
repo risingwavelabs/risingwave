@@ -27,16 +27,6 @@ pub enum Frame {
     // Range(FrameBound<ScalarImpl>, FrameBound<ScalarImpl>),
 }
 
-impl Default for Frame {
-    fn default() -> Self {
-        // note it's not (unbounded, current row]
-        Frame::Rows(
-            FrameBound::UnboundedPreceding,
-            FrameBound::UnboundedFollowing,
-        )
-    }
-}
-
 impl Frame {
     pub fn is_valid(&self) -> bool {
         match self {

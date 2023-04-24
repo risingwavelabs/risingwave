@@ -58,11 +58,6 @@ impl Rule for OverAggToTopNRule {
             return None;
         }
 
-        if !f.frame.start_is_unbounded() || !f.frame.end_is_unbounded() {
-            // Only unbounded frame can be converted to TopN.
-            return None;
-        }
-
         let over_agg_len = over_agg.schema().len();
         let window_func_pos = over_agg_len - 1;
 
