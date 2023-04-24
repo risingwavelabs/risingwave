@@ -130,6 +130,7 @@ configure_all() {
 ############## Start benchmark environment
 
 start_nperf() {
+  echo '1' | sudo tee /proc/sys/kernel/perf_event_paranoid
   ./nperf record -p $(pidof compute-node) -o perf.data
 }
 
