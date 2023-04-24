@@ -56,6 +56,8 @@ services:
 
   ci-flamegraph-env:
     image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230407
+    privileged: true
+    userns_mode: host
     security_opt:
       - seccomp:unconfined
     volumes:
