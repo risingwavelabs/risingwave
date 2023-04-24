@@ -35,8 +35,6 @@ pub struct BatchExpand {
 
 impl BatchExpand {
     pub fn new(logical: generic::Expand<PlanRef>) -> Self {
-        let base = PlanBase::new_logical_with_core(&logical);
-        let ctx = base.ctx;
         let dist = match logical.input.distribution() {
             Distribution::Single => Distribution::Single,
             Distribution::SomeShard
@@ -44,7 +42,7 @@ impl BatchExpand {
             | Distribution::UpstreamHashShard(_, _) => Distribution::SomeShard,
             Distribution::Broadcast => unreachable!(),
         };
-        let base = PlanBase::new_batch(ctx, base.schema, dist, Order::any());
+        let base = PlanBase::new_batch_from_logical(&logical, dist, Order::any());
         BatchExpand { base, logical }
     }
 

@@ -138,12 +138,14 @@ impl MetaClient {
         connection_name: String,
         database_id: u32,
         schema_id: u32,
+        owner_id: u32,
         req: create_connection_request::Payload,
     ) -> Result<(ConnectionId, CatalogVersion)> {
         let request = CreateConnectionRequest {
             name: connection_name,
             database_id,
             schema_id,
+            owner_id,
             payload: Some(req),
         };
         let resp = self.inner.create_connection(request).await?;

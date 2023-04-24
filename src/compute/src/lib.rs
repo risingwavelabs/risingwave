@@ -89,22 +89,6 @@ pub struct ComputeNodeOpts {
     #[clap(long, value_enum, default_value_t = default_role())]
     pub role: Role,
 
-    /// The policy for compute node memory control. Valid values:
-    /// - streaming-only
-    /// - streaming-batch
-    #[clap(
-        long,
-        env = "RW_MEMORY_CONTROL_POLICY",
-        default_value = "streaming-only"
-    )]
-    pub memory_control_policy: String,
-
-    /// The proportion of streaming memory to all available memory for computing. Only works when
-    /// `memory_control_policy` is set to "streaming-batch". Ignored otherwise. See
-    /// [`FixedProportionPolicy`] for more details.
-    #[clap(long, env = "RW_STREAMING_MEMORY_PROPORTION", default_value_t = 0.7)]
-    pub streaming_memory_proportion: f64,
-
     #[clap(flatten)]
     override_config: OverrideConfigOpts,
 }

@@ -18,7 +18,6 @@ use std::marker::PhantomData;
 
 use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
-use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
@@ -39,7 +38,7 @@ use super::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
     ExecutorInfo, Message, PkIndices, StreamExecutorError, StreamExecutorResult, Watermark,
 };
-use crate::cache::{new_unbounded, ExecutorCache};
+use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
 use crate::executor::over_window::state::StateEvictHint;
@@ -49,7 +48,7 @@ mod partition;
 mod state;
 
 type MemcmpEncoded = Box<[u8]>;
-type PartitionCache = ExecutorCache<MemcmpEncoded, Partition>; // TODO(rc): use `K: HashKey` as key like in hash agg?
+type PartitionCache = ManagedLruCache<MemcmpEncoded, Partition>; // TODO(rc): use `K: HashKey` as key like in hash agg?
 
 /// [`OverWindowExecutor`] consumes ordered input (on order key column with watermark) and outputs
 /// window function results. One [`OverWindowExecutor`] can handle one combination of partition key
@@ -221,7 +220,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             return Ok(());
         }
 
-        let mut partition = Partition::new(&this.calls);
+        let mut partition = Partition::new(&this.calls)?;
 
         // Recover states from state table.
         let table_iter = this
@@ -246,7 +245,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                         .input_pk_indices
                         .iter()
                         .map(|idx| this.col_mapping.upstream_to_state_table(*idx).unwrap())
-                        .collect_vec(),
+                        .collect::<Vec<_>>(),
                 ),
                 &vec![OrderType::ascending(); this.input_pk_indices.len()],
             )?
@@ -265,7 +264,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                                 .val_indices()
                                 .iter()
                                 .map(|idx| this.col_mapping.upstream_to_state_table(*idx).unwrap())
-                                .collect_vec(),
+                                .collect::<Vec<_>>(),
                         )
                         .into_owned_row()
                         .into_inner()
@@ -279,9 +278,9 @@ impl<S: StateStore> OverWindowExecutor<S> {
 
         // Ignore ready windows (all ready windows were outputted before).
         while partition.is_ready() {
-            partition.states.iter_mut().for_each(|state| {
-                state.slide();
-            });
+            for state in &mut partition.states {
+                state.output()?;
+            }
         }
 
         cache.put(encoded_partition_key.clone(), partition);
@@ -316,7 +315,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 &encoded_partition_key,
             )
             .await?;
-            let partition = vars.partitions.get_mut(&encoded_partition_key).unwrap();
+            let mut partition = vars.partitions.get_mut(&encoded_partition_key).unwrap();
 
             // Materialize input to state table.
             this.state_table
@@ -363,7 +362,9 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 let (ret_values, evict_hints): (Vec<_>, Vec<_>) = partition
                     .states
                     .iter_mut()
-                    .map(|state| state.slide())
+                    .map(|state| state.output())
+                    .try_collect::<Vec<_>>()?
+                    .into_iter()
                     .map(|o| (o.return_value, o.evict_hint))
                     .unzip();
 
@@ -402,10 +403,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             }
         }
 
-        let columns: Vec<Column> = builders
-            .into_iter()
-            .map(|b| b.finish().into())
-            .collect_vec();
+        let columns: Vec<Column> = builders.into_iter().map(|b| b.finish().into()).collect();
         let chunk_size = columns[0].len();
         Ok(if chunk_size > 0 {
             Some(StreamChunk::new(
@@ -426,7 +424,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         } = self;
 
         let mut vars = ExecutionVars {
-            partitions: ExecutorCache::new(new_unbounded(this.watermark_epoch.clone())),
+            partitions: new_unbounded(this.watermark_epoch.clone()),
             last_watermark: None,
             _phantom: PhantomData::<S>,
         };
@@ -501,8 +499,8 @@ mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::function::aggregate::AggArgs;
-    use risingwave_expr::function::window::{Frame, WindowFuncCall, WindowFuncKind};
+    use risingwave_expr::function::aggregate::{AggArgs, AggKind};
+    use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncCall, WindowFuncKind};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
@@ -575,13 +573,13 @@ mod tests {
                 kind: WindowFuncKind::Lag,
                 args: AggArgs::Unary(DataType::Int32, 3),
                 return_type: DataType::Int32,
-                frame: Frame::Offset(-1),
+                frame: Frame::Rows(FrameBound::Preceding(1), FrameBound::CurrentRow),
             },
             WindowFuncCall {
                 kind: WindowFuncKind::Lead,
                 args: AggArgs::Unary(DataType::Int32, 3),
                 return_type: DataType::Int32,
-                frame: Frame::Offset(1),
+                frame: Frame::Rows(FrameBound::CurrentRow, FrameBound::Following(1)),
             },
         ];
 
@@ -654,5 +652,39 @@ mod tests {
             tx.push_barrier(4, false);
             over_window.expect_barrier().await;
         }
+    }
+
+    #[tokio::test]
+    async fn test_over_window_aggregate() {
+        let store = MemoryStateStore::new();
+        let calls = vec![WindowFuncCall {
+            kind: WindowFuncKind::Aggregate(AggKind::Sum),
+            args: AggArgs::Unary(DataType::Int32, 3),
+            return_type: DataType::Int64,
+            frame: Frame::Rows(FrameBound::Preceding(1), FrameBound::Following(1)),
+        }];
+
+        let (mut tx, mut over_window) = create_executor(calls.clone(), store.clone()).await;
+
+        tx.push_barrier(1, false);
+        over_window.expect_barrier().await;
+
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I T  I   i
+            + 1 p1 100 10
+            + 1 p1 101 16
+            + 4 p1 102 20",
+        ));
+        assert_eq!(1, over_window.expect_watermark().await.val.into_int64());
+        let chunk = over_window.expect_chunk().await;
+        println!("{}", chunk.to_pretty_string());
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " T  I I   I
+                + p1 1 100 26
+                + p1 1 101 46"
+            )
+        );
     }
 }

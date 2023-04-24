@@ -12,4 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod estimate_size;
+package com.risingwave.sourcenode.common;
+
+import io.grpc.Status;
+
+public abstract class ValidatorUtils {
+    public static RuntimeException invalidArgument(String description) {
+        return Status.INVALID_ARGUMENT.withDescription(description).asRuntimeException();
+    }
+
+    public static RuntimeException internalError(String description) {
+        return Status.INTERNAL.withDescription(description).asRuntimeException();
+    }
+}

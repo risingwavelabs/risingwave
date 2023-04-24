@@ -43,6 +43,7 @@ pub struct SinkExecutor<F: LogStoreFactory> {
     schema: Schema,
     pk_indices: Vec<usize>,
     sink_type: SinkType,
+    sink_id: u64,
     actor_context: ActorContextRef,
     log_reader: F::Reader,
     log_writer: F::Writer,
@@ -54,8 +55,17 @@ async fn build_sink(
     pk_indices: PkIndices,
     connector_params: ConnectorParams,
     sink_type: SinkType,
+    sink_id: u64,
 ) -> StreamExecutorResult<SinkImpl> {
-    Ok(SinkImpl::new(config, schema, pk_indices, connector_params, sink_type).await?)
+    Ok(SinkImpl::new(
+        config,
+        schema,
+        pk_indices,
+        connector_params,
+        sink_type,
+        sink_id,
+    )
+    .await?)
 }
 
 // Drop all the DELETE messages in this chunk and convert UPDATE INSERT into INSERT.
@@ -84,6 +94,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         schema: Schema,
         pk_indices: Vec<usize>,
         sink_type: SinkType,
+        sink_id: u64,
         actor_context: ActorContextRef,
         log_store_factory: F,
     ) -> Self {
@@ -97,6 +108,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             schema,
             connector_params,
             sink_type,
+            sink_id,
             actor_context,
             log_reader,
             log_writer,
@@ -117,6 +129,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             self.pk_indices,
             self.connector_params,
             self.sink_type,
+            self.sink_id,
             self.log_reader,
             metrics,
         );
@@ -190,16 +203,26 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         }
     }
 
+    #[expect(clippy::too_many_arguments)]
     async fn execute_consume_log<R: LogReader>(
         config: SinkConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
         connector_params: ConnectorParams,
         sink_type: SinkType,
+        sink_id: u64,
         mut log_reader: R,
         sink_commit_duration_metrics: Histogram,
     ) -> StreamExecutorResult<Message> {
-        let mut sink = build_sink(config, schema, pk_indices, connector_params, sink_type).await?;
+        let mut sink = build_sink(
+            config,
+            schema,
+            pk_indices,
+            connector_params,
+            sink_type,
+            sink_id,
+        )
+        .await?;
 
         let mut epoch = log_reader.init().await?;
 
@@ -338,6 +361,7 @@ mod test {
             schema.clone(),
             pk.clone(),
             SinkType::ForceAppendOnly,
+            0,
             ActorContext::create(0),
             BoundedInMemLogStoreFactory::new(1),
         )

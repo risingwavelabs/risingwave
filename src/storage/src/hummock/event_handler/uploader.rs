@@ -688,10 +688,10 @@ impl HummockUploader {
             .iter_mut()
             .filter(|(_, imms)| imms.len() >= self.context.imm_merge_threshold)
         {
-            let imms = imms.drain(..).collect_vec();
+            let imms_to_merge = imms.drain(..).collect_vec();
             let mut kv_count = 0;
             let mut imm_size = 0;
-            imms.iter().for_each(|imm| {
+            imms_to_merge.iter().for_each(|imm| {
                 // ensure imms are sealed
                 assert!(imm.max_epoch() <= sealed_epoch);
                 kv_count += imm.kv_count();
@@ -707,7 +707,7 @@ impl HummockUploader {
                     .push_front(MergingImmTask::new(
                         *table_id,
                         *shard_id,
-                        imms,
+                        imms_to_merge,
                         Some(tracker),
                         &self.context,
                     ));
@@ -718,6 +718,7 @@ impl HummockUploader {
                     table_id,
                     shard_id
                 );
+                imms.extend(imms_to_merge);
             }
         }
     }

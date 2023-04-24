@@ -172,7 +172,7 @@ where
 }
 
 /// Visit the internal tables of a [`StreamFragment`].
-pub(super) fn visit_internal_tables<F>(fragment: &mut StreamFragment, f: F)
+pub fn visit_internal_tables<F>(fragment: &mut StreamFragment, f: F)
 where
     F: FnMut(&mut Table, &str),
 {

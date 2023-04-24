@@ -19,7 +19,11 @@ use risingwave_expr::function::window::{WindowFuncCall, WindowFuncKind};
 use smallvec::SmallVec;
 
 use super::MemcmpEncoded;
+use crate::executor::StreamExecutorResult;
 
+mod buffer;
+
+mod aggregate;
 mod lag;
 mod lead;
 
@@ -103,14 +107,21 @@ pub(super) trait WindowState {
     /// Get the current window frame position.
     fn curr_window(&self) -> StatePos<'_>;
 
+    // TODO(rc): split `output` into `curr_output` and `slide` to avoid unnecessary computation on
+    // recovery.
     /// Return the output for the current ready window frame and push the window forward.
-    fn slide(&mut self) -> StateOutput;
+    fn output(&mut self) -> StreamExecutorResult<StateOutput>;
 }
 
-pub(super) fn create_window_state(call: &WindowFuncCall) -> Box<dyn WindowState + Send> {
+pub(super) fn create_window_state(
+    call: &WindowFuncCall,
+) -> StreamExecutorResult<Box<dyn WindowState + Send>> {
+    assert!(call.frame.is_valid());
+
     use WindowFuncKind::*;
-    match call.kind {
+    Ok(match call.kind {
         Lag => Box::new(lag::LagState::new(&call.frame)),
         Lead => Box::new(lead::LeadState::new(&call.frame)),
-    }
+        Aggregate(_) => Box::new(aggregate::AggregateState::new(call)?),
+    })
 }

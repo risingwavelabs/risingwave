@@ -17,10 +17,9 @@ use std::fmt::{Display, Write};
 use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::bytes_array::{BytesWriter, PartialBytesWriter};
-use super::{Array, ArrayBuilder, ArrayMeta, BytesArray, BytesArrayBuilder};
-use crate::array::ArrayBuilderImpl;
+use super::{Array, ArrayBuilder, BytesArray, BytesArrayBuilder, DataType};
 use crate::buffer::Bitmap;
-use crate::collection::estimate_size::EstimateSize;
+use crate::estimate_size::EstimateSize;
 
 /// `Utf8Array` is a collection of Rust Utf8 `str`s. It's a wrapper of `BytesArray`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,9 +68,8 @@ impl Array for Utf8Array {
         self.bytes.set_bitmap(bitmap);
     }
 
-    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
-        let array_builder = Utf8ArrayBuilder::new(capacity);
-        ArrayBuilderImpl::Utf8(array_builder)
+    fn data_type(&self) -> DataType {
+        DataType::Varchar
     }
 }
 
@@ -129,10 +127,15 @@ pub struct Utf8ArrayBuilder {
 impl ArrayBuilder for Utf8ArrayBuilder {
     type ArrayType = Utf8Array;
 
-    fn with_meta(capacity: usize, meta: ArrayMeta) -> Self {
+    fn new(capacity: usize) -> Self {
         Self {
-            bytes: BytesArrayBuilder::with_meta(capacity, meta),
+            bytes: BytesArrayBuilder::new(capacity),
         }
+    }
+
+    fn with_type(capacity: usize, ty: DataType) -> Self {
+        assert_eq!(ty, DataType::Varchar);
+        Self::new(capacity)
     }
 
     #[inline]

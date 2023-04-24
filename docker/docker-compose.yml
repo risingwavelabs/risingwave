@@ -209,6 +209,8 @@ services:
       - "connector-node:50051"
       - "--state-store"
       - "hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001"
+      - "--data-directory"
+      - "hummock_001"
       - "--config-path"
       - /risingwave.toml
     expose:

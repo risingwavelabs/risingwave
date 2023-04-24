@@ -69,7 +69,7 @@ cargo make ci-start ci-3streaming-2serving-3fe
 sqllogictest -p 4566 -d dev -e postgres-extended './e2e_test/extended_mode/**/*.slt'
 RUST_BACKTRACE=1 target/debug/risingwave_e2e_extended_mode_test --host 127.0.0.1 \
   -p 4566 \
-  -u root 
+  -u root
 
 echo "--- Kill cluster"
 cargo make ci-kill

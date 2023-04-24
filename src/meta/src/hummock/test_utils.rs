@@ -321,6 +321,7 @@ pub async fn setup_compute_env(
     let config = CompactionConfigBuilder::new()
         .level0_tier_compact_file_number(1)
         .level0_max_compact_file_number(130)
+        .level0_sub_level_compact_level_count(1)
         .build();
     setup_compute_env_with_config(port, config).await
 }

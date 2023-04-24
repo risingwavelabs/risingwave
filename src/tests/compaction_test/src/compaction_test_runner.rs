@@ -149,7 +149,7 @@ pub async fn start_meta_node(listen_addr: String, state_store: String, config_pa
     // to commit new epochs to avoid bumping the hummock version during version log replay.
     assert_eq!(
         CHECKPOINT_FREQ_FOR_REPLAY,
-        config.system.checkpoint_frequency
+        config.system.checkpoint_frequency.unwrap()
     );
     assert!(
         config.meta.enable_compaction_deterministic,

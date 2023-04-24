@@ -15,7 +15,7 @@
 use risingwave_common::catalog::Field;
 use risingwave_pb::catalog::PbView;
 
-use super::{RelationCatalog, ViewId};
+use super::{OwnedByUserCatalog, ViewId};
 use crate::user::UserId;
 use crate::WithOptions;
 
@@ -54,7 +54,7 @@ impl ViewCatalog {
     }
 }
 
-impl RelationCatalog for ViewCatalog {
+impl OwnedByUserCatalog for ViewCatalog {
     fn owner(&self) -> UserId {
         self.owner
     }
