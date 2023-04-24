@@ -47,8 +47,8 @@ impl StreamLocalSimpleAgg {
 
         let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
         // Watermark column(s) must be in group key.
-        for (idx, input_idx) in logical.group_key().iter().enumerate() {
-            if input.watermark_columns().contains(*input_idx) {
+        for (idx, input_idx) in logical.group_key().ones().enumerate() {
+            if input.watermark_columns().contains(input_idx) {
                 watermark_columns.insert(idx);
             }
         }

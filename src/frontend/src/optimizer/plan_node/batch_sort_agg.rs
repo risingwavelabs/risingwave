@@ -14,6 +14,8 @@
 
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -51,7 +53,7 @@ impl BatchSortAgg {
                 .order()
                 .column_orders
                 .iter()
-                .filter(|o| logical.group_key.iter().any(|g_k| *g_k == o.column_index))
+                .filter(|o| logical.group_key.ones().any(|g_k| g_k == o.column_index))
                 .cloned()
                 .collect(),
         };
@@ -75,7 +77,7 @@ impl BatchSortAgg {
         &self.logical.agg_calls
     }
 
-    pub fn group_key(&self) -> &[usize] {
+    pub fn group_key(&self) -> &FixedBitSet {
         &self.logical.group_key
     }
 }
@@ -103,7 +105,10 @@ impl ToDistributedBatch for BatchSortAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
         let new_input = self.input().to_distributed_with_required(
             &self.input_order,
-            &RequiredDist::shard_by_key(self.input().schema().len(), self.group_key()),
+            &RequiredDist::shard_by_key(
+                self.input().schema().len(),
+                &self.group_key().ones().collect_vec(),
+            ),
         )?;
         Ok(self.clone_with_input(new_input).into())
     }
@@ -119,8 +124,8 @@ impl ToBatchPb for BatchSortAgg {
                 .collect(),
             group_key: self
                 .group_key()
-                .iter()
-                .map(|idx| ExprImpl::InputRef(Box::new(InputRef::new(*idx, DataType::Int32))))
+                .ones()
+                .map(|idx| ExprImpl::InputRef(Box::new(InputRef::new(idx, DataType::Int32))))
                 .map(|expr| expr.to_expr_proto())
                 .collect::<Vec<ExprNode>>(),
         })

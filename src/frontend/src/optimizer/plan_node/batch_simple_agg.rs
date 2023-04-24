@@ -101,7 +101,7 @@ impl ToDistributedBatch for BatchSimpleAgg {
                 })
                 .collect();
             let total_agg_logical =
-                generic::Agg::new(total_agg_types, self.logical.group_key.to_vec(), exchange);
+                generic::Agg::new(total_agg_types, self.logical.group_key.clone(), exchange);
             Ok(BatchSimpleAgg::new(total_agg_logical).into())
         } else {
             let new_input = self

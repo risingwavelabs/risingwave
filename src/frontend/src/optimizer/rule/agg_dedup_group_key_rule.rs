@@ -45,25 +45,25 @@ impl Rule for AggDedupGroupKeyRule {
         let (deduped_group_key, group_key_mapping) = {
             let mut deduped_group_key = vec![];
             let mut group_key_mapping = vec![];
-            for key in &group_key {
+            for key in group_key.ones() {
                 if let Some(idx) = deduped_group_key
                     .iter()
-                    .position(|deduped_key| *deduped_key == *key)
+                    .position(|deduped_key| *deduped_key == key)
                 {
                     group_key_mapping.push(idx);
                 } else {
-                    deduped_group_key.push(*key);
+                    deduped_group_key.push(key);
                     group_key_mapping.push(deduped_group_key.len() - 1);
                 }
             }
             (deduped_group_key, group_key_mapping)
         };
-        if deduped_group_key.len() == group_key.len() {
+        if deduped_group_key.len() == group_key.count_ones(..) {
             return None;
         }
         let deduped_group_key_num = deduped_group_key.len();
         let agg_call_num = agg_calls.len();
-        let new_agg = Agg::new(agg_calls, deduped_group_key, input);
+        let new_agg = Agg::new(agg_calls, deduped_group_key.into_iter().collect(), input);
         let proj = LogicalProject::with_out_col_idx(
             new_agg.into(),
             group_key_mapping

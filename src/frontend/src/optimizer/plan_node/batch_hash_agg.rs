@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -55,7 +56,7 @@ impl BatchHashAgg {
         &self.logical.agg_calls
     }
 
-    pub fn group_key(&self) -> &[usize] {
+    pub fn group_key(&self) -> &FixedBitSet {
         &self.logical.group_key
     }
 
@@ -67,7 +68,7 @@ impl BatchHashAgg {
         // insert exchange
         let exchange = RequiredDist::shard_by_key(
             partial_agg.schema().len(),
-            &(0..self.group_key().len()).collect_vec(),
+            &(0..self.group_key().count_ones(..)).collect_vec(),
         )
         .enforce_if_not_satisfies(partial_agg, &Order::any())?;
 
@@ -78,12 +79,13 @@ impl BatchHashAgg {
             .iter()
             .enumerate()
             .map(|(partial_output_idx, agg_call)| {
-                agg_call.partial_to_total_agg_call(partial_output_idx + self.group_key().len())
+                agg_call
+                    .partial_to_total_agg_call(partial_output_idx + self.group_key().count_ones(..))
             })
             .collect();
         let total_agg_logical = generic::Agg::new(
             total_agg_types,
-            (0..self.group_key().len()).collect(),
+            (0..self.group_key().count_ones(..)).collect(),
             exchange,
         );
         Ok(BatchHashAgg::new(total_agg_logical).into())
@@ -91,7 +93,10 @@ impl BatchHashAgg {
 
     fn to_shuffle_agg(&self) -> Result<PlanRef> {
         let input = self.input();
-        let required_dist = RequiredDist::shard_by_key(input.schema().len(), self.group_key());
+        let required_dist = RequiredDist::shard_by_key(
+            input.schema().len(),
+            &self.group_key().ones().collect_vec(),
+        );
         let new_input = input.to_distributed_with_required(&Order::any(), &required_dist)?;
         Ok(self.clone_with_input(new_input).into())
     }
@@ -146,12 +151,7 @@ impl ToBatchPb for BatchHashAgg {
                 .iter()
                 .map(PlanAggCall::to_protobuf)
                 .collect(),
-            group_key: self
-                .group_key()
-                .iter()
-                .clone()
-                .map(|index| *index as u32)
-                .collect(),
+            group_key: self.group_key().ones().map(|index| index as u32).collect(),
         })
     }
 }
