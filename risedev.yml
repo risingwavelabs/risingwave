@@ -301,8 +301,6 @@ profile:
         # used to support other s3 compatible object store.
         s3-compatible: false
 
-      # FIXME(kwannoel): should use s3.
-      # - use: minio
       - use: etcd
       - use: meta-node
       - use: compute-node

@@ -2,6 +2,12 @@
 
 set -uo pipefail
 
+install_aws_cli() {
+  echo "--- Install aws cli"
+  curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+  unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
+}
+
 # FIXME: Can't get this to work ;_;
 upload_logs () {
   EXIT_CODE=$?
@@ -30,6 +36,11 @@ print_machine_debug_info() {
 ############## INSTALL
 
 install_all() {
+  echo ">>> Installing aws"
+  install_aws_cli
+  echo ">>> Checking that we can reach s3 bucket"
+  aws s3 ls s3://rw-ci-benchmark
+
   echo ">>> Installing PromQL cli client"
   # Download promql
   wget https://github.com/nalbury/promql-cli/releases/download/v0.3.0/promql-v0.3.0-linux-arm64.tar.gz
