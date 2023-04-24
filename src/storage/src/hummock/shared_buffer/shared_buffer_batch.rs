@@ -234,7 +234,8 @@ impl SharedBufferBatchInner {
         }
     }
 
-    // If the key is deleted by a epoch greater than the read epoch, return None
+    /// Return `None` if cannot find a visible version
+    /// Return `HummockValue::Delete` if the key has been deleted by some epoch <= `read_epoch`
     fn get_value(
         &self,
         table_id: TableId,
@@ -389,8 +390,6 @@ impl SharedBufferBatch {
         self.inner.kv_count
     }
 
-    /// Return `None` if the key doesn't exist
-    /// Return `HummockValue::Delete` if the key has been deleted by some epoch >= `read_epoch`
     pub fn get(
         &self,
         table_key: TableKey<&[u8]>,
