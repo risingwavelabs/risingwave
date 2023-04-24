@@ -13,13 +13,14 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::fmt::Display;
 
 use risingwave_common::types::DataType;
 
 use super::WindowFuncKind;
 use crate::function::aggregate::AggArgs;
 
-#[derive(Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Frame {
     Rows(FrameBound<usize>, FrameBound<usize>),
     // Groups(FrameBound<usize>, FrameBound<usize>),
@@ -46,7 +47,18 @@ impl Frame {
     }
 }
 
-#[derive(Clone, Eq, PartialEq, Hash)]
+impl Display for Frame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Frame::Rows(start, end) => {
+                write!(f, "ROWS BETWEEN {} AND {}", start, end)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum FrameBound<T> {
     UnboundedPreceding,
     Preceding(T),
@@ -82,6 +94,19 @@ impl<T: Ord> PartialOrd for FrameBound<T> {
             (Preceding(_), Following(_)) => Some(Ordering::Less),
             (Following(_), Preceding(_)) => Some(Ordering::Greater),
         }
+    }
+}
+
+impl Display for FrameBound<usize> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FrameBound::UnboundedPreceding => write!(f, "UNBOUNDED PRECEDING")?,
+            FrameBound::Preceding(n) => write!(f, "{} PRECEDING", n)?,
+            FrameBound::CurrentRow => write!(f, "CURRENT ROW")?,
+            FrameBound::Following(n) => write!(f, "{} FOLLOWING", n)?,
+            FrameBound::UnboundedFollowing => write!(f, "UNBOUNDED FOLLOWING")?,
+        }
+        Ok(())
     }
 }
 

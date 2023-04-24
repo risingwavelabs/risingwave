@@ -26,13 +26,16 @@ use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_expr::function::aggregate::AggKind;
-use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, WindowSpec};
+use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncKind};
+use risingwave_sqlparser::ast::{
+    Function, FunctionArg, FunctionArgExpr, WindowFrameBound, WindowFrameUnits, WindowSpec,
+};
 
 use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprType, FunctionCall, Literal, OrderBy, Subquery, SubqueryKind,
-    TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction, WindowFunctionType,
+    TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
 };
 use crate::utils::Condition;
 
@@ -62,14 +65,7 @@ impl Binder {
         };
 
         // agg calls
-        if let Ok(kind) = function_name.parse() {
-            if f.over.is_some() {
-                return Err(ErrorCode::NotImplemented(
-                    format!("aggregate function as over window function: {}", kind),
-                    4978.into(),
-                )
-                .into());
-            }
+        if f.over.is_none() && let Ok(kind) = function_name.parse() {
             return self.bind_agg(f, kind);
         }
 
@@ -89,8 +85,22 @@ impl Binder {
             .try_collect()?;
 
         // window function
-        if let Some(window_spec) = f.over {
-            return self.bind_window_function(window_spec, function_name, inputs);
+        let window_func_kind = WindowFuncKind::from_str(function_name.as_str());
+        if let Ok(kind) = window_func_kind {
+            if let Some(window_spec) = f.over {
+                return self.bind_window_function(kind, inputs, window_spec);
+            }
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "Window function `{}` must have OVER clause",
+                function_name
+            ))
+            .into());
+        } else if f.over.is_some() {
+            return Err(ErrorCode::NotImplemented(
+                format!("Unrecognized window function: {}", function_name),
+                8961.into(),
+            )
+            .into());
         }
 
         // table function
@@ -219,35 +229,66 @@ impl Binder {
 
     pub(super) fn bind_window_function(
         &mut self,
+        kind: WindowFuncKind,
+        inputs: Vec<ExprImpl>,
         WindowSpec {
             partition_by,
             order_by,
             window_frame,
         }: WindowSpec,
-        function_name: String,
-        inputs: Vec<ExprImpl>,
     ) -> Result<ExprImpl> {
         self.ensure_window_function_allowed()?;
-        if let Some(window_frame) = window_frame {
-            return Err(ErrorCode::NotImplemented(
-                format!("window frame: {}", window_frame),
-                None.into(),
-            )
-            .into());
-        }
-        let window_function_type = WindowFunctionType::from_str(&function_name)?;
         let partition_by = partition_by
             .into_iter()
             .map(|arg| self.bind_expr(arg))
             .try_collect()?;
-
         let order_by = OrderBy::new(
             order_by
                 .into_iter()
                 .map(|order_by_expr| self.bind_order_by_expr(order_by_expr))
                 .collect::<Result<_>>()?,
         );
-        Ok(WindowFunction::new(window_function_type, partition_by, order_by, inputs)?.into())
+        let frame = if let Some(frame) = window_frame {
+            let frame = match frame.units {
+                WindowFrameUnits::Rows => {
+                    let convert_bound = |bound| match bound {
+                        WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
+                        WindowFrameBound::Preceding(None) => FrameBound::UnboundedPreceding,
+                        WindowFrameBound::Preceding(Some(offset)) => {
+                            FrameBound::Preceding(offset as usize)
+                        }
+                        WindowFrameBound::Following(None) => FrameBound::UnboundedFollowing,
+                        WindowFrameBound::Following(Some(offset)) => {
+                            FrameBound::Following(offset as usize)
+                        }
+                    };
+                    let start = convert_bound(frame.start_bound);
+                    let end = if let Some(end_bound) = frame.end_bound {
+                        convert_bound(end_bound)
+                    } else {
+                        FrameBound::CurrentRow
+                    };
+                    Frame::Rows(start, end)
+                }
+                WindowFrameUnits::Range | WindowFrameUnits::Groups => {
+                    return Err(ErrorCode::NotImplemented(
+                        format!("window frame in `{}` mode is not supported", frame.units),
+                        9124.into(),
+                    )
+                    .into());
+                }
+            };
+            if !frame.is_valid() {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "window frame `{frame}` is not valid",
+                ))
+                .into());
+            }
+            Some(frame)
+        } else {
+            None
+        };
+        Ok(WindowFunction::new(kind, partition_by, order_by, inputs, frame)?.into())
     }
 
     fn bind_builtin_scalar_function(
@@ -367,6 +408,7 @@ impl Binder {
                 ("atan2", raw_call(ExprType::Atan2)),
                 ("sind", raw_call(ExprType::Sind)),
                 ("cosd", raw_call(ExprType::Cosd)),
+                ("cotd", raw_call(ExprType::Cotd)),
                 ("tand", raw_call(ExprType::Tand)),
                 ("degrees", raw_call(ExprType::Degrees)),
                 ("radians", raw_call(ExprType::Radians)),

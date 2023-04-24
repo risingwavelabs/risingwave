@@ -21,9 +21,7 @@ use crate::optimizer::plan_node::{ColumnPruningContext, PredicatePushdownContext
 use crate::optimizer::plan_rewriter::ShareSourceRewriter;
 #[cfg(debug_assertions)]
 use crate::optimizer::plan_visitor::InputRefValidator;
-use crate::optimizer::plan_visitor::{
-    has_logical_apply, has_logical_over_agg, HasMaxOneRowApply, PlanVisitor,
-};
+use crate::optimizer::plan_visitor::{has_logical_apply, HasMaxOneRowApply, PlanVisitor};
 use crate::optimizer::rule::*;
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
@@ -425,14 +423,6 @@ impl LogicalOptimizer {
 
         plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
 
-        if has_logical_over_agg(plan.clone()) {
-            return Err(ErrorCode::InternalError(format!(
-                "OverAgg can not be transformed. Plan:\n{}",
-                plan.explain_to_string().unwrap()
-            ))
-            .into());
-        }
-
         plan = plan.optimize_by_rules(&DEDUP_GROUP_KEYS);
 
         #[cfg(debug_assertions)]
@@ -496,14 +486,6 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&PULL_UP_HOP);
 
         plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
-
-        if has_logical_over_agg(plan.clone()) {
-            return Err(ErrorCode::InternalError(format!(
-                "OverAgg can not be transformed. Plan:\n{}",
-                plan.explain_to_string().unwrap()
-            ))
-            .into());
-        }
 
         plan = plan.optimize_by_rules(&DEDUP_GROUP_KEYS);
 
