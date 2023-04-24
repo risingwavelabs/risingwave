@@ -191,14 +191,14 @@ macro_rules! impl_try_from_float {
             type Error = Error;
 
             fn try_from(value: $from_ty) -> Result<Self, Self::Error> {
-                $convert(value).ok_or_else(|| Error::ConversionTo("".into()))
+                $convert(value).ok_or_else(|| Error::ConversionTo("decimal".into()))
             }
         }
         impl core::convert::TryFrom<OrderedFloat<$from_ty>> for $to_ty {
             type Error = Error;
 
             fn try_from(value: OrderedFloat<$from_ty>) -> Result<Self, Self::Error> {
-                $convert(value.0).ok_or_else(|| Error::ConversionTo("".into()))
+                $convert(value.0).ok_or_else(|| Error::ConversionTo("decimal".into()))
             }
         }
     };
