@@ -188,12 +188,13 @@ impl CompactionDeleteRangesBuilder {
                 last_exit_epoch = delete_event.new_epoch;
             }
         }
+        let events = ret
+            .into_iter()
+            .map(|(k, (exits, enters))| (k, exits, enters))
+            .collect_vec();
 
         Arc::new(CompactionDeleteRanges {
-            events: ret
-                .into_iter()
-                .map(|(k, (exits, enters))| (k, exits, enters))
-                .collect_vec(),
+            events,
             gc_delete_keys,
         })
     }
@@ -229,13 +230,16 @@ impl CompactionDeleteRanges {
         let mut epochs = BTreeSet::new();
         let mut idx = 0;
         while idx < self.events.len() {
-            if self.events[idx].0.as_ref().gt(&smallest_user_key) {
+            if self.events[idx].0.as_ref().ge(&smallest_user_key) {
                 if let Some(epoch) = epochs.first() {
                     monotonic_events.push(MonotonicDeleteEvent {
                         event_key: smallest_user_key.to_vec(),
                         new_epoch: *epoch,
                         is_exclusive: false,
                     });
+                    if self.events[idx].0.as_ref().eq(&smallest_user_key) {
+                        idx += 1;
+                    }
                 }
                 break;
             }
@@ -470,13 +474,16 @@ mod tests {
     pub fn test_delete_range_split() {
         let table_id = TableId::default();
         let mut builder = CompactionDeleteRangesBuilder::default();
-        builder.add_delete_events(create_monotonic_events(vec![
+        let data = vec![
             DeleteRangeTombstone::new(table_id, b"aaaa".to_vec(), b"bbbb".to_vec(), 12),
             DeleteRangeTombstone::new(table_id, b"aaaa".to_vec(), b"cccc".to_vec(), 12),
             DeleteRangeTombstone::new(table_id, b"cccc".to_vec(), b"dddd".to_vec(), 10),
             DeleteRangeTombstone::new(table_id, b"cccc".to_vec(), b"eeee".to_vec(), 12),
             DeleteRangeTombstone::new(table_id, b"eeee".to_vec(), b"ffff".to_vec(), 12),
-        ]));
+        ];
+        for range in data {
+            builder.add_delete_events(create_monotonic_events(vec![range]));
+        }
         let compaction_delete_range = builder.build_for_compaction(false);
         let split_ranges = compaction_delete_range.get_tombstone_between(
             test_user_key(b"bbbb").as_ref(),
