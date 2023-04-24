@@ -439,7 +439,7 @@ impl DataChunk {
     ///
     /// Otherwise, for variable sized datatypes, such as `varchar`,
     /// we have to individually compute their lengths per row.
-    fn estimate_row_sizes(&self) -> (usize, Vec<&Column>) {
+    fn partition_sizes(&self) -> (usize, Vec<&Column>) {
         let mut col_variable: Vec<&Column> = vec![];
         let mut row_len_fixed: usize = 0;
         for c in &self.columns {
@@ -452,18 +452,24 @@ impl DataChunk {
         (row_len_fixed, col_variable)
     }
 
-    fn compute_size_of_variable_cols_in_row(variable_cols: &[&Column], row_idx: usize) -> usize {
-        col_variable
+    unsafe fn compute_size_of_variable_cols_in_row(
+        variable_cols: &[&Column],
+        row_idx: usize,
+    ) -> usize {
+        variable_cols
             .iter()
-            .map(|col| {
-                estimate_serialize_datum_size(
-                    col.array_ref().value_at_unchecked(i),
-                )
-            }).sum::<usize>()
+            .map(|col| estimate_serialize_datum_size(col.array_ref().value_at_unchecked(row_idx)))
+            .sum::<usize>()
     }
 
-    fn init_buffer(row_len_fixed: usize, variable_cols: &[&Column], row_idx: usize) -> Vec<u8> {
-        Vec::with_capacity(row_len_fixed + Self::compute_size_of_variable_cols_in_row(variable_cols, row_idx))
+    unsafe fn init_buffer(
+        row_len_fixed: usize,
+        variable_cols: &[&Column],
+        row_idx: usize,
+    ) -> Vec<u8> {
+        Vec::with_capacity(
+            row_len_fixed + Self::compute_size_of_variable_cols_in_row(variable_cols, row_idx),
+        )
     }
 
     /// Serialize each row into value encoding bytes.
@@ -477,7 +483,7 @@ impl DataChunk {
             Vis::Bitmap(vis) => {
                 let rows_num = vis.len();
                 let mut buffers: Vec<Vec<u8>> = vec![];
-                let (row_len_fixed, col_variable) = self.estimate_row_sizes();
+                let (row_len_fixed, col_variable) = self.partition_sizes();
 
                 // First initialize buffer with the right size to avoid re-allocations
                 for i in 0..rows_num {
@@ -508,28 +514,10 @@ impl DataChunk {
             }
             Vis::Compact(rows_num) => {
                 let mut buffers: Vec<Vec<u8>> = vec![];
-                let mut col_variable: Vec<&Column> = vec![];
-                let mut row_len_fixed: usize = 0;
-                for c in &self.columns {
-                    if let Some(field_len) = try_get_exact_serialize_datum_size(&c.array()) {
-                        row_len_fixed += field_len;
-                    } else {
-                        col_variable.push(c);
-                    }
-                }
+                let (row_len_fixed, col_variable) = self.partition_sizes();
                 for i in 0..*rows_num {
                     unsafe {
-                        buffers.push(Vec::with_capacity(
-                            row_len_fixed
-                                + col_variable
-                                    .iter()
-                                    .map(|col| {
-                                        estimate_serialize_datum_size(
-                                            col.array_ref().value_at_unchecked(i),
-                                        )
-                                    })
-                                    .sum::<usize>(),
-                        ));
+                        buffers.push(Self::init_buffer(row_len_fixed, &col_variable, i));
                     }
                 }
                 for c in &self.columns {
