@@ -91,11 +91,11 @@ impl EstimateSize for Partition {
 
 type PartitionCache = ManagedLruCache<MemcmpEncoded, Partition>; // TODO(rc): use `K: HashKey` as key like in hash agg?
 
-/// [`OverWindowExecutor`] consumes ordered input (on order key column with watermark) and outputs
-/// window function results. One [`OverWindowExecutor`] can handle one combination of partition key
-/// and order key.
+/// [`EowcOverWindowExecutor`] consumes ordered input (on order key column with watermark) and
+/// outputs window function results. One [`EowcOverWindowExecutor`] can handle one combination of
+/// partition key and order key.
 ///
-/// The reason not to use [`SortBuffer`] is that the table schemas of [`OverWindowExecutor`] and
+/// The reason not to use [`SortBuffer`] is that the table schemas of [`EowcOverWindowExecutor`] and
 /// [`SortBuffer`] are different, since we don't have something like a _grouped_ sort buffer.
 ///
 /// [`SortBuffer`]: crate::executor::sort_buffer::SortBuffer
@@ -134,7 +134,7 @@ type PartitionCache = ManagedLruCache<MemcmpEncoded, Partition>; // TODO(rc): us
 /// - `curr evict row` <= min(last evict rows of all `WindowState`s).
 /// - `WindowState` should output agg result for `curr output row`.
 /// - Recover: iterate through `state_table`, push rows to `WindowState`, ignore ready windows.
-pub struct OverWindowExecutor<S: StateStore> {
+pub struct EowcOverWindowExecutor<S: StateStore> {
     input: Box<dyn Executor>,
     inner: ExecutorInner<S>,
 }
@@ -173,7 +173,7 @@ struct ExecutionVars<S: StateStore> {
     _phantom: PhantomData<S>,
 }
 
-impl<S: StateStore> Executor for OverWindowExecutor<S> {
+impl<S: StateStore> Executor for EowcOverWindowExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.executor_inner().boxed()
     }
@@ -191,7 +191,7 @@ impl<S: StateStore> Executor for OverWindowExecutor<S> {
     }
 }
 
-pub struct OverWindowExecutorArgs<S: StateStore> {
+pub struct EowcOverWindowExecutorArgs<S: StateStore> {
     pub input: BoxedExecutor,
 
     pub actor_ctx: ActorContextRef,
@@ -206,8 +206,8 @@ pub struct OverWindowExecutorArgs<S: StateStore> {
     pub watermark_epoch: AtomicU64Ref,
 }
 
-impl<S: StateStore> OverWindowExecutor<S> {
-    pub fn new(args: OverWindowExecutorArgs<S>) -> Self {
+impl<S: StateStore> EowcOverWindowExecutor<S> {
+    pub fn new(args: EowcOverWindowExecutorArgs<S>) -> Self {
         let input_info = args.input.info();
 
         let fields = args
@@ -237,7 +237,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 info: ExecutorInfo {
                     schema,
                     pk_indices: args.pk_indices,
-                    identity: format!("OverWindowExecutor {:X}", args.executor_id),
+                    identity: format!("EowcOverWindowExecutor {:X}", args.executor_id),
                 },
                 calls: args.calls,
                 state_table: args.state_table,
@@ -459,7 +459,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn executor_inner(self) {
-        let OverWindowExecutor {
+        let EowcOverWindowExecutor {
             input,
             inner: mut this,
         } = self;
@@ -545,7 +545,7 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
-    use super::{OverWindowExecutor, OverWindowExecutorArgs};
+    use super::{EowcOverWindowExecutor, EowcOverWindowExecutorArgs};
     use crate::common::table::state_table::StateTable;
     use crate::common::StateTableColumnMapping;
     use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
@@ -591,7 +591,7 @@ mod tests {
         .await;
 
         let (tx, source) = MockSource::channel(input_schema, input_pk_indices.clone());
-        let executor = OverWindowExecutor::new(OverWindowExecutorArgs {
+        let executor = EowcOverWindowExecutor::new(EowcOverWindowExecutorArgs {
             input: source.boxed(),
             actor_ctx: ActorContext::create(123),
             pk_indices: output_pk_indices,
