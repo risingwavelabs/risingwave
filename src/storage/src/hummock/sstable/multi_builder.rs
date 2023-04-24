@@ -428,7 +428,7 @@ mod tests {
         let opts = default_builder_opt_for_test();
         let table_id = TableId::default();
         let mut builder = CompactionDeleteRangesBuilder::default();
-        let events = create_monotonic_events(&vec![
+        let events = create_monotonic_events(vec![
             DeleteRangeTombstone::new(table_id, b"aaa".to_vec(), b"ddd".to_vec(), 200),
             DeleteRangeTombstone::new(table_id, b"k".to_vec(), b"kkk".to_vec(), 100),
         ]);
@@ -480,7 +480,7 @@ mod tests {
         };
         let table_id = TableId::new(1);
         let mut builder = CompactionDeleteRangesBuilder::default();
-        builder.add_delete_events(create_monotonic_events(&vec![
+        builder.add_delete_events(create_monotonic_events(vec![
             DeleteRangeTombstone::new(table_id, b"k".to_vec(), b"kkk".to_vec(), 100),
             DeleteRangeTombstone::new(table_id, b"aaa".to_vec(), b"ddd".to_vec(), 200),
         ]));

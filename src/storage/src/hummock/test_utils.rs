@@ -268,7 +268,7 @@ pub async fn gen_test_sstable_inner<B: AsRef<[u8]> + Clone + Default + Eq>(
             .await
             .unwrap();
     }
-    b.add_monotonic_deletes(create_monotonic_events(&range_tombstones));
+    b.add_monotonic_deletes(create_monotonic_events(range_tombstones));
     let output = b.finish().await.unwrap();
     output.writer_output.await.unwrap().unwrap();
     let table = sstable_store

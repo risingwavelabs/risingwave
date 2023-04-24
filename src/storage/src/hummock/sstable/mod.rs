@@ -183,15 +183,15 @@ pub(crate) fn create_monotonic_events_from_compaction_delete_events(
     monotonic_tombstone_events.dedup_by(|a, b| {
         a.event_key.table_id == b.event_key.table_id && a.new_epoch == b.new_epoch
     });
-
     monotonic_tombstone_events
 }
 
 #[cfg(any(test, feature = "test"))]
 pub(crate) fn create_monotonic_events(
-    delete_range_tombstones: &Vec<DeleteRangeTombstone>,
+    mut delete_range_tombstones: Vec<DeleteRangeTombstone>,
 ) -> Vec<MonotonicDeleteEvent> {
-    let events = CompactionDeleteRangesBuilder::build_events(delete_range_tombstones);
+    delete_range_tombstones.sort();
+    let events = CompactionDeleteRangesBuilder::build_events(&delete_range_tombstones);
     create_monotonic_events_from_compaction_delete_events(events)
 }
 

@@ -237,7 +237,7 @@ mod tests {
         );
         assert_eq!(
             ret,
-            create_monotonic_events(&vec![range_tombstones[1].clone()])
+            create_monotonic_events(vec![range_tombstones[1].clone()])
         );
     }
 }

@@ -221,7 +221,7 @@ impl CompactionDeleteRanges {
         smallest_user_key: UserKey<&[u8]>,
         largest_user_key: UserKey<&[u8]>,
     ) -> Vec<MonotonicDeleteEvent> {
-        if self.gc_delete_keys {
+        if self.gc_delete_keys || self.events.is_empty() {
             return vec![];
         }
 
@@ -244,12 +244,14 @@ impl CompactionDeleteRanges {
         }
         while idx < self.events.len() {
             // TODO: replace it with Bound
-            if !largest_user_key.is_empty() && self.events[idx].0.as_ref().gt(&largest_user_key) {
-                monotonic_events.push(MonotonicDeleteEvent {
-                    event_key: largest_user_key.to_vec(),
-                    new_epoch: HummockEpoch::MAX,
-                    is_exclusive: false,
-                });
+            if !largest_user_key.is_empty() && self.events[idx].0.as_ref().ge(&largest_user_key) {
+                if !monotonic_events.is_empty() {
+                    monotonic_events.push(MonotonicDeleteEvent {
+                        event_key: largest_user_key.to_vec(),
+                        new_epoch: HummockEpoch::MAX,
+                        is_exclusive: false,
+                    });
+                }
                 break;
             }
             apply_event(&mut epochs, &self.events[idx]);
@@ -402,14 +404,17 @@ mod tests {
     pub fn test_compaction_delete_range_iterator() {
         let mut builder = CompactionDeleteRangesBuilder::default();
         let table_id = TableId::default();
-        builder.add_delete_events(create_monotonic_events(&vec![
+        let data = vec![
             DeleteRangeTombstone::new(table_id, b"aaaaaa".to_vec(), b"bbbccc".to_vec(), 12),
             DeleteRangeTombstone::new(table_id, b"aaaaaa".to_vec(), b"bbbddd".to_vec(), 9),
             DeleteRangeTombstone::new(table_id, b"bbbaab".to_vec(), b"bbbdddf".to_vec(), 6),
             DeleteRangeTombstone::new(table_id, b"bbbeee".to_vec(), b"eeeeee".to_vec(), 8),
             DeleteRangeTombstone::new(table_id, b"bbbfff".to_vec(), b"ffffff".to_vec(), 9),
             DeleteRangeTombstone::new(table_id, b"gggggg".to_vec(), b"hhhhhh".to_vec(), 9),
-        ]));
+        ];
+        for range in data {
+            builder.add_delete_events(create_monotonic_events(vec![range]));
+        }
         let compaction_delete_ranges = builder.build_for_compaction(false);
         let mut iter = compaction_delete_ranges.iter();
 
@@ -465,7 +470,7 @@ mod tests {
     pub fn test_delete_range_split() {
         let table_id = TableId::default();
         let mut builder = CompactionDeleteRangesBuilder::default();
-        builder.add_delete_events(create_monotonic_events(&vec![
+        builder.add_delete_events(create_monotonic_events(vec![
             DeleteRangeTombstone::new(table_id, b"aaaa".to_vec(), b"bbbb".to_vec(), 12),
             DeleteRangeTombstone::new(table_id, b"aaaa".to_vec(), b"cccc".to_vec(), 12),
             DeleteRangeTombstone::new(table_id, b"cccc".to_vec(), b"dddd".to_vec(), 10),
