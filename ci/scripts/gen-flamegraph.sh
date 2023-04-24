@@ -3,7 +3,7 @@
 set -uo pipefail
 
 install_aws_cli() {
-  echo "--- Install aws cli"
+  echo ">>> Install aws cli"
   curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
   unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
 }
@@ -38,8 +38,8 @@ print_machine_debug_info() {
 install_all() {
   echo ">>> Installing aws"
   install_aws_cli
-  echo ">>> Checking that we can reach s3 bucket"
-  aws s3 ls s3://rw-ci-benchmark
+  echo ">>> Ensure s3 bucket is clean + we can reach it"
+  aws s3 rm s3://rw-ci-benchmark
 
   echo ">>> Installing PromQL cli client"
   # Download promql
@@ -215,6 +215,8 @@ main() {
   psql -h localhost -p 4566 -d dev -U root -f ci/scripts/sql/nexmark/q17.sql
 
   echo "--- Start Profiling"
+  # Ensure we can run profiling
+  echo '1' | sudo tee /proc/sys/kernel/perf_event_paranoid
   start_nperf
 
   # NOTE(kwannoel): Can stub first if promql gives us issues.
