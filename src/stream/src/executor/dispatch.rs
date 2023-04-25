@@ -882,7 +882,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use async_trait::async_trait;
-    use futures::{pin_mut, FutureExt, StreamExt};
+    use futures::{pin_mut, StreamExt};
     use itertools::Itertools;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};

@@ -76,7 +76,9 @@ message GetDataRequest {
 // The structure for permit-based back-pressure.
 message Permits {
   oneof value {
+    // The permits required for a chunk, i.e. the cardinality of the chunk.
     uint32 record = 1;
+    // The permits required for a barrier, typically 1.
     uint32 barrier = 2;
   }
 }
@@ -100,6 +102,8 @@ message GetStreamRequest {
 message GetStreamResponse {
   stream_plan.StreamMessage message = 1;
   // The number of permits acquired for this message, which should be sent back to the upstream with `add_permits`.
+  // In theory, this can also be derived from the message itself by the receiver. Here we send it explicitly to
+  // avoid any sense of inconsistency for the derivation logic, so the receiver can simply send it back verbatim.
   Permits permits = 2;
 }
 

@@ -186,9 +186,9 @@ impl RemoteInput {
                     rr += 1;
 
                     if let Some(add_back_permits) = match permits.unwrap().value {
+                        // For records, batch the permits we received to reduce the backward `AddPermits`
+                        // messages.
                         Some(permits::Value::Record(p)) => {
-                            // Batch the permits we received to reduce the backward `AddPermits`
-                            // messages.
                             batched_permits_accumulated += p;
                             if batched_permits_accumulated >= batched_permits_limit as u32 {
                                 let permits = std::mem::take(&mut batched_permits_accumulated);
@@ -197,6 +197,7 @@ impl RemoteInput {
                                 None
                             }
                         }
+                        // For barriers, always send it back immediately.
                         Some(permits::Value::Barrier(p)) => Some(permits::Value::Barrier(p)),
                         None => None,
                     } {
