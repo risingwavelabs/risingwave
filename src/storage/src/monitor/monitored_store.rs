@@ -19,8 +19,14 @@ use bytes::Bytes;
 use futures::{Future, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::opts::NewLocalOptions;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::error;
+#[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
+use {
+    super::{TracedStateStore, TracedStateStoreIter},
+    risingwave_hummock_trace::StorageType,
+};
 
 use super::MonitoredStorageMetrics;
 use crate::error::{StorageError, StorageResult};
@@ -35,19 +41,30 @@ use crate::{
 /// A state store wrapper for monitoring metrics.
 #[derive(Clone)]
 pub struct MonitoredStateStore<S> {
+    #[cfg(not(all(not(madsim), any(hm_trace, feature = "hm-trace"))))]
     inner: Box<S>,
+
+    #[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
+    inner: Box<TracedStateStore<S>>,
 
     storage_metrics: Arc<MonitoredStorageMetrics>,
 }
 
 impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
+        #[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
+        let inner = TracedStateStore::new(inner, StorageType::Global);
         Self {
             inner: Box::new(inner),
             storage_metrics,
         }
     }
 }
+
+#[cfg(not(all(not(madsim), any(hm_trace, feature = "hm-trace"))))]
+type MonitoredIterInnerType<I> = I;
+#[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
+type MonitoredIterInnerType<I> = TracedStateStoreIter<I>;
 
 /// A util function to break the type connection between two opaque return types defined by `impl`.
 fn identity(input: impl StateStoreIterItemStream) -> impl StateStoreIterItemStream {
@@ -102,6 +119,11 @@ impl<S> MonitoredStateStore<S> {
     }
 
     pub fn inner(&self) -> &S {
+        #[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
+        {
+            self.inner.inner()
+        }
+        #[cfg(not(all(not(madsim), any(hm_trace, feature = "hm-trace"))))]
         &self.inner
     }
 

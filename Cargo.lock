@@ -995,9 +995,9 @@ dependencies = [
 
 [[package]]
 name = "bincode"
-version = "2.0.0-rc.2"
+version = "2.0.0-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7bb50c5a2ef4b9b1e7ae73e3a73b52ea24b20312d629f9c4df28260b7ad2c3c4"
+checksum = "f11ea1a0346b94ef188834a65c068a03aec181c94896d481d7a0a40d85b0ce95"
 dependencies = [
  "bincode_derive",
  "serde",
@@ -5957,6 +5957,7 @@ dependencies = [
  "arrow-schema",
  "async-trait",
  "auto_enums",
+ "bincode 2.0.0-rc.3",
  "bitflags 2.0.2",
  "byteorder",
  "bytes",
@@ -6368,6 +6369,7 @@ dependencies = [
 name = "risingwave_hummock_sdk"
 version = "1.0.0-alpha"
 dependencies = [
+ "bincode 2.0.0-rc.3",
  "bytes",
  "hex",
  "itertools",
@@ -6419,7 +6421,7 @@ name = "risingwave_hummock_trace"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "bincode 2.0.0-rc.2",
+ "bincode 2.0.0-rc.3",
  "byteorder",
  "bytes",
  "itertools",
@@ -6428,6 +6430,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "prost 0.11.8",
  "risingwave_common",
+ "risingwave_hummock_sdk",
  "risingwave_pb",
  "thiserror",
  "tracing",

@@ -20,6 +20,7 @@ arrow-array = "36"
 arrow-schema = "36"
 async-trait = "0.1"
 auto_enums = "0.8"
+bincode = { version = "=2.0.0-rc.3", features = ["serde"] }
 bitflags = "2"
 byteorder = "1"
 bytes = "1"

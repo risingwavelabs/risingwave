@@ -6,12 +6,13 @@ edition = "2021"
 
 [dependencies]
 async-trait = "0.1"
-bincode = { version = "=2.0.0-rc.2", features = ["serde"] }
+bincode = { version = "=2.0.0-rc.3", features = ["serde"] }
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 parking_lot = "0.12"
 prost = "0.11"
 risingwave_common = { path = "../../common" }
+risingwave_hummock_sdk = {path = "../hummock_sdk"}
 risingwave_pb = { path = "../../prost" }
 thiserror = "1.0"
 tokio = { version = "0.2", package = "madsim-tokio" }

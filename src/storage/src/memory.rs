@@ -22,6 +22,7 @@ use bytes::Bytes;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+use risingwave_hummock_sdk::opts::NewLocalOptions;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 
 use crate::error::StorageResult;

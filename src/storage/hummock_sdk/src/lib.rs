@@ -39,6 +39,7 @@ pub mod compaction_group;
 pub mod filter_key_extractor;
 pub mod key;
 pub mod key_range;
+pub mod opts;
 pub mod prost_key_range;
 pub mod table_stats;
 

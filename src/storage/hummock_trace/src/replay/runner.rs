@@ -75,11 +75,12 @@ mod tests {
 
     use itertools::Itertools;
     use mockall::predicate;
+    use risingwave_common::catalog::TableOption;
 
     use super::*;
     use crate::{
         traced_bytes, MockGlobalReplayInterface, MockLocalReplayInterface, MockTraceReader,
-        OperationResult, Record, StorageType, TraceError, TraceResult,
+        OperationResult, Record, StorageType, TraceError, TraceResult, TracedNewLocalOpts,
     };
 
     #[tokio::test(flavor = "multi_thread")]
@@ -91,9 +92,27 @@ mod tests {
         let sync_id = 4561245432;
         let seal_id = 5734875243;
 
-        let table_id1 = 1;
-        let table_id2 = 2;
-        let table_id3 = 3;
+        let table_id1 = TracedNewLocalOpts {
+            table_id: 1,
+            is_consistent_op: false,
+            table_option: TableOption {
+                retention_seconds: None,
+            },
+        };
+        let table_id2 = TracedNewLocalOpts {
+            table_id: 2,
+            is_consistent_op: false,
+            table_option: TableOption {
+                retention_seconds: None,
+            },
+        };
+        let table_id3 = TracedNewLocalOpts {
+            table_id: 3,
+            is_consistent_op: false,
+            table_option: TableOption {
+                retention_seconds: None,
+            },
+        };
 
         let storage_type1 = StorageType::Local(0, table_id1);
         let storage_type2 = StorageType::Local(1, table_id2);
@@ -110,7 +129,7 @@ mod tests {
                     None,
                     true,
                     Some(12),
-                    table_id1,
+                    table_id1.table_id,
                     false,
                 ),
             ),
@@ -127,7 +146,7 @@ mod tests {
                     vec![(traced_bytes![123], Some(traced_bytes![123]))],
                     vec![],
                     4,
-                    table_id1,
+                    table_id1.table_id,
                 ),
             ),
             (
@@ -150,7 +169,7 @@ mod tests {
                     None,
                     true,
                     Some(12),
-                    table_id2,
+                    table_id1.table_id,
                     false,
                 ),
             ),
@@ -167,7 +186,7 @@ mod tests {
                     vec![(traced_bytes![123], Some(traced_bytes![123]))],
                     vec![],
                     4,
-                    table_id2,
+                    table_id2.table_id,
                 ),
             ),
             (
@@ -190,7 +209,7 @@ mod tests {
                     None,
                     true,
                     Some(12),
-                    table_id3,
+                    table_id3.table_id,
                     false,
                 ),
             ),
@@ -207,7 +226,7 @@ mod tests {
                     vec![(traced_bytes![123], Some(traced_bytes![123]))],
                     vec![],
                     4,
-                    table_id3,
+                    table_id3.table_id,
                 ),
             ),
             (

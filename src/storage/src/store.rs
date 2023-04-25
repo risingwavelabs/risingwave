@@ -19,9 +19,10 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType};
+use risingwave_hummock_sdk::opts::NewLocalOptions;
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 
 use crate::error::{StorageError, StorageResult};
@@ -361,30 +362,4 @@ pub fn gen_min_epoch(base_epoch: u64, retention_seconds: Option<&u32>) -> u64 {
 pub struct WriteOptions {
     pub epoch: u64,
     pub table_id: TableId,
-}
-
-#[derive(Clone, Default)]
-pub struct NewLocalOptions {
-    pub table_id: TableId,
-    /// Whether the operation is consistent. The term `consistent` requires the following:
-    ///
-    /// 1. A key cannot be inserted or deleted for more than once, i.e. inserting to an existing
-    /// key or deleting an non-existing key is not allowed.
-    ///
-    /// 2. The old value passed from
-    /// `update` and `delete` should match the original stored value.
-    pub is_consistent_op: bool,
-    pub table_option: TableOption,
-}
-
-impl NewLocalOptions {
-    pub fn for_test(table_id: TableId) -> Self {
-        Self {
-            table_id,
-            is_consistent_op: false,
-            table_option: TableOption {
-                retention_seconds: None,
-            },
-        }
-    }
 }

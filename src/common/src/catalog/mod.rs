@@ -22,6 +22,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bincode::{Decode, Encode};
 pub use column::*;
 pub use internal_table::*;
 use parse_display::Display;
@@ -173,7 +174,9 @@ impl From<SchemaId> for u32 {
     }
 }
 
-#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
+#[derive(
+    Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord, Encode, Decode,
+)]
 #[display("{table_id}")]
 pub struct TableId {
     pub table_id: u32,
@@ -214,7 +217,7 @@ impl From<TableId> for u32 {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Default, Copy)]
+#[derive(Clone, Debug, PartialEq, Default, Copy, Encode, Decode, Eq, PartialOrd, Ord)]
 pub struct TableOption {
     pub retention_seconds: Option<u32>, // second
 }

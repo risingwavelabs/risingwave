@@ -18,6 +18,7 @@ use std::sync::Arc;
 use enum_as_inner::EnumAsInner;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
+use risingwave_hummock_sdk::opts::NewLocalOptions;
 use risingwave_object_store::object::{
     parse_local_object_store, parse_remote_object_store, ObjectStoreImpl,
 };
@@ -228,6 +229,7 @@ pub mod verify {
     use bytes::Bytes;
     use futures::{pin_mut, TryStreamExt};
     use futures_async_stream::try_stream;
+    use risingwave_hummock_sdk::opts::NewLocalOptions;
     use risingwave_hummock_sdk::HummockReadEpoch;
     use tracing::log::warn;
 
@@ -698,6 +700,7 @@ pub mod boxed_state_store {
     use bytes::Bytes;
     use futures::stream::BoxStream;
     use futures::StreamExt;
+    use risingwave_hummock_sdk::opts::NewLocalOptions;
     use risingwave_hummock_sdk::HummockReadEpoch;
 
     use crate::error::StorageResult;

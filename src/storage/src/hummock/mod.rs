@@ -73,6 +73,7 @@ use risingwave_common_service::observer_manager::{NotificationClient, ObserverMa
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
 };
+use risingwave_hummock_sdk::opts::NewLocalOptions;
 pub use validator::*;
 use value::*;
 
@@ -92,7 +93,7 @@ use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::store::version::HummockVersionReader;
 use crate::hummock::write_limiter::{WriteLimiter, WriteLimiterRef};
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
-use crate::store::{gen_min_epoch, NewLocalOptions, ReadOptions};
+use crate::store::{gen_min_epoch, ReadOptions};
 
 struct HummockStorageShutdownGuard {
     shutdown_sender: UnboundedSender<HummockEvent>,

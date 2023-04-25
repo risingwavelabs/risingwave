@@ -18,6 +18,7 @@ use bincode::error::{DecodeError, EncodeError};
 use bincode::{Decode, Encode};
 use bytes::Bytes;
 use prost::Message;
+use risingwave_common::catalog::TableOption;
 use risingwave_pb::meta::SubscribeResponse;
 
 use crate::StorageType;
@@ -85,6 +86,13 @@ impl Record {
 }
 
 pub type TableId = u32;
+#[derive(Clone, Copy, Debug, Encode, Decode, PartialEq)]
+pub struct TracedNewLocalOpts {
+    pub table_id: TableId,
+    pub is_consistent_op: bool,
+    pub table_option: TableOption,
+}
+
 /// Operations represents Hummock operations
 #[derive(Encode, Decode, PartialEq, Debug, Clone)]
 pub enum Operation {

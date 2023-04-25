@@ -21,6 +21,7 @@ use std::sync::LazyLock;
 
 use bincode::{Decode, Encode};
 use parking_lot::Mutex;
+use risingwave_hummock_sdk::opts::NewLocalOptions;
 use tokio::sync::mpsc::{
     unbounded_channel as channel, UnboundedReceiver as Receiver, UnboundedSender as Sender,
 };
@@ -29,7 +30,7 @@ use tokio::task_local;
 use crate::write::{TraceWriter, TraceWriterImpl};
 use crate::{
     ConcurrentIdGenerator, Operation, OperationResult, Record, RecordId, RecordIdGenerator,
-    TableId, UniqueIdGenerator,
+    TracedNewLocalOpts, UniqueIdGenerator,
 };
 
 static GLOBAL_COLLECTOR: LazyLock<GlobalCollector> = LazyLock::new(GlobalCollector::new);
@@ -194,10 +195,10 @@ impl Drop for TraceSpan {
 pub type RecordMsg = Option<Record>;
 pub type ConcurrentId = u64;
 
-#[derive(Clone, Copy, Debug, Encode, Decode, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Encode, Decode, PartialEq)]
 pub enum StorageType {
     Global,
-    Local(ConcurrentId, TableId),
+    Local(ConcurrentId, NewLocalOptions),
 }
 
 task_local! {
@@ -210,6 +211,8 @@ task_local! {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+
+    use risingwave_common::catalog::{TableId, TableOption};
 
     use super::*;
     use crate::{traced_bytes, MockTraceWriter};
@@ -289,8 +292,12 @@ mod tests {
             let tx = GLOBAL_COLLECTOR.tx();
             let generator = generator.clone();
             let handle = tokio::spawn(async move {
-                let _span =
-                    TraceSpan::new_with_op(tx, generator.next(), op, StorageType::Local(0, 0));
+                let _span = TraceSpan::new_with_op(
+                    tx,
+                    generator.next(),
+                    op,
+                    StorageType::Local(0, NewLocalOptions::for_test(TableId { table_id: 0 })),
+                );
             });
             handles.push(handle);
         }

@@ -177,7 +177,7 @@ impl ReplayWorker {
                 let actual = match storage_type {
                     StorageType::Global => replay.get(key, epoch, read_options).await,
                     StorageType::Local(_, table_id) => {
-                        assert_eq!(table_id, read_options.table_id);
+                        assert_eq!(table_id.table_id, read_options.table_id);
                         let s = local_storages.get_mut(&read_options.table_id).unwrap();
                         s.get(key, epoch, read_options).await
                     }
@@ -208,8 +208,8 @@ impl ReplayWorker {
                 let iter = match storage_type {
                     StorageType::Global => replay.iter(key_range, epoch, read_options).await,
                     StorageType::Local(_, table_id) => {
-                        assert_eq!(table_id, read_options.table_id);
-                        let s = local_storages.get_mut(&table_id).unwrap();
+                        assert_eq!(table_id.table_id, read_options.table_id);
+                        let s = local_storages.get_mut(&table_id.table_id).unwrap();
                         s.iter(key_range, epoch, read_options).await
                     }
                 };
@@ -244,12 +244,12 @@ impl ReplayWorker {
             }
             Operation::NewLocalStorage => {
                 if let StorageType::Local(_, table_id) = storage_type {
-                    local_storages.insert(table_id, replay).await;
+                    local_storages.insert(table_id.table_id, replay).await;
                 }
             }
             Operation::DropLocalStorage => {
                 if let StorageType::Local(_, table_id) = storage_type {
-                    local_storages.remove(&table_id);
+                    local_storages.remove(&table_id.table_id);
                 }
                 // All local storages have been dropped, we should shutdown this worker
                 // If there are incoming new_local, this ReplayWorker will spawn again
@@ -361,12 +361,13 @@ mod tests {
     use std::ops::Bound;
 
     use mockall::predicate;
+    use risingwave_common::catalog::TableOption;
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
     use crate::{
         traced_bytes, MockGlobalReplayInterface, MockLocalReplayInterface, MockReplayIter,
-        StorageType, TraceReadOptions,
+        StorageType, TraceReadOptions, TracedNewLocalOpts,
     };
 
     #[tokio::test]
@@ -394,9 +395,15 @@ mod tests {
             epoch: 123,
             read_options: read_options.clone(),
         };
-
+        let new_local_opts = TracedNewLocalOpts {
+            table_id: 0,
+            is_consistent_op: false,
+            table_option: TableOption {
+                retention_seconds: None,
+            },
+        };
         let mut should_exit = false;
-        let get_storage_type = StorageType::Local(0, read_options.table_id);
+        let get_storage_type = StorageType::Local(0, new_local_opts);
         let record = Record::new(get_storage_type, 1, op);
         let mut mock_replay = MockGlobalReplayInterface::new();
 
@@ -473,7 +480,7 @@ mod tests {
             read_options: iter_read_options.clone(),
         };
 
-        let iter_storage_type = StorageType::Local(0, iter_read_options.table_id);
+        let iter_storage_type = StorageType::Local(0, new_local_opts);
 
         ReplayWorker::handle_record(
             Record(iter_storage_type, 2, Operation::NewLocalStorage),

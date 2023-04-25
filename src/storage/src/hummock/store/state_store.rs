@@ -22,6 +22,7 @@ use minitrace::future::FutureExt;
 use parking_lot::RwLock;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::opts::NewLocalOptions;
 use risingwave_hummock_sdk::HummockEpoch;
 use tokio::sync::mpsc;
 use tracing::warn;

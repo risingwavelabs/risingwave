@@ -22,6 +22,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::opts::NewLocalOptions;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::hummock::SstableInfo;
 use tokio::sync::oneshot;
