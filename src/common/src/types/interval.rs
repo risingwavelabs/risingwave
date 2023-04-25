@@ -23,12 +23,14 @@ use byteorder::{BigEndian, NetworkEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
 use num_traits::{CheckedAdd, CheckedNeg, CheckedSub, Zero};
 use postgres_types::{to_sql_checked, FromSql};
+use risingwave_common_proc_macro::EstimateSize;
 use risingwave_pb::data::PbInterval;
 
 use super::ops::IsNegative;
 use super::to_binary::ToBinary;
 use super::*;
 use crate::error::{ErrorCode, Result, RwError};
+use crate::estimate_size::EstimateSize;
 
 /// Every interval can be represented by a `Interval`.
 /// Note that the difference between Interval and Instant.
@@ -38,7 +40,7 @@ use crate::error::{ErrorCode, Result, RwError};
 /// One month may contain 28/31 days. One day may contain 23/25 hours.
 /// This internals is learned from PG:
 /// <https://www.postgresql.org/docs/9.1/datatype-datetime.html#:~:text=field%20is%20negative.-,Internally,-interval%20values%20are>
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, EstimateSize)]
 pub struct Interval {
     months: i32,
     days: i32,
@@ -1684,5 +1686,11 @@ mod tests {
             <Interval as crate::hash::HashKeySerDe>::deserialize(&mut &buf[..])
         })
         .unwrap_err();
+    }
+
+    #[test]
+    fn test_interval_estimate_size() {
+        let interval = Interval::MIN;
+        assert_eq!(interval.estimated_size(), 16);
     }
 }

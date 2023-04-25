@@ -320,6 +320,16 @@ pub fn display_for_explain(list: &ListValue) -> String {
     )
 }
 
+impl EstimateSize for ListValue {
+    fn estimated_heap_size(&self) -> usize {
+        // TODO: Try speed up this process.
+        self.values
+            .iter()
+            .map(|datum| datum.estimated_heap_size())
+            .sum()
+    }
+}
+
 impl ListValue {
     pub fn new(values: Vec<Datum>) -> Self {
         Self {
