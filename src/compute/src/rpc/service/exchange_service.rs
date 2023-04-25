@@ -180,9 +180,10 @@ impl ExchangeServiceImpl {
                     };
                     rr += 1;
 
+                    // forward the acquired permit to the downstream
                     let response = GetStreamResponse {
                         message: Some(proto),
-                        permits: Some(PbPermits { value: permits }), // forward the acquired permit to the downstream */
+                        permits: Some(PbPermits { value: permits }),
                     };
                     let bytes = Message::get_encoded_len(&response);
 
