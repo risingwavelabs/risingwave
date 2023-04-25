@@ -544,9 +544,22 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                               break;
                         },
                         None => {
-                             debug!("Batch task {:?} finished successfully.", self.task_id);
-                             state = TaskStatus::Finished;
-                             break;
+                            // TODO(ZENOTME): enable this when all executors support early stop. #9418
+                            // if self.context.get_stop_flag_ref().check_stop() {
+                            //     // Task stop by reading stop flag. It can be either cancelled or aborted.
+                            //     if let Some(error_reason) = self.context.get_stop_flag_ref().get_stop_reason() {
+                            //         state = TaskStatus::Aborted;
+                            //         error = Some(Aborted(error_reason));
+                            //     } else {
+                            //         state = TaskStatus::Cancelled;
+                            //     }
+                            // } else {
+                            //     debug!("Batch task {:?} finished successfully.", self.task_id);
+                            //     state = TaskStatus::Finished;
+                            // }
+                            debug!("Batch task {:?} finished successfully.", self.task_id);
+                            state = TaskStatus::Finished;
+                            break;
                         }
                     }
                 }
@@ -581,6 +594,9 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
     pub fn abort(&self, err_msg: String) {
         if let Some(sender) = self.shutdown_tx.lock().take() {
+            self.context
+                .get_stop_flag_ref()
+                .set_stop(Some(err_msg.clone()));
             // No need to set state to be Aborted here cuz it will be set by shutdown receiver.
             // Stop task execution.
             if sender.send(err_msg).is_err() {
@@ -593,6 +609,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
     pub fn cancel(&self) {
         if let Some(sender) = self.shutdown_tx.lock().take() {
+            self.context.get_stop_flag_ref().set_stop(None);
             // Drop sender directly to mark cancel without error.
             drop(sender);
         };
