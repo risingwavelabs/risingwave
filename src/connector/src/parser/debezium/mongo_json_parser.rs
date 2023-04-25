@@ -290,7 +290,7 @@ mod tests {
     #[test]
     fn test_parse_bson_value_id_int() {
         let data = r#"{"_id":{"$numberInt":"2345"}}"#;
-        let pld: serde_json::Value = serde_json::from_str(&data).unwrap();
+        let pld: serde_json::Value = serde_json::from_str(data).unwrap();
         let (a, b) = parse_bson_value(
             &DataType::Int32,
             &DataType::Jsonb,
@@ -303,7 +303,7 @@ mod tests {
     #[test]
     fn test_parse_bson_value_id_long() {
         let data = r#"{"_id":{"$numberLong":"22423434544"}}"#;
-        let pld: serde_json::Value = serde_json::from_str(&data).unwrap();
+        let pld: serde_json::Value = serde_json::from_str(data).unwrap();
 
         let (a, b) = parse_bson_value(
             &DataType::Int64,
@@ -318,7 +318,7 @@ mod tests {
     #[test]
     fn test_parse_bson_value_id_oid() {
         let data = r#"{"_id":{"$oid":"5d505646cf6d4fe581014ab2"}}"#;
-        let pld: serde_json::Value = serde_json::from_str(&data).unwrap();
+        let pld: serde_json::Value = serde_json::from_str(data).unwrap();
         let (a, b) = parse_bson_value(
             &DataType::Varchar,
             &DataType::Jsonb,
