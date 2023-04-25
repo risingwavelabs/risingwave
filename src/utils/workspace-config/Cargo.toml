@@ -15,9 +15,9 @@ enable-static-log-level = ["log", "tracing"]
 
 [dependencies]
 isahc = { version = "1", optional = true, default-features = false, features = ["static-ssl", "static-curl"] }
-log = { version = "0.4", optional = true, features = ["release_max_level_info"] }
+log = { version = "0.4", optional = true, features = ["release_max_level_debug"] }
 openssl = { version = "0.10", optional = true, features = ["vendored"] }
 rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", optional = true, features = ["ssl-vendored", "gssapi-vendored"] }
-tracing = { version = "0.1", optional = true, features = ["release_max_level_info"] }
+tracing = { version = "0.1", optional = true, features = ["release_max_level_debug"] }
 # workspace-hack = { path = "../../workspace-hack" }
 # Don't add workspace-hack into this crate!
