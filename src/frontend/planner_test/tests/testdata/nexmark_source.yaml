@@ -483,9 +483,7 @@
         WHERE A.id = B.auction and B.date_time between A.date_time and A.expires
         GROUP BY A.id, A.seller
     ) AS Q;
-  binder_error: |-
-    Feature is not yet implemented: aggregate function as over window function: avg
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4978
+  planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause or be used in an aggregate function'
 - id: nexmark_q7
   before:
   - create_sources
@@ -709,9 +707,9 @@
     WHERE rownum <= 1;
   logical_plan: |
     LogicalProject { exprs: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, auction, bidder, price, date_time] }
-    └─LogicalFilter { predicate: (ROW_NUMBER <= 1:Int32) }
-      └─LogicalProject { exprs: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, auction, bidder, price, date_time, ROW_NUMBER] }
-        └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY id ORDER BY price DESC, date_time ASC) }
+    └─LogicalFilter { predicate: (row_number <= 1:Int32) }
+      └─LogicalProject { exprs: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, auction, bidder, price, date_time, row_number] }
+        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY id ORDER BY price DESC, date_time ASC)] }
           └─LogicalFilter { predicate: (id = auction) AND (date_time >= date_time) AND (date_time <= expires) }
             └─LogicalJoin { type: Inner, on: true, output: all }
               ├─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
@@ -938,12 +936,11 @@
     BatchExchange { order: [], dist: Single }
     └─BatchHashAgg { group_key: [$expr1], aggs: [sum0(count) filter((flag = 0:Int64)), sum0(count filter((price < 10000:Int32))) filter((flag = 0:Int64)), sum0(count filter((price >= 10000:Int32) AND (price < 1000000:Int32))) filter((flag = 0:Int64)), sum0(count filter((price >= 1000000:Int32))) filter((flag = 0:Int64)), count(bidder) filter((flag = 1:Int64)), count(bidder) filter((count filter((price < 10000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bidder) filter((count filter((price >= 10000:Int32) AND (price < 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bidder) filter((count filter((price >= 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(auction) filter((flag = 2:Int64)), count(auction) filter((count filter((price < 10000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(auction) filter((count filter((price >= 10000:Int32) AND (price < 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(auction) filter((count filter((price >= 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64))] }
       └─BatchExchange { order: [], dist: HashShard($expr1) }
-        └─BatchProject { exprs: [$expr1, bidder, bidder, bidder, bidder, auction, auction, auction, auction, flag, count, count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32))] }
-          └─BatchHashAgg { group_key: [$expr1, bidder, auction, flag], aggs: [count, count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32))] }
-            └─BatchExchange { order: [], dist: HashShard($expr1, bidder, auction, flag) }
-              └─BatchExpand { column_subsets: [[$expr1], [$expr1, bidder], [$expr1, auction]] }
-                └─BatchProject { exprs: [ToChar(date_time, 'yyyy-MM-dd':Varchar) as $expr1, price, bidder, auction] }
-                  └─BatchSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"], filter: (None, None) }
+        └─BatchHashAgg { group_key: [$expr1, bidder, auction, flag], aggs: [count, count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32))] }
+          └─BatchExchange { order: [], dist: HashShard($expr1, bidder, auction, flag) }
+            └─BatchExpand { column_subsets: [[$expr1], [$expr1, bidder], [$expr1, auction]] }
+              └─BatchProject { exprs: [ToChar(date_time, 'yyyy-MM-dd':Varchar) as $expr1, price, bidder, auction] }
+                └─BatchSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"], filter: (None, None) }
   stream_plan: |
     StreamMaterialize { columns: [day, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions], stream_key: [day], pk_columns: [day], pk_conflict: "NoCheck" }
     └─StreamAppendOnlyHashAgg { group_key: [$expr1], aggs: [count, count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), count(distinct bidder), count(distinct bidder) filter((price < 10000:Int32)), count(distinct bidder) filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count(distinct bidder) filter((price >= 1000000:Int32)), count(distinct auction), count(distinct auction) filter((price < 10000:Int32)), count(distinct auction) filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count(distinct auction) filter((price >= 1000000:Int32))] }
@@ -1006,12 +1003,11 @@
     BatchExchange { order: [], dist: Single }
     └─BatchHashAgg { group_key: [channel, $expr1], aggs: [max(max($expr2)) filter((flag = 0:Int64)), sum0(count) filter((flag = 0:Int64)), sum0(count filter((price < 10000:Int32))) filter((flag = 0:Int64)), sum0(count filter((price >= 10000:Int32) AND (price < 1000000:Int32))) filter((flag = 0:Int64)), sum0(count filter((price >= 1000000:Int32))) filter((flag = 0:Int64)), count(bidder) filter((flag = 1:Int64)), count(bidder) filter((count filter((price < 10000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bidder) filter((count filter((price >= 10000:Int32) AND (price < 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bidder) filter((count filter((price >= 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(auction) filter((flag = 2:Int64)), count(auction) filter((count filter((price < 10000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(auction) filter((count filter((price >= 10000:Int32) AND (price < 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(auction) filter((count filter((price >= 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64))] }
       └─BatchExchange { order: [], dist: HashShard(channel, $expr1) }
-        └─BatchProject { exprs: [channel, $expr1, bidder, bidder, bidder, bidder, auction, auction, auction, auction, flag, max($expr2), count, count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32))] }
-          └─BatchHashAgg { group_key: [channel, $expr1, bidder, auction, flag], aggs: [max($expr2), count, count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32))] }
-            └─BatchExchange { order: [], dist: HashShard(channel, $expr1, bidder, auction, flag) }
-              └─BatchExpand { column_subsets: [[channel, $expr1, $expr2], [channel, $expr1, bidder], [channel, $expr1, auction]] }
-                └─BatchProject { exprs: [channel, ToChar(date_time, 'yyyy-MM-dd':Varchar) as $expr1, ToChar(date_time, 'HH:mm':Varchar) as $expr2, price, bidder, auction] }
-                  └─BatchSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"], filter: (None, None) }
+        └─BatchHashAgg { group_key: [channel, $expr1, bidder, auction, flag], aggs: [max($expr2), count, count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32))] }
+          └─BatchExchange { order: [], dist: HashShard(channel, $expr1, bidder, auction, flag) }
+            └─BatchExpand { column_subsets: [[channel, $expr1, $expr2], [channel, $expr1, bidder], [channel, $expr1, auction]] }
+              └─BatchProject { exprs: [channel, ToChar(date_time, 'yyyy-MM-dd':Varchar) as $expr1, ToChar(date_time, 'HH:mm':Varchar) as $expr2, price, bidder, auction] }
+                └─BatchSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"], filter: (None, None) }
   stream_plan: |
     StreamMaterialize { columns: [channel, day, minute, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions], stream_key: [channel, day], pk_columns: [channel, day], pk_conflict: "NoCheck" }
     └─StreamAppendOnlyHashAgg { group_key: [channel, $expr1], aggs: [max($expr2), count, count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), count(distinct bidder), count(distinct bidder) filter((price < 10000:Int32)), count(distinct bidder) filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count(distinct bidder) filter((price >= 1000000:Int32)), count(distinct auction), count(distinct auction) filter((price < 10000:Int32)), count(distinct auction) filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count(distinct auction) filter((price >= 1000000:Int32))] }
@@ -1116,9 +1112,9 @@
     WHERE rank_number <= 1;
   logical_plan: |
     LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra] }
-    └─LogicalFilter { predicate: (ROW_NUMBER <= 1:Int32) }
-      └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, ROW_NUMBER] }
-        └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY bidder, auction ORDER BY date_time DESC) }
+    └─LogicalFilter { predicate: (row_number <= 1:Int32) }
+      └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, row_number] }
+        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY bidder, auction ORDER BY date_time DESC)] }
           └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
@@ -1171,9 +1167,9 @@
     WHERE rank_number <= 1;
   logical_plan: |
     LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra] }
-    └─LogicalFilter { predicate: (RANK <= 1:Int32) }
-      └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, RANK] }
-        └─LogicalOverAgg { window_function: RANK() OVER(PARTITION BY bidder, auction ORDER BY date_time DESC) }
+    └─LogicalFilter { predicate: (rank <= 1:Int32) }
+      └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, rank] }
+        └─LogicalOverAgg { window_functions: [rank() OVER(PARTITION BY bidder, auction ORDER BY date_time DESC)] }
           └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
@@ -1228,17 +1224,11 @@
     (SELECT *, ROW_NUMBER() OVER (PARTITION BY auction ORDER BY price DESC) AS rank_number FROM bid)
     WHERE rank_number <= 10;
   logical_plan: |
-    LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, ROW_NUMBER] }
-    └─LogicalFilter { predicate: (ROW_NUMBER <= 10:Int32) }
-      └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, ROW_NUMBER] }
-        └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY auction ORDER BY price DESC) }
+    LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, row_number] }
+    └─LogicalFilter { predicate: (row_number <= 10:Int32) }
+      └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, row_number] }
+        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY auction ORDER BY price DESC)] }
           └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
-  optimizer_error: |
-    internal error: OverAgg can not be transformed. Plan:
-    LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, ROW_NUMBER] }
-    └─LogicalFilter { predicate: (ROW_NUMBER <= 10:Int32) }
-      └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY auction ORDER BY price DESC) }
-        └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
 - id: nexmark_q20
   before:
   - create_sources

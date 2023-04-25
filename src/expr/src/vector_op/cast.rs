@@ -352,8 +352,9 @@ pub fn jsonb_to_bool(v: JsonbRef<'_>) -> Result<bool> {
 #[function("cast(jsonb) -> decimal")]
 pub fn jsonb_to_dec(v: JsonbRef<'_>) -> Result<Decimal> {
     v.as_number()
-        .map_err(|e| ExprError::Parse(e.into()))
-        .map(Into::into)
+        .map_err(|e| ExprError::Parse(e.into()))?
+        .try_into()
+        .map_err(|_| ExprError::NumericOutOfRange)
 }
 
 /// Similar to and an result of [`define_cast_to_primitive`] macro above.
@@ -407,6 +408,8 @@ pub fn interval_to_time(elem: Interval) -> Time {
 #[function("cast(int64) -> int16")]
 #[function("cast(int64) -> int32")]
 #[function("cast(int64) -> float64")]
+#[function("cast(float32) -> decimal")]
+#[function("cast(float64) -> decimal")]
 pub fn try_cast<T1, T2>(elem: T1) -> Result<T2>
 where
     T1: TryInto<T2> + std::fmt::Debug + Copy,
@@ -426,8 +429,6 @@ where
 #[function("cast(int32) -> decimal")]
 #[function("cast(int64) -> decimal")]
 #[function("cast(float32) -> float64")]
-#[function("cast(float32) -> decimal")]
-#[function("cast(float64) -> decimal")]
 #[function("cast(date) -> timestamp")]
 #[function("cast(time) -> interval")]
 #[function("cast(varchar) -> varchar")]

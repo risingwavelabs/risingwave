@@ -27,6 +27,7 @@ itertools = "0.10"
 minitrace = "0.4"
 num-traits = "0.2"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
+paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
 risingwave_common = { path = "../common" }
 risingwave_connector = { path = "../connector" }

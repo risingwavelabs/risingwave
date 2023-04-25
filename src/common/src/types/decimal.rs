@@ -19,6 +19,7 @@ use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 use bytes::{BufMut, Bytes, BytesMut};
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
 use postgres_types::{ToSql, Type};
+use risingwave_common_proc_macro::EstimateSize;
 pub use rust_decimal::prelude::{FromPrimitive, FromStr, ToPrimitive};
 use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
 
@@ -27,10 +28,13 @@ use super::to_text::ToText;
 use super::DataType;
 use crate::array::ArrayResult;
 use crate::error::Result as RwResult;
+use crate::estimate_size::EstimateSize;
 use crate::types::ordered_float::OrderedFloat;
 use crate::types::Decimal::Normalized;
 
-#[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
+#[derive(
+    Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd, EstimateSize,
+)]
 pub enum Decimal {
     #[display("{0}")]
     Normalized(RustDecimal),
@@ -187,14 +191,18 @@ macro_rules! impl_try_from_decimal {
 
 macro_rules! impl_try_from_float {
     ($from_ty:ty, $to_ty:ty, $convert:path) => {
-        impl core::convert::From<$from_ty> for $to_ty {
-            fn from(value: $from_ty) -> Self {
-                $convert(value).expect("f32/f64 to decimal should not fail")
+        impl core::convert::TryFrom<$from_ty> for $to_ty {
+            type Error = Error;
+
+            fn try_from(value: $from_ty) -> Result<Self, Self::Error> {
+                $convert(value).ok_or_else(|| Error::ConversionTo("decimal".into()))
             }
         }
-        impl core::convert::From<OrderedFloat<$from_ty>> for $to_ty {
-            fn from(value: OrderedFloat<$from_ty>) -> Self {
-                $convert(value.0).expect("f32/f64 to decimal should not fail")
+        impl core::convert::TryFrom<OrderedFloat<$from_ty>> for $to_ty {
+            type Error = Error;
+
+            fn try_from(value: OrderedFloat<$from_ty>) -> Result<Self, Self::Error> {
+                $convert(value.0).ok_or_else(|| Error::ConversionTo("decimal".into()))
             }
         }
     };
@@ -219,6 +227,12 @@ impl_try_from_decimal!(Decimal, f32, Decimal::to_f32, "Failed to convert to f32"
 impl_try_from_decimal!(Decimal, f64, Decimal::to_f64, "Failed to convert to f64");
 impl_try_from_float!(f32, Decimal, Decimal::from_f32);
 impl_try_from_float!(f64, Decimal, Decimal::from_f64);
+
+impl From<crate::types::Decimal> for OrderedFloat<f64> {
+    fn from(n: crate::types::Decimal) -> Self {
+        n.to_f64().map_or(Self(f64::NAN), Self)
+    }
+}
 
 impl FromPrimitive for Decimal {
     impl_from_integer!([
@@ -795,5 +809,14 @@ mod tests {
         assert_eq!(Decimal::to_i32(&Decimal::from_i32(1).unwrap()).unwrap(), 1,);
         assert_eq!(Decimal::to_u64(&Decimal::from_u64(1).unwrap()).unwrap(), 1,);
         assert_eq!(Decimal::to_i64(&Decimal::from_i64(1).unwrap()).unwrap(), 1,);
+    }
+
+    #[test]
+    fn test_decimal_estimate_size() {
+        let decimal = Decimal::NegativeInf;
+        assert_eq!(decimal.estimated_size(), 20);
+
+        let decimal = Decimal::Normalized(RustDecimal::from_f32(1.0).unwrap());
+        assert_eq!(decimal.estimated_size(), 20);
     }
 }

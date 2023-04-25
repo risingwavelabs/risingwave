@@ -118,6 +118,12 @@ impl<T: Float> AsMut<T> for OrderedFloat<T> {
     }
 }
 
+impl<T: Float> EstimateSize for OrderedFloat<T> {
+    fn estimated_heap_size(&self) -> usize {
+        0
+    }
+}
+
 impl<'a, T: Float> From<&'a T> for &'a OrderedFloat<T> {
     #[inline]
     fn from(t: &'a T) -> &'a OrderedFloat<T> {
@@ -1049,8 +1055,6 @@ mod impl_as_primitive {
 
     impl_as_primitive_for!(f32);
     impl_as_primitive_for!(f64);
-
-    impl_as_primitive_for!(crate::types::Decimal);
 }
 
 mod impl_from {
@@ -1117,12 +1121,6 @@ impl From<i64> for OrderedFloat<f64> {
     }
 }
 
-impl From<crate::types::Decimal> for OrderedFloat<f64> {
-    fn from(n: crate::types::Decimal) -> Self {
-        n.to_f64().map_or(Self(f64::NAN), Self)
-    }
-}
-
 mod impl_into_ordered {
     use super::*;
 
@@ -1143,8 +1141,11 @@ mod impl_into_ordered {
 pub use impl_into_ordered::IntoOrdered;
 use serde::Serialize;
 
+use crate::estimate_size::EstimateSize;
+
 #[cfg(test)]
 mod tests {
+    use crate::estimate_size::EstimateSize;
     use crate::types::ordered_float::OrderedFloat;
 
     #[test]
@@ -1168,5 +1169,11 @@ mod tests {
 
         use num_traits::Signed as _;
         assert_eq!(nan.abs(), nan.abs());
+    }
+
+    #[test]
+    fn test_ordered_float_estimate_size() {
+        let ordered_float = OrderedFloat::<f64>::from(5_i64);
+        assert_eq!(ordered_float.estimated_size(), 8);
     }
 }
