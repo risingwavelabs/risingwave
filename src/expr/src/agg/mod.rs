@@ -19,7 +19,7 @@ use risingwave_common::types::{DataType, DataTypeName};
 
 use crate::{ExprError, Result};
 
-// aggregate defination
+// aggregate definition
 mod def;
 
 // concrete aggregators
