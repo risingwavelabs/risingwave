@@ -163,9 +163,6 @@
     Bind error: failed to bind expression: sum + 1
 
     Caused by:
-      Bind error: failed to bind expression: sum
-
-    Caused by:
       Item not found: Invalid column: sum
 - name: select distinct with order by expressions not appear in select list
   sql: |

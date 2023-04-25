@@ -219,7 +219,7 @@
     create table t (v1 int);
     select (case when v1=1 then 1 when v1=2 then 2 else true end) from t;
   binder_error: |-
-    Bind error: failed to bind expression: CASE WHEN v1 = 1 THEN 1 WHEN v1 = 2 THEN 2 ELSE true END
+    Bind error: failed to bind expression: (CASE WHEN v1 = 1 THEN 1 WHEN v1 = 2 THEN 2 ELSE true END)
 
     Caused by:
       Bind error: types Int32 and Boolean cannot be matched
@@ -228,10 +228,7 @@
     create table t (v1 int);
     select (case v1 when 1 then 1 when true then 2 else 0.0 end) from t;
   binder_error: |-
-    Bind error: failed to bind expression: CASE v1 WHEN 1 THEN 1 WHEN true THEN 2 ELSE 0.0 END
-
-    Caused by:
-      Bind error: failed to bind expression: v1 = true
+    Bind error: failed to bind expression: (CASE v1 WHEN 1 THEN 1 WHEN true THEN 2 ELSE 0.0 END)
 
     Caused by:
       Feature is not yet implemented: Equal[Int32, Boolean]
@@ -572,9 +569,6 @@
     Bind error: failed to bind expression: v1 >= now()
 
     Caused by:
-      Bind error: failed to bind expression: now()
-
-    Caused by:
       Invalid input syntax: For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: Some(GroupBy)
 - name: forbid now in select for stream
   sql: |
@@ -591,12 +585,6 @@
     select sum(v2) filter (where v1 >= now()) as sum_v2 from t;
   stream_error: |-
     Bind error: failed to bind expression: sum(v2) FILTER(WHERE v1 >= now())
-
-    Caused by:
-      Bind error: failed to bind expression: v1 >= now()
-
-    Caused by:
-      Bind error: failed to bind expression: now()
 
     Caused by:
       Invalid input syntax: For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: Some(Filter)

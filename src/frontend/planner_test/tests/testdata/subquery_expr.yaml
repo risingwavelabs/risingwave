@@ -213,9 +213,6 @@
     Bind error: failed to bind expression: 1 + (SELECT 2 FROM t)
 
     Caused by:
-      Bind error: failed to bind expression: (SELECT 2 FROM t)
-
-    Caused by:
       Catalog error: table or source not found: t
 - sql: |
     create table t1(x int, y int);

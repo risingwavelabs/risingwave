@@ -50,9 +50,6 @@
     Bind error: failed to bind expression: CAST(ARRAY[] AS INT)
 
     Caused by:
-      Bind error: failed to bind expression: ARRAY[]
-
-    Caused by:
       Bind error: cannot determine type of empty array
     HINT:  Explicitly cast to the desired type, for example ARRAY[]::integer[].
 - sql: |

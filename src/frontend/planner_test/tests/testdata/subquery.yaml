@@ -144,9 +144,6 @@
       Bind error: failed to bind expression: v1 = c
 
     Caused by:
-      Bind error: failed to bind expression: c
-
-    Caused by:
       Item not found: Invalid column: c
 - name: We need to ensure doubly nested reference to a left table is not permitted
   sql: |
@@ -160,9 +157,6 @@
     );
   binder_error: |-
     Bind error: failed to bind expression: v1 = a
-
-    Caused by:
-      Bind error: failed to bind expression: a
 
     Caused by:
       Item not found: Invalid column: a

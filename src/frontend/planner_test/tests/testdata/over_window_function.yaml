@@ -140,7 +140,7 @@
     create table t(x int);
     select x from t group by (row_number(x) over());
   binder_error: |-
-    Bind error: failed to bind expression: row_number(x) OVER ()
+    Bind error: failed to bind expression: (row_number(x) OVER ())
 
     Caused by:
       Invalid input syntax: window functions are not allowed in GROUP BY
@@ -148,10 +148,7 @@
     create table t(x int);
     select x from t having (row_number(x) over() > 1);
   binder_error: |-
-    Bind error: failed to bind expression: row_number(x) OVER () > 1
-
-    Caused by:
-      Bind error: failed to bind expression: row_number(x) OVER ()
+    Bind error: failed to bind expression: (row_number(x) OVER () > 1)
 
     Caused by:
       Invalid input syntax: window functions are not allowed in HAVING
@@ -159,10 +156,7 @@
     create table t(x int);
     select x from t where (row_number(x) over() > 1);
   binder_error: |-
-    Bind error: failed to bind expression: row_number(x) OVER () > 1
-
-    Caused by:
-      Bind error: failed to bind expression: row_number(x) OVER ()
+    Bind error: failed to bind expression: (row_number(x) OVER () > 1)
 
     Caused by:
       Invalid input syntax: window functions are not allowed in WHERE
@@ -171,12 +165,6 @@
     select sum(x) filter (where row_number() over () > 1) from t;
   binder_error: |-
     Bind error: failed to bind expression: sum(x) FILTER(WHERE row_number() OVER () > 1)
-
-    Caused by:
-      Bind error: failed to bind expression: row_number() OVER () > 1
-
-    Caused by:
-      Bind error: failed to bind expression: row_number() OVER ()
 
     Caused by:
       Invalid input syntax: window functions are not allowed in FILTER

@@ -287,12 +287,6 @@
     Bind error: failed to bind expression: a1 + b1 = c1
 
     Caused by:
-      Bind error: failed to bind expression: a1 + b1
-
-    Caused by:
-      Bind error: failed to bind expression: a1
-
-    Caused by:
       Item not found: Invalid column: a1
 - sql: |
     create table a(a1 int);

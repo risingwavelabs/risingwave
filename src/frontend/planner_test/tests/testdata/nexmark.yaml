@@ -1300,9 +1300,6 @@
     Bind error: failed to bind expression: CASE WHEN lower(channel) = 'apple' THEN '0' WHEN lower(channel) = 'google' THEN '1' WHEN lower(channel) = 'facebook' THEN '2' WHEN lower(channel) = 'baidu' THEN '3' ELSE REGEXP_EXTRACT(url, '(&|^)channel_id=([^&]*)', 2) END
 
     Caused by:
-      Bind error: failed to bind expression: REGEXP_EXTRACT(url, '(&|^)channel_id=([^&]*)', 2)
-
-    Caused by:
       Feature is not yet implemented: unsupported function: "regexp_extract"
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
 - id: nexmark_q22
