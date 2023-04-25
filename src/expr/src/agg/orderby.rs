@@ -24,11 +24,13 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use super::{Aggregator, BoxedAggState};
 use crate::{ExprError, Result};
 
-/// `OrderBy` is a wrapper of `Aggregator` that sorts rows by given columns.
+/// `ProjectionOrderBy` is a wrapper of `Aggregator` that sorts rows by given columns and then
+/// projects columns.
 #[derive(Clone)]
-pub struct OrderBy {
+pub struct ProjectionOrderBy {
     inner: BoxedAggState,
     arg_types: Vec<DataType>,
+    arg_indices: Vec<usize>,
     order_col_indices: Vec<usize>,
     order_types: Vec<OrderType>,
     unordered_values: Vec<(OrderKey, OwnedRow)>,
@@ -36,9 +38,10 @@ pub struct OrderBy {
 
 type OrderKey = Vec<u8>;
 
-impl OrderBy {
+impl ProjectionOrderBy {
     pub fn new(
         arg_types: Vec<DataType>,
+        arg_indices: Vec<usize>,
         column_orders: Vec<ColumnOrder>,
         inner: BoxedAggState,
     ) -> Self {
@@ -49,6 +52,7 @@ impl OrderBy {
         Self {
             inner,
             arg_types,
+            arg_indices,
             order_col_indices,
             order_types,
             unordered_values: vec![],
@@ -59,13 +63,14 @@ impl OrderBy {
         let key =
             memcmp_encoding::encode_row(row.project(&self.order_col_indices), &self.order_types)
                 .map_err(|e| ExprError::Internal(anyhow!("failed to encode row, error: {}", e)))?;
-        self.unordered_values.push((key, row.to_owned_row()));
+        self.unordered_values
+            .push((key, row.project(&self.arg_indices).to_owned_row()));
         Ok(())
     }
 }
 
 #[async_trait::async_trait]
-impl Aggregator for OrderBy {
+impl Aggregator for ProjectionOrderBy {
     fn return_type(&self) -> DataType {
         self.inner.return_type()
     }
@@ -99,6 +104,12 @@ impl Aggregator for OrderBy {
                     .now_or_never()
                     .expect("todo: support async aggregation with orderby")?;
             }
+        }
+        if let Some(chunk) = chunk_builder.consume_all() {
+            self.inner
+                .update_multi(&chunk, 0, chunk.capacity())
+                .now_or_never()
+                .expect("todo: support async aggregation with orderby")?;
         }
         self.inner.output(builder)
     }

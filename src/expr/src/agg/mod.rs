@@ -41,7 +41,7 @@ pub use self::def::*;
 use self::distinct::Distinct;
 use self::filter::*;
 pub use self::general_sorted_grouper::{create_sorted_grouper, BoxedSortedGrouper, EqGroups};
-use self::orderby::OrderBy;
+use self::orderby::ProjectionOrderBy;
 use self::projection::Projection;
 
 /// An `Aggregator` supports `update` data and `output` result.
@@ -96,10 +96,12 @@ pub fn build(agg: AggCall) -> Result<BoxedAggState> {
     if agg.distinct {
         aggregator = Box::new(Distinct::new(aggregator));
     }
-    aggregator = Box::new(Projection::new(agg.args.val_indices().to_vec(), aggregator));
-    if !agg.column_orders.is_empty() {
-        aggregator = Box::new(OrderBy::new(
+    if agg.column_orders.is_empty() {
+        aggregator = Box::new(Projection::new(agg.args.val_indices().to_vec(), aggregator));
+    } else {
+        aggregator = Box::new(ProjectionOrderBy::new(
             agg.args.arg_types().to_vec(),
+            agg.args.val_indices().to_vec(),
             agg.column_orders,
             aggregator,
         ));
