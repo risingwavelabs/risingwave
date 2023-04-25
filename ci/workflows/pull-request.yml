@@ -337,4 +337,8 @@ steps:
           mount-buildkite-agent: true
           environment:
             - GITHUB_TOKEN
-    timeout_in_minutes: 30
+    # TODO(kwannoel): Here are the areas that can be further optimized:
+    # - Nexmark event generation: ~3min for 100mil records.
+    # - Generate Flamegraph: ~15min
+    # - Building RW artifacts: ~8min
+    timeout_in_minutes: 50

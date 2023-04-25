@@ -154,6 +154,19 @@ gen_cpu_flamegraph() {
 ############## MONITORING
 
 # TODO: promql
+monitor() {
+  sleep $((5 * 60))
+}
+
+stop_processes() {
+  # stop profiler
+  pkill nperf
+
+  # stop rw
+  pushd risingwave
+  ./risedev k
+  popd
+}
 
 ############## LIB
 
@@ -207,11 +220,10 @@ main() {
   # We can just let flamegraph profile 5min slice.
   # TODO(kwannoel): Use promql to monitor when throughput hits 0 with 1-minute intervals.
   echo "--- Monitoring Benchmark for 5 minutes"
-  sleep $((5 * 60))
-  pkill nperf
+  monitor
 
-  echo "--- Benchmark finished"
-  echo "Success!"
+  echo "--- Benchmark finished, stopping processes"
+  stop_processes
 
   # NOTE(kwannoel): We can only generate cpu flamegraph OR extract metrics.
   # Running profiling will take up 30-50% of a single CPU core.
