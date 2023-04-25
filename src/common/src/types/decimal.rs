@@ -762,7 +762,7 @@ mod tests {
         let decimal = Decimal::NegativeInf;
         assert_eq!(decimal.estimated_size(), 20);
 
-        let decimal = Decimal::Normalized(RustDecimal::from_f32(1.0).unwrap());
+        let decimal = Decimal::Normalized(RustDecimal::try_from(1.0).unwrap());
         assert_eq!(decimal.estimated_size(), 20);
     }
 }
