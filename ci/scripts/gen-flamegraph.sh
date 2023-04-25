@@ -35,13 +35,12 @@ install_all() {
 
   echo ">>> Installing PromQL cli client"
   # Download promql
-  wget https://github.com/nalbury/promql-cli/releases/download/v0.3.0/promql-v0.3.0-linux-arm64.tar.gz
-  tar -xvf promql-v0.3.0-linux-arm64.tar.gz
+  wget https://github.com/nalbury/promql-cli/releases/download/v0.3.0/promql-v0.3.0-linux-amd64.tar.gz
+  tar -xvf promql-v0.3.0-linux-amd64.tar.gz
   chmod +x ./promql
   mv ./promql /usr/local/bin/promql
-  # TODO(kwannoel): For some reason this command hangs.
-  #  echo ">>> Run Sanity check that PromQL is installed"
-  #  promql --help
+  echo ">>> Run Sanity check that PromQL is installed"
+  promql --help
 
   echo ">>> Installing Kafka"
   wget https://downloads.apache.org/kafka/3.4.0/kafka_2.13-3.4.0.tgz
