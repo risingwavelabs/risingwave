@@ -323,13 +323,10 @@ impl PredicatePushdown for LogicalProjectSet {
         let remain_mask = {
             let mut remain_mask = FixedBitSet::with_capacity(self.select_list().len() + 1);
             remain_mask.set(0, true);
-            for (i, e) in self.select_list().iter().enumerate() {
-                if e.has_table_function() {
-                    remain_mask.set(i + 1, true);
-                } else {
-                    remain_mask.set(i + 1, e.is_impure());
-                }
-            }
+            self.select_list()
+                .iter()
+                .enumerate()
+                .for_each(|(i, e)| remain_mask.set(i + 1, e.is_impure() || e.has_table_function()));
             remain_mask
         };
         let (remained_cond, pushed_cond) = predicate.split_disjoint(&remain_mask);
