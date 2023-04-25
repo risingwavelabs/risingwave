@@ -212,6 +212,7 @@ pub static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
         TaskStatus::AssignFailCanceled,
         TaskStatus::HeartbeatCanceled,
         TaskStatus::InvalidGroupCanceled,
+        TaskStatus::NoAvailResourceCanceled,
     ]
     .into_iter()
     .collect()
@@ -418,13 +419,10 @@ where
                 .map(|version_delta| (version_delta.id, version_delta))
                 .collect();
 
-        let mut need_init = self.need_init().await?;
-        let mut redo_state = if need_init {
+        let mut redo_state = if self.need_init().await? {
             // For backward compatibility, try to read checkpoint from meta store.
             let versions = HummockVersion::list(self.env.meta_store()).await?;
             let checkpoint_version = if !versions.is_empty() {
-                // Reject further init op.
-                need_init = false;
                 let checkpoint = versions.into_iter().next().unwrap();
                 tracing::warn!(
                     "read hummock version checkpoint from meta store: {:#?}",
@@ -435,6 +433,9 @@ where
                 // As no record found in stores, create a initial version.
                 let checkpoint = create_init_version();
                 tracing::info!("init hummock version checkpoint");
+                HummockVersionStats::default()
+                    .insert(self.env.meta_store())
+                    .await?;
                 checkpoint
             };
             versioning_guard.checkpoint = HummockVersionCheckpoint {
@@ -454,19 +455,11 @@ where
                 .cloned()
                 .unwrap()
         };
-        if need_init {
-            versioning_guard.version_stats = HummockVersionStats::default();
-            versioning_guard
-                .version_stats
-                .insert(self.env.meta_store())
-                .await?;
-        } else {
-            versioning_guard.version_stats = HummockVersionStats::list(self.env.meta_store())
-                .await?
-                .into_iter()
-                .next()
-                .expect("should contain exact one item");
-        }
+        versioning_guard.version_stats = HummockVersionStats::list(self.env.meta_store())
+            .await?
+            .into_iter()
+            .next()
+            .expect("should contain exact one item");
         for version_delta in hummock_version_deltas.values() {
             if version_delta.prev_id == redo_state.id {
                 redo_state.apply_version_delta(version_delta);
@@ -1142,19 +1135,6 @@ where
             }
         }
 
-        match compact_statuses.get_mut(compact_task.compaction_group_id) {
-            Some(mut compact_status) => {
-                compact_status.report_compact_task(compact_task);
-            }
-            None => {
-                compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
-            }
-        }
-
-        debug_assert!(
-            compact_task.task_status() != TaskStatus::Pending,
-            "report pending compaction task"
-        );
         {
             // The compaction task is finished.
             let mut versioning_guard = write_lock!(self, versioning).await;
@@ -1166,18 +1146,31 @@ where
                     compact_statuses.remove(group_id);
                 }
             }
+
+            match compact_statuses.get_mut(compact_task.compaction_group_id) {
+                Some(mut compact_status) => {
+                    compact_status.report_compact_task(compact_task);
+                }
+                None => {
+                    compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
+                }
+            }
+
+            debug_assert!(
+                compact_task.task_status() != TaskStatus::Pending,
+                "report pending compaction task"
+            );
             let is_success = if let TaskStatus::Success = compact_task.task_status() {
                 // if member_table_ids changes, the data of sstable may stale.
-                let is_expired = current_version
-                    .levels
-                    .get(&compact_task.compaction_group_id)
-                    .map(|group| group.member_table_ids != compact_task.existing_table_ids)
-                    .unwrap_or(true)
-                    || Self::is_compact_task_expired(compact_task, &versioning.branched_ssts);
+                let is_expired =
+                    Self::is_compact_task_expired(compact_task, &versioning.branched_ssts);
                 if is_expired {
-                    compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
+                    compact_task.set_task_status(TaskStatus::InputOutdatedCanceled);
                     false
                 } else {
+                    assert!(current_version
+                        .levels
+                        .contains_key(&compact_task.compaction_group_id));
                     true
                 }
             } else {

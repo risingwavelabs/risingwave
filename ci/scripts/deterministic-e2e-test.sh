@@ -3,7 +3,7 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-source ci/scripts/common.env.sh
+source ci/scripts/common.sh
 source ci/scripts/pr.env.sh
 
 echo "--- Download artifacts"
@@ -46,3 +46,6 @@ seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation -j 16 ./e2
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, fuzzing (pre-generated-queries)"
 seq 64 | parallel MADSIM_TEST_SEED={} './risingwave_simulation  --run-sqlsmith-queries ./src/tests/sqlsmith/tests/sqlsmith-query-snapshots/{} 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
+
+echo "--- deterministic simulation e2e, ci-3cn-2fe, e2e extended mode test"
+seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation -e 2> $LOGDIR/extended-{}.log && rm $LOGDIR/extended-{}.log'

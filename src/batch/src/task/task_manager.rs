@@ -21,14 +21,14 @@ use parking_lot::Mutex;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::error::ErrorCode::{self, TaskNotFound};
 use risingwave_common::error::Result;
+use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
-use tokio::runtime::Runtime;
 use tokio::sync::mpsc::Sender;
 use tonic::Status;
 
-use crate::executor::BatchManagerMetrics;
+use crate::monitor::BatchManagerMetrics;
 use crate::rpc::service::exchange::GrpcExchangeWriter;
 use crate::task::{
     BatchTaskExecution, ComputeNodeContext, StateReporter, TaskId, TaskOutput, TaskOutputId,
@@ -41,7 +41,7 @@ pub struct BatchManager {
     tasks: Arc<Mutex<HashMap<TaskId, Arc<BatchTaskExecution<ComputeNodeContext>>>>>,
 
     /// Runtime for the batch manager.
-    runtime: &'static Runtime,
+    runtime: Arc<BackgroundShutdownRuntime>,
 
     /// Batch configuration
     config: BatchConfig,
@@ -70,10 +70,7 @@ impl BatchManager {
         };
         BatchManager {
             tasks: Arc::new(Mutex::new(HashMap::new())),
-            // Leak the runtime to avoid runtime shutting-down in the main async context.
-            // TODO: may manually shutdown the runtime after we implement graceful shutdown for
-            // stream manager.
-            runtime: Box::leak(Box::new(runtime)),
+            runtime: Arc::new(runtime.into()),
             config,
             total_mem_val: TrAdder::new().into(),
             metrics,
@@ -89,7 +86,7 @@ impl BatchManager {
         state_reporter: StateReporter,
     ) -> Result<()> {
         trace!("Received task id: {:?}, plan: {:?}", tid, plan);
-        let task = BatchTaskExecution::new(tid, plan, context, epoch, self.runtime)?;
+        let task = BatchTaskExecution::new(tid, plan, context, epoch, self.runtime())?;
         let task_id = task.get_task_id().clone();
         let task = Arc::new(task);
         // Here the task id insert into self.tasks is put in front of `.async_execute`, cuz when
@@ -153,7 +150,7 @@ impl BatchManager {
                 // Use `cancel` rather than `abort` here since this is not an error which should be
                 // propagated to upstream.
                 task.cancel();
-                self.metrics.task_num.dec()
+                self.metrics.task_num.dec();
             }
             None => {
                 warn!("Task id not found for abort task")
@@ -203,8 +200,8 @@ impl BatchManager {
         self.tasks.lock().get(task_id).unwrap().state_receiver()
     }
 
-    pub fn runtime(&self) -> &'static Runtime {
-        self.runtime
+    pub fn runtime(&self) -> Arc<BackgroundShutdownRuntime> {
+        self.runtime.clone()
     }
 
     pub fn config(&self) -> &BatchConfig {
@@ -267,7 +264,7 @@ mod tests {
     use risingwave_pb::expr::TableFunction;
     use tonic::Code;
 
-    use crate::executor::BatchManagerMetrics;
+    use crate::monitor::BatchManagerMetrics;
     use crate::task::{BatchManager, ComputeNodeContext, StateReporter, TaskId};
 
     #[test]

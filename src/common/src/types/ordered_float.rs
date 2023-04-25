@@ -46,8 +46,7 @@ use core::hash::{Hash, Hasher};
 use core::iter::{Product, Sum};
 use core::num::FpCategory;
 use core::ops::{
-    Add, AddAssign, Deref, DerefMut, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Sub,
-    SubAssign,
+    Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign,
 };
 use core::str::FromStr;
 
@@ -227,22 +226,6 @@ impl<T: Float> From<T> for OrderedFloat<T> {
     #[inline]
     fn from(val: T) -> Self {
         OrderedFloat(val)
-    }
-}
-
-impl<T: Float> Deref for OrderedFloat<T> {
-    type Target = T;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<T: Float> DerefMut for OrderedFloat<T> {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
     }
 }
 
@@ -1066,8 +1049,6 @@ mod impl_as_primitive {
 
     impl_as_primitive_for!(f32);
     impl_as_primitive_for!(f64);
-
-    impl_as_primitive_for!(crate::types::Decimal);
 }
 
 mod impl_from {
@@ -1134,12 +1115,6 @@ impl From<i64> for OrderedFloat<f64> {
     }
 }
 
-impl From<crate::types::Decimal> for OrderedFloat<f64> {
-    fn from(n: crate::types::Decimal) -> Self {
-        n.to_f64().map_or(Self(f64::NAN), Self)
-    }
-}
-
 mod impl_into_ordered {
     use super::*;
 
@@ -1173,5 +1148,17 @@ mod tests {
         // decimal -> f64.
         let ret: OrderedFloat<f64> = OrderedFloat::<f64>::from(crate::types::Decimal::from(5));
         assert_eq!(ret, OrderedFloat::<f64>::from(5_f64));
+    }
+
+    #[test]
+    fn test_nan_eq() {
+        let nan_prim = f64::NAN;
+        assert_ne!(nan_prim, nan_prim);
+
+        let nan = OrderedFloat::<f64>::from(nan_prim);
+        assert_eq!(nan, nan);
+
+        use num_traits::Signed as _;
+        assert_eq!(nan.abs(), nan.abs());
     }
 }

@@ -12,12 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt;
+use std::mem::size_of;
+
 use postgres_types::{FromSql as _, ToSql as _, Type};
 use serde_json::Value;
 
 use super::{Array, ArrayBuilder};
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::types::{Scalar, ScalarRef};
+use crate::estimate_size::EstimateSize;
+use crate::types::{DataType, Scalar, ScalarRef};
 use crate::util::iter_util::ZipEqFast;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,6 +29,22 @@ pub struct JsonbVal(Box<Value>); // The `Box` is just to keep `size_of::<ScalarI
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct JsonbRef<'a>(&'a Value);
+
+/// The display of `JsonbVal` is pg-compatible format which has slightly different from
+/// `serde_json::Value`.
+impl fmt::Display for JsonbVal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        crate::types::to_text::ToText::write(&self.as_scalar_ref(), f)
+    }
+}
+
+/// The display of `JsonbRef` is pg-compatible format which has slightly different from
+/// `serde_json::Value`.
+impl fmt::Display for JsonbRef<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        crate::types::to_text::ToText::write(self, f)
+    }
+}
 
 impl Scalar for JsonbVal {
     type ScalarRefType<'a> = JsonbRef<'a>;
@@ -280,7 +300,7 @@ impl FromIterator<Option<JsonbVal>> for JsonbArray {
         let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
         for i in iter {
             match i {
-                Some(x) => builder.append(Some(x.as_scalar_ref())),
+                Some(x) => builder.append_move(x),
                 None => builder.append(None),
             }
         }
@@ -300,7 +320,7 @@ pub struct JsonbArrayBuilder {
     data: Vec<Value>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsonbArray {
     bitmap: Bitmap,
     data: Vec<Value>,
@@ -309,11 +329,16 @@ pub struct JsonbArray {
 impl ArrayBuilder for JsonbArrayBuilder {
     type ArrayType = JsonbArray;
 
-    fn with_meta(capacity: usize, _meta: super::ArrayMeta) -> Self {
+    fn new(capacity: usize) -> Self {
         Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: Vec::with_capacity(capacity),
         }
+    }
+
+    fn with_type(capacity: usize, ty: DataType) -> Self {
+        assert_eq!(ty, DataType::Jsonb);
+        Self::new(capacity)
     }
 
     fn append_n(&mut self, n: usize, value: Option<<Self::ArrayType as Array>::RefItem<'_>>) {
@@ -351,10 +376,7 @@ impl ArrayBuilder for JsonbArrayBuilder {
 }
 
 impl JsonbArrayBuilder {
-    pub fn append_move(
-        &mut self,
-        value: <<JsonbArrayBuilder as ArrayBuilder>::ArrayType as Array>::OwnedItem,
-    ) {
+    pub fn append_move(&mut self, value: JsonbVal) {
         self.bitmap.append(true);
         self.data.push(*value.0);
     }
@@ -430,9 +452,8 @@ impl Array for JsonbArray {
         self.bitmap = bitmap;
     }
 
-    fn create_builder(&self, capacity: usize) -> super::ArrayBuilderImpl {
-        let array_builder = Self::Builder::new(capacity);
-        super::ArrayBuilderImpl::Jsonb(array_builder)
+    fn data_type(&self) -> DataType {
+        DataType::Jsonb
     }
 }
 
@@ -468,5 +489,12 @@ impl serde_json::ser::Formatter for ToTextFormatter {
         W: ?Sized + std::io::Write,
     {
         writer.write_all(b": ")
+    }
+}
+
+// TODO: We need to fix this later.
+impl EstimateSize for JsonbArray {
+    fn estimated_heap_size(&self) -> usize {
+        self.bitmap.estimated_heap_size() + self.data.capacity() * size_of::<Value>()
     }
 }

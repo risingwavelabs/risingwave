@@ -30,6 +30,7 @@ use crate::common::KafkaCommon;
 pub const KAFKA_CONNECTOR: &str = "kafka";
 pub const KAFKA_PROPS_BROKER_KEY: &str = "properties.bootstrap.server";
 pub const KAFKA_PROPS_BROKER_KEY_ALIAS: &str = "kafka.brokers";
+pub const PRIVATELINK_CONNECTION: &str = "privatelink";
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct KafkaProperties {
@@ -67,3 +68,4 @@ pub struct KafkaProperties {
 }
 
 const KAFKA_SYNC_CALL_TIMEOUT: Duration = Duration::from_secs(1);
+const KAFKA_ISOLATION_LEVEL: &str = "read_committed";

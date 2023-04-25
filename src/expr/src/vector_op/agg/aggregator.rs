@@ -12,16 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use dyn_clone::DynClone;
 use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::types::*;
-use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_pb::expr::AggCall;
 
-use crate::expr::{build_from_prost, AggKind};
+use crate::function::aggregate::{AggArgs, AggCall, AggKind};
 use crate::vector_op::agg::approx_count_distinct::ApproxCountDistinct;
 use crate::vector_op::agg::array_agg::create_array_agg_state;
 use crate::vector_op::agg::count_star::CountStar;
@@ -29,6 +25,7 @@ use crate::vector_op::agg::filter::*;
 use crate::vector_op::agg::functions::*;
 use crate::vector_op::agg::general_agg::*;
 use crate::vector_op::agg::general_distinct_agg::*;
+use crate::vector_op::agg::non_primitive_sum::Int256Sum;
 use crate::vector_op::agg::string_agg::create_string_agg_state;
 use crate::Result;
 
@@ -65,71 +62,62 @@ pub struct AggStateFactory {
 }
 
 impl AggStateFactory {
-    pub fn new(prost: &AggCall) -> Result<Self> {
+    pub fn new(agg_call: AggCall) -> Result<Self> {
         // NOTE: The function signature is checked by `AggCall::infer_return_type` in the frontend.
 
-        let return_type = DataType::from(prost.get_return_type()?);
-        let agg_kind = AggKind::try_from(prost.get_type()?)?;
-        let distinct = prost.distinct;
-        let column_orders = prost
-            .get_order_by()
-            .iter()
-            .map(|col_order| {
-                let col_idx = col_order.get_column_index() as usize;
-                let order_type = OrderType::from_protobuf(col_order.get_order_type().unwrap());
-                ColumnOrder::new(col_idx, order_type)
-            })
-            .collect();
-
-        let initial_agg_state: BoxedAggState = match (agg_kind, &prost.get_args()[..]) {
-            (AggKind::Count, []) => Box::new(CountStar::new(return_type.clone())),
-            (AggKind::ApproxCountDistinct, [arg]) => {
-                let input_col_idx = arg.get_index() as usize;
-                Box::new(ApproxCountDistinct::new(return_type.clone(), input_col_idx))
+        let initial_agg_state: BoxedAggState = match (agg_call.kind, agg_call.args) {
+            (AggKind::Count, AggArgs::None) => {
+                Box::new(CountStar::new(agg_call.return_type.clone()))
             }
-            (AggKind::StringAgg, [agg_arg, delim_arg]) => {
-                assert_eq!(
-                    DataType::from(agg_arg.get_type().unwrap()),
-                    DataType::Varchar
-                );
-                assert_eq!(
-                    DataType::from(delim_arg.get_type().unwrap()),
-                    DataType::Varchar
-                );
-                let agg_col_idx = agg_arg.get_index() as usize;
-                let delim_col_idx = delim_arg.get_index() as usize;
-                create_string_agg_state(agg_col_idx, delim_col_idx, column_orders)?
+            (AggKind::ApproxCountDistinct, AggArgs::Unary(_, arg_idx)) => Box::new(
+                ApproxCountDistinct::new(agg_call.return_type.clone(), arg_idx),
+            ),
+            (
+                AggKind::StringAgg,
+                AggArgs::Binary([value_type, delim_type], [value_idx, delim_idx]),
+            ) => {
+                assert_eq!(value_type, DataType::Varchar);
+                assert_eq!(delim_type, DataType::Varchar);
+                create_string_agg_state(value_idx, delim_idx, agg_call.column_orders.clone())
             }
-            (AggKind::ArrayAgg, [arg]) => {
-                let agg_col_idx = arg.get_index() as usize;
-                create_array_agg_state(return_type.clone(), agg_col_idx, column_orders)?
+            (AggKind::Sum, AggArgs::Unary(arg_type, arg_idx))
+                if matches!(arg_type, DataType::Int256) =>
+            {
+                // Special handling of the `sum` function for `Int256`, when the
+                // `GeneralAgg` is applied to `sum`, it needs `sum` to return a temporary
+                // `ScalarRef` for intermediate variable. However, this is not feasible
+                // for non-primitive `Int256` types. Therefore, we have added a separate handling
+                // here. It is important to note that this is a temporary and rough imitation of the
+                // `GeneralAgg` solution and will need to be considered and fixed
+                // when refactoring the code related to aggregation in the future.
+                Box::new(Int256Sum::new(arg_idx, agg_call.distinct))
             }
-            (agg_kind, [arg]) => {
+            (AggKind::ArrayAgg, AggArgs::Unary(_, arg_idx)) => create_array_agg_state(
+                agg_call.return_type.clone(),
+                arg_idx,
+                agg_call.column_orders.clone(),
+            ),
+            (agg_kind, AggArgs::Unary(arg_type, arg_idx)) => {
                 // other unary agg call
-                let input_type = DataType::from(arg.get_type()?);
-                let input_col_idx = arg.get_index() as usize;
                 create_agg_state_unary(
-                    input_type,
-                    input_col_idx,
+                    arg_type,
+                    arg_idx,
                     agg_kind,
-                    return_type.clone(),
-                    distinct,
+                    agg_call.return_type.clone(),
+                    agg_call.distinct,
                 )?
             }
-            _ => bail!("Invalid agg call: {:?}", agg_kind),
+            (agg_kind, _) => bail!("Invalid agg call: {:?}", agg_kind),
         };
 
         // wrap the agg state in a `Filter` if needed
-        let initial_agg_state = match prost.filter {
-            Some(ref expr) => Box::new(Filter::new(
-                Arc::from(build_from_prost(expr)?),
-                initial_agg_state,
-            )),
+        let initial_agg_state = match agg_call.filter {
+            Some(ref expr) => Box::new(Filter::new(expr.clone(), initial_agg_state)),
             None => initial_agg_state,
         };
 
         Ok(Self {
-            return_type,
+            return_type: agg_call.return_type,
             initial_agg_state,
         })
     }
@@ -200,6 +188,8 @@ pub fn create_agg_state_unary(
         (Count, count, date, int64, Some(0)),
         (Count, count, timestamp, int64, Some(0)),
         (Count, count, time, int64, Some(0)),
+        (Count, count, timestamptz, int64, Some(0)),
+        (Count, count_int256, int256, int64, Some(0)),
         (Count, count_struct, struct_type, int64, Some(0)),
         (Count, count_list, list, int64, Some(0)),
         (Sum0, sum, int64, int64, Some(0)),
@@ -210,9 +200,19 @@ pub fn create_agg_state_unary(
         (Sum, sum, float64, float64, None),
         (Sum, sum, decimal, decimal, None),
         (Sum, sum, interval, interval, None),
+        (BitAnd, bit_and, int16, int16, None),
+        (BitAnd, bit_and, int32, int32, None),
+        (BitAnd, bit_and, int64, int64, None),
+        (BitOr, bit_or, int16, int16, None),
+        (BitOr, bit_or, int32, int32, None),
+        (BitOr, bit_or, int64, int64, None),
+        (BitXor, bit_xor, int16, int16, None),
+        (BitXor, bit_xor, int32, int32, None),
+        (BitXor, bit_xor, int64, int64, None),
         (Min, min, int16, int16, None),
         (Min, min, int32, int32, None),
         (Min, min, int64, int64, None),
+        (Min, min_int256, int256, int256, None),
         (Min, min, float32, float32, None),
         (Min, min, float64, float64, None),
         (Min, min, decimal, decimal, None),
@@ -221,12 +221,14 @@ pub fn create_agg_state_unary(
         (Min, min, date, date, None),
         (Min, min, timestamp, timestamp, None),
         (Min, min, time, time, None),
+        (Min, min, timestamptz, timestamptz, None),
         (Min, min_struct, struct_type, struct_type, None),
         (Min, min_str, varchar, varchar, None),
         (Min, min_list, list, list, None),
         (Max, max, int16, int16, None),
         (Max, max, int32, int32, None),
         (Max, max, int64, int64, None),
+        (Max, max_int256, int256, int256, None),
         (Max, max, float32, float32, None),
         (Max, max, float64, float64, None),
         (Max, max, decimal, decimal, None),
@@ -235,12 +237,14 @@ pub fn create_agg_state_unary(
         (Max, max, date, date, None),
         (Max, max, timestamp, timestamp, None),
         (Max, max, time, time, None),
+        (Max, max, timestamptz, timestamptz, None),
         (Max, max_struct, struct_type, struct_type, None),
         (Max, max_str, varchar, varchar, None),
         (Max, max_list, list, list, None),
         (FirstValue, first, int16, int16, None),
         (FirstValue, first, int32, int32, None),
         (FirstValue, first, int64, int64, None),
+        (FirstValue, first_int256, int256, int256, None),
         (FirstValue, first, float32, float32, None),
         (FirstValue, first, float64, float64, None),
         (FirstValue, first, decimal, decimal, None),

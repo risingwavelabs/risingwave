@@ -19,7 +19,10 @@ use pgwire::types::Row;
 use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
+use risingwave_pb::catalog::connection;
 use risingwave_sqlparser::ast::{Ident, ObjectName, ShowCreateType, ShowObject};
+use serde_json;
 
 use super::RwPgResponse;
 use crate::binder::{Binder, Relation};
@@ -32,7 +35,7 @@ pub fn get_columns_from_table(
     session: &SessionImpl,
     table_name: ObjectName,
 ) -> Result<Vec<ColumnDesc>> {
-    let mut binder = Binder::new(session);
+    let mut binder = Binder::new_for_system(session);
     let relation = binder.bind_relation_by_name(table_name.clone(), None, false)?;
     let catalogs = match relation {
         Relation::Source(s) => s.catalog.columns,
@@ -117,6 +120,120 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
                 ],
             ));
         }
+        ShowObject::Connection { schema } => {
+            let schema = catalog_reader
+                .get_schema_by_name(session.database(), &schema_or_default(&schema))?;
+            let rows = schema
+                .iter_connections()
+                .map(|c| {
+                    let name = c.name.clone();
+                    let conn_type = match &c.info {
+                        connection::Info::PrivateLinkService(_) => {
+                            PRIVATELINK_CONNECTION.to_string()
+                        },
+                    };
+                    let source_names = schema
+                        .get_source_ids_by_connection(c.id)
+                        .unwrap_or(Vec::new())
+                        .into_iter()
+                        .filter_map(|sid| schema.get_source_by_id(&sid).map(|catalog| catalog.name.as_str()))
+                        .collect_vec();
+                    let sink_names = schema
+                        .get_sink_ids_by_connection(c.id)
+                        .unwrap_or(Vec::new())
+                        .into_iter()
+                        .filter_map(|sid| schema.get_sink_by_id(&sid).map(|catalog| catalog.name.as_str()))
+                        .collect_vec();
+                    let properties = match &c.info {
+                        connection::Info::PrivateLinkService(i) => {
+                            format!(
+                                "provider: {}\nservice_name: {}\nendpoint_id: {}\navailability_zones: {}\nsources: {}\nsinks: {}",
+                                i.get_provider().unwrap().as_str_name(),
+                                i.service_name,
+                                i.endpoint_id,
+                                serde_json::to_string(&i.dns_entries.keys().collect_vec()).unwrap(),
+                                serde_json::to_string(&source_names).unwrap(),
+                                serde_json::to_string(&sink_names).unwrap(),
+                            )
+                        }
+                    };
+                    Row::new(vec![
+                        Some(name.into()),
+                        Some(conn_type.into()),
+                        Some(properties.into()),
+                    ])
+                })
+                .collect_vec();
+            return Ok(PgResponse::new_for_stream(
+                StatementType::SHOW_COMMAND,
+                None,
+                rows.into(),
+                vec![
+                    PgFieldDescriptor::new(
+                        "Name".to_owned(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
+                    ),
+                    PgFieldDescriptor::new(
+                        "Type".to_owned(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
+                    ),
+                    PgFieldDescriptor::new(
+                        "Properties".to_owned(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
+                    ),
+                ],
+            ));
+        }
+        ShowObject::Function { schema } => {
+            let rows = catalog_reader
+                .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+                .iter_function()
+                .map(|t| {
+                    Row::new(vec![
+                        Some(t.name.clone().into()),
+                        Some(t.arg_types.iter().map(|t| t.to_string()).join(", ").into()),
+                        Some(t.return_type.to_string().into()),
+                        Some(t.language.clone().into()),
+                        Some(t.link.clone().into()),
+                    ])
+                })
+                .collect_vec();
+            return Ok(PgResponse::new_for_stream(
+                StatementType::SHOW_COMMAND,
+                None,
+                rows.into(),
+                vec![
+                    PgFieldDescriptor::new(
+                        "Name".to_owned(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
+                    ),
+                    PgFieldDescriptor::new(
+                        "Arguments".to_owned(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
+                    ),
+                    PgFieldDescriptor::new(
+                        "Return Type".to_owned(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
+                    ),
+                    PgFieldDescriptor::new(
+                        "Language".to_owned(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
+                    ),
+                    PgFieldDescriptor::new(
+                        "Link".to_owned(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
+                    ),
+                ],
+            ));
+        }
     };
 
     let rows = names
@@ -167,6 +284,19 @@ pub fn handle_show_create_object(
                 .filter(|t| t.is_table())
                 .ok_or_else(|| CatalogError::NotFound("table", name.to_string()))?;
             table.create_sql()
+        }
+        ShowCreateType::Sink => {
+            let sink = schema
+                .get_sink_by_name(&object_name)
+                .ok_or_else(|| CatalogError::NotFound("sink", name.to_string()))?;
+            sink.create_sql()
+        }
+        ShowCreateType::Source => {
+            let source = schema
+                .get_source_by_name(&object_name)
+                .filter(|s| s.associated_table_id.is_none())
+                .ok_or_else(|| CatalogError::NotFound("source", name.to_string()))?;
+            source.create_sql()
         }
         _ => {
             return Err(ErrorCode::NotImplemented(

@@ -20,11 +20,10 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_storage::StateStore;
 
 use super::utils::*;
-use super::{TopNCache, TopNCacheTrait};
+use super::{ManagedTopNState, TopNCache, TopNCacheTrait};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::top_n::{ManagedTopNState, NO_GROUP_KEY};
 use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Watermark};
 
 /// `TopNExecutor` works with input with modification, it keeps all the data

@@ -365,9 +365,15 @@ impl HummockVersionUpdateExt for HummockVersion {
                     .levels
                     .get_mut(&group_change.origin_group_id)
                     .expect("compaction group should exist");
-                levels
+                let mut moving_tables = levels
                     .member_table_ids
-                    .drain_filter(|t| group_change.table_ids.contains(t));
+                    .drain_filter(|t| group_change.table_ids.contains(t))
+                    .collect_vec();
+                self.levels
+                    .get_mut(compaction_group_id)
+                    .expect("compaction group should exist")
+                    .member_table_ids
+                    .append(&mut moving_tables);
             }
             let has_destroy = summary.group_destroy.is_some();
             let levels = self
@@ -820,6 +826,25 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: Vec<SstableInfo>) 
     }
 
     debug_assert!(can_concat(&operand.table_infos));
+}
+
+pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockSstableObjectId, u64> {
+    version
+        .levels
+        .values()
+        .flat_map(|cg| {
+            cg.get_level0()
+                .get_sub_levels()
+                .iter()
+                .chain(cg.get_levels().iter())
+                .flat_map(|level| {
+                    level
+                        .get_table_infos()
+                        .iter()
+                        .map(|t| (t.object_id, t.file_size))
+                })
+        })
+        .collect()
 }
 
 #[cfg(test)]

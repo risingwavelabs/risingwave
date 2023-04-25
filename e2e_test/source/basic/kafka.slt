@@ -158,7 +158,8 @@ CREATE TABLE s12(
     code string, 
     timestamp bigint, 
     xfas struct<device_model_id int, device_make_id int, ip string>[],
-    contacts struct<emails string[], phones string[]>)
+    contacts struct<emails string[], phones string[]>,
+    jsonb jsonb)
 WITH (
     connector = 'kafka',
     topic = 'json_c',
@@ -244,7 +245,6 @@ create source s18 with (
 ) row format avro 
 row schema location 'file:///risingwave/avro-complex-schema.avsc'
 
-
 # we cannot use confluent schema registry when connector is not kafka
 statement error
 create table s19 
@@ -255,6 +255,38 @@ with (
 )
 row format avro
 row schema location confluent schema registry 'http://127.0.0.1:8081'
+
+# we cannot create debezium source with generated column
+statement error
+create table s20 (
+  id integer primary key,
+  first_name varchar,
+  last_name varchar,
+  email varchar,
+  gen_id integer as id+1
+) with (
+  connector = 'kafka',
+  topic = 'debezium_log',
+  properties.bootstrap.server = '127.0.0.1:29092'
+) row format debezium_json
+
+# create kafka source table with generated column
+statement ok
+create table s21 (v1 int as v2-1, v2 int, v3 int as v2+1) with (
+  connector = 'kafka',
+  topic = 'kafka_4_partition_topic_generated_columns',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  scan.startup.mode = 'earliest'
+) row format json
+
+# create kafka source with generated column
+statement ok
+create source s22 (v1 int as v2-1, v2 int, v3 int as v2+1) with (
+  connector = 'kafka',
+  topic = 'kafka_4_partition_topic_generated_columns',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  scan.startup.mode = 'earliest'
+) row format json
 
 statement ok
 flush;
@@ -397,9 +429,9 @@ select id, code, timestamp, xfas, contacts, sex from s11;
 0 abc 1473305798 {"(0,200,127.0.0.1)","(1,400,127.0.0.2)"} ({1xxx,2xxx},{1xxx,2xxx}) MALE
 
 query ITITT
-select id, code, timestamp, xfas, contacts from s12;
+select id, code, timestamp, xfas, contacts, jsonb from s12;
 ----
-100 abc 1473305798 {"(0,200,10.0.0.1)","(1,400,10.0.0.2)"} ({1xxx,2xxx},{1xxx,2xxx})
+100 abc 1473305798 {"(0,200,10.0.0.1)","(1,400,10.0.0.2)"} ({1xxx,2xxx},{1xxx,2xxx}) {"blockNumber": 16938734}
 
 query ITIT
 select * from s13 order by id;
@@ -421,6 +453,20 @@ query I
 select count(*) from s16
 ----
 0
+
+query III rowsort
+select * from s21;
+----
+19 20 21
+20 21 22
+NULL NULL NULL
+
+query III rowsort
+select * from s22;
+----
+19 20 21
+20 21 22
+NULL NULL NULL
 
 statement ok
 drop materialized view source_mv1
@@ -463,3 +509,9 @@ drop source s17
 
 statement ok
 drop source s18
+
+statement ok
+drop table s21
+
+statement ok
+drop source s22

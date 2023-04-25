@@ -29,6 +29,7 @@ mod iterator;
 mod jsonb_array;
 pub mod list_array;
 mod macros;
+mod num256_array;
 mod primitive_array;
 pub mod serial_array;
 pub mod stream_chunk;
@@ -56,6 +57,7 @@ pub use interval_array::{IntervalArray, IntervalArrayBuilder};
 pub use iterator::ArrayIterator;
 pub use jsonb_array::{JsonbArray, JsonbArrayBuilder, JsonbRef, JsonbVal};
 pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
+pub use num256_array::*;
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
 use risingwave_pb::data::{PbArray, PbArrayType};
@@ -66,10 +68,11 @@ pub use utf8_array::*;
 pub use vis::{Vis, VisRef};
 
 pub use self::error::ArrayError;
+pub use crate::array::num256_array::{Int256Array, Int256ArrayBuilder};
 use crate::buffer::Bitmap;
+use crate::estimate_size::EstimateSize;
 use crate::types::*;
-use crate::util::iter_util::ZipEqFast;
-pub type ArrayResult<T> = std::result::Result<T, ArrayError>;
+pub type ArrayResult<T> = Result<T, ArrayError>;
 
 pub type I64Array = PrimitiveArray<i64>;
 pub type I32Array = PrimitiveArray<i32>;
@@ -101,14 +104,11 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
     type ArrayType: Array<Builder = Self>;
 
     /// Create a new builder with `capacity`.
-    fn new(capacity: usize) -> Self {
-        // No metadata by default.
-        Self::with_meta(capacity, ArrayMeta::Simple)
-    }
+    fn new(capacity: usize) -> Self;
 
     /// # Panics
     /// Panics if `meta`'s type mismatches with the array type.
-    fn with_meta(capacity: usize, meta: ArrayMeta) -> Self;
+    fn with_type(capacity: usize, ty: DataType) -> Self;
 
     /// Append a value multiple times.
     ///
@@ -158,7 +158,9 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
 /// In some cases, we will need to store owned data. For example, when aggregating min
 /// and max, we need to store current maximum in the aggregator. In this case, we
 /// could use `A::OwnedItem` in aggregator struct.
-pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImpl> {
+pub trait Array:
+    std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImpl> + EstimateSize
+{
     /// A reference to item in array, as well as return type of `value_at`, which is
     /// reciprocal to `Self::OwnedItem`.
     type RefItem<'a>: ScalarRef<'a, ScalarType = Self::OwnedItem>
@@ -267,41 +269,11 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
         self.len() == 0
     }
 
-    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl;
-
-    fn array_meta(&self) -> ArrayMeta {
-        ArrayMeta::Simple
+    fn create_builder(&self, capacity: usize) -> Self::Builder {
+        Self::Builder::with_type(capacity, self.data_type())
     }
-}
 
-/// The creation of [`Array`] typically does not rely on [`DataType`].
-/// For now the exceptions are list and struct, which require type details
-/// as they decide the layout of the array.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ArrayMeta {
-    Simple, // Simple array without given any extra metadata.
-    Struct {
-        children: Arc<[DataType]>,
-        children_names: Arc<[String]>,
-    },
-    List {
-        datatype: Box<DataType>,
-    },
-}
-
-impl From<&DataType> for ArrayMeta {
-    fn from(data_type: &DataType) -> Self {
-        match data_type {
-            DataType::Struct(struct_type) => ArrayMeta::Struct {
-                children: struct_type.fields.clone().into(),
-                children_names: struct_type.field_names.clone().into(),
-            },
-            DataType::List { datatype } => ArrayMeta::List {
-                datatype: datatype.clone(),
-            },
-            _ => ArrayMeta::Simple,
-        }
-    }
+    fn data_type(&self) -> DataType;
 }
 
 /// Implement `compact` on array, which removes element according to `visibility`.
@@ -313,10 +285,11 @@ trait CompactableArray: Array {
 
 impl<A: Array> CompactableArray for A {
     fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self {
-        let mut builder = A::Builder::with_meta(cardinality, self.array_meta());
-        for (elem, visible) in self.iter().zip_eq_fast(visibility.iter()) {
-            if visible {
-                builder.append(elem);
+        let mut builder = A::Builder::with_type(cardinality, self.data_type());
+        for idx in visibility.iter_ones() {
+            // SAFETY(value_at_unchecked): the idx is always in bound.
+            unsafe {
+                builder.append(self.value_at_unchecked(idx));
             }
         }
         builder.finish()
@@ -338,6 +311,7 @@ macro_rules! for_all_variants {
             { Int16, int16, I16Array, I16ArrayBuilder },
             { Int32, int32, I32Array, I32ArrayBuilder },
             { Int64, int64, I64Array, I64ArrayBuilder },
+            { Int256, int256, Int256Array, Int256ArrayBuilder },
             { Float32, float32, F32Array, F32ArrayBuilder },
             { Float64, float64, F64Array, F64ArrayBuilder },
             { Utf8, utf8, Utf8Array, Utf8ArrayBuilder },
@@ -372,6 +346,12 @@ for_all_variants! { array_impl_enum }
 impl<T: PrimitiveArrayItemType> From<PrimitiveArray<T>> for ArrayImpl {
     fn from(arr: PrimitiveArray<T>) -> Self {
         T::erase_array_type(arr)
+    }
+}
+
+impl From<Int256Array> for ArrayImpl {
+    fn from(arr: Int256Array) -> Self {
+        Self::Int256(arr)
     }
 }
 
@@ -649,7 +629,7 @@ macro_rules! impl_array {
 
             pub fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
                 match self {
-                    $( Self::$variant_name(inner) => inner.create_builder(capacity), )*
+                    $( Self::$variant_name(inner) => ArrayBuilderImpl::$variant_name(inner.create_builder(capacity)), )*
                 }
             }
         }
@@ -657,6 +637,20 @@ macro_rules! impl_array {
 }
 
 for_all_variants! { impl_array }
+
+macro_rules! impl_array_estimate_size {
+    ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        impl EstimateSize for ArrayImpl {
+            fn estimated_heap_size(&self) -> usize {
+                match self {
+                    $( Self::$variant_name(inner) => inner.estimated_heap_size(), )*
+                }
+            }
+        }
+    }
+}
+
+for_all_variants! { impl_array_estimate_size }
 
 impl ArrayImpl {
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = DatumRef<'_>> + ExactSizeIterator {
@@ -695,6 +689,7 @@ impl ArrayImpl {
             PbArrayType::Bytea => {
                 read_string_array::<BytesArrayBuilder, BytesValueReader>(array, cardinality)?
             }
+            PbArrayType::Int256 => Int256Array::from_protobuf(array, cardinality)?,
         };
         Ok(array)
     }
@@ -719,13 +714,14 @@ impl PartialEq for ArrayImpl {
 mod tests {
 
     use super::*;
+    use crate::util::iter_util::ZipEqFast;
 
     fn filter<'a, A, F>(data: &'a A, pred: F) -> ArrayResult<A>
     where
         A: Array + 'a,
         F: Fn(Option<A::RefItem<'a>>) -> bool,
     {
-        let mut builder = A::Builder::with_meta(data.len(), data.array_meta());
+        let mut builder = A::Builder::with_type(data.len(), data.data_type());
         for i in 0..data.len() {
             if pred(data.value_at(i)) {
                 builder.append(data.value_at(i));

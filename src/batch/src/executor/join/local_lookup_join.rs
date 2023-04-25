@@ -367,7 +367,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
         let vnode_mapping = lookup_join_node.get_inner_side_vnode_mapping().to_vec();
         assert!(!vnode_mapping.is_empty());
 
-        let chunk_size = source.context.get_config().developer.batch_chunk_size;
+        let chunk_size = source.context.get_config().developer.chunk_size;
 
         let inner_side_builder = InnerSideExecutorBuilder {
             table_desc: table_desc.clone(),
@@ -671,7 +671,7 @@ mod tests {
              2 5.5 2 5.5
              2 8.4 2 5.5",
         );
-        let condition = build_from_pretty("(less_than:boolean 5:int4 $3:float4)");
+        let condition = build_from_pretty("(less_than:boolean (cast:float4 5:int4) $3:float4)");
 
         do_test(JoinType::Inner, Some(condition), false, expected).await;
     }
@@ -688,7 +688,7 @@ mod tests {
              5 9.1 . .
              . .   . .",
         );
-        let condition = build_from_pretty("(less_than:boolean 5:int4 $3:float4)");
+        let condition = build_from_pretty("(less_than:boolean (cast:float4 5:int4) $3:float4)");
 
         do_test(JoinType::LeftOuter, Some(condition), false, expected).await;
     }
@@ -701,7 +701,7 @@ mod tests {
              2 5.5
              2 8.4",
         );
-        let condition = build_from_pretty("(less_than:boolean 5:int4 $3:float4)");
+        let condition = build_from_pretty("(less_than:boolean (cast:float4 5:int4) $3:float4)");
 
         do_test(JoinType::LeftSemi, Some(condition), false, expected).await;
     }
@@ -715,7 +715,7 @@ mod tests {
             5 9.1
             . .",
         );
-        let condition = build_from_pretty("(less_than:boolean 5:int4 $3:float4)");
+        let condition = build_from_pretty("(less_than:boolean (cast:float4 5:int4) $3:float4)");
 
         do_test(JoinType::LeftAnti, Some(condition), false, expected).await;
     }

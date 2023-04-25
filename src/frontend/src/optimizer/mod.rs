@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 // Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -35,7 +36,7 @@ pub use logical_optimization::*;
 pub use optimizer_context::*;
 use plan_expr_rewriter::ConstEvalRewriter;
 use property::Order;
-use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, Field, Schema};
+use risingwave_common::catalog::{ColumnCatalog, ColumnId, ConflictBehavior, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -43,7 +44,7 @@ use risingwave_pb::catalog::WatermarkDesc;
 
 use self::heuristic_optimizer::ApplyOrder;
 use self::plan_node::{
-    BatchProject, Convention, LogicalProject, LogicalSource, StreamDml, StreamMaterialize,
+    generic, BatchProject, Convention, LogicalProject, LogicalSource, StreamDml, StreamMaterialize,
     StreamProject, StreamRowIdGen, StreamSink, StreamWatermarkFilter,
 };
 use self::plan_visitor::has_batch_exchange;
@@ -216,7 +217,7 @@ impl PlanRoot {
         // Add Project if the any position of `self.out_fields` is set to zero.
         if self.out_fields.count_ones(..) != self.out_fields.len() {
             plan =
-                BatchProject::new(LogicalProject::with_out_fields(plan, &self.out_fields)).into();
+                BatchProject::new(generic::Project::with_out_fields(plan, &self.out_fields)).into();
         }
 
         let ctx = plan.ctx();
@@ -253,7 +254,7 @@ impl PlanRoot {
         // Add Project if the any position of `self.out_fields` is set to zero.
         if self.out_fields.count_ones(..) != self.out_fields.len() {
             plan =
-                BatchProject::new(LogicalProject::with_out_fields(plan, &self.out_fields)).into();
+                BatchProject::new(generic::Project::with_out_fields(plan, &self.out_fields)).into();
         }
 
         let ctx = plan.ctx();
@@ -271,12 +272,6 @@ impl PlanRoot {
         let _explain_trace = ctx.is_explain_trace();
 
         let mut plan = self.gen_stream_plan()?;
-
-        plan = plan.optimize_by_rules(&OptimizationStage::new(
-            "Add identity project between exchange and share",
-            vec![AvoidExchangeShareRule::create()],
-            ApplyOrder::BottomUp,
-        ));
 
         plan = plan.optimize_by_rules(&OptimizationStage::new(
             "Merge StreamProject",
@@ -392,6 +387,7 @@ impl PlanRoot {
         table_name: String,
         columns: Vec<ColumnCatalog>,
         definition: String,
+        pk_column_ids: Vec<ColumnId>,
         row_id_index: Option<usize>,
         append_only: bool,
         watermark_descs: Vec<WatermarkDesc>,
@@ -415,7 +411,7 @@ impl PlanRoot {
             columns.iter().map(|c| c.column_desc.clone()).collect(),
         )?;
         if let Some(exprs) = exprs {
-            let logical_project = LogicalProject::new(stream_plan, exprs);
+            let logical_project = generic::Project::new(exprs, stream_plan);
             stream_plan = StreamProject::new(logical_project).into();
         }
 
@@ -433,14 +429,36 @@ impl PlanRoot {
             true => ConflictBehavior::NoCheck,
             false => ConflictBehavior::Overwrite,
         };
+
+        let pk_column_indices = {
+            let mut id_to_idx = HashMap::new();
+
+            columns.iter().enumerate().for_each(|(idx, c)| {
+                id_to_idx.insert(c.column_id(), idx);
+            });
+            pk_column_ids
+                .iter()
+                .map(|c| id_to_idx.get(c).copied().unwrap()) // pk column id must exist in table columns.
+                .collect_vec()
+        };
+
+        let table_required_dist = {
+            let mut bitset = FixedBitSet::with_capacity(columns.len());
+            for idx in &pk_column_indices {
+                bitset.insert(*idx);
+            }
+            RequiredDist::ShardByKey(bitset)
+        };
+
         StreamMaterialize::create_for_table(
             stream_plan,
             table_name,
-            self.required_dist.clone(),
-            self.required_order.clone(),
+            table_required_dist,
+            Order::any(),
             columns,
             definition,
             conflict_behavior,
+            pk_column_indices,
             row_id_index,
             version,
         )
@@ -509,7 +527,7 @@ impl PlanRoot {
                     }
                 })
                 .collect_vec();
-            stream_plan = StreamProject::new(LogicalProject::new(stream_plan, exprs)).into();
+            stream_plan = StreamProject::new(generic::Project::new(exprs, stream_plan)).into();
         }
 
         StreamSink::create(

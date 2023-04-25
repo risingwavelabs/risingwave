@@ -19,27 +19,15 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
+download_and_prepare_rw "$profile" common
+
 echo "--- Download artifacts"
-mkdir -p target/debug
-buildkite-agent artifact download risingwave-"$profile" target/debug/
-buildkite-agent artifact download risedev-dev-"$profile" target/debug/
 buildkite-agent artifact download "e2e_test/generated/*" ./
 buildkite-agent artifact download risingwave_e2e_extended_mode_test-"$profile" target/debug/
-mv target/debug/risingwave-"$profile" target/debug/risingwave
-mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
 mv target/debug/risingwave_e2e_extended_mode_test-"$profile" target/debug/risingwave_e2e_extended_mode_test
 
-echo "--- Adjust permission"
-chmod +x ./target/debug/risingwave
-chmod +x ./target/debug/risedev-dev
 chmod +x ./target/debug/risingwave_e2e_extended_mode_test
 
-echo "--- Generate RiseDev CI config"
-cp ci/risedev-components.ci.env risedev-components.user.env
-
-echo "--- Prepare RiseDev dev cluster"
-cargo make pre-start-dev
-cargo make link-all-in-one-binaries
 
 echo "--- e2e, ci-3cn-1fe, streaming"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
@@ -81,7 +69,7 @@ cargo make ci-start ci-3cn-1fe
 sqllogictest -p 4566 -d dev -e postgres-extended './e2e_test/extended_mode/**/*.slt'
 RUST_BACKTRACE=1 target/debug/risingwave_e2e_extended_mode_test --host 127.0.0.1 \
   -p 4566 \
-  -u root 
+  -u root
 
 echo "--- Kill cluster"
 cargo make ci-kill

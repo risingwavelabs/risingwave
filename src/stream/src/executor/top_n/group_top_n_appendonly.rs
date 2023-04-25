@@ -41,17 +41,16 @@ use risingwave_storage::StateStore;
 use super::group_top_n::GroupTopNCache;
 use super::top_n_cache::AppendOnlyTopNCacheTrait;
 use super::utils::*;
-use super::TopNCache;
+use super::{ManagedTopNState, TopNCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::top_n::ManagedTopNState;
 use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Watermark};
 use crate::task::AtomicU64Ref;
 
-/// If the input contains only append, `AppendOnlyGroupTopNExecutor` does not need
-/// to keep all the data records/rows that have been seen. As long as a record
-/// is no longer being in the result set, it can be deleted.
+/// If the input is append-only, `AppendOnlyGroupTopNExecutor` does not need
+/// to keep all the rows seen. As long as a record
+/// is no longer in the result set, it can be deleted.
 pub type AppendOnlyGroupTopNExecutor<K, S, const WITH_TIES: bool> =
     TopNExecutorWrapper<InnerAppendOnlyGroupTopNExecutor<K, S, WITH_TIES>>;
 
@@ -124,7 +123,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
-        lru_manager: AtomicU64Ref,
+        watermark_epoch: AtomicU64Ref,
     ) -> StreamResult<Self> {
         let ExecutorInfo {
             pk_indices, schema, ..
@@ -145,7 +144,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
             managed_state,
             storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
             group_by,
-            caches: GroupTopNCache::new(lru_manager),
+            caches: GroupTopNCache::new(watermark_epoch),
             cache_key_serde,
         })
     }
@@ -181,7 +180,7 @@ where
                     .await?;
                 self.caches.push(group_cache_key.clone(), topn_cache);
             }
-            let cache = self.caches.get_mut(group_cache_key).unwrap();
+            let mut cache = self.caches.get_mut(group_cache_key).unwrap();
 
             debug_assert_eq!(op, Op::Insert);
             cache.insert(

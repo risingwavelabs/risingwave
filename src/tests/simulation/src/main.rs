@@ -13,7 +13,7 @@
 // limitations under the License.
 
 #![cfg_attr(not(madsim), allow(dead_code))]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 
 use std::path::PathBuf;
 
@@ -36,7 +36,7 @@ fn main() {
 #[derive(Debug, Parser)]
 pub struct Args {
     /// Glob of sqllogictest scripts.
-    #[clap()]
+    #[clap(default_value = "")]
     files: String,
 
     /// The number of frontend nodes.
@@ -96,6 +96,10 @@ pub struct Args {
     #[clap(long, default_value = "1.0")]
     kill_rate: f32,
 
+    /// Delay in restart after kill.
+    #[clap(long, default_value = "20")]
+    restart_delay_secs: u32,
+
     /// The directory of kafka source data.
     #[clap(long)]
     kafka_datadir: Option<String>,
@@ -132,6 +136,9 @@ pub struct Args {
     /// Dump etcd data into toml file before exit.
     #[clap(long)]
     etcd_dump: Option<PathBuf>,
+
+    #[arg(short, long)]
+    e2e_extended_test: bool,
 }
 
 #[cfg(madsim)]
@@ -140,7 +147,7 @@ async fn main() {
     use std::sync::Arc;
 
     use risingwave_simulation::client::RisingWave;
-    use risingwave_simulation::cluster::{Cluster, Configuration, KillOpts};
+    use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration, KillOpts};
     use risingwave_simulation::slt::*;
     use tracing_subscriber::EnvFilter;
 
@@ -153,7 +160,7 @@ async fn main() {
 
     let args = Args::parse();
     let config = Configuration {
-        config_path: args.config_path.unwrap_or_default(),
+        config_path: ConfigPath::Regular(args.config_path.unwrap_or_default()),
         frontend_nodes: args.frontend_nodes,
         compute_nodes: args.compute_nodes,
         compactor_nodes: args.compactor_nodes,
@@ -168,6 +175,7 @@ async fn main() {
         kill_compute: args.kill_compute || args.kill,
         kill_compactor: args.kill_compactor || args.kill,
         kill_rate: args.kill_rate,
+        restart_delay_secs: args.restart_delay_secs,
     };
 
     let cluster = Arc::new(
@@ -246,5 +254,21 @@ async fn main() {
             })
             .await;
     }
+
+    if args.e2e_extended_test {
+        cluster
+            .run_on_client(async move {
+                risingwave_e2e_extended_mode_test::run_test_suit(
+                    "dev".to_string(),
+                    "root".to_string(),
+                    "frontend".to_string(),
+                    4566,
+                    "".to_string(),
+                )
+                .await;
+            })
+            .await;
+    }
+
     cluster.graceful_shutdown().await;
 }

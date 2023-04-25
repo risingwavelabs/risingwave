@@ -23,8 +23,8 @@ use crate::expr::{ExprImpl, InputRef, Literal};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::stream_union::StreamUnion;
 use crate::optimizer::plan_node::{
-    generic, BatchHashAgg, BatchUnion, ColumnPruningContext, LogicalAgg, LogicalProject,
-    PlanTreeNode, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+    generic, BatchHashAgg, BatchUnion, ColumnPruningContext, LogicalProject, PlanTreeNode,
+    PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::RequiredDist;
 use crate::utils::{ColIndexMapping, Condition};
@@ -131,9 +131,9 @@ impl ToBatch for LogicalUnion {
         // Convert union to union all + agg
         if !self.all() {
             let batch_union = BatchUnion::new(new_logical).into();
-            Ok(BatchHashAgg::new(LogicalAgg::new(
+            Ok(BatchHashAgg::new(generic::Agg::new(
                 vec![],
-                (0..self.base.schema.len()).collect_vec(),
+                (0..self.base.schema.len()).collect(),
                 batch_union,
             ))
             .into())

@@ -30,6 +30,7 @@ impl DataType {
             | DataType::Time => 8,
             DataType::Decimal
             | DataType::Varchar
+            | DataType::Int256
             | DataType::Bytea
             | DataType::Interval
             | DataType::Jsonb
@@ -47,6 +48,7 @@ impl DataType {
     pub fn from_oid(oid: i32) -> crate::error::Result<Self> {
         match oid {
             16 => Ok(DataType::Boolean),
+            17 => Ok(DataType::Bytea),
             21 => Ok(DataType::Int16),
             23 => Ok(DataType::Int32),
             20 => Ok(DataType::Int64),
@@ -118,6 +120,7 @@ impl DataType {
             DataType::Serial => 20,
             DataType::Float32 => 700,
             DataType::Float64 => 701,
+            DataType::Int256 => 1301,
             DataType::Decimal => 1700,
             DataType::Date => 1082,
             DataType::Varchar => 1043,
@@ -125,9 +128,8 @@ impl DataType {
             DataType::Timestamp => 1114,
             DataType::Timestamptz => 1184,
             DataType::Interval => 1186,
-            // NOTE: Struct type don't have oid in postgres, here we use varchar oid so that struct
-            // will be considered as a varchar.
-            DataType::Struct(_) => 1043,
+            // TODO: Support to give a new oid for custom struct type.
+            DataType::Struct(_) => -1,
             DataType::Jsonb => 3802,
             DataType::Bytea => 17,
             DataType::List { datatype } => match unnested_list_type(datatype.as_ref().clone()) {
@@ -135,6 +137,7 @@ impl DataType {
                 DataType::Int16 => 1005,
                 DataType::Int32 => 1007,
                 DataType::Int64 => 1016,
+                DataType::Int256 => 1302,
                 DataType::Serial => 1016,
                 DataType::Float32 => 1021,
                 DataType::Float64 => 1022,
@@ -147,7 +150,7 @@ impl DataType {
                 DataType::Timestamptz => 1185,
                 DataType::Interval => 1187,
                 DataType::Jsonb => 3807,
-                DataType::Struct(_) => 1015,
+                DataType::Struct(_) => -1,
                 DataType::List { .. } => unreachable!("Never reach here!"),
             },
         }

@@ -14,14 +14,15 @@
 
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
 
-use super::generic::{GenericPlanRef, PlanAggCall};
+use super::generic::{self, GenericPlanRef, PlanAggCall};
 use super::{
-    ExprRewritable, LogicalAgg, PlanBase, PlanNodeType, PlanRef, PlanTreeNodeUnary, ToBatchPb,
+    ExprRewritable, PlanBase, PlanNodeType, PlanRef, PlanTreeNodeUnary, ToBatchPb,
     ToDistributedBatch,
 };
 use crate::expr::ExprRewriter;
@@ -32,13 +33,12 @@ use crate::utils::ColIndexMappingRewriteExt;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchHashAgg {
     pub base: PlanBase,
-    logical: LogicalAgg,
+    logical: generic::Agg<PlanRef>,
 }
 
 impl BatchHashAgg {
-    pub fn new(logical: LogicalAgg) -> Self {
-        let ctx = logical.base.ctx.clone();
-        let input = logical.input();
+    pub fn new(logical: generic::Agg<PlanRef>) -> Self {
+        let input = logical.input.clone();
         let input_dist = input.distribution();
         let dist = match input_dist {
             Distribution::HashShard(_) | Distribution::UpstreamHashShard(_, _) => logical
@@ -46,16 +46,16 @@ impl BatchHashAgg {
                 .rewrite_provided_distribution(input_dist),
             d => d.clone(),
         };
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
+        let base = PlanBase::new_batch_from_logical(&logical, dist, Order::any());
         BatchHashAgg { base, logical }
     }
 
     pub fn agg_calls(&self) -> &[PlanAggCall] {
-        self.logical.agg_calls()
+        &self.logical.agg_calls
     }
 
-    pub fn group_key(&self) -> &[usize] {
-        self.logical.group_key()
+    pub fn group_key(&self) -> &FixedBitSet {
+        &self.logical.group_key
     }
 
     fn to_two_phase_agg(&self, dist_input: PlanRef) -> Result<PlanRef> {
@@ -66,23 +66,24 @@ impl BatchHashAgg {
         // insert exchange
         let exchange = RequiredDist::shard_by_key(
             partial_agg.schema().len(),
-            &(0..self.group_key().len()).collect_vec(),
+            &(0..self.group_key().count_ones(..)).collect_vec(),
         )
         .enforce_if_not_satisfies(partial_agg, &Order::any())?;
 
         // insert total agg
         let total_agg_types = self
             .logical
-            .agg_calls()
+            .agg_calls
             .iter()
             .enumerate()
             .map(|(partial_output_idx, agg_call)| {
-                agg_call.partial_to_total_agg_call(partial_output_idx + self.group_key().len())
+                agg_call
+                    .partial_to_total_agg_call(partial_output_idx + self.group_key().count_ones(..))
             })
             .collect();
-        let total_agg_logical = LogicalAgg::new(
+        let total_agg_logical = generic::Agg::new(
             total_agg_types,
-            (0..self.group_key().len()).collect(),
+            (0..self.group_key().count_ones(..)).collect(),
             exchange,
         );
         Ok(BatchHashAgg::new(total_agg_logical).into())
@@ -90,7 +91,10 @@ impl BatchHashAgg {
 
     fn to_shuffle_agg(&self) -> Result<PlanRef> {
         let input = self.input();
-        let required_dist = RequiredDist::shard_by_key(input.schema().len(), self.group_key());
+        let required_dist = RequiredDist::shard_by_key(
+            input.schema().len(),
+            &self.group_key().ones().collect_vec(),
+        );
         let new_input = input.to_distributed_with_required(&Order::any(), &required_dist)?;
         Ok(self.clone_with_input(new_input).into())
     }
@@ -104,18 +108,20 @@ impl fmt::Display for BatchHashAgg {
 
 impl PlanTreeNodeUnary for BatchHashAgg {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let mut logical = self.logical.clone();
+        logical.input = input;
+        Self::new(logical)
     }
 }
 
 impl_plan_tree_node_for_unary! { BatchHashAgg }
 impl ToDistributedBatch for BatchHashAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
-        if self.logical.two_phase_agg_forced() && self.logical.can_two_phase_agg() {
+        if self.logical.must_try_two_phase_agg() {
             let input = self.input().to_distributed()?;
             let input_dist = input.distribution();
             if !self
@@ -143,12 +149,7 @@ impl ToBatchPb for BatchHashAgg {
                 .iter()
                 .map(PlanAggCall::to_protobuf)
                 .collect(),
-            group_key: self
-                .group_key()
-                .iter()
-                .clone()
-                .map(|index| *index as u32)
-                .collect(),
+            group_key: self.group_key().ones().map(|index| index as u32).collect(),
         })
     }
 }
@@ -170,13 +171,8 @@ impl ExprRewritable for BatchHashAgg {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self::new(
-            self.logical
-                .rewrite_exprs(r)
-                .as_logical_agg()
-                .unwrap()
-                .clone(),
-        )
-        .into()
+        let mut logical = self.logical.clone();
+        logical.rewrite_exprs(r);
+        Self::new(logical).into()
     }
 }

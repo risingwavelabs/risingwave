@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::{Array, ListRef, StructRef};
+use risingwave_common::types::num256::Int256Ref;
 
 use crate::{ExprError, Result};
 
@@ -55,6 +56,7 @@ where
 }
 
 use std::convert::From;
+use std::ops::{BitAnd, BitOr, BitXor};
 
 use num_traits::CheckedAdd;
 use risingwave_common::types::ScalarRef;
@@ -100,6 +102,13 @@ pub fn min_list<'a>(r: Option<ListRef<'a>>, i: Option<ListRef<'a>>) -> Result<Op
     min(r, i)
 }
 
+pub fn min_int256<'a>(
+    r: Option<Int256Ref<'a>>,
+    i: Option<Int256Ref<'a>>,
+) -> Result<Option<Int256Ref<'a>>> {
+    min(r, i)
+}
+
 pub fn max<'a, T>(result: Option<T>, input: Option<T>) -> Result<Option<T>>
 where
     T: ScalarRef<'a> + PartialOrd,
@@ -127,6 +136,13 @@ pub fn max_list<'a>(r: Option<ListRef<'a>>, i: Option<ListRef<'a>>) -> Result<Op
     max(r, i)
 }
 
+pub fn max_int256<'a>(
+    r: Option<Int256Ref<'a>>,
+    i: Option<Int256Ref<'a>>,
+) -> Result<Option<Int256Ref<'a>>> {
+    max(r, i)
+}
+
 pub fn first<T>(result: Option<T>, input: Option<T>) -> Result<Option<T>> {
     Ok(result.or(input))
 }
@@ -146,6 +162,13 @@ pub fn first_list<'a>(
     r: Option<ListRef<'a>>,
     i: Option<ListRef<'a>>,
 ) -> Result<Option<ListRef<'a>>> {
+    first(r, i)
+}
+
+pub fn first_int256<'a>(
+    r: Option<Int256Ref<'a>>,
+    i: Option<Int256Ref<'a>>,
+) -> Result<Option<Int256Ref<'a>>> {
     first(r, i)
 }
 
@@ -196,4 +219,44 @@ pub fn count_struct(r: Option<i64>, i: Option<StructRef<'_>>) -> Result<Option<i
 
 pub fn count_list(r: Option<i64>, i: Option<ListRef<'_>>) -> Result<Option<i64>> {
     count(r, i)
+}
+
+pub fn count_int256(r: Option<i64>, i: Option<Int256Ref<'_>>) -> Result<Option<i64>> {
+    count(r, i)
+}
+
+pub fn bit_and<'a, T>(result: Option<T>, input: Option<T>) -> Result<Option<T>>
+where
+    T: ScalarRef<'a> + PartialOrd + BitAnd<Output = T>,
+{
+    let res = match (result, input) {
+        (None, _) => input,
+        (_, None) => result,
+        (Some(r), Some(i)) => Some(r.bitand(i)),
+    };
+    Ok(res)
+}
+
+pub fn bit_or<'a, T>(result: Option<T>, input: Option<T>) -> Result<Option<T>>
+where
+    T: ScalarRef<'a> + PartialOrd + BitOr<Output = T>,
+{
+    let res = match (result, input) {
+        (None, _) => input,
+        (_, None) => result,
+        (Some(r), Some(i)) => Some(r.bitor(i)),
+    };
+    Ok(res)
+}
+
+pub fn bit_xor<'a, T>(result: Option<T>, input: Option<T>) -> Result<Option<T>>
+where
+    T: ScalarRef<'a> + PartialOrd + BitXor<Output = T>,
+{
+    let res = match (result, input) {
+        (None, _) => input,
+        (_, None) => result,
+        (Some(r), Some(i)) => Some(r.bitxor(i)),
+    };
+    Ok(res)
 }

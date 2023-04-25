@@ -21,9 +21,9 @@ use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 
 use crate::barrier::BarrierManagerRef;
 use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, DatabaseId, FragmentManagerRef, FunctionId, IdCategory,
-    IndexId, MetaSrvEnv, NotificationVersion, SchemaId, SinkId, SourceId, StreamingJob, TableId,
-    ViewId,
+    CatalogManagerRef, ClusterManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId,
+    IdCategory, IndexId, MetaSrvEnv, NotificationVersion, SchemaId, SinkId, SourceId, StreamingJob,
+    TableId, ViewId,
 };
 use crate::model::{StreamEnvironment, TableFragments};
 use crate::storage::MetaStore;
@@ -68,7 +68,7 @@ pub enum DdlCommand {
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
     AlterRelationName(Relation, String),
     CreateConnection(Connection),
-    DropConnection(String),
+    DropConnection(ConnectionId),
 }
 
 #[derive(Clone)]
@@ -151,7 +151,9 @@ where
                 DdlCommand::CreateConnection(connection) => {
                     ctrl.create_connection(connection).await
                 }
-                DdlCommand::DropConnection(conn_name) => ctrl.drop_connection(&conn_name).await,
+                DdlCommand::DropConnection(connection_id) => {
+                    ctrl.drop_connection(connection_id).await
+                }
             }
         });
         handler.await.unwrap()
@@ -234,8 +236,11 @@ where
         self.catalog_manager.create_connection(connection).await
     }
 
-    async fn drop_connection(&self, conn_name: &str) -> MetaResult<NotificationVersion> {
-        self.catalog_manager.drop_connection(conn_name).await
+    async fn drop_connection(
+        &self,
+        connection_id: ConnectionId,
+    ) -> MetaResult<NotificationVersion> {
+        self.catalog_manager.drop_connection(connection_id).await
     }
 
     async fn create_streaming_job(
@@ -404,6 +409,7 @@ where
             existing_locations,
             table_properties: stream_job.properties(),
             definition: stream_job.mview_definition(),
+            mv_table_id: stream_job.mv_table(),
         };
 
         // 4. Mark creating tables, including internal tables and the table of the stream job.
@@ -532,7 +538,6 @@ where
                 .await;
             Ok((version, delete_jobs))
         } else {
-            assert!(internal_table_ids.is_empty());
             self.catalog_manager
                 .drop_table(table_id, internal_table_ids)
                 .await

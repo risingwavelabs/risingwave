@@ -4,7 +4,7 @@
     select v1 from (select * from t) where v2 > 1;
   logical_plan: |
     LogicalProject { exprs: [t.v1] }
-    └─LogicalFilter { predicate: (t.v2 > 1:Int32) }
+    └─LogicalFilter { predicate: (t.v2 > 1:Int32::Float64) }
       └─LogicalProject { exprs: [t.v1, t.v2] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - name: merge and then eliminate
@@ -26,7 +26,7 @@
     select v3 from (select v2, v1 as v3 from t) where v2 > 1;
   logical_plan: |
     LogicalProject { exprs: [t.v1] }
-    └─LogicalFilter { predicate: (t.v2 > 1:Int32) }
+    └─LogicalFilter { predicate: (t.v2 > 1:Int32::Float64) }
       └─LogicalProject { exprs: [t.v2, t.v1] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - name: consecutive projects are merged
@@ -164,6 +164,32 @@
         └─BatchExchange { order: [], dist: Single }
           └─BatchScan { table: t2, columns: [], distribution: SomeShard }
 - sql: |
+    SELECT (SELECT pg_catalog.pg_get_userbyid(1))
+  logical_plan: |
+    LogicalProject { exprs: [pg_user.name] }
+    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+      ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+      └─LogicalProject { exprs: [pg_user.name] }
+        └─LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
+          ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+          └─LogicalProject { exprs: [pg_user.name] }
+            └─LogicalFilter { predicate: (1:Int32 = pg_user.usesysid) }
+              └─LogicalScan { table: pg_user, columns: [pg_user.usesysid, pg_user.name, pg_user.usecreatedb, pg_user.usesuper, pg_user.passwd] }
+  optimized_logical_plan_for_batch: |
+    LogicalJoin { type: LeftOuter, on: true, output: all }
+    ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    └─LogicalJoin { type: LeftOuter, on: true, output: all }
+      ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+      └─LogicalScan { table: pg_user, output_columns: [pg_user.name], required_columns: [pg_user.name, pg_user.usesysid], predicate: (1:Int32 = pg_user.usesysid) }
+  batch_plan: |
+    BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
+    ├─BatchValues { rows: [[]] }
+    └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
+      ├─BatchValues { rows: [[]] }
+      └─BatchProject { exprs: [pg_user.name] }
+        └─BatchFilter { predicate: (1:Int32 = pg_user.usesysid) }
+          └─BatchScan { table: pg_user, columns: [pg_user.name, pg_user.usesysid], distribution: Single }
+- sql: |
     SELECT n.nspname as "Schema",
     c.relname as "Name",
     CASE c.relkind WHEN 'r' THEN 'table' WHEN 'v' THEN 'view' WHEN 'm' THEN 'materialized view' WHEN 'i' THEN 'index' WHEN 'S' THEN 'sequence' WHEN 's' THEN 'special' WHEN 't' THEN 'TOAST table' WHEN 'f' THEN 'foreign table' WHEN 'p' THEN 'partitioned table' WHEN 'I' THEN 'partitioned index' END as "Type",
@@ -217,11 +243,10 @@
           └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr1] }
             └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   optimized_logical_plan_for_batch: |
-    LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(auction.date_time, auction.date_time), output: all }
-    ├─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
-    | └─LogicalScan { table: auction, columns: [auction.date_time], predicate: IsNotNull(auction.date_time) }
-    └─LogicalProject { exprs: [auction.date_time] }
-      └─LogicalProject { exprs: [auction.date_time, auction.date_time] }
+    LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
+    └─LogicalFilter { predicate: IsNotNull(auction.date_time) }
+      └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(auction.date_time, auction.date_time), output: all }
+        ├─LogicalScan { table: auction, columns: [auction.date_time], predicate: IsNotNull(auction.date_time) }
         └─LogicalAgg { group_key: [auction.date_time], aggs: [] }
           └─LogicalJoin { type: Inner, on: true, output: all }
             ├─LogicalAgg { group_key: [auction.date_time], aggs: [] }
@@ -229,23 +254,23 @@
             |   └─LogicalScan { table: auction, columns: [auction.date_time], predicate: IsNotNull(auction.date_time) }
             └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
-    BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: LeftSemi, predicate: auction.date_time IS NOT DISTINCT FROM auction.date_time, output: all }
-      ├─BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
-      | └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
-      |   └─BatchFilter { predicate: IsNotNull(auction.date_time) }
-      |     └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
-      └─BatchProject { exprs: [auction.date_time] }
-        └─BatchHashAgg { group_key: [auction.date_time], aggs: [] }
-          └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
-            └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
-              ├─BatchExchange { order: [], dist: Single }
-              | └─BatchHashAgg { group_key: [auction.date_time], aggs: [] }
-              |   └─BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
-              |     └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
-              |       └─BatchFilter { predicate: IsNotNull(auction.date_time) }
-              |         └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
-              └─BatchValues { rows: [[]] }
+    BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchFilter { predicate: IsNotNull(auction.date_time) }
+        └─BatchHashJoin { type: LeftSemi, predicate: auction.date_time IS NOT DISTINCT FROM auction.date_time, output: all }
+          ├─BatchExchange { order: [], dist: HashShard(auction.date_time) }
+          | └─BatchFilter { predicate: IsNotNull(auction.date_time) }
+          |   └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
+          └─BatchHashAgg { group_key: [auction.date_time], aggs: [] }
+            └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
+              └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+                ├─BatchExchange { order: [], dist: Single }
+                | └─BatchHashAgg { group_key: [auction.date_time], aggs: [] }
+                |   └─BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
+                |     └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
+                |       └─BatchFilter { predicate: IsNotNull(auction.date_time) }
+                |         └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
+                └─BatchValues { rows: [[]] }
   stream_error: |-
     Not supported: streaming nested-loop join
     HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.

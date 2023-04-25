@@ -99,7 +99,7 @@ impl BoxedExecutorBuilder for FilterExecutor {
             expr,
             input,
             source.plan_node().get_identity().clone(),
-            source.context.get_config().developer.batch_chunk_size,
+            source.context.get_config().developer.chunk_size,
         )))
     }
 }
@@ -137,14 +137,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_filter_executor() {
-        use risingwave_common::array::{
-            ArrayBuilder, ArrayMeta, ListArrayBuilder, ListRef, ListValue,
-        };
+        use risingwave_common::array::{ArrayBuilder, ListArrayBuilder, ListRef, ListValue};
         use risingwave_common::types::Scalar;
 
-        let mut builder = ListArrayBuilder::with_meta(
+        let mut builder = ListArrayBuilder::with_type(
             4,
-            ArrayMeta::List {
+            DataType::List {
                 datatype: Box::new(DataType::Int32),
             },
         );

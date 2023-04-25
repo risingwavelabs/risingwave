@@ -64,7 +64,12 @@ fn is_numeric_overflow_error(db_error: &str) -> bool {
 
 /// Negative substr error
 fn is_neg_substr_error(db_error: &str) -> bool {
-    db_error.contains("length in substr should be non-negative")
+    db_error.contains("negative substring length not allowed")
+}
+
+/// Zero or negative overlay start error
+fn is_overlay_start_error(db_error: &str) -> bool {
+    db_error.contains("Invalid parameter start") && db_error.contains("is not positive")
 }
 
 /// Certain errors are permitted to occur. This is because:
@@ -80,4 +85,5 @@ pub fn is_permissible_error(db_error: &str) -> bool {
         || is_subquery_unnesting_error(db_error)
         || is_numeric_overflow_error(db_error)
         || is_neg_substr_error(db_error)
+        || is_overlay_start_error(db_error)
 }

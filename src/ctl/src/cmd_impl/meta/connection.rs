@@ -13,42 +13,8 @@
 // limitations under the License.
 
 use risingwave_pb::catalog::connection::Info;
-use risingwave_pb::ddl_service::create_connection_request;
-use risingwave_pb::ddl_service::create_connection_request::PrivateLink;
 
 use crate::common::CtlContext;
-
-pub async fn create_connection(
-    context: &CtlContext,
-    provider: String,
-    service_name: String,
-    availability_zone: String,
-) -> anyhow::Result<()> {
-    let meta_client = context.meta_client().await?;
-    let availability_zones: Vec<String> = availability_zone
-        .split(',')
-        .map(|str| str.to_string())
-        .collect();
-    let conn_id = meta_client
-        .create_connection(create_connection_request::Payload::PrivateLink(
-            PrivateLink {
-                provider,
-                service_name,
-                availability_zones,
-            },
-        ))
-        .await?;
-
-    println!("Create connection success id#{}", conn_id);
-    Ok(())
-}
-
-pub async fn drop_connection(context: &CtlContext, conn_name: String) -> anyhow::Result<()> {
-    let meta_client = context.meta_client().await?;
-    meta_client.drop_connection(&conn_name).await?;
-    println!("Drop connection {} success", conn_name);
-    Ok(())
-}
 
 pub async fn list_connections(context: &CtlContext) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
@@ -56,13 +22,13 @@ pub async fn list_connections(context: &CtlContext) -> anyhow::Result<()> {
 
     for conn in connections {
         println!(
-            "Connection#{}, service_name: {}, {}",
+            "Connection#{}, connection_name: {}, {}",
             conn.id,
             conn.name,
             match conn.info {
                 Some(Info::PrivateLinkService(svc)) => format!(
-                    "PrivateLink: endpoint_id: {}, dns_entries: {:?}",
-                    svc.endpoint_id, svc.dns_entries,
+                    "PrivateLink: service_name: {}, endpoint_id: {}, dns_entries: {:?}",
+                    svc.service_name, svc.endpoint_id, svc.dns_entries,
                 ),
                 None => "None".to_string(),
             }

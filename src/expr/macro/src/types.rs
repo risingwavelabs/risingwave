@@ -22,6 +22,7 @@ pub fn expand_type_wildcard(ty: &str) -> Vec<&str> {
             "int16",
             "int32",
             "int64",
+            "int256",
             "float32",
             "float64",
             "decimal",
@@ -38,7 +39,8 @@ pub fn expand_type_wildcard(ty: &str) -> Vec<&str> {
             "list",
         ],
         "*int" => vec!["int16", "int32", "int64"],
-        "*number" => vec!["int16", "int32", "int64", "float32", "float64", "decimal"],
+        "*numeric" => vec!["decimal"],
+        "*float" => vec!["float32", "float64"],
         _ => vec![ty],
     }
 }
@@ -50,6 +52,7 @@ pub fn to_data_type_name(ty: &str) -> Option<&str> {
         "int16" => "Int16",
         "int32" => "Int32",
         "int64" => "Int64",
+        "int256" => "Int256",
         "float32" => "Float32",
         "float64" => "Float64",
         "decimal" => "Decimal",
@@ -80,43 +83,30 @@ pub fn min_compatible_type(types: &[impl AsRef<str>]) -> &str {
         ("int16", "int16") => "int16",
         ("int16", "int32") => "int32",
         ("int16", "int64") => "int64",
-        ("int16", "float32") => "float64",
-        ("int16", "float64") => "float64",
-        ("int16", "decimal") => "decimal",
 
         ("int32", "int16") => "int32",
         ("int32", "int32") => "int32",
         ("int32", "int64") => "int64",
-        ("int32", "float32") => "float64",
-        ("int32", "float64") => "float64",
-        ("int32", "decimal") => "decimal",
 
         ("int64", "int16") => "int64",
         ("int64", "int32") => "int64",
         ("int64", "int64") => "int64",
-        ("int64", "float32") => "float64",
-        ("int64", "float64") => "float64",
-        ("int64", "decimal") => "decimal",
 
-        ("float32", "int16") => "float64",
-        ("float32", "int32") => "float64",
-        ("float32", "int64") => "float64",
+        ("int16", "int256") => "int256",
+        ("int32", "int256") => "int256",
+        ("int64", "int256") => "int256",
+        ("int256", "int16") => "int256",
+        ("int256", "int32") => "int256",
+        ("int256", "int64") => "int256",
+        ("int256", "float64") => "float64",
+        ("float64", "int256") => "float64",
+
         ("float32", "float32") => "float32",
         ("float32", "float64") => "float64",
-        ("float32", "decimal") => "float64",
 
-        ("float64", "int16") => "float64",
-        ("float64", "int32") => "float64",
-        ("float64", "int64") => "float64",
         ("float64", "float32") => "float64",
         ("float64", "float64") => "float64",
-        ("float64", "decimal") => "float64",
 
-        ("decimal", "int16") => "decimal",
-        ("decimal", "int32") => "decimal",
-        ("decimal", "int64") => "decimal",
-        ("decimal", "float32") => "float64",
-        ("decimal", "float64") => "float64",
         ("decimal", "decimal") => "decimal",
 
         ("date", "timestamp") => "timestamp",
@@ -137,6 +127,7 @@ pub fn to_array_type(ty: &str) -> &str {
         "int64" => "I64Array",
         "float32" => "F32Array",
         "float64" => "F64Array",
+        "int256" => "Int256Array",
         "decimal" => "DecimalArray",
         "serial" => "SerialArray",
         "date" => "DateArray",
@@ -171,6 +162,7 @@ pub fn to_data_type(ty: &str) -> &str {
         "interval" => "Interval",
         "varchar" => "&str",
         "bytea" => "&[u8]",
+        "int256" => "Int256Ref<'_>",
         "jsonb" => "JsonbRef<'_>",
         "struct" => "StructRef<'_>",
         "list" => "ListRef<'_>",
@@ -183,7 +175,7 @@ pub fn is_primitive(ty: &str) -> bool {
     match ty {
         "int16" | "int32" | "int64" | "float32" | "float64" | "decimal" | "date" | "time"
         | "timestamp" | "timestamptz" | "interval" | "serial" => true,
-        "boolean" | "varchar" | "bytea" | "jsonb" | "struct" | "list" => false,
+        "boolean" | "int256" | "varchar" | "bytea" | "jsonb" | "struct" | "list" => false,
         _ => panic!("unknown type: {ty:?}"),
     }
 }

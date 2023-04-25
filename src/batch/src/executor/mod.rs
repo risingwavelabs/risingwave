@@ -23,7 +23,6 @@ mod insert;
 mod join;
 mod limit;
 mod merge_sort_exchange;
-pub mod monitor;
 mod order_by;
 mod project;
 mod project_set;
@@ -53,7 +52,6 @@ pub use insert::*;
 pub use join::*;
 pub use limit::*;
 pub use merge_sort_exchange::*;
-pub use monitor::*;
 pub use order_by::*;
 pub use project::*;
 pub use project_set::*;
@@ -237,9 +235,7 @@ mod tests {
 
     #[test]
     fn test_clone_for_plan() {
-        let plan_node = PlanNode {
-            ..Default::default()
-        };
+        let plan_node = PlanNode::default();
         let task_id = &TaskId {
             task_id: 1,
             stage_id: 1,
@@ -251,9 +247,7 @@ mod tests {
             ComputeNodeContext::for_test(),
             to_committed_batch_query_epoch(u64::MAX),
         );
-        let child_plan = &PlanNode {
-            ..Default::default()
-        };
+        let child_plan = &PlanNode::default();
         let cloned_builder = builder.clone_for_plan(child_plan);
         assert_eq!(builder.task_id, cloned_builder.task_id);
     }

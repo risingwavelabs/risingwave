@@ -13,6 +13,9 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_pb::expr::expr_node::RexNode;
+use risingwave_pb::expr::{ExprNode, FunctionCall, UserDefinedFunction};
 use risingwave_sqlparser::ast::{
     Array, CreateSink, CreateSinkStatement, CreateSourceStatement, Distinct, Expr, Function,
     FunctionArg, FunctionArgExpr, Ident, ObjectName, Query, SelectItem, SetExpr, Statement,
@@ -249,7 +252,13 @@ impl QueryRewriter<'_> {
             | Expr::Overlay { expr, .. }
             | Expr::Trim { expr, .. }
             | Expr::Nested(expr)
-            | Expr::ArrayIndex { obj: expr, .. } => self.visit_expr(expr),
+            | Expr::ArrayIndex { obj: expr, .. }
+            | Expr::ArrayRangeIndex { obj: expr, .. } => self.visit_expr(expr),
+
+            Expr::Position { substring, string } => {
+                self.visit_expr(substring);
+                self.visit_expr(string);
+            }
 
             Expr::InSubquery { expr, subquery, .. } => {
                 self.visit_expr(expr);
@@ -309,6 +318,37 @@ impl QueryRewriter<'_> {
             | SelectItem::ExprWithAlias { expr, .. } => self.visit_expr(expr),
             SelectItem::QualifiedWildcard(_) | SelectItem::Wildcard => {}
         }
+    }
+}
+
+pub struct ReplaceTableExprRewriter {
+    pub table_col_index_mapping: ColIndexMapping,
+}
+
+impl ReplaceTableExprRewriter {
+    pub fn rewrite_expr(&self, expr: &mut ExprNode) {
+        let rex_node = expr.rex_node.as_mut().unwrap();
+        match rex_node {
+            RexNode::InputRef(input_col_idx) => {
+                *input_col_idx = self.table_col_index_mapping.map(*input_col_idx as usize) as u32
+            }
+            RexNode::Constant(_) => {}
+            RexNode::Udf(udf) => self.rewrite_udf(udf),
+            RexNode::FuncCall(function_call) => self.rewrite_function_call(function_call),
+        }
+    }
+
+    fn rewrite_udf(&self, udf: &mut UserDefinedFunction) {
+        udf.children
+            .iter_mut()
+            .for_each(|expr| self.rewrite_expr(expr));
+    }
+
+    fn rewrite_function_call(&self, function_call: &mut FunctionCall) {
+        function_call
+            .children
+            .iter_mut()
+            .for_each(|expr| self.rewrite_expr(expr));
     }
 }
 

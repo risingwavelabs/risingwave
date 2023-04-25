@@ -68,6 +68,9 @@ impl Binder {
             Expr::Nested(expr) => self.bind_expr(*expr),
             Expr::Array(Array { elem: exprs, .. }) => self.bind_array(exprs),
             Expr::ArrayIndex { obj, index } => self.bind_array_index(*obj, *index),
+            Expr::ArrayRangeIndex { obj, start, end } => {
+                self.bind_array_range_index(*obj, start, end)
+            }
             Expr::Function(f) => self.bind_function(f),
             // subquery
             Expr::Subquery(q) => self.bind_subquery_expr(*q, SubqueryKind::Scalar),
@@ -111,12 +114,17 @@ impl Binder {
                 time_zone,
             } => self.bind_at_time_zone(*timestamp, time_zone),
             // special syntaxt for string
-            Expr::Trim { expr, trim_where } => self.bind_trim(*expr, trim_where),
+            Expr::Trim {
+                expr,
+                trim_where,
+                trim_what,
+            } => self.bind_trim(*expr, trim_where, trim_what),
             Expr::Substring {
                 expr,
                 substring_from,
                 substring_for,
             } => self.bind_substring(*expr, substring_from, substring_for),
+            Expr::Position { substring, string } => self.bind_position(*substring, *string),
             Expr::Overlay {
                 expr,
                 new_substring,
@@ -214,10 +222,12 @@ impl Binder {
         let func_type = match op {
             UnaryOperator::Not => ExprType::Not,
             UnaryOperator::Minus => ExprType::Neg,
+            UnaryOperator::PGAbs => ExprType::Abs,
             UnaryOperator::PGBitwiseNot => ExprType::BitwiseNot,
             UnaryOperator::Plus => {
                 return self.rewrite_positive(expr);
             }
+            UnaryOperator::PGSquareRoot => ExprType::Sqrt,
             _ => {
                 return Err(ErrorCode::NotImplemented(
                     format!("unsupported unary expression: {:?}", op),
@@ -243,21 +253,20 @@ impl Binder {
     pub(super) fn bind_trim(
         &mut self,
         expr: Expr,
-        // ([BOTH | LEADING | TRAILING], <expr>)
-        trim_where: Option<(TrimWhereField, Box<Expr>)>,
+        // BOTH | LEADING | TRAILING
+        trim_where: Option<TrimWhereField>,
+        trim_what: Option<Box<Expr>>,
     ) -> Result<ExprImpl> {
         let mut inputs = vec![self.bind_expr(expr)?];
         let func_type = match trim_where {
-            Some(t) => {
-                inputs.push(self.bind_expr(*t.1)?);
-                match t.0 {
-                    TrimWhereField::Both => ExprType::Trim,
-                    TrimWhereField::Leading => ExprType::Ltrim,
-                    TrimWhereField::Trailing => ExprType::Rtrim,
-                }
-            }
+            Some(TrimWhereField::Both) => ExprType::Trim,
+            Some(TrimWhereField::Leading) => ExprType::Ltrim,
+            Some(TrimWhereField::Trailing) => ExprType::Rtrim,
             None => ExprType::Trim,
         };
+        if let Some(t) = trim_what {
+            inputs.push(self.bind_expr(*t)?);
+        }
         Ok(FunctionCall::new(func_type, inputs)?.into())
     }
 
@@ -278,6 +287,15 @@ impl Binder {
             args.push(self.bind_expr(*expr)?);
         }
         FunctionCall::new(ExprType::Substr, args).map(|f| f.into())
+    }
+
+    fn bind_position(&mut self, substring: Expr, string: Expr) -> Result<ExprImpl> {
+        let args = vec![
+            // Note that we reverse the order of arguments.
+            self.bind_expr(string)?,
+            self.bind_expr(substring)?,
+        ];
+        FunctionCall::new(ExprType::Position, args).map(Into::into)
     }
 
     fn bind_overlay(
@@ -515,6 +533,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 "int2" => DataType::Int16,
                 "int4" => DataType::Int32,
                 "int8" => DataType::Int64,
+                "rw_int256" => DataType::Int256,
                 "float4" => DataType::Float32,
                 "float8" => DataType::Float64,
                 "timestamptz" => DataType::Timestamptz,

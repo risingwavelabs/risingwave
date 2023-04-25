@@ -64,9 +64,6 @@ enum QueryState {
 
     /// Failed
     Failed,
-
-    /// Completed
-    Completed,
 }
 
 pub struct QueryExecution {
@@ -86,8 +83,6 @@ struct QueryRunner {
 
     /// Will be set to `None` after all stage scheduled.
     root_stage_sender: Option<oneshot::Sender<SchedulerResult<QueryResultFetcher>>>,
-
-    compute_client_pool: ComputeClientPoolRef,
 
     // Used for cleaning up `QueryExecution` after execution.
     query_execution_info: QueryExecutionInfoRef,
@@ -155,7 +150,6 @@ impl QueryExecution {
                     msg_receiver,
                     root_stage_sender: Some(root_stage_sender),
                     scheduled_stages_count: 0,
-                    compute_client_pool,
                     query_execution_info,
                     query_metrics,
                 };
@@ -374,10 +368,7 @@ impl QueryRunner {
         let root_stage_result = QueryResultFetcher::new(
             root_task_output_id,
             // Execute in local, so no need to fill meaningful address.
-            HostAddress {
-                ..Default::default()
-            },
-            self.compute_client_pool.clone(),
+            HostAddress::default(),
             chunk_rx,
             self.query.query_id.clone(),
             self.query_execution_info.clone(),
@@ -454,8 +445,7 @@ pub(crate) mod tests {
     use crate::catalog::root_catalog::Catalog;
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
-        generic, BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalFilter,
-        LogicalScan, ToBatch,
+        generic, BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalScan, ToBatch,
     };
     use crate::optimizer::property::{Distribution, Order};
     use crate::optimizer::{OptimizerContext, PlanRef};
@@ -539,11 +529,11 @@ pub(crate) mod tests {
         .unwrap()
         .to_distributed()
         .unwrap();
-        let batch_filter = BatchFilter::new(LogicalFilter::new(
-            batch_plan_node.clone(),
+        let batch_filter = BatchFilter::new(generic::Filter::new(
             Condition {
                 conjunctions: vec![],
             },
+            batch_plan_node.clone(),
         ))
         .into();
         let batch_exchange_node1: PlanRef = BatchExchange::new(

@@ -19,7 +19,7 @@ use std::time::Duration;
 use either::Either;
 use etcd_client::ConnectOptions;
 use futures::future::join_all;
-use risingwave_common::config::MetaBackend;
+use itertools::Itertools;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -59,7 +59,7 @@ use crate::manager::{
 };
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
-use crate::rpc::metrics::{start_worker_info_monitor, MetaMetrics};
+use crate::rpc::metrics::{start_fragment_info_monitor, start_worker_info_monitor, MetaMetrics};
 use crate::rpc::service::backup_service::BackupServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
@@ -397,6 +397,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             barrier_scheduler.clone(),
             catalog_manager.clone(),
             fragment_manager.clone(),
+            meta_metrics.clone(),
         )
         .await
         .unwrap(),
@@ -434,10 +435,12 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     hummock_manager
         .purge(
-            &fragment_manager
-                .list_table_fragments()
+            &catalog_manager
+                .list_tables()
                 .await
-                .expect("list_table_fragments"),
+                .into_iter()
+                .map(|t| t.id)
+                .collect_vec(),
         )
         .await?;
 
@@ -540,13 +543,25 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         )
         .await,
     );
+    sub_tasks.push(
+        start_fragment_info_monitor(
+            cluster_manager.clone(),
+            fragment_manager.clone(),
+            meta_metrics.clone(),
+        )
+        .await,
+    );
     sub_tasks.push(SystemParamsManager::start_params_notifier(system_params_manager.clone()).await);
     sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager.clone()).await);
     sub_tasks.push(HummockManager::start_lsm_stat_report(hummock_manager).await);
 
     if cfg!(not(test)) {
         sub_tasks.push(
-            ClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1)).await,
+            ClusterManager::start_heartbeat_checker(
+                cluster_manager.clone(),
+                Duration::from_secs(1),
+            )
+            .await,
         );
         sub_tasks.push(GlobalBarrierManager::start(barrier_manager).await);
     }
@@ -570,7 +585,10 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let mgr = TelemetryManager::new(
         local_system_params_manager.watch_params(),
         Arc::new(MetaTelemetryInfoFetcher::new(meta_store.clone())),
-        Arc::new(MetaReportCreator::new()),
+        Arc::new(MetaReportCreator::new(
+            cluster_manager,
+            meta_store.meta_store_type(),
+        )),
     );
 
     {
@@ -583,9 +601,9 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     }
 
     // May start telemetry reporting
-    if let MetaBackend::Etcd = meta_store.meta_store_type() && env.opts.telemetry_enabled && telemetry_env_enabled(){
-        if system_params_reader.telemetry_enabled(){
-            mgr.start_telemetry_reporting();
+    if env.opts.telemetry_enabled && telemetry_env_enabled() {
+        if system_params_reader.telemetry_enabled() {
+            mgr.start_telemetry_reporting().await;
         }
         sub_tasks.push(mgr.watch_params_change());
     } else {
@@ -618,6 +636,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             }
         }
     };
+
+    tracing::info!("Starting meta services");
 
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))

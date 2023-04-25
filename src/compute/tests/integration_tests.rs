@@ -121,15 +121,9 @@ async fn test_table_materialize() -> StreamResult<()> {
         "fields.v1.max" => "1000",
         "fields.v1.seed" => "12345",
     ));
-    let pk_column_ids = vec![0];
     let row_id_index: usize = 0;
-    let source_builder = create_source_desc_builder(
-        &schema,
-        pk_column_ids,
-        Some(row_id_index),
-        source_info,
-        properties,
-    );
+    let source_builder =
+        create_source_desc_builder(&schema, Some(row_id_index), source_info, properties);
 
     // Ensure the source exists.
     let source_desc = source_builder.build().await.unwrap();
@@ -236,7 +230,8 @@ async fn test_table_materialize() -> StreamResult<()> {
         insert_inner,
         1024,
         "InsertExecutor".to_string(),
-        vec![], // ignore insertion order
+        vec![0], // ignore insertion order
+        vec![],
         Some(row_id_index),
         false,
     ));

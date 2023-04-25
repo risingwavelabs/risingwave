@@ -30,7 +30,7 @@ use crate::optimizer::property::{Distribution, Order, RequiredDist};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchUpdate {
     pub base: PlanBase,
-    logical: LogicalUpdate,
+    pub logical: LogicalUpdate,
 }
 
 impl BatchUpdate {

@@ -16,6 +16,7 @@ use core::fmt;
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::hash::Hash;
+use std::mem::size_of;
 
 use bytes::{Buf, BufMut};
 use itertools::EitherOrBoth::{Both, Left, Right};
@@ -23,8 +24,9 @@ use itertools::Itertools;
 use risingwave_pb::data::{ListArrayData, PbArray, PbArrayType};
 use serde::{Deserializer, Serializer};
 
-use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayMeta, ArrayResult, RowRef};
+use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, RowRef};
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::estimate_size::EstimateSize;
 use crate::row::Row;
 use crate::types::to_text::ToText;
 use crate::types::{hash_datum, DataType, Datum, DatumRef, Scalar, ScalarRefImpl, ToDatumRef};
@@ -45,31 +47,30 @@ impl ArrayBuilder for ListArrayBuilder {
 
     #[cfg(not(test))]
     fn new(_capacity: usize) -> Self {
-        panic!("Must use with_meta.")
+        panic!("Must use with_type.")
     }
 
     #[cfg(test)]
     fn new(capacity: usize) -> Self {
-        Self::with_meta(
+        Self::with_type(
             capacity,
-            ArrayMeta::List {
+            DataType::List {
                 // Default datatype
                 datatype: Box::new(DataType::Int16),
             },
         )
     }
 
-    fn with_meta(capacity: usize, meta: ArrayMeta) -> Self {
-        if let ArrayMeta::List { datatype } = meta {
-            Self {
-                bitmap: BitmapBuilder::with_capacity(capacity),
-                offsets: vec![0],
-                value: Box::new(datatype.create_array_builder(capacity)),
-                value_type: *datatype,
-                len: 0,
-            }
-        } else {
-            panic!("must be ArrayMeta::List");
+    fn with_type(capacity: usize, ty: DataType) -> Self {
+        let DataType::List { datatype } = ty else {
+            panic!("data type must be DataType::List");
+        };
+        Self {
+            bitmap: BitmapBuilder::with_capacity(capacity),
+            offsets: vec![0],
+            value: Box::new(datatype.create_array_builder(capacity)),
+            value_type: *datatype,
+            len: 0,
         }
     }
 
@@ -160,6 +161,14 @@ pub struct ListArray {
     pub(super) value_type: DataType,
 }
 
+impl EstimateSize for ListArray {
+    fn estimated_heap_size(&self) -> usize {
+        self.bitmap.estimated_heap_size()
+            + self.offsets.capacity() * size_of::<u32>()
+            + self.value.estimated_heap_size()
+    }
+}
+
 impl Array for ListArray {
     type Builder = ListArrayBuilder;
     type OwnedItem = ListValue;
@@ -200,18 +209,8 @@ impl Array for ListArray {
         self.bitmap = bitmap;
     }
 
-    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
-        let array_builder = ListArrayBuilder::with_meta(
-            capacity,
-            ArrayMeta::List {
-                datatype: Box::new(self.value_type.clone()),
-            },
-        );
-        ArrayBuilderImpl::List(array_builder)
-    }
-
-    fn array_meta(&self) -> ArrayMeta {
-        ArrayMeta::List {
+    fn data_type(&self) -> DataType {
+        DataType::List {
             datatype: Box::new(self.value_type.clone()),
         }
     }
@@ -604,9 +603,9 @@ mod tests {
             ]
         );
 
-        let mut builder = ListArrayBuilder::with_meta(
+        let mut builder = ListArrayBuilder::with_type(
             4,
-            ArrayMeta::List {
+            DataType::List {
                 datatype: Box::new(DataType::Int32),
             },
         );
@@ -632,9 +631,9 @@ mod tests {
             DataType::Int32,
         );
 
-        let mut builder = ListArrayBuilder::with_meta(
+        let mut builder = ListArrayBuilder::with_type(
             4,
-            ArrayMeta::List {
+            DataType::List {
                 datatype: Box::new(DataType::Int32),
             },
         );
@@ -655,8 +654,8 @@ mod tests {
             DataType::Float32,
         );
         let builder = arr.create_builder(0);
-        let arr2 = try_match_expand!(builder.finish(), ArrayImpl::List).unwrap();
-        assert_eq!(arr.array_meta(), arr2.array_meta());
+        let arr2 = builder.finish();
+        assert_eq!(arr.data_type(), arr2.data_type());
     }
 
     #[test]
@@ -664,9 +663,9 @@ mod tests {
         use crate::array::*;
 
         {
-            let mut builder = ListArrayBuilder::with_meta(
+            let mut builder = ListArrayBuilder::with_type(
                 1,
-                ArrayMeta::List {
+                DataType::List {
                     datatype: Box::new(DataType::Int32),
                 },
             );
@@ -679,12 +678,12 @@ mod tests {
         }
 
         {
-            let meta = ArrayMeta::List {
+            let meta = DataType::List {
                 datatype: Box::new(DataType::List {
                     datatype: Box::new(DataType::Int32),
                 }),
             };
-            let mut builder = ListArrayBuilder::with_meta(2, meta);
+            let mut builder = ListArrayBuilder::with_type(2, meta);
             let val1 = ListValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
             let val2 = ListValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
             let list1 = ListValue::new(vec![Some(val1.into()), Some(val2.into())]);
@@ -786,9 +785,9 @@ mod tests {
             ]
         );
 
-        let mut builder = ListArrayBuilder::with_meta(
+        let mut builder = ListArrayBuilder::with_type(
             3,
-            ArrayMeta::List {
+            DataType::List {
                 datatype: Box::new(DataType::List {
                     datatype: Box::new(DataType::Int32),
                 }),
@@ -868,9 +867,9 @@ mod tests {
             value
         );
 
-        let mut builder = ListArrayBuilder::with_meta(
+        let mut builder = ListArrayBuilder::with_type(
             0,
-            ArrayMeta::List {
+            DataType::List {
                 datatype: Box::new(DataType::Varchar),
             },
         );
@@ -946,9 +945,9 @@ mod tests {
             };
             assert_eq!(lhs_serialized.cmp(&rhs_serialized), order);
 
-            let mut builder = ListArrayBuilder::with_meta(
+            let mut builder = ListArrayBuilder::with_type(
                 0,
-                ArrayMeta::List {
+                DataType::List {
                     datatype: Box::new(datatype),
                 },
             );

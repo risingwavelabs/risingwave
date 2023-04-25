@@ -18,7 +18,7 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::field_generator::FieldGeneratorImpl;
+use risingwave_common::field_generator::{FieldGeneratorImpl, VarcharProperty};
 use risingwave_common::util::iter_util::zip_eq_fast;
 
 use super::generator::DatagenEventGenerator;
@@ -151,8 +151,22 @@ impl SplitReader for DatagenSplitReader {
         // spawn_data_generation_stream(self.generator.into_native_stream(), BUFFER_SIZE).boxed()
         match self.parser_config.specific {
             SpecificParserConfig::Native => {
-                spawn_data_generation_stream(self.generator.into_native_stream(), BUFFER_SIZE)
-                    .boxed()
+                let actor_id = self.source_ctx.source_info.actor_id.to_string();
+                let source_id = self.source_ctx.source_info.source_id.to_string();
+                let split_id = self.split_id.to_string();
+                let metrics = self.source_ctx.metrics.clone();
+                spawn_data_generation_stream(
+                    self.generator
+                        .into_native_stream()
+                        .inspect_ok(move |chunk_with_states| {
+                            metrics
+                                .partition_input_count
+                                .with_label_values(&[&actor_id, &source_id, &split_id])
+                                .inc_by(chunk_with_states.chunk.cardinality() as u64);
+                        }),
+                    BUFFER_SIZE,
+                )
+                .boxed()
             }
             _ => self.into_chunk_stream(),
         }
@@ -225,8 +239,14 @@ fn generator_from_data_type(
         }
         DataType::Varchar => {
             let length_key = format!("fields.{}.length", name);
-            let length_value = fields_option_map.get(&length_key).map(|s| s.to_string());
-            FieldGeneratorImpl::with_varchar(length_value, random_seed)
+            let length_value = fields_option_map
+                .get(&length_key)
+                .map(|s| s.parse::<usize>())
+                .transpose()?;
+            Ok(FieldGeneratorImpl::with_varchar(
+                &VarcharProperty::RandomFixedLength(length_value),
+                random_seed,
+            ))
         }
         DataType::Struct(struct_type) => {
             let struct_fields =

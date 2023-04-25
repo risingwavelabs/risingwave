@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod connection;
 mod database;
 mod fragment;
 mod user;
@@ -24,7 +23,6 @@ use std::option::Option::Some;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
-pub use connection::*;
 pub use database::*;
 pub use fragment::*;
 use itertools::Itertools;
@@ -90,11 +88,12 @@ macro_rules! commit_meta {
 }
 pub(crate) use commit_meta;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::{CreatingJobInfo, Relation, RelationGroup};
 
-use crate::manager::catalog::utils::{alter_relation_rename, alter_relation_rename_refs};
+use crate::manager::catalog::utils::{
+    alter_relation_rename, alter_relation_rename_refs, ReplaceTableExprRewriter,
+};
 
 pub type CatalogManagerRef<S> = Arc<CatalogManager<S>>;
 
@@ -112,19 +111,13 @@ pub struct CatalogManager<S: MetaStore> {
 pub struct CatalogManagerCore {
     pub database: DatabaseManager,
     pub user: UserManager,
-    pub connection: ConnectionManager,
 }
 
 impl CatalogManagerCore {
     async fn new<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
         let database = DatabaseManager::new(env.clone()).await?;
         let user = UserManager::new(env.clone(), &database).await?;
-        let connection = ConnectionManager::new(env).await?;
-        Ok(Self {
-            database,
-            user,
-            connection,
-        })
+        Ok(Self { database, user })
     }
 }
 
@@ -231,6 +224,13 @@ where
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
+
+        if database_core.has_creation_in_database(database_id) {
+            return Err(MetaError::permission_denied(
+                "Some relations are creating in the target database, try again later".into(),
+            ));
+        }
+
         let mut databases = BTreeMapTransaction::new(&mut database_core.databases);
         let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
         let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
@@ -239,6 +239,8 @@ where
         let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
         let mut views = BTreeMapTransaction::new(&mut database_core.views);
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+        let mut functions = BTreeMapTransaction::new(&mut database_core.functions);
+        let mut connections = BTreeMapTransaction::new(&mut database_core.connections);
 
         /// `drop_by_database_id` provides a wrapper for dropping relations by database id, it will
         /// return the relation ids that dropped.
@@ -267,6 +269,8 @@ where
             let tables_to_drop = drop_by_database_id!(tables, database_id);
             let indexes_to_drop = drop_by_database_id!(indexes, database_id);
             let views_to_drop = drop_by_database_id!(views, database_id);
+            let functions_to_drop = drop_by_database_id!(functions, database_id);
+            let connections_to_drop = drop_by_database_id!(connections, database_id);
 
             let objects = std::iter::once(Object::DatabaseId(database_id))
                 .chain(
@@ -280,6 +284,11 @@ where
                     sources_to_drop
                         .iter()
                         .map(|source| Object::SourceId(source.id)),
+                )
+                .chain(
+                    functions_to_drop
+                        .iter()
+                        .map(|function| Object::FunctionId(function.id)),
                 )
                 .collect_vec();
             let users_need_update = Self::update_user_privileges(&mut users, &objects);
@@ -298,6 +307,7 @@ where
                 )
                 .chain(indexes_to_drop.iter().map(|index| index.owner))
                 .chain(views_to_drop.iter().map(|view| view.owner))
+                .chain(functions_to_drop.iter().map(|function| function.owner))
                 .for_each(|owner_id| user_core.decrease_ref(owner_id));
 
             // Update relation ref count.
@@ -310,7 +320,11 @@ where
             for view in &views_to_drop {
                 database_core.relation_ref_count.remove(&view.id);
             }
-
+            // TODO(weili): wait for yezizp to refactor ref cnt
+            for connection in &connections_to_drop {
+                database_core.relation_ref_count.remove(&connection.id);
+            }
+            // FIXME: resolve function refer count.
             for user in users_need_update {
                 self.notify_frontend(Operation::Update, Info::User(user))
                     .await;
@@ -342,38 +356,73 @@ where
         }
     }
 
-    /// Each connection is identified by a unique name
     pub async fn create_connection(
         &self,
         connection: Connection,
     ) -> MetaResult<NotificationVersion> {
-        let core = &mut self.core.lock().await.connection;
-        core.check_connection_duplicated(&connection.name)?;
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        database_core.ensure_database_id(connection.database_id)?;
+        database_core.ensure_schema_id(connection.schema_id)?;
+        #[cfg(not(test))]
+        user_core.ensure_user_id(connection.owner)?;
+
+        let key = (
+            connection.database_id,
+            connection.schema_id,
+            connection.name.clone(),
+        );
+        database_core.check_connection_name_duplicated(&key)?;
 
         let conn_id = connection.id;
-        let conn_name = connection.name.clone();
-        let mut connections = BTreeMapTransaction::new(&mut core.connections);
-        connections.insert(conn_id, connection);
+        let mut connections = BTreeMapTransaction::new(&mut database_core.connections);
+        connections.insert(conn_id, connection.to_owned());
         commit_meta!(self, connections)?;
 
-        core.connection_by_name.insert(conn_name, conn_id);
-        // Currently we don't need to notify frontend, so just fill 0 here
-        Ok(0)
+        user_core.increase_ref(connection.owner);
+
+        let version = self
+            .notify_frontend(Operation::Add, Info::Connection(connection))
+            .await;
+        Ok(version)
     }
 
-    pub async fn drop_connection(&self, conn_name: &str) -> MetaResult<NotificationVersion> {
-        let core = &mut self.core.lock().await.connection;
+    pub async fn drop_connection(&self, conn_id: ConnectionId) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_connection_id(conn_id)?;
 
-        let conn_id = core
-            .connection_by_name
-            .remove(conn_name)
-            .ok_or_else(|| anyhow!("connection {} not found", conn_name))?;
+        let user_core = &mut core.user;
+        let mut connections = BTreeMapTransaction::new(&mut database_core.connections);
 
-        let mut connections = BTreeMapTransaction::new(&mut core.connections);
-        connections.remove(conn_id);
-        commit_meta!(self, connections)?;
-        // Currently we don't need to notify frontend, so just fill 0 here
-        Ok(0)
+        // TODO(weili): wait for yezizp to refactor ref cnt
+        match database_core.relation_ref_count.get(&conn_id) {
+            Some(ref_count) => {
+                let connection_name = connections
+                    .get(&conn_id)
+                    .ok_or_else(|| anyhow!("connection not found"))?
+                    .name
+                    .clone();
+                Err(MetaError::permission_denied(format!(
+                    "Fail to delete connection {} because {} other relation(s) depend on it",
+                    connection_name, ref_count
+                )))
+            }
+            None => {
+                let connection = connections
+                    .remove(conn_id)
+                    .ok_or_else(|| anyhow!("connection not found"))?;
+
+                commit_meta!(self, connections)?;
+                user_core.decrease_ref(connection.owner);
+
+                let version = self
+                    .notify_frontend(Operation::Delete, Info::Connection(connection))
+                    .await;
+                Ok(version)
+            }
+        }
     }
 
     pub async fn create_schema(&self, schema: &Schema) -> MetaResult<NotificationVersion> {
@@ -405,8 +454,15 @@ where
         if !database_core.schemas.contains_key(&schema_id) {
             return Err(MetaError::catalog_id_not_found("schema", schema_id));
         }
+        if database_core.has_creation_in_schema(schema_id) {
+            return Err(MetaError::permission_denied(
+                "Some relations are creating in the target schema, try again later".into(),
+            ));
+        }
         if !database_core.schema_is_empty(schema_id) {
-            bail!("schema is not empty!");
+            return Err(MetaError::permission_denied(
+                "The schema is not empty, try dropping them first".into(),
+            ));
         }
         let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
@@ -508,6 +564,7 @@ where
         let user_core = &mut core.user;
         database_core.ensure_database_id(function.database_id)?;
         database_core.ensure_schema_id(function.schema_id)?;
+        database_core.check_function_duplicated(function)?;
 
         #[cfg(not(test))]
         user_core.ensure_user_id(function.owner)?;
@@ -519,10 +576,7 @@ where
         user_core.increase_ref(function.owner);
 
         let version = self
-            .notify_frontend_relation_info(
-                Operation::Add,
-                RelationInfo::Function(function.to_owned()),
-            )
+            .notify_frontend(Operation::Add, Info::Function(function.to_owned()))
             .await;
 
         Ok(version)
@@ -552,7 +606,7 @@ where
         }
 
         let version = self
-            .notify_frontend_relation_info(Operation::Delete, RelationInfo::Function(function))
+            .notify_frontend(Operation::Delete, Info::Function(function))
             .await;
 
         Ok(version)
@@ -1157,6 +1211,7 @@ where
         // 2. rename source and its definition.
         let old_name = source.name.clone();
         source.name = source_name.to_string();
+        source.definition = alter_relation_rename(&source.definition, source_name);
 
         // 3. update, commit and notify all relations that depend on this source.
         self.alter_relation_name_refs_inner(
@@ -1238,15 +1293,29 @@ where
         } else {
             database_core.mark_creating(&key);
             user_core.increase_ref(source.owner);
+            // We have validate the status of connection before starting the procedure.
+            if let Some(connection_id) = source.connection_id {
+                if let Some(_conn) = database_core.get_connection(connection_id) {
+                    // TODO(weili): wait for yezizp to refactor ref cnt
+                    database_core.increase_ref_count(connection_id);
+                } else {
+                    bail!("connection {} not found.", connection_id);
+                }
+            }
             Ok(())
         }
     }
 
-    pub async fn get_connection_by_name(&self, name: &str) -> MetaResult<Connection> {
-        let core = &mut self.core.lock().await.connection;
-        core.get_connection_by_name(name)
+    pub async fn get_connection_by_id(
+        &self,
+        connection_id: ConnectionId,
+    ) -> MetaResult<Connection> {
+        let core = &mut self.core.lock().await;
+        let database_core = &core.database;
+        database_core
+            .get_connection(connection_id)
             .cloned()
-            .ok_or_else(|| anyhow!(format!("could not find connection by the given name")).into())
+            .ok_or_else(|| anyhow!(format!("could not find connection {}", connection_id)).into())
     }
 
     pub async fn finish_create_source_procedure(
@@ -1287,6 +1356,10 @@ where
 
         database_core.unmark_creating(&key);
         user_core.decrease_ref(source.owner);
+        if let Some(connection_id) = source.connection_id {
+            // TODO(weili): wait for yezizp to refactor ref cnt
+            database_core.decrease_ref_count(connection_id);
+        }
         Ok(())
     }
 
@@ -1312,6 +1385,10 @@ where
                 commit_meta!(self, sources, users)?;
 
                 user_core.decrease_ref(source.owner);
+                if let Some(connection_id) = source.connection_id {
+                    // TODO(weili): wait for yezizp to refactor ref cnt
+                    database_core.decrease_ref_count(connection_id);
+                }
 
                 for user in users_need_update {
                     self.notify_frontend(Operation::Update, Info::User(user))
@@ -1722,6 +1799,15 @@ where
                 database_core.increase_ref_count(dependent_relation_id);
             }
             user_core.increase_ref(sink.owner);
+            // We have validate the status of connection before starting the procedure.
+            if let Some(connection_id) = sink.connection_id {
+                if let Some(_conn) = database_core.get_connection(connection_id) {
+                    // TODO(siyuan): wait for yezizp to refactor ref cnt
+                    database_core.increase_ref_count(connection_id);
+                } else {
+                    bail!("connection {} not found.", connection_id);
+                }
+            }
             Ok(())
         }
     }
@@ -1789,6 +1875,10 @@ where
             database_core.decrease_ref_count(dependent_relation_id);
         }
         user_core.decrease_ref(sink.owner);
+        if let Some(connection_id) = sink.connection_id {
+            // TODO(siyuan): wait for yezizp to refactor ref cnt
+            database_core.decrease_ref_count(connection_id);
+        }
     }
 
     pub async fn drop_sink(
@@ -1832,6 +1922,11 @@ where
                 let users_need_update = Self::update_user_privileges(&mut users, objects);
 
                 commit_meta!(self, sinks, tables, users)?;
+
+                if let Some(connection_id) = sink.connection_id {
+                    // TODO(siyuan): wait for yezizp to refactor ref cnt
+                    database_core.decrease_ref_count(connection_id);
+                }
 
                 user_core.decrease_ref(sink.owner);
 
@@ -1920,28 +2015,16 @@ where
 
         let mut updated_indexes = vec![];
 
+        let expr_rewriter = ReplaceTableExprRewriter {
+            table_col_index_mapping: table_col_index_mapping.clone(),
+        };
+
         for index_id in &index_ids {
             let mut index = indexes.get_mut(*index_id).unwrap();
             index
                 .index_item
                 .iter_mut()
-                .for_each(|x| match x.rex_node.as_mut().unwrap() {
-                    RexNode::InputRef(input_col_idx) => {
-                        *input_col_idx =
-                            table_col_index_mapping.map(*input_col_idx as usize) as u32;
-                        assert_eq!(
-                            x.return_type,
-                            table.columns[*input_col_idx as usize]
-                                .column_desc
-                                .clone()
-                                .unwrap()
-                                .column_type
-                        );
-                    }
-                    RexNode::FuncCall(_) => unimplemented!(),
-                    _ => unreachable!(),
-                });
-
+                .for_each(|x| expr_rewriter.rewrite_expr(x));
             updated_indexes.push(indexes.get(index_id).cloned().unwrap());
         }
 
@@ -1992,7 +2075,7 @@ where
     }
 
     pub async fn list_connections(&self) -> Vec<Connection> {
-        self.core.lock().await.connection.list_connections()
+        self.core.lock().await.database.list_connections()
     }
 
     pub async fn list_databases(&self) -> Vec<Database> {
@@ -2063,6 +2146,19 @@ where
             .notification_manager()
             .notify_frontend_relation_info(operation, relation_info)
             .await
+    }
+
+    pub async fn get_tables(&self, table_ids: &[TableId]) -> Vec<Table> {
+        let mut tables = vec![];
+        let guard = self.core.lock().await;
+        for table_id in table_ids {
+            if let Some(table) = guard.database.in_progress_creating_tables.get(table_id) {
+                tables.push(table.clone());
+            } else if let Some(table) = guard.database.tables.get(table_id) {
+                tables.push(table.clone());
+            }
+        }
+        tables
     }
 }
 

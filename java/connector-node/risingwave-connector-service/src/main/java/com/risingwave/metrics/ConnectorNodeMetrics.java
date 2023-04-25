@@ -36,14 +36,14 @@ public class ConnectorNodeMetrics {
     private static final Counter activeSinkConnections =
             Counter.build()
                     .name("active_sink_connections")
-                    .labelNames("sink_type", "ip")
+                    .labelNames("connector_type", "ip")
                     .help("Number of active sink connections")
                     .register();
 
     private static final Counter totalSinkConnections =
             Counter.build()
                     .name("total_sink_connections")
-                    .labelNames("sink_type", "ip")
+                    .labelNames("connector_type", "ip")
                     .help("Number of total connections")
                     .register();
     private static final Counter cpuUsage =
@@ -67,7 +67,8 @@ public class ConnectorNodeMetrics {
                     .register();
     private static final Counter sinkRowsReceived =
             Counter.build()
-                    .name("sink_rows_received")
+                    .name("connector_sink_rows_received")
+                    .labelNames("connector_type", "sink_id")
                     .help("Number of rows received by sink")
                     .register();
 
@@ -117,6 +118,7 @@ public class ConnectorNodeMetrics {
         registry.register(activeSourceConnections);
         registry.register(activeSinkConnections);
         registry.register(sourceRowsReceived);
+        registry.register(sinkRowsReceived);
         registry.register(cpuUsage);
         registry.register(ramUsage);
         PeriodicMetricsCollector collector = new PeriodicMetricsCollector(1000, "connector");
@@ -138,20 +140,20 @@ public class ConnectorNodeMetrics {
         activeSourceConnections.remove(sourceType, ip);
     }
 
-    public static void incActiveSinkConnections(String sinkType, String ip) {
-        activeSinkConnections.labels(sinkType, ip).inc();
+    public static void incActiveSinkConnections(String connectorType, String ip) {
+        activeSinkConnections.labels(connectorType, ip).inc();
     }
 
-    public static void decActiveConnections(String sinkType, String ip) {
-        activeSinkConnections.remove(sinkType, ip);
+    public static void decActiveSinkConnections(String connectorType, String ip) {
+        activeSinkConnections.remove(connectorType, ip);
     }
 
     public static void incSourceRowsReceived(String sourceType, String sourceId, double amt) {
         sourceRowsReceived.labels(sourceType, sourceId).inc(amt);
     }
 
-    public static void incSinkRowsReceived() {
-        sinkRowsReceived.inc();
+    public static void incSinkRowsReceived(String connectorType, String sinkId, double amt) {
+        sinkRowsReceived.labels(connectorType, sinkId).inc(amt);
     }
 
     public static void incTotalConnections(String sinkType, String ip) {

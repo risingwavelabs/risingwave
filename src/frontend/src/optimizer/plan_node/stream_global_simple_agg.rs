@@ -18,8 +18,8 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::generic::PlanAggCall;
-use super::{ExprRewritable, LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::generic::{self, PlanAggCall};
+use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::ExprRewriter;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -27,23 +27,17 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamGlobalSimpleAgg {
     pub base: PlanBase,
-    logical: LogicalAgg,
+    logical: generic::Agg<PlanRef>,
 
     /// The index of `count(*)` in `agg_calls`.
     row_count_idx: usize,
 }
 
 impl StreamGlobalSimpleAgg {
-    pub fn new(logical: LogicalAgg, row_count_idx: usize) -> Self {
-        assert_eq!(
-            logical.agg_calls()[row_count_idx],
-            PlanAggCall::count_star()
-        );
+    pub fn new(logical: generic::Agg<PlanRef>, row_count_idx: usize) -> Self {
+        assert_eq!(logical.agg_calls[row_count_idx], PlanAggCall::count_star());
 
-        let ctx = logical.base.ctx.clone();
-        let pk_indices = logical.base.logical_pk.to_vec();
-        let schema = logical.schema().clone();
-        let input = logical.input();
+        let input = logical.input.clone();
         let input_dist = input.distribution();
         let dist = match input_dist {
             Distribution::Single => Distribution::Single,
@@ -52,18 +46,10 @@ impl StreamGlobalSimpleAgg {
 
         // Empty because watermark column(s) must be in group key and global simple agg have no
         // group key.
-        let watermark_columns = FixedBitSet::with_capacity(schema.len());
+        let watermark_columns = FixedBitSet::with_capacity(logical.output_len());
 
         // Simple agg executor might change the append-only behavior of the stream.
-        let base = PlanBase::new_stream(
-            ctx,
-            schema,
-            pk_indices,
-            logical.functional_dependency().clone(),
-            dist,
-            false,
-            watermark_columns,
-        );
+        let base = PlanBase::new_stream_with_logical(&logical, dist, false, watermark_columns);
         StreamGlobalSimpleAgg {
             base,
             logical,
@@ -72,7 +58,7 @@ impl StreamGlobalSimpleAgg {
     }
 
     pub fn agg_calls(&self) -> &[PlanAggCall] {
-        self.logical.agg_calls()
+        &self.logical.agg_calls
     }
 }
 
@@ -91,11 +77,15 @@ impl fmt::Display for StreamGlobalSimpleAgg {
 
 impl PlanTreeNodeUnary for StreamGlobalSimpleAgg {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input), self.row_count_idx)
+        let logical = generic::Agg {
+            input,
+            ..self.logical.clone()
+        };
+        Self::new(logical, self.row_count_idx)
     }
 }
 impl_plan_tree_node_for_unary! { StreamGlobalSimpleAgg }
@@ -103,9 +93,8 @@ impl_plan_tree_node_for_unary! { StreamGlobalSimpleAgg }
 impl StreamNode for StreamGlobalSimpleAgg {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
-        let result_table = self.logical.infer_result_table(None);
-        let agg_states = self.logical.infer_stream_agg_state(None);
-        let distinct_dedup_tables = self.logical.infer_distinct_dedup_tables(None);
+        let (result_table, agg_states, distinct_dedup_tables) =
+            self.logical.infer_tables(&self.base, None);
 
         PbNodeBody::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: self
@@ -153,14 +142,8 @@ impl ExprRewritable for StreamGlobalSimpleAgg {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self::new(
-            self.logical
-                .rewrite_exprs(r)
-                .as_logical_agg()
-                .unwrap()
-                .clone(),
-            self.row_count_idx,
-        )
-        .into()
+        let mut logical = self.logical.clone();
+        logical.rewrite_exprs(r);
+        Self::new(logical, self.row_count_idx).into()
     }
 }

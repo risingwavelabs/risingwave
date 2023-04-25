@@ -685,7 +685,7 @@ pub mod tests {
 
     #[test]
     fn test_skip_compact_write_amplification_limit() {
-        let config = CompactionConfigBuilder::new()
+        let config: CompactionConfig = CompactionConfigBuilder::new()
             .level0_tier_compact_file_number(2)
             .max_compaction_bytes(1000)
             .sub_level_max_compaction_bytes(150)

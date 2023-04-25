@@ -22,7 +22,6 @@ use risingwave_common::array::StreamChunk;
 #[cfg(test)]
 use risingwave_common::catalog::Field;
 use risingwave_common::catalog::Schema;
-#[cfg(test)]
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::connector_service::sink_stream_request::write_batch::json_payload::RowOp;
@@ -119,6 +118,7 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
         schema: Schema,
         pk_indices: Vec<usize>,
         connector_params: ConnectorParams,
+        sink_id: u64,
     ) -> Result<Self> {
         let address = connector_params.connector_rpc_endpoint.ok_or_else(|| {
             SinkError::Remote("connector sink endpoint not specified".parse().unwrap())
@@ -147,6 +147,7 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
         let (request_sender, mut response) = client
             .start_sink_stream(
                 config.connector_type.clone(),
+                sink_id,
                 config.properties.clone(),
                 table_schema,
                 connector_params.sink_payload_format,
@@ -187,6 +188,37 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
         sink_catalog: SinkCatalog,
         connector_rpc_endpoint: Option<String>,
     ) -> Result<()> {
+        // FIXME: support struct and array in stream sink
+        let columns = sink_catalog
+            .columns
+            .iter()
+            .map(|column| {
+                if matches!(
+                column.column_desc.data_type,
+                DataType::Int16
+                    | DataType::Int32
+                    | DataType::Int64
+                    | DataType::Float32
+                    | DataType::Float64
+                    | DataType::Boolean
+                    | DataType::Decimal
+                    | DataType::Timestamp
+                    | DataType::Varchar
+            ) {
+                Ok( Column {
+                    name: column.column_desc.name.clone(),
+                    data_type: column.column_desc.data_type.to_protobuf().type_name,
+                })
+                } else {
+                    Err(SinkError::Remote(format!(
+                        "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Timestamp and Varchar, got {:?}: {:?}",
+                        column.column_desc.name,
+                        column.column_desc.data_type
+                    )))
+                }
+               })
+            .collect::<Result<Vec<_>>>()?;
+
         let address = connector_rpc_endpoint.ok_or_else(|| {
             SinkError::Remote("connector sink endpoint not specified".parse().unwrap())
         })?;
@@ -197,15 +229,6 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
                 &address, err
             ))
         })?;
-
-        let columns = sink_catalog
-            .columns
-            .iter()
-            .map(|column| Column {
-                name: column.column_desc.name.clone(),
-                data_type: column.column_desc.data_type.to_protobuf().type_name,
-            })
-            .collect_vec();
         let table_schema = TableSchema {
             columns,
             pk_indices: sink_catalog

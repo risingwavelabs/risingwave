@@ -127,7 +127,8 @@ message StreamSource {
   catalog.Table state_table = 2;
   optional uint32 row_id_index = 3;
   repeated plan_common.ColumnCatalog columns = 4;
-  repeated int32 pk_column_ids = 5;
+  reserved "pk_column_ids";
+  reserved 5;
   map<string, string> properties = 6;
   catalog.StreamSourceInfo info = 7;
   string source_name = 8;
@@ -538,6 +539,13 @@ message ValuesNode {
   repeated plan_common.Field fields = 2;
 }
 
+message DedupNode {
+  catalog.Table state_table = 1;
+  repeated uint32 dedup_column_indices = 2;
+}
+
+message NoOpNode {}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
@@ -574,6 +582,8 @@ message StreamNode {
     TemporalJoinNode temporal_join = 131;
     BarrierRecvNode barrier_recv = 132;
     ValuesNode values = 133;
+    DedupNode append_only_dedup = 134;
+    NoOpNode no_op = 135;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
