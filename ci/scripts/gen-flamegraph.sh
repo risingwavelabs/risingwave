@@ -236,14 +236,6 @@ main() {
   echo "--- Benchmark finished, stopping processes"
   stop_processes
 
-  # NOTE(kwannoel): We can only generate cpu flamegraph OR extract metrics.
-  # Running profiling will take up 30-50% of a single CPU core.
-  # So that will affect benchmark accuracy.
-  # Another solution could be to:
-  # 1. Run cpu flamegraph for first 10 mins.
-  # 2. Monitor throughput for next 10 mins.
-  # Benchmark will still not be as accurate as just running benchmark w/o profiling,
-  # but quick way to get both results.
   echo "--- Generate flamegraph"
   gen_cpu_flamegraph
 
