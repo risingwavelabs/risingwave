@@ -610,7 +610,7 @@ pub mod tests {
     #[test]
     fn test_pick_multi_level_basic() {
         {
-            let l0 = generate_l0_nonoverlapping_sublevels2(vec![
+            let l0 = generate_l0_nonoverlapping_multi_sublevels(vec![
                 vec![
                     generate_table(6, 1, 50, 99, 1),
                     generate_table(1, 1, 100, 200, 1),
@@ -653,7 +653,7 @@ pub mod tests {
         {
             // Suppose keyguard [100, 200] [300, 400]
             // will pick sst [1, 3, 4]
-            let l0 = generate_l0_nonoverlapping_sublevels2(vec![
+            let l0 = generate_l0_nonoverlapping_multi_sublevels(vec![
                 vec![
                     generate_table(1, 1, 100, 200, 1),
                     generate_table(2, 1, 300, 400, 1),
@@ -708,7 +708,7 @@ pub mod tests {
         {
             // Suppose keyguard [100, 250] [300, 400]
             // will pick sst [1, 3, 4]
-            let l0 = generate_l0_nonoverlapping_sublevels2(vec![
+            let l0 = generate_l0_nonoverlapping_multi_sublevels(vec![
                 vec![
                     generate_table(1, 1, 100, 149, 1),
                     generate_table(6, 1, 150, 199, 1),

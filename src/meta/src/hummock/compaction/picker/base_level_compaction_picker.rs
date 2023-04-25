@@ -180,7 +180,10 @@ impl LevelCompactionPicker {
                     continue;
                 }
 
-                if !target_level_ssts.is_empty() && level_select_table.len() < 3 {
+                if !target_level_ssts.is_empty()
+                    && level_select_table.len()
+                        < self.config.level0_sub_level_compact_level_count as usize
+                {
                     // not trivial move
                     skip_by_count = true;
                     continue;
