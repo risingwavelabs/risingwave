@@ -114,6 +114,16 @@ fn count<T>(state: i64, _: T) -> i64 {
     state + 1
 }
 
+#[aggregate("bool_and(boolean) -> boolean")]
+fn bool_and(state: bool, input: bool) -> bool {
+    state && input
+}
+
+#[aggregate("bool_or(boolean) -> boolean")]
+fn bool_or(state: bool, input: bool) -> bool {
+    state || input
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

@@ -281,6 +281,8 @@ impl DistinctAggRule {
                     AggKind::BitAnd
                     | AggKind::BitOr
                     | AggKind::BitXor
+                    | AggKind::BoolAnd
+                    | AggKind::BoolOr
                     | AggKind::Min
                     | AggKind::Max
                     | AggKind::Sum

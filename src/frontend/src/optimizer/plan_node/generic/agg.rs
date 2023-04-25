@@ -443,7 +443,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     }
                 }
                 // TODO: is its state a Table?
-                AggKind::BitAnd | AggKind::BitOr => {
+                AggKind::BitAnd | AggKind::BitOr | AggKind::BoolAnd | AggKind::BoolOr => {
                     unimplemented!()
                 }
             })
@@ -670,6 +670,8 @@ impl PlanAggCall {
             AggKind::BitAnd
             | AggKind::BitOr
             | AggKind::BitXor
+            | AggKind::BoolAnd
+            | AggKind::BoolOr
             | AggKind::Min
             | AggKind::Max
             | AggKind::StringAgg

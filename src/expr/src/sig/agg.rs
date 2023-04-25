@@ -152,6 +152,10 @@ pub fn infer_return_type(agg_kind: AggKind, inputs: &[DataType]) -> Option<DataT
 
         (AggKind::Sum, _) => return None,
 
+        (AggKind::BoolAnd, [DataType::Boolean]) => DataType::Boolean,
+        (AggKind::BoolOr, [DataType::Boolean]) => DataType::Boolean,
+        (AggKind::BoolAnd | AggKind::BoolOr, _) => return None,
+
         // StdDev/Var, stddev_pop, stddev_samp, var_pop, var_samp
         (
             AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp,
