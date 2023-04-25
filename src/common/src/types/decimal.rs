@@ -459,7 +459,13 @@ impl Decimal {
     #[must_use]
     pub fn ceil(&self) -> Self {
         match self {
-            Self::Normalized(d) => Self::Normalized(d.ceil()),
+            Self::Normalized(d) => {
+                let mut d = d.ceil();
+                if d.is_zero() {
+                    d.set_sign_positive(true);
+                }
+                Self::Normalized(d)
+            }
             d => *d,
         }
     }
