@@ -1003,14 +1003,14 @@ mod impl_from {
     impl_from_approx!(i64, f64);
 
     impl TryFrom<OrderedFloat<f64>> for OrderedFloat<f32> {
-        type Error = u8;
+        type Error = &'static str;
 
         fn try_from(s: OrderedFloat<f64>) -> Result<Self, Self::Error> {
             let inner = s.0 as f32;
             if inner.is_infinite() && s.0.is_finite() {
-                Err(1)
+                Err("double precision to real out of range: overflow")
             } else if inner == 0.0 && s.0 != 0.0 {
-                Err(2)
+                Err("double precision to real out of range: underflow")
             } else {
                 Ok(Self(inner))
             }
@@ -1020,14 +1020,14 @@ mod impl_from {
     macro_rules! impl_try_from_even {
         ($f:ty, $ty:ty) => {
             impl TryFrom<OrderedFloat<$f>> for $ty {
-                type Error = ();
+                type Error = &'static str;
 
                 fn try_from(n: OrderedFloat<$f>) -> Result<Self, Self::Error> {
                     let n = n.0.round_ties_even();
                     // `-MIN` can be represented exactly but `MAX` cannot.
                     // So we test `>= -MIN` rather than `> MAX`.
                     if n.is_nan() || n < (<$ty>::MIN as $f) || n >= -(<$ty>::MIN as $f) {
-                        Err(())
+                        Err("float to integral out of range")
                     } else {
                         Ok(n as _)
                     }
