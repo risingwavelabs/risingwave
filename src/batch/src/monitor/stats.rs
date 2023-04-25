@@ -23,8 +23,9 @@ use prometheus::core::{
 };
 use prometheus::{
     exponential_buckets, opts, proto, GaugeVec, Histogram, HistogramOpts, HistogramVec,
-    IntCounterVec, IntGauge, Registry,
+    IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
+use risingwave_common::metrics::TrAdderGauge;
 
 use crate::task::TaskId;
 
@@ -37,6 +38,7 @@ macro_rules! for_all_task_metrics {
             { task_poll_duration, GenericGaugeVec<AtomicF64> },
             { task_scheduled_duration, GenericGaugeVec<AtomicF64> },
             { task_slow_poll_duration, GenericGaugeVec<AtomicF64> },
+            { task_mem_usage, IntGaugeVec },
         }
     };
 }
@@ -116,6 +118,16 @@ impl BatchTaskMetrics {
         .unwrap();
         descs.extend(task_slow_poll_duration.desc().into_iter().cloned());
 
+        let task_mem_usage = IntGaugeVec::new(
+            opts!(
+                "batch_task_mem_usage",
+                "Memory usage of batch tasks in bytes."
+            ),
+            &task_labels[..],
+        )
+        .unwrap();
+        descs.extend(task_mem_usage.desc().into_iter().cloned());
+
         let metrics = Self {
             descs,
             task_first_poll_delay,
@@ -124,6 +136,7 @@ impl BatchTaskMetrics {
             task_poll_duration,
             task_scheduled_duration,
             task_slow_poll_duration,
+            task_mem_usage,
             delete_task: Arc::new(Mutex::new(Vec::new())),
         };
         registry.register(Box::new(metrics.clone())).unwrap();
@@ -193,6 +206,7 @@ macro_rules! for_all_executor_metrics {
         $macro! {
             { exchange_recv_row_number,  GenericCounterVec<AtomicU64>, GenericCounter<AtomicU64>},
             { row_seq_scan_next_duration, HistogramVec , Histogram},
+            { mem_usage, IntGaugeVec, IntGauge },
         }
     };
 }
@@ -228,7 +242,7 @@ impl BatchExecutorMetrics {
         .unwrap();
         descs.extend(exchange_recv_row_number.desc().into_iter().cloned());
 
-        let task_row_seq_scan_next_duration = HistogramVec::new(
+        let row_seq_scan_next_duration = HistogramVec::new(
             HistogramOpts::new(
                 "batch_row_seq_scan_next_duration",
                 "Time spent deserializing into a row in cell based table.",
@@ -237,13 +251,24 @@ impl BatchExecutorMetrics {
             &executor_labels,
         )
         .unwrap();
-        descs.extend(task_row_seq_scan_next_duration.desc().into_iter().cloned());
+        descs.extend(row_seq_scan_next_duration.desc().into_iter().cloned());
+
+        let mem_usage = IntGaugeVec::new(
+            opts!(
+                "batch_executor_mem_usage",
+                "Batch executor memory usage in bytes."
+            ),
+            &executor_labels,
+        )
+        .unwrap();
+        descs.extend(mem_usage.desc().into_iter().cloned());
 
         let metrics = Self {
             descs,
             delete_task: Arc::new(Mutex::new(Vec::new())),
             exchange_recv_row_number,
-            row_seq_scan_next_duration: task_row_seq_scan_next_duration,
+            row_seq_scan_next_duration,
+            mem_usage,
             register_labels: Arc::new(Mutex::new(HashMap::new())),
         };
         register.register(Box::new(metrics.clone())).unwrap();
@@ -388,14 +413,23 @@ impl Drop for BatchMetricsWithTaskLabelsInner {
 #[derive(Clone)]
 pub struct BatchManagerMetrics {
     pub task_num: IntGauge,
+    pub batch_total_mem: TrAdderGauge,
 }
 
 impl BatchManagerMetrics {
     pub fn new(registry: Registry) -> Self {
         let task_num = IntGauge::new("batch_task_num", "Number of batch task in memory").unwrap();
+        let batch_total_mem = TrAdderGauge::new(
+            "batch_total_mem",
+            "Total number of memory usage for batch tasks.",
+        )
+        .unwrap();
 
         registry.register(Box::new(task_num.clone())).unwrap();
-        Self { task_num }
+        Self {
+            task_num,
+            batch_total_mem,
+        }
     }
 
     #[cfg(test)]
