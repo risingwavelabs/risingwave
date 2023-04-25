@@ -27,11 +27,6 @@ print_machine_debug_info() {
 
 # NOTE(kwannoel) we can mirror the artifacts here in an s3 bucket if there are errors with access.
 install_all() {
-  echo ">>> Installing aws"
-  install_aws_cli
-  echo ">>> Ensure s3 bucket is clean + we can reach it"
-  aws s3 rm s3://rw-ci-benchmark
-
   echo ">>> Installing PromQL cli client"
   # Download promql
   wget https://github.com/nalbury/promql-cli/releases/download/v0.3.0/promql-v0.3.0-linux-amd64.tar.gz
@@ -97,6 +92,7 @@ pushd risingwave
 cat <<EOF > risedev-components.user.env
 RISEDEV_CONFIGURED=true
 
+ENABLE_MINIO=true
 ENABLE_PROMETHEUS_GRAFANA=true
 ENABLE_ETCD=true
 ENABLE_KAFKA=true
@@ -241,10 +237,6 @@ main() {
 
   echo "--- Uploading flamegraph"
   buildkite-agent artifact upload ./perf.svg
-
-  echo "--- Cleanup"
-  aws s3 rm s3://rw-ci-benchmark
-  echo "Success!"
 
   # TODO(kwannoel): `trap ERR` and upload these logs.
   #  echo "--- Uploading rw logs"
