@@ -19,18 +19,30 @@ use risingwave_common::types::{DataType, DataTypeName};
 
 use crate::{ExprError, Result};
 
+// aggregate defination
+mod def;
+
+// concrete aggregators
 mod approx_count_distinct;
 mod array_agg;
 mod count_star;
-mod def;
-mod filter;
 mod general;
 mod general_sorted_grouper;
 mod string_agg;
 
+// wrappers
+// XXX(wrj): should frontend plan these as operators?
+mod distinct;
+mod filter;
+mod orderby;
+mod projection;
+
 pub use self::def::*;
+use self::distinct::Distinct;
 use self::filter::*;
 pub use self::general_sorted_grouper::{create_sorted_grouper, BoxedSortedGrouper, EqGroups};
+use self::orderby::OrderBy;
+use self::projection::Projection;
 
 /// An `Aggregator` supports `update` data and `output` result.
 #[async_trait::async_trait]
@@ -60,31 +72,41 @@ dyn_clone::clone_trait_object!(Aggregator);
 pub type BoxedAggState = Box<dyn Aggregator>;
 
 /// Build an `Aggregator` from `AggCall`.
-pub fn build(agg_call: AggCall) -> Result<BoxedAggState> {
+pub fn build(agg: AggCall) -> Result<BoxedAggState> {
     // NOTE: The function signature is checked by `AggCall::infer_return_type` in the frontend.
 
-    let args = (agg_call.args.arg_types().iter())
+    let args = (agg.args.arg_types().iter())
         .map(|t| t.into())
         .collect::<Vec<DataTypeName>>();
     let desc = crate::sig::agg::AGG_FUNC_SIG_MAP
-        .get(agg_call.kind, &args, (&agg_call.return_type).into())
+        .get(agg.kind, &args, (&agg.return_type).into())
         .ok_or_else(|| {
             ExprError::UnsupportedFunction(format!(
                 "{:?}({}) -> {:?}",
-                agg_call.kind,
-                (agg_call.args.arg_types().iter())
+                agg.kind,
+                (agg.args.arg_types().iter())
                     .map(|t| format!("{:?}", t))
                     .join(", "),
-                agg_call.return_type,
+                agg.return_type,
             ))
         })?;
-    let filter = agg_call.filter.clone();
-    let mut aggregator = (desc.build)(agg_call)?;
 
-    // wrap the agg state in a `Filter` if needed
-    if let Some(expr) = filter {
+    let mut aggregator = (desc.build)(agg.clone())?;
+
+    if agg.distinct {
+        aggregator = Box::new(Distinct::new(aggregator));
+    }
+    aggregator = Box::new(Projection::new(agg.args.val_indices().to_vec(), aggregator));
+    if !agg.column_orders.is_empty() {
+        aggregator = Box::new(OrderBy::new(
+            agg.args.arg_types().to_vec(),
+            agg.column_orders,
+            aggregator,
+        ));
+    }
+    if let Some(expr) = agg.filter {
         aggregator = Box::new(Filter::new(expr, aggregator));
-    };
+    }
 
     Ok(aggregator)
 }

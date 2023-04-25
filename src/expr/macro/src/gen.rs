@@ -392,14 +392,10 @@ impl FunctionAttr {
                         start_row_id: usize,
                         end_row_id: usize,
                     ) -> Result<()> {
-                        let mut bitmap = match input.visibility() {
-                            Some(vis) => vis.clone(),
-                            None => Bitmap::ones(input.capacity()),
-                        };
                         #(#let_arrays)*
                         #let_state
                         for row_id in start_row_id..end_row_id {
-                            if !bitmap.is_set(row_id) {
+                            if !input.vis().is_set(row_id) {
                                 continue;
                             }
                             #(#let_values)*
