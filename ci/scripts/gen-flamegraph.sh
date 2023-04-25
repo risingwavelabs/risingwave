@@ -88,8 +88,12 @@ popd
 }
 
 configure_rw() {
-# FIXME(kwannoel): Workaround
-# git config --global --add safe.directory /risingwave
+# TODO(kwannoel): Workaround this error:
+# ```
+# Extracting dashboard artifacts to /risingwave/.risingwave/ui
+# fatal: detected dubious ownership in repository at '/risingwave'
+# ```
+git config --global --add safe.directory /risingwave
 pushd risingwave
 cat <<EOF > risedev-components.user.env
 RISEDEV_CONFIGURED=true
@@ -114,6 +118,12 @@ configure_all() {
 
 ############## Start benchmark environment
 
+# TODO(kwannoel): Currently we receive many errors for the dynamic libraries like so:
+# ```
+# major/minor/inode of /usr/lib/x86_64-linux-gnu/<some_library>.so.3" doesn't match the expected value: Some(Inode ...) != Some(Inode ...)
+# ```
+# This has minor effect on the flamegraph, so can ignore for now.
+# could it be related to profiling on Docker? Needs further investigation.
 start_nperf() {
   ./nperf record -p `pidof compute-node` -o perf.data &
 }
