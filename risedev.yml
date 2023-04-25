@@ -287,7 +287,6 @@ profile:
       - use: compactor
 
   ci-gen-cpu-flamegraph:
-    config-path: src/config/ci-gen-cpu-flamegraph.toml
     steps:
       - use: aws-s3
         # Id to be picked-up by services
