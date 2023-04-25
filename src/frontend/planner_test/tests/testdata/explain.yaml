@@ -126,7 +126,7 @@
       ├─LogicalScan { table: t1, columns: [v1, _row_id] }
       └─LogicalScan { table: t2, columns: [v2, _row_id] }
 
-    Push Down the Calculation of Inputs of Join's Condition:
+    Push down the calculation of inputs of join's condition:
 
     apply PushCalculationOfJoinRule 1 time(s)
 
