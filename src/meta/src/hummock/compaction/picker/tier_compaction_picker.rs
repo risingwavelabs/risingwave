@@ -439,6 +439,10 @@ impl CompactionPicker for TierCompactionPicker {
             return Some(ret);
         }
 
+        if !self.config.split_by_state_table {
+            return self.pick_multi_level(l0, &level_handlers[0], stats);
+        }
+
         let mut member_table_ids = levels.member_table_ids.clone();
         for level in &l0.sub_levels {
             if level.level_type != LevelType::Nonoverlapping as i32 {
@@ -449,10 +453,6 @@ impl CompactionPicker for TierCompactionPicker {
                     member_table_ids.push(sst.table_ids[0]);
                 }
             }
-        }
-
-        if !self.config.split_by_state_table {
-            return self.pick_multi_level(l0, &level_handlers[0], stats);
         }
 
         member_table_ids.sort();
