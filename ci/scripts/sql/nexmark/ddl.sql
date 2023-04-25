@@ -35,6 +35,7 @@ kafka.scan.startup.mode = 'earliest'
 CREATE VIEW bid
 AS
 SELECT (bid).* FROM nexmark WHERE event_type = 2;
+
 CREATE VIEW auction
 AS
 SELECT (auction).* FROM nexmark WHERE event_type = 1;
