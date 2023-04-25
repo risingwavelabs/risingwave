@@ -183,7 +183,9 @@ pub async fn gen_iterator_test_sstable_with_range_tombstones(
             DeleteRangeTombstone::new(
                 TableId::default(),
                 iterator_test_table_key_of(start),
+                false,
                 iterator_test_table_key_of(end),
+                false,
                 epoch,
             )
         })

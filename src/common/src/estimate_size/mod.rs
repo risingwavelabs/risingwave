@@ -18,6 +18,7 @@ use std::collections::HashSet;
 
 use bytes::Bytes;
 use fixedbitset::FixedBitSet;
+use rust_decimal::Decimal as RustDecimal;
 
 /// The trait for estimating the actual memory usage of a struct.
 ///
@@ -77,11 +78,23 @@ impl EstimateSize for Bytes {
     }
 }
 
+impl EstimateSize for Box<str> {
+    fn estimated_heap_size(&self) -> usize {
+        self.len()
+    }
+}
+
 // FIXME: implement a wrapper structure for `HashSet` that impl `EstimateSize`
 impl<T: EstimateSize> EstimateSize for HashSet<T> {
     fn estimated_heap_size(&self) -> usize {
         // FIXME: implement correct size
         // https://github.com/risingwavelabs/risingwave/issues/8957
+        0
+    }
+}
+
+impl EstimateSize for RustDecimal {
+    fn estimated_heap_size(&self) -> usize {
         0
     }
 }
@@ -102,4 +115,4 @@ macro_rules! primitive_estimate_size_impl {
     )*)
 }
 
-primitive_estimate_size_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 }
+primitive_estimate_size_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 bool }
