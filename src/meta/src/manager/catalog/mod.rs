@@ -28,6 +28,7 @@ use anyhow::{anyhow, Context};
 pub use database::*;
 pub use fragment::*;
 use itertools::Itertools;
+pub use manager::*;
 use risingwave_common::catalog::{
     valid_table_name, TableId as StreamingJobId, TableOption, DEFAULT_DATABASE_NAME,
     DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG,

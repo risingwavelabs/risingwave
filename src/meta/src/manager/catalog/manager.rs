@@ -18,8 +18,8 @@ use std::iter;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG,
-    DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
+    valid_table_name, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
+    DEFAULT_SUPER_USER_FOR_PG, DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
 };
 use risingwave_common::ensure;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -124,6 +124,14 @@ impl CatalogItem {
             | CatalogItem::Sink(_) => true,
             CatalogItem::Function(_) => false,
             CatalogItem::Connection(_) => false,
+        }
+    }
+
+    fn has_streaming_job(&self) -> bool {
+        match self {
+            CatalogItem::Table(t) => valid_table_name(&t.name),
+            CatalogItem::Sink(_) => true,
+            _ => false,
         }
     }
 
@@ -573,12 +581,12 @@ impl CatalogCore {
     }
 }
 
-pub struct CatalogManager<S: MetaStore> {
+pub struct CatalogManagerV2<S: MetaStore> {
     env: MetaSrvEnv<S>,
     core: Mutex<CatalogCore>,
 }
 
-impl<S> CatalogManager<S>
+impl<S> CatalogManagerV2<S>
 where
     S: MetaStore,
 {
@@ -771,7 +779,7 @@ where
 }
 
 // Catalog related interfaces.
-impl<S> CatalogManager<S>
+impl<S> CatalogManagerV2<S>
 where
     S: MetaStore,
 {
@@ -824,7 +832,12 @@ where
         Ok(version)
     }
 
-    pub async fn drop_database(&self, id: DatabaseId) -> MetaResult<NotificationVersion> {
+    /// `drop_database` will drop the database and the corresponding schemas and items in it. It
+    /// returns all dropped streaming ids, source ids and the notification version.
+    pub async fn drop_database(
+        &self,
+        id: DatabaseId,
+    ) -> MetaResult<(Vec<GlobalId>, Vec<GlobalId>, NotificationVersion)> {
         let core = &mut *self.core.lock().await;
         core.ensure_database_id(id)?;
 
@@ -849,6 +862,8 @@ where
         let mut to_clear_objs = std::iter::once(PbObject::DatabaseId(id))
             .chain(schemas_to_drop.iter().map(|id| PbObject::SchemaId(*id)))
             .collect_vec();
+        let mut streaming_ids = vec![];
+        let mut source_ids = vec![];
         let db = txn_database.remove(id).unwrap();
         schemas_to_drop.iter().for_each(|id| {
             txn_schema.remove(*id).unwrap();
@@ -856,6 +871,12 @@ where
         items_to_drop.iter().for_each(|id| {
             let item = txn_item.remove(*id).unwrap();
             to_clear_objs.push(item.item.pb_object_id());
+            if item.item.has_streaming_job() {
+                streaming_ids.push(item.item.id());
+            }
+            if let CatalogItem::Source(source) = &item.item {
+                source_ids.push(source.id);
+            }
         });
         let users_need_update = Self::clean_user_privileges(&mut txn_user, &to_clear_objs);
 
@@ -869,7 +890,7 @@ where
             .notify_frontend(Operation::Delete, Info::Database(db.database))
             .await;
 
-        Ok(version)
+        Ok((streaming_ids, source_ids, version))
     }
 
     pub async fn create_schema(&self, schema: Schema) -> MetaResult<NotificationVersion> {
@@ -1062,7 +1083,7 @@ where
 }
 
 // User related interfaces.
-impl<S> CatalogManager<S>
+impl<S> CatalogManagerV2<S>
 where
     S: MetaStore,
 {
