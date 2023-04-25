@@ -261,8 +261,7 @@ impl ColPrunable for LogicalProjectSet {
             // current schema perfectly fit the required columns
             new_node
         } else {
-            // some columns are not needed, or the order need to be adjusted.
-            // so we did a projection to remove/reorder the columns.
+            // projected_row_id column is not needed so we did a projection to remove it
             let mut new_output_cols = Vec::from(required_cols);
             if required_cols.first() != Some(&0) {
                 new_output_cols.insert(0, 0);
