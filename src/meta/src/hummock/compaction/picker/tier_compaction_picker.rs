@@ -62,9 +62,13 @@ impl TierCompactionPicker {
                 continue;
             }
 
+            let max_compaction_bytes = std::cmp::min(
+                self.config.max_compaction_bytes,
+                self.config.sub_level_max_compaction_bytes,
+            );
             let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
                 0,
-                self.config.max_compaction_bytes,
+                max_compaction_bytes,
                 1,
                 self.config.level0_max_compact_file_number,
                 self.overlap_strategy.clone(),
@@ -83,7 +87,8 @@ impl TierCompactionPicker {
                 l0_select_tables_vec.into_iter().enumerate()
             {
                 if plan_index == 0
-                    && level_select_sst.len() < self.config.level0_tier_compact_file_number as usize
+                    && level_select_sst.len()
+                        < self.config.level0_sub_level_compact_level_count as usize
                 {
                     // first plan level count smaller than limit
                     break;
@@ -108,7 +113,8 @@ impl TierCompactionPicker {
                         >= compaction_bytes;
 
                 if is_write_amp_large
-                    && level_select_sst.len() < self.config.level0_tier_compact_file_number as usize
+                    && level_select_sst.len()
+                        < self.config.level0_sub_level_compact_level_count as usize
                     && all_file_count < self.config.level0_max_compact_file_number as usize
                 {
                     skip_by_write_amp = true;
@@ -136,11 +142,6 @@ impl TierCompactionPicker {
             }
 
             select_level_inputs.reverse();
-
-            tracing::info!(
-                "TRACK tier_compaction level_count {}",
-                select_level_inputs.len()
-            );
 
             return Some(CompactionInput {
                 input_levels: select_level_inputs,
@@ -191,6 +192,28 @@ impl TierCompactionPicker {
                 continue;
             }
 
+            // support trivial move cross multi sub_levels
+            let mut overlap = self.overlap_strategy.create_overlap_info();
+            for sst in &select_tables {
+                overlap.update(sst);
+            }
+
+            assert!(overlap
+                .check_multiple_overlap(&l0.sub_levels[idx].table_infos)
+                .is_empty());
+            let mut target_level_idx = idx;
+            while target_level_idx > 0 {
+                if l0.sub_levels[target_level_idx - 1].level_type
+                    != LevelType::Nonoverlapping as i32
+                    || !overlap
+                        .check_multiple_overlap(&l0.sub_levels[target_level_idx - 1].table_infos)
+                        .is_empty()
+                {
+                    break;
+                }
+                target_level_idx -= 1;
+            }
+
             let input_levels = vec![
                 InputLevel {
                     level_idx: 0,
@@ -200,13 +223,13 @@ impl TierCompactionPicker {
                 InputLevel {
                     level_idx: 0,
                     level_type: LevelType::Nonoverlapping as i32,
-                    table_infos: target_tables,
+                    table_infos: vec![],
                 },
             ];
             return Some(CompactionInput {
                 input_levels,
                 target_level: 0,
-                target_sub_level_id: level.sub_level_id,
+                target_sub_level_id: l0.sub_levels[target_level_idx].sub_level_id,
             });
         }
         None
@@ -415,13 +438,8 @@ impl CompactionPicker for TierCompactionPicker {
             }
         }
 
-        if member_table_ids.len() == 1 {
-            return self.pick_multi_level(l0, &level_handlers[0], stats);
-        }
-
         if !self.config.split_by_state_table {
             return self.pick_multi_level(l0, &level_handlers[0], stats);
-            // return self.pick_whole_level(l0, &level_handlers[0], stats);
         }
 
         member_table_ids.sort();
@@ -442,7 +460,8 @@ pub mod tests {
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::level_selector::tests::{
-        generate_l0_nonoverlapping_sublevels2, generate_l0_overlapping_sublevels, generate_table,
+        generate_l0_nonoverlapping_multi_sublevels, generate_l0_overlapping_sublevels,
+        generate_table,
     };
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
     use crate::hummock::compaction::{
@@ -469,7 +488,7 @@ pub mod tests {
             TierCompactionPicker::new(config, Arc::new(RangeOverlapStrategy::default()));
 
         // Cannot trivial move because there is only 1 sub-level.
-        let l0 = generate_l0_nonoverlapping_sublevels2(vec![vec![
+        let l0 = generate_l0_nonoverlapping_multi_sublevels(vec![vec![
             generate_table(1, 1, 100, 110, 1),
             generate_table(2, 1, 150, 250, 1),
         ]]);
@@ -587,12 +606,12 @@ pub mod tests {
                 vec![
                     generate_table(6, 1, 50, 99, 1),
                     generate_table(1, 1, 100, 200, 1),
-                    generate_table(2, 1, 150, 250, 1),
+                    generate_table(2, 1, 250, 300, 1),
                 ],
                 vec![generate_table(3, 1, 10, 90, 1)],
                 vec![
-                    generate_table(4, 1, 100, 200, 1),
-                    generate_table(5, 1, 50, 150, 1),
+                    generate_table(4, 1, 50, 99, 1),
+                    generate_table(5, 1, 100, 200, 1),
                 ],
             ]);
             let levels = Levels {
@@ -604,7 +623,7 @@ pub mod tests {
             let mut levels_handler = vec![LevelHandler::new(0)];
             let config = Arc::new(
                 CompactionConfigBuilder::new()
-                    .level0_tier_compact_file_number(2)
+                    .level0_sub_level_compact_level_count(1)
                     .build(),
             );
             let mut picker =
@@ -619,12 +638,8 @@ pub mod tests {
                     .iter()
                     .map(|i| i.table_infos.len())
                     .sum::<usize>(),
-                6
+                3
             );
-            // all pending
-            assert!(picker
-                .pick_compaction(&levels, &levels_handler, &mut local_stats)
-                .is_none());
         }
 
         {
@@ -635,10 +650,10 @@ pub mod tests {
                     generate_table(1, 1, 100, 200, 1),
                     generate_table(2, 1, 300, 400, 1),
                 ],
-                vec![generate_table(3, 1, 100, 150, 1)],
+                vec![generate_table(3, 1, 100, 200, 1)],
                 vec![
                     generate_table(4, 1, 100, 200, 1),
-                    generate_table(5, 1, 300, 350, 1),
+                    generate_table(5, 1, 300, 400, 1),
                 ],
             ]);
             let levels = Levels {
@@ -650,7 +665,7 @@ pub mod tests {
             let mut levels_handler = vec![LevelHandler::new(0)];
             let config = Arc::new(
                 CompactionConfigBuilder::new()
-                    .level0_tier_compact_file_number(2)
+                    .level0_sub_level_compact_level_count(1)
                     .build(),
             );
             let mut picker =
@@ -687,19 +702,19 @@ pub mod tests {
             // will pick sst [1, 3, 4]
             let l0 = generate_l0_nonoverlapping_sublevels2(vec![
                 vec![
-                    generate_table(1, 1, 100, 150, 1),
-                    generate_table(6, 1, 150, 200, 1),
+                    generate_table(1, 1, 100, 149, 1),
+                    generate_table(6, 1, 150, 199, 1),
                     generate_table(7, 1, 200, 250, 1),
                     generate_table(2, 1, 300, 400, 1),
                 ],
                 vec![
-                    generate_table(3, 1, 100, 150, 1),
-                    generate_table(8, 1, 150, 200, 1),
+                    generate_table(3, 1, 100, 149, 1),
+                    generate_table(8, 1, 150, 199, 1),
                     generate_table(9, 1, 200, 250, 1),
                     generate_table(10, 1, 300, 400, 1),
                 ],
                 vec![
-                    generate_table(4, 1, 100, 200, 1),
+                    generate_table(4, 1, 100, 199, 1),
                     generate_table(11, 1, 200, 250, 1),
                     generate_table(5, 1, 300, 350, 1),
                 ],
@@ -713,7 +728,7 @@ pub mod tests {
             let mut levels_handler = vec![LevelHandler::new(0)];
             let config = Arc::new(
                 CompactionConfigBuilder::new()
-                    .level0_tier_compact_file_number(2)
+                    .level0_sub_level_compact_level_count(1)
                     .build(),
             );
             let mut picker =
@@ -731,7 +746,6 @@ pub mod tests {
                 3
             );
 
-            // will pick sst [1, 6, 7, 3, 8, 9, 4, 11]
             let ret2 = picker
                 .pick_compaction(&levels, &levels_handler, &mut local_stats)
                 .unwrap();
@@ -741,7 +755,7 @@ pub mod tests {
                     .iter()
                     .map(|i| i.table_infos.len())
                     .sum::<usize>(),
-                8
+                3
             );
         }
     }

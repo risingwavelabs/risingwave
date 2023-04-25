@@ -52,8 +52,6 @@ impl CompactionPicker for LevelCompactionPicker {
             return None;
         }
 
-        // let is_l0_pending_compact =
-        // level_handlers[0].is_level_pending_compact(&l0.sub_levels[0]);
         let is_l0_pending_compact =
             level_handlers[0].is_level_all_pending_compact(&l0.sub_levels[0]);
 
@@ -125,7 +123,7 @@ impl LevelCompactionPicker {
 
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
         let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
-            self.config.sub_level_max_compaction_bytes,
+            0,
             self.config.max_compaction_bytes,
             1,
             self.config.level0_max_compact_file_number,
@@ -140,6 +138,7 @@ impl LevelCompactionPicker {
 
         let mut skip_by_pending = false;
         let mut skip_by_write_amp = false;
+        let mut skip_by_count = false;
         let (mut level_select_files, mut target_level_files): (
             Vec<Vec<SstableInfo>>,
             Vec<SstableInfo>,
@@ -181,6 +180,12 @@ impl LevelCompactionPicker {
                     continue;
                 }
 
+                if !target_level_ssts.is_empty() && level_select_table.len() < 3 {
+                    // not trivial move
+                    skip_by_count = true;
+                    continue;
+                }
+
                 let to_base_write_amp = target_level_size * 100 / total_select_size;
                 if to_base_write_amp > 100 * self.config.max_bytes_for_level_multiplier {
                     skip_by_write_amp = true;
@@ -199,7 +204,11 @@ impl LevelCompactionPicker {
             }
 
             if skip_by_write_amp {
-                stats.skip_by_pending_files += 1;
+                stats.skip_by_write_amp_limit += 1;
+            }
+
+            if skip_by_count {
+                stats.skip_by_count_limit += 1;
             }
 
             return None;

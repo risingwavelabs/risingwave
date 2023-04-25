@@ -694,7 +694,7 @@ pub mod tests {
         }
     }
 
-    pub fn generate_l0_nonoverlapping_sublevels2(
+    pub fn generate_l0_nonoverlapping_multi_sublevels(
         table_infos: Vec<Vec<SstableInfo>>,
     ) -> OverlappingLevel {
         let mut l0 = OverlappingLevel {

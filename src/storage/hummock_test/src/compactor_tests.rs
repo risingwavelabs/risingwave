@@ -16,11 +16,10 @@
 pub(crate) mod tests {
 
     use std::collections::{BTreeSet, HashMap};
-    use std::mem::size_of;
     use std::ops::Bound;
     use std::sync::Arc;
 
-    use bytes::{Bytes, BytesMut};
+    use bytes::Bytes;
     use itertools::Itertools;
     use rand::Rng;
     use risingwave_common::cache::CachePriority;
@@ -31,11 +30,7 @@ pub(crate) mod tests {
     use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-    use risingwave_hummock_sdk::filter_key_extractor::{
-        FilterKeyExtractorImpl, FilterKeyExtractorManagerRef, FixedLengthFilterKeyExtractor,
-        FullKeyFilterKeyExtractor,
-    };
-    use risingwave_hummock_sdk::key::{next_key, FullKey, TableKey, TABLE_PREFIX_LEN};
+    use risingwave_hummock_sdk::key::{next_key, TABLE_PREFIX_LEN};
     use risingwave_meta::hummock::compaction::{default_level_selector, ManualCompactionOption};
     use risingwave_meta::hummock::test_utils::{
         register_table_ids_to_compaction_group, setup_compute_env,
@@ -45,6 +40,10 @@ pub(crate) mod tests {
     use risingwave_meta::storage::MetaStore;
     use risingwave_pb::hummock::{HummockVersion, TableOption};
     use risingwave_rpc_client::HummockMetaClient;
+    use risingwave_storage::filter_key_extractor::{
+        FilterKeyExtractorImpl, FilterKeyExtractorManagerRef, FixedLengthFilterKeyExtractor,
+        FullKeyFilterKeyExtractor,
+    };
     use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
@@ -59,38 +58,6 @@ pub(crate) mod tests {
 
     use crate::get_notification_client_for_test;
     use crate::test_utils::{register_tables_with_id_for_test, TestIngestBatch};
-
-    pub fn get_split_keys(table_id: u32, vnode: u16, split_count: usize) -> Vec<Vec<u8>> {
-        let mut result = vec![];
-        let interval = vnode as usize / split_count;
-        for index in 0..split_count {
-            // let mut start_vnode = index * interval;
-            // if index != 0 {
-            //     start_vnode += 1;
-            // }
-
-            let end_vnode = (index + 1) * interval;
-
-            let vnode_key = |vnode: u16| -> Bytes {
-                let mut buf = BytesMut::with_capacity(size_of::<u16>());
-                buf.extend_from_slice(&vnode.to_be_bytes());
-
-                buf.freeze()
-            };
-
-            // let left = FullKey::new(table_id.into(), TableKey(vnode_key(start_vnode as u16)), 0);
-
-            let right = FullKey::new(
-                table_id.into(),
-                TableKey(vnode_key(end_vnode as u16)),
-                u64::MAX,
-            );
-
-            result.push(right.encode());
-        }
-
-        result
-    }
 
     pub(crate) async fn get_hummock_storage<S: MetaStore>(
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -218,7 +185,7 @@ pub(crate) mod tests {
             compactor_metrics: Arc::new(CompactorMetrics::unused()),
             is_share_buffer_compact: false,
             compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
-            read_memory_limiter: MemoryLimiter::unlimit(),
+            output_memory_limiter: MemoryLimiter::unlimit(),
             filter_key_extractor_manager,
             sstable_object_id_manager: Arc::new(SstableObjectIdManager::new(
                 hummock_meta_client.clone(),
@@ -239,12 +206,6 @@ pub(crate) mod tests {
             hummock_manager_ref.clone(),
             worker_node.id,
         ));
-
-        let split_keys = get_split_keys(1, 256, 4);
-
-        for split_key_guard in split_keys {
-            println!("key guard {:?}", split_key_guard);
-        }
 
         // 1. add sstables
         let key = Bytes::from(0u64.to_be_bytes().to_vec());
