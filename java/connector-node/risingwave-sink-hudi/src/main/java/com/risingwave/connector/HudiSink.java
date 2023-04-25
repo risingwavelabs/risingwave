@@ -17,6 +17,7 @@
 package com.risingwave.connector;
 
 import static io.grpc.Status.UNIMPLEMENTED;
+import static org.apache.hudi.common.config.HoodieStorageConfig.PARQUET_MAX_FILE_SIZE;
 import static org.apache.hudi.common.table.HoodieTableConfig.CREATE_SCHEMA;
 
 import com.risingwave.connector.api.TableSchema;
@@ -37,6 +38,7 @@ import org.apache.hudi.common.model.HoodieKey;
 import org.apache.hudi.common.model.HoodieRecord;
 import org.apache.hudi.common.table.HoodieTableMetaClient;
 import org.apache.hudi.common.util.Option;
+import org.apache.hudi.config.HoodieCompactionConfig;
 import org.apache.hudi.config.HoodieIndexConfig;
 import org.apache.hudi.config.HoodieWriteConfig;
 import org.apache.hudi.index.HoodieIndex;
@@ -69,6 +71,10 @@ public class HudiSink extends SinkBase {
                                         .withIndexType(HoodieIndex.IndexType.BLOOM)
                                         .build())
                         .build();
+        cfg.setValue(
+                HoodieCompactionConfig.COPY_ON_WRITE_INSERT_SPLIT_SIZE,
+                String.valueOf(Integer.MAX_VALUE));
+        cfg.setValue(HoodieCompactionConfig.COPY_ON_WRITE_AUTO_SPLIT_INSERTS, "false");
         this.writer = new HoodieRisingWaveWriter(new HoodieJavaEngineContext(hadoopConf), cfg);
     }
 
