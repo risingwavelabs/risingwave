@@ -186,8 +186,8 @@ impl RemoteInput {
                     rr += 1;
 
                     if let Some(add_back_permits) = match permits.unwrap().value {
-                        // For records, batch the permits we received to reduce the backward `AddPermits`
-                        // messages.
+                        // For records, batch the permits we received to reduce the backward
+                        // `AddPermits` messages.
                         Some(permits::Value::Record(p)) => {
                             batched_permits_accumulated += p;
                             if batched_permits_accumulated >= batched_permits_limit as u32 {
