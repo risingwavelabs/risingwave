@@ -2,8 +2,7 @@
 
 # NOTE(kwannoel): When developing this script, you may want to disable the `-e` flag.
 # The feedback loop is too long otherwise.
-# FIXME: enable -e.
-set -uo pipefail
+set -euo pipefail
 
 # TODO(kwannoel): This is a workaround since workdir is `/risingwave` in the docker container.
 # Perhaps we should have a new docker container just for benchmarking?
