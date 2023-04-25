@@ -700,28 +700,28 @@ mod tests {
             Decimal::try_from(1.234).unwrap(),
         );
         assert_eq!(
-            Decimal::unordered_deserialize(Decimal::from(1).unordered_serialize()),
-            Decimal::from(1),
+            Decimal::unordered_deserialize(Decimal::from(1u8).unordered_serialize()),
+            Decimal::from(1u8),
         );
         assert_eq!(
-            Decimal::unordered_deserialize(Decimal::from(1).unordered_serialize()),
-            Decimal::from(1),
+            Decimal::unordered_deserialize(Decimal::from(1i8).unordered_serialize()),
+            Decimal::from(1i8),
         );
         assert_eq!(
-            Decimal::unordered_deserialize(Decimal::from(1).unordered_serialize()),
-            Decimal::from(1),
+            Decimal::unordered_deserialize(Decimal::from(1u16).unordered_serialize()),
+            Decimal::from(1u16),
         );
         assert_eq!(
-            Decimal::unordered_deserialize(Decimal::from(1).unordered_serialize()),
-            Decimal::from(1),
+            Decimal::unordered_deserialize(Decimal::from(1i16).unordered_serialize()),
+            Decimal::from(1i16),
         );
         assert_eq!(
-            Decimal::unordered_deserialize(Decimal::from(1).unordered_serialize()),
-            Decimal::from(1),
+            Decimal::unordered_deserialize(Decimal::from(1u32).unordered_serialize()),
+            Decimal::from(1u32),
         );
         assert_eq!(
-            Decimal::unordered_deserialize(Decimal::from(1).unordered_serialize()),
-            Decimal::from(1),
+            Decimal::unordered_deserialize(Decimal::from(1i32).unordered_serialize()),
+            Decimal::from(1i32),
         );
         assert_eq!(
             Decimal::unordered_deserialize(
@@ -737,13 +737,13 @@ mod tests {
             ),
             Decimal::try_from(f64::INFINITY).unwrap(),
         );
-        assert_eq!(u8::try_from(Decimal::from(1)).unwrap(), 1,);
-        assert_eq!(i8::try_from(Decimal::from(1)).unwrap(), 1,);
-        assert_eq!(u16::try_from(Decimal::from(1)).unwrap(), 1,);
-        assert_eq!(i16::try_from(Decimal::from(1)).unwrap(), 1,);
-        assert_eq!(u32::try_from(Decimal::from(1)).unwrap(), 1,);
-        assert_eq!(i32::try_from(Decimal::from(1)).unwrap(), 1,);
-        assert_eq!(u64::try_from(Decimal::from(1)).unwrap(), 1,);
-        assert_eq!(i64::try_from(Decimal::from(1)).unwrap(), 1,);
+        assert_eq!(u8::try_from(Decimal::from(1u8)).unwrap(), 1,);
+        assert_eq!(i8::try_from(Decimal::from(1i8)).unwrap(), 1,);
+        assert_eq!(u16::try_from(Decimal::from(1u16)).unwrap(), 1,);
+        assert_eq!(i16::try_from(Decimal::from(1i16)).unwrap(), 1,);
+        assert_eq!(u32::try_from(Decimal::from(1u32)).unwrap(), 1,);
+        assert_eq!(i32::try_from(Decimal::from(1i32)).unwrap(), 1,);
+        assert_eq!(u64::try_from(Decimal::from(1u64)).unwrap(), 1,);
+        assert_eq!(i64::try_from(Decimal::from(1i64)).unwrap(), 1,);
     }
 }
