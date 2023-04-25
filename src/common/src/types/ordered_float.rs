@@ -1013,50 +1013,6 @@ mod impl_rand {
     impl_uniform_sampler! { f64 }
 }
 
-mod impl_as_primitive {
-    use num_traits::AsPrimitive;
-
-    use super::*;
-
-    impl<T, F> AsPrimitive<T> for OrderedFloat<F>
-    where
-        F: 'static + Float + AsPrimitive<T>,
-        T: 'static + Copy,
-    {
-        fn as_(self) -> T {
-            AsPrimitive::as_(self.0)
-        }
-    }
-
-    macro_rules! impl_as_primitive_for {
-        ($ty:ty) => {
-            impl<F> AsPrimitive<OrderedFloat<F>> for $ty
-            where
-                F: 'static + Float,
-                $ty: AsPrimitive<F>,
-            {
-                fn as_(self) -> OrderedFloat<F> {
-                    let inner: F = AsPrimitive::as_(self);
-                    inner.into()
-                }
-            }
-        };
-    }
-
-    impl_as_primitive_for!(i8);
-    impl_as_primitive_for!(i16);
-    impl_as_primitive_for!(i32);
-    impl_as_primitive_for!(i64);
-
-    impl_as_primitive_for!(u8);
-    impl_as_primitive_for!(u16);
-    impl_as_primitive_for!(u32);
-    impl_as_primitive_for!(u64);
-
-    impl_as_primitive_for!(f32);
-    impl_as_primitive_for!(f64);
-}
-
 mod impl_from {
     use super::*;
 
