@@ -26,14 +26,14 @@ use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, EmptySliceRef, FullKey, TableKey, UserKey,
 };
+use risingwave_hummock_sdk::opts::{CachePolicy, ReadOptions};
 use risingwave_pb::hummock::{HummockVersion, SstableInfo};
 use tokio::sync::Notify;
 
 use super::{HummockError, HummockResult};
 use crate::error::StorageResult;
-use crate::hummock::CachePolicy;
 use crate::mem_table::{KeyOp, MemTableError};
-use crate::store::{ReadOptions, StateStoreRead};
+use crate::store::StateStoreRead;
 
 pub fn range_overlap<R, B>(
     search_key_range: &R,

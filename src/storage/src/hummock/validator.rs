@@ -18,12 +18,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::opts::CachePolicy;
 use risingwave_pb::hummock::ValidationTask;
 
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::{CachePolicy, SstableIterator};
+use crate::hummock::SstableIterator;
 use crate::monitor::StoreLocalStatistic;
 
 /// Validate SSTs in terms of Ordered, Locally unique and Globally unique.

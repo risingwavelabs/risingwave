@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::opts::CachePolicy;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use tokio::task::JoinHandle;
 
@@ -26,7 +27,7 @@ use crate::hummock::sstable::filter::FilterBuilder;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BatchUploadWriter, CachePolicy, DeleteRangeTombstone, HummockResult, MemoryLimiter,
+    BatchUploadWriter, DeleteRangeTombstone, HummockResult, MemoryLimiter,
     RangeTombstonesCollector, SstableBuilder, SstableBuilderOptions, SstableWriter,
     SstableWriterOptions, XorFilterBuilder,
 };

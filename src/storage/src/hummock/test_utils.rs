@@ -19,6 +19,7 @@ use futures::{Stream, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
+use risingwave_hummock_sdk::opts::CachePolicy;
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
@@ -31,7 +32,7 @@ use crate::error::StorageResult;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    CachePolicy, DeleteRangeTombstone, LruCache, Sstable, SstableBuilder, SstableBuilderOptions,
+    DeleteRangeTombstone, LruCache, Sstable, SstableBuilder, SstableBuilderOptions,
     SstableStoreRef, SstableWriter,
 };
 use crate::monitor::StoreLocalStatistic;

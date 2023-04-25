@@ -75,7 +75,8 @@ mod tests {
 
     use itertools::Itertools;
     use mockall::predicate;
-    use risingwave_common::catalog::TableOption;
+    use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::opts::NewLocalOptions;
 
     use super::*;
     use crate::{
@@ -92,31 +93,13 @@ mod tests {
         let sync_id = 4561245432;
         let seal_id = 5734875243;
 
-        let table_id1 = TracedNewLocalOpts {
-            table_id: 1,
-            is_consistent_op: false,
-            table_option: TableOption {
-                retention_seconds: None,
-            },
-        };
-        let table_id2 = TracedNewLocalOpts {
-            table_id: 2,
-            is_consistent_op: false,
-            table_option: TableOption {
-                retention_seconds: None,
-            },
-        };
-        let table_id3 = TracedNewLocalOpts {
-            table_id: 3,
-            is_consistent_op: false,
-            table_option: TableOption {
-                retention_seconds: None,
-            },
-        };
+        let opts1 = NewLocalOptions::for_test(TableId { table_id: 1 });
+        let opts2 = NewLocalOptions::for_test(TableId { table_id: 2 });
+        let opts3 = NewLocalOptions::for_test(TableId { table_id: 3 });
 
-        let storage_type1 = StorageType::Local(0, table_id1);
-        let storage_type2 = StorageType::Local(1, table_id2);
-        let storage_type3 = StorageType::Local(2, table_id3);
+        let storage_type1 = StorageType::Local(0, opts1);
+        let storage_type2 = StorageType::Local(1, opts2);
+        let storage_type3 = StorageType::Local(2, opts3);
         let storage_type4 = StorageType::Global;
 
         let actor_1 = vec![
@@ -129,7 +112,7 @@ mod tests {
                     None,
                     true,
                     Some(12),
-                    table_id1.table_id,
+                    opts1.table_id.table_id,
                     false,
                 ),
             ),
@@ -146,7 +129,7 @@ mod tests {
                     vec![(traced_bytes![123], Some(traced_bytes![123]))],
                     vec![],
                     4,
-                    table_id1.table_id,
+                    opts1.table_id.table_id,
                 ),
             ),
             (
@@ -169,7 +152,7 @@ mod tests {
                     None,
                     true,
                     Some(12),
-                    table_id1.table_id,
+                    opts1.table_id.table_id,
                     false,
                 ),
             ),
@@ -186,7 +169,7 @@ mod tests {
                     vec![(traced_bytes![123], Some(traced_bytes![123]))],
                     vec![],
                     4,
-                    table_id2.table_id,
+                    opts2.table_id.table_id,
                 ),
             ),
             (
@@ -209,7 +192,7 @@ mod tests {
                     None,
                     true,
                     Some(12),
-                    table_id3.table_id,
+                    opts3.table_id.table_id,
                     false,
                 ),
             ),
@@ -226,7 +209,7 @@ mod tests {
                     vec![(traced_bytes![123], Some(traced_bytes![123]))],
                     vec![],
                     4,
-                    table_id3.table_id,
+                    opts3.table_id.table_id,
                 ),
             ),
             (

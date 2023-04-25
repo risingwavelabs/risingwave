@@ -23,6 +23,7 @@ use risingwave_common::constants::hummock::CompactionFilterFlag;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::opts::CachePolicy;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator};
@@ -35,8 +36,8 @@ use crate::hummock::compactor::{
 use crate::hummock::multi_builder::TableBuilderFactory;
 use crate::hummock::sstable::DEFAULT_ENTRY_SIZE;
 use crate::hummock::{
-    CachePolicy, FilterBuilder, HummockResult, MemoryLimiter, SstableBuilder,
-    SstableBuilderOptions, SstableObjectIdManagerRef, SstableWriterFactory, SstableWriterOptions,
+    FilterBuilder, HummockResult, MemoryLimiter, SstableBuilder, SstableBuilderOptions,
+    SstableObjectIdManagerRef, SstableWriterFactory, SstableWriterOptions,
 };
 use crate::monitor::StoreLocalStatistic;
 

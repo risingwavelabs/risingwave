@@ -36,17 +36,16 @@ use risingwave_common::util::value_encoding::{
     BasicSerde, EitherSerde, ValueRowSerde, ValueRowSerdeNew,
 };
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
+use risingwave_hummock_sdk::opts::{CachePolicy, PrefetchOptions, ReadOptions};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::trace;
 
 use super::iter_utils;
 use crate::error::{StorageError, StorageResult};
-use crate::hummock::CachePolicy;
 use crate::row_serde::row_serde_util::{
     parse_raw_key_to_vnode_and_key, serialize_pk, serialize_pk_with_vnode,
 };
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
-use crate::store::{PrefetchOptions, ReadOptions};
 use crate::table::{compute_vnode, Distribution, TableIter, DEFAULT_VNODE};
 use crate::StateStore;
 

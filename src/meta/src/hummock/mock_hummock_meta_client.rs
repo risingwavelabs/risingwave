@@ -60,6 +60,7 @@ impl MockHummockMetaClient {
             hummock_manager,
             context_id,
             sst_offset: 0,
+            compact_context_id: AtomicU32::new(context_id),
         }
     }
 
@@ -144,7 +145,7 @@ impl HummockMetaClient for MockHummockMetaClient {
             .get_new_sst_ids(number)
             .await
             .map_err(mock_err)
-            .map(|r| SstIdRange {
+            .map(|r: SstObjectIdRange| SstObjectIdRange {
                 start_id: r.start_id + self.sst_offset,
                 end_id: r.end_id + self.sst_offset,
             })

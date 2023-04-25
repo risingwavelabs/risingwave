@@ -26,6 +26,7 @@ pub use block_iterator::*;
 mod bloom;
 mod xor_filter;
 pub use bloom::BloomFilterBuilder;
+use risingwave_hummock_sdk::opts::{CachePolicy, ReadOptions};
 pub use xor_filter::XorFilterBuilder;
 use xor_filter::XorFilterReader;
 pub mod builder;
@@ -62,8 +63,6 @@ use xxhash_rust::{xxh32, xxh64};
 
 use self::utils::{xxhash64_checksum, xxhash64_verify};
 use super::{HummockError, HummockResult};
-use crate::hummock::CachePolicy;
-use crate::store::ReadOptions;
 
 const DEFAULT_META_BUFFER_CAPACITY: usize = 4096;
 const MAGIC: u32 = 0x5785ab73;

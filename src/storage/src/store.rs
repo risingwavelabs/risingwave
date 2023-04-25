@@ -22,11 +22,10 @@ use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType};
-use risingwave_hummock_sdk::opts::NewLocalOptions;
+use risingwave_hummock_sdk::opts::{NewLocalOptions, ReadOptions, WriteOptions};
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 
 use crate::error::{StorageError, StorageResult};
-use crate::hummock::CachePolicy;
 use crate::monitor::{MonitoredStateStore, MonitoredStorageMetrics};
 use crate::storage_value::StorageValue;
 use crate::write_batch::WriteBatch;
@@ -314,38 +313,6 @@ pub trait LocalStateStore: StaticSendSync {
     ) -> Self::MayExistFuture<'_>;
 }
 
-/// If `exhaust_iter` is true, prefetch will be enabled. Prefetching may increase the memory
-/// footprint of the CN process because the prefetched blocks cannot be evicted.
-#[derive(Default, Clone, Copy)]
-pub struct PrefetchOptions {
-    /// `exhaust_iter` is set `true` only if the return value of `iter()` will definitely be
-    /// exhausted, i.e., will iterate until end.
-    pub exhaust_iter: bool,
-}
-
-impl PrefetchOptions {
-    pub fn new_for_exhaust_iter() -> Self {
-        Self { exhaust_iter: true }
-    }
-}
-
-#[derive(Default, Clone)]
-pub struct ReadOptions {
-    /// A hint for prefix key to check bloom filter.
-    /// If the `prefix_hint` is not None, it should be included in
-    /// `key` or `key_range` in the read API.
-    pub prefix_hint: Option<Bytes>,
-    pub ignore_range_tombstone: bool,
-    pub prefetch_options: PrefetchOptions,
-    pub cache_policy: CachePolicy,
-
-    pub retention_seconds: Option<u32>,
-    pub table_id: TableId,
-    /// Read from historical hummock version of meta snapshot backup.
-    /// It should only be used by `StorageTable` for batch query.
-    pub read_version_from_backup: bool,
-}
-
 pub fn gen_min_epoch(base_epoch: u64, retention_seconds: Option<&u32>) -> u64 {
     let base_epoch = Epoch(base_epoch);
     match retention_seconds {
@@ -356,10 +323,4 @@ pub fn gen_min_epoch(base_epoch: u64, retention_seconds: Option<&u32>) -> u64 {
         }
         None => 0,
     }
-}
-
-#[derive(Default, Clone)]
-pub struct WriteOptions {
-    pub epoch: u64,
-    pub table_id: TableId,
 }

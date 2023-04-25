@@ -27,6 +27,7 @@ use risingwave_hummock_sdk::key::{
     bound_table_key_range, FullKey, TableKey, TableKeyRange, UserKey,
 };
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
+use risingwave_hummock_sdk::opts::ReadOptions;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{HummockVersionDelta, LevelType, SstableInfo};
 use sync_point::sync_point;
@@ -53,7 +54,7 @@ use crate::hummock::{
 use crate::monitor::{
     GetLocalMetricsGuard, HummockStateStoreMetrics, MayExistLocalMetricsGuard, StoreLocalStatistic,
 };
-use crate::store::{gen_min_epoch, ReadOptions, StateStoreIterExt, StreamTypeOfIter};
+use crate::store::{gen_min_epoch, StateStoreIterExt, StreamTypeOfIter};
 
 // TODO: use a custom data structure to allow in-place update instead of proto
 // pub type CommittedVersion = HummockVersion;

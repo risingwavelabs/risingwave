@@ -176,8 +176,8 @@ impl ReplayWorker {
             } => {
                 let actual = match storage_type {
                     StorageType::Global => replay.get(key, epoch, read_options).await,
-                    StorageType::Local(_, table_id) => {
-                        assert_eq!(table_id.table_id, read_options.table_id);
+                    StorageType::Local(_, new_local_opts) => {
+                        assert_eq!(new_local_opts.table_id.table_id, read_options.table_id);
                         let s = local_storages.get_mut(&read_options.table_id).unwrap();
                         s.get(key, epoch, read_options).await
                     }
@@ -207,9 +207,9 @@ impl ReplayWorker {
             } => {
                 let iter = match storage_type {
                     StorageType::Global => replay.iter(key_range, epoch, read_options).await,
-                    StorageType::Local(_, table_id) => {
-                        assert_eq!(table_id.table_id, read_options.table_id);
-                        let s = local_storages.get_mut(&table_id.table_id).unwrap();
+                    StorageType::Local(_, new_local_opts) => {
+                        assert_eq!(new_local_opts.table_id.table_id, read_options.table_id);
+                        let s = local_storages.get_mut(&read_options.table_id).unwrap();
                         s.iter(key_range, epoch, read_options).await
                     }
                 };
@@ -243,13 +243,15 @@ impl ReplayWorker {
                 }
             }
             Operation::NewLocalStorage => {
-                if let StorageType::Local(_, table_id) = storage_type {
-                    local_storages.insert(table_id.table_id, replay).await;
+                if let StorageType::Local(_, new_local_opts) = storage_type {
+                    local_storages
+                        .insert(new_local_opts.table_id.table_id, replay)
+                        .await;
                 }
             }
             Operation::DropLocalStorage => {
-                if let StorageType::Local(_, table_id) = storage_type {
-                    local_storages.remove(&table_id.table_id);
+                if let StorageType::Local(_, new_local_opts) = storage_type {
+                    local_storages.remove(&new_local_opts.table_id.table_id);
                 }
                 // All local storages have been dropped, we should shutdown this worker
                 // If there are incoming new_local, this ReplayWorker will spawn again
@@ -361,13 +363,14 @@ mod tests {
     use std::ops::Bound;
 
     use mockall::predicate;
-    use risingwave_common::catalog::TableOption;
+    use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::opts::NewLocalOptions;
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
     use crate::{
         traced_bytes, MockGlobalReplayInterface, MockLocalReplayInterface, MockReplayIter,
-        StorageType, TraceReadOptions, TracedNewLocalOpts,
+        StorageType, TraceReadOptions,
     };
 
     #[tokio::test]
@@ -395,13 +398,7 @@ mod tests {
             epoch: 123,
             read_options: read_options.clone(),
         };
-        let new_local_opts = TracedNewLocalOpts {
-            table_id: 0,
-            is_consistent_op: false,
-            table_option: TableOption {
-                retention_seconds: None,
-            },
-        };
+        let new_local_opts = NewLocalOptions::for_test(TableId { table_id: 0 });
         let mut should_exit = false;
         let get_storage_type = StorageType::Local(0, new_local_opts);
         let record = Record::new(get_storage_type, 1, op);

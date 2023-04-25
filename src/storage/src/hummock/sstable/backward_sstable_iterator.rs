@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::cache::CachePriority;
 use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::opts::CachePolicy;
 
 use crate::hummock::iterator::{Backward, HummockIterator};
 use crate::hummock::sstable::SstableIteratorReadOptions;
@@ -68,7 +69,7 @@ impl BackwardSstableIterator {
                 .get(
                     self.sst.value(),
                     idx as usize,
-                    crate::hummock::CachePolicy::Fill(CachePriority::High),
+                    CachePolicy::Fill(CachePriority::High),
                     &mut self.stats,
                 )
                 .await?;

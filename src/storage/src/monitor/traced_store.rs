@@ -18,7 +18,7 @@ use bytes::Bytes;
 use futures::{Future, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::opts::NewLocalOptions;
+use risingwave_hummock_sdk::opts::{NewLocalOptions, ReadOptions, WriteOptions};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
     init_collector, should_use_trace, trace, trace_result, ConcurrentId, Operation,
@@ -57,14 +57,7 @@ impl<S> TracedStateStore<S> {
 
     pub fn new_local(inner: S, opts: NewLocalOptions) -> Self {
         let id = get_concurrent_id();
-        let storage_type = StorageType::Local(
-            id,
-            TracedNewLocalOpts {
-                table_id: opts.table_id,
-                is_consistent_op: opts.is_consistent_op,
-                table_option: opts.table_option,
-            },
-        );
+        let storage_type = StorageType::Local(id, opts.clone());
 
         trace!(NEWLOCAL, storage_type);
         Self {

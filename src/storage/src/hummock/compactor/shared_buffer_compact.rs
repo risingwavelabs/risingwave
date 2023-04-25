@@ -25,6 +25,7 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::opts::CachePolicy;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
 
@@ -35,7 +36,7 @@ use crate::hummock::event_handler::uploader::UploadTaskPayload;
 use crate::hummock::iterator::{Forward, HummockIterator, OrderedMergeIteratorInner};
 use crate::hummock::sstable::DeleteRangeAggregatorBuilder;
 use crate::hummock::{
-    CachePolicy, HummockError, HummockResult, RangeTombstonesCollector, SstableBuilderOptions,
+    HummockError, HummockResult, RangeTombstonesCollector, SstableBuilderOptions,
 };
 
 const GC_DELETE_KEYS_FOR_FLUSH: bool = false;

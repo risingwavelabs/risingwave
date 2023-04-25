@@ -19,14 +19,14 @@ use std::ops::Bound::*;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::opts::CachePolicy;
 
 use super::super::{HummockResult, HummockValue};
 use super::Sstable;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::{
-    BlockHolder, BlockIterator, BlockResponse, CachePolicy, SstableStore, SstableStoreRef,
-    TableHolder,
+    BlockHolder, BlockIterator, BlockResponse, SstableStore, SstableStoreRef, TableHolder,
 };
 use crate::monitor::StoreLocalStatistic;
 

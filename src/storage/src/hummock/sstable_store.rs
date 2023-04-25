@@ -20,6 +20,7 @@ use bytes::{Buf, BufMut, Bytes};
 use fail::fail_point;
 use itertools::Itertools;
 use risingwave_common::cache::{CachePriority, LruCacheEventListener};
+use risingwave_hummock_sdk::opts::CachePolicy;
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_object_store::object::{
     BlockLocation, MonitoredStreamingReader, ObjectError, ObjectMetadata, ObjectStoreRef,
@@ -98,23 +99,6 @@ impl LruCacheEventListener for BlockCacheEventListener {
 }
 
 // END section for tiered cache
-
-// TODO: Define policy based on use cases (read / compaction / ...).
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub enum CachePolicy {
-    /// Disable read cache and not fill the cache afterwards.
-    Disable,
-    /// Try reading the cache and fill the cache afterwards.
-    Fill(CachePriority),
-    /// Read the cache but not fill the cache afterwards.
-    NotFill,
-}
-
-impl Default for CachePolicy {
-    fn default() -> Self {
-        CachePolicy::Fill(CachePriority::High)
-    }
-}
 
 pub struct SstableStore {
     path: String,
@@ -895,6 +879,7 @@ mod tests {
     use std::ops::Range;
     use std::sync::Arc;
 
+    use risingwave_hummock_sdk::opts::CachePolicy;
     use risingwave_hummock_sdk::HummockSstableObjectId;
     use risingwave_pb::hummock::SstableInfo;
 
@@ -906,7 +891,7 @@ mod tests {
         default_builder_opt_for_test, gen_test_sstable_data, put_sst,
     };
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{CachePolicy, SstableIterator, SstableMeta};
+    use crate::hummock::{SstableIterator, SstableMeta};
     use crate::monitor::StoreLocalStatistic;
 
     const SST_ID: HummockSstableObjectId = 1;

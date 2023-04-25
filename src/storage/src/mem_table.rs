@@ -24,7 +24,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::value_encoding::ValueRowSerde;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
-use risingwave_hummock_sdk::opts::NewLocalOptions;
+use risingwave_hummock_sdk::opts::{NewLocalOptions, ReadOptions, WriteOptions};
 use thiserror::Error;
 
 use crate::error::{StorageError, StorageResult};

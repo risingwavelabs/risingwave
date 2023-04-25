@@ -14,11 +14,12 @@
 
 use bytes::Bytes;
 use risingwave_hummock_sdk::key::next_key;
+use risingwave_hummock_sdk::opts::WriteOptions;
 
 use crate::error::StorageResult;
 use crate::hummock::HummockError;
 use crate::storage_value::StorageValue;
-use crate::store::{StateStoreWrite, WriteOptions};
+use crate::store::StateStoreWrite;
 
 /// [`WriteBatch`] wraps a list of key-value pairs and an associated [`StateStore`].
 pub struct WriteBatch<'a, S: StateStoreWrite> {
@@ -126,10 +127,11 @@ impl<'a, S: StateStoreWrite> WriteBatch<'a, S> {
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
+    use risingwave_hummock_sdk::opts::WriteOptions;
 
     use crate::memory::MemoryStateStore;
     use crate::storage_value::StorageValue;
-    use crate::store::{StateStoreWrite, WriteOptions};
+    use crate::store::StateStoreWrite;
 
     #[tokio::test]
     async fn test_invalid_write_batch() {

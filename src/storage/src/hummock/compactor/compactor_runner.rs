@@ -21,6 +21,7 @@ use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
+use risingwave_hummock_sdk::opts::CachePolicy;
 use risingwave_pb::hummock::{CompactTask, LevelType};
 
 use super::task_progress::TaskProgress;
@@ -30,8 +31,8 @@ use crate::hummock::compactor::{CompactOutput, CompactionFilter, Compactor, Comp
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
 use crate::hummock::sstable::DeleteRangeAggregatorBuilder;
 use crate::hummock::{
-    CachePolicy, CompressionAlgorithm, HummockResult, RangeTombstonesCollector,
-    SstableBuilderOptions, SstableStoreRef,
+    CompressionAlgorithm, HummockResult, RangeTombstonesCollector, SstableBuilderOptions,
+    SstableStoreRef,
 };
 use crate::monitor::StoreLocalStatistic;
 
