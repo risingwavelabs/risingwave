@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.sourcenode;
+package com.risingwave.connector.source;
 
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.Data;
-import com.risingwave.sourcenode.common.DbzConnectorConfig;
-import com.risingwave.sourcenode.common.PostgresValidator;
-import com.risingwave.sourcenode.common.ValidatorUtils;
+import com.risingwave.connector.source.common.DbzConnectorConfig;
+import com.risingwave.connector.source.common.PostgresValidator;
+import com.risingwave.connector.source.common.ValidatorUtils;
 import io.grpc.StatusRuntimeException;
 import io.grpc.stub.StreamObserver;
 import java.io.IOException;

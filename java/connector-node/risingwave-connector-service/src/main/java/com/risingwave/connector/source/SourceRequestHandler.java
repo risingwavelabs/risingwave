@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.sourcenode;
+package com.risingwave.connector.source;
 
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.proto.ConnectorServiceProto;
-import com.risingwave.sourcenode.core.SourceHandlerFactory;
+import com.risingwave.connector.source.core.SourceHandlerFactory;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
 
