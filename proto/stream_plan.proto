@@ -591,6 +591,7 @@ message StreamNode {
     ValuesNode values = 133;
     DedupNode append_only_dedup = 134;
     NoOpNode no_op = 135;
+    EowcOverWindowNode eowc_over_window = 136;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

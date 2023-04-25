@@ -138,11 +138,11 @@ struct ExecutorInner<S: StateStore> {
     info: ExecutorInfo,
 
     calls: Vec<WindowFuncCall>,
-    state_table: StateTable<S>,
     pk_data_types: Vec<DataType>,
     input_pk_indices: Vec<usize>,
     partition_key_indices: Vec<usize>,
     order_key_index: usize, // no `OrderType` here, cuz we expect the input is ascending
+    state_table: StateTable<S>,
     watermark_epoch: AtomicU64Ref,
 }
 
@@ -178,9 +178,9 @@ pub struct EowcOverWindowExecutorArgs<S: StateStore> {
     pub executor_id: u64,
 
     pub calls: Vec<WindowFuncCall>,
-    pub state_table: StateTable<S>,
     pub partition_key_indices: Vec<usize>,
     pub order_key_index: usize,
+    pub state_table: StateTable<S>,
     pub watermark_epoch: AtomicU64Ref,
 }
 
@@ -212,11 +212,11 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                     identity: format!("EowcOverWindowExecutor {:X}", args.executor_id),
                 },
                 calls: args.calls,
-                state_table: args.state_table,
                 pk_data_types,
                 input_pk_indices: input_info.pk_indices,
                 partition_key_indices: args.partition_key_indices,
                 order_key_index: args.order_key_index,
+                state_table: args.state_table,
                 watermark_epoch: args.watermark_epoch,
             },
         }
@@ -544,9 +544,9 @@ mod tests {
             pk_indices: output_pk_indices,
             executor_id: 1,
             calls,
-            state_table,
             partition_key_indices,
             order_key_index,
+            state_table,
             watermark_epoch: Arc::new(AtomicU64::new(0)),
         });
         (tx, executor.boxed().execute())
