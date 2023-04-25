@@ -96,7 +96,7 @@ impl NestedLoopJoinExecutor {
             for chunk in self.left_child.execute() {
                 let c = chunk?;
                 if let Some(m) = &self.mem_context {
-                    println!("Estimated chunk size is {:?}", c.estimated_heap_size());
+                    trace!("Estimated chunk size is {:?}", c.estimated_heap_size());
                     m.add(c.estimated_heap_size() as i64);
                 }
                 ret.push(c);
