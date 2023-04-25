@@ -11,8 +11,6 @@ echo "CUR_DIR: $PWD"
 pushd ..
 git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/nexmark-bench.git
 pushd nexmark-bench
-# TODO(kwannoel): Upstream this fix
-echo "nightly-2023-04-07" > rust-toolchain
 make install
 cp /risingwave/.cargo/bin/nexmark-server ./nexmark-server
 buildkite-agent artifact upload ./nexmark-server
