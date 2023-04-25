@@ -488,10 +488,10 @@ FROM
 ORDER BY
 	_id;
 ----
-1001    {"_id": 1001, "first_name": "Sally", "last_name": "Thomas", "email": "sally.thomas@acme.com"}
-1002    {"_id": 1002, "first_name": "George", "last_name": "Bailey", "email": "gbailey@foobar.com"}
-1003    {"_id": 1003, "first_name": "Edward", "last_name": "Walker", "email": "ed@walker.com"}
-1004    {"_id": 1004, "first_name": "Anne", "last_name": "Kretchmar", "email": "annek@noanswer.org"}
+1001    {"_id": {"$numberLong": "1001"}, "email": "sally.thomas@acme.com", "first_name": "Sally", "last_name": "Thomas"}
+1002    {"_id": {"$numberLong": "1002"}, "email": "gbailey@foobar.com", "first_name": "George", "last_name": "Bailey"}
+1003    {"_id": {"$numberLong": "1003"}, "email": "ed@walker.com", "first_name": "Edward", "last_name": "Walker"}
+1004    {"_id": {"$numberLong": "1004"}, "email": "annek@noanswer.org", "first_name": "Anne", "last_name": "Kretchmar"}
 
 
 statement ok
