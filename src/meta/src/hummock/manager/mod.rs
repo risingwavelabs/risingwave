@@ -894,7 +894,7 @@ where
             };
 
             if compact_task.input_ssts[0].level_idx == 0 {
-                tracing::info!(
+                tracing::trace!(
                     "For compaction group {}: pick up {} {} sub_level in level {} file_count {} file_size {} to compact to target {}. cost time: {:?}",
                     compaction_group_id,
                     compact_task.input_ssts.len(),
@@ -906,7 +906,7 @@ where
                     start_time.elapsed()
                 );
             } else {
-                tracing::info!(
+                tracing::trace!(
                     "For compaction group {}: pick up {} tables in level {} file_count {} file_size {} to compact to target {}.  cost time: {:?}",
                     compaction_group_id,
                     compact_task.input_ssts[0].table_infos.len(),

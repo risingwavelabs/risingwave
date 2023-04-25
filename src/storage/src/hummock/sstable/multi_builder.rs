@@ -159,7 +159,6 @@ where
             self.last_table_id = full_key.user_key.table_id.table_id;
             switch_builder = true;
         }
-
         if let Some(builder) = self.current_builder.as_ref() {
             if is_new_user_key && (switch_builder || builder.reach_capacity()) {
                 let monotonic_deletes = self
