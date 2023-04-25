@@ -85,6 +85,7 @@ pub static CAST_MAP: LazyLock<CastMap> = LazyLock::new(|| {
         T::Time,
         T::Interval,
         T::Jsonb,
+        T::Bytea,
     ] {
         m.insert((t, T::Varchar), CastContext::Assign);
         m.insert((T::Varchar, t), CastContext::Explicit);
@@ -94,6 +95,8 @@ pub static CAST_MAP: LazyLock<CastMap> = LazyLock::new(|| {
     m.insert((T::Int16, T::Int256), CastContext::Implicit);
     m.insert((T::Int32, T::Int256), CastContext::Implicit);
     m.insert((T::Int64, T::Int256), CastContext::Implicit);
+
+    m.insert((T::Int256, T::Float64), CastContext::Explicit);
 
     // Misc casts allowed by PG that are neither in implicit cast sequences nor from/to string.
     m.insert((T::Timestamp, T::Time), CastContext::Assign);

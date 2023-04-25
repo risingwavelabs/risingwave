@@ -16,8 +16,7 @@ package com.risingwave.connector;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.*;
 
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.Data;
@@ -75,7 +74,12 @@ public class PostgresSourceTest {
                             "sh",
                             "-c",
                             "echo 'host replication postgres 172.17.0.1/32 trust' >> /var/lib/postgresql/data/pg_hba.conf");
-            pgDataSource = SourceTestClient.getDataSource(pg);
+            pgDataSource =
+                    SourceTestClient.getDataSource(
+                            pg.getJdbcUrl(),
+                            pg.getUsername(),
+                            pg.getPassword(),
+                            pg.getDriverClassName());
             LOG.info("postgres started");
         } catch (IOException e) {
             fail("IO exception: ", e);
@@ -108,7 +112,7 @@ public class PostgresSourceTest {
     // insert 10,000 rows into orders
     // check if the number of changes debezium captures is 10,000
     @Test
-    public void testLines() throws InterruptedException, SQLException {
+    public void testLines() throws Exception {
         ExecutorService executorService = Executors.newFixedThreadPool(1);
         Connection connection = SourceTestClient.connect(pgDataSource);
         String query = testClient.sqlStmts.getProperty("tpch.create.orders");
@@ -134,26 +138,42 @@ public class PostgresSourceTest {
                     return count;
                 };
         Future<Integer> countResult = executorService.submit(countTask);
+        int count = countResult.get();
+        LOG.info("number of cdc messages received: {}", count);
         try {
-            int count = countResult.get();
-            LOG.info("number of cdc messages received: {}", count);
-            assertEquals(count, 10000);
-        } catch (ExecutionException e) {
-            fail("Execution exception: ", e);
+            assertEquals(10000, count);
+        } catch (Exception e) {
+            Assert.fail("validate rpc fail: " + e.getMessage());
+        } finally {
+            // cleanup
+            query = "DROP TABLE orders";
+            SourceTestClient.performQuery(connection, query);
+            connection.close();
         }
-        connection.close();
     }
 
     // test whether validation catches permission errors
     @Test
-    public void testPermissionCheck() {
-        Connection connection = SourceTestClient.connect(pgDataSource);
-        String query =
+    public void testPermissionCheck() throws SQLException {
+        // user Postgres creates a superuser debezium
+        Connection connPg = SourceTestClient.connect(pgDataSource);
+        String query = "CREATE USER debezium";
+        SourceTestClient.performQuery(connPg, query);
+        query = "ALTER USER debezium SUPERUSER REPLICATION";
+        SourceTestClient.performQuery(connPg, query);
+        query = "ALTER USER debezium WITH PASSWORD '" + pg.getPassword() + "'";
+        SourceTestClient.performQuery(connPg, query);
+        // user debezium connects to Postgres
+        DataSource dbzDataSource =
+                SourceTestClient.getDataSource(
+                        pg.getJdbcUrl(), "debezium", pg.getPassword(), pg.getDriverClassName());
+        Connection connDbz = SourceTestClient.connect(dbzDataSource);
+        query =
                 "CREATE TABLE IF NOT EXISTS orders (o_key BIGINT NOT NULL, o_val INT, PRIMARY KEY (o_key))";
-        SourceTestClient.performQuery(connection, query);
+        SourceTestClient.performQuery(connDbz, query);
         // create a partial publication, check whether error is reported
         query = "CREATE PUBLICATION dbz_publication FOR TABLE orders (o_key)";
-        SourceTestClient.performQuery(connection, query);
+        SourceTestClient.performQuery(connDbz, query);
         ConnectorServiceProto.TableSchema tableSchema =
                 ConnectorServiceProto.TableSchema.newBuilder()
                         .addColumns(
@@ -168,43 +188,52 @@ public class PostgresSourceTest {
                                         .build())
                         .addPkIndices(0)
                         .build();
-        Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream1 =
-                testClient.getEventStreamValidate(
-                        pg,
-                        ConnectorServiceProto.SourceType.POSTGRES,
-                        tableSchema,
-                        "test",
-                        "orders");
-        StatusRuntimeException exception1 =
-                assertThrows(
-                        StatusRuntimeException.class,
-                        () -> {
-                            eventStream1.hasNext();
-                        });
-        assertEquals(
-                exception1.getMessage(),
-                "INVALID_ARGUMENT: INTERNAL: The publication 'dbz_publication' does not cover all necessary columns in table orders");
-        query = "DROP PUBLICATION dbz_publication";
-        SourceTestClient.performQuery(connection, query);
-        // revoke superuser and replication, check if reports error
-        query = "ALTER USER " + pg.getUsername() + " nosuperuser noreplication";
-        SourceTestClient.performQuery(connection, query);
-        Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream2 =
-                testClient.getEventStreamValidate(
-                        pg,
-                        ConnectorServiceProto.SourceType.POSTGRES,
-                        tableSchema,
-                        "test",
-                        "orders");
-        StatusRuntimeException exception2 =
-                assertThrows(
-                        StatusRuntimeException.class,
-                        () -> {
-                            eventStream2.hasNext();
-                        });
-        assertEquals(
-                exception2.getMessage(),
-                "INVALID_ARGUMENT: INTERNAL: Postgres user must be superuser or replication role to start walsender.");
+
+        try {
+            var resp =
+                    testClient.validateSource(
+                            pg.getJdbcUrl(),
+                            pg.getHost(),
+                            "debezium",
+                            pg.getPassword(),
+                            ConnectorServiceProto.SourceType.POSTGRES,
+                            tableSchema,
+                            "test",
+                            "orders");
+            assertEquals(
+                    "INVALID_ARGUMENT: The publication 'dbz_publication' does not cover all necessary columns in table orders",
+                    resp.getError().getErrorMessage());
+            query = "DROP PUBLICATION dbz_publication";
+            SourceTestClient.performQuery(connDbz, query);
+            // revoke superuser and replication, check if reports error
+            query = "ALTER USER debezium nosuperuser noreplication";
+            SourceTestClient.performQuery(connDbz, query);
+
+            resp =
+                    testClient.validateSource(
+                            pg.getJdbcUrl(),
+                            pg.getHost(),
+                            "debezium",
+                            pg.getPassword(),
+                            ConnectorServiceProto.SourceType.POSTGRES,
+                            tableSchema,
+                            "test",
+                            "orders");
+
+            assertEquals(
+                    "INVALID_ARGUMENT: Postgres user must be superuser or replication role to start walsender.",
+                    resp.getError().getErrorMessage());
+        } catch (Exception e) {
+            Assert.fail("validate rpc fail: " + e.getMessage());
+        } finally {
+            // cleanup
+            query = "DROP TABLE orders";
+            SourceTestClient.performQuery(connDbz, query);
+            query = "DROP USER debezium";
+            SourceTestClient.performQuery(connPg, query);
+            connDbz.close();
+            connPg.close();
+        }
     }
 
     // generates test cases for the risingwave debezium parser

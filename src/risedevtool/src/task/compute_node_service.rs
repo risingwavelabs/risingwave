@@ -61,11 +61,7 @@ impl ComputeNodeService {
             .arg("--parallelism")
             .arg(&config.parallelism.to_string())
             .arg("--total-memory-bytes")
-            .arg(&config.total_memory_bytes.to_string())
-            .arg("--memory-control-policy")
-            .arg(&config.memory_control_policy)
-            .arg("--streaming-memory-proportion")
-            .arg(&config.streaming_memory_proportion.to_string());
+            .arg(&config.total_memory_bytes.to_string());
 
         let provide_jaeger = config.provide_jaeger.as_ref().unwrap();
         match provide_jaeger.len() {
@@ -101,6 +97,8 @@ impl Task for ComputeNodeService {
             "TOKIO_CONSOLE_BIND",
             format!("127.0.0.1:{}", self.config.port + 1000),
         );
+        // FIXME: Otherwise, CI will throw log size too large error
+        // cmd.env("RW_QUERY_LOG_PATH", DEFAULT_QUERY_LOG_PATH);
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(
                 "RW_PROFILE_PATH",

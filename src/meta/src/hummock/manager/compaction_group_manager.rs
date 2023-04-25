@@ -147,11 +147,7 @@ impl<S: MetaStore> HummockManager<S> {
     /// The caller should ensure [`table_fragments_list`] remain unchanged during [`purge`].
     /// Currently [`purge`] is only called during meta service start ups.
     #[named]
-    pub async fn purge(&self, table_fragments_list: &[TableFragments]) -> Result<()> {
-        let valid_ids = table_fragments_list
-            .iter()
-            .flat_map(|table_fragments| table_fragments.all_table_ids())
-            .collect_vec();
+    pub async fn purge(&self, valid_ids: &[u32]) -> Result<()> {
         let registered_members =
             get_member_table_ids(&read_lock!(self, versioning).await.current_version);
         let to_unregister = registered_members
@@ -803,6 +799,9 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::Level0StopWriteThresholdSubLevelNumber(c) => {
                 target.level0_stop_write_threshold_sub_level_number = *c;
             }
+            MutableConfig::Level0SubLevelCompactLevelCount(c) => {
+                target.level0_sub_level_compact_level_count = *c;
+            }
         }
     }
 }
@@ -811,6 +810,7 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
 mod tests {
     use std::collections::{BTreeMap, HashMap};
 
+    use itertools::Itertools;
     use risingwave_common::catalog::TableId;
     use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
@@ -952,7 +952,7 @@ mod tests {
 
         // Test purge_stale_members: table fragments
         compaction_group_manager
-            .purge(&[table_fragment_2])
+            .purge(&table_fragment_2.all_table_ids().collect_vec())
             .await
             .unwrap();
         assert_eq!(registered_number().await, 4);

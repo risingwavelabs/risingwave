@@ -170,6 +170,42 @@ impl Binder {
         }
     }
 
+    pub(super) fn bind_array_range_index(
+        &mut self,
+        obj: Expr,
+        start: Option<Box<Expr>>,
+        end: Option<Box<Expr>>,
+    ) -> Result<ExprImpl> {
+        let obj = self.bind_expr(obj)?;
+        let start = match start {
+            None => ExprImpl::literal_int(1),
+            Some(expr) => self.bind_expr(*expr)?.cast_implicit(DataType::Int32)?,
+        };
+        // Don't worry, the backend implementation will stop iterating once it encounters the end
+        // of the array.
+        let end = match end {
+            None => ExprImpl::literal_int(i32::MAX),
+            Some(expr) => self.bind_expr(*expr)?.cast_implicit(DataType::Int32)?,
+        };
+        match obj.return_type() {
+            DataType::List {
+                datatype: return_type,
+            } => Ok(FunctionCall::new_unchecked(
+                ExprType::ArrayRangeAccess,
+                vec![obj, start, end],
+                DataType::List {
+                    datatype: return_type,
+                },
+            )
+            .into()),
+            data_type => Err(ErrorCode::BindError(format!(
+                "array range index applied to type {}, which is not a composite type",
+                data_type
+            ))
+            .into()),
+        }
+    }
+
     /// `Row(...)` is represented as an function call at the binder stage.
     pub(super) fn bind_row(&mut self, exprs: Vec<Expr>) -> Result<ExprImpl> {
         let exprs = exprs

@@ -1358,21 +1358,69 @@ impl Parser {
         }
     }
 
+    /// We parse both array[1,9][1], array[1,9][1:2], array[1,9][:2], array[1,9][1:] and
+    /// array[1,9][:] in this function.
     pub fn parse_array_index(&mut self, expr: Expr) -> Result<Expr, ParserError> {
-        let index = Box::new(self.parse_expr()?);
-        self.expect_token(&Token::RBracket)?;
-
-        // Create ArrayIndex
-        let array_index = Expr::ArrayIndex {
-            obj: Box::new(expr),
-            index,
+        let new_expr = match self.peek_token().token {
+            Token::Colon => {
+                // [:] or [:N]
+                assert!(self.consume_token(&Token::Colon));
+                let end = match self.peek_token().token {
+                    Token::RBracket => None,
+                    _ => {
+                        let end_index = Box::new(self.parse_expr()?);
+                        Some(end_index)
+                    }
+                };
+                Expr::ArrayRangeIndex {
+                    obj: Box::new(expr),
+                    start: None,
+                    end,
+                }
+            }
+            _ => {
+                // [N], [N:], [N:M]
+                let index = Box::new(self.parse_expr()?);
+                match self.peek_token().token {
+                    Token::Colon => {
+                        // [N:], [N:M]
+                        assert!(self.consume_token(&Token::Colon));
+                        match self.peek_token().token {
+                            Token::RBracket => {
+                                // [N:]
+                                Expr::ArrayRangeIndex {
+                                    obj: Box::new(expr),
+                                    start: Some(index),
+                                    end: None,
+                                }
+                            }
+                            _ => {
+                                // [N:M]
+                                let end = Some(Box::new(self.parse_expr()?));
+                                Expr::ArrayRangeIndex {
+                                    obj: Box::new(expr),
+                                    start: Some(index),
+                                    end,
+                                }
+                            }
+                        }
+                    }
+                    _ => {
+                        // [N]
+                        Expr::ArrayIndex {
+                            obj: Box::new(expr),
+                            index,
+                        }
+                    }
+                }
+            }
         };
-
-        // Return ArrayIndex Expr after after recursively checking for more indices
+        self.expect_token(&Token::RBracket)?;
+        // recursively checking for more indices
         if self.consume_token(&Token::LBracket) {
-            self.parse_array_index(array_index)
+            self.parse_array_index(new_expr)
         } else {
-            Ok(array_index)
+            Ok(new_expr)
         }
     }
 
@@ -3624,7 +3672,14 @@ impl Parser {
                     }
                 }
                 Keyword::CONNECTIONS => {
-                    return Ok(Statement::ShowObjects(ShowObject::Connection));
+                    return Ok(Statement::ShowObjects(ShowObject::Connection {
+                        schema: self.parse_from_and_identifier()?,
+                    }));
+                }
+                Keyword::FUNCTIONS => {
+                    return Ok(Statement::ShowObjects(ShowObject::Function {
+                        schema: self.parse_from_and_identifier()?,
+                    }));
                 }
                 _ => {}
             }

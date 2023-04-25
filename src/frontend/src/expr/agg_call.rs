@@ -15,7 +15,7 @@
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::function::aggregate::AggKind;
 
 use super::{Expr, ExprImpl, OrderBy};
 use crate::utils::Condition;
@@ -52,7 +52,7 @@ impl std::fmt::Debug for AggCall {
 impl AggCall {
     /// Infer the return type for the given agg call.
     /// Returns error if not supported or the arguments are invalid.
-    pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Result<DataType> {
+    pub fn infer_return_type(agg_kind: AggKind, inputs: &[DataType]) -> Result<DataType> {
         risingwave_expr::sig::agg::infer_return_type(agg_kind, inputs).ok_or_else(|| {
             let args = inputs.iter().map(|t| format!("{}", t)).join(", ");
             RwError::from(ErrorCode::InvalidInputSyntax(format!(
@@ -72,7 +72,7 @@ impl AggCall {
         filter: Condition,
     ) -> Result<Self> {
         let data_types = inputs.iter().map(ExprImpl::return_type).collect_vec();
-        let return_type = Self::infer_return_type(&agg_kind, &data_types)?;
+        let return_type = Self::infer_return_type(agg_kind, &data_types)?;
         Ok(AggCall {
             agg_kind,
             return_type,

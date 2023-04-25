@@ -258,7 +258,9 @@ pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-#[function("cast(varchar) -> *number")]
+#[function("cast(varchar) -> *int")]
+#[function("cast(varchar) -> *numeric")]
+#[function("cast(varchar) -> *float")]
 #[function("cast(varchar) -> int256")]
 #[function("cast(varchar) -> interval")]
 #[function("cast(varchar) -> jsonb")]
@@ -350,8 +352,9 @@ pub fn jsonb_to_bool(v: JsonbRef<'_>) -> Result<bool> {
 #[function("cast(jsonb) -> decimal")]
 pub fn jsonb_to_dec(v: JsonbRef<'_>) -> Result<Decimal> {
     v.as_number()
-        .map_err(|e| ExprError::Parse(e.into()))
-        .map(Into::into)
+        .map_err(|e| ExprError::Parse(e.into()))?
+        .try_into()
+        .map_err(|_| ExprError::NumericOutOfRange)
 }
 
 /// Similar to and an result of [`define_cast_to_primitive`] macro above.
@@ -405,6 +408,8 @@ pub fn interval_to_time(elem: Interval) -> Time {
 #[function("cast(int64) -> int16")]
 #[function("cast(int64) -> int32")]
 #[function("cast(int64) -> float64")]
+#[function("cast(float32) -> decimal")]
+#[function("cast(float64) -> decimal")]
 pub fn try_cast<T1, T2>(elem: T1) -> Result<T2>
 where
     T1: TryInto<T2> + std::fmt::Debug + Copy,
@@ -424,11 +429,10 @@ where
 #[function("cast(int32) -> decimal")]
 #[function("cast(int64) -> decimal")]
 #[function("cast(float32) -> float64")]
-#[function("cast(float32) -> decimal")]
-#[function("cast(float64) -> decimal")]
 #[function("cast(date) -> timestamp")]
 #[function("cast(time) -> interval")]
 #[function("cast(varchar) -> varchar")]
+#[function("cast(int256) -> float64")]
 pub fn cast<T1, T2>(elem: T1) -> T2
 where
     T1: Into<T2>,
@@ -461,7 +465,9 @@ pub fn int32_to_bool(input: i32) -> Result<bool> {
 
 // For most of the types, cast them to varchar is similar to return their text format.
 // So we use this function to cast type to varchar.
-#[function("cast(*number) -> varchar")]
+#[function("cast(*int) -> varchar")]
+#[function("cast(*numeric) -> varchar")]
+#[function("cast(*float) -> varchar")]
 #[function("cast(int256) -> varchar")]
 #[function("cast(time) -> varchar")]
 #[function("cast(date) -> varchar")]

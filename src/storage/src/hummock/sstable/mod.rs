@@ -17,6 +17,7 @@
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 mod block;
 
+use std::collections::BTreeSet;
 use std::fmt::{Debug, Formatter};
 use std::ops::{BitXor, Bound};
 
@@ -51,8 +52,8 @@ mod sstable_object_id_manager;
 mod utils;
 
 pub use delete_range_aggregator::{
-    get_delete_range_epoch_from_sstable, DeleteRangeAggregator, DeleteRangeAggregatorBuilder,
-    RangeTombstonesCollector, SingleDeleteRangeIterator, SstableDeleteRangeIterator,
+    get_min_delete_range_epoch_from_sstable, CompactionDeleteRanges, CompactionDeleteRangesBuilder,
+    SstableDeleteRangeIterator,
 };
 pub use filter::FilterBuilder;
 pub use sstable_object_id_manager::*;
@@ -60,6 +61,7 @@ pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
 use xxhash_rust::{xxh32, xxh64};
 
+use self::delete_range_aggregator::{apply_event, CompactionDeleteRangeEvent};
 use self::utils::{xxhash64_checksum, xxhash64_verify};
 use super::{HummockError, HummockResult};
 use crate::hummock::CachePolicy;
@@ -105,23 +107,92 @@ impl DeleteRangeTombstone {
             sequence,
         }
     }
+}
+
+/// Assume that watermark1 is 5, watermark2 is 7, watermark3 is 11, delete ranges
+/// `{ [0, wmk1) in epoch1, [wmk1, wmk2) in epoch2, [wmk2, wmk3) in epoch3 }`
+/// can be transformed into events below:
+/// `{ <0, +epoch1> <wmk1, -epoch1> <wmk1, +epoch2> <wmk2, -epoch2> <wmk2, +epoch3> <wmk3,
+/// -epoch3> }`
+/// Then we can get monotonic events (they are in order by user key) as below:
+/// `{ <0, epoch1>, <wmk1, epoch2>, <wmk2, epoch3>, <wmk3, +inf> }`
+/// which means that delete range of [0, wmk1) is epoch1, delete range of [wmk1, wmk2) if epoch2,
+/// etc. In this example, at the event key wmk1 (5), delete range changes from epoch1 to epoch2,
+/// thus the `new epoch` is epoch2. epoch2 will be used from the event key wmk1 (5) and till the
+/// next event key wmk2 (7) (not inclusive).
+/// If there is no range deletes between current event key and next event key, `new_epoch` will be
+/// `HummockEpoch::MAX`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MonotonicDeleteEvent {
+    pub event_key: UserKey<Vec<u8>>,
+    pub is_exclusive: bool,
+    pub new_epoch: HummockEpoch,
+}
+
+impl MonotonicDeleteEvent {
+    #[cfg(test)]
+    pub fn new(table_id: TableId, event_key: Vec<u8>, new_epoch: HummockEpoch) -> Self {
+        Self {
+            event_key: UserKey::new(table_id, TableKey(event_key)),
+            is_exclusive: false,
+            new_epoch,
+        }
+    }
 
     pub fn encode(&self, buf: &mut Vec<u8>) {
-        self.start_user_key.encode_length_prefixed(buf);
-        self.end_user_key.encode_length_prefixed(buf);
-        buf.put_u64_le(self.sequence);
+        self.event_key.encode_length_prefixed(buf);
+        buf.put_u8(if self.is_exclusive { 1 } else { 0 });
+        buf.put_u64_le(self.new_epoch);
     }
 
     pub fn decode(buf: &mut &[u8]) -> Self {
-        let start_user_key = UserKey::decode_length_prefixed(buf);
-        let end_user_key = UserKey::decode_length_prefixed(buf);
-        let sequence = buf.get_u64_le();
+        let event_key = UserKey::decode_length_prefixed(buf);
+        let exclusive_flag = buf.get_u8();
+        let is_exclusive = match exclusive_flag {
+            0 => false,
+            1 => true,
+            _ => panic!("exclusive flag should be either 0 or 1"),
+        };
+        let new_epoch = buf.get_u64_le();
         Self {
-            start_user_key,
-            end_user_key,
-            sequence,
+            event_key,
+            is_exclusive,
+            new_epoch,
         }
     }
+
+    #[inline]
+    pub fn encoded_size(&self) -> usize {
+        4 + self.event_key.encoded_len() + 1 + 8
+    }
+}
+
+pub(crate) fn create_monotonic_events_from_compaction_delete_events(
+    compaction_delete_range_events: Vec<CompactionDeleteRangeEvent>,
+) -> Vec<MonotonicDeleteEvent> {
+    let mut epochs = BTreeSet::new();
+    let mut monotonic_tombstone_events = Vec::with_capacity(compaction_delete_range_events.len());
+    for event in compaction_delete_range_events {
+        apply_event(&mut epochs, &event);
+        monotonic_tombstone_events.push(MonotonicDeleteEvent {
+            event_key: event.0,
+            is_exclusive: false,
+            new_epoch: epochs.first().map_or(HummockEpoch::MAX, |epoch| *epoch),
+        });
+    }
+    monotonic_tombstone_events.dedup_by(|a, b| {
+        a.event_key.table_id == b.event_key.table_id && a.new_epoch == b.new_epoch
+    });
+    monotonic_tombstone_events
+}
+
+#[cfg(any(test, feature = "test"))]
+pub(crate) fn create_monotonic_events(
+    mut delete_range_tombstones: Vec<DeleteRangeTombstone>,
+) -> Vec<MonotonicDeleteEvent> {
+    delete_range_tombstones.sort();
+    let events = CompactionDeleteRangesBuilder::build_events(&delete_range_tombstones);
+    create_monotonic_events_from_compaction_delete_events(events)
 }
 
 /// [`Sstable`] is a handle for accessing SST.
@@ -145,6 +216,7 @@ impl Sstable {
     pub fn new(id: HummockSstableObjectId, mut meta: SstableMeta) -> Self {
         let filter_data = std::mem::take(&mut meta.bloom_filter);
         let filter_reader = XorFilterReader::new(filter_data);
+
         Self {
             id,
             meta,
@@ -270,7 +342,20 @@ pub struct SstableMeta {
     pub smallest_key: Vec<u8>,
     pub largest_key: Vec<u8>,
     pub meta_offset: u64,
-    pub range_tombstone_list: Vec<DeleteRangeTombstone>,
+    /// Assume that watermark1 is 5, watermark2 is 7, watermark3 is 11, delete ranges
+    /// `{ [0, wmk1) in epoch1, [wmk1, wmk2) in epoch2, [wmk2, wmk3) in epoch3 }`
+    /// can be transformed into events below:
+    /// `{ <0, +epoch1> <wmk1, -epoch1> <wmk1, +epoch2> <wmk2, -epoch2> <wmk2, +epoch3> <wmk3,
+    /// -epoch3> }`
+    /// Then we can get monotonic events (they are in order by user key) as below:
+    /// `{ <0, epoch1>, <wmk1, epoch2>, <wmk2, epoch3>, <wmk3, +inf> }`
+    /// which means that delete range of [0, wmk1) is epoch1, delete range of [wmk1, wmk2) if
+    /// epoch2, etc. In this example, at the event key wmk1 (5), delete range changes from
+    /// epoch1 to epoch2, thus the `new epoch` is epoch2. epoch2 will be used from the event
+    /// key wmk1 (5) and till the next event key wmk2 (7) (not inclusive).
+    /// If there is no range deletes between current event key and next event key, `new_epoch` will
+    /// be `HummockEpoch::MAX`.
+    pub monotonic_tombstone_events: Vec<MonotonicDeleteEvent>,
     /// Format version, for further compatibility.
     pub version: u32,
 }
@@ -285,8 +370,8 @@ impl SstableMeta {
     /// | estimated size (4B) | key count (4B) |
     /// | smallest key len (4B) | smallest key |
     /// | largest key len (4B) | largest key |
-    /// | M (4B) |
-    /// | range-tombstone 0 | ... | range-tombstone M-1 |
+    /// | K (4B) |
+    /// | tombstone-event 0 | ... | tombstone-event K-1 |
     /// | file offset of this meta block (8B) |
     /// | checksum (8B) | version (4B) | magic (4B) |
     /// ```
@@ -307,9 +392,9 @@ impl SstableMeta {
         buf.put_u32_le(self.key_count);
         put_length_prefixed_slice(buf, &self.smallest_key);
         put_length_prefixed_slice(buf, &self.largest_key);
-        buf.put_u32_le(self.range_tombstone_list.len() as u32);
-        for tombstone in &self.range_tombstone_list {
-            tombstone.encode(buf);
+        buf.put_u32_le(self.monotonic_tombstone_events.len() as u32);
+        for monotonic_tombstone_event in &self.monotonic_tombstone_events {
+            monotonic_tombstone_event.encode(buf);
         }
         buf.put_u64_le(self.meta_offset);
         let checksum = xxhash64_checksum(&buf[start_offset..]);
@@ -348,11 +433,11 @@ impl SstableMeta {
         let key_count = buf.get_u32_le();
         let smallest_key = get_length_prefixed_slice(buf);
         let largest_key = get_length_prefixed_slice(buf);
-        let range_del_count = buf.get_u32_le() as usize;
-        let mut range_tombstone_list = Vec::with_capacity(range_del_count);
-        for _ in 0..range_del_count {
-            let tombstone = DeleteRangeTombstone::decode(buf);
-            range_tombstone_list.push(tombstone);
+        let tomb_event_count = buf.get_u32_le() as usize;
+        let mut monotonic_tombstone_events = Vec::with_capacity(tomb_event_count);
+        for _ in 0..tomb_event_count {
+            let monotonic_tombstone_event = MonotonicDeleteEvent::decode(buf);
+            monotonic_tombstone_events.push(monotonic_tombstone_event);
         }
         let meta_offset = buf.get_u64_le();
 
@@ -364,7 +449,7 @@ impl SstableMeta {
             smallest_key,
             largest_key,
             meta_offset,
-            range_tombstone_list,
+            monotonic_tombstone_events,
             version,
         })
     }
@@ -377,11 +462,11 @@ impl SstableMeta {
             .iter()
             .map(|block_meta| block_meta.encoded_size())
             .sum::<usize>()
-            + 4 // delete range tombstones len
+            + 4 // monotonic tombstone events len
             + self
-            .range_tombstone_list
+            .monotonic_tombstone_events
             .iter()
-            .map(| tombstone| 16 + tombstone.start_user_key.encoded_len() + tombstone.end_user_key.encoded_len())
+            .map(|event| event.encoded_size())
             .sum::<usize>()
             + 4 // bloom filter len
             + self.bloom_filter.len()
@@ -404,8 +489,8 @@ pub struct SstableIteratorReadOptions {
     pub must_iterated_end_user_key: Option<Bound<UserKey<KeyPayloadType>>>,
 }
 
-impl From<&ReadOptions> for SstableIteratorReadOptions {
-    fn from(read_options: &ReadOptions) -> Self {
+impl SstableIteratorReadOptions {
+    pub fn from_read_options(read_options: &ReadOptions) -> Self {
         Self {
             cache_policy: read_options.cache_policy,
             must_iterated_end_user_key: None,
@@ -440,7 +525,7 @@ mod tests {
             smallest_key: b"0-smallest-key".to_vec(),
             largest_key: b"9-largest-key".to_vec(),
             meta_offset: 123,
-            range_tombstone_list: vec![],
+            monotonic_tombstone_events: vec![],
             version: VERSION,
         };
         let sz = meta.encoded_size();

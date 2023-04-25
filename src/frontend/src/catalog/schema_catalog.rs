@@ -19,16 +19,18 @@ use std::sync::Arc;
 use risingwave_common::catalog::{valid_table_name, FunctionId, IndexId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
-use risingwave_pb::catalog::{PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView};
+use risingwave_pb::catalog::{
+    PbConnection, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
+};
 
-use super::{SinkId, SourceId, ViewId};
+use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::catalog::index_catalog::IndexCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
-use crate::catalog::SchemaId;
+use crate::catalog::{ConnectionId, SchemaId, SinkId, SourceId, ViewId};
 
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {
@@ -47,7 +49,13 @@ pub struct SchemaCatalog {
     view_by_id: HashMap<ViewId, Arc<ViewCatalog>>,
     function_by_name: HashMap<String, HashMap<Vec<DataType>, Arc<FunctionCatalog>>>,
     function_by_id: HashMap<FunctionId, Arc<FunctionCatalog>>,
+    connection_by_name: HashMap<String, Arc<ConnectionCatalog>>,
+    connection_by_id: HashMap<ConnectionId, Arc<ConnectionCatalog>>,
 
+    // This field is currently used only for `show connections`
+    connection_source_ref: HashMap<ConnectionId, Vec<SourceId>>,
+    // This field is currently used only for `show connections`
+    connection_sink_ref: HashMap<ConnectionId, Vec<SinkId>>,
     // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
     system_table_by_name: HashMap<String, SystemCatalog>,
     owner: u32,
@@ -175,6 +183,13 @@ impl SchemaCatalog {
         let source = SourceCatalog::from(prost);
         let source_ref = Arc::new(source);
 
+        if let Some(connection_id) = source_ref.connection_id {
+            self.connection_source_ref
+                .entry(connection_id)
+                .and_modify(|sources| sources.push(source_ref.id))
+                .or_insert(vec![source_ref.id]);
+        }
+
         self.source_by_name
             .try_insert(name, source_ref.clone())
             .unwrap();
@@ -184,6 +199,15 @@ impl SchemaCatalog {
     pub fn drop_source(&mut self, id: SourceId) {
         let source_ref = self.source_by_id.remove(&id).unwrap();
         self.source_by_name.remove(&source_ref.name).unwrap();
+        if let Some(connection_id) = source_ref.connection_id {
+            if let Occupied(mut e) = self.connection_source_ref.entry(connection_id) {
+                let source_ids = e.get_mut();
+                source_ids.retain_mut(|sid| *sid != id);
+                if source_ids.is_empty() {
+                    e.remove_entry();
+                }
+            }
+        }
     }
 
     pub fn update_source(&mut self, prost: &PbSource) {
@@ -208,6 +232,13 @@ impl SchemaCatalog {
         let sink = SinkCatalog::from(prost);
         let sink_ref = Arc::new(sink);
 
+        if let Some(connection_id) = sink_ref.connection_id {
+            self.connection_sink_ref
+                .entry(connection_id.0)
+                .and_modify(|sinks| sinks.push(id))
+                .or_insert(vec![id]);
+        }
+
         self.sink_by_name
             .try_insert(name, sink_ref.clone())
             .unwrap();
@@ -217,6 +248,15 @@ impl SchemaCatalog {
     pub fn drop_sink(&mut self, id: SinkId) {
         let sink_ref = self.sink_by_id.remove(&id).unwrap();
         self.sink_by_name.remove(&sink_ref.name).unwrap();
+        if let Some(connection_id) = sink_ref.connection_id {
+            if let Occupied(mut e) = self.connection_sink_ref.entry(connection_id.0) {
+                let sink_ids = e.get_mut();
+                sink_ids.retain_mut(|sid| *sid != id);
+                if sink_ids.is_empty() {
+                    e.remove_entry();
+                }
+            }
+        }
     }
 
     pub fn update_sink(&mut self, prost: &PbSink) {
@@ -297,6 +337,29 @@ impl SchemaCatalog {
             .expect("function not found by argument types");
     }
 
+    pub fn create_connection(&mut self, prost: &PbConnection) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let connection = ConnectionCatalog::from(prost);
+        let connection_ref = Arc::new(connection);
+        self.connection_by_name
+            .try_insert(name, connection_ref.clone())
+            .unwrap();
+        self.connection_by_id
+            .try_insert(id, connection_ref)
+            .unwrap();
+    }
+
+    pub fn drop_connection(&mut self, connection_id: ConnectionId) {
+        let connection_ref = self
+            .connection_by_id
+            .remove(&connection_id)
+            .expect("connection not found by id");
+        self.connection_by_name
+            .remove(&connection_ref.name)
+            .expect("connection not found by name");
+    }
+
     pub fn iter_all(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name.values()
     }
@@ -347,6 +410,14 @@ impl SchemaCatalog {
         self.view_by_name.values()
     }
 
+    pub fn iter_function(&self) -> impl Iterator<Item = &Arc<FunctionCatalog>> {
+        self.function_by_name.values().flat_map(|v| v.values())
+    }
+
+    pub fn iter_connections(&self) -> impl Iterator<Item = &Arc<ConnectionCatalog>> {
+        self.connection_by_name.values()
+    }
+
     pub fn iter_system_tables(&self) -> impl Iterator<Item = &SystemCatalog> {
         self.system_table_by_name.values()
     }
@@ -363,8 +434,16 @@ impl SchemaCatalog {
         self.source_by_name.get(source_name)
     }
 
+    pub fn get_source_by_id(&self, source_id: &SourceId) -> Option<&Arc<SourceCatalog>> {
+        self.source_by_id.get(source_id)
+    }
+
     pub fn get_sink_by_name(&self, sink_name: &str) -> Option<&Arc<SinkCatalog>> {
         self.sink_by_name.get(sink_name)
+    }
+
+    pub fn get_sink_by_id(&self, sink_id: &SinkId) -> Option<&Arc<SinkCatalog>> {
+        self.sink_by_id.get(sink_id)
     }
 
     pub fn get_index_by_name(&self, index_name: &str) -> Option<&Arc<IndexCatalog>> {
@@ -404,6 +483,27 @@ impl SchemaCatalog {
         self.function_by_name.get(name)?.get(args)
     }
 
+    pub fn get_connection_by_name(&self, connection_name: &str) -> Option<&Arc<ConnectionCatalog>> {
+        self.connection_by_name.get(connection_name)
+    }
+
+    /// get all sources referencing the connection
+    pub fn get_source_ids_by_connection(
+        &self,
+        connection_id: ConnectionId,
+    ) -> Option<Vec<SourceId>> {
+        self.connection_source_ref
+            .get(&connection_id)
+            .map(|c| c.to_owned())
+    }
+
+    /// get all sinks referencing the connection
+    pub fn get_sink_ids_by_connection(&self, connection_id: ConnectionId) -> Option<Vec<SinkId>> {
+        self.connection_sink_ref
+            .get(&connection_id)
+            .map(|s| s.to_owned())
+    }
+
     pub fn id(&self) -> SchemaId {
         self.id
     }
@@ -437,6 +537,10 @@ impl From<&PbSchema> for SchemaCatalog {
             view_by_id: HashMap::new(),
             function_by_name: HashMap::new(),
             function_by_id: HashMap::new(),
+            connection_by_name: HashMap::new(),
+            connection_by_id: HashMap::new(),
+            connection_source_ref: HashMap::new(),
+            connection_sink_ref: HashMap::new(),
         }
     }
 }

@@ -16,8 +16,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use pretty_bytes::converter::convert;
-use risingwave_batch::executor::{BatchManagerMetrics, BatchTaskMetrics};
+use risingwave_batch::monitor::{BatchExecutorMetrics, BatchManagerMetrics, BatchTaskMetrics};
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{
@@ -29,6 +28,7 @@ use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::pretty_bytes::convert;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
@@ -62,8 +62,7 @@ use tokio::task::JoinHandle;
 
 use crate::memory_management::memory_manager::GlobalMemoryManager;
 use crate::memory_management::{
-    memory_control_policy_from_config, reserve_memory_bytes, storage_memory_config,
-    MIN_COMPUTE_MEMORY_MB,
+    build_memory_control_policy, reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB,
 };
 use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
@@ -131,9 +130,18 @@ pub async fn compute_node_serve(
         storage_memory_bytes,
         &storage_memory_config,
         embedded_compactor_enabled,
+        reserved_memory_bytes,
     );
 
-    let memory_control_policy = memory_control_policy_from_config(&opts).unwrap();
+    // NOTE: Due to some limits, we use `compute_memory_bytes + storage_memory_bytes` as
+    // `total_compute_memory_bytes` for memory control. This is just a workaround for some
+    // memory control issues and should be modified as soon as we figure out a better solution.
+    //
+    // Related issues:
+    // - https://github.com/risingwavelabs/risingwave/issues/8696
+    // - https://github.com/risingwavelabs/risingwave/issues/8822
+    let total_memory_bytes = compute_memory_bytes + storage_memory_bytes;
+    let memory_control_policy = build_memory_control_policy(total_memory_bytes).unwrap();
 
     let storage_opts = Arc::new(StorageOpts::from((
         &config,
@@ -152,6 +160,7 @@ pub async fn compute_node_serve(
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
     let batch_task_metrics = Arc::new(BatchTaskMetrics::new(registry.clone()));
+    let batch_executor_metrics = Arc::new(BatchExecutorMetrics::new(registry.clone()));
     let batch_manager_metrics = BatchManagerMetrics::new(registry.clone());
     let exchange_srv_metrics = Arc::new(ExchangeServiceMetrics::new(registry.clone()));
 
@@ -203,7 +212,7 @@ pub async fn compute_node_serve(
         extra_info_sources.push(storage.sstable_object_id_manager().clone());
         if embedded_compactor_enabled {
             tracing::info!("start embedded compactor");
-            let read_memory_limiter = Arc::new(MemoryLimiter::new(
+            let output_memory_limiter = Arc::new(MemoryLimiter::new(
                 storage_opts.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
             ));
             let compactor_context = Arc::new(CompactorContext {
@@ -214,7 +223,7 @@ pub async fn compute_node_serve(
                 is_share_buffer_compact: false,
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
                 filter_key_extractor_manager: storage.filter_key_extractor_manager().clone(),
-                read_memory_limiter,
+                output_memory_limiter,
                 sstable_object_id_manager: storage.sstable_object_id_manager().clone(),
                 task_progress_manager: Default::default(),
                 compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(
@@ -275,15 +284,7 @@ pub async fn compute_node_serve(
     let batch_mgr_clone = batch_mgr.clone();
     let stream_mgr_clone = stream_mgr.clone();
 
-    // NOTE: Due to some limits, we use `total_memory_bytes` as `total_compute_memory_bytes` for
-    // memory control. This is just a workaround for some memory control issues and should be
-    // modified as soon as we figure out a better solution.
-    //
-    // Related issues:
-    // - https://github.com/risingwavelabs/risingwave/issues/8696
-    // - https://github.com/risingwavelabs/risingwave/issues/8822
     let memory_mgr = GlobalMemoryManager::new(
-        opts.total_memory_bytes,
         system_params.barrier_interval_ms(),
         streaming_metrics.clone(),
         memory_control_policy,
@@ -311,6 +312,7 @@ pub async fn compute_node_serve(
         worker_id,
         state_store.clone(),
         batch_task_metrics.clone(),
+        batch_executor_metrics.clone(),
         client_pool,
         dml_mgr.clone(),
         source_metrics.clone(),
@@ -373,7 +375,7 @@ pub async fn compute_node_serve(
     if config.server.telemetry_enabled && telemetry_env_enabled() {
         // if all configs are true, start reporting
         if telemetry_enabled {
-            telemetry_manager.start_telemetry_reporting();
+            telemetry_manager.start_telemetry_reporting().await;
         }
         // if config and env are true, starting watching
         sub_tasks.push(telemetry_manager.watch_params_change());
@@ -493,6 +495,7 @@ fn print_memory_config(
     storage_memory_bytes: usize,
     storage_memory_config: &StorageMemoryConfig,
     embedded_compactor_enabled: bool,
+    reserved_memory_bytes: usize,
 ) {
     info!("Memory outline: ");
     info!("> total_memory: {}", convert(cn_total_memory_bytes as _));
@@ -525,5 +528,9 @@ fn print_memory_config(
     info!(
         ">     compute_memory: {}",
         convert(compute_memory_bytes as _)
+    );
+    info!(
+        ">     reserved_memory: {}",
+        convert(reserved_memory_bytes as _)
     );
 }

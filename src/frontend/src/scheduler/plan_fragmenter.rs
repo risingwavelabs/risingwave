@@ -874,12 +874,12 @@ impl BatchPlanFragmenter {
         }
 
         if let Some(source_node) = node.as_batch_source() {
-            let source_catalog = source_node.logical().source_catalog();
+            let source_catalog = source_node.source_catalog();
             if let Some(source_catalog) = source_catalog {
                 let property = ConnectorProperties::extract(
                     source_catalog.properties.clone().into_iter().collect(),
                 )?;
-                let timestamp_bound = source_node.logical().kafka_timestamp_range_value();
+                let timestamp_bound = source_node.kafka_timestamp_range_value();
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
                     connector: property,
                     timebound: timestamp_bound,

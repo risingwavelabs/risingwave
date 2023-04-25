@@ -20,7 +20,7 @@ etcd-client = { version = "0.2.20", package = "madsim-etcd-client" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 glob = "0.3"
 itertools = "0.10"
-lru = { git = "https://github.com/risingwavelabs/lru-rs.git", branch = "evict_by_timestamp" }
+lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
 madsim = "0.2.21"
 paste = "1"
 pin-project = "1.0"
@@ -43,6 +43,6 @@ serde_json = "1.0.91"
 sqllogictest = "0.11.1"
 tempfile = "3"
 tokio = { version = "0.2.19", package = "madsim-tokio" }
-tokio-postgres = "0.7.7"
+tokio-postgres = "0.7"
 tracing = "0.1"
 tracing-subscriber = "0.3"

@@ -17,7 +17,7 @@ use std::sync::LazyLock;
 
 use risingwave_common::types::{DataType, DataTypeName};
 
-use crate::expr::AggKind;
+use crate::function::aggregate::AggKind;
 
 // Same as FuncSign in func.rs except this is for aggregate function
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
@@ -84,6 +84,9 @@ static AGG_FUNC_SIG_MAP: LazyLock<AggFuncSigMap> = LazyLock::new(|| {
     // Call infer_return_type to check the return type. If it throw error shows that the type is not
     // inferred.
     for agg in [
+        A::BitAnd,
+        A::BitOr,
+        A::BitXor,
         A::Sum,
         A::Min,
         A::Max,
@@ -92,7 +95,7 @@ static AGG_FUNC_SIG_MAP: LazyLock<AggFuncSigMap> = LazyLock::new(|| {
         A::ApproxCountDistinct,
     ] {
         for input in all_types {
-            if let Some(v) = infer_return_type(&agg, &[DataType::from(input)]) {
+            if let Some(v) = infer_return_type(agg, &[DataType::from(input)]) {
                 map.insert(agg, vec![input], DataTypeName::from(v));
             }
         }
@@ -113,20 +116,36 @@ pub fn agg_func_sigs() -> impl Iterator<Item = &'static AggFuncSig> {
 
 /// Infer the return type for the given agg call.
 /// Returns `None` if not supported or the arguments are invalid.
-pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Option<DataType> {
+pub fn infer_return_type(agg_kind: AggKind, inputs: &[DataType]) -> Option<DataType> {
     // The function signatures are aligned with postgres, see
     // https://www.postgresql.org/docs/current/functions-aggregate.html.
-    let return_type = match (&agg_kind, inputs) {
-        // Min, Max, FirstValue
-        (AggKind::Min | AggKind::Max | AggKind::FirstValue, [input]) => input.clone(),
-        (AggKind::Min | AggKind::Max | AggKind::FirstValue, _) => return None,
-
+    let return_type = match (agg_kind, inputs) {
+        // Min, Max, FirstValue, BitAnd, BitOr, BitXor
+        (
+            AggKind::Min
+            | AggKind::Max
+            | AggKind::FirstValue
+            | AggKind::BitAnd
+            | AggKind::BitOr
+            | AggKind::BitXor,
+            [input],
+        ) => input.clone(),
+        (
+            AggKind::Min
+            | AggKind::Max
+            | AggKind::FirstValue
+            | AggKind::BitAnd
+            | AggKind::BitOr
+            | AggKind::BitXor,
+            _,
+        ) => return None,
         // Avg
         (AggKind::Avg, [input]) => match input {
             DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Decimal => {
                 DataType::Decimal
             }
             DataType::Float32 | DataType::Float64 => DataType::Float64,
+            DataType::Int256 => DataType::Float64,
             DataType::Interval => DataType::Interval,
             _ => return None,
         },
@@ -156,6 +175,7 @@ pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Option<Data
                 DataType::Decimal
             }
             DataType::Float32 | DataType::Float64 => DataType::Float64,
+            DataType::Int256 => DataType::Float64,
             _ => return None,
         },
 

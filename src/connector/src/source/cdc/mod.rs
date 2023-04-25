@@ -27,6 +27,7 @@ pub use split::*;
 
 pub const MYSQL_CDC_CONNECTOR: &str = "mysql-cdc";
 pub const POSTGRES_CDC_CONNECTOR: &str = "postgres-cdc";
+pub const CITUS_CDC_CONNECTOR: &str = "citus-cdc";
 
 #[derive(Clone, Debug, Deserialize, Default)]
 pub struct CdcProperties {
@@ -44,11 +45,8 @@ pub struct CdcProperties {
 }
 
 impl CdcProperties {
-    pub fn source_type_enum(&self) -> anyhow::Result<SourceType> {
-        match self.source_type.as_str() {
-            "mysql" => Ok(SourceType::Mysql),
-            "postgres" => Ok(SourceType::Postgres),
-            _ => Err(anyhow!("unknown source type")),
-        }
+    pub fn get_source_type(&self) -> anyhow::Result<SourceType> {
+        SourceType::from_str_name(&self.source_type.to_ascii_uppercase())
+            .ok_or(anyhow!("unknown source type: {}", self.source_type))
     }
 }
