@@ -446,7 +446,6 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 AggKind::BitAnd | AggKind::BitOr => {
                     unimplemented!()
                 }
-                AggKind::Unspecified => unreachable!(),
             })
             .collect()
     }
@@ -657,7 +656,7 @@ impl PlanAggCall {
 
     pub fn to_protobuf(&self) -> PbAggCall {
         PbAggCall {
-            r#type: self.agg_kind.into(),
+            r#type: self.agg_kind.to_protobuf().into(),
             return_type: Some(self.return_type.to_protobuf()),
             args: self.inputs.iter().map(InputRef::to_proto).collect(),
             distinct: self.distinct,
@@ -686,7 +685,6 @@ impl PlanAggCall {
             AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp => {
                 panic!("Stddev/Var aggregation should have been rewritten to Sum, Count and Case")
             }
-            AggKind::Unspecified => panic!("Unspecified aggregation"),
         };
         PlanAggCall {
             agg_kind: total_agg_kind,

@@ -16,10 +16,11 @@
 
 use std::sync::Arc;
 
+use parse_display::{Display, FromStr};
 use risingwave_common::bail;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-pub use risingwave_pb::expr::agg_call::PbType as AggKind;
+use risingwave_pb::expr::agg_call::PbType;
 use risingwave_pb::expr::PbAggCall;
 
 use crate::expr::{build_from_prost, ExpressionRef};
@@ -47,7 +48,7 @@ pub struct AggCall {
 
 impl AggCall {
     pub fn from_protobuf(agg_call: &PbAggCall) -> Result<Self> {
-        let agg_kind = agg_call.get_type()?;
+        let agg_kind = AggKind::from_protobuf(agg_call.get_type()?)?;
         let args = match &agg_call.get_args()[..] {
             [] => AggArgs::None,
             [arg] if agg_kind != AggKind::StringAgg => {
@@ -83,6 +84,76 @@ impl AggCall {
             filter,
             distinct: agg_call.distinct,
         })
+    }
+}
+
+/// Kind of aggregation function
+#[derive(Debug, Display, FromStr, Copy, Clone, PartialEq, Eq, Hash)]
+#[display(style = "snake_case")]
+pub enum AggKind {
+    BitAnd,
+    BitOr,
+    BitXor,
+    Min,
+    Max,
+    Sum,
+    Sum0,
+    Count,
+    Avg,
+    StringAgg,
+    ApproxCountDistinct,
+    ArrayAgg,
+    FirstValue,
+    VarPop,
+    VarSamp,
+    StddevPop,
+    StddevSamp,
+}
+
+impl AggKind {
+    pub fn from_protobuf(pb_type: PbType) -> Result<Self> {
+        match pb_type {
+            PbType::BitAnd => Ok(AggKind::BitAnd),
+            PbType::BitOr => Ok(AggKind::BitOr),
+            PbType::BitXor => Ok(AggKind::BitXor),
+            PbType::Min => Ok(AggKind::Min),
+            PbType::Max => Ok(AggKind::Max),
+            PbType::Sum => Ok(AggKind::Sum),
+            PbType::Sum0 => Ok(AggKind::Sum0),
+            PbType::Avg => Ok(AggKind::Avg),
+            PbType::Count => Ok(AggKind::Count),
+            PbType::StringAgg => Ok(AggKind::StringAgg),
+            PbType::ApproxCountDistinct => Ok(AggKind::ApproxCountDistinct),
+            PbType::ArrayAgg => Ok(AggKind::ArrayAgg),
+            PbType::FirstValue => Ok(AggKind::FirstValue),
+            PbType::StddevPop => Ok(AggKind::StddevPop),
+            PbType::StddevSamp => Ok(AggKind::StddevSamp),
+            PbType::VarPop => Ok(AggKind::VarPop),
+            PbType::VarSamp => Ok(AggKind::VarSamp),
+            PbType::Unspecified => bail!("Unrecognized agg."),
+        }
+    }
+
+    pub fn to_protobuf(self) -> PbType {
+        match self {
+            Self::BitAnd => PbType::BitAnd,
+            Self::BitOr => PbType::BitOr,
+            Self::BitXor => PbType::BitXor,
+            Self::Min => PbType::Min,
+            Self::Max => PbType::Max,
+            Self::Sum => PbType::Sum,
+            Self::Sum0 => PbType::Sum0,
+            Self::Avg => PbType::Avg,
+            Self::Count => PbType::Count,
+            Self::StringAgg => PbType::StringAgg,
+            Self::ApproxCountDistinct => PbType::ApproxCountDistinct,
+            Self::ArrayAgg => PbType::ArrayAgg,
+            Self::FirstValue => PbType::FirstValue,
+            Self::StddevPop => PbType::StddevPop,
+            Self::StddevSamp => PbType::StddevSamp,
+            Self::VarPop => PbType::VarPop,
+            Self::VarSamp => PbType::VarSamp,
+        }
     }
 }
 

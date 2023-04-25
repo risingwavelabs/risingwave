@@ -483,7 +483,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 filter,
                 order_by,
             ))),
-            A::Unspecified => unreachable!(),
         }
     }
 }

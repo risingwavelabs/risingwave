@@ -296,7 +296,7 @@ impl FunctionAttr {
             #[ctor::ctor]
             fn #ctor_name() {
                 unsafe { crate::sig::agg::_register(#descriptor_type {
-                    func: risingwave_pb::expr::agg_call::PbType::#pb_type,
+                    func: crate::agg::AggKind::#pb_type,
                     inputs_type: &[#(#args),*],
                     ret_type: #ret,
                     build: #build_fn,

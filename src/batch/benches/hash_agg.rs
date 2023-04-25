@@ -34,7 +34,7 @@ fn create_agg_call(
     return_type: DataType,
 ) -> PbAggCall {
     PbAggCall {
-        r#type: agg_kind as i32,
+        r#type: agg_kind.to_protobuf() as i32,
         args: args
             .into_iter()
             .map(|col_idx| PbInputRef {

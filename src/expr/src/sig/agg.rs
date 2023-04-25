@@ -44,7 +44,7 @@ impl AggFuncSig {
     pub fn to_string_no_return(&self) -> String {
         format!(
             "{}({})->{:?}",
-            self.func.as_str_name(),
+            self.func,
             self.inputs_type.iter().map(|t| format!("{t:?}")).join(","),
             self.ret_type
         )
@@ -189,8 +189,6 @@ pub fn infer_return_type(agg_kind: AggKind, inputs: &[DataType]) -> Option<DataT
             datatype: Box::new(input.clone()),
         },
         (AggKind::ArrayAgg, _) => return None,
-
-        (AggKind::Unspecified, _) => return None,
     };
 
     Some(return_type)
