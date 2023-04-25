@@ -38,7 +38,7 @@ use crate::store::{ReadOptions, StateStoreRead};
 pub fn range_overlap<R, B>(
     search_key_range: &R,
     inclusive_start_key: &B,
-    inclusive_end_key: &B,
+    end_key: Bound<&B>,
 ) -> bool
 where
     R: RangeBounds<B>,
@@ -48,10 +48,12 @@ where
 
     //        RANGE
     // TABLE
-    let too_left = match start_bound {
-        Included(range_start) => range_start > inclusive_end_key,
-        Excluded(range_start) => range_start >= inclusive_end_key,
-        Unbounded => false,
+    let too_left = match (start_bound, end_key) {
+        (Included(range_start), Included(inclusive_end_key)) => range_start > inclusive_end_key,
+        (Included(range_start), Excluded(end_key))
+        | (Excluded(range_start), Included(end_key))
+        | (Excluded(range_start), Excluded(end_key)) => range_start >= end_key,
+        (Unbounded, _) | (_, Unbounded) => false,
     };
     // RANGE
     //        TABLE
@@ -103,11 +105,18 @@ where
     let (left, right) = bound_table_key_range(table_id, table_key_range);
     let left: Bound<UserKey<&[u8]>> = left.as_ref().map(|key| key.as_ref());
     let right: Bound<UserKey<&[u8]>> = right.as_ref().map(|key| key.as_ref());
-    range_overlap(&(left, right), &table_start, &table_end)
-        && info
-            .get_table_ids()
-            .binary_search(&table_id.table_id())
-            .is_ok()
+    range_overlap(
+        &(left, right),
+        &table_start,
+        if table_range.right_exclusive {
+            Bound::Excluded(&table_end)
+        } else {
+            Bound::Included(&table_end)
+        },
+    ) && info
+        .get_table_ids()
+        .binary_search(&table_id.table_id())
+        .is_ok()
 }
 
 /// Search the SST containing the specified key within a level, using binary search.

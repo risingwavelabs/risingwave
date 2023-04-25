@@ -1049,8 +1049,6 @@ mod impl_as_primitive {
 
     impl_as_primitive_for!(f32);
     impl_as_primitive_for!(f64);
-
-    impl_as_primitive_for!(crate::types::Decimal);
 }
 
 mod impl_from {
@@ -1114,12 +1112,6 @@ mod impl_from {
 impl From<i64> for OrderedFloat<f64> {
     fn from(n: i64) -> Self {
         AsPrimitive::<OrderedFloat<f64>>::as_(n)
-    }
-}
-
-impl From<crate::types::Decimal> for OrderedFloat<f64> {
-    fn from(n: crate::types::Decimal) -> Self {
-        n.to_f64().map_or(Self(f64::NAN), Self)
     }
 }
 

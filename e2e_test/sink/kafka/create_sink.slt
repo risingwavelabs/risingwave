@@ -10,6 +10,50 @@ create table t_kafka (
     v_timestamp timestamp
 );
 
+# Test create sink with connection
+# Create a mock connection
+statement ok
+create connection mock with (
+    type = 'privatelink',
+    provider = 'mock',
+);
+
+# Refer to a non-existant connection
+statement error
+create sink si_kafka_append_only_conn from t_kafka with (
+    connector = 'kafka',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    topic = 'test-rw-sink-append-only',
+    type = 'append-only',
+    force_append_only = 'true',
+    connection.name = 'nonexist',
+);
+
+# Create sink with connection
+statement ok
+create sink si_kafka_append_only_conn from t_kafka with (
+    connector = 'kafka',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    topic = 'test-rw-sink-append-only',
+    type = 'append-only',
+    force_append_only = 'true',
+    connection.name = 'mock',
+);
+
+# Try to drop connection mock, which is in use
+statement error
+drop connection mock;
+
+# Drop sink
+statement ok
+drop sink si_kafka_append_only_conn;
+
+# Drop connection
+statement ok
+drop connection mock;
+
+# Connection test clean-up finished
+
 statement error sink cannot be append-only
 create sink si_kafka_append_only from t_kafka with (
     connector = 'kafka',

@@ -102,10 +102,10 @@ static mut AGG_FUNC_SIG_MAP_INIT: Vec<AggFuncSig> = Vec::new();
 
 /// Infer the return type for the given agg call.
 /// Returns `None` if not supported or the arguments are invalid.
-pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Option<DataType> {
+pub fn infer_return_type(agg_kind: AggKind, inputs: &[DataType]) -> Option<DataType> {
     // The function signatures are aligned with postgres, see
     // https://www.postgresql.org/docs/current/functions-aggregate.html.
-    let return_type = match (&agg_kind, inputs) {
+    let return_type = match (agg_kind, inputs) {
         // Min, Max, FirstValue, BitAnd, BitOr, BitXor
         (
             AggKind::Min

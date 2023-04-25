@@ -132,6 +132,7 @@ impl SinkImpl {
         pk_indices: Vec<usize>,
         connector_params: ConnectorParams,
         sink_type: SinkType,
+        sink_id: u64,
     ) -> Result<Self> {
         Ok(match cfg {
             SinkConfig::Redis(cfg) => SinkImpl::Redis(Box::new(RedisSink::new(cfg, schema)?)),
@@ -152,12 +153,20 @@ impl SinkImpl {
                 if sink_type.is_append_only() {
                     // Append-only remote sink
                     SinkImpl::Remote(Box::new(
-                        RemoteSink::<true>::new(cfg, schema, pk_indices, connector_params).await?,
+                        RemoteSink::<true>::new(cfg, schema, pk_indices, connector_params, sink_id)
+                            .await?,
                     ))
                 } else {
                     // Upsert remote sink
                     SinkImpl::UpsertRemote(Box::new(
-                        RemoteSink::<false>::new(cfg, schema, pk_indices, connector_params).await?,
+                        RemoteSink::<false>::new(
+                            cfg,
+                            schema,
+                            pk_indices,
+                            connector_params,
+                            sink_id,
+                        )
+                        .await?,
                     ))
                 }
             }

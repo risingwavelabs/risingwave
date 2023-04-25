@@ -15,7 +15,10 @@
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use futures::executor::block_on;
 use futures::StreamExt;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::field_generator::VarcharProperty;
+use risingwave_common::test_prelude::StreamChunkTestExt;
 use risingwave_common::types::DataType;
 use risingwave_expr::agg::{AggArgs, AggCall, AggKind};
 use risingwave_expr::expr::*;
@@ -173,7 +176,12 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
 
     let num_of_chunks = 1000;
     let chunk_size = 1024;
-    let chunks = gen_data(num_of_chunks, chunk_size, &input_data_types);
+    let chunks = StreamChunk::gen_stream_chunks(
+        num_of_chunks,
+        chunk_size,
+        &input_data_types,
+        &VarcharProperty::RandomFixedLength(None),
+    );
 
     // ---- Create MockSourceExecutor ----
     let (mut tx, source) = MockSource::channel(schema, PkIndices::new());

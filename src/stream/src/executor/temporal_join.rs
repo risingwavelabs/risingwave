@@ -229,6 +229,8 @@ impl<S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<S, T> {
         let mut prev_epoch = None;
         #[for_await]
         for msg in align_input(self.left, self.right) {
+            self.right_table.cache.evict();
+
             match msg? {
                 InternalMessage::Chunk(chunk) => {
                     let mut builder = StreamChunkBuilder::new(
@@ -276,7 +278,6 @@ impl<S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<S, T> {
                     }
                 }
                 InternalMessage::Barrier(updates, barrier) => {
-                    self.right_table.cache.evict();
                     if let Some(vnodes) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         let prev_vnodes =
                             self.right_table.source.update_vnode_bitmap(vnodes.clone());

@@ -251,9 +251,9 @@ mod tests {
             Arc::new(input.into()),
             agg_type,
             return_type,
-            ArrayBuilderImpl::List(ListArrayBuilder::with_meta(
+            ArrayBuilderImpl::List(ListArrayBuilder::with_type(
                 0,
-                ArrayMeta::List {
+                DataType::List {
                     datatype: Box::new(DataType::Int32),
                 },
             )),

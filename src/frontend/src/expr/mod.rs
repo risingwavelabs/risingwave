@@ -66,7 +66,7 @@ pub use type_inference::{
 };
 pub use user_defined_function::UserDefinedFunction;
 pub use utils::*;
-pub use window_function::{WindowFunction, WindowFunctionType};
+pub use window_function::WindowFunction;
 
 /// the trait of bound expressions
 pub trait Expr: Into<ExprImpl> {

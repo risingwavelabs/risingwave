@@ -98,6 +98,9 @@ type StreamingMinAgg<S> = StreamingFoldAgg<S, S, Minimizable<<S as Array>::Owned
 /// `StreamingMaxAgg` get maximum data of the same type.
 type StreamingMaxAgg<S> = StreamingFoldAgg<S, S, Maximizable<<S as Array>::OwnedItem>>;
 
+/// `StreamingBitXor`
+type StreamingBitXorAgg<S> = StreamingFoldAgg<S, S, BitXorable<<S as Array>::OwnedItem>>;
+
 /// [postgresql specification of aggregate functions](https://www.postgresql.org/docs/13/functions-aggregate.html)
 /// Most of the general-purpose aggregate functions have one input except for:
 /// 1. `count(*) -> bigint`. The input type of count(*)
@@ -226,6 +229,10 @@ pub fn create_streaming_agg_impl(
                     (Max, timestamptz, timestamptz, StreamingMaxAgg::<I64Array>),
                     (Max, varchar, varchar, StreamingMaxAgg::<Utf8Array>),
                     (Max, bytea, bytea, StreamingMaxAgg::<BytesArray>),
+                    // BitXor
+                    (BitXor, int16, int16, StreamingBitXorAgg::<I16Array>),
+                    (BitXor, int32, int32, StreamingBitXorAgg::<I32Array>),
+                    (BitXor, int64, int64, StreamingBitXorAgg::<I64Array>),
                 ]
             )
         }

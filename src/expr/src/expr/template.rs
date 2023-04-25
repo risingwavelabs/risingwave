@@ -61,7 +61,7 @@ macro_rules! gen_eval {
                     // Otherwise, fallback to array computation.
                     ($([<val_ $arg:lower>], )*) => {
                         let bitmap = data_chunk.visibility();
-                        let mut output_array = <$OA as Array>::Builder::with_meta(data_chunk.capacity(), (&self.return_type).into());
+                        let mut output_array = <$OA as Array>::Builder::with_type(data_chunk.capacity(), self.return_type.clone());
                         let array = match bitmap {
                             Some(bitmap) => {
                                 // TODO: use `izip` here.
@@ -415,7 +415,7 @@ where
     async fn eval(&self, data_chunk: &DataChunk) -> Result<ArrayRef> {
         let bitmap = data_chunk.visibility();
         let mut output_array =
-            OA::Builder::with_meta(data_chunk.capacity(), (&self.return_type).into());
+            OA::Builder::with_type(data_chunk.capacity(), self.return_type.clone());
 
         match bitmap {
             Some(bitmap) => {

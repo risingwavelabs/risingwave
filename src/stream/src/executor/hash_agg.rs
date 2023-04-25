@@ -566,6 +566,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         #[for_await]
         for msg in input {
             let msg = msg?;
+            vars.agg_group_cache.evict_except_cur_epoch();
             match msg {
                 Message::Watermark(watermark) => {
                     let group_key_seq = group_key_invert_idx[watermark.col_idx];

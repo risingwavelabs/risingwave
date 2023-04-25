@@ -36,6 +36,7 @@ mod error;
 pub mod exchange_source;
 pub mod execution;
 pub mod executor;
+pub mod monitor;
 pub mod rpc;
 pub mod task;
 

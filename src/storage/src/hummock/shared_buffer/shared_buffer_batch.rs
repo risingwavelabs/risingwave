@@ -16,12 +16,12 @@ use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::future::Future;
 use std::marker::PhantomData;
-use std::ops::{Deref, RangeBounds};
+use std::ops::{Bound, Deref, RangeBounds};
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, LazyLock};
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
@@ -34,12 +34,20 @@ use crate::hummock::iterator::{
 use crate::hummock::store::memtable::ImmId;
 use crate::hummock::utils::{range_overlap, MemoryTracker};
 use crate::hummock::value::HummockValue;
-use crate::hummock::{
-    create_monotonic_events, create_tombstones_to_represent_monotonic_deletes,
-    DeleteRangeTombstone, HummockEpoch, HummockResult, MonotonicDeleteEvent,
-};
+use crate::hummock::{HummockEpoch, HummockResult, MonotonicDeleteEvent};
 use crate::storage_value::StorageValue;
 use crate::store::ReadOptions;
+
+fn whether_update_largest_key<P: AsRef<[u8]>, Q: AsRef<[u8]>>(
+    current_largest_key: &Bound<P>,
+    key_to_update: &Q,
+) -> bool {
+    match current_largest_key {
+        Bound::Excluded(x) => x.as_ref() <= key_to_update.as_ref(),
+        Bound::Included(x) => x.as_ref() < key_to_update.as_ref(),
+        Bound::Unbounded => false,
+    }
+}
 
 /// The key is `table_key`, which does not contain table id or epoch.
 pub(crate) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
@@ -50,6 +58,14 @@ pub type SharedBufferBatchId = u64;
 /// and sort them in descending order, aka newest to oldest.
 pub type SharedBufferVersionedEntry = (Bytes, Vec<(HummockEpoch, HummockValue<Bytes>)>);
 
+struct SharedBufferDeleteRangeMeta {
+    // smallest/largest keys below are only inferred from tombstones.
+    smallest_empty: bool,
+    smallest_table_key: BytesMut,
+    largest_table_key: Bound<Bytes>,
+    delete_ranges: Vec<(Bytes, Bytes)>,
+}
+
 #[derive(Debug)]
 pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferVersionedEntry>,
@@ -59,8 +75,8 @@ pub(crate) struct SharedBufferBatchInner {
     /// The epochs of the data in batch, sorted in ascending order (old to new)
     epochs: Vec<HummockEpoch>,
     monotonic_tombstone_events: Vec<MonotonicDeleteEvent>,
-    largest_table_key: Vec<u8>,
-    smallest_table_key: Vec<u8>,
+    largest_table_key: Bound<Bytes>,
+    smallest_table_key: Bytes,
     kv_count: usize,
     /// Total size of all key-value items (excluding the `epoch` of value versions)
     size: usize,
@@ -72,23 +88,27 @@ pub(crate) struct SharedBufferBatchInner {
 
 impl SharedBufferBatchInner {
     pub(crate) fn new(
+        table_id: TableId,
         epoch: HummockEpoch,
         payload: Vec<SharedBufferItem>,
-        range_tombstone_list: Vec<DeleteRangeTombstone>,
+        delete_ranges: Vec<(Bytes, Bytes)>,
         size: usize,
         _tracker: Option<MemoryTracker>,
     ) -> Self {
-        let (smallest_empty, mut smallest_table_key, mut largest_table_key, range_tombstones) =
-            Self::get_table_key_ends(range_tombstone_list);
+        let SharedBufferDeleteRangeMeta {
+            smallest_empty,
+            mut smallest_table_key,
+            mut largest_table_key,
+            delete_ranges,
+        } = Self::get_table_key_ends(delete_ranges);
 
         if let Some(item) = payload.last() {
-            if item.0.gt(&largest_table_key) {
-                largest_table_key.clear();
-                largest_table_key.extend_from_slice(item.0.as_ref());
+            if whether_update_largest_key(&largest_table_key, &item.0) {
+                largest_table_key = Bound::Included(item.0.clone());
             }
         }
         if let Some(item) = payload.first() {
-            if smallest_empty || item.0.lt(&smallest_table_key) {
+            if smallest_empty || item.0.lt(&smallest_table_key.as_ref()) {
                 smallest_table_key.clear();
                 smallest_table_key.extend_from_slice(item.0.as_ref());
             }
@@ -99,14 +119,16 @@ impl SharedBufferBatchInner {
             .map(|(k, v)| (k, vec![(epoch, v)]))
             .collect_vec();
 
-        let mut monotonic_tombstone_events = Vec::with_capacity(range_tombstones.len() * 2);
-        for range_tombstone in &range_tombstones {
+        let mut monotonic_tombstone_events = Vec::with_capacity(delete_ranges.len() * 2);
+        for (start_key, end_key) in delete_ranges {
             monotonic_tombstone_events.push(MonotonicDeleteEvent {
-                event_key: range_tombstone.start_user_key.clone(),
-                new_epoch: range_tombstone.sequence,
+                event_key: UserKey::new(table_id, TableKey(start_key.to_vec())),
+                is_exclusive: false,
+                new_epoch: epoch,
             });
             monotonic_tombstone_events.push(MonotonicDeleteEvent {
-                event_key: range_tombstone.end_user_key.clone(),
+                event_key: UserKey::new(table_id, TableKey(end_key.to_vec())),
+                is_exclusive: false,
                 new_epoch: HummockEpoch::MAX,
             });
         }
@@ -120,7 +142,7 @@ impl SharedBufferBatchInner {
             kv_count,
             size,
             largest_table_key,
-            smallest_table_key,
+            smallest_table_key: smallest_table_key.freeze(),
             _tracker,
             batch_id,
         }
@@ -130,11 +152,11 @@ impl SharedBufferBatchInner {
     pub(crate) fn new_with_multi_epoch_batches(
         epochs: Vec<HummockEpoch>,
         payload: Vec<SharedBufferVersionedEntry>,
-        smallest_table_key: Vec<u8>,
-        largest_table_key: Vec<u8>,
+        smallest_table_key: Bytes,
+        largest_table_key: Bound<Bytes>,
         num_items: usize,
         imm_ids: Vec<ImmId>,
-        range_tombstone_list: Vec<DeleteRangeTombstone>,
+        monotonic_tombstone_events: Vec<MonotonicDeleteEvent>,
         size: usize,
         tracker: Option<MemoryTracker>,
     ) -> Self {
@@ -144,7 +166,6 @@ impl SharedBufferBatchInner {
 
         let max_imm_id = *imm_ids.iter().max().unwrap();
 
-        let monotonic_tombstone_events = create_monotonic_events(&range_tombstone_list);
         Self {
             payload,
             epochs,
@@ -160,58 +181,56 @@ impl SharedBufferBatchInner {
     }
 
     fn get_table_key_ends(
-        mut range_tombstone_list: Vec<DeleteRangeTombstone>,
-    ) -> (bool, Vec<u8>, Vec<u8>, Vec<DeleteRangeTombstone>) {
-        let mut largest_table_key = vec![];
-        let mut smallest_table_key = vec![];
+        mut range_tombstone_list: Vec<(Bytes, Bytes)>,
+    ) -> SharedBufferDeleteRangeMeta {
+        let mut largest_table_key = Bound::Included(Bytes::new());
+        let mut smallest_table_key = BytesMut::new();
         let mut smallest_empty = true;
         if !range_tombstone_list.is_empty() {
-            range_tombstone_list.sort();
-            let mut range_tombstones: Vec<DeleteRangeTombstone> = vec![];
-            for tombstone in range_tombstone_list {
-                if tombstone.start_user_key.ge(&tombstone.end_user_key) {
+            range_tombstone_list.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)));
+            let mut range_tombstones: Vec<(Bytes, Bytes)> = vec![];
+            for (start_table_key, end_table_key) in range_tombstone_list {
+                if start_table_key.ge(&end_table_key) {
                     continue;
                 }
-                // Although `end_user_key` of tombstone is exclusive, we still use it as a boundary
-                // of `SharedBufferBatch` because it just expands an useless query
-                // and does not affect correctness.
-                if largest_table_key.lt(&tombstone.end_user_key.table_key.0) {
-                    largest_table_key.clear();
-                    largest_table_key.extend_from_slice(&tombstone.end_user_key.table_key.0);
+                // TODO: check whether end-table-key is ubounded
+                if whether_update_largest_key(&largest_table_key, &end_table_key) {
+                    largest_table_key = Bound::Excluded(end_table_key.clone());
                 }
-                if smallest_empty || smallest_table_key.gt(&tombstone.start_user_key.table_key.0) {
+                if smallest_empty || smallest_table_key.as_ref().gt(start_table_key.as_ref()) {
                     smallest_table_key.clear();
-                    smallest_table_key.extend_from_slice(&tombstone.start_user_key.table_key.0);
+                    smallest_table_key.extend_from_slice(&start_table_key);
                     smallest_empty = false;
                 }
                 if let Some(last) = range_tombstones.last_mut() {
-                    if last.end_user_key.ge(&tombstone.start_user_key) {
-                        if last.end_user_key.lt(&tombstone.end_user_key) {
-                            last.end_user_key = tombstone.end_user_key;
+                    if last.1.ge(&start_table_key) {
+                        if last.1.lt(&end_table_key) {
+                            last.1 = end_table_key;
                         }
                         continue;
                     }
                 }
-                range_tombstones.push(tombstone);
+                range_tombstones.push((start_table_key, end_table_key));
             }
             range_tombstone_list = range_tombstones;
         }
-        (
+        SharedBufferDeleteRangeMeta {
             smallest_empty,
             smallest_table_key,
             largest_table_key,
-            range_tombstone_list,
-        )
+            delete_ranges: range_tombstone_list,
+        }
     }
 
-    // If the key is deleted by a epoch greater than the read epoch, return None
+    /// Return `None` if cannot find a visible version
+    /// Return `HummockValue::Delete` if the key has been deleted by some epoch <= `read_epoch`
     fn get_value(
         &self,
         table_id: TableId,
         table_key: TableKey<&[u8]>,
         read_epoch: HummockEpoch,
         read_options: &ReadOptions,
-    ) -> Option<HummockValue<Bytes>> {
+    ) -> Option<(HummockValue<Bytes>, HummockEpoch)> {
         // Perform binary search on table key to find the corresponding entry
         if let Ok(i) = self.payload.binary_search_by(|m| (m.0[..]).cmp(*table_key)) {
             let item = &self.payload[i];
@@ -222,23 +241,26 @@ impl SharedBufferBatchInner {
                 if read_epoch < *e {
                     continue;
                 }
-                return Some(v.clone());
+                return Some((v.clone(), *e));
             }
             // cannot find a visible version
         }
 
-        if !read_options.ignore_range_tombstone
-            && self.get_min_delete_range_epoch(&UserKey::new(table_id, table_key)) <= read_epoch
-        {
-            Some(HummockValue::Delete)
+        if !read_options.ignore_range_tombstone {
+            let delete_epoch = self.get_min_delete_range_epoch(UserKey::new(table_id, table_key));
+            if delete_epoch <= read_epoch {
+                Some((HummockValue::Delete, delete_epoch))
+            } else {
+                None
+            }
         } else {
             None
         }
     }
 
-    fn get_min_delete_range_epoch(&self, query_user_key: &UserKey<&[u8]>) -> HummockEpoch {
+    fn get_min_delete_range_epoch(&self, query_user_key: UserKey<&[u8]>) -> HummockEpoch {
         let idx = self.monotonic_tombstone_events.partition_point(
-            |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(query_user_key),
+            |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(&query_user_key),
         );
         if idx == 0 {
             HummockEpoch::MAX
@@ -283,6 +305,7 @@ impl SharedBufferBatch {
 
         Self {
             inner: Arc::new(SharedBufferBatchInner::new(
+                table_id,
                 epoch,
                 sorted_items,
                 vec![],
@@ -326,7 +349,7 @@ impl SharedBufferBatch {
             && range_overlap(
                 &(left, right),
                 &self.start_table_key(),
-                &self.end_table_key(),
+                self.end_table_key().as_ref(),
             )
     }
 
@@ -355,19 +378,17 @@ impl SharedBufferBatch {
         self.inner.kv_count
     }
 
-    /// Return `None` if the key doesn't exist
-    /// Return `HummockValue::Delete` if the key has been deleted by some epoch >= `read_epoch`
     pub fn get(
         &self,
         table_key: TableKey<&[u8]>,
         read_epoch: HummockEpoch,
         read_options: &ReadOptions,
-    ) -> Option<HummockValue<Bytes>> {
+    ) -> Option<(HummockValue<Bytes>, HummockEpoch)> {
         self.inner
             .get_value(self.table_id, table_key, read_epoch, read_options)
     }
 
-    pub fn get_min_delete_range_epoch(&self, user_key: &UserKey<&[u8]>) -> HummockEpoch {
+    pub fn get_min_delete_range_epoch(&self, user_key: UserKey<&[u8]>) -> HummockEpoch {
         self.inner.get_min_delete_range_epoch(user_key)
     }
 
@@ -424,17 +445,20 @@ impl SharedBufferBatch {
     }
 
     #[inline(always)]
-    pub fn raw_smallest_key(&self) -> &Vec<u8> {
+    pub fn raw_smallest_key(&self) -> &Bytes {
         &self.inner.smallest_table_key
     }
 
     #[inline(always)]
-    pub fn end_table_key(&self) -> TableKey<&[u8]> {
-        TableKey(&self.inner.largest_table_key)
+    pub fn end_table_key(&self) -> Bound<TableKey<&[u8]>> {
+        self.inner
+            .largest_table_key
+            .as_ref()
+            .map(|largest_key| TableKey(largest_key.as_ref()))
     }
 
     #[inline(always)]
-    pub fn raw_largest_key(&self) -> &Vec<u8> {
+    pub fn raw_largest_key(&self) -> &Bound<Bytes> {
         &self.inner.largest_table_key
     }
 
@@ -447,12 +471,6 @@ impl SharedBufferBatch {
     #[inline(always)]
     pub fn has_range_tombstone(&self) -> bool {
         !self.inner.monotonic_tombstone_events.is_empty()
-    }
-
-    /// return inclusive right endpoint, which means that all data in this batch should be smaller
-    /// or equal than this key.
-    pub fn end_user_key(&self) -> UserKey<&[u8]> {
-        UserKey::new(self.table_id, self.end_table_key())
     }
 
     pub fn size(&self) -> usize {
@@ -485,25 +503,11 @@ impl SharedBufferBatch {
         instance_id: Option<LocalInstanceId>,
         tracker: Option<MemoryTracker>,
     ) -> Self {
-        let delete_range_tombstones = delete_ranges
-            .into_iter()
-            .map(|(start_table_key, end_table_key)| {
-                DeleteRangeTombstone::new(
-                    table_id,
-                    start_table_key.to_vec(),
-                    end_table_key.to_vec(),
-                    epoch,
-                )
-            })
-            .collect_vec();
-        #[cfg(test)]
-        {
-            Self::check_tombstone_prefix(table_id, &delete_range_tombstones);
-        }
         let inner = SharedBufferBatchInner::new(
+            table_id,
             epoch,
             sorted_items,
-            delete_range_tombstones,
+            delete_ranges,
             size,
             tracker,
         );
@@ -514,22 +518,8 @@ impl SharedBufferBatch {
         }
     }
 
-    pub fn get_delete_range_tombstones(&self) -> Vec<DeleteRangeTombstone> {
-        create_tombstones_to_represent_monotonic_deletes(&self.inner.monotonic_tombstone_events)
-    }
-
-    #[cfg(test)]
-    fn check_tombstone_prefix(table_id: TableId, tombstones: &[DeleteRangeTombstone]) {
-        for tombstone in tombstones {
-            assert_eq!(
-                tombstone.start_user_key.table_id, table_id,
-                "delete range tombstone in a shared buffer batch must begin with the same table id"
-            );
-            assert_eq!(
-                tombstone.end_user_key.table_id, table_id,
-                "delete range tombstone in a shared buffer batch must begin with the same table id"
-            );
-        }
+    pub fn get_delete_range_tombstones(&self) -> Vec<MonotonicDeleteEvent> {
+        self.inner.monotonic_tombstone_events.clone()
     }
 }
 
@@ -778,6 +768,7 @@ impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
 mod tests {
     use std::ops::Bound::{Excluded, Included};
 
+    use risingwave_common::must_match;
     use risingwave_hummock_sdk::key::map_table_key_range;
 
     use super::*;
@@ -815,15 +806,18 @@ mod tests {
             shared_buffer_items[0].0
         );
         assert_eq!(
-            *shared_buffer_batch.end_table_key(),
+            must_match!(shared_buffer_batch.end_table_key(), Bound::Included(table_key) => *table_key),
             shared_buffer_items[2].0
         );
 
         // Point lookup
         for (k, v) in &shared_buffer_items {
             assert_eq!(
-                shared_buffer_batch.get(TableKey(k.as_slice()), epoch, &ReadOptions::default()),
-                Some(v.clone())
+                shared_buffer_batch
+                    .get(TableKey(k.as_slice()), epoch, &ReadOptions::default())
+                    .unwrap()
+                    .0,
+                v.clone()
             );
         }
         assert_eq!(
@@ -883,7 +877,10 @@ mod tests {
             None,
         );
         assert_eq!(batch.start_table_key().as_ref(), "a".as_bytes());
-        assert_eq!(batch.end_table_key().as_ref(), "d".as_bytes());
+        assert_eq!(
+            must_match!(batch.end_table_key(), Bound::Excluded(table_key) => *table_key),
+            "d".as_bytes()
+        );
     }
 
     #[tokio::test]
@@ -1046,22 +1043,22 @@ mod tests {
         assert_eq!(
             epoch,
             shared_buffer_batch
-                .get_min_delete_range_epoch(&UserKey::new(Default::default(), TableKey(b"aaa"),))
+                .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"aaa"),))
         );
         assert_eq!(
             HummockEpoch::MAX,
             shared_buffer_batch
-                .get_min_delete_range_epoch(&UserKey::new(Default::default(), TableKey(b"bbb"),))
+                .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"bbb"),))
         );
         assert_eq!(
             epoch,
             shared_buffer_batch
-                .get_min_delete_range_epoch(&UserKey::new(Default::default(), TableKey(b"ddd"),))
+                .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"ddd"),))
         );
         assert_eq!(
             HummockEpoch::MAX,
             shared_buffer_batch
-                .get_min_delete_range_epoch(&UserKey::new(Default::default(), TableKey(b"eee"),))
+                .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"eee"),))
         );
     }
 
@@ -1201,12 +1198,15 @@ mod tests {
         for (i, items) in batch_items.iter().enumerate() {
             for (key, value) in items {
                 assert_eq!(
-                    merged_imm.get(
-                        TableKey(key.as_slice()),
-                        i as u64 + 1,
-                        &ReadOptions::default()
-                    ),
-                    Some(value.clone()),
+                    merged_imm
+                        .get(
+                            TableKey(key.as_slice()),
+                            i as u64 + 1,
+                            &ReadOptions::default()
+                        )
+                        .unwrap()
+                        .0,
+                    value.clone(),
                     "epoch: {}, key: {:?}",
                     i + 1,
                     String::from_utf8(key.clone())
@@ -1365,49 +1365,67 @@ mod tests {
 
         assert_eq!(
             1,
-            merged_imm.get_min_delete_range_epoch(&UserKey::new(table_id, TableKey(b"111")))
+            merged_imm.get_min_delete_range_epoch(UserKey::new(table_id, TableKey(b"111")))
         );
         assert_eq!(
             1,
-            merged_imm.get_min_delete_range_epoch(&UserKey::new(table_id, TableKey(b"555")))
+            merged_imm.get_min_delete_range_epoch(UserKey::new(table_id, TableKey(b"555")))
         );
         assert_eq!(
             2,
-            merged_imm.get_min_delete_range_epoch(&UserKey::new(table_id, TableKey(b"888")))
+            merged_imm.get_min_delete_range_epoch(UserKey::new(table_id, TableKey(b"888")))
         );
 
         assert_eq!(
-            Some(HummockValue::put(Bytes::from("value12"))),
-            merged_imm.get(TableKey(b"111"), 2, &ReadOptions::default())
+            HummockValue::put(Bytes::from("value12")),
+            merged_imm
+                .get(TableKey(b"111"), 2, &ReadOptions::default())
+                .unwrap()
+                .0
         );
 
         // 555 is deleted in epoch=1
         assert_eq!(
-            Some(HummockValue::Delete),
-            merged_imm.get(TableKey(b"555"), 1, &ReadOptions::default())
+            HummockValue::Delete,
+            merged_imm
+                .get(TableKey(b"555"), 1, &ReadOptions::default())
+                .unwrap()
+                .0
         );
 
         // 555 is inserted again in epoch=2
         assert_eq!(
-            Some(HummockValue::put(Bytes::from("value52"))),
-            merged_imm.get(TableKey(b"555"), 2, &ReadOptions::default())
+            HummockValue::put(Bytes::from("value52")),
+            merged_imm
+                .get(TableKey(b"555"), 2, &ReadOptions::default())
+                .unwrap()
+                .0
         );
 
         // "666" is deleted in epoch=1 and isn't inserted in later epochs
         assert_eq!(
-            Some(HummockValue::Delete),
-            merged_imm.get(TableKey(b"666"), 2, &ReadOptions::default())
+            HummockValue::Delete,
+            merged_imm
+                .get(TableKey(b"666"), 2, &ReadOptions::default())
+                .unwrap()
+                .0
         );
         // "888" is deleted in epoch=2
         assert_eq!(
-            Some(HummockValue::Delete),
-            merged_imm.get(TableKey(b"888"), 2, &ReadOptions::default())
+            HummockValue::Delete,
+            merged_imm
+                .get(TableKey(b"888"), 2, &ReadOptions::default())
+                .unwrap()
+                .0
         );
 
         // 888 exists in the snapshot of epoch=1
         assert_eq!(
-            Some(HummockValue::put(Bytes::from("value8"))),
-            merged_imm.get(TableKey(b"888"), 1, &ReadOptions::default())
+            HummockValue::put(Bytes::from("value8")),
+            merged_imm
+                .get(TableKey(b"888"), 1, &ReadOptions::default())
+                .unwrap()
+                .0
         );
     }
 }
