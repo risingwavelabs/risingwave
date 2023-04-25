@@ -286,6 +286,28 @@ profile:
       - use: frontend
       - use: compactor
 
+  ci-gen-cpu-flamegraph:
+    steps:
+      # NOTE(kwannoel): We do not use aws-s3 here, to avoid
+      # contention over s3 bucket when multiple benchmarks at run at once.
+      - use: minio
+      - use: etcd
+      - use: meta-node
+      - use: compute-node
+        parallelism: 8
+      - use: frontend
+      - use: compactor
+      - use: prometheus
+      - use: grafana
+      # Do not use kafka and zookeeper here, we will spawn it separately,
+      # so we don't have to re-generate data each time.
+      # - use: zookeeper
+      #   persist-data: true
+      # RW will still be ale to talk to it.
+      # - use: kafka
+      #   port: 9092
+      #   persist-data: true
+
   ######################################
   ### Configurations used in Compose ###
   ######################################

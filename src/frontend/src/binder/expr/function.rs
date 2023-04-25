@@ -179,7 +179,7 @@ impl Binder {
                 let mut clause = Some(Clause::Filter);
                 std::mem::swap(&mut self.context.clause, &mut clause);
                 let expr = self
-                    .bind_expr(*filter)
+                    .bind_expr_inner(*filter)
                     .and_then(|expr| expr.enforce_bool_clause("FILTER"))?;
                 self.context.clause = clause;
                 if expr.has_subquery() {
@@ -240,7 +240,7 @@ impl Binder {
         self.ensure_window_function_allowed()?;
         let partition_by = partition_by
             .into_iter()
-            .map(|arg| self.bind_expr(arg))
+            .map(|arg| self.bind_expr_inner(arg))
             .try_collect()?;
         let order_by = OrderBy::new(
             order_by
@@ -793,7 +793,7 @@ impl Binder {
         arg_expr: FunctionArgExpr,
     ) -> Result<Vec<ExprImpl>> {
         match arg_expr {
-            FunctionArgExpr::Expr(expr) => Ok(vec![self.bind_expr(expr)?]),
+            FunctionArgExpr::Expr(expr) => Ok(vec![self.bind_expr_inner(expr)?]),
             FunctionArgExpr::QualifiedWildcard(_) => todo!(),
             FunctionArgExpr::ExprQualifiedWildcard(_, _) => todo!(),
             FunctionArgExpr::Wildcard => Ok(vec![]),
