@@ -17,6 +17,7 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::Result;
+use risingwave_common::types::DataType;
 
 use super::{
     gen_filter_and_pushdown, generic, BatchProjectSet, ColPrunable, ExprRewritable, LogicalProject,
@@ -30,7 +31,7 @@ use crate::optimizer::plan_node::{
     CollectInputRef, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
     ToStreamContext,
 };
-use crate::utils::{ColIndexMapping, Condition};
+use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// `LogicalProjectSet` projects one row multiple times according to `select_list`.
 ///
@@ -304,8 +305,34 @@ impl PredicatePushdown for LogicalProjectSet {
         predicate: Condition,
         ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        // TODO: predicate pushdown https://github.com/risingwavelabs/risingwave/issues/8591
-        gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx)
+        // convert the predicate to one that references the child of the project
+        let mut subst = Substitute {
+            mapping: {
+                let mut output_list = self.select_list().clone();
+                output_list.insert(
+                    0,
+                    ExprImpl::InputRef(Box::new(InputRef {
+                        index: 0,
+                        data_type: DataType::Int64,
+                    })),
+                );
+                output_list
+            },
+        };
+
+        let remain_mask = {
+            let mut remain_mask = FixedBitSet::with_capacity(self.select_list().len() + 1);
+            remain_mask.set(0, true);
+            self.select_list()
+                .iter()
+                .enumerate()
+                .for_each(|(i, e)| remain_mask.set(i + 1, e.is_impure() || e.has_table_function()));
+            remain_mask
+        };
+        let (remained_cond, pushed_cond) = predicate.split_disjoint(&remain_mask);
+        let pushed_cond = pushed_cond.rewrite_expr(&mut subst);
+
+        gen_filter_and_pushdown(self, remained_cond, pushed_cond, ctx)
     }
 }
 
