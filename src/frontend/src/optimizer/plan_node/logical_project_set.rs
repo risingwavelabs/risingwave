@@ -263,7 +263,7 @@ impl ColPrunable for LogicalProjectSet {
         } else {
             // projected_row_id column is not needed so we did a projection to remove it
             let mut new_output_cols = Vec::from(required_cols);
-            if required_cols.first() != Some(&0) {
+            if !required_cols.contains(&0) {
                 new_output_cols.insert(0, 0);
             }
             let mapping =
