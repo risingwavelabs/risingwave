@@ -280,32 +280,51 @@ impl DebeziumMongoJsonParser {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::array::Op;
+    use risingwave_common::catalog::ColumnId;
+    use risingwave_common::row::Row;
+    use risingwave_common::types::ToOwnedDatum;
+
     use super::*;
+    use crate::parser::SourceStreamChunkBuilder;
     #[test]
     fn test_parse_bson_value_id_int() {
-        let pld = json!({
-            "_id":{"$numberInt":"2345"}
-        });
-        let (a, b) = parse_bson_value(&DataType::Int32, &DataType::Jsonb, &pld).unwrap();
+        let data = r#"{"_id":{"$numberInt":"2345"}}"#;
+        let pld: serde_json::Value = serde_json::from_str(&data).unwrap();
+        let (a, b) = parse_bson_value(
+            &DataType::Int32,
+            &DataType::Jsonb,
+            &simd_json::value::borrowed::Value::String(data.into()),
+        )
+        .unwrap();
         assert_eq!(a, Some(ScalarImpl::Int32(2345)));
         assert_eq!(b, Some(ScalarImpl::Jsonb(pld.into())))
     }
     #[test]
     fn test_parse_bson_value_id_long() {
-        let pld = json!({
-            "_id":{"$numberLong":"22423434544"}
-        });
-        let (a, b) = parse_bson_value(&DataType::Int32, &DataType::Jsonb, &pld).unwrap();
+        let data = r#"{"_id":{"$numberLong":"22423434544"}}"#;
+        let pld: serde_json::Value = serde_json::from_str(&data).unwrap();
+
+        let (a, b) = parse_bson_value(
+            &DataType::Int64,
+            &DataType::Jsonb,
+            &simd_json::value::borrowed::Value::String(data.into()),
+        )
+        .unwrap();
         assert_eq!(a, Some(ScalarImpl::Int64(22423434544)));
         assert_eq!(b, Some(ScalarImpl::Jsonb(pld.into())))
     }
 
     #[test]
     fn test_parse_bson_value_id_oid() {
-        let pld = json!({
-            "_id":{"$oid":"5d505646cf6d4fe581014ab2"}
-        });
-        let (a, b) = parse_bson_value(&DataType::Int32, &DataType::Jsonb, &pld).unwrap();
+        let data = r#"{"_id":{"$oid":"5d505646cf6d4fe581014ab2"}}"#;
+        let pld: serde_json::Value = serde_json::from_str(&data).unwrap();
+        let (a, b) = parse_bson_value(
+            &DataType::Varchar,
+            &DataType::Jsonb,
+            &simd_json::value::borrowed::Value::String(data.into()),
+        )
+        .unwrap();
         assert_eq!(a, Some(ScalarImpl::Utf8("5d505646cf6d4fe581014ab2".into())));
         assert_eq!(b, Some(ScalarImpl::Jsonb(pld.into())))
     }
@@ -325,10 +344,10 @@ mod tests {
         let columns = get_columns();
         let parser = DebeziumMongoJsonParser::new(columns.clone(), Default::default()).unwrap();
 
-        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 3);
+        let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 3);
 
         let writer = builder.row_writer();
-        parser.parse_inner(data, writer).await.unwrap();
+        parser.parse_inner(data.to_vec(), writer).await.unwrap();
         let chunk = builder.finish();
         let mut rows = chunk.rows();
         let (op, row) = rows.next().unwrap();
@@ -337,7 +356,7 @@ mod tests {
         assert_eq!(
             row.datum_at(1).to_owned_datum(),
             (Some(ScalarImpl::Jsonb(
-                json!({"_id": {"$numberLong": "1004"},"first_name": "Anne","last_name": "Kretchmar","email": "annek@noanswer.org"})
+                serde_json::json!({"_id": {"$numberLong": "1004"},"first_name": "Anne","last_name": "Kretchmar","email": "annek@noanswer.org"}).into()
             )))
         );
         assert_eq!(
