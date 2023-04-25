@@ -890,8 +890,6 @@ impl Compactor {
             del_agg,
             self.task_config.key_range.clone(),
             self.task_config.split_by_table,
-            // false,
-            !self.context.is_share_buffer_compact,
         );
         let compaction_statistics = Compactor::compact_and_build_sst(
             &mut sst_builder,

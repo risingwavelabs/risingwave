@@ -115,12 +115,6 @@ impl LevelCompactionPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
-        if level_handlers[target_level.level_idx as usize]
-            .is_level_all_pending_compact(target_level)
-        {
-            return None;
-        }
-
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
         let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
             0,
@@ -341,8 +335,9 @@ pub mod tests {
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::level_selector::tests::{
-        generate_l0_nonoverlapping_sublevels, generate_l0_overlapping_sublevels, generate_level,
-        generate_table, push_table_level0_nonoverlapping, push_table_level0_overlapping,
+        generate_l0_nonoverlapping_multi_sublevels, generate_l0_nonoverlapping_sublevels,
+        generate_l0_overlapping_sublevels, generate_level, generate_table,
+        push_table_level0_nonoverlapping, push_table_level0_overlapping,
         push_tables_level0_nonoverlapping,
     };
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
@@ -353,6 +348,7 @@ pub mod tests {
             CompactionConfigBuilder::new()
                 .level0_tier_compact_file_number(2)
                 .sub_level_max_compaction_bytes(0)
+                .level0_sub_level_compact_level_count(1)
                 .build(),
         );
         LevelCompactionPicker::new(1, config)
@@ -391,13 +387,9 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        // assert_eq!(ret.input_levels[0].table_infos.len(), 2);
-        // assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 5);
-        // assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 3);
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
-        assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 5);
-        assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 3);
-        assert_eq!(ret.input_levels[1].table_infos[1].get_sst_id(), 2);
+        assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 4);
+        assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 1);
 
         ret.add_pending_task(0, &mut levels_handler);
         {
@@ -408,8 +400,8 @@ pub mod tests {
                 .unwrap();
 
             assert_eq!(ret2.input_levels[0].table_infos.len(), 1);
-            assert_eq!(ret2.input_levels[0].table_infos[0].get_sst_id(), 4);
-            assert_eq!(ret2.input_levels[1].table_infos[0].get_sst_id(), 1);
+            assert_eq!(ret2.input_levels[0].table_infos[0].get_sst_id(), 6);
+            assert_eq!(ret2.input_levels[1].table_infos[0].get_sst_id(), 5);
         }
 
         levels.l0.as_mut().unwrap().sub_levels[0]
@@ -423,12 +415,9 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        // assert_eq!(ret.input_levels.len(), 4);
-        // assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 7);
         assert_eq!(ret.input_levels.len(), 3);
         assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 6);
         assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 5);
-        // assert_eq!(ret.input_levels[3].table_infos.len(), 3);
         assert_eq!(ret.input_levels[2].table_infos.len(), 2);
         assert_eq!(ret.input_levels[2].table_infos[0].get_sst_id(), 3);
         assert_eq!(ret.input_levels[2].table_infos[1].get_sst_id(), 2);
@@ -448,7 +437,6 @@ pub mod tests {
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
         assert_eq!(ret.input_levels.len(), 3);
-        // assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 7);
         assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 6);
         assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 5);
         assert_eq!(ret.input_levels[2].table_infos.len(), 2);
@@ -462,6 +450,7 @@ pub mod tests {
                 .level0_tier_compact_file_number(2)
                 .sub_level_max_compaction_bytes(0)
                 .compaction_mode(CompactionMode::Range as i32)
+                .level0_sub_level_compact_level_count(1)
                 .build(),
         );
         let mut picker = LevelCompactionPicker::new(1, config);
@@ -609,90 +598,14 @@ pub mod tests {
             .is_none());
     }
 
-    // compact the whole level and upper sub-level when the write-amplification is more than 1.0.
-    #[test]
-    fn test_compact_whole_level_write_amplification_limit() {
-        let config = CompactionConfigBuilder::new()
-            .level0_tier_compact_file_number(2)
-            .max_compaction_bytes(1000)
-            .sub_level_max_compaction_bytes(0)
-            .max_bytes_for_level_multiplier(3)
-            .build();
-        let mut picker = LevelCompactionPicker::new(1, Arc::new(config));
-
-        let mut levels = Levels {
-            levels: vec![Level {
-                level_idx: 1,
-                level_type: LevelType::Nonoverlapping as i32,
-                table_infos: vec![
-                    generate_table(1, 1, 1, 200, 2),
-                    generate_table(2, 1, 201, 300, 2),
-                    generate_table(3, 1, 401, 500, 2),
-                ],
-                total_file_size: 590,
-                sub_level_id: 0,
-                uncompressed_file_size: 590,
-            }],
-            l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
-            member_table_ids: vec![1],
-            ..Default::default()
-        };
-        push_tables_level0_nonoverlapping(
-            &mut levels,
-            vec![
-                generate_table(4, 1, 100, 180, 2),
-                generate_table(5, 1, 190, 250, 2),
-                generate_table(6, 1, 260, 400, 2),
-            ],
-        );
-        push_tables_level0_nonoverlapping(
-            &mut levels,
-            vec![
-                generate_table(7, 1, 100, 180, 2),
-                generate_table(8, 1, 190, 250, 2),
-                generate_table(9, 1, 260, 400, 2),
-            ],
-        );
-        let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
-        let mut local_stats = LocalPickerStatistic::default();
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
-        // assert_eq!(ret.input_levels.len(), 3);
-        // assert_eq!(ret.input_levels[2].table_infos[0].get_sst_id(), 1);
-        // assert_eq!(ret.input_levels[2].table_infos[1].get_sst_id(), 2);
-        // assert_eq!(ret.input_levels[2].table_infos[2].get_sst_id(), 3);
-        assert_eq!(ret.input_levels.len(), 3);
-        assert_eq!(ret.input_levels[0].table_infos.len(), 1);
-        assert_eq!(ret.input_levels[1].table_infos.len(), 1);
-        assert_eq!(ret.input_levels[2].table_infos.len(), 1);
-        assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 7);
-        assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 4);
-        assert_eq!(ret.input_levels[2].table_infos[0].get_sst_id(), 1);
-
-        // levels.levels[0].table_infos[0].file_size += 1600 - levels.levels[0].total_file_size;
-        // levels.levels[0].total_file_size = 1600;
-        {
-            levels.levels[0].table_infos[0].file_size = 3000;
-            levels.levels[0].table_infos[1].file_size = 3000;
-            levels.levels[0].table_infos[2].file_size = 3000;
-        }
-
-        let sub_level = &mut levels.l0.as_mut().unwrap().sub_levels[0];
-        sub_level.table_infos[0].file_size += 1000 - sub_level.total_file_size;
-        sub_level.total_file_size = 1000;
-        levels.l0.as_mut().unwrap().sub_levels[1].total_file_size = 1000;
-        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
-        assert!(ret.is_none());
-    }
-
     #[test]
     fn test_skip_compact_write_amplification_limit() {
         let config: CompactionConfig = CompactionConfigBuilder::new()
             .level0_tier_compact_file_number(2)
             .max_compaction_bytes(1000)
             .sub_level_max_compaction_bytes(150)
-            .max_bytes_for_level_multiplier(2)
+            .max_bytes_for_level_multiplier(1)
+            .level0_sub_level_compact_level_count(1)
             .build();
         let mut picker = LevelCompactionPicker::new(1, Arc::new(config));
 
@@ -755,6 +668,7 @@ pub mod tests {
             CompactionConfigBuilder::new()
                 .max_compaction_bytes(500000)
                 .sub_level_max_compaction_bytes(0)
+                .level0_sub_level_compact_level_count(1)
                 .build(),
         );
         // Only include sub-level 0 results will violate MAX_WRITE_AMPLIFICATION.
@@ -782,6 +696,7 @@ pub mod tests {
             CompactionConfigBuilder::new()
                 .max_compaction_bytes(50000)
                 .sub_level_max_compaction_bytes(0)
+                .level0_sub_level_compact_level_count(1)
                 .build(),
         );
         let mut picker = LevelCompactionPicker::new(1, config);
@@ -805,7 +720,7 @@ pub mod tests {
 
     #[test]
     fn test_l0_to_l1_break_on_pending_sub_level() {
-        let mut l0 = generate_l0_overlapping_sublevels(vec![
+        let l0 = generate_l0_nonoverlapping_multi_sublevels(vec![
             vec![
                 generate_table(4, 1, 10, 90, 1),
                 generate_table(5, 1, 210, 220, 1),
@@ -813,10 +728,7 @@ pub mod tests {
             vec![generate_table(6, 1, 0, 100000, 1)],
             vec![generate_table(7, 1, 0, 100000, 1)],
         ]);
-        // We can set level_type only because the input above is valid.
-        for s in &mut l0.sub_levels {
-            s.level_type = LevelType::Nonoverlapping as i32;
-        }
+
         let levels = Levels {
             l0: Some(l0),
             levels: vec![generate_level(1, vec![generate_table(3, 1, 0, 100000, 1)])],
@@ -847,6 +759,7 @@ pub mod tests {
             CompactionConfigBuilder::new()
                 .max_compaction_bytes(500000)
                 .sub_level_max_compaction_bytes(0)
+                .level0_sub_level_compact_level_count(1)
                 .build(),
         );
 
@@ -867,5 +780,47 @@ pub mod tests {
         picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
+    }
+
+    #[test]
+    fn test_l0_to_base_when_all_base_pending() {
+        let l0 = generate_l0_nonoverlapping_multi_sublevels(vec![vec![
+            generate_table(4, 1, 10, 90, 1),
+            generate_table(5, 1, 210, 500, 1),
+        ]]);
+
+        let levels = Levels {
+            l0: Some(l0),
+            levels: vec![generate_level(1, vec![generate_table(3, 1, 10, 100, 1)])],
+            member_table_ids: vec![1],
+            ..Default::default()
+        };
+        let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let mut local_stats = LocalPickerStatistic::default();
+
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .max_compaction_bytes(500000)
+                .sub_level_max_compaction_bytes(0)
+                .level0_sub_level_compact_level_count(1)
+                .build(),
+        );
+
+        let mut picker = LevelCompactionPicker::new(1, config);
+        let ret = picker
+            .pick_compaction(&levels, &levels_handler, &mut local_stats)
+            .unwrap();
+        assert_eq!(2, ret.input_levels.len());
+        assert_eq!(4, ret.input_levels[0].table_infos[0].sst_id);
+        assert_eq!(3, ret.input_levels[1].table_infos[0].sst_id);
+
+        ret.add_pending_task(0, &mut levels_handler);
+        let ret = picker
+            .pick_compaction(&levels, &levels_handler, &mut local_stats)
+            .unwrap();
+        assert_eq!(2, ret.input_levels.len());
+        assert_eq!(5, ret.input_levels[0].table_infos[0].sst_id);
+        assert_eq!(1, ret.input_levels[1].level_idx);
+        assert!(ret.input_levels[1].table_infos.is_empty());
     }
 }

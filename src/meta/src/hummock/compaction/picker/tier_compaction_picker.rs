@@ -495,7 +495,7 @@ pub mod tests {
             TierCompactionPicker::new(config, Arc::new(RangeOverlapStrategy::default()));
 
         // Cannot trivial move because there is only 1 sub-level.
-        let l0 = generate_l0_nonoverlapping_multi_sublevels(vec![vec![
+        let l0 = generate_l0_overlapping_sublevels(vec![vec![
             generate_table(1, 1, 100, 110, 1),
             generate_table(2, 1, 150, 250, 1),
         ]]);
@@ -506,10 +506,8 @@ pub mod tests {
             ..Default::default()
         };
         let mut local_stats = LocalPickerStatistic::default();
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
-        assert!(!is_l0_trivial_move(&ret));
+        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+        assert!(ret.is_none());
 
         // Cannot trivial move because sub-levels are overlapping
         let l0 = generate_l0_overlapping_sublevels(vec![
@@ -533,11 +531,8 @@ pub mod tests {
         // Cannot trivial move because latter sub-level is overlapping
         levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Nonoverlapping as i32;
         levels.l0.as_mut().unwrap().sub_levels[1].level_type = LevelType::Overlapping as i32;
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
-        // assert!(ret.is_none());
-        assert!(!is_l0_trivial_move(&ret));
+        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+        assert!(ret.is_none());
 
         // Cannot trivial move because former sub-level is overlapping
         levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Overlapping as i32;
@@ -691,6 +686,10 @@ pub mod tests {
                 3
             );
 
+            assert_eq!(4, ret.input_levels[0].table_infos[0].get_sst_id());
+            assert_eq!(3, ret.input_levels[1].table_infos[0].get_sst_id());
+            assert_eq!(1, ret.input_levels[2].table_infos[0].get_sst_id());
+
             // will pick sst [2, 5]
             let ret2 = picker
                 .pick_compaction(&levels, &levels_handler, &mut local_stats)
@@ -703,11 +702,12 @@ pub mod tests {
                     .sum::<usize>(),
                 2
             );
+
+            assert_eq!(5, ret2.input_levels[0].table_infos[0].get_sst_id());
+            assert_eq!(2, ret2.input_levels[1].table_infos[0].get_sst_id());
         }
 
         {
-            // Suppose keyguard [100, 250] [300, 400]
-            // will pick sst [1, 3, 4]
             let l0 = generate_l0_nonoverlapping_multi_sublevels(vec![
                 vec![
                     generate_table(1, 1, 100, 149, 1),
@@ -754,6 +754,10 @@ pub mod tests {
                 3
             );
 
+            assert_eq!(11, ret.input_levels[0].table_infos[0].get_sst_id());
+            assert_eq!(9, ret.input_levels[1].table_infos[0].get_sst_id());
+            assert_eq!(7, ret.input_levels[2].table_infos[0].get_sst_id());
+
             let ret2 = picker
                 .pick_compaction(&levels, &levels_handler, &mut local_stats)
                 .unwrap();
@@ -765,6 +769,10 @@ pub mod tests {
                     .sum::<usize>(),
                 3
             );
+
+            assert_eq!(5, ret2.input_levels[0].table_infos[0].get_sst_id());
+            assert_eq!(10, ret2.input_levels[1].table_infos[0].get_sst_id());
+            assert_eq!(2, ret2.input_levels[2].table_infos[0].get_sst_id());
         }
     }
 

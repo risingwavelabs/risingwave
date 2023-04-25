@@ -843,7 +843,7 @@ where
             compact_task.set_task_status(TaskStatus::Success);
             self.report_compact_task_impl(None, &mut compact_task, Some(compaction_guard), None)
                 .await?;
-            tracing::info!(
+            tracing::debug!(
                 "TrivialMove for compaction group {}: pick up {} tables in level {} to compact to target_level {}  cost time: {:?}",
                 compaction_group_id,
                 compact_task.input_ssts[0].table_infos.len(),
@@ -879,20 +879,41 @@ where
 
             drop(compaction_guard);
 
+            let (file_count, file_size) = {
+                let mut count = 0;
+                let mut size = 0;
+                for select_level in &compact_task.input_ssts {
+                    count += select_level.table_infos.len();
+
+                    for sst in &select_level.table_infos {
+                        size += sst.get_file_size();
+                    }
+                }
+
+                (count, size)
+            };
+
             if compact_task.input_ssts[0].level_idx == 0 {
                 tracing::info!(
-                    "For compaction group {}: pick up {} sub_level in level {} to compact. cost time: {:?}",
+                    "For compaction group {}: pick up {} {} sub_level in level {} file_count {} file_size {} to compact to target {}. cost time: {:?}",
                     compaction_group_id,
                     compact_task.input_ssts.len(),
+                    compact_task.input_ssts[0].level_type().as_str_name(),
                     compact_task.input_ssts[0].level_idx,
+                    file_count,
+                    file_size,
+                    compact_task.target_level,
                     start_time.elapsed()
                 );
             } else {
                 tracing::info!(
-                    "For compaction group {}: pick up {} tables in level {} to compact.  cost time: {:?}",
+                    "For compaction group {}: pick up {} tables in level {} file_count {} file_size {} to compact to target {}.  cost time: {:?}",
                     compaction_group_id,
                     compact_task.input_ssts[0].table_infos.len(),
                     compact_task.input_ssts[0].level_idx,
+                    file_count,
+                    file_size,
+                    compact_task.target_level,
                     start_time.elapsed()
                 );
             }

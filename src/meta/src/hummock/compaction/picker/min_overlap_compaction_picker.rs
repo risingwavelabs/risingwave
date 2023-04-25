@@ -751,7 +751,7 @@ pub mod tests {
         }
 
         {
-            // limit min_deptg
+            // limit min_depth
             let picker = NonOverlapSubLevelPicker::new(
                 0,
                 10000,
