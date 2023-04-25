@@ -1065,12 +1065,7 @@ mod tests {
             .collect::<HashMap<_, _>>();
         macro_rules! try_recv {
             ($down_id:expr) => {
-                rxs.get_mut(&$down_id)
-                    .unwrap()
-                    .recv()
-                    .now_or_never()
-                    .flatten()
-                    .ok_or(())
+                rxs.get_mut(&$down_id).unwrap().try_recv()
             };
         }
 

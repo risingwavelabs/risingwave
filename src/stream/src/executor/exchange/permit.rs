@@ -57,9 +57,9 @@ pub fn channel(
 }
 
 pub fn channel_for_test() -> (Sender, Receiver) {
-    const INITIAL_PERMITS: usize = 8192;
-    const BATCHED_PERMITS: usize = 1024;
-    const CONCURRENT_BARRIERS: usize = 2;
+    const INITIAL_PERMITS: usize = (u32::MAX / 2) as _;
+    const BATCHED_PERMITS: usize = 1;
+    const CONCURRENT_BARRIERS: usize = (u32::MAX / 2) as _;
 
     channel(INITIAL_PERMITS, BATCHED_PERMITS, CONCURRENT_BARRIERS)
 }
