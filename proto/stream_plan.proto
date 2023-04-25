@@ -546,6 +546,13 @@ message DedupNode {
 
 message NoOpNode {}
 
+message EowcOverWindowNode {
+  repeated expr.WindowFunction calls = 1;
+  repeated uint32 partition_by = 2;
+  repeated common.ColumnOrder order_by = 3; // use `repeated` in case of future extension, now only one column is allowed
+  catalog.Table state_table = 4;
+}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
