@@ -49,7 +49,7 @@ pub fn floor_decimal(input: Decimal) -> Decimal {
 // Ties are broken by rounding away from zero
 #[function("round(float64) -> float64")]
 pub fn round_f64(input: F64) -> F64 {
-    f64::round(input.0).into()
+    f64::round_ties_even(input.0).into()
 }
 
 // Ties are broken by rounding away from zero
