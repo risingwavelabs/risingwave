@@ -17,7 +17,6 @@
 package com.risingwave.connector;
 
 import static io.grpc.Status.UNIMPLEMENTED;
-import static org.apache.hudi.common.config.HoodieStorageConfig.PARQUET_MAX_FILE_SIZE;
 import static org.apache.hudi.common.table.HoodieTableConfig.CREATE_SCHEMA;
 
 import com.risingwave.connector.api.TableSchema;
