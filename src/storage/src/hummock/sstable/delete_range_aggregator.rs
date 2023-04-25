@@ -411,6 +411,7 @@ pub fn get_min_delete_range_epoch_from_sstable(
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::key::TableKey;
 
     use super::*;
     use crate::hummock::create_monotonic_events;
@@ -434,13 +435,31 @@ mod tests {
             DeleteRangeTombstone::new_for_test(table_id, b"aaaaaa".to_vec(), b"bbbddd".to_vec(), 9),
             DeleteRangeTombstone::new_for_test(table_id, b"bbbfff".to_vec(), b"ffffff".to_vec(), 9),
             DeleteRangeTombstone::new_for_test(table_id, b"gggggg".to_vec(), b"hhhhhh".to_vec(), 9),
-            DeleteRangeTombstone::new_for_test(table_id, b"bbbeee".to_vec(), b"eeeeee".to_vec(), 8),
+            DeleteRangeTombstone::new(
+                table_id,
+                b"bbbeee".to_vec(),
+                true,
+                b"eeeeee".to_vec(),
+                true,
+                8,
+            ),
             DeleteRangeTombstone::new_for_test(
                 table_id,
                 b"bbbaab".to_vec(),
                 b"bbbdddf".to_vec(),
                 6,
             ),
+            DeleteRangeTombstone {
+                start_user_key: PointRange::from_user_key(
+                    UserKey::new(table_id, TableKey(b"hhhhhh".to_vec())),
+                    true,
+                ),
+                end_user_key: PointRange::from_user_key(
+                    UserKey::new(TableId::new(table_id.table_id() + 1), TableKey::default()),
+                    false,
+                ),
+                sequence: 7,
+            },
         ];
         for range in data {
             builder.add_delete_events(create_monotonic_events(vec![range]));
@@ -475,7 +494,7 @@ mod tests {
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key(test_user_key(b"bbbeee").as_ref(), 8),
-            8
+            HummockEpoch::MAX
         );
 
         assert_eq!(
@@ -483,16 +502,20 @@ mod tests {
             HummockEpoch::MAX
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(test_user_key(b"eeeeee").as_ref(), 9),
-            9
+            iter.earliest_delete_which_can_see_key(test_user_key(b"eeeeee").as_ref(), 8),
+            8
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key(test_user_key(b"gggggg").as_ref(), 8),
             9
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(test_user_key(b"hhhhhh").as_ref(), 8),
+            iter.earliest_delete_which_can_see_key(test_user_key(b"hhhhhh").as_ref(), 6),
             HummockEpoch::MAX
+        );
+        assert_eq!(
+            iter.earliest_delete_which_can_see_key(test_user_key(b"iiiiii").as_ref(), 6),
+            7
         );
     }
 
@@ -501,10 +524,24 @@ mod tests {
         let table_id = TableId::default();
         let mut builder = CompactionDeleteRangesBuilder::default();
         let data = vec![
-            DeleteRangeTombstone::new_for_test(table_id, b"aaaa".to_vec(), b"cccc".to_vec(), 12),
-            DeleteRangeTombstone::new_for_test(table_id, b"cccc".to_vec(), b"dddd".to_vec(), 10),
-            DeleteRangeTombstone::new_for_test(table_id, b"cccc".to_vec(), b"eeee".to_vec(), 12),
-            DeleteRangeTombstone::new_for_test(table_id, b"eeee".to_vec(), b"ffff".to_vec(), 12),
+            DeleteRangeTombstone::new_for_test(table_id, b"aaaa".to_vec(), b"cccc".to_vec(), 13),
+            DeleteRangeTombstone::new(
+                table_id,
+                b"cccc".to_vec(),
+                true,
+                b"dddd".to_vec(),
+                false,
+                10,
+            ),
+            DeleteRangeTombstone::new(
+                table_id,
+                b"cccc".to_vec(),
+                false,
+                b"eeee".to_vec(),
+                true,
+                12,
+            ),
+            DeleteRangeTombstone::new(table_id, b"eeee".to_vec(), true, b"ffff".to_vec(), true, 15),
         ];
         for range in data {
             builder.add_delete_events(create_monotonic_events(vec![range]));
@@ -514,7 +551,7 @@ mod tests {
             test_user_key(b"bbbb").as_ref(),
             test_user_key(b"eeeeee").as_ref(),
         );
-        assert_eq!(4, split_ranges.len());
+        assert_eq!(6, split_ranges.len());
         assert_eq!(
             PointRange::from_user_key(test_user_key(b"bbbb"), false),
             split_ranges[0].event_key
@@ -524,12 +561,20 @@ mod tests {
             split_ranges[1].event_key
         );
         assert_eq!(
-            PointRange::from_user_key(test_user_key(b"dddd"), false),
+            PointRange::from_user_key(test_user_key(b"cccc"), true),
             split_ranges[2].event_key
         );
         assert_eq!(
-            PointRange::from_user_key(test_user_key(b"eeeeee"), false),
+            PointRange::from_user_key(test_user_key(b"dddd"), false),
             split_ranges[3].event_key
+        );
+        assert_eq!(
+            PointRange::from_user_key(test_user_key(b"eeee"), true),
+            split_ranges[4].event_key
+        );
+        assert_eq!(
+            PointRange::from_user_key(test_user_key(b"eeeeee"), false),
+            split_ranges[5].event_key
         );
     }
 
