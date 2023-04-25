@@ -49,7 +49,8 @@ pub struct DebeziumMongoJsonParser {
 
 fn parse_bson_value(
     id_type: &DataType,
-    payload_type: &DataType,
+    payload_type: &DataType, /* Only `DataType::Jsonb` is supported now. But it can be extended
+                              * in the future. */
     value: &BorrowedValue<'_>,
 ) -> anyhow::Result<(Datum, Datum)> {
     let bson_str = value.as_str().unwrap_or_default();
@@ -108,7 +109,6 @@ fn parse_bson_value(
     };
     let payload: Datum = match payload_type {
         DataType::Jsonb => ScalarImpl::Jsonb(bson_value.into()).into(),
-        DataType::Varchar => ScalarImpl::Utf8(bson_str.into()).into(),
         _ => unreachable!("DebeziumMongoJsonParser::new must ensure payload column datatypes."),
     };
 
@@ -133,13 +133,14 @@ impl DebeziumMongoJsonParser {
             )))?.clone();
         let payload_column = rw_columns
             .iter()
-            .find(|desc| {
-                desc.name == "payload"
-                    && matches!(desc.data_type, DataType::Jsonb | DataType::Varchar)
-            })
-            .ok_or_else(||RwError::from(ProtocolError(
-                "Debezuim Mongo needs a `payload` column with supported types (Varchar Jsonb) in table".into(),
-            )))?.clone();
+            .find(|desc| desc.name == "payload" && matches!(desc.data_type, DataType::Jsonb))
+            .ok_or_else(|| {
+                RwError::from(ProtocolError(
+                    "Debezuim Mongo needs a `payload` column with supported types Jsonb in table"
+                        .into(),
+                ))
+            })?
+            .clone();
 
         if rw_columns.len() != 2 {
             return Err(RwError::from(ProtocolError(
@@ -274,5 +275,74 @@ impl DebeziumMongoJsonParser {
                 op
             )))),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_parse_bson_value_id_int() {
+        let pld = json!({
+            "_id":{"$numberInt":"2345"}
+        });
+        let (a, b) = parse_bson_value(&DataType::Int32, &DataType::Jsonb, &pld).unwrap();
+        assert_eq!(a, Some(ScalarImpl::Int32(2345)));
+        assert_eq!(b, Some(ScalarImpl::Jsonb(pld.into())))
+    }
+    #[test]
+    fn test_parse_bson_value_id_long() {
+        let pld = json!({
+            "_id":{"$numberLong":"22423434544"}
+        });
+        let (a, b) = parse_bson_value(&DataType::Int32, &DataType::Jsonb, &pld).unwrap();
+        assert_eq!(a, Some(ScalarImpl::Int64(22423434544)));
+        assert_eq!(b, Some(ScalarImpl::Jsonb(pld.into())))
+    }
+
+    #[test]
+    fn test_parse_bson_value_id_oid() {
+        let pld = json!({
+            "_id":{"$oid":"5d505646cf6d4fe581014ab2"}
+        });
+        let (a, b) = parse_bson_value(&DataType::Int32, &DataType::Jsonb, &pld).unwrap();
+        assert_eq!(a, Some(ScalarImpl::Utf8("5d505646cf6d4fe581014ab2".into())));
+        assert_eq!(b, Some(ScalarImpl::Jsonb(pld.into())))
+    }
+    fn get_columns() -> Vec<SourceColumnDesc> {
+        let descs = vec![
+            SourceColumnDesc::simple("_id", DataType::Int64, ColumnId::from(0)),
+            SourceColumnDesc::simple("payload", DataType::Jsonb, ColumnId::from(1)),
+        ];
+
+        descs
+    }
+
+    #[tokio::test]
+    async fn test_long_id() {
+        let data = br#"{"schema":{"type":"struct","fields":[{"type":"string","optional":true,"name":"io.debezium.data.Json","version":1,"field":"before"},{"type":"string","optional":true,"name":"io.debezium.data.Json","version":1,"field":"after"},{"type":"string","optional":true,"name":"io.debezium.data.Json","version":1,"field":"patch"},{"type":"string","optional":true,"name":"io.debezium.data.Json","version":1,"field":"filter"},{"type":"struct","fields":[{"type":"array","items":{"type":"string","optional":false},"optional":true,"field":"removedFields"},{"type":"string","optional":true,"name":"io.debezium.data.Json","version":1,"field":"updatedFields"},{"type":"array","items":{"type":"struct","fields":[{"type":"string","optional":false,"field":"field"},{"type":"int32","optional":false,"field":"size"}],"optional":false,"name":"io.debezium.connector.mongodb.changestream.truncatedarray","version":1},"optional":true,"field":"truncatedArrays"}],"optional":true,"name":"io.debezium.connector.mongodb.changestream.updatedescription","version":1,"field":"updateDescription"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":false,"field":"rs"},{"type":"string","optional":false,"field":"collection"},{"type":"int32","optional":false,"field":"ord"},{"type":"string","optional":true,"field":"lsid"},{"type":"int64","optional":true,"field":"txnNumber"}],"optional":false,"name":"io.debezium.connector.mongo.Source","field":"source"},{"type":"string","optional":true,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"name":"event.block","version":1,"field":"transaction"}],"optional":false,"name":"dbserver1.inventory.customers.Envelope"},"payload":{"before":null,"after":"{\"_id\": {\"$numberLong\": \"1004\"},\"first_name\": \"Anne\",\"last_name\": \"Kretchmar\",\"email\": \"annek@noanswer.org\"}","patch":null,"filter":null,"updateDescription":null,"source":{"version":"2.1.4.Final","connector":"mongodb","name":"dbserver1","ts_ms":1681879044000,"snapshot":"last","db":"inventory","sequence":null,"rs":"rs0","collection":"customers","ord":1,"lsid":null,"txnNumber":null},"op":"r","ts_ms":1681879054736,"transaction":null}}"#;
+
+        let columns = get_columns();
+        let parser = DebeziumMongoJsonParser::new(columns.clone(), Default::default()).unwrap();
+
+        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 3);
+
+        let writer = builder.row_writer();
+        parser.parse_inner(data, writer).await.unwrap();
+        let chunk = builder.finish();
+        let mut rows = chunk.rows();
+        let (op, row) = rows.next().unwrap();
+        assert_eq!(op, Op::Insert);
+
+        assert_eq!(
+            row.datum_at(1).to_owned_datum(),
+            (Some(ScalarImpl::Jsonb(
+                json!({"_id": {"$numberLong": "1004"},"first_name": "Anne","last_name": "Kretchmar","email": "annek@noanswer.org"})
+            )))
+        );
+        assert_eq!(
+            row.datum_at(0).to_owned_datum(),
+            (Some(ScalarImpl::Int64(1004)))
+        );
     }
 }

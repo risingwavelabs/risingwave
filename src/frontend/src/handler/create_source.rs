@@ -414,14 +414,14 @@ pub(crate) async fn resolve_source_schema(
                 )));
             }
             let _ = columns
-            .iter()
-            .find(|col| col.name() == "payload" && matches!(
-                col.data_type(),  DataType::Jsonb | DataType::Varchar
-            ))
-            .ok_or_else(|| RwError::from(ProtocolError(
-                "A column named as `payload` with supported datatypes (Jsonb Varchar) must exist in table."
+                .iter()
+                .find(|col| col.name() == "payload" && matches!(col.data_type(), DataType::Jsonb))
+                .ok_or_else(|| {
+                    RwError::from(ProtocolError(
+                "A column named as `payload` with supported datatypes Jsonb must exist in table."
                     .to_string(),
-            )))?;
+            ))
+                })?;
 
             StreamSourceInfo {
                 row_format: RowFormatType::DebeziumMongoJson as i32,
