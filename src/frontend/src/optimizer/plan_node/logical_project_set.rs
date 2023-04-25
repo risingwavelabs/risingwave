@@ -324,7 +324,7 @@ impl PredicatePushdown for LogicalProjectSet {
             let mut remain_mask = FixedBitSet::with_capacity(self.select_list().len() + 1);
             remain_mask.set(0, true);
             for (i, e) in self.select_list().iter().enumerate() {
-                if let ExprImpl::TableFunction(_) = e {
+                if e.has_table_function() {
                     remain_mask.set(i + 1, true);
                 } else {
                     remain_mask.set(i + 1, e.is_impure());
