@@ -121,11 +121,12 @@ start_nperf() {
 start_kafka() {
   ./kafka_2.13-3.4.0/bin/zookeeper-server-start.sh ./kafka_2.13-3.4.0/config/zookeeper.properties > zookeeper.log 2>&1 &
   ./kafka_2.13-3.4.0/bin/kafka-server-start.sh ./kafka_2.13-3.4.0/config/server.properties --override num.partitions=8 > kafka.log 2>&1 &
-  echo "Should have 2 java process running"
+  echo "Should have zookeeper and kafka running"
   ps
   sleep 10
-  buildkite-agent artifact upload ./zookeeper.log
-  buildkite-agent artifact upload ./kafka.log
+  # TODO(kwannoel): `trap ERR` and upload these logs.
+  # buildkite-agent artifact upload ./zookeeper.log
+  # buildkite-agent artifact upload ./kafka.log
 }
 
 # Currently 100mil events in Kafka take up 17% of 200GB gp3 i.e. 34GB
@@ -244,10 +245,11 @@ main() {
   aws s3 rm s3://rw-ci-benchmark
   echo "Success!"
 
-  echo "--- Uploading rw logs"
-  pushd risingwave/.risingwave/log
-  buildkite-agent artifact upload "./*.log"
-  popd
+  # TODO(kwannoel): `trap ERR` and upload these logs.
+  #  echo "--- Uploading rw logs"
+  #  pushd risingwave/.risingwave/log
+  #  buildkite-agent artifact upload "./*.log"
+  #  popd
 }
 
 main
