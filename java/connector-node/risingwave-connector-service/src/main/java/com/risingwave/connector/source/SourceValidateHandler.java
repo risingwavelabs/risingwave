@@ -38,7 +38,7 @@ public class SourceValidateHandler {
 
     public void handle(ConnectorServiceProto.ValidateSourceRequest request) {
         try {
-            validateSource(request, this.responseObserver);
+            validateSource(request);
             // validate pass
             responseObserver.onNext(
                     ConnectorServiceProto.ValidateSourceResponse.newBuilder().build());
@@ -72,9 +72,7 @@ public class SourceValidateHandler {
         }
     }
 
-    private void validateSource(
-            ConnectorServiceProto.ValidateSourceRequest request,
-            StreamObserver<ConnectorServiceProto.ValidateSourceResponse> responseObserver)
+    private void validateSource(ConnectorServiceProto.ValidateSourceRequest request)
             throws Exception {
         var props = request.getPropertiesMap();
 
