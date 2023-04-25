@@ -40,7 +40,7 @@ impl std::fmt::Debug for AggCall {
                 .field("filter", &self.filter)
                 .finish()
         } else {
-            let mut builder = f.debug_tuple(&format!("{:?}", self.agg_kind));
+            let mut builder = f.debug_tuple(&format!("{}", self.agg_kind));
             self.inputs.iter().for_each(|child| {
                 builder.field(child);
             });
@@ -56,7 +56,7 @@ impl AggCall {
         risingwave_expr::sig::agg::infer_return_type(agg_kind, inputs).ok_or_else(|| {
             let args = inputs.iter().map(|t| format!("{}", t)).join(", ");
             RwError::from(ErrorCode::InvalidInputSyntax(format!(
-                "Invalid aggregation: {:?}({})",
+                "Invalid aggregation: {}({})",
                 agg_kind, args
             )))
         })

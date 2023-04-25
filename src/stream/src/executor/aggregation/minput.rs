@@ -136,7 +136,7 @@ impl<S: StateStore> MaterializedInputState<S> {
                 ArrayAgg,
             )),
             _ => panic!(
-                "Agg kind `{:?}` is not expected to have materialized input state",
+                "Agg kind `{}` is not expected to have materialized input state",
                 agg_call.kind
             ),
         };

@@ -78,7 +78,7 @@ impl<S: StateStore> TableState<S> {
                     Box::new(AppendOnlyStreamingApproxCountDistinct::new())
                 }
                 _ => panic!(
-                    "Agg kind `{:?}` is not expected to have table state",
+                    "Agg kind `{}` is not expected to have table state",
                     agg_call.kind
                 ),
             },
