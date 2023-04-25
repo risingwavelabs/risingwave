@@ -31,6 +31,13 @@ pub struct JsonbVal(Box<Value>); // The `Box` is just to keep `size_of::<ScalarI
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct JsonbRef<'a>(&'a Value);
 
+impl EstimateSize for JsonbVal {
+    fn estimated_heap_size(&self) -> usize {
+        // FIXME: correctly handle jsonb size
+        0
+    }
+}
+
 /// The display of `JsonbVal` is pg-compatible format which has slightly different from
 /// `serde_json::Value`.
 impl fmt::Display for JsonbVal {

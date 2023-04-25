@@ -19,6 +19,7 @@ use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 use bytes::{BufMut, Bytes, BytesMut};
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
 use postgres_types::{ToSql, Type};
+use risingwave_common_proc_macro::EstimateSize;
 pub use rust_decimal::prelude::{FromPrimitive, FromStr, ToPrimitive};
 use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
 
@@ -27,10 +28,13 @@ use super::to_text::ToText;
 use super::DataType;
 use crate::array::ArrayResult;
 use crate::error::Result as RwResult;
+use crate::estimate_size::EstimateSize;
 use crate::types::ordered_float::OrderedFloat;
 use crate::types::Decimal::Normalized;
 
-#[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
+#[derive(
+    Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd, EstimateSize,
+)]
 pub enum Decimal {
     #[display("{0}")]
     Normalized(RustDecimal),
@@ -805,5 +809,14 @@ mod tests {
         assert_eq!(Decimal::to_i32(&Decimal::from_i32(1).unwrap()).unwrap(), 1,);
         assert_eq!(Decimal::to_u64(&Decimal::from_u64(1).unwrap()).unwrap(), 1,);
         assert_eq!(Decimal::to_i64(&Decimal::from_i64(1).unwrap()).unwrap(), 1,);
+    }
+
+    #[test]
+    fn test_decimal_estimate_size() {
+        let decimal = Decimal::NegativeInf;
+        assert_eq!(decimal.estimated_size(), 20);
+
+        let decimal = Decimal::Normalized(RustDecimal::from_f32(1.0).unwrap());
+        assert_eq!(decimal.estimated_size(), 20);
     }
 }

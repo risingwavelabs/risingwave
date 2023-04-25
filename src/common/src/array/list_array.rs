@@ -326,6 +326,16 @@ impl From<Vec<Datum>> for ListValue {
     }
 }
 
+impl EstimateSize for ListValue {
+    fn estimated_heap_size(&self) -> usize {
+        // TODO: Try speed up this process.
+        self.values
+            .iter()
+            .map(|datum| datum.estimated_heap_size())
+            .sum()
+    }
+}
+
 impl ListValue {
     pub fn new(values: Vec<Datum>) -> Self {
         Self {
