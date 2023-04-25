@@ -852,6 +852,7 @@ pub mod tests {
             .max_compaction_bytes(10000)
             .level0_tier_compact_file_number(4)
             .compaction_mode(CompactionMode::Range as i32)
+            .level0_sub_level_compact_level_count(1)
             .build();
         let group_config = CompactionGroup::new(1, config.clone());
         let levels = vec![

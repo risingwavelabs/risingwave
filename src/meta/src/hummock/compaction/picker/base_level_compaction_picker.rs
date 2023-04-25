@@ -784,14 +784,17 @@ pub mod tests {
 
     #[test]
     fn test_l0_to_base_when_all_base_pending() {
-        let l0 = generate_l0_nonoverlapping_multi_sublevels(vec![vec![
-            generate_table(4, 1, 10, 90, 1),
-            generate_table(5, 1, 210, 500, 1),
-        ]]);
+        let l0 = generate_l0_nonoverlapping_multi_sublevels(vec![
+            vec![
+                generate_table(4, 1, 10, 90, 1),
+                generate_table(5, 1, 1000, 2000, 1),
+            ],
+            vec![generate_table(6, 1, 10, 90, 1)],
+        ]);
 
         let levels = Levels {
             l0: Some(l0),
-            levels: vec![generate_level(1, vec![generate_table(3, 1, 10, 100, 1)])],
+            levels: vec![generate_level(1, vec![generate_table(3, 1, 10, 90, 1)])],
             member_table_ids: vec![1],
             ..Default::default()
         };
@@ -802,7 +805,7 @@ pub mod tests {
             CompactionConfigBuilder::new()
                 .max_compaction_bytes(500000)
                 .sub_level_max_compaction_bytes(0)
-                .level0_sub_level_compact_level_count(1)
+                .level0_sub_level_compact_level_count(2)
                 .build(),
         );
 
@@ -810,10 +813,12 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        assert_eq!(2, ret.input_levels.len());
-        assert_eq!(4, ret.input_levels[0].table_infos[0].sst_id);
-        assert_eq!(3, ret.input_levels[1].table_infos[0].sst_id);
+        assert_eq!(3, ret.input_levels.len());
+        assert_eq!(6, ret.input_levels[0].table_infos[0].sst_id);
+        assert_eq!(4, ret.input_levels[1].table_infos[0].sst_id);
+        assert_eq!(3, ret.input_levels[2].table_infos[0].sst_id);
 
+        // trivial move do not be limited by level0_sub_level_compact_level_count
         ret.add_pending_task(0, &mut levels_handler);
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)

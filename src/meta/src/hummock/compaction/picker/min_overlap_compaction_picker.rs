@@ -679,89 +679,57 @@ pub mod tests {
                 Arc::new(RangeOverlapStrategy::default()),
             );
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
-            // assert_eq!(21, ret.len());
-            println!("ret 1",);
-
-            for plan in ret {
-                let mut sst_id_set = BTreeSet::default();
-                for sst in &plan.2 {
-                    sst_id_set.insert(sst[0].get_sst_id());
-                }
-
-                println!(
-                    "plan select_level_count {} sst_id_set {:?}",
-                    plan.2.len(),
-                    sst_id_set
-                );
-            }
+            assert_eq!(6, ret.len());
         }
 
         {
             // limit max bytes
+            let max_compaction_bytes = 100;
             let picker = NonOverlapSubLevelPicker::new(
                 0,
-                100,
+                max_compaction_bytes,
                 1,
                 10000,
                 Arc::new(RangeOverlapStrategy::default()),
             );
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
-            // assert_eq!(6, ret.len());
-            println!("ret2");
-
-            for plan in ret {
-                let mut sst_id_set = BTreeSet::default();
-                for sst in &plan.2 {
-                    sst_id_set.insert(sst[0].get_sst_id());
-                }
-
-                println!(
-                    "plan select_level_count {} sst_id_set {:?}",
-                    plan.2.len(),
-                    sst_id_set
-                );
-            }
+            assert_eq!(6, ret.len());
         }
 
         {
             // limit max file_count
+            let max_file_count = 2;
             let picker = NonOverlapSubLevelPicker::new(
                 0,
                 10000,
                 1,
-                2,
+                max_file_count,
                 Arc::new(RangeOverlapStrategy::default()),
             );
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
-            // assert_eq!(9, ret.len());
-            println!("ret3 plan_count {}", ret.len());
+            assert_eq!(6, ret.len());
 
             for plan in ret {
                 let mut sst_id_set = BTreeSet::default();
                 for sst in &plan.2 {
                     sst_id_set.insert(sst[0].get_sst_id());
                 }
-
-                println!(
-                    "plan select_level_count {} sst_id_set {:?}",
-                    plan.2.len(),
-                    sst_id_set
-                );
+                assert!(sst_id_set.len() <= max_file_count as usize);
             }
         }
 
         {
             // limit min_depth
+            let min_depth = 3;
             let picker = NonOverlapSubLevelPicker::new(
                 0,
                 10000,
-                3,
+                min_depth,
                 10000,
                 Arc::new(RangeOverlapStrategy::default()),
             );
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
-            // assert_eq!(9, ret.len());
-            println!("ret3 plan_count {}", ret.len());
+            assert_eq!(3, ret.len());
 
             for plan in ret {
                 let mut sst_id_set = BTreeSet::default();
@@ -769,11 +737,7 @@ pub mod tests {
                     sst_id_set.insert(sst[0].get_sst_id());
                 }
 
-                println!(
-                    "plan select_level_count {} sst_id_set {:?}",
-                    plan.2.len(),
-                    sst_id_set
-                );
+                assert!(plan.2.len() >= min_depth);
             }
         }
     }
