@@ -53,8 +53,8 @@ fn parse_bson_value(
     value: &BorrowedValue<'_>,
 ) -> anyhow::Result<(Datum, Datum)> {
     let bson_str = value.as_str().unwrap_or_default();
-    let bson_value: bson::Bson = serde_json::from_str::<serde_json::Value>(bson_str)?.try_into()?;
-    let bson_doc = bson_value.as_document().ok_or_else(|| {
+    let bson_value: serde_json::Value = serde_json::from_str(bson_str)?;
+    let bson_doc = bson_value.as_object().ok_or_else(|| {
         RwError::from(ProtocolError(
             "Debezuim Mongo requires payload is a document".into(),
         ))
@@ -68,29 +68,46 @@ fn parse_bson_value(
         })?
         .clone();
     let id: Datum = match id_type {
-        DataType::Jsonb => ScalarImpl::Jsonb(id_field.into_relaxed_extjson().into()).into(),
+        DataType::Jsonb => ScalarImpl::Jsonb(id_field.into()).into(),
         DataType::Varchar => match id_field {
-            bson::Bson::String(s) => Some(ScalarImpl::Utf8(s.into())),
-            bson::Bson::ObjectId(oid) => Some(ScalarImpl::Utf8(oid.to_string().into())),
+            serde_json::Value::String(s) => Some(ScalarImpl::Utf8(s.into())),
+            serde_json::Value::Object(obj) if obj.contains_key("$oid") => Some(ScalarImpl::Utf8(
+                obj["$oid"].as_str().to_owned().unwrap_or_default().into(),
+            )),
             _ => Err(RwError::from(ProtocolError(format!(
                 "Can not convert bson {:?} to {:?}",
-                id_field.element_type(),
+                id_field,
                 id_type
             ))))?,
         },
-        DataType::Int32 | DataType::Int64 => match id_field {
-            bson::Bson::Int32(i) => Some(ScalarImpl::Int32(i)),
-            bson::Bson::Int64(i) => Some(ScalarImpl::Int64(i)),
-            _ => Err(RwError::from(ProtocolError(format!(
-                "Can not convert bson {:?} to {:?}",
-                id_field.element_type(),
-                id_type
-            ))))?,
-        },
+        DataType::Int32 => {
+            if let serde_json::Value::Object(ref obj) = id_field  && obj.contains_key("$numberInt"){
+                    let int_str = obj["$numberInt"].as_str().unwrap_or_default();
+                    Some(ScalarImpl::Int32(int_str.parse().unwrap_or_default()))
+                } else {
+                    Err(RwError::from(ProtocolError(format!(
+                        "Can not convert bson {:?} to {:?}",
+                        id_field,
+                        id_type
+                    ))))?
+            }
+        }
+        DataType::Int64 => {
+            if let serde_json::Value::Object(ref obj) = id_field && obj.contains_key("$numberLong") {
+                    let int_str = obj["$numberLong"].as_str().unwrap_or_default();
+                    Some(ScalarImpl::Int64(int_str.parse().unwrap_or_default()))
+                } else {
+                    Err(RwError::from(ProtocolError(format!(
+                        "Can not convert bson {:?} to {:?}",
+                        id_field,
+                        id_type
+                    ))))?
+            }
+        }
         _ => unreachable!("DebeziumMongoJsonParser::new must ensure _id column datatypes."),
     };
     let payload: Datum = match payload_type {
-        DataType::Jsonb => ScalarImpl::Jsonb(bson_value.into_relaxed_extjson().into()).into(),
+        DataType::Jsonb => ScalarImpl::Jsonb(bson_value.into()).into(),
         DataType::Varchar => ScalarImpl::Utf8(bson_str.into()).into(),
         _ => unreachable!("DebeziumMongoJsonParser::new must ensure payload column datatypes."),
     };

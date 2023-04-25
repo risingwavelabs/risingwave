@@ -357,6 +357,35 @@ pub(crate) async fn resolve_source_schema(
             }
         }
         SourceSchema::DebeziumMongoJson => {
+            if columns.is_empty() {
+                let mut col_id_gen = ColumnIdGenerator::new_initial();
+                let pk_id = col_id_gen.generate("_id");
+                columns.push(ColumnCatalog {
+                    column_desc: ColumnDesc {
+                        data_type: DataType::Varchar,
+                        column_id: pk_id,
+                        name: "_id".to_string(),
+                        field_descs: vec![],
+                        type_name: "".to_string(),
+                        generated_column: None,
+                    },
+                    is_hidden: false,
+                });
+                columns.push(ColumnCatalog {
+                    column_desc: ColumnDesc {
+                        data_type: DataType::Jsonb,
+                        column_id: col_id_gen.generate("payload"),
+                        name: "payload".to_string(),
+                        field_descs: vec![],
+                        type_name: "".to_string(),
+                        generated_column: None,
+                    },
+                    is_hidden: false,
+                });
+                pk_column_ids.push(pk_id);
+                row_id_index.take();
+            }
+
             // return err if user has not specified a pk
             if row_id_index.is_some() {
                 return Err(RwError::from(ProtocolError(

@@ -29,7 +29,6 @@ aws-sdk-s3 = { workspace = true }
 aws-smithy-http = { workspace = true }
 aws-types = { workspace = true }
 bincode = "1"
-bson = "2.6"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", default-features = false, features = [

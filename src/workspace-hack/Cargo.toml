@@ -18,8 +18,7 @@ publish = false
 
 ### BEGIN HAKARI SECTION
 [dependencies]
-ahash-c38e5c1d305a1b54 = { package = "ahash", version = "0.8" }
-ahash-ca01ad9e24f5d932 = { package = "ahash", version = "0.7" }
+ahash = { version = "0.8" }
 anyhow = { version = "1", features = ["backtrace"] }
 arrayvec = { version = "0.7", default-features = false, features = ["std"] }
 aws-sdk-s3 = { version = "0.21", features = ["native-tls"] }
@@ -88,12 +87,12 @@ ring = { version = "0.16", features = ["std"] }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
-serde_json = { version = "1", features = ["alloc", "preserve_order"] }
+serde_json = { version = "1", features = ["alloc"] }
 serde_with = { version = "2", features = ["json"] }
 smallvec = { version = "1", default-features = false, features = ["serde"] }
 strum = { version = "0.24", features = ["derive"] }
 subtle = { version = "2" }
-time = { version = "0.3", features = ["formatting", "large-dates", "local-offset", "macros", "parsing"] }
+time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "parking_lot", "process", "rt-multi-thread", "signal", "stats", "sync", "time", "tracing"] }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "4538cd6", features = ["with-chrono-0_4"] }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "ab251ad", features = ["fs", "net"] }
@@ -111,8 +110,7 @@ zstd-safe = { version = "5", default-features = false, features = ["arrays", "le
 zstd-sys = { version = "2", default-features = false, features = ["legacy", "std", "zdict_builder"] }
 
 [build-dependencies]
-ahash-c38e5c1d305a1b54 = { package = "ahash", version = "0.8" }
-ahash-ca01ad9e24f5d932 = { package = "ahash", version = "0.7" }
+ahash = { version = "0.8" }
 anyhow = { version = "1", features = ["backtrace"] }
 arrayvec = { version = "0.7", default-features = false, features = ["std"] }
 auto_enums = { version = "0.8", features = ["futures03"] }
@@ -184,14 +182,13 @@ ring = { version = "0.16", features = ["std"] }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
-serde_json = { version = "1", features = ["alloc", "preserve_order"] }
+serde_json = { version = "1", features = ["alloc"] }
 serde_with = { version = "2", features = ["json"] }
 smallvec = { version = "1", default-features = false, features = ["serde"] }
 strum = { version = "0.24", features = ["derive"] }
 subtle = { version = "2" }
 syn = { version = "1", features = ["extra-traits", "full", "visit", "visit-mut"] }
-time = { version = "0.3", features = ["formatting", "large-dates", "local-offset", "macros", "parsing"] }
-time-macros = { version = "0.2", default-features = false, features = ["formatting", "large-dates", "parsing"] }
+time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "parking_lot", "process", "rt-multi-thread", "signal", "stats", "sync", "time", "tracing"] }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "4538cd6", features = ["with-chrono-0_4"] }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "ab251ad", features = ["fs", "net"] }
