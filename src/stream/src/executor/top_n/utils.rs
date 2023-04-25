@@ -123,6 +123,7 @@ where
 
         #[for_await]
         for msg in input {
+            self.inner.evict();
             let msg = msg?;
             match msg {
                 Message::Watermark(watermark) => {
@@ -138,7 +139,6 @@ where
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         self.inner.update_vnode_bitmap(vnode_bitmap);
                     }
-                    self.inner.evict();
                     yield Message::Barrier(barrier)
                 }
             };
@@ -236,3 +236,7 @@ pub fn create_cache_key_serde(
     );
     (first_key_serde, second_key_serde, order_by_len)
 }
+
+use risingwave_common::row;
+pub trait GroupKey = row::Row + Send + Sync;
+pub const NO_GROUP_KEY: Option<row::Empty> = None;

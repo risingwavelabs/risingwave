@@ -21,7 +21,7 @@ use risingwave_rpc_client::ComputeClientPoolRef;
 use risingwave_source::dml_manager::DmlManagerRef;
 use risingwave_storage::StateStoreImpl;
 
-use crate::executor::BatchTaskMetrics;
+use crate::monitor::{BatchExecutorMetrics, BatchTaskMetrics};
 use crate::task::BatchManager;
 
 pub(crate) type WorkerNodeId = u32;
@@ -48,6 +48,9 @@ pub struct BatchEnvironment {
     /// Task level metrics.
     task_metrics: Arc<BatchTaskMetrics>,
 
+    /// Executor level metrics.
+    executor_metrics: Arc<BatchExecutorMetrics>,
+
     /// Compute client pool for grpc exchange.
     client_pool: ComputeClientPoolRef,
 
@@ -67,6 +70,7 @@ impl BatchEnvironment {
         worker_id: WorkerNodeId,
         state_store: StateStoreImpl,
         task_metrics: Arc<BatchTaskMetrics>,
+        executor_metrics: Arc<BatchExecutorMetrics>,
         client_pool: ComputeClientPoolRef,
         dml_manager: DmlManagerRef,
         source_metrics: Arc<SourceMetrics>,
@@ -78,6 +82,7 @@ impl BatchEnvironment {
             worker_id,
             state_store,
             task_metrics,
+            executor_metrics,
             client_pool,
             dml_manager,
             source_metrics,
@@ -91,7 +96,7 @@ impl BatchEnvironment {
         use risingwave_source::dml_manager::DmlManager;
         use risingwave_storage::monitor::MonitoredStorageMetrics;
 
-        use crate::executor::monitor::BatchManagerMetrics;
+        use crate::monitor::BatchManagerMetrics;
 
         BatchEnvironment {
             task_manager: Arc::new(BatchManager::new(
@@ -108,6 +113,7 @@ impl BatchEnvironment {
             client_pool: Arc::new(ComputeClientPool::default()),
             dml_manager: Arc::new(DmlManager::default()),
             source_metrics: Arc::new(SourceMetrics::default()),
+            executor_metrics: Arc::new(BatchExecutorMetrics::for_test()),
         }
     }
 
@@ -133,6 +139,10 @@ impl BatchEnvironment {
 
     pub fn task_metrics(&self) -> Arc<BatchTaskMetrics> {
         self.task_metrics.clone()
+    }
+
+    pub fn executor_metrics(&self) -> Arc<BatchExecutorMetrics> {
+        self.executor_metrics.clone()
     }
 
     pub fn client_pool(&self) -> ComputeClientPoolRef {

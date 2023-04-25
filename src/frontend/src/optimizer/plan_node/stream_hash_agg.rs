@@ -47,10 +47,6 @@ impl StreamHashAgg {
     ) -> Self {
         assert_eq!(logical.agg_calls[row_count_idx], PlanAggCall::count_star());
 
-        let base = PlanBase::new_logical_with_core(&logical);
-        let ctx = base.ctx;
-        let pk_indices = base.logical_pk;
-        let schema = base.schema;
         let input = logical.input.clone();
         let input_dist = input.distribution();
         let dist = match input_dist {
@@ -60,24 +56,16 @@ impl StreamHashAgg {
             d => d.clone(),
         };
 
-        let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
+        let mut watermark_columns = FixedBitSet::with_capacity(logical.output_len());
         // Watermark column(s) must be in group key.
-        for (idx, input_idx) in logical.group_key.iter().enumerate() {
-            if input.watermark_columns().contains(*input_idx) {
+        for (idx, input_idx) in logical.group_key.ones().enumerate() {
+            if input.watermark_columns().contains(input_idx) {
                 watermark_columns.insert(idx);
             }
         }
 
         // Hash agg executor might change the append-only behavior of the stream.
-        let base = PlanBase::new_stream(
-            ctx,
-            schema,
-            pk_indices,
-            base.functional_dependency,
-            dist,
-            false,
-            watermark_columns,
-        );
+        let base = PlanBase::new_stream_with_logical(&logical, dist, false, watermark_columns);
         StreamHashAgg {
             base,
             logical,
@@ -90,7 +78,7 @@ impl StreamHashAgg {
         &self.logical.agg_calls
     }
 
-    pub fn group_key(&self) -> &[usize] {
+    pub fn group_key(&self) -> &FixedBitSet {
         &self.logical.group_key
     }
 
@@ -146,7 +134,7 @@ impl StreamNode for StreamHashAgg {
             self.logical.infer_tables(&self.base, self.vnode_col_idx);
 
         PbNodeBody::HashAgg(HashAggNode {
-            group_key: self.group_key().iter().map(|idx| *idx as u32).collect(),
+            group_key: self.group_key().ones().map(|idx| idx as u32).collect(),
             agg_calls: self
                 .agg_calls()
                 .iter()

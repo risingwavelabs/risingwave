@@ -47,14 +47,17 @@ use risingwave_sqlparser::ast::{
 use super::create_table::bind_sql_table_column_constraints;
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::connection_catalog::resolve_private_link_connection;
 use crate::catalog::ColumnId;
 use crate::expr::Expr;
 use crate::handler::create_table::{
     bind_sql_column_constraints, bind_sql_columns, ColumnIdGenerator,
 };
+use crate::handler::util::{get_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
 use crate::session::SessionImpl;
+use crate::WithOptions;
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 pub(crate) const CONNECTION_NAME_KEY: &str = "connection.name";
@@ -176,26 +179,10 @@ async fn extract_protobuf_table_schema(
 }
 
 #[inline(always)]
-fn get_connector(with_properties: &HashMap<String, String>) -> Option<String> {
-    with_properties
-        .get(UPSTREAM_SOURCE_KEY)
-        .map(|s| s.to_lowercase())
-}
-
-#[inline(always)]
 fn get_connection_name(with_properties: &HashMap<String, String>) -> Option<String> {
     with_properties
         .get(CONNECTION_NAME_KEY)
         .map(|s| s.to_lowercase())
-}
-
-#[inline(always)]
-pub(crate) fn is_kafka_source(with_properties: &HashMap<String, String>) -> bool {
-    let Some(connector) = get_connector(with_properties) else {
-        return false;
-    };
-
-    connector == KAFKA_CONNECTOR
 }
 
 pub(crate) async fn resolve_source_schema(
@@ -209,7 +196,7 @@ pub(crate) async fn resolve_source_schema(
     validate_compatibility(&source_schema, with_properties)?;
     check_nexmark_schema(with_properties, *row_id_index, columns)?;
 
-    let is_kafka = is_kafka_source(with_properties);
+    let is_kafka = is_kafka_connector(with_properties);
 
     let source_info = match &source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
@@ -538,7 +525,7 @@ fn check_and_add_timestamp_column(
     column_descs: &mut Vec<ColumnDesc>,
     col_id_gen: &mut ColumnIdGenerator,
 ) {
-    if is_kafka_source(with_properties) {
+    if is_kafka_connector(with_properties) {
         let kafka_timestamp_column = ColumnDesc {
             data_type: DataType::Timestamptz,
             column_id: col_id_gen.generate(KAFKA_TIMESTAMP_COLUMN_NAME),
@@ -786,18 +773,21 @@ pub async fn handle_create_source(
     let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
 
     let connection_name = get_connection_name(&with_properties);
+    let is_kafka_connector = is_kafka_connector(&with_properties);
+    let mut with_options = WithOptions::new(with_properties);
     let connection_id = match connection_name {
         Some(connection_name) => {
-            let connection_id = session
-                .get_connection_id_for_create(schema_name, connection_name.as_str())
+            let connection = session
+                .get_connection_by_name(schema_name, &connection_name)
                 .map_err(|_| ErrorCode::ItemNotFound(connection_name))?;
-            if !is_kafka_source(&with_properties) {
+            if !is_kafka_connector {
                 return Err(RwError::from(ErrorCode::ProtocolError(
                     "Create source with connection is only supported for kafka connectors."
                         .to_string(),
                 )));
             }
-            Some(connection_id)
+            resolve_private_link_connection(&connection, with_options.inner_mut())?;
+            Some(connection.id)
         }
         None => None,
     };
@@ -811,7 +801,7 @@ pub async fn handle_create_source(
         row_id_index,
         columns,
         pk_column_ids,
-        properties: with_properties.into_iter().collect(),
+        properties: with_options.into_inner().into_iter().collect(),
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs,
