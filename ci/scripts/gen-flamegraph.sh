@@ -22,8 +22,6 @@ print_machine_debug_info() {
   echo "$SHELL"
   echo "Free space on Machine:"
   df -h
-  echo "Files on Machine:"
-  ls -la
 }
 
 ############## INSTALL
@@ -117,7 +115,6 @@ configure_all() {
 ############## Start benchmark environment
 
 start_nperf() {
-  # echo '1' | tee /proc/sys/kernel/perf_event_paranoid
   ./nperf record -p `pidof compute-node` -o perf.data &
 }
 
@@ -131,6 +128,8 @@ start_kafka() {
   buildkite-agent artifact upload ./kafka.log
 }
 
+# Currently 100mil events in Kafka take up 17% of 200GB gp3 i.e. 34GB
+# 1bil records would likely exceed the current storage,
 gen_events() {
   pushd nexmark-bench
   nexmark-server -c
