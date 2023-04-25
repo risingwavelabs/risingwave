@@ -16,9 +16,9 @@ package com.risingwave.connector.source.core;
 
 import com.risingwave.connector.api.source.CdcEngineRunner;
 import com.risingwave.connector.api.source.SourceHandler;
+import com.risingwave.connector.source.common.DbzConnectorConfig;
 import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
-import com.risingwave.connector.source.common.DbzConnectorConfig;
 import io.grpc.Context;
 import io.grpc.stub.ServerCallStreamObserver;
 import java.util.concurrent.TimeUnit;

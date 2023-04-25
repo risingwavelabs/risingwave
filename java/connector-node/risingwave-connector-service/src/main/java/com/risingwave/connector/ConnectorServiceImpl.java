@@ -14,10 +14,10 @@
 
 package com.risingwave.connector;
 
-import com.risingwave.proto.ConnectorServiceGrpc;
-import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.connector.source.SourceRequestHandler;
 import com.risingwave.connector.source.SourceValidateHandler;
+import com.risingwave.proto.ConnectorServiceGrpc;
+import com.risingwave.proto.ConnectorServiceProto;
 import io.grpc.stub.StreamObserver;
 
 public class ConnectorServiceImpl extends ConnectorServiceGrpc.ConnectorServiceImplBase {

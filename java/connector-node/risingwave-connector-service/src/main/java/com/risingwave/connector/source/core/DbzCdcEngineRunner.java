@@ -15,8 +15,8 @@
 package com.risingwave.connector.source.core;
 
 import com.risingwave.connector.api.source.*;
-import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
+import com.risingwave.proto.ConnectorServiceProto;
 import io.grpc.stub.StreamObserver;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;

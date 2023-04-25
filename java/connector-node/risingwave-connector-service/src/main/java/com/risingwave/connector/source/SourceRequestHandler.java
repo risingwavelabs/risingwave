@@ -15,8 +15,8 @@
 package com.risingwave.connector.source;
 
 import com.risingwave.connector.api.source.SourceTypeE;
-import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.connector.source.core.SourceHandlerFactory;
+import com.risingwave.proto.ConnectorServiceProto;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
 
