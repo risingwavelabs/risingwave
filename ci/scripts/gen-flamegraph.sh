@@ -40,7 +40,7 @@ install_all() {
   chmod +x ./promql
   mv ./promql /usr/local/bin/promql
   echo ">>> Run Sanity check that PromQL is installed"
-  promql --help
+  promql --version
 
   echo ">>> Installing Kafka"
   wget https://downloads.apache.org/kafka/3.4.0/kafka_2.13-3.4.0.tgz
