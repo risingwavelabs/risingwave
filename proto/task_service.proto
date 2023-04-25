@@ -73,28 +73,34 @@ message GetDataRequest {
   batch_plan.TaskOutputId task_output_id = 1;
 }
 
+// The structure for permit-based back-pressure.
+message Permits {
+  oneof value {
+    uint32 record = 1;
+    uint32 barrier = 2;
+  }
+}
+
 message GetStreamRequest {
-  // The first message, which tells the upstream which channel this exchange stream is for.
   message Get {
     uint32 up_actor_id = 1;
     uint32 down_actor_id = 2;
     uint32 up_fragment_id = 3;
     uint32 down_fragment_id = 4;
   }
-  // The following messages, which adds the permits back to the upstream to achieve back-pressure.
-  message AddPermits {
-    uint32 permits = 1;
-  }
+
   oneof value {
+    // The first message, which tells the upstream which channel this exchange stream is for.
     Get get = 1;
-    AddPermits add_permits = 2;
+    // The following messages, which adds the permits back to the upstream to achieve back-pressure.
+    Permits add_permits = 2;
   }
 }
 
 message GetStreamResponse {
   stream_plan.StreamMessage message = 1;
-  // The number of permits acquired for this message, which should be sent back to the upstream with `AddPermits`.
-  uint32 permits = 2;
+  // The number of permits acquired for this message, which should be sent back to the upstream with `add_permits`.
+  Permits permits = 2;
 }
 
 service ExchangeService {

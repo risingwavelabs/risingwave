@@ -882,7 +882,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use async_trait::async_trait;
-    use futures::{pin_mut, StreamExt};
+    use futures::{pin_mut, FutureExt, StreamExt};
     use itertools::Itertools;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
@@ -1065,7 +1065,12 @@ mod tests {
             .collect::<HashMap<_, _>>();
         macro_rules! try_recv {
             ($down_id:expr) => {
-                rxs.get_mut(&$down_id).unwrap().try_recv()
+                rxs.get_mut(&$down_id)
+                    .unwrap()
+                    .recv()
+                    .now_or_never()
+                    .flatten()
+                    .ok_or(())
             };
         }
 

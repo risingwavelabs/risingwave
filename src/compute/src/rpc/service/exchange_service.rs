@@ -22,9 +22,9 @@ use futures_async_stream::try_stream;
 use risingwave_batch::task::BatchManager;
 use risingwave_pb::task_service::exchange_service_server::ExchangeService;
 use risingwave_pb::task_service::{
-    GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
+    permits, GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse, PbPermits,
 };
-use risingwave_stream::executor::exchange::permit::{MessageWithPermits, Permits, Receiver};
+use risingwave_stream::executor::exchange::permit::{MessageWithPermits, Receiver};
 use risingwave_stream::executor::Message;
 use risingwave_stream::task::LocalStreamManager;
 use tokio_stream::wrappers::ReceiverStream;
@@ -102,7 +102,7 @@ impl ExchangeService for ExchangeServiceImpl {
         // Map the remaining stream to add-permits.
         let add_permits_stream = request_stream.map_ok(|req| match req.value.unwrap() {
             Value::Get(_) => unreachable!("the following messages must be `AddPermits`"),
-            Value::AddPermits(add_permits) => add_permits.permits,
+            Value::AddPermits(add_permits) => add_permits.value.unwrap(),
         });
 
         Ok(Response::new(Self::get_stream_impl(
@@ -134,7 +134,7 @@ impl ExchangeServiceImpl {
         metrics: Arc<ExchangeServiceMetrics>,
         peer_addr: SocketAddr,
         mut receiver: Receiver,
-        add_permits_stream: impl Stream<Item = std::result::Result<Permits, tonic::Status>>,
+        add_permits_stream: impl Stream<Item = std::result::Result<permits::Value, tonic::Status>>,
         up_down_actor_ids: (u32, u32),
         up_down_fragment_ids: (u32, u32),
     ) {
@@ -163,7 +163,7 @@ impl ExchangeServiceImpl {
         while let Some(r) = select_stream.try_next().await? {
             match r {
                 Either::Left(permits_to_add) => {
-                    permits.add_permits(permits_to_add as usize);
+                    permits.add_permits(permits_to_add);
                 }
                 Either::Right(MessageWithPermits { message, permits }) => {
                     // add serialization duration metric with given sampling frequency
@@ -182,7 +182,7 @@ impl ExchangeServiceImpl {
 
                     let response = GetStreamResponse {
                         message: Some(proto),
-                        permits, // forward the acquired permit to the downstream
+                        permits: Some(PbPermits { value: permits }), // forward the acquired permit to the downstream */
                     };
                     let bytes = Message::get_encoded_len(&response);
 
