@@ -11,8 +11,8 @@ echo "CUR_DIR: $PWD"
 pushd ..
 git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/nexmark-bench.git
 pushd nexmark-bench
-# FIXME(kwannoel): Upstream this fix
-echo "nightly-2023-03-01" > rust-toolchain
+# TODO(kwannoel): Upstream this fix
+echo "nightly-2023-04-07" > rust-toolchain
 make install
 cp /risingwave/.cargo/bin/nexmark-server ./nexmark-server
 buildkite-agent artifact upload ./nexmark-server
@@ -21,7 +21,7 @@ popd
 
 ############# SETUP RW
 
-# FIXME(kwannoel): Currently these are in `gen-flamegraph.sh`.
+# TODO(kwannoel): Currently these are in `gen-flamegraph.sh`.
 #
 # That's sub-optimal as it takes up disk space, which could otherwise
 # be used to store more nexmark events.

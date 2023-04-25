@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+# NOTE(kwannoel): When developing this script, you may want to disable the `-e` flag.
+# The feedback loop is too long otherwise.
 # FIXME: enable -e.
 set -uo pipefail
 
@@ -89,7 +91,7 @@ popd
 
 configure_rw() {
 # FIXME(kwannoel): Workaround
-git config --global --add safe.directory /risingwave
+# git config --global --add safe.directory /risingwave
 pushd risingwave
 cat <<EOF > risedev-components.user.env
 RISEDEV_CONFIGURED=true
@@ -209,7 +211,7 @@ main() {
   psql -h localhost -p 4566 -d dev -U root -f risingwave/ci/scripts/sql/nexmark/ddl.sql
 
   echo "--- Running Benchmarks"
-  # FIXME(kwannoel): Allow users to configure which query they want to run.
+  # TODO(kwannoel): Allow users to configure which query they want to run.
   psql -h localhost -p 4566 -d dev -U root -f risingwave/ci/scripts/sql/nexmark/q17.sql
 
   echo "--- Start Profiling"
