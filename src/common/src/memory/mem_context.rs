@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use prometheus::IntGauge;
 
-use crate::metrics::TrAdderGauage;
+use crate::metrics::TrAdderGauge;
 
 pub type MemoryContextRef = Arc<MemoryContext>;
 
@@ -15,7 +15,7 @@ pub enum MemCounter {
     /// Used when the add/sub operation don't have much conflicts.
     Atomic(IntGauge),
     /// Used when the add/sub operation may cause a lot of conflicts.
-    TrAdder(TrAdderGauage),
+    TrAdder(TrAdderGauge),
 }
 
 impl From<IntGauge> for MemCounter {
@@ -24,8 +24,8 @@ impl From<IntGauge> for MemCounter {
     }
 }
 
-impl From<TrAdderGauage> for MemCounter {
-    fn from(value: TrAdderGauage) -> Self {
+impl From<TrAdderGauge> for MemCounter {
+    fn from(value: TrAdderGauge) -> Self {
         MemCounter::TrAdder(value)
     }
 }

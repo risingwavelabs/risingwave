@@ -141,13 +141,11 @@ impl BatchTaskContext for ComputeNodeContext {
     }
 
     fn create_executor_mem_context(&self, executor_id: &str) -> Option<MemoryContextRef> {
-        if let Some(metrics) = &self.task_metrics {
+        if let Some(metrics) = &self.batch_metrics {
             let mut labels = metrics.task_labels();
             labels.push(executor_id);
-            let executor_mem_usage = metrics
-                .metrics
-                .executor_mem_usage
-                .with_label_values(&labels);
+            let executor_mem_usage =
+                metrics.create_collector_for_mem_usage(vec![executor_id.to_string()]);
             Some(Arc::new(MemoryContext::new(
                 Some(self.mem_context.clone()),
                 executor_mem_usage,
@@ -171,20 +169,18 @@ impl ComputeNodeContext {
     }
 
     pub fn new(env: BatchEnvironment, task_id: TaskId) -> Self {
-        let task_metrics = BatchTaskMetricsWithTaskLabels::new(env.task_metrics(), task_id);
         let batch_mem_context = env.task_manager().memory_context_ref();
-        let mem_context = Arc::new(MemoryContext::new(
-            Some(batch_mem_context),
-            task_metrics
-                .metrics
-                .task_mem_usage
-                .with_label_values(&task_metrics.task_labels()),
-        ));
-
         let batch_metrics = Arc::new(BatchMetricsWithTaskLabelsInner::new(
             env.task_metrics(),
             env.executor_metrics(),
             task_id,
+        ));
+        let mem_context = Arc::new(MemoryContext::new(
+            Some(batch_mem_context),
+            batch_metrics
+                .get_task_metrics()
+                .task_mem_usage
+                .with_label_values(&batch_metrics.task_labels()),
         ));
         Self {
             env,

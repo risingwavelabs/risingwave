@@ -29,4 +29,4 @@ impl Atomic for TrAdderAtomic {
     }
 }
 
-pub type TrAdderGauage = GenericGauge<TrAdderAtomic>;
+pub type TrAdderGauge = GenericGauge<TrAdderAtomic>;
