@@ -35,7 +35,7 @@ pub struct PlanWindowFunction {
     pub args: Vec<InputRef>,
     pub partition_by: Vec<InputRef>,
     pub order_by: Vec<ColumnOrder>,
-    pub frame: Option<Frame>,
+    pub frame: Frame,
 }
 
 struct PlanWindowFunctionDisplay<'a> {
@@ -86,9 +86,7 @@ impl<'a> std::fmt::Debug for PlanWindowFunctionDisplay<'a> {
                     })
                 )?;
             }
-            if let Some(frame) = &window_function.frame {
-                write!(f, "{delim}{}", frame)?;
-            }
+            write!(f, "{delim}{}", window_function.frame)?;
             f.write_str(")")?;
 
             Ok(())

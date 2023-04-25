@@ -130,8 +130,11 @@ impl LogicalOverAgg {
         let mut args = window_function.args;
         let frame = match window_function.kind {
             WindowFuncKind::RowNumber | WindowFuncKind::Rank | WindowFuncKind::DenseRank => {
-                // ignore frame for rank functions
-                None
+                // ignore user-defined frame for rank functions
+                Frame::Rows(
+                    FrameBound::UnboundedPreceding,
+                    FrameBound::UnboundedFollowing,
+                )
             }
             WindowFuncKind::Lag | WindowFuncKind::Lead => {
                 let offset = if args.len() > 1 {
@@ -154,13 +157,23 @@ impl LogicalOverAgg {
 
                 // override the frame
                 // TODO(rc): We can only do the optimization for constant offset.
-                Some(if window_function.kind == WindowFuncKind::Lag {
+                if window_function.kind == WindowFuncKind::Lag {
                     Frame::Rows(FrameBound::Preceding(offset), FrameBound::CurrentRow)
                 } else {
                     Frame::Rows(FrameBound::CurrentRow, FrameBound::Following(offset))
-                })
+                }
             }
-            _ => window_function.frame,
+            _ => window_function.frame.unwrap_or_else(|| {
+                if order_by.is_empty() {
+                    Frame::Rows(
+                        FrameBound::UnboundedPreceding,
+                        FrameBound::UnboundedFollowing,
+                    )
+                } else {
+                    // FIXME(rc): Should be `Frame::Range` but we don't support yet.
+                    Frame::Rows(FrameBound::UnboundedPreceding, FrameBound::CurrentRow)
+                }
+            }),
         };
 
         let args = args
