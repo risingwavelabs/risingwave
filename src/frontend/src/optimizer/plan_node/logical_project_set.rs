@@ -308,15 +308,15 @@ impl PredicatePushdown for LogicalProjectSet {
         // convert the predicate to one that references the child of the project
         let mut subst = Substitute {
             mapping: {
-                let mut select_list = self.select_list().clone();
-                select_list.insert(
+                let mut output_list = self.select_list().clone();
+                output_list.insert(
                     0,
                     ExprImpl::InputRef(Box::new(InputRef {
                         index: 0,
                         data_type: DataType::Int64,
                     })),
                 );
-                select_list
+                output_list
             },
         };
 
