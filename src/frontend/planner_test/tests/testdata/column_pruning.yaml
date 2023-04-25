@@ -133,9 +133,9 @@
             └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t.arr, t._row_id] }
   optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [t.v1, t.v2, t.v3, Unnest($3)] }
-    └─LogicalFilter { predicate: (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) AND (Unnest($3) = 30:Int32) }
+    └─LogicalFilter { predicate: (Unnest($3) = 30:Int32) }
       └─LogicalProjectSet { select_list: [$0, $1, $2, Unnest($3)] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.arr] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.arr], predicate: (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) }
 - name: mixed
   sql: |
     create table t (v1 bigint, v2 double precision, v3 int);
