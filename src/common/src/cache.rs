@@ -28,6 +28,7 @@ use std::ptr::null_mut;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use bincode::{Decode, Encode};
 use futures::FutureExt;
 use parking_lot::Mutex;
 use tokio::sync::oneshot::error::RecvError;
@@ -50,7 +51,7 @@ impl<T: Eq + Send + Hash> LruKey for T {}
 pub trait LruValue: Send + Sync {}
 impl<T: Send + Sync> LruValue for T {}
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Decode, Encode)]
 pub enum CachePriority {
     High,
     Low,

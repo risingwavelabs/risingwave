@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use risingwave_common::catalog::TableId;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 
@@ -177,7 +178,7 @@ impl ReplayWorker {
                 let actual = match storage_type {
                     StorageType::Global => replay.get(key, epoch, read_options).await,
                     StorageType::Local(_, new_local_opts) => {
-                        assert_eq!(new_local_opts.table_id.table_id, read_options.table_id);
+                        assert_eq!(new_local_opts.table_id, read_options.table_id);
                         let s = local_storages.get_mut(&read_options.table_id).unwrap();
                         s.get(key, epoch, read_options).await
                     }
@@ -208,7 +209,7 @@ impl ReplayWorker {
                 let iter = match storage_type {
                     StorageType::Global => replay.iter(key_range, epoch, read_options).await,
                     StorageType::Local(_, new_local_opts) => {
-                        assert_eq!(new_local_opts.table_id.table_id, read_options.table_id);
+                        assert_eq!(new_local_opts.table_id, read_options.table_id);
                         let s = local_storages.get_mut(&read_options.table_id).unwrap();
                         s.iter(key_range, epoch, read_options).await
                     }
@@ -244,14 +245,12 @@ impl ReplayWorker {
             }
             Operation::NewLocalStorage => {
                 if let StorageType::Local(_, new_local_opts) = storage_type {
-                    local_storages
-                        .insert(new_local_opts.table_id.table_id, replay)
-                        .await;
+                    local_storages.insert(new_local_opts.table_id, replay).await;
                 }
             }
             Operation::DropLocalStorage => {
                 if let StorageType::Local(_, new_local_opts) = storage_type {
-                    local_storages.remove(&new_local_opts.table_id.table_id);
+                    local_storages.remove(&new_local_opts.table_id);
                 }
                 // All local storages have been dropped, we should shutdown this worker
                 // If there are incoming new_local, this ReplayWorker will spawn again
@@ -325,7 +324,7 @@ impl WorkerHandler {
 }
 
 struct LocalStorages {
-    storages: HashMap<u32, Box<dyn LocalReplay>>,
+    storages: HashMap<TableId, Box<dyn LocalReplay>>,
 }
 impl LocalStorages {
     fn new() -> Self {
@@ -334,15 +333,15 @@ impl LocalStorages {
         }
     }
 
-    fn remove(&mut self, table_id: &u32) {
+    fn remove(&mut self, table_id: &TableId) {
         self.storages.remove(table_id);
     }
 
-    fn get_mut(&mut self, table_id: &u32) -> Option<&mut Box<dyn LocalReplay>> {
+    fn get_mut(&mut self, table_id: &TableId) -> Option<&mut Box<dyn LocalReplay>> {
         self.storages.get_mut(table_id)
     }
 
-    async fn insert(&mut self, table_id: u32, replay: &Arc<impl GlobalReplay>) {
+    async fn insert(&mut self, table_id: TableId, replay: &Arc<impl GlobalReplay>) {
         self.storages
             .insert(table_id, replay.new_local(table_id).await);
     }
@@ -362,15 +361,16 @@ mod tests {
 
     use std::ops::Bound;
 
+    use bytes::Bytes;
     use mockall::predicate;
     use risingwave_common::catalog::TableId;
-    use risingwave_hummock_sdk::opts::NewLocalOptions;
+    use risingwave_hummock_sdk::opts::{NewLocalOptions, ReadOptions};
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
     use crate::{
         traced_bytes, MockGlobalReplayInterface, MockLocalReplayInterface, MockReplayIter,
-        StorageType, TraceReadOptions,
+        StorageType, TracedReadOptions,
     };
 
     #[tokio::test]
@@ -379,25 +379,10 @@ mod tests {
         let mut local_storages = LocalStorages::new();
         let (res_tx, mut res_rx) = unbounded_channel();
 
-        let read_options = TraceReadOptions {
-            prefix_hint: None,
-            check_bloom_filter: false,
-            retention_seconds: Some(12),
-            table_id: 12,
-            ignore_range_tombstone: false,
-        };
-        let iter_read_options = TraceReadOptions {
-            prefix_hint: None,
-            check_bloom_filter: true,
-            retention_seconds: Some(124),
-            table_id: 123,
-            ignore_range_tombstone: true,
-        };
-        let op = Operation::Get {
-            key: traced_bytes![123],
-            epoch: 123,
-            read_options: read_options.clone(),
-        };
+        let read_options = ReadOptions::for_test(12);
+        let iter_read_options = ReadOptions::for_test(123);
+        let op = Operation::get(Bytes::from(vec![123]), 123, read_options);
+
         let new_local_opts = NewLocalOptions::for_test(TableId { table_id: 0 });
         let mut should_exit = false;
         let get_storage_type = StorageType::Local(0, new_local_opts);
@@ -474,7 +459,7 @@ mod tests {
         let op = Operation::Iter {
             key_range: (Bound::Unbounded, Bound::Unbounded),
             epoch: 45,
-            read_options: iter_read_options.clone(),
+            read_options: TracedReadOptions::from(iter_read_options),
         };
 
         let iter_storage_type = StorageType::Local(0, new_local_opts);
@@ -537,13 +522,7 @@ mod tests {
         let record_id = 29053;
         let key = traced_bytes![1];
         let epoch = 2596;
-        let read_options = TraceReadOptions {
-            prefix_hint: None,
-            ignore_range_tombstone: false,
-            check_bloom_filter: false,
-            table_id: 1,
-            retention_seconds: None,
-        };
+        let read_options = ReadOptions::for_test(1);
 
         let res_bytes = traced_bytes![58, 54, 35];
 
@@ -561,11 +540,7 @@ mod tests {
         let record = Record(
             StorageType::Global,
             record_id,
-            Operation::Get {
-                key,
-                epoch,
-                read_options,
-            },
+            Operation::get(key.into(), epoch, read_options),
         );
         scheduler.schedule(record);
 

@@ -19,12 +19,14 @@ use std::ops::Bound;
 
 #[cfg(test)]
 use mockall::{automock, mock};
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::opts::WriteOptions;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
 pub use runner::*;
 pub(crate) use worker::*;
 
 use crate::error::Result;
-use crate::{Record, TraceReadOptions, TracedBytes, TracedWriteOptions};
+use crate::{Record, TracedBytes, TracedReadOptions};
 
 type ReplayGroup = Record;
 
@@ -51,13 +53,13 @@ pub trait ReplayRead {
         &self,
         key_range: (Bound<TracedBytes>, Bound<TracedBytes>),
         epoch: u64,
-        read_options: TraceReadOptions,
+        read_options: TracedReadOptions,
     ) -> Result<Box<dyn ReplayIter>>;
     async fn get(
         &self,
         key: TracedBytes,
         epoch: u64,
-        read_options: TraceReadOptions,
+        read_options: TracedReadOptions,
     ) -> Result<Option<TracedBytes>>;
 }
 
@@ -68,7 +70,7 @@ pub trait ReplayWrite {
         &self,
         kv_pairs: Vec<(TracedBytes, Option<TracedBytes>)>,
         delete_ranges: Vec<(TracedBytes, TracedBytes)>,
-        write_options: TracedWriteOptions,
+        write_options: WriteOptions,
     ) -> Result<usize>;
 }
 
@@ -78,7 +80,7 @@ pub trait ReplayStateStore {
     async fn sync(&self, id: u64) -> Result<usize>;
     async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
     async fn notify_hummock(&self, info: Info, op: RespOperation, version: u64) -> Result<u64>;
-    async fn new_local(&self, table_id: u32) -> Box<dyn LocalReplay>;
+    async fn new_local(&self, table_id: TableId) -> Box<dyn LocalReplay>;
 }
 
 #[cfg_attr(test, automock)]
@@ -97,13 +99,13 @@ mock! {
             &self,
             key_range: (Bound<TracedBytes>, Bound<TracedBytes>),
             epoch: u64,
-            read_options: TraceReadOptions,
+            read_options: TracedReadOptions,
         ) -> Result<Box<dyn ReplayIter>>;
         async fn get(
             &self,
             key: TracedBytes,
             epoch: u64,
-            read_options: TraceReadOptions,
+            read_options: TracedReadOptions,
         ) -> Result<Option<TracedBytes>>;
     }
     #[async_trait::async_trait]
@@ -112,7 +114,7 @@ mock! {
             &self,
             kv_pairs: Vec<(TracedBytes, Option<TracedBytes>)>,
             delete_ranges: Vec<(TracedBytes, TracedBytes)>,
-            write_options: TracedWriteOptions,
+            write_options: WriteOptions,
         ) -> Result<usize>;
     }
     #[async_trait::async_trait]
@@ -121,7 +123,7 @@ mock! {
         async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
         async fn notify_hummock(&self, info: Info, op: RespOperation, version: u64,
         ) -> Result<u64>;
-        async fn new_local(&self, table_id: u32) -> Box<dyn LocalReplay>;
+        async fn new_local(&self, table_id: TableId) -> Box<dyn LocalReplay>;
     }
     impl GlobalReplay for GlobalReplayInterface{}
 }
@@ -136,13 +138,13 @@ mock! {
             &self,
             key_range: (Bound<TracedBytes>, Bound<TracedBytes>),
             epoch: u64,
-            read_options: TraceReadOptions,
+            read_options: TracedReadOptions,
         ) -> Result<Box<dyn ReplayIter>>;
         async fn get(
             &self,
             key: TracedBytes,
             epoch: u64,
-            read_options: TraceReadOptions,
+            read_options: TracedReadOptions,
         ) -> Result<Option<TracedBytes>>;
     }
     #[async_trait::async_trait]
@@ -151,7 +153,7 @@ mock! {
             &self,
             kv_pairs: Vec<(TracedBytes, Option<TracedBytes>)>,
             delete_ranges: Vec<(TracedBytes, TracedBytes)>,
-            write_options: TracedWriteOptions,
+            write_options: WriteOptions,
         ) -> Result<usize>;
     }
     impl LocalReplay for LocalReplayInterface{}

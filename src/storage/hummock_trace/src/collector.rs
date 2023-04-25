@@ -20,8 +20,9 @@ use std::sync::atomic::AtomicU64;
 use std::sync::LazyLock;
 
 use bincode::{Decode, Encode};
+use bytes::Bytes;
 use parking_lot::Mutex;
-use risingwave_hummock_sdk::opts::NewLocalOptions;
+use risingwave_hummock_sdk::opts::{NewLocalOptions, ReadOptions};
 use tokio::sync::mpsc::{
     unbounded_channel as channel, UnboundedReceiver as Receiver, UnboundedSender as Sender,
 };
@@ -30,7 +31,7 @@ use tokio::task_local;
 use crate::write::{TraceWriter, TraceWriterImpl};
 use crate::{
     ConcurrentIdGenerator, Operation, OperationResult, Record, RecordId, RecordIdGenerator,
-    TracedNewLocalOpts, UniqueIdGenerator,
+    UniqueIdGenerator,
 };
 
 static GLOBAL_COLLECTOR: LazyLock<GlobalCollector> = LazyLock::new(GlobalCollector::new);
@@ -144,6 +145,22 @@ impl TraceSpan {
         }
     }
 
+    pub fn new_global(op: Operation, storage_type: StorageType) -> Option<Self> {
+        match should_use_trace() {
+            true => Some(Self::new_to_global(op, storage_type)),
+            false => None,
+        }
+    }
+
+    pub fn new_get(
+        key: Bytes,
+        epoch: u64,
+        read_options: ReadOptions,
+        storage_type: StorageType,
+    ) -> Option<Self> {
+        Self::new_global(Operation::get(key, epoch, read_options), storage_type)
+    }
+
     pub fn send(&self, op: Operation) {
         self.tx
             .send(Some(Record::new(self.storage_type(), self.id(), op)))
@@ -212,10 +229,10 @@ task_local! {
 mod tests {
     use std::sync::Arc;
 
-    use risingwave_common::catalog::{TableId, TableOption};
+    use risingwave_common::catalog::TableId;
 
     use super::*;
-    use crate::{traced_bytes, MockTraceWriter};
+    use crate::MockTraceWriter;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_new_spans_concurrent() {
@@ -229,15 +246,7 @@ mod tests {
             let collector = collector.clone();
             let generator = generator.clone();
             let handle = tokio::spawn(async move {
-                let op = Operation::get(
-                    traced_bytes![i as u8],
-                    123,
-                    None,
-                    true,
-                    Some(12),
-                    123,
-                    false,
-                );
+                let op = Operation::get(Bytes::from(vec![i as u8]), 123, ReadOptions::for_test());
                 let _span = TraceSpan::new_with_op(
                     collector.tx(),
                     generator.next(),
@@ -267,13 +276,9 @@ mod tests {
         let generator = Arc::new(UniqueIdGenerator::new(AtomicU64::new(0)));
 
         let op = Operation::get(
-            traced_bytes![74, 56, 43, 67],
+            Bytes::from(vec![74, 56, 43, 67]),
             256,
-            None,
-            true,
-            Some(242),
-            167,
-            false,
+            ReadOptions::for_test(),
         );
         let mut mock_writer = MockTraceWriter::new();
 

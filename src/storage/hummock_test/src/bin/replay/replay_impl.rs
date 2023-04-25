@@ -22,7 +22,7 @@ use risingwave_common_service::observer_manager::{Channel, NotificationClient};
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_trace::{
     GlobalReplay, LocalReplay, ReplayIter, ReplayRead, ReplayStateStore, ReplayWrite, Result,
-    TraceError, TraceReadOptions, TraceSubResp, TracedBytes, TracedWriteOptions,
+    TraceError, TraceSubResp, TracedBytes, TracedReadOptions, TracedWriteOptions,
 };
 use risingwave_meta::manager::{
     MessageStatus, MetaSrvEnv, NotificationManagerRef, NotificationVersion, WorkerKey,
@@ -82,7 +82,7 @@ impl ReplayRead for GlobalReplayInterface {
         &self,
         key_range: (Bound<TracedBytes>, Bound<TracedBytes>),
         epoch: u64,
-        read_options: TraceReadOptions,
+        read_options: TracedReadOptions,
     ) -> Result<Box<dyn ReplayIter>> {
         dispatch_iter!(self.store, key_range, epoch, read_options)
     }
@@ -91,7 +91,7 @@ impl ReplayRead for GlobalReplayInterface {
         &self,
         key: TracedBytes,
         epoch: u64,
-        read_options: TraceReadOptions,
+        read_options: TracedReadOptions,
     ) -> Result<Option<TracedBytes>> {
         Ok(self
             .store
@@ -154,7 +154,7 @@ impl ReplayRead for LocalReplayInterface {
         &self,
         key_range: (Bound<TracedBytes>, Bound<TracedBytes>),
         epoch: u64,
-        read_options: TraceReadOptions,
+        read_options: TracedReadOptions,
     ) -> Result<Box<dyn ReplayIter>> {
         dispatch_iter!(self.0, key_range, epoch, read_options)
     }
@@ -163,7 +163,7 @@ impl ReplayRead for LocalReplayInterface {
         &self,
         key: TracedBytes,
         epoch: u64,
-        read_options: TraceReadOptions,
+        read_options: TracedReadOptions,
     ) -> Result<Option<TracedBytes>> {
         Ok(self
             .0
@@ -280,7 +280,7 @@ impl<T: Send + 'static> Channel for ReplayChannel<T> {
     }
 }
 
-fn from_trace_read_options(opt: TraceReadOptions) -> ReadOptions {
+fn from_trace_read_options(opt: TracedReadOptions) -> ReadOptions {
     ReadOptions {
         prefix_hint: opt.prefix_hint,
         ignore_range_tombstone: opt.ignore_range_tombstone,

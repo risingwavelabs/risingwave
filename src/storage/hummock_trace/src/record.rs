@@ -18,7 +18,8 @@ use bincode::error::{DecodeError, EncodeError};
 use bincode::{Decode, Encode};
 use bytes::Bytes;
 use prost::Message;
-use risingwave_common::catalog::TableOption;
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::opts::{CachePolicy, PrefetchOptions, ReadOptions, WriteOptions};
 use risingwave_pb::meta::SubscribeResponse;
 
 use crate::StorageType;
@@ -85,14 +86,6 @@ impl Record {
     }
 }
 
-pub type TableId = u32;
-#[derive(Clone, Copy, Debug, Encode, Decode, PartialEq)]
-pub struct TracedNewLocalOpts {
-    pub table_id: TableId,
-    pub is_consistent_op: bool,
-    pub table_option: TableOption,
-}
-
 /// Operations represents Hummock operations
 #[derive(Encode, Decode, PartialEq, Debug, Clone)]
 pub enum Operation {
@@ -100,21 +93,21 @@ pub enum Operation {
     Get {
         key: TracedBytes,
         epoch: u64,
-        read_options: TraceReadOptions,
+        read_options: TracedReadOptions,
     },
 
     /// Ingest operation of Hummock.
     Ingest {
         kv_pairs: Vec<(TracedBytes, Option<TracedBytes>)>,
         delete_ranges: Vec<(TracedBytes, TracedBytes)>,
-        write_options: TracedWriteOptions,
+        write_options: WriteOptions,
     },
 
     /// Iter operation of Hummock
     Iter {
         key_range: (Bound<TracedBytes>, Bound<TracedBytes>),
         epoch: u64,
-        read_options: TraceReadOptions,
+        read_options: TracedReadOptions,
     },
 
     /// Iter.next operation
@@ -138,38 +131,23 @@ pub enum Operation {
 }
 
 impl Operation {
-    pub fn get(
-        key: TracedBytes,
-        epoch: u64,
-        prefix_hint: Option<Vec<u8>>,
-        check_bloom_filter: bool,
-        retention_seconds: Option<u32>,
-        table_id: TableId,
-        ignore_range_tombstone: bool,
-    ) -> Operation {
+    pub fn get(key: Bytes, epoch: u64, read_options: ReadOptions) -> Operation {
         Operation::Get {
-            key,
+            key: TracedBytes::from(key),
             epoch,
-            read_options: TraceReadOptions {
-                prefix_hint,
-                ignore_range_tombstone,
-                check_bloom_filter,
-                retention_seconds,
-                table_id,
-            },
+            read_options: TracedReadOptions::from(read_options),
         }
     }
 
     pub fn ingest(
         kv_pairs: Vec<(TracedBytes, Option<TracedBytes>)>,
         delete_ranges: Vec<(TracedBytes, TracedBytes)>,
-        epoch: u64,
-        table_id: TableId,
+        write_options: WriteOptions,
     ) -> Operation {
         Operation::Ingest {
             kv_pairs,
             delete_ranges,
-            write_options: TracedWriteOptions { epoch, table_id },
+            write_options,
         }
     }
 }
@@ -304,18 +282,45 @@ impl<'de> bincode::BorrowDecode<'de> for TraceSubResp {
 }
 
 #[derive(Encode, Decode, PartialEq, Debug, Clone)]
-pub struct TraceReadOptions {
-    pub prefix_hint: Option<Vec<u8>>,
+pub struct TracedReadOptions {
+    pub prefix_hint: Option<TracedBytes>,
     pub ignore_range_tombstone: bool,
-    pub check_bloom_filter: bool,
+    pub prefetch_options: PrefetchOptions,
+    pub cache_policy: CachePolicy,
+
     pub retention_seconds: Option<u32>,
     pub table_id: TableId,
+    pub read_version_from_backup: bool,
 }
-#[derive(Encode, Decode, PartialEq, Debug, Clone)]
-pub struct TracedWriteOptions {
-    pub epoch: u64,
-    pub table_id: TableId,
+
+impl From<ReadOptions> for TracedReadOptions {
+    fn from(opts: ReadOptions) -> Self {
+        Self {
+            prefix_hint: opts.prefix_hint.map(|b| TracedBytes::from(b)),
+            ignore_range_tombstone: opts.ignore_range_tombstone,
+            retention_seconds: opts.retention_seconds,
+            table_id: opts.table_id,
+            read_version_from_backup: opts.read_version_from_backup,
+            prefetch_options: opts.prefetch_options,
+            cache_policy: opts.cache_policy,
+        }
+    }
 }
+
+impl Into<ReadOptions> for TracedReadOptions {
+    fn into(self) -> ReadOptions {
+        ReadOptions {
+            prefix_hint: self.prefix_hint.map(|b| b.into_bytes()),
+            ignore_range_tombstone: self.ignore_range_tombstone,
+            prefetch_options: self.prefetch_options,
+            cache_policy: self.cache_policy,
+            retention_seconds: self.retention_seconds,
+            table_id: self.table_id,
+            read_version_from_backup: self.read_version_from_backup,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;

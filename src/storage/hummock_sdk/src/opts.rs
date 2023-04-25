@@ -4,7 +4,7 @@ use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
 
 // TODO: Define policy based on use cases (read / compaction / ...).
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Encode, Decode)]
 pub enum CachePolicy {
     /// Disable read cache and not fill the cache afterwards.
     Disable,
@@ -22,7 +22,7 @@ impl Default for CachePolicy {
 
 /// If `exhaust_iter` is true, prefetch will be enabled. Prefetching may increase the memory
 /// footprint of the CN process because the prefetched blocks cannot be evicted.
-#[derive(Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, Encode, Decode, PartialEq, Eq)]
 pub struct PrefetchOptions {
     /// `exhaust_iter` is set `true` only if the return value of `iter()` will definitely be
     /// exhausted, i.e., will iterate until end.
@@ -35,7 +35,7 @@ impl PrefetchOptions {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
 pub struct ReadOptions {
     /// A hint for prefix key to check bloom filter.
     /// If the `prefix_hint` is not None, it should be included in
@@ -52,7 +52,21 @@ pub struct ReadOptions {
     pub read_version_from_backup: bool,
 }
 
-#[derive(Default, Clone)]
+impl ReadOptions {
+    pub fn for_test(table_id: u32) -> Self {
+        Self {
+            prefix_hint: Some(Bytes::from(vec![0])),
+            ignore_range_tombstone: true,
+            prefetch_options: PrefetchOptions { exhaust_iter: true },
+            cache_policy: CachePolicy::Disable,
+            retention_seconds: None,
+            table_id: TableId { table_id: table_id },
+            read_version_from_backup: true,
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Encode, Decode, PartialEq)]
 pub struct WriteOptions {
     pub epoch: u64,
     pub table_id: TableId,

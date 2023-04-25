@@ -97,7 +97,10 @@ mod test {
 
     use bincode::config::{self};
     use bincode::encode_to_vec;
+    use bytes::Bytes;
     use mockall::mock;
+    use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::opts::{ReadOptions, WriteOptions};
     use risingwave_pb::common::Status;
     use risingwave_pb::meta::SubscribeResponse;
 
@@ -118,13 +121,9 @@ mod test {
     fn test_bincode_deserialize() {
         let deserializer = BincodeDeserializer::default();
         let op = Operation::get(
-            traced_bytes![5, 5, 15, 6],
+            Bytes::from(vec![5, 5, 15, 6]),
             7564,
-            None,
-            true,
-            Some(5433),
-            123,
-            false,
+            ReadOptions::for_test(),
         );
         let expected = Record::new_local_none(54433, op);
 
@@ -173,7 +172,14 @@ mod test {
         for i in 0..count {
             let key = TracedBytes::from(format!("key{}", i).as_bytes().to_vec());
             let value = TracedBytes::from(format!("value{}", i).as_bytes().to_vec());
-            let op = Operation::ingest(vec![(key, Some(value))], vec![], 0, 0);
+            let op = Operation::ingest(
+                vec![(key, Some(value))],
+                vec![],
+                WriteOptions {
+                    epoch: 0,
+                    table_id: TableId { table_id: 0 },
+                },
+            );
             let record = Record::new_local_none(i, op);
             records.push(record.clone());
             let record_bytes = encode_to_vec(record.clone(), config::standard()).unwrap();
