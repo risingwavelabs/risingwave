@@ -397,7 +397,7 @@
     Bind error: failed to bind expression: 1 = SOME(1)
 
     Caused by:
-      Bind error: op ANY/ALL (array) requires array on right side
+      Bind error: op SOME/ANY/ALL (array) requires array on right side
 - sql: |
     select 1 < SOME(null);
   logical_plan: |
@@ -437,7 +437,7 @@
     Bind error: failed to bind expression: 1 < SOME(CAST(NULL AS DATE))
 
     Caused by:
-      Bind error: op ANY/ALL (array) requires array on right side
+      Bind error: op SOME/ANY/ALL (array) requires array on right side
 - name: array/struct on left not supported yet 5808
   sql: |
     select array[1] < SOME(null);
