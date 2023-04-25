@@ -95,9 +95,9 @@ impl EstimateSize for Partition {
 
 type PartitionCache = ManagedLruCache<MemcmpEncoded, Partition>; // TODO(rc): use `K: HashKey` as key like in hash agg?
 
-/// [`EowcOverWindowExecutor`] consumes ordered input (on order key column with watermark) and
-/// outputs window function results. One [`EowcOverWindowExecutor`] can handle one combination of
-/// partition key and order key.
+/// [`EowcOverWindowExecutor`] consumes ordered input (on order key column with watermark in
+/// ascending order) and outputs window function results. One [`EowcOverWindowExecutor`] can handle
+/// one combination of partition key and order key.
 ///
 /// The reason not to use [`SortBuffer`] is that the table schemas of [`EowcOverWindowExecutor`] and
 /// [`SortBuffer`] are different, since we don't have something like a _grouped_ sort buffer.
@@ -142,7 +142,7 @@ struct ExecutorInner<S: StateStore> {
     pk_data_types: Vec<DataType>,
     input_pk_indices: Vec<usize>,
     partition_key_indices: Vec<usize>,
-    order_key_index: usize,
+    order_key_index: usize, // no `OrderType` here, cuz we expect the input is ascending
     watermark_epoch: AtomicU64Ref,
 }
 
