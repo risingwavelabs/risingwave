@@ -25,6 +25,7 @@ use itertools::{izip, Itertools};
 use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Schema, TableId};
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{CompactedRow, RowDeserializer};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -36,7 +37,7 @@ use risingwave_pb::catalog::Table;
 use risingwave_storage::mem_table::KeyOp;
 use risingwave_storage::StateStore;
 
-use crate::cache::{new_unbounded, ExecutorCache};
+use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::table::state_table::StateTableInner;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
@@ -432,7 +433,7 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S
 
 /// A cache for materialize executors.
 pub struct MaterializeCache<SD> {
-    data: ExecutorCache<Vec<u8>, CacheValue>,
+    data: ManagedLruCache<Vec<u8>, CacheValue>,
     _serde: PhantomData<SD>,
     metrics: Arc<StreamingMetrics>,
     actor_id: String,
@@ -447,6 +448,14 @@ pub enum CacheValue {
 
 type EmptyValue = ();
 
+impl EstimateSize for CacheValue {
+    fn estimated_heap_size(&self) -> usize {
+        // FIXME: implement correct size
+        // https://github.com/risingwavelabs/risingwave/issues/8957
+        0
+    }
+}
+
 impl<SD: ValueRowSerde> MaterializeCache<SD> {
     pub fn new(
         watermark_epoch: AtomicU64Ref,
@@ -454,7 +463,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         actor_id: u32,
         table_id: u32,
     ) -> Self {
-        let cache = ExecutorCache::new(new_unbounded(watermark_epoch));
+        let cache = new_unbounded(watermark_epoch);
         Self {
             data: cache,
             _serde: PhantomData,

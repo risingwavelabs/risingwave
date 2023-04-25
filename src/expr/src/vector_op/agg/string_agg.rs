@@ -243,18 +243,15 @@ pub fn create_string_agg_state(
     agg_col_idx: usize,
     delim_col_idx: usize,
     column_orders: Vec<ColumnOrder>,
-) -> Result<Box<dyn Aggregator>> {
+) -> Box<dyn Aggregator> {
     if column_orders.is_empty() {
-        Ok(Box::new(StringAggUnordered::new(
-            agg_col_idx,
-            delim_col_idx,
-        )))
+        Box::new(StringAggUnordered::new(agg_col_idx, delim_col_idx))
     } else {
-        Ok(Box::new(StringAggOrdered::new(
+        Box::new(StringAggOrdered::new(
             agg_col_idx,
             delim_col_idx,
             column_orders,
-        )))
+        ))
     }
 }
 
@@ -274,7 +271,7 @@ mod tests {
              ccc ,
              ddd ,",
         );
-        let mut agg = create_string_agg_state(0, 1, vec![])?;
+        let mut agg = create_string_agg_state(0, 1, vec![]);
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;
@@ -295,7 +292,7 @@ mod tests {
              ccc _
              ddd .",
         );
-        let mut agg = create_string_agg_state(0, 1, vec![])?;
+        let mut agg = create_string_agg_state(0, 1, vec![]);
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;
@@ -324,7 +321,7 @@ mod tests {
                 ColumnOrder::new(3, OrderType::descending()),
                 ColumnOrder::new(1, OrderType::descending()),
             ],
-        )?;
+        );
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;

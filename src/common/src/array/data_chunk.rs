@@ -25,7 +25,8 @@ use crate::array::column::Column;
 use crate::array::data_chunk_iter::RowRef;
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::collection::estimate_size::EstimateSize;
+use crate::estimate_size::EstimateSize;
+use crate::field_generator::{FieldGeneratorImpl, VarcharProperty};
 use crate::hash::HashCode;
 use crate::row::Row;
 use crate::types::struct_type::StructType;
@@ -226,7 +227,7 @@ impl DataChunk {
         match &self.vis2 {
             Vis::Compact(_) => self,
             Vis::Bitmap(visibility) => {
-                let cardinality = visibility.iter().filter(|&vis| vis).count();
+                let cardinality = visibility.count_ones();
                 let columns = self
                     .columns
                     .into_iter()
@@ -594,6 +595,9 @@ impl EstimateSize for DataChunk {
 
 /// Test utilities for [`DataChunk`].
 pub trait DataChunkTestExt {
+    /// SEED for generating data chunk.
+    const SEED: u64 = 0xFF67FEABBAEF76FF;
+
     /// Parse a chunk from string.
     ///
     /// # Format
@@ -634,6 +638,24 @@ pub trait DataChunkTestExt {
 
     /// Panic if the chunk is invalid.
     fn assert_valid(&self);
+
+    /// Generate data chunk when supplied with `chunk_size` and column data types.
+    fn gen_data_chunk(
+        chunk_offset: usize,
+        chunk_size: usize,
+        data_types: &[DataType],
+        string_properties: &VarcharProperty,
+    ) -> Self;
+
+    /// Generate data chunks when supplied with `chunk_size` and column data types.
+    fn gen_data_chunks(
+        num_of_chunks: usize,
+        chunk_size: usize,
+        data_types: &[DataType],
+        string_properties: &VarcharProperty,
+    ) -> Vec<Self>
+    where
+        Self: Sized;
 }
 
 impl DataChunkTestExt for DataChunk {
@@ -747,6 +769,51 @@ impl DataChunkTestExt for DataChunk {
         for col in cols.iter() {
             assert_eq!(col.array().len(), n);
         }
+    }
+
+    fn gen_data_chunk(
+        chunk_offset: usize,
+        chunk_size: usize,
+        data_types: &[DataType],
+        varchar_properties: &VarcharProperty,
+    ) -> Self {
+        let mut columns = Vec::new();
+        // Generate columns of this chunk.
+        for data_type in data_types {
+            let mut array_builder = data_type.create_array_builder(chunk_size);
+            for j in 0..chunk_size {
+                let offset = ((chunk_offset + 1) * (j + 1)) as u64;
+                if *data_type == DataType::Varchar {
+                    let datum = FieldGeneratorImpl::with_varchar(varchar_properties, Self::SEED)
+                        .generate_datum(offset);
+                    array_builder.append_datum(&datum);
+                } else {
+                    let mut data_gen = FieldGeneratorImpl::with_number_random(
+                        data_type.clone(),
+                        None,
+                        None,
+                        Self::SEED,
+                    )
+                    .unwrap();
+                    let datum = data_gen.generate_datum(offset);
+                    array_builder.append_datum(datum);
+                }
+                // FIXME(kwannoel): This misses the case where it is neither Varchar or numeric.
+            }
+            columns.push(array_builder.finish().into());
+        }
+        DataChunk::new(columns, Bitmap::ones(chunk_size))
+    }
+
+    fn gen_data_chunks(
+        num_of_chunks: usize,
+        chunk_size: usize,
+        data_types: &[DataType],
+        varchar_properties: &VarcharProperty,
+    ) -> Vec<Self> {
+        (0..num_of_chunks)
+            .map(|i| Self::gen_data_chunk(i, chunk_size, data_types, varchar_properties))
+            .collect()
     }
 }
 

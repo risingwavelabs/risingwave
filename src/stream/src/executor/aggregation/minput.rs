@@ -25,7 +25,7 @@ use risingwave_common::row::{OwnedRow, RowExt};
 use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::function::aggregate::{AggCall, AggKind};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
@@ -33,7 +33,6 @@ use super::agg_state_cache::{AggStateCache, GenericAggStateCache, StateCacheInpu
 use super::minput_agg_impl::array_agg::ArrayAgg;
 use super::minput_agg_impl::extreme::ExtremeAgg;
 use super::minput_agg_impl::string_agg::StringAgg;
-use super::AggCall;
 use crate::common::cache::{OrderedStateCache, TopNStateCache};
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
@@ -232,14 +231,13 @@ mod tests {
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::iter_util::ZipEqFast;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-    use risingwave_expr::expr::AggKind;
+    use risingwave_expr::function::aggregate::{AggArgs, AggCall, AggKind};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
     use super::MaterializedInputState;
     use crate::common::table::state_table::StateTable;
     use crate::common::StateTableColumnMapping;
-    use crate::executor::aggregation::{AggArgs, AggCall};
     use crate::executor::StreamExecutorResult;
 
     fn create_chunk<S: StateStore>(
@@ -292,7 +290,6 @@ mod tests {
             args: AggArgs::Unary(arg_type.clone(), arg_idx),
             return_type: arg_type,
             column_orders: vec![],
-            append_only: false,
             filter: None,
             distinct: false,
         }
@@ -989,7 +986,6 @@ mod tests {
                 ColumnOrder::new(2, OrderType::ascending()),  // b ASC
                 ColumnOrder::new(0, OrderType::descending()), // a DESC
             ],
-            append_only: false,
             filter: None,
             distinct: false,
         };
@@ -1091,7 +1087,6 @@ mod tests {
                 ColumnOrder::new(2, OrderType::ascending()),  // c ASC
                 ColumnOrder::new(0, OrderType::descending()), // a DESC
             ],
-            append_only: false,
             filter: None,
             distinct: false,
         };

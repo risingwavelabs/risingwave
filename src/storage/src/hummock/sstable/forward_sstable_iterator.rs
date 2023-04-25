@@ -225,6 +225,10 @@ impl SstableIterator {
         }
     }
 
+    pub(crate) fn sst(&self) -> &TableHolder {
+        &self.sst
+    }
+
     /// Seeks to a block, and then seeks to the key if `seek_key` is given.
     async fn seek_idx(
         &mut self,

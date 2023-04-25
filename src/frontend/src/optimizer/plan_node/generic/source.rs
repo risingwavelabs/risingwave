@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::collections::HashMap;
+use std::ops::Bound;
+use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::rc::Rc;
 
 use derivative::Derivative;
@@ -43,6 +45,9 @@ pub struct Source {
     #[derivative(PartialEq = "ignore")]
     #[derivative(Hash = "ignore")]
     pub ctx: OptimizerContextRef,
+
+    /// Kafka timestamp range, currently we only support kafka, so we just leave it like this.
+    pub(crate) kafka_timestamp_range: (Bound<i64>, Bound<i64>),
 }
 
 impl GenericPlanNode for Source {
@@ -75,6 +80,22 @@ impl GenericPlanNode for Source {
 }
 
 impl Source {
+    pub fn kafka_timestamp_range_value(&self) -> (Option<i64>, Option<i64>) {
+        let (lower_bound, upper_bound) = &self.kafka_timestamp_range;
+        let lower_bound = match lower_bound {
+            Included(t) => Some(*t),
+            Excluded(t) => Some(*t - 1),
+            Unbounded => None,
+        };
+
+        let upper_bound = match upper_bound {
+            Included(t) => Some(*t),
+            Excluded(t) => Some(*t + 1),
+            Unbounded => None,
+        };
+        (lower_bound, upper_bound)
+    }
+
     pub fn infer_internal_table_catalog() -> TableCatalog {
         // note that source's internal table is to store partition_id -> offset mapping and its
         // schema is irrelevant to input schema

@@ -19,7 +19,7 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::{DataType, DataTypeName};
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::function::aggregate::AggKind;
 use risingwave_frontend::expr::{agg_func_sigs, cast_sigs, func_sigs, CastContext, ExprType};
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName, OrderByExpr,
@@ -445,41 +445,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     ) -> Option<Expr> {
         use AggKind as A;
         match func {
-            A::Sum | A::Sum0 => Some(Expr::Function(make_agg_func(
-                "sum", exprs, distinct, filter, order_by,
-            ))),
-            A::Min => Some(Expr::Function(make_agg_func(
-                "min", exprs, distinct, filter, order_by,
-            ))),
-            A::Max => Some(Expr::Function(make_agg_func(
-                "max", exprs, distinct, filter, order_by,
-            ))),
-            A::Count => Some(Expr::Function(make_agg_func(
-                "count", exprs, distinct, filter, order_by,
-            ))),
-            A::Avg => Some(Expr::Function(make_agg_func(
-                "avg", exprs, distinct, filter, order_by,
-            ))),
-            A::VarSamp => Some(Expr::Function(make_agg_func(
-                "var_samp", exprs, distinct, filter, order_by,
-            ))),
-            A::VarPop => Some(Expr::Function(make_agg_func(
-                "var_pop", exprs, distinct, filter, order_by,
-            ))),
-            A::StddevSamp => Some(Expr::Function(make_agg_func(
-                "stddev_samp",
-                exprs,
-                distinct,
-                filter,
-                order_by,
-            ))),
-            A::StddevPop => Some(Expr::Function(make_agg_func(
-                "stddev_pop",
-                exprs,
-                distinct,
-                filter,
-                order_by,
-            ))),
             A::StringAgg => {
                 // distinct and non_distinct_string_agg are incompatible according to
                 // https://github.com/risingwavelabs/risingwave/blob/a703dc7d725aa995fecbaedc4e9569bc9f6ca5ba/src/frontend/src/optimizer/plan_node/logical_agg.rs#L394
@@ -511,8 +476,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                     )))
                 }
             }
-            A::ArrayAgg => Some(Expr::Function(make_agg_func(
-                "array_agg",
+            other => Some(Expr::Function(make_agg_func(
+                &other.to_string(),
                 exprs,
                 distinct,
                 filter,

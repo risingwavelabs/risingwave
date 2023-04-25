@@ -1,0 +1,87 @@
+---
+version: "3"
+services:
+  risingwave:
+    image: ghcr.io/risingwavelabs/risingwave:latest
+    ports:
+      - 4566:4566
+      - 5691:5691
+    command:
+      - playground
+    container_name: risingwave
+  mysql:
+    image: mysql:8.0
+    ports:
+      - 3306:3306
+    environment:
+      - MYSQL_ROOT_PASSWORD=123456
+      - MYSQL_USER=mysqluser
+      - MYSQL_PASSWORD=mysqlpw
+      - MYSQL_DATABASE=mydb
+    volumes:
+      - ./mysql/mysql.cnf:/etc/mysql/conf.d/mysql.cnf
+      - ./mysql/mysql_bootstrap.sql:/docker-entrypoint-initdb.d/mysql_bootstrap.sql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -u root -p123456"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    container_name: mysql
+  message_queue:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: message_queue
+  debezium:
+    image: debezium/connect:1.9
+    environment:
+      BOOTSTRAP_SERVERS: message_queue:29092
+      GROUP_ID: 1
+      CONFIG_STORAGE_TOPIC: connect_configs
+      OFFSET_STORAGE_TOPIC: connect_offsets
+      KEY_CONVERTER: io.confluent.connect.avro.AvroConverter
+      VALUE_CONVERTER: io.confluent.connect.avro.AvroConverter
+      CONNECT_KEY_CONVERTER_SCHEMA_REGISTRY_URL: http://message_queue:8081
+      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://message_queue:8081
+    volumes:
+      - ./mysql:/data
+    ports:
+      - 8083:8083
+    healthcheck:
+      test: curl -f localhost:8083
+      interval: 1s
+      start_period: 120s
+    depends_on:
+      message_queue: { condition: service_healthy }
+      mysql: { condition: service_healthy }
+    container_name: debezium
+  debezium_deploy:
+    image: debezium/connect:1.9
+    depends_on:
+      debezium:
+        condition: service_healthy
+    volumes:
+      - ./mysql/mysql_dbz.sh:/mysql_dbz.sh
+    entrypoint: [ bash, -c, /mysql_dbz.sh ]
+    container_name: debezium_deploy
+    restart: on-failure
+  datagen:
+    image: mysql:8.0
+    depends_on:
+      mysql: { condition: service_healthy }
+    command:
+      - /bin/sh
+      - -c
+      - "mysql -p123456 -h mysql mydb < mysql_prepare.sql"
+    volumes:
+      - "./mysql_prepare.sql:/mysql_prepare.sql"
+    container_name: datagen
+    restart: on-failure
+volumes:
+  message_queue:
+    external: false
+
+name: risingwave-compose

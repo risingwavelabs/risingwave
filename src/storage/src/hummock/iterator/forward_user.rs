@@ -18,10 +18,11 @@ use bytes::Bytes;
 use risingwave_hummock_sdk::key::{FullKey, UserKey, UserKeyRange};
 use risingwave_hummock_sdk::HummockEpoch;
 
+use super::DeleteRangeIterator;
 use crate::hummock::iterator::{Forward, ForwardMergeRangeIterator, HummockIterator};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{DeleteRangeAggregator, HummockResult};
+use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
 
 /// [`UserIterator`] can be used by user directly.
@@ -52,7 +53,7 @@ pub struct UserIterator<I: HummockIterator<Direction = Forward>> {
 
     stats: StoreLocalStatistic,
 
-    delete_range_aggregator: DeleteRangeAggregator<ForwardMergeRangeIterator>,
+    delete_range_iter: ForwardMergeRangeIterator,
 }
 
 // TODO: decide whether this should also impl `HummockIterator`
@@ -64,7 +65,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         read_epoch: u64,
         min_epoch: u64,
         version: Option<PinnedVersion>,
-        delete_range_aggregator: DeleteRangeAggregator<ForwardMergeRangeIterator>,
+        delete_range_iter: ForwardMergeRangeIterator,
     ) -> Self {
         Self {
             iterator,
@@ -75,7 +76,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             read_epoch,
             min_epoch,
             stats: StoreLocalStatistic::default(),
-            delete_range_aggregator,
+            delete_range_iter,
             _version: version,
         }
     }
@@ -90,7 +91,6 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         while self.iterator.is_valid() {
             let full_key = self.iterator.key();
             let epoch = full_key.epoch;
-            let key = &full_key.user_key;
 
             // handle multi-version
             if epoch <= self.min_epoch || epoch > self.read_epoch {
@@ -98,12 +98,13 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                 continue;
             }
 
-            if &self.last_key.user_key.as_ref() != key {
+            if self.last_key.user_key.as_ref() != full_key.user_key {
                 self.last_key = full_key.copy_into();
                 // handle delete operation
                 match self.iterator.value() {
                     HummockValue::Put(val) => {
-                        if self.delete_range_aggregator.should_delete(key, epoch) {
+                        self.delete_range_iter.next_until(full_key.user_key);
+                        if self.delete_range_iter.current_epoch() >= epoch {
                             self.stats.skip_delete_key_count += 1;
                         } else {
                             self.last_val = Bytes::copy_from_slice(val);
@@ -111,10 +112,10 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                             // handle range scan
                             match &self.key_range.1 {
                                 Included(end_key) => {
-                                    self.out_of_range = key > &end_key.as_ref();
+                                    self.out_of_range = full_key.user_key > end_key.as_ref();
                                 }
                                 Excluded(end_key) => {
-                                    self.out_of_range = key >= &end_key.as_ref();
+                                    self.out_of_range = full_key.user_key >= end_key.as_ref();
                                 }
                                 Unbounded => {}
                             };
@@ -169,12 +170,12 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                     epoch: self.read_epoch,
                 };
                 self.iterator.seek(full_key.to_ref()).await?;
-                self.delete_range_aggregator.seek(begin_key.as_ref());
+                self.delete_range_iter.seek(begin_key.as_ref());
             }
             Excluded(_) => unimplemented!("excluded begin key is not supported"),
             Unbounded => {
                 self.iterator.rewind().await?;
-                self.delete_range_aggregator.rewind();
+                self.delete_range_iter.rewind();
             }
         };
 
@@ -205,7 +206,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             epoch: self.read_epoch,
         };
         self.iterator.seek(full_key).await?;
-        self.delete_range_aggregator.seek(full_key.user_key);
+        self.delete_range_iter.seek(full_key.user_key);
 
         // Handle multi-version
         self.last_key = FullKey::default();
@@ -231,13 +232,14 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     /// Create [`UserIterator`] with maximum epoch.
     pub(crate) fn for_test(iterator: I, key_range: UserKeyRange) -> Self {
+        let read_epoch = HummockEpoch::MAX;
         Self::new(
             iterator,
             key_range,
-            HummockEpoch::MAX,
+            read_epoch,
             0,
             None,
-            DeleteRangeAggregator::new(ForwardMergeRangeIterator::default(), HummockEpoch::MAX),
+            ForwardMergeRangeIterator::new(read_epoch),
         )
     }
 
@@ -253,7 +255,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             read_epoch,
             min_epoch,
             None,
-            DeleteRangeAggregator::new(ForwardMergeRangeIterator::default(), read_epoch),
+            ForwardMergeRangeIterator::new(read_epoch),
         )
     }
 }
@@ -909,22 +911,21 @@ mod tests {
         )
         .await;
         let cache = create_small_table_cache();
-        let read_options = Arc::new(SstableIteratorReadOptions::default());
+        let read_options = SstableIteratorReadOptions::default();
         let table_id = table.id;
         let iters = vec![SstableIterator::create(
             cache.insert(table.id, table.id, 1, Box::new(table), CachePriority::High),
             sstable_store.clone(),
-            read_options.clone(),
+            Arc::new(read_options),
         )];
         let mi = UnorderedMergeIteratorInner::new(iters);
 
-        let mut del_iter = ForwardMergeRangeIterator::default();
+        let mut del_iter = ForwardMergeRangeIterator::new(150);
         del_iter.add_sst_iter(SstableDeleteRangeIterator::new(
             cache.lookup(table_id, &table_id).unwrap(),
         ));
-        let del_agg = DeleteRangeAggregator::new(del_iter, 150);
         let mut ui: UserIterator<_> =
-            UserIterator::new(mi, (Unbounded, Unbounded), 150, 0, None, del_agg);
+            UserIterator::new(mi, (Unbounded, Unbounded), 150, 0, None, del_iter);
 
         // ----- basic iterate -----
         ui.rewind().await.unwrap();
@@ -943,19 +944,19 @@ mod tests {
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
+        let read_options = SstableIteratorReadOptions::default();
         let iters = vec![SstableIterator::create(
             cache.lookup(table_id, &table_id).unwrap(),
             sstable_store,
-            read_options,
+            Arc::new(read_options),
         )];
-        let mut del_iter = ForwardMergeRangeIterator::default();
+        let mut del_iter = ForwardMergeRangeIterator::new(300);
         del_iter.add_sst_iter(SstableDeleteRangeIterator::new(
             cache.lookup(table_id, &table_id).unwrap(),
         ));
-        let del_agg = DeleteRangeAggregator::new(del_iter, 300);
         let mi = UnorderedMergeIteratorInner::new(iters);
         let mut ui: UserIterator<_> =
-            UserIterator::new(mi, (Unbounded, Unbounded), 300, 0, None, del_agg);
+            UserIterator::new(mi, (Unbounded, Unbounded), 300, 0, None, del_iter);
         ui.rewind().await.unwrap();
         assert!(ui.is_valid());
         assert_eq!(ui.key().user_key, iterator_test_bytes_user_key_of(2));

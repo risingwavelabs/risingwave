@@ -19,7 +19,8 @@ use paste::paste;
 use risingwave_common::array::ListValue;
 use risingwave_common::error::Result as RwResult;
 use risingwave_common::types::{DataType, Datum, Scalar};
-use risingwave_expr::expr::{build_from_prost, AggKind};
+use risingwave_expr::expr::build_from_prost;
+use risingwave_expr::function::aggregate::AggKind;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{ExprNode, ProjectSetSelectItem};
 
@@ -29,6 +30,7 @@ mod function_call;
 mod input_ref;
 mod literal;
 mod parameter;
+mod pure;
 mod subquery;
 mod table_function;
 mod user_defined_function;
@@ -53,6 +55,7 @@ pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
 pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
 pub use literal::Literal;
 pub use parameter::Parameter;
+pub use pure::*;
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
 pub use session_timezone::SessionTimezone;
 pub use subquery::{Subquery, SubqueryKind};
@@ -168,6 +171,15 @@ impl ExprImpl {
         let mut visitor = CollectInputRef::with_capacity(input_col_num);
         visitor.visit_expr(self);
         visitor.into()
+    }
+
+    /// Check if the expression has no side effects and output is deterministic
+    pub fn is_pure(&self) -> bool {
+        is_pure(self)
+    }
+
+    pub fn is_impure(&self) -> bool {
+        is_impure(self)
     }
 
     /// Count `Now`s in the expression.

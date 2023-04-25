@@ -16,7 +16,7 @@ use auto_enums::auto_enum;
 use itertools::repeat_n;
 
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::collection::estimate_size::EstimateSize;
+use crate::estimate_size::EstimateSize;
 
 /// `Vis` is a visibility bitmap of rows.
 #[derive(Clone, PartialEq, Debug)]

@@ -79,47 +79,42 @@ public class SourceTestClient {
         return resultSet;
     }
 
-    protected static DataSource getDataSource(JdbcDatabaseContainer<?> container) {
+    protected static DataSource getDataSource(
+            String jdbcUrl, String username, String password, String driverClassName) {
         HikariConfig hikariConfig = new HikariConfig();
-        hikariConfig.setJdbcUrl(container.getJdbcUrl());
-        hikariConfig.setUsername(container.getUsername());
-        hikariConfig.setPassword(container.getPassword());
-        hikariConfig.setDriverClassName(container.getDriverClassName());
+        hikariConfig.setJdbcUrl(jdbcUrl);
+        hikariConfig.setUsername(username);
+        hikariConfig.setPassword(password);
+        hikariConfig.setDriverClassName(driverClassName);
         return new HikariDataSource(hikariConfig);
     }
 
-    protected Iterator<ConnectorServiceProto.GetEventStreamResponse> getEventStreamValidate(
-            JdbcDatabaseContainer<?> container,
+    protected ConnectorServiceProto.ValidateSourceResponse validateSource(
+            String jdbcUrl,
+            String host,
+            String username,
+            String password,
             ConnectorServiceProto.SourceType sourceType,
             ConnectorServiceProto.TableSchema tableSchema,
             String databaseName,
             String tableName) {
-        String port = String.valueOf(URI.create(container.getJdbcUrl().substring(5)).getPort());
-        ConnectorServiceProto.GetEventStreamRequest req =
-                ConnectorServiceProto.GetEventStreamRequest.newBuilder()
-                        .setValidate(
-                                ConnectorServiceProto.GetEventStreamRequest.ValidateProperties
-                                        .newBuilder()
-                                        .setSourceId(0)
-                                        .setSourceType(sourceType)
-                                        .setTableSchema(tableSchema)
-                                        .putProperties("hostname", container.getHost())
-                                        .putProperties("port", port)
-                                        .putProperties("username", container.getUsername())
-                                        .putProperties("password", container.getPassword())
-                                        .putProperties("database.name", databaseName)
-                                        .putProperties("table.name", tableName)
-                                        .putProperties("schema.name", "public") // pg only
-                                        .putProperties("slot.name", "orders") // pg only
-                                        .putProperties("server.id", "1")) // mysql only
+        String port = String.valueOf(URI.create(jdbcUrl.substring(5)).getPort());
+        ConnectorServiceProto.ValidateSourceRequest req =
+                ConnectorServiceProto.ValidateSourceRequest.newBuilder()
+                        .setSourceId(0)
+                        .setSourceType(sourceType)
+                        .setTableSchema(tableSchema)
+                        .putProperties("hostname", host)
+                        .putProperties("port", port)
+                        .putProperties("username", username)
+                        .putProperties("password", password)
+                        .putProperties("database.name", databaseName)
+                        .putProperties("table.name", tableName)
+                        .putProperties("schema.name", "public") // pg only
+                        .putProperties("slot.name", "orders") // pg only
+                        .putProperties("server.id", "1") // mysql only
                         .build();
-        Iterator<ConnectorServiceProto.GetEventStreamResponse> responses = null;
-        try {
-            responses = blockingStub.getEventStream(req);
-        } catch (StatusRuntimeException e) {
-            fail("RPC failed: {}", e.getStatus());
-        }
-        return responses;
+        return blockingStub.validateSource(req);
     }
 
     protected Iterator<ConnectorServiceProto.GetEventStreamResponse> getEventStreamStart(
@@ -130,20 +125,18 @@ public class SourceTestClient {
         String port = String.valueOf(URI.create(container.getJdbcUrl().substring(5)).getPort());
         ConnectorServiceProto.GetEventStreamRequest req =
                 ConnectorServiceProto.GetEventStreamRequest.newBuilder()
-                        .setStart(
-                                ConnectorServiceProto.GetEventStreamRequest.StartSource.newBuilder()
-                                        .setSourceId(0)
-                                        .setSourceType(sourceType)
-                                        .setStartOffset("")
-                                        .putProperties("hostname", container.getHost())
-                                        .putProperties("port", port)
-                                        .putProperties("username", container.getUsername())
-                                        .putProperties("password", container.getPassword())
-                                        .putProperties("database.name", databaseName)
-                                        .putProperties("table.name", tableName)
-                                        .putProperties("schema.name", "public") // pg only
-                                        .putProperties("slot.name", "orders") // pg only
-                                        .putProperties("server.id", "1")) // mysql only
+                        .setSourceId(0)
+                        .setSourceType(sourceType)
+                        .setStartOffset("")
+                        .putProperties("hostname", container.getHost())
+                        .putProperties("port", port)
+                        .putProperties("username", container.getUsername())
+                        .putProperties("password", container.getPassword())
+                        .putProperties("database.name", databaseName)
+                        .putProperties("table.name", tableName)
+                        .putProperties("schema.name", "public") // pg only
+                        .putProperties("slot.name", "orders") // pg only
+                        .putProperties("server.id", "1") // mysql only
                         .build();
         Iterator<ConnectorServiceProto.GetEventStreamResponse> responses = null;
         try {
