@@ -41,7 +41,7 @@ use bytes::{Buf, BufMut};
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
-use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType, PointRange, TableKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 #[cfg(test)]
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -74,8 +74,8 @@ const VERSION: u32 = 1;
 #[derive(Clone, PartialEq, Eq, Debug)]
 // delete keys located in [start_user_key, end_user_key)
 pub struct DeleteRangeTombstone {
-    pub start_user_key: UserKey<Vec<u8>>,
-    pub end_user_key: UserKey<Vec<u8>>,
+    pub start_user_key: PointRange<Vec<u8>>,
+    pub end_user_key: PointRange<Vec<u8>>,
     pub sequence: HummockEpoch,
 }
 
@@ -98,14 +98,39 @@ impl DeleteRangeTombstone {
     pub fn new(
         table_id: TableId,
         start_table_key: Vec<u8>,
+        is_left_open: bool,
         end_table_key: Vec<u8>,
+        is_right_close: bool,
         sequence: HummockEpoch,
     ) -> Self {
         Self {
-            start_user_key: UserKey::new(table_id, TableKey(start_table_key)),
-            end_user_key: UserKey::new(table_id, TableKey(end_table_key)),
+            start_user_key: PointRange::from_user_key(
+                UserKey::new(table_id, TableKey(start_table_key)),
+                is_left_open,
+            ),
+            end_user_key: PointRange::from_user_key(
+                UserKey::new(table_id, TableKey(end_table_key)),
+                is_right_close,
+            ),
             sequence,
         }
+    }
+
+    #[cfg(test)]
+    pub fn new_for_test(
+        table_id: TableId,
+        start_table_key: Vec<u8>,
+        end_table_key: Vec<u8>,
+        sequence: HummockEpoch,
+    ) -> Self {
+        Self::new(
+            table_id,
+            start_table_key,
+            false,
+            end_table_key,
+            false,
+            sequence,
+        )
     }
 }
 
@@ -124,8 +149,7 @@ impl DeleteRangeTombstone {
 /// `HummockEpoch::MAX`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MonotonicDeleteEvent {
-    pub event_key: UserKey<Vec<u8>>,
-    pub is_exclusive: bool,
+    pub event_key: PointRange<Vec<u8>>,
     pub new_epoch: HummockEpoch,
 }
 
@@ -133,37 +157,42 @@ impl MonotonicDeleteEvent {
     #[cfg(test)]
     pub fn new(table_id: TableId, event_key: Vec<u8>, new_epoch: HummockEpoch) -> Self {
         Self {
-            event_key: UserKey::new(table_id, TableKey(event_key)),
-            is_exclusive: false,
+            event_key: PointRange::from_user_key(
+                UserKey::new(table_id, TableKey(event_key)),
+                false,
+            ),
             new_epoch,
         }
     }
 
     pub fn encode(&self, buf: &mut Vec<u8>) {
-        self.event_key.encode_length_prefixed(buf);
-        buf.put_u8(if self.is_exclusive { 1 } else { 0 });
+        self.event_key.left_user_key.encode_length_prefixed(buf);
+        buf.put_u8(if self.event_key.is_exclude_left_key {
+            1
+        } else {
+            0
+        });
         buf.put_u64_le(self.new_epoch);
     }
 
     pub fn decode(buf: &mut &[u8]) -> Self {
-        let event_key = UserKey::decode_length_prefixed(buf);
-        let exclusive_flag = buf.get_u8();
-        let is_exclusive = match exclusive_flag {
+        let user_key = UserKey::decode_length_prefixed(buf);
+        let exclude_left_key_flag = buf.get_u8();
+        let is_exclude_left_key = match exclude_left_key_flag {
             0 => false,
             1 => true,
             _ => panic!("exclusive flag should be either 0 or 1"),
         };
         let new_epoch = buf.get_u64_le();
         Self {
-            event_key,
-            is_exclusive,
+            event_key: PointRange::from_user_key(user_key, is_exclude_left_key),
             new_epoch,
         }
     }
 
     #[inline]
     pub fn encoded_size(&self) -> usize {
-        4 + self.event_key.encoded_len() + 1 + 8
+        4 + self.event_key.left_user_key.encoded_len() + 1 + 8
     }
 }
 
@@ -176,39 +205,23 @@ pub(crate) fn create_monotonic_events_from_compaction_delete_events(
         apply_event(&mut epochs, &event);
         monotonic_tombstone_events.push(MonotonicDeleteEvent {
             event_key: event.0,
-            is_exclusive: false,
             new_epoch: epochs.first().map_or(HummockEpoch::MAX, |epoch| *epoch),
         });
     }
-    monotonic_tombstone_events.dedup_by_key(|MonotonicDeleteEvent { new_epoch, .. }| *new_epoch);
-
+    monotonic_tombstone_events.dedup_by(|a, b| {
+        a.event_key.left_user_key.table_id == b.event_key.left_user_key.table_id
+            && a.new_epoch == b.new_epoch
+    });
     monotonic_tombstone_events
 }
 
+#[cfg(any(test, feature = "test"))]
 pub(crate) fn create_monotonic_events(
-    delete_range_tombstones: &Vec<DeleteRangeTombstone>,
+    mut delete_range_tombstones: Vec<DeleteRangeTombstone>,
 ) -> Vec<MonotonicDeleteEvent> {
-    let events = CompactionDeleteRangesBuilder::build_events(delete_range_tombstones);
+    delete_range_tombstones.sort();
+    let events = CompactionDeleteRangesBuilder::build_events(&delete_range_tombstones);
     create_monotonic_events_from_compaction_delete_events(events)
-}
-
-pub(crate) fn create_tombstones_to_represent_monotonic_deletes(
-    monotonic_deletes: &Vec<MonotonicDeleteEvent>,
-) -> Vec<DeleteRangeTombstone> {
-    let mut ret = vec![];
-    let len = monotonic_deletes.len();
-    if len > 1 {
-        for i in 0..(len - 1) {
-            if monotonic_deletes[i].new_epoch != HummockEpoch::MAX {
-                ret.push(DeleteRangeTombstone {
-                    start_user_key: monotonic_deletes[i].event_key.clone(),
-                    end_user_key: monotonic_deletes[i + 1].event_key.clone(),
-                    sequence: monotonic_deletes[i].new_epoch,
-                });
-            }
-        }
-    }
-    ret
 }
 
 /// [`Sstable`] is a handle for accessing SST.

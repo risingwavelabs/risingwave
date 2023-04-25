@@ -140,7 +140,7 @@ async fn compact_shared_buffer(
     for imm in &payload {
         let data_size = {
             let tombstones = imm.get_delete_range_tombstones();
-            builder.add_tombstone(tombstones);
+            builder.add_delete_events(tombstones);
             // calculate encoded bytes of key var length
             (imm.kv_count() * 8 + imm.size()) as u64
         };
@@ -269,7 +269,6 @@ pub async fn merge_imms_in_memory(
     imms: Vec<ImmutableMemtable>,
     memory_tracker: Option<MemoryTracker>,
 ) -> HummockResult<ImmutableMemtable> {
-    let mut range_tombstone_list = Vec::new();
     let mut kv_count = 0;
     let mut epochs = vec![];
     let mut merged_size = 0;
@@ -280,6 +279,7 @@ pub async fn merge_imms_in_memory(
     let mut largest_table_key = Bound::Included(Bytes::new());
 
     let mut imm_iters = Vec::with_capacity(imms.len());
+    let mut builder = CompactionDeleteRangesBuilder::default();
     for imm in imms {
         assert!(
             imm.kv_count() > 0 || imm.has_range_tombstone(),
@@ -295,7 +295,7 @@ pub async fn merge_imms_in_memory(
         epochs.push(imm.min_epoch());
         kv_count += imm.kv_count();
         merged_size += imm.size();
-        range_tombstone_list.extend(imm.get_delete_range_tombstones());
+        builder.add_delete_events(imm.get_delete_range_tombstones());
 
         if smallest_empty || smallest_table_key.as_ref().gt(imm.raw_smallest_key()) {
             smallest_table_key.clear();
@@ -318,8 +318,6 @@ pub async fn merge_imms_in_memory(
 
         imm_iters.push(imm.into_forward_iter());
     }
-    let mut builder = CompactionDeleteRangesBuilder::default();
-    builder.add_tombstone(range_tombstone_list);
     let compaction_delete_ranges = builder.build_for_compaction(GC_DELETE_KEYS_FOR_FLUSH);
     let mut del_iter = compaction_delete_ranges.iter();
     del_iter.rewind();
