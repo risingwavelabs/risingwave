@@ -20,7 +20,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
 use postgres_types::{ToSql, Type};
 use risingwave_common_proc_macro::EstimateSize;
-pub use rust_decimal::prelude::{FromPrimitive, FromStr, ToPrimitive};
+pub use rust_decimal::prelude::FromStr;
 use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
 
 use super::to_binary::ToBinary;
@@ -119,90 +119,68 @@ impl ToBinary for Decimal {
     }
 }
 
-macro_rules! impl_from_integer {
-    ([$(($T:ty, $from_int:ident)), *]) => {
-        $(fn $from_int(num: $T) -> Option<Self> {
-            RustDecimal::$from_int(num).map(Decimal::Normalized)
-        })*
-    }
-}
-
-macro_rules! impl_to_integer {
-    ([$(($T:ty, $to_int:ident)), *]) => {
-        $(fn $to_int(&self) -> Option<$T> {
-            match self {
-                Self::Normalized(d) => d.$to_int(),
-                _ => None,
-            }
-        })*
-    }
-}
-
-macro_rules! impl_to_float {
-    ([$(($T:ty, $to_float:ident)), *]) => {
-        $(fn $to_float(&self) -> Option<$T> {
-            match self {
-                Self::Normalized(d) => d.$to_float(),
-                Self::NaN => Some(<$T>::NAN),
-                Self::PositiveInf => Some(<$T>::INFINITY),
-                Self::NegativeInf => Some(<$T>::NEG_INFINITY),
-            }
-        })*
-    }
-}
-
-macro_rules! impl_from_float {
-    ([$(($T:ty, $from_float:ident)), *]) => {
-        $(fn $from_float(num: $T) -> Option<Self> {
-            match num {
-                num if num.is_nan() => Some(Decimal::NaN),
-                num if num.is_infinite() && num.is_sign_positive() => Some(Decimal::PositiveInf),
-                num if num.is_infinite() && num.is_sign_negative() => Some(Decimal::NegativeInf),
-                num => {
-                    RustDecimal::$from_float(num).map(Decimal::Normalized)
-                },
-            }
-        })*
-    }
-}
-
-macro_rules! impl_from {
-    ($T:ty, $from_ty:path) => {
+macro_rules! impl_convert_int {
+    ($T:ty) => {
         impl core::convert::From<$T> for Decimal {
             #[inline]
             fn from(t: $T) -> Self {
-                $from_ty(t).unwrap()
+                Self::Normalized(t.into())
+            }
+        }
+
+        impl core::convert::TryFrom<Decimal> for $T {
+            type Error = Error;
+
+            #[inline]
+            fn try_from(d: Decimal) -> Result<Self, Self::Error> {
+                match d.round_dp_ties_away(0) {
+                    Decimal::Normalized(d) => d.try_into(),
+                    _ => Err(Error::ConversionTo(std::any::type_name::<$T>().into())),
+                }
             }
         }
     };
 }
 
-macro_rules! impl_try_from_decimal {
-    ($from_ty:ty, $to_ty:ty, $convert:path, $err:expr) => {
-        impl core::convert::TryFrom<$from_ty> for $to_ty {
+macro_rules! impl_convert_float {
+    ($T:ty) => {
+        impl core::convert::TryFrom<$T> for Decimal {
             type Error = Error;
 
-            fn try_from(value: $from_ty) -> Result<Self, Self::Error> {
-                $convert(&value).ok_or_else(|| Error::from($err))
+            fn try_from(num: $T) -> Result<Self, Self::Error> {
+                match num {
+                    num if num.is_nan() => Ok(Decimal::NaN),
+                    num if num.is_infinite() && num.is_sign_positive() => Ok(Decimal::PositiveInf),
+                    num if num.is_infinite() && num.is_sign_negative() => Ok(Decimal::NegativeInf),
+                    num => num.try_into().map(Decimal::Normalized),
+                }
             }
         }
-    };
-}
-
-macro_rules! impl_try_from_float {
-    ($from_ty:ty, $to_ty:ty, $convert:path) => {
-        impl core::convert::TryFrom<$from_ty> for $to_ty {
+        impl core::convert::TryFrom<OrderedFloat<$T>> for Decimal {
             type Error = Error;
 
-            fn try_from(value: $from_ty) -> Result<Self, Self::Error> {
-                $convert(value).ok_or_else(|| Error::ConversionTo("decimal".into()))
+            fn try_from(value: OrderedFloat<$T>) -> Result<Self, Self::Error> {
+                value.0.try_into()
             }
         }
-        impl core::convert::TryFrom<OrderedFloat<$from_ty>> for $to_ty {
+
+        impl core::convert::TryFrom<Decimal> for $T {
             type Error = Error;
 
-            fn try_from(value: OrderedFloat<$from_ty>) -> Result<Self, Self::Error> {
-                $convert(value.0).ok_or_else(|| Error::ConversionTo("decimal".into()))
+            fn try_from(d: Decimal) -> Result<Self, Self::Error> {
+                match d {
+                    Decimal::Normalized(d) => d.try_into(),
+                    Decimal::NaN => Ok(<$T>::NAN),
+                    Decimal::PositiveInf => Ok(<$T>::INFINITY),
+                    Decimal::NegativeInf => Ok(<$T>::NEG_INFINITY),
+                }
+            }
+        }
+        impl core::convert::TryFrom<Decimal> for OrderedFloat<$T> {
+            type Error = Error;
+
+            fn try_from(d: Decimal) -> Result<Self, Self::Error> {
+                d.try_into().map(Self)
             }
         }
     };
@@ -223,42 +201,19 @@ macro_rules! checked_proxy {
     }
 }
 
-impl_try_from_decimal!(Decimal, f32, Decimal::to_f32, "Failed to convert to f32");
-impl_try_from_decimal!(Decimal, f64, Decimal::to_f64, "Failed to convert to f64");
-impl_try_from_float!(f32, Decimal, Decimal::from_f32);
-impl_try_from_float!(f64, Decimal, Decimal::from_f64);
+impl_convert_float!(f32);
+impl_convert_float!(f64);
 
-impl From<crate::types::Decimal> for OrderedFloat<f64> {
-    fn from(n: crate::types::Decimal) -> Self {
-        n.to_f64().map_or(Self(f64::NAN), Self)
-    }
-}
-
-impl FromPrimitive for Decimal {
-    impl_from_integer!([
-        (u8, from_u8),
-        (u16, from_u16),
-        (u32, from_u32),
-        (u64, from_u64),
-        (i8, from_i8),
-        (i16, from_i16),
-        (i32, from_i32),
-        (i64, from_i64)
-    ]);
-
-    impl_from_float!([(f32, from_f32), (f64, from_f64)]);
-}
-
-impl_from!(isize, FromPrimitive::from_isize);
-impl_from!(i8, FromPrimitive::from_i8);
-impl_from!(i16, FromPrimitive::from_i16);
-impl_from!(i32, FromPrimitive::from_i32);
-impl_from!(i64, FromPrimitive::from_i64);
-impl_from!(usize, FromPrimitive::from_usize);
-impl_from!(u8, FromPrimitive::from_u8);
-impl_from!(u16, FromPrimitive::from_u16);
-impl_from!(u32, FromPrimitive::from_u32);
-impl_from!(u64, FromPrimitive::from_u64);
+impl_convert_int!(isize);
+impl_convert_int!(i8);
+impl_convert_int!(i16);
+impl_convert_int!(i32);
+impl_convert_int!(i64);
+impl_convert_int!(usize);
+impl_convert_int!(u8);
+impl_convert_int!(u16);
+impl_convert_int!(u32);
+impl_convert_int!(u64);
 
 checked_proxy!(CheckedRem, checked_rem, %);
 checked_proxy!(CheckedSub, checked_sub, -);
@@ -495,7 +450,7 @@ impl Decimal {
     }
 
     #[must_use]
-    pub fn round_dp(&self, dp: u32) -> Self {
+    pub fn round_dp_ties_away(&self, dp: u32) -> Self {
         match self {
             Self::Normalized(d) => {
                 let new_d = d.round_dp_with_strategy(dp, RoundingStrategy::MidpointAwayFromZero);
@@ -508,7 +463,13 @@ impl Decimal {
     #[must_use]
     pub fn ceil(&self) -> Self {
         match self {
-            Self::Normalized(d) => Self::Normalized(d.ceil()),
+            Self::Normalized(d) => {
+                let mut d = d.ceil();
+                if d.is_zero() {
+                    d.set_sign_positive(true);
+                }
+                Self::Normalized(d)
+            }
             d => *d,
         }
     }
@@ -522,7 +483,7 @@ impl Decimal {
     }
 
     #[must_use]
-    pub fn round(&self) -> Self {
+    pub fn round_ties_even(&self) -> Self {
         match self {
             Self::Normalized(d) => Self::Normalized(d.round()),
             d => *d,
@@ -606,21 +567,6 @@ impl Default for Decimal {
     }
 }
 
-impl ToPrimitive for Decimal {
-    impl_to_integer!([
-        (i64, to_i64),
-        (i32, to_i32),
-        (i16, to_i16),
-        (i8, to_i8),
-        (u64, to_u64),
-        (u32, to_u32),
-        (u16, to_u16),
-        (u8, to_u8)
-    ]);
-
-    impl_to_float!([(f64, to_f64), (f32, to_f32)]);
-}
-
 impl FromStr for Decimal {
     type Err = Error;
 
@@ -682,9 +628,9 @@ mod tests {
             Decimal::NaN,
             Decimal::PositiveInf,
             Decimal::NegativeInf,
-            Decimal::from_f32(1.0).unwrap(),
-            Decimal::from_f32(-1.0).unwrap(),
-            Decimal::from_f32(0.0).unwrap(),
+            Decimal::try_from(1.0).unwrap(),
+            Decimal::try_from(-1.0).unwrap(),
+            Decimal::try_from(0.0).unwrap(),
         ];
         let floats = [
             f32::NAN,
@@ -696,11 +642,11 @@ mod tests {
         ];
         for (d_lhs, f_lhs) in decimals.iter().zip_eq_fast(floats.iter()) {
             for (d_rhs, f_rhs) in decimals.iter().zip_eq_fast(floats.iter()) {
-                assert!(check((*d_lhs + *d_rhs).to_f32().unwrap(), f_lhs + f_rhs));
-                assert!(check((*d_lhs - *d_rhs).to_f32().unwrap(), f_lhs - f_rhs));
-                assert!(check((*d_lhs * *d_rhs).to_f32().unwrap(), f_lhs * f_rhs));
-                assert!(check((*d_lhs / *d_rhs).to_f32().unwrap(), f_lhs / f_rhs));
-                assert!(check((*d_lhs % *d_rhs).to_f32().unwrap(), f_lhs % f_rhs));
+                assert!(check((*d_lhs + *d_rhs).try_into().unwrap(), f_lhs + f_rhs));
+                assert!(check((*d_lhs - *d_rhs).try_into().unwrap(), f_lhs - f_rhs));
+                assert!(check((*d_lhs * *d_rhs).try_into().unwrap(), f_lhs * f_rhs));
+                assert!(check((*d_lhs / *d_rhs).try_into().unwrap(), f_lhs / f_rhs));
+                assert!(check((*d_lhs % *d_rhs).try_into().unwrap(), f_lhs % f_rhs));
             }
         }
     }
@@ -747,68 +693,68 @@ mod tests {
         );
 
         assert_eq!(
-            Decimal::from_f32(10.0).unwrap() / Decimal::PositiveInf,
-            Decimal::from_f32(0.0).unwrap(),
+            Decimal::try_from(10.0).unwrap() / Decimal::PositiveInf,
+            Decimal::try_from(0.0).unwrap(),
         );
         assert_eq!(
-            Decimal::from_f32(f32::INFINITY).unwrap(),
+            Decimal::try_from(f32::INFINITY).unwrap(),
             Decimal::PositiveInf
         );
-        assert_eq!(Decimal::from_f64(f64::NAN).unwrap(), Decimal::NaN);
+        assert_eq!(Decimal::try_from(f64::NAN).unwrap(), Decimal::NaN);
         assert_eq!(
-            Decimal::from_f64(f64::INFINITY).unwrap(),
+            Decimal::try_from(f64::INFINITY).unwrap(),
             Decimal::PositiveInf
         );
         assert_eq!(
-            Decimal::unordered_deserialize(Decimal::from_f64(1.234).unwrap().unordered_serialize()),
-            Decimal::from_f64(1.234).unwrap(),
+            Decimal::unordered_deserialize(Decimal::try_from(1.234).unwrap().unordered_serialize()),
+            Decimal::try_from(1.234).unwrap(),
         );
         assert_eq!(
-            Decimal::unordered_deserialize(Decimal::from_u8(1).unwrap().unordered_serialize()),
-            Decimal::from_u8(1).unwrap(),
+            Decimal::unordered_deserialize(Decimal::from(1u8).unordered_serialize()),
+            Decimal::from(1u8),
         );
         assert_eq!(
-            Decimal::unordered_deserialize(Decimal::from_i8(1).unwrap().unordered_serialize()),
-            Decimal::from_i8(1).unwrap(),
+            Decimal::unordered_deserialize(Decimal::from(1i8).unordered_serialize()),
+            Decimal::from(1i8),
         );
         assert_eq!(
-            Decimal::unordered_deserialize(Decimal::from_u16(1).unwrap().unordered_serialize()),
-            Decimal::from_u16(1).unwrap(),
+            Decimal::unordered_deserialize(Decimal::from(1u16).unordered_serialize()),
+            Decimal::from(1u16),
         );
         assert_eq!(
-            Decimal::unordered_deserialize(Decimal::from_i16(1).unwrap().unordered_serialize()),
-            Decimal::from_i16(1).unwrap(),
+            Decimal::unordered_deserialize(Decimal::from(1i16).unordered_serialize()),
+            Decimal::from(1i16),
         );
         assert_eq!(
-            Decimal::unordered_deserialize(Decimal::from_u32(1).unwrap().unordered_serialize()),
-            Decimal::from_u32(1).unwrap(),
+            Decimal::unordered_deserialize(Decimal::from(1u32).unordered_serialize()),
+            Decimal::from(1u32),
         );
         assert_eq!(
-            Decimal::unordered_deserialize(Decimal::from_i32(1).unwrap().unordered_serialize()),
-            Decimal::from_i32(1).unwrap(),
+            Decimal::unordered_deserialize(Decimal::from(1i32).unordered_serialize()),
+            Decimal::from(1i32),
         );
         assert_eq!(
             Decimal::unordered_deserialize(
-                Decimal::from_f64(f64::NAN).unwrap().unordered_serialize()
+                Decimal::try_from(f64::NAN).unwrap().unordered_serialize()
             ),
-            Decimal::from_f64(f64::NAN).unwrap(),
+            Decimal::try_from(f64::NAN).unwrap(),
         );
         assert_eq!(
             Decimal::unordered_deserialize(
-                Decimal::from_f64(f64::INFINITY)
+                Decimal::try_from(f64::INFINITY)
                     .unwrap()
                     .unordered_serialize()
             ),
-            Decimal::from_f64(f64::INFINITY).unwrap(),
+            Decimal::try_from(f64::INFINITY).unwrap(),
         );
-        assert_eq!(Decimal::to_u8(&Decimal::from_u8(1).unwrap()).unwrap(), 1,);
-        assert_eq!(Decimal::to_i8(&Decimal::from_i8(1).unwrap()).unwrap(), 1,);
-        assert_eq!(Decimal::to_u16(&Decimal::from_u16(1).unwrap()).unwrap(), 1,);
-        assert_eq!(Decimal::to_i16(&Decimal::from_i16(1).unwrap()).unwrap(), 1,);
-        assert_eq!(Decimal::to_u32(&Decimal::from_u32(1).unwrap()).unwrap(), 1,);
-        assert_eq!(Decimal::to_i32(&Decimal::from_i32(1).unwrap()).unwrap(), 1,);
-        assert_eq!(Decimal::to_u64(&Decimal::from_u64(1).unwrap()).unwrap(), 1,);
-        assert_eq!(Decimal::to_i64(&Decimal::from_i64(1).unwrap()).unwrap(), 1,);
+        assert_eq!(u8::try_from(Decimal::from(1u8)).unwrap(), 1,);
+        assert_eq!(i8::try_from(Decimal::from(1i8)).unwrap(), 1,);
+        assert_eq!(u16::try_from(Decimal::from(1u16)).unwrap(), 1,);
+        assert_eq!(i16::try_from(Decimal::from(1i16)).unwrap(), 1,);
+        assert_eq!(u32::try_from(Decimal::from(1u32)).unwrap(), 1,);
+        assert_eq!(i32::try_from(Decimal::from(1i32)).unwrap(), 1,);
+        assert_eq!(u64::try_from(Decimal::from(1u64)).unwrap(), 1,);
+        assert_eq!(i64::try_from(Decimal::from(1i64)).unwrap(), 1,);
     }
 
     #[test]
@@ -816,7 +762,7 @@ mod tests {
         let decimal = Decimal::NegativeInf;
         assert_eq!(decimal.estimated_size(), 20);
 
-        let decimal = Decimal::Normalized(RustDecimal::from_f32(1.0).unwrap());
+        let decimal = Decimal::Normalized(RustDecimal::try_from(1.0).unwrap());
         assert_eq!(decimal.estimated_size(), 20);
     }
 }

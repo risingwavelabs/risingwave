@@ -305,7 +305,6 @@ pub fn to_i64<T: ToPrimitive + Debug>(elem: T) -> Result<i64> {
 #[function("cast(int32) -> float32")]
 #[function("cast(int64) -> float32")]
 #[function("cast(float64) -> float32")]
-#[function("cast(decimal) -> float32")]
 pub fn to_f32<T: ToPrimitive + Debug>(elem: T) -> Result<F32> {
     elem.to_f32()
         .map(Into::into)
@@ -320,28 +319,10 @@ pub fn to_int256<T: TryInto<Int256>>(elem: T) -> Result<Int256> {
         .map_err(|_| ExprError::CastOutOfRange("int256"))
 }
 
-#[function("cast(decimal) -> float64")]
 pub fn to_f64<T: ToPrimitive + Debug>(elem: T) -> Result<F64> {
     elem.to_f64()
         .map(Into::into)
         .ok_or(ExprError::CastOutOfRange("f64"))
-}
-
-// In postgresSql, the behavior of casting decimal to integer is rounding.
-// We should write them separately
-#[function("cast(decimal) -> int16")]
-pub fn dec_to_i16(elem: Decimal) -> Result<i16> {
-    to_i16(elem.round_dp(0))
-}
-
-#[function("cast(decimal) -> int32")]
-pub fn dec_to_i32(elem: Decimal) -> Result<i32> {
-    to_i32(elem.round_dp(0))
-}
-
-#[function("cast(decimal) -> int64")]
-pub fn dec_to_i64(elem: Decimal) -> Result<i64> {
-    to_i64(elem.round_dp(0))
 }
 
 #[function("cast(jsonb) -> boolean")]
@@ -408,6 +389,11 @@ pub fn interval_to_time(elem: Interval) -> Time {
 #[function("cast(int64) -> int16")]
 #[function("cast(int64) -> int32")]
 #[function("cast(int64) -> float64")]
+#[function("cast(decimal) -> int16")]
+#[function("cast(decimal) -> int32")]
+#[function("cast(decimal) -> int64")]
+#[function("cast(decimal) -> float32")]
+#[function("cast(decimal) -> float64")]
 #[function("cast(float32) -> decimal")]
 #[function("cast(float64) -> decimal")]
 pub fn try_cast<T1, T2>(elem: T1) -> Result<T2>
@@ -708,8 +694,6 @@ fn struct_cast(
 
 #[cfg(test)]
 mod tests {
-
-    use num_traits::FromPrimitive;
     use risingwave_common::types::Scalar;
 
     use super::*;
@@ -793,7 +777,7 @@ mod tests {
         test!(general_to_text(F32::from(32.12_f32)), "32.12");
         test!(general_to_text(F32::from(-32.14_f32)), "-32.14");
 
-        test!(general_to_text(Decimal::from_f64(1.222).unwrap()), "1.222");
+        test!(general_to_text(Decimal::try_from(1.222).unwrap()), "1.222");
 
         test!(general_to_text(Decimal::NaN), "NaN");
     }

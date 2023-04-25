@@ -22,7 +22,7 @@ pub fn round_digits<D: Into<i32>>(input: Decimal, digits: D) -> Decimal {
         Decimal::zero()
     } else {
         // rust_decimal can only handle up to 28 digits of scale
-        input.round_dp(std::cmp::min(digits as u32, 28))
+        input.round_dp_ties_away(std::cmp::min(digits as u32, 28))
     }
 }
 
@@ -55,14 +55,13 @@ pub fn round_f64(input: F64) -> F64 {
 // Ties are broken by rounding away from zero
 #[function("round(decimal) -> decimal")]
 pub fn round_decimal(input: Decimal) -> Decimal {
-    input.round_dp(0)
+    input.round_dp_ties_away(0)
 }
 
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
 
-    use num_traits::FromPrimitive;
     use risingwave_common::types::{Decimal, F64};
 
     use super::ceil_f64;
@@ -113,6 +112,6 @@ mod tests {
     }
 
     fn dec(f: f64) -> Decimal {
-        Decimal::from_f64(f).unwrap()
+        Decimal::try_from(f).unwrap()
     }
 }
