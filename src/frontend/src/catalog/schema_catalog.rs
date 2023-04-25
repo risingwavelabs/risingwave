@@ -410,6 +410,10 @@ impl SchemaCatalog {
         self.view_by_name.values()
     }
 
+    pub fn iter_function(&self) -> impl Iterator<Item = &Arc<FunctionCatalog>> {
+        self.function_by_name.values().flat_map(|v| v.values())
+    }
+
     pub fn iter_connections(&self) -> impl Iterator<Item = &Arc<ConnectionCatalog>> {
         self.connection_by_name.values()
     }

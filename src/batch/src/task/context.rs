@@ -25,7 +25,7 @@ use risingwave_source::dml_manager::DmlManagerRef;
 use risingwave_storage::StateStoreImpl;
 
 use super::TaskId;
-use crate::executor::BatchTaskMetricsWithTaskLabels;
+use crate::monitor::{BatchMetricsWithTaskLabels, BatchMetricsWithTaskLabelsInner};
 use crate::task::{BatchEnvironment, TaskOutput, TaskOutputId};
 
 /// Context for batch task execution.
@@ -47,9 +47,9 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
 
     fn state_store(&self) -> StateStoreImpl;
 
-    /// Get task level metrics.
+    /// Get batch metrics.
     /// None indicates that not collect task metrics.
-    fn task_metrics(&self) -> Option<BatchTaskMetricsWithTaskLabels>;
+    fn batch_metrics(&self) -> Option<BatchMetricsWithTaskLabels>;
 
     /// Get compute client pool. This is used in grpc exchange to avoid creating new compute client
     /// for each grpc call.
@@ -70,7 +70,7 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
 pub struct ComputeNodeContext {
     env: BatchEnvironment,
     // None: Local mode don't record metrics.
-    task_metrics: Option<BatchTaskMetricsWithTaskLabels>,
+    batch_metrics: Option<BatchMetricsWithTaskLabels>,
 
     // Last mem usage value. Init to be 0. Should be the last value of `cur_mem_val`.
     last_mem_val: Arc<AtomicUsize>,
@@ -102,8 +102,8 @@ impl BatchTaskContext for ComputeNodeContext {
         self.env.state_store()
     }
 
-    fn task_metrics(&self) -> Option<BatchTaskMetricsWithTaskLabels> {
-        self.task_metrics.clone()
+    fn batch_metrics(&self) -> Option<BatchMetricsWithTaskLabels> {
+        self.batch_metrics.clone()
     }
 
     fn client_pool(&self) -> ComputeClientPoolRef {
@@ -140,17 +140,21 @@ impl ComputeNodeContext {
     pub fn for_test() -> Self {
         Self {
             env: BatchEnvironment::for_test(),
-            task_metrics: None,
+            batch_metrics: None,
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
         }
     }
 
     pub fn new(env: BatchEnvironment, task_id: TaskId) -> Self {
-        let task_metrics = BatchTaskMetricsWithTaskLabels::new(env.task_metrics(), task_id);
+        let batch_metrics = Arc::new(BatchMetricsWithTaskLabelsInner::new(
+            env.task_metrics(),
+            env.executor_metrics(),
+            task_id,
+        ));
         Self {
             env,
-            task_metrics: Some(task_metrics),
+            batch_metrics: Some(batch_metrics),
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
         }
@@ -159,7 +163,7 @@ impl ComputeNodeContext {
     pub fn new_for_local(env: BatchEnvironment) -> Self {
         Self {
             env,
-            task_metrics: None,
+            batch_metrics: None,
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
         }

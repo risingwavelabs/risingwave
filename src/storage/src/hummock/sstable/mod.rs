@@ -180,35 +180,19 @@ pub(crate) fn create_monotonic_events_from_compaction_delete_events(
             new_epoch: epochs.first().map_or(HummockEpoch::MAX, |epoch| *epoch),
         });
     }
-    monotonic_tombstone_events.dedup_by_key(|MonotonicDeleteEvent { new_epoch, .. }| *new_epoch);
-
+    monotonic_tombstone_events.dedup_by(|a, b| {
+        a.event_key.table_id == b.event_key.table_id && a.new_epoch == b.new_epoch
+    });
     monotonic_tombstone_events
 }
 
+#[cfg(any(test, feature = "test"))]
 pub(crate) fn create_monotonic_events(
-    delete_range_tombstones: &Vec<DeleteRangeTombstone>,
+    mut delete_range_tombstones: Vec<DeleteRangeTombstone>,
 ) -> Vec<MonotonicDeleteEvent> {
-    let events = CompactionDeleteRangesBuilder::build_events(delete_range_tombstones);
+    delete_range_tombstones.sort();
+    let events = CompactionDeleteRangesBuilder::build_events(&delete_range_tombstones);
     create_monotonic_events_from_compaction_delete_events(events)
-}
-
-pub(crate) fn create_tombstones_to_represent_monotonic_deletes(
-    monotonic_deletes: &Vec<MonotonicDeleteEvent>,
-) -> Vec<DeleteRangeTombstone> {
-    let mut ret = vec![];
-    let len = monotonic_deletes.len();
-    if len > 1 {
-        for i in 0..(len - 1) {
-            if monotonic_deletes[i].new_epoch != HummockEpoch::MAX {
-                ret.push(DeleteRangeTombstone {
-                    start_user_key: monotonic_deletes[i].event_key.clone(),
-                    end_user_key: monotonic_deletes[i + 1].event_key.clone(),
-                    sequence: monotonic_deletes[i].new_epoch,
-                });
-            }
-        }
-    }
-    ret
 }
 
 /// [`Sstable`] is a handle for accessing SST.
