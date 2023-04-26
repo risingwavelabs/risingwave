@@ -91,6 +91,15 @@ impl Binder {
             Self::resolve_schema_qualified_name(&self.db_name, name.clone())?;
 
         let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, false)?;
+
+        // TODO(yuhao): update a table with generated columns
+        if table_catalog.has_generated_column() {
+            return Err(ErrorCode::BindError(
+                "Update a table with generated column has not been implemented.".to_string(),
+            )
+            .into());
+        }
+
         let pk_indices = table_catalog
             .pk()
             .iter()
