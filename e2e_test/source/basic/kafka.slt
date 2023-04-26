@@ -303,11 +303,11 @@ ROW FORMAT DEBEZIUM_MONGO_JSON
 statement ok
 CREATE TABLE upsert_students (
     "ID" INT PRIMARY KEY,
-    "firstName" VARCHAR(50) NOT NULL,
-    "lastName" VARCHAR(50) NOT NULL,
-    age INT NOT NULL,
-    height REAL NOT NULL,
-    weight REAL NOT NULL
+    "firstName" VARCHAR,
+    "lastName" VARCHAR,
+    age INT,
+    height REAL,
+    weight REAL
 )
 WITH (
 	connector = 'kafka',
@@ -508,7 +508,6 @@ ORDER BY
 1002    {"_id": {"$numberLong": "1002"}, "email": "gbailey@foobar.com", "first_name": "George", "last_name": "Bailey"}
 1003    {"_id": {"$numberLong": "1003"}, "email": "ed@walker.com", "first_name": "Edward", "last_name": "Walker"}
 1004    {"_id": {"$numberLong": "1004"}, "email": "annek@noanswer.org", "first_name": "Anne", "last_name": "Kretchmar"}
-
 
 
 query II 
