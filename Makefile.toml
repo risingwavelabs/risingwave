@@ -346,7 +346,7 @@ cargo clean
 category = "RiseDev - Build"
 description = "Build Rust docs"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
-env = { RUSTDOCFLAGS = "--markdown-css ../../docs/rust.css --markdown-no-toc --index-page docs/index.md -Zunstable-options" }
+env = { RUSTDOCFLAGS = "--markdown-css ../../docs/rustdoc/rust.css --markdown-no-toc --index-page docs/rustdoc/index.md -Zunstable-options" }
 script = '''
 #!/usr/bin/env bash
 
