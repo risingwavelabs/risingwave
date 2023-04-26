@@ -35,9 +35,10 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         this.userProps = userProps;
         this.tableSchema = tableSchema;
 
-        var host = userProps.get(DbzConnectorConfig.HOST);
+        var dbHost = userProps.get(DbzConnectorConfig.HOST);
+        var dbPort = userProps.get(DbzConnectorConfig.PORT);
         var dbName = userProps.get(DbzConnectorConfig.DB_NAME);
-        var jdbcUrl = ValidatorUtils.getJdbcUrl(SourceTypeE.MYSQL, host, dbName);
+        var jdbcUrl = ValidatorUtils.getJdbcUrl(SourceTypeE.MYSQL, dbHost, dbPort, dbName);
 
         var user = userProps.get(DbzConnectorConfig.USER);
         var password = userProps.get(DbzConnectorConfig.PASSWORD);

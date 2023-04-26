@@ -59,13 +59,13 @@ public final class ValidatorUtils {
         return storedSqls.getProperty(name);
     }
 
-    public static String getJdbcUrl(SourceTypeE sourceType, String host, String database) {
+    public static String getJdbcUrl(SourceTypeE sourceType, String host, String port, String database) {
         switch (sourceType) {
             case MYSQL:
-                return String.format("jdbc:mysql://%s/%s", host, database);
+                return String.format("jdbc:mysql://%s:%s/%s", host, port, database);
             case POSTGRES:
             case CITUS:
-                return String.format("jdbc:postgresql://%s/%s", host, database);
+                return String.format("jdbc:postgresql://%s:%s/%s", host, port, database);
             default:
                 throw ValidatorUtils.invalidArgument("Unknown source type: " + sourceType);
         }
