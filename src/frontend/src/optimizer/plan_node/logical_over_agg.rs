@@ -388,10 +388,12 @@ impl ColPrunable for LogicalOverAgg {
                 .iter()
                 .map(|&idx| mapping.map(idx))
                 .collect_vec();
-            let src_size = new_over_agg.schema().len();
             LogicalProject::with_mapping(
                 new_over_agg.into(),
-                ColIndexMapping::with_remaining_columns(&output_required_cols, src_size),
+                ColIndexMapping::with_remaining_columns(
+                    &output_required_cols,
+                    new_over_agg.schema().len(),
+                ),
             )
             .into()
         }
