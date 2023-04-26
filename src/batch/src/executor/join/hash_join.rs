@@ -225,7 +225,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for build_chunk in self.build_side_source.execute() {
             if self.stop_flag.check_stop() {
-                return;
+                return Ok(());
             }
             let build_chunk = build_chunk?;
             if build_chunk.cardinality() > 0 {
@@ -243,13 +243,13 @@ impl<K: HashKey> HashJoinExecutor<K> {
         // Build hash map
         for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {
             if self.stop_flag.check_stop() {
-                return;
+                return Ok(());
             }
             let build_keys = K::build(&self.build_key_idxs, build_chunk)?;
 
             for (build_row_id, build_key) in build_keys.into_iter().enumerate() {
                 if self.stop_flag.check_stop() {
-                    return;
+                    return Ok(());
                 }
                 // Only insert key to hash map if it is consistent with the null safe restriction.
                 if build_key.null_bitmap().is_subset(&null_matched) {
@@ -298,7 +298,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             #[for_await]
             for chunk in stream {
                 if self.stop_flag.check_stop() {
-                    return;
+                    return Ok(());
                 }
                 for output_chunk in
                     output_chunk_builder.append_chunk(chunk?.reorder_columns(&self.output_indices))
@@ -323,7 +323,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             #[for_await]
             for chunk in stream {
                 if self.stop_flag.check_stop() {
-                    return;
+                    return Ok(());
                 }
                 yield chunk?.reorder_columns(&self.output_indices)
             }
