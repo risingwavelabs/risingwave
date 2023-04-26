@@ -156,7 +156,9 @@ start_kafka() {
   ./kafka_2.13-3.4.0/bin/zookeeper-server-start.sh ./kafka_2.13-3.4.0/config/zookeeper.properties > zookeeper.log 2>&1 &
   ./kafka_2.13-3.4.0/bin/kafka-server-start.sh ./kafka_2.13-3.4.0/config/server.properties --override num.partitions=8 > kafka.log 2>&1 &
   echo "Should have zookeeper and kafka running"
+  echo "zookeeper PID: "
   pgrep zookeeper
+  echo "kafka PID: "
   pgrep kafka
   sleep 10
   # TODO(kwannoel): `trap ERR` and upload these logs.
