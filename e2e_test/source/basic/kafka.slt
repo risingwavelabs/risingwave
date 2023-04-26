@@ -301,6 +301,22 @@ WITH (
 ROW FORMAT DEBEZIUM_MONGO_JSON
 
 statement ok
+CREATE TABLE upsert_students (
+    "ID" INT PRIMARY KEY,
+    "firstName" VARCHAR(50) NOT NULL,
+    "lastName" VARCHAR(50) NOT NULL,
+    age INT NOT NULL,
+    height REAL NOT NULL,
+    weight REAL NOT NULL
+)
+WITH (
+	connector = 'kafka',
+  properties.bootstrap.server = '127.0.0.1:29092',
+	topic = 'upsert_json')
+ROW FORMAT UPSERT_JSON
+
+
+statement ok
 flush;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
@@ -494,6 +510,22 @@ ORDER BY
 1004    {"_id": {"$numberLong": "1004"}, "email": "annek@noanswer.org", "first_name": "Anne", "last_name": "Kretchmar"}
 
 
+
+query II 
+SELECT
+	*
+FROM
+	upsert_students
+ORDER BY
+	_id;
+----
+1001    {"_id": {"$numberLong": "1001"}, "email": "sally.thomas@acme.com", "first_name": "Sally", "last_name": "Thomas"}
+1002    {"_id": {"$numberLong": "1002"}, "email": "gbailey@foobar.com", "first_name": "George", "last_name": "Bailey"}
+1003    {"_id": {"$numberLong": "1003"}, "email": "ed@walker.com", "first_name": "Edward", "last_name": "Walker"}
+1004    {"_id": {"$numberLong": "1004"}, "email": "annek@noanswer.org", "first_name": "Anne", "last_name": "Kretchmar"}
+
+
+
 statement ok
 drop materialized view source_mv1
 
@@ -544,3 +576,6 @@ drop source s22
 
 statement ok
 DROP TABLE mongo_customers;
+
+statement ok
+DROP TABLE upsert_students;
