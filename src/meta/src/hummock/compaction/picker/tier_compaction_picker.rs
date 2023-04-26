@@ -66,10 +66,16 @@ impl TierCompactionPicker {
                 self.config.max_compaction_bytes,
                 self.config.sub_level_max_compaction_bytes,
             );
+            let max_depth = std::cmp::max(
+                (self.config.max_compaction_bytes / self.config.sub_level_max_compaction_bytes)
+                    as usize,
+                self.config.level0_sub_level_compact_level_count as usize + 1,
+            );
             let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
                 0,
                 max_compaction_bytes,
                 1,
+                max_depth,
                 self.config.level0_max_compact_file_number,
                 self.overlap_strategy.clone(),
             );
@@ -109,7 +115,7 @@ impl TierCompactionPicker {
                 // ln(self.config.level0_tier_compact_file_number/2) Here we only use half
                 // of level0_tier_compact_file_number just for convenient.
                 let is_write_amp_large =
-                    max_level_size * self.config.level0_tier_compact_file_number / 2
+                    max_level_size * self.config.level0_sub_level_compact_level_count as u64 / 2
                         >= compaction_bytes;
 
                 if is_write_amp_large

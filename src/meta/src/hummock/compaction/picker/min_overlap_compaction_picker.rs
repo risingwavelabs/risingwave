@@ -150,6 +150,7 @@ pub struct NonOverlapSubLevelPicker {
     min_compaction_bytes: u64,
     max_compaction_bytes: u64,
     min_depth: usize,
+    max_depth: usize,
     max_file_count: u64,
     overlap_strategy: Arc<dyn OverlapStrategy>,
 }
@@ -159,6 +160,7 @@ impl NonOverlapSubLevelPicker {
         min_compaction_bytes: u64,
         max_compaction_bytes: u64,
         min_depth: usize,
+        max_depth: usize,
         max_file_count: u64,
         overlap_strategy: Arc<dyn OverlapStrategy>,
     ) -> Self {
@@ -166,6 +168,7 @@ impl NonOverlapSubLevelPicker {
             min_compaction_bytes,
             max_compaction_bytes,
             min_depth,
+            max_depth,
             max_file_count,
             overlap_strategy,
         }
@@ -213,6 +216,13 @@ impl NonOverlapSubLevelPicker {
                 if all_file_size >= self.max_compaction_bytes
                     || all_file_count >= self.max_file_count as usize
                 {
+                    break;
+                }
+
+                if select_level_count >= self.max_depth {
+                    // Since the size of each sub_level is determined by the configuration, the
+                    // maximum number of selected levels is limited to ensure that the selected task
+                    // is not too large.
                     break;
                 }
 
@@ -563,6 +573,7 @@ pub mod tests {
                 0,
                 10000,
                 1,
+                usize::MAX,
                 10000,
                 Arc::new(RangeOverlapStrategy::default()),
             );
@@ -576,6 +587,7 @@ pub mod tests {
                 0,
                 100,
                 1,
+                usize::MAX,
                 10000,
                 Arc::new(RangeOverlapStrategy::default()),
             );
@@ -589,6 +601,7 @@ pub mod tests {
                 0,
                 10000,
                 1,
+                usize::MAX,
                 5,
                 Arc::new(RangeOverlapStrategy::default()),
             );
@@ -667,6 +680,7 @@ pub mod tests {
                 0,
                 10000,
                 1,
+                usize::MAX,
                 10000,
                 Arc::new(RangeOverlapStrategy::default()),
             );
@@ -681,6 +695,7 @@ pub mod tests {
                 0,
                 max_compaction_bytes,
                 1,
+                usize::MAX,
                 10000,
                 Arc::new(RangeOverlapStrategy::default()),
             );
@@ -695,6 +710,7 @@ pub mod tests {
                 0,
                 10000,
                 1,
+                usize::MAX,
                 max_file_count,
                 Arc::new(RangeOverlapStrategy::default()),
             );
@@ -717,6 +733,7 @@ pub mod tests {
                 0,
                 10000,
                 min_depth,
+                usize::MAX,
                 10000,
                 Arc::new(RangeOverlapStrategy::default()),
             );

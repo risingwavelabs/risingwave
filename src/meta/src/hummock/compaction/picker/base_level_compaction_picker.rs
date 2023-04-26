@@ -116,10 +116,18 @@ impl LevelCompactionPicker {
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
+        let max_depth = std::cmp::max(
+            (self.config.max_compaction_bytes / self.config.sub_level_max_compaction_bytes)
+                as usize,
+            self.config.level0_sub_level_compact_level_count as usize + 1,
+        );
+
         let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
             0,
             self.config.max_compaction_bytes,
             1,
+            // The maximum number of sub_level compact level per task
+            max_depth,
             self.config.level0_max_compact_file_number,
             overlap_strategy.clone(),
         );
@@ -346,7 +354,6 @@ pub mod tests {
         let config = Arc::new(
             CompactionConfigBuilder::new()
                 .level0_tier_compact_file_number(2)
-                .sub_level_max_compaction_bytes(0)
                 .level0_sub_level_compact_level_count(1)
                 .build(),
         );
@@ -446,7 +453,6 @@ pub mod tests {
         let config = Arc::new(
             CompactionConfigBuilder::new()
                 .level0_tier_compact_file_number(2)
-                .sub_level_max_compaction_bytes(0)
                 .compaction_mode(CompactionMode::Range as i32)
                 .level0_sub_level_compact_level_count(1)
                 .build(),
@@ -549,15 +555,25 @@ pub mod tests {
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
         ret.add_pending_task(0, &mut levels_handler);
+        let ret = picker
+            .pick_compaction(&levels, &levels_handler, &mut local_stats)
+            .unwrap();
+        ret.add_pending_task(1, &mut levels_handler);
 
         push_tables_level0_nonoverlapping(&mut levels, vec![generate_table(3, 1, 250, 300, 3)]);
-        let mut picker = TierCompactionPicker::new(
-            picker.config.clone(),
-            Arc::new(RangeOverlapStrategy::default()),
-        );
-        assert!(picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .is_none());
+        let config: CompactionConfig = CompactionConfigBuilder::new()
+            .level0_tier_compact_file_number(2)
+            .max_compaction_bytes(1000)
+            .sub_level_max_compaction_bytes(150)
+            .max_bytes_for_level_multiplier(1)
+            .level0_sub_level_compact_level_count(3)
+            .build();
+        let mut picker =
+            TierCompactionPicker::new(Arc::new(config), Arc::new(RangeOverlapStrategy::default()));
+
+        let ret: Option<CompactionInput> =
+            picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+        assert!(ret.is_none());
     }
 
     #[test]
@@ -665,7 +681,7 @@ pub mod tests {
         let config = Arc::new(
             CompactionConfigBuilder::new()
                 .max_compaction_bytes(500000)
-                .sub_level_max_compaction_bytes(0)
+                .sub_level_max_compaction_bytes(50000)
                 .level0_sub_level_compact_level_count(1)
                 .build(),
         );
@@ -693,7 +709,6 @@ pub mod tests {
         let config = Arc::new(
             CompactionConfigBuilder::new()
                 .max_compaction_bytes(50000)
-                .sub_level_max_compaction_bytes(0)
                 .level0_sub_level_compact_level_count(1)
                 .build(),
         );
@@ -756,7 +771,6 @@ pub mod tests {
         let config = Arc::new(
             CompactionConfigBuilder::new()
                 .max_compaction_bytes(500000)
-                .sub_level_max_compaction_bytes(0)
                 .level0_sub_level_compact_level_count(1)
                 .build(),
         );
@@ -802,7 +816,6 @@ pub mod tests {
         let config = Arc::new(
             CompactionConfigBuilder::new()
                 .max_compaction_bytes(500000)
-                .sub_level_max_compaction_bytes(0)
                 .level0_sub_level_compact_level_count(2)
                 .build(),
         );
