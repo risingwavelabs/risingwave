@@ -14,8 +14,11 @@
 
 pub mod utils;
 
+use std::sync::Arc;
+
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, FilterExecutor};
+use risingwave_batch::task::StopFlag;
 use risingwave_common::enable_jemalloc_on_unix;
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::build_from_pretty;
@@ -32,6 +35,7 @@ fn create_filter_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecutor 
         input,
         "FilterBenchmark".to_string(),
         CHUNK_SIZE,
+        Arc::new(StopFlag::default()),
     ))
 }
 

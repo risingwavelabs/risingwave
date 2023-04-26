@@ -32,8 +32,11 @@ use crate::executor::ExecutorBuilder;
 use crate::task::{BatchTaskContext, TaskId};
 
 pub type ExchangeExecutor<C> = GenericExchangeExecutor<DefaultCreateSource, C>;
+use std::sync::Arc;
+
 use crate::executor::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor};
 use crate::monitor::BatchMetricsWithTaskLabels;
+use crate::task::StopFlag;
 
 pub struct GenericExchangeExecutor<CS, C> {
     proto_sources: Vec<PbExchangeSource>,
@@ -48,6 +51,8 @@ pub struct GenericExchangeExecutor<CS, C> {
     /// Batch metrics.
     /// None: Local mode don't record mertics.
     metrics: Option<BatchMetricsWithTaskLabels>,
+
+    stop_flag: Arc<StopFlag>,
 }
 
 /// `CreateSource` determines the right type of `ExchangeSource` to create.
@@ -141,6 +146,7 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
             task_id: source.task_id.clone(),
             identity: source.plan_node().get_identity().clone(),
             metrics: source.context().batch_metrics(),
+            stop_flag: source.context().get_stop_flag(),
         }))
     }
 }
@@ -182,6 +188,9 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> GenericExchangeExec
         .boxed();
 
         while let Some(data_chunk) = stream.next().await {
+            if self.stop_flag.check_stop() {
+                return Ok(());
+            }
             let data_chunk = data_chunk?;
             yield data_chunk
         }
@@ -266,6 +275,7 @@ mod tests {
                 },
                 task_id: TaskId::default(),
                 identity: "GenericExchangeExecutor2".to_string(),
+                stop_flag: Arc::new(StopFlag::default()),
             },
         );
 

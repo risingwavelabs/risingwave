@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use anyhow::anyhow;
 use futures_async_stream::try_stream;
 use risingwave_common::array::ArrayImpl::Bool;
@@ -26,13 +28,14 @@ use crate::error::BatchError;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
-use crate::task::BatchTaskContext;
+use crate::task::{BatchTaskContext, StopFlag};
 
 pub struct FilterExecutor {
     expr: BoxedExpression,
     child: BoxedExecutor,
     identity: String,
     chunk_size: usize,
+    stop_flag: Arc<StopFlag>,
 }
 
 impl Executor for FilterExecutor {
@@ -57,6 +60,9 @@ impl FilterExecutor {
 
         #[for_await]
         for data_chunk in self.child.execute() {
+            if self.stop_flag.check_stop() {
+                return Ok(());
+            }
             let data_chunk = data_chunk?.compact();
             let vis_array = self.expr.eval(&data_chunk).await?;
 
@@ -100,6 +106,7 @@ impl BoxedExecutorBuilder for FilterExecutor {
             input,
             source.plan_node().get_identity().clone(),
             source.context.get_config().developer.chunk_size,
+            source.context.get_stop_flag(),
         )))
     }
 }
@@ -110,18 +117,22 @@ impl FilterExecutor {
         input: BoxedExecutor,
         identity: String,
         chunk_size: usize,
+        stop_flag: Arc<StopFlag>,
     ) -> Self {
         Self {
             expr,
             child: input,
             identity,
             chunk_size,
+            stop_flag,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use assert_matches::assert_matches;
     use futures::stream::StreamExt;
     use risingwave_common::array::{Array, DataChunk};
@@ -132,6 +143,7 @@ mod tests {
 
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::{Executor, FilterExecutor};
+    use crate::task::StopFlag;
 
     const CHUNK_SIZE: usize = 1024;
 
@@ -171,6 +183,7 @@ mod tests {
             child: Box::new(mock_executor),
             identity: "FilterExecutor".to_string(),
             chunk_size: CHUNK_SIZE,
+            stop_flag: Arc::new(StopFlag::default()),
         });
 
         let fields = &filter_executor.schema().fields;
@@ -229,6 +242,7 @@ mod tests {
             child: Box::new(mock_executor),
             identity: "FilterExecutor".to_string(),
             chunk_size: CHUNK_SIZE,
+            stop_flag: Arc::new(StopFlag::default()),
         });
         let fields = &filter_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);

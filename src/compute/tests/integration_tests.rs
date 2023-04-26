@@ -26,6 +26,7 @@ use risingwave_batch::executor::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
     RowSeqScanExecutor, ScanRange,
 };
+use risingwave_batch::task::StopFlag;
 use risingwave_common::array::serial_array::SerialArray;
 use risingwave_common::array::{Array, DataChunk, F64Array};
 use risingwave_common::buffer::Bitmap;
@@ -261,6 +262,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         1024,
         "RowSeqExecutor2".to_string(),
         None,
+        Arc::new(StopFlag::default()),
     ));
     let mut stream = scan.execute();
     let result = stream.next().await;
@@ -324,6 +326,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         1024,
         "RowSeqScanExecutor2".to_string(),
         None,
+        Arc::new(StopFlag::default()),
     ));
 
     let mut stream = scan.execute();
@@ -400,6 +403,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         1024,
         "RowSeqScanExecutor2".to_string(),
         None,
+        Arc::new(StopFlag::default()),
     ));
 
     let mut stream = scan.execute();
@@ -470,6 +474,7 @@ async fn test_row_seq_scan() -> Result<()> {
         1,
         "RowSeqScanExecutor2".to_string(),
         None,
+        Arc::new(StopFlag::default()),
     ));
 
     assert_eq!(executor.schema().fields().len(), 3);

@@ -13,8 +13,11 @@
 // limitations under the License.
 pub mod utils;
 
+use std::sync::Arc;
+
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, ExpandExecutor};
+use risingwave_batch::task::StopFlag;
 use risingwave_common::enable_jemalloc_on_unix;
 use risingwave_common::types::DataType;
 use tokio::runtime::Runtime;
@@ -30,7 +33,12 @@ fn create_expand_executor(
     const CHUNK_SIZE: usize = 1024;
     let input_types = &[DataType::Int32, DataType::Int64, DataType::Varchar];
     let input = create_input(input_types, chunk_size, chunk_num);
-    Box::new(ExpandExecutor::new(input, column_subsets, CHUNK_SIZE))
+    Box::new(ExpandExecutor::new(
+        input,
+        column_subsets,
+        CHUNK_SIZE,
+        Arc::new(StopFlag::default()),
+    ))
 }
 
 fn bench_expand(c: &mut Criterion) {

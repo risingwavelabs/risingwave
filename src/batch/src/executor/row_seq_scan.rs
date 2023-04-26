@@ -41,7 +41,7 @@ use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
 use crate::monitor::BatchMetricsWithTaskLabels;
-use crate::task::BatchTaskContext;
+use crate::task::{BatchTaskContext, StopFlag};
 
 /// Executor that scans data from row table
 pub struct RowSeqScanExecutor<S: StateStore> {
@@ -56,6 +56,8 @@ pub struct RowSeqScanExecutor<S: StateStore> {
     scan_ranges: Vec<ScanRange>,
     ordered: bool,
     epoch: BatchQueryEpoch,
+
+    stop_flag: Arc<StopFlag>,
 }
 
 /// Range for batch scan.
@@ -131,6 +133,7 @@ impl ScanRange {
 }
 
 impl<S: StateStore> RowSeqScanExecutor<S> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         table: StorageTable<S>,
         scan_ranges: Vec<ScanRange>,
@@ -139,6 +142,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         chunk_size: usize,
         identity: String,
         metrics: Option<BatchMetricsWithTaskLabels>,
+        stop_flag: Arc<StopFlag>,
     ) -> Self {
         Self {
             chunk_size,
@@ -148,6 +152,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             scan_ranges,
             ordered,
             epoch,
+            stop_flag,
         }
     }
 }
@@ -276,6 +281,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 chunk_size as usize,
                 source.plan_node().get_identity().clone(),
                 metrics,
+                source.context.get_stop_flag(),
             )))
         })
     }
@@ -306,6 +312,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             scan_ranges,
             ordered,
             epoch,
+            stop_flag,
         } = *self;
         let table = Arc::new(table);
 
@@ -357,6 +364,9 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         }));
         #[for_await]
         for chunk in range_scans {
+            if stop_flag.check_stop() {
+                return Ok(());
+            }
             yield chunk?;
         }
     }

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
@@ -23,7 +25,7 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
-use crate::task::BatchTaskContext;
+use crate::task::{BatchTaskContext, StopFlag};
 
 pub struct ExpandExecutor {
     column_subsets: Vec<Vec<usize>>,
@@ -31,6 +33,7 @@ pub struct ExpandExecutor {
     schema: Schema,
     identity: String,
     chunk_size: usize,
+    stop_flag: Arc<StopFlag>,
 }
 
 impl Executor for ExpandExecutor {
@@ -55,6 +58,9 @@ impl ExpandExecutor {
 
         #[for_await]
         for data_chunk in self.child.execute() {
+            if self.stop_flag.check_stop() {
+                return Ok(());
+            }
             let data_chunk: DataChunk = data_chunk?.compact();
             assert!(
                 data_chunk.dimension() > 0,
@@ -80,7 +86,12 @@ impl ExpandExecutor {
         }
     }
 
-    pub fn new(input: BoxedExecutor, column_subsets: Vec<Vec<usize>>, chunk_size: usize) -> Self {
+    pub fn new(
+        input: BoxedExecutor,
+        column_subsets: Vec<Vec<usize>>,
+        chunk_size: usize,
+        stop_flag: Arc<StopFlag>,
+    ) -> Self {
         let schema = {
             let mut fields = input.schema().clone().into_fields();
             fields.extend(fields.clone());
@@ -93,6 +104,7 @@ impl ExpandExecutor {
             schema,
             identity: "ExpandExecutor".into(),
             chunk_size,
+            stop_flag,
         }
     }
 }
@@ -125,12 +137,15 @@ impl BoxedExecutorBuilder for ExpandExecutor {
             input,
             column_subsets,
             source.context.get_config().developer.chunk_size,
+            source.context.get_stop_flag(),
         )))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use futures::StreamExt;
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
@@ -139,6 +154,7 @@ mod tests {
     use super::ExpandExecutor;
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::Executor;
+    use crate::task::StopFlag;
 
     const CHUNK_SIZE: usize = 1024;
 
@@ -175,6 +191,7 @@ mod tests {
             schema: expand_schema,
             identity: "ExpandExecutor".to_string(),
             chunk_size: CHUNK_SIZE,
+            stop_flag: Arc::new(StopFlag::default()),
         });
         let mut stream = expand_executor.execute();
         let res = stream.next().await.unwrap().unwrap();
