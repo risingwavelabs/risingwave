@@ -26,7 +26,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
-use tokio::time;
+use tokio::{task, time};
 
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
 use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
@@ -166,9 +166,25 @@ where
 
     /// Remove a 'deleting' worker node after it missed 3 heartbeats
     async fn delete_worker_node_cleanup(&self, node_id: u32, host_address: HostAddress) {
-        let mut ticker = time::interval(Duration::from_secs(1));
+        let mut ticker = time::interval(Duration::from_millis(1100));
+        let mut log_ticker = time::interval(Duration::from_secs(60));
+        let start_time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_secs();
         loop {
             tokio::select! {
+                _ = log_ticker.tick() => {
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .expect("Time went backwards")
+                        .as_secs();
+                    tracing::warn!("Unable to delete compute node {:#?} with id {}. Trying since {} sec",
+                        host_address,
+                        node_id,
+                        (now - start_time) / 60
+                    );
+                }
                 _ = ticker.tick() => {
                     let mut core = self.core.write().await;
                     let worker = match core.get_worker_by_host_checked(host_address.clone()) {
@@ -217,7 +233,9 @@ where
         // Persist deletion.
         Worker::delete(self.env.meta_store(), &host_address).await?;
 
-        self.delete_worker_node_cleanup(worker.worker_node.id, host_address)
+        // TODO. this should not be blocking
+        // Maybe we have to just return somewhere what node is being deleted?
+        self.delete_worker_node_cleanup(worker.worker_node.id.clone(), host_address.clone())
             .await;
 
         // Notify frontends to delete compute node.
