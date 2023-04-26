@@ -73,7 +73,7 @@ pub fn infer_some_all(
         Some(DataTypeName::from(*datatype))
     } else {
         return Err(ErrorCode::BindError(
-            "op ANY/ALL (array) requires array on right side".to_string(),
+            "op SOME/ANY/ALL (array) requires array on right side".to_string(),
         )
         .into());
     };

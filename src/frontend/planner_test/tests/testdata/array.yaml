@@ -29,7 +29,10 @@
 - sql: |
     select ARRAY[];
   binder_error: |-
-    Bind error: cannot determine type of empty array
+    Bind error: failed to bind expression: ARRAY[]
+
+    Caused by:
+      Bind error: cannot determine type of empty array
     HINT:  Explicitly cast to the desired type, for example ARRAY[]::integer[].
 - sql: |
     select ARRAY[]::int[];
@@ -44,7 +47,10 @@
 - sql: |
     select ARRAY[]::int;
   binder_error: |-
-    Bind error: cannot determine type of empty array
+    Bind error: failed to bind expression: CAST(ARRAY[] AS INT)
+
+    Caused by:
+      Bind error: cannot determine type of empty array
     HINT:  Explicitly cast to the desired type, for example ARRAY[]::integer[].
 - sql: |
     select array_cat(array[66], array[123]);
@@ -69,13 +75,25 @@
     BatchValues { rows: [[ARRAY[{233}, {66}]:List { datatype: List { datatype: Int32 } }]] }
 - sql: |
     select array_cat(array[233], array[array[array[66]]]);
-  binder_error: 'Bind error: unable to find least restrictive type between integer[] and integer[][][]'
+  binder_error: |-
+    Bind error: failed to bind expression: array_cat(ARRAY[233], ARRAY[ARRAY[ARRAY[66]]])
+
+    Caused by:
+      Bind error: unable to find least restrictive type between integer[] and integer[][][]
 - sql: |
     select array_cat(array[233], 123);
-  binder_error: 'Bind error: Cannot concatenate integer[] and integer'
+  binder_error: |-
+    Bind error: failed to bind expression: array_cat(ARRAY[233], 123)
+
+    Caused by:
+      Bind error: Cannot concatenate integer[] and integer
 - sql: |
     select array_cat(123, array[233]);
-  binder_error: 'Bind error: Cannot concatenate integer and integer[]'
+  binder_error: |-
+    Bind error: failed to bind expression: array_cat(123, ARRAY[233])
+
+    Caused by:
+      Bind error: Cannot concatenate integer and integer[]
 - sql: |
     select array_append(array[66], 123);
   logical_plan: |
@@ -85,7 +103,11 @@
     BatchValues { rows: [[ARRAY[66, 123]:List { datatype: Int32 }]] }
 - sql: |
     select array_append(123, 234);
-  binder_error: 'Bind error: Cannot append integer to integer'
+  binder_error: |-
+    Bind error: failed to bind expression: array_append(123, 234)
+
+    Caused by:
+      Bind error: Cannot append integer to integer
 - sql: |
     /* Combining multidimensional arrays as such is supported beyond what PostgresSQL allows */
     select array_append(array[array[66]], array[233]);
@@ -101,7 +123,11 @@
     BatchValues { rows: [[ARRAY[123, 66]:List { datatype: Int32 }]] }
 - sql: |
     select array_prepend(123, 234);
-  binder_error: 'Bind error: Cannot prepend integer to integer'
+  binder_error: |-
+    Bind error: failed to bind expression: array_prepend(123, 234)
+
+    Caused by:
+      Bind error: Cannot prepend integer to integer
 - sql: |
     select array_prepend(array[233], array[array[66]]);
   logical_plan: |
@@ -180,4 +206,8 @@
 - name: compare with different type
   sql: |
     select array[1] = array[1.2];
-  binder_error: 'Bind error: cannot compare integer[] and numeric[]'
+  binder_error: |-
+    Bind error: failed to bind expression: ARRAY[1] = ARRAY[1.2]
+
+    Caused by:
+      Bind error: cannot compare integer[] and numeric[]
