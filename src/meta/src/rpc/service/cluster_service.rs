@@ -70,16 +70,13 @@ where
         Ok(Response::new(ActivateWorkerNodeResponse { status: None }))
     }
 
-    // TODO: Should return response immediately
     async fn delete_worker_node(
         &self,
         request: Request<DeleteWorkerNodeRequest>,
     ) -> Result<Response<DeleteWorkerNodeResponse>, Status> {
         let req = request.into_inner();
         let host = req.get_host()?.clone();
-        self.cluster_manager
-            .delete_worker_node(host.clone())
-            .await?;
+        self.cluster_manager.delete_worker_node(host).await?;
         Ok(Response::new(DeleteWorkerNodeResponse { status: None }))
     }
 
