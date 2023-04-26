@@ -40,9 +40,11 @@ pub const STORAGE_MEMORY_PROPORTION: f64 = 0.3;
 pub const COMPACTOR_MEMORY_PROPORTION: f64 = 0.1;
 
 pub const STORAGE_BLOCK_CACHE_MEMORY_PROPORTION: f64 = 0.3;
-pub const STORAGE_META_CACHE_MEMORY_PROPORTION: f64 = 0.1;
-pub const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.5;
-pub const STORAGE_FILE_CACHE_MEMORY_PROPORTION: f64 = 0.1;
+
+pub const STORAGE_META_CACHE_MAX_MEMORY_MB: usize = 4096;
+pub const STORAGE_META_CACHE_MEMORY_PROPORTION: f64 = 0.35;
+pub const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.3;
+pub const STORAGE_FILE_CACHE_MEMORY_PROPORTION: f64 = 0.05;
 pub const STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO: usize = 70;
 
 /// `MemoryControlStats` contains the state from previous control loop
@@ -118,11 +120,17 @@ pub fn reserve_memory_bytes(total_memory_bytes: usize) -> (usize, usize) {
 /// limits are calculated based on the proportions to total `non_reserved_memory_bytes`.
 pub fn storage_memory_config(
     non_reserved_memory_bytes: usize,
+    embedded_compactor_enabled: bool,
     storage_config: &StorageConfig,
 ) -> StorageMemoryConfig {
-    let block_cache_capacity_mb = storage_config.block_cache_capacity_mb.unwrap_or(
+    let (storage_memory_proportion, compactor_memory_proportion) = if embedded_compactor_enabled {
+        (STORAGE_MEMORY_PROPORTION, COMPACTOR_MEMORY_PROPORTION)
+    } else {
+        (STORAGE_MEMORY_PROPORTION + COMPACTOR_MEMORY_PROPORTION, 0.0)
+    };
+    let mut block_cache_capacity_mb = storage_config.block_cache_capacity_mb.unwrap_or(
         ((non_reserved_memory_bytes as f64
-            * STORAGE_MEMORY_PROPORTION
+            * storage_memory_proportion
             * STORAGE_BLOCK_CACHE_MEMORY_PROPORTION)
             .ceil() as usize)
             >> 20,
@@ -130,16 +138,22 @@ pub fn storage_memory_config(
     let high_priority_ratio_in_percent = storage_config
         .high_priority_ratio_in_percent
         .unwrap_or(STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO);
-    let meta_cache_capacity_mb = storage_config.meta_cache_capacity_mb.unwrap_or(
-        ((non_reserved_memory_bytes as f64
-            * STORAGE_MEMORY_PROPORTION
-            * STORAGE_META_CACHE_MEMORY_PROPORTION)
-            .ceil() as usize)
-            >> 20,
-    );
+    let default_meta_cache_capacity = (non_reserved_memory_bytes as f64
+        * storage_memory_proportion
+        * STORAGE_META_CACHE_MEMORY_PROPORTION)
+        .ceil() as usize;
+    let meta_cache_capacity_mb = storage_config
+        .meta_cache_capacity_mb
+        .unwrap_or(std::cmp::min(
+            default_meta_cache_capacity >> 20,
+            STORAGE_META_CACHE_MAX_MEMORY_MB,
+        ));
+    if meta_cache_capacity_mb == STORAGE_META_CACHE_MAX_MEMORY_MB {
+        block_cache_capacity_mb += (default_meta_cache_capacity >> 20) - meta_cache_capacity_mb;
+    }
     let shared_buffer_capacity_mb = storage_config.shared_buffer_capacity_mb.unwrap_or(
         ((non_reserved_memory_bytes as f64
-            * STORAGE_MEMORY_PROPORTION
+            * storage_memory_proportion
             * STORAGE_SHARED_BUFFER_MEMORY_PROPORTION)
             .ceil() as usize)
             >> 20,
@@ -149,13 +163,13 @@ pub fn storage_memory_config(
         .total_buffer_capacity_mb
         .unwrap_or(
             ((non_reserved_memory_bytes as f64
-                * STORAGE_MEMORY_PROPORTION
+                * storage_memory_proportion
                 * STORAGE_FILE_CACHE_MEMORY_PROPORTION)
                 .ceil() as usize)
                 >> 20,
         );
     let compactor_memory_limit_mb = storage_config.compactor_memory_limit_mb.unwrap_or(
-        ((non_reserved_memory_bytes as f64 * COMPACTOR_MEMORY_PROPORTION).ceil() as usize) >> 20,
+        ((non_reserved_memory_bytes as f64 * compactor_memory_proportion).ceil() as usize) >> 20,
     );
 
     StorageMemoryConfig {
@@ -198,11 +212,12 @@ mod tests {
         let mut storage_config = StorageConfig::default();
         let total_non_reserved_memory_bytes = 8 << 30;
 
-        let memory_config = storage_memory_config(total_non_reserved_memory_bytes, &storage_config);
+        let memory_config =
+            storage_memory_config(total_non_reserved_memory_bytes, true, &storage_config);
         assert_eq!(memory_config.block_cache_capacity_mb, 737);
-        assert_eq!(memory_config.meta_cache_capacity_mb, 245);
-        assert_eq!(memory_config.shared_buffer_capacity_mb, 1228);
-        assert_eq!(memory_config.file_cache_total_buffer_capacity_mb, 245);
+        assert_eq!(memory_config.meta_cache_capacity_mb, 860);
+        assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
+        assert_eq!(memory_config.file_cache_total_buffer_capacity_mb, 122);
         assert_eq!(memory_config.compactor_memory_limit_mb, 819);
 
         storage_config.block_cache_capacity_mb = Some(512);
@@ -210,7 +225,7 @@ mod tests {
         storage_config.shared_buffer_capacity_mb = Some(1024);
         storage_config.file_cache.total_buffer_capacity_mb = Some(128);
         storage_config.compactor_memory_limit_mb = Some(512);
-        let memory_config = storage_memory_config(0, &storage_config);
+        let memory_config = storage_memory_config(0, true, &storage_config);
         assert_eq!(memory_config.block_cache_capacity_mb, 512);
         assert_eq!(memory_config.meta_cache_capacity_mb, 128);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 1024);
