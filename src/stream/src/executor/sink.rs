@@ -196,38 +196,39 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     ) -> StreamExecutorResult<Message> {
         log_reader.init().await?;
 
-        enum SinkState {
+        enum LogConsumerState {
+            /// Mark that the log consumer is not initialized yet
             Uninitialized,
+
+            /// Mark that there is some data written in this checkpoint.
             Writing { curr_epoch: u64 },
+
+            /// Mark that the consumer has been checkpointed and there is no new data written after
+            /// the checkpoint
             Checkpointed { prev_epoch: u64 },
         }
 
-        let mut state = SinkState::Uninitialized;
+        let mut state = LogConsumerState::Uninitialized;
 
         loop {
             let (epoch, item): (u64, LogStoreReadItem) = log_reader.next_item().await?;
             match item {
                 LogStoreReadItem::StreamChunk(chunk) => {
-                    // NOTE: We start the txn here because a force-append-only sink might
-                    // receive a data chunk full of DELETE messages and then drop all of them.
-                    // At this point (instead of the point above when we receive the upstream
-                    // data chunk), we make sure that we do have data to send out, and we can
-                    // thus mark the txn as started.
                     state = match state {
-                        SinkState::Uninitialized => {
+                        LogConsumerState::Uninitialized => {
                             sink.begin_epoch(epoch).await?;
-                            SinkState::Writing { curr_epoch: epoch }
+                            LogConsumerState::Writing { curr_epoch: epoch }
                         }
-                        SinkState::Writing { curr_epoch } => {
+                        LogConsumerState::Writing { curr_epoch } => {
                             assert!(
                                 epoch >= curr_epoch,
                                 "new epoch {} should not be below the current epoch {}",
                                 epoch,
                                 curr_epoch
                             );
-                            SinkState::Writing { curr_epoch: epoch }
+                            LogConsumerState::Writing { curr_epoch: epoch }
                         }
-                        SinkState::Checkpointed { prev_epoch } => {
+                        LogConsumerState::Checkpointed { prev_epoch } => {
                             assert!(
                                 epoch > prev_epoch,
                                 "new epoch {} should be greater than prev epoch {}",
@@ -235,7 +236,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 prev_epoch
                             );
                             sink.begin_epoch(epoch).await?;
-                            SinkState::Writing { curr_epoch: epoch }
+                            LogConsumerState::Writing { curr_epoch: epoch }
                         }
                     };
 
@@ -246,8 +247,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 }
                 LogStoreReadItem::Barrier { is_checkpoint } => {
                     state = match state {
-                        SinkState::Uninitialized => SinkState::Checkpointed { prev_epoch: epoch },
-                        SinkState::Writing { curr_epoch } => {
+                        LogConsumerState::Uninitialized => {
+                            LogConsumerState::Checkpointed { prev_epoch: epoch }
+                        }
+                        LogConsumerState::Writing { curr_epoch } => {
                             assert!(
                                 epoch >= curr_epoch,
                                 "barrier epoch {} should not be below current epoch {}",
@@ -259,19 +262,19 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 sink.commit().await?;
                                 sink_commit_duration_metrics
                                     .observe(start_time.elapsed().as_millis() as f64);
-                                SinkState::Checkpointed { prev_epoch: epoch }
+                                LogConsumerState::Checkpointed { prev_epoch: epoch }
                             } else {
-                                SinkState::Writing { curr_epoch: epoch }
+                                LogConsumerState::Writing { curr_epoch: epoch }
                             }
                         }
-                        SinkState::Checkpointed { prev_epoch } => {
+                        LogConsumerState::Checkpointed { prev_epoch } => {
                             assert!(
                                 epoch > prev_epoch,
                                 "checkpoint epoch {} should be greater than prev checkpoint epoch: {}",
                                 epoch,
                                 prev_epoch
                             );
-                            SinkState::Checkpointed { prev_epoch: epoch }
+                            LogConsumerState::Checkpointed { prev_epoch: epoch }
                         }
                     };
                     if is_checkpoint {
