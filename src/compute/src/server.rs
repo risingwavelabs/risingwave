@@ -16,7 +16,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_batch::executor::{BatchManagerMetrics, BatchTaskMetrics};
+use risingwave_batch::monitor::{BatchExecutorMetrics, BatchManagerMetrics, BatchTaskMetrics};
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{
@@ -165,6 +165,7 @@ pub async fn compute_node_serve(
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
     let batch_task_metrics = Arc::new(BatchTaskMetrics::new(registry.clone()));
+    let batch_executor_metrics = Arc::new(BatchExecutorMetrics::new(registry.clone()));
     let batch_manager_metrics = BatchManagerMetrics::new(registry.clone());
     let exchange_srv_metrics = Arc::new(ExchangeServiceMetrics::new(registry.clone()));
 
@@ -316,6 +317,7 @@ pub async fn compute_node_serve(
         worker_id,
         state_store.clone(),
         batch_task_metrics.clone(),
+        batch_executor_metrics.clone(),
         client_pool,
         dml_mgr.clone(),
         source_metrics.clone(),
