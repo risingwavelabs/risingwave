@@ -4,6 +4,8 @@
 # The feedback loop is too long otherwise.
 set -euo pipefail
 
+QUERY_DIR="/risingwave/ci/scripts/sql/nexmark"
+
 # TODO(kwannoel): This is a workaround since workdir is `/risingwave` in the docker container.
 # Perhaps we should have a new docker container just for benchmarking?
 pushd ..
@@ -213,6 +215,11 @@ setup() {
 
 # Run benchmark for a query
 run() {
+  echo "--- Setting variables"
+  QUERY_LABEL="$1"
+  QUERY_FILE_NAME="$(echo $QUERY_LABEL | sed 's/nexmark\-\(.*\)/\1/')"
+  QUERY_PATH="$QUERY_DIR/$QUERY_FILE_NAME"
+
   echo "--- Starting up RW"
   pushd risingwave
   ./risedev d ci-gen-cpu-flamegraph
@@ -226,7 +233,7 @@ run() {
 
   echo "--- Running Benchmarks"
   # TODO(kwannoel): Allow users to configure which query they want to run.
-  psql -h localhost -p 4566 -d dev -U root -f risingwave/ci/scripts/sql/nexmark/q17.sql
+  psql -h localhost -p 4566 -d dev -U root -f $QUERY_PATH
 
   echo "--- Start Profiling"
   start_nperf
