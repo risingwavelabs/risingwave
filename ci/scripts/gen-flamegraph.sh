@@ -11,12 +11,12 @@ pushd ..
 
 # Buildkite does not support labels at the moment. Have to get via github api.
 get_nexmark_queries_to_run() {
-  echo "BUILDKITE_PULL_REQUEST: $BUILDKITE_PULL_REQUEST"
+  echo "PULL_REQUEST: $PULL_REQUEST"
   curl -L \
     -H "Accept: application/vnd.github+json" \
     -H "Authorization: Bearer $GITHUB_TOKEN"\
     -H "X-GitHub-Api-Version: 2022-11-28" \
-    https://api.github.com/repos/risingwavelabs/risingwave/pull/"$BUILDKITE_PULL_REQUEST"/labels \
+    https://api.github.com/repos/risingwavelabs/risingwave/pull/"$PULL_REQUEST"/labels \
   | parse_labels
 }
 

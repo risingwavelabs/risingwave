@@ -349,7 +349,7 @@ steps:
           environment:
             - GITHUB_TOKEN
     env:
-      - BUILDKITE_PULL_REQUEST
+      PULL_REQUEST: BUILDKITE_PULL_REQUEST
     # TODO(kwannoel): Here are the areas that can be further optimized:
     # - Nexmark event generation: ~3min for 100mil records.
     # - Generate Flamegraph: ~15min (see https://github.com/koute/not-perf/issues/30 on optimizing)
