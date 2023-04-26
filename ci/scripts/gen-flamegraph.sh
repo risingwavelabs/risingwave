@@ -222,6 +222,7 @@ run() {
   QUERY_LABEL="$1"
   QUERY_FILE_NAME="$(echo $QUERY_LABEL | sed 's/nexmark\-\(.*\)/\1.sql/')"
   QUERY_PATH="$QUERY_DIR/$QUERY_FILE_NAME"
+  FLAMEGRAPH_PATH="perf-$QUERY_LABEL.svg"
   echo "QUERY_LABEL: $QUERY_LABEL"
   echo "QUERY_FILE_NAME: $QUERY_FILE_NAME"
   echo "QUERY_PATH: $QUERY_PATH"
@@ -256,9 +257,10 @@ run() {
 
   echo "--- Generate flamegraph"
   gen_cpu_flamegraph
+  mv perf.svg $FLAMEGRAPH_PATH
 
   echo "--- Uploading flamegraph"
-  buildkite-agent artifact upload ./perf.svg
+  buildkite-agent artifact upload "./$FLAMEGRAPH_PATH"
 }
 
 ############## MAIN
