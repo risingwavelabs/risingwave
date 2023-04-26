@@ -75,11 +75,23 @@ where
         let meta_store = env.meta_store_ref();
         let core = ClusterManagerCore::new(meta_store.clone()).await?;
 
-        Ok(Self {
+        let s = Arc::new(Mutex::new(Self {
             env,
             max_heartbeat_interval,
             core: RwLock::new(core),
-        })
+        }));
+
+        let h = HostAddress {
+            host: "".to_owned(),
+            port: 1,
+        };
+        delete_worker_node_cleanup(s, 1, h);
+
+        // remove deleting if they missed heartbeats
+        // s.worker_node_cleanup_daemon();
+
+        let x = s.lock().await;
+        Ok(x)
     }
 
     /// Used in `NotificationService::subscribe`.
@@ -225,6 +237,7 @@ where
         }
     }
 
+    // todo: instead of passing self pass arc mutex
     pub async fn delete_worker_node(&self, host_address: HostAddress) -> MetaResult<WorkerType> {
         let core = self.core.write().await;
         let mut worker = core.get_worker_by_host_checked(host_address.clone())?;
@@ -235,7 +248,11 @@ where
         // Persist deletion.
         Worker::delete(self.env.meta_store(), &host_address).await?;
 
+        // TODO: write this cleanup as part of the heartbeat function
+        // every interval check that
         // TODO: should not be blocking
+        // Alternative write a function that is called on startup of cluster manager that checks for
+        // deleted nodes every so and so seconds
         delete_worker_node_cleanup(
             Arc::new(Mutex::new(*self)),
             worker.worker_node.id.clone(),

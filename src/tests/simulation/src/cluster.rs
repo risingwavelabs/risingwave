@@ -542,7 +542,7 @@ impl Cluster {
     // Copy of the implementation in meta_client
     pub async fn try_build_rpc_channel(addrs: Vec<String>) -> Result<(Channel, String)> {
         assert!(addrs.len() > 0, "Unable to connect without addresses");
-        
+
         let endpoints: Vec<_> = addrs
             .into_iter()
             .map(|addr| Self::addr_to_endpoint(addr.clone()).map(|endpoint| (endpoint, addr)))
@@ -589,7 +589,7 @@ impl Cluster {
         // ClusterServiceClient.DeleteWorkerNode
 
         // TODO:
-        // cannot use advertising meta addr? 
+        // cannot use advertising meta addr?
         // How do we resolve the address?
         // 192, 168, 1, i as u8
 
@@ -623,7 +623,8 @@ impl Cluster {
             .await
             .expect(format!("Deleting node {:?} failed", host).as_str());
 
-        // TODO: Do I have to shut down the worker node after this or does delete_worker_node do it all?
+        // TODO: Do I have to shut down the worker node after this or does delete_worker_node do it
+        // all?
     }
 
     /// Create a node for kafka producer and prepare data.

@@ -70,6 +70,7 @@ where
         Ok(Response::new(ActivateWorkerNodeResponse { status: None }))
     }
 
+    // TODO: Should return response immediately
     async fn delete_worker_node(
         &self,
         request: Request<DeleteWorkerNodeRequest>,
