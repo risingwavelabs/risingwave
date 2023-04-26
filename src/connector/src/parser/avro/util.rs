@@ -324,8 +324,6 @@ pub(crate) fn from_avro_value(value: Value, value_schema: &Schema) -> Result<Dat
 
 #[cfg(test)]
 mod tests {
-    use num_traits::FromPrimitive;
-
     use super::*;
     #[test]
     fn test_convert_decimal() {
@@ -333,13 +331,13 @@ mod tests {
         let v = vec![1, 24];
         let avro_decimal = AvroDecimal::from(v);
         let rust_decimal = avro_decimal_to_rust_decimal(avro_decimal, 28, 0).unwrap();
-        assert_eq!(rust_decimal, rust_decimal::Decimal::from_i32(280).unwrap());
+        assert_eq!(rust_decimal, rust_decimal::Decimal::from(280));
 
         // 28.1
         let v = vec![1, 25];
         let avro_decimal = AvroDecimal::from(v);
         let rust_decimal = avro_decimal_to_rust_decimal(avro_decimal, 28, 1).unwrap();
-        assert_eq!(rust_decimal, rust_decimal::Decimal::from_f32(28.1).unwrap());
+        assert_eq!(rust_decimal, rust_decimal::Decimal::try_from(28.1).unwrap());
     }
 
     #[test]
