@@ -72,7 +72,9 @@ impl SplitReader for KafkaSplitReader {
 
         properties.common.set_security_properties(&mut config);
 
-        if config.get("group.id").is_none() {
+        if let Some(group_id) = &properties.consumer_group {
+            config.set("group.id", group_id);
+        } else if config.get("group.id").is_none() {
             config.set(
                 "group.id",
                 format!(
