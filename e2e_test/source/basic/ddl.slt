@@ -97,6 +97,40 @@ create source s with (
   connection.name = 'nonexist',
 ) row format json;
 
+
+statement error
+create source s (
+  a int,
+  b int
+) with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  connection.name = 'nonexist',
+) row format DEBEZIUM_MONGO_JSON;
+
+statement error
+create source s (
+  _id jsonb,
+  payload jsonb
+) with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  connection.name = 'nonexist',
+) row format DEBEZIUM_MONGO_JSON;
+
+statement error
+create source s (
+  _id varchar,
+  payload int
+) with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  connection.name = 'nonexist',
+) row format DEBEZIUM_MONGO_JSON;
+
 statement ok
 create source s with (
   connector = 'kafka',
