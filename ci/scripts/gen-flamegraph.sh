@@ -4,13 +4,16 @@
 # The feedback loop is too long otherwise.
 set -euo pipefail
 
+PULL_REQUEST=$1
+
 # TODO(kwannoel): This is a workaround since workdir is `/risingwave` in the docker container.
 # Perhaps we should have a new docker container just for benchmarking?
 pushd ..
 
+
 # Buildkite does not support labels at the moment. Have to get via github api.
 get_nexmark_queries_to_run() {
-  echo "BUILDKITE_PULL_REQUEST: $BUILDKITE_PULL_REQUEST"
+  echo "BUILDKITE_PULL_REQUEST: $PULL_REQUEST"
   curl -L \
     -H "Accept: application/vnd.github+json" \
     -H "Authorization: Bearer $GITHUB_TOKEN"\
