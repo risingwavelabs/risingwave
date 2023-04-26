@@ -17,6 +17,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use futures::Future;
 use itertools::Itertools;
 use risingwave_common::hash::ParallelUnitId;
 use risingwave_pb::common::worker_node::State;
@@ -24,7 +25,7 @@ use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::oneshot::Sender;
-use tokio::sync::{RwLock, RwLockReadGuard};
+use tokio::sync::{Mutex, RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 use tokio::{task, time};
 
@@ -164,6 +165,7 @@ where
         Ok(())
     }
 
+    // TODO: delete this function
     /// Remove a 'deleting' worker node after it missed 3 heartbeats
     async fn delete_worker_node_cleanup(&self, node_id: u32, host_address: HostAddress) {
         let mut ticker = time::interval(Duration::from_millis(1100));
@@ -179,7 +181,7 @@ where
                         .duration_since(UNIX_EPOCH)
                         .expect("Time went backwards")
                         .as_secs();
-                    tracing::warn!("Unable to delete compute node {:#?} with id {}. Trying since {} sec",
+                    tracing::warn!("Unable to delete compute node {:#?} with id {}. Trying since {} min",
                         host_address,
                         node_id,
                         (now - start_time) / 60
@@ -200,7 +202,7 @@ where
 
                     if worker.worker_node.state != State::Deleting as i32 || worker.worker_node.id != node_id  {
                         tracing::warn!(
-                            "Worker node changed. Expected state deleting, got {}. Expected ID {}, got {}",
+                            "Worker node changed. Expected state deleting, got {} AND ID {}, got {}. Assuming this is a different node. Aborting deletion.",
                             worker.worker_node.state,
                             node_id,
                             worker.worker_node.id
@@ -233,10 +235,13 @@ where
         // Persist deletion.
         Worker::delete(self.env.meta_store(), &host_address).await?;
 
-        // TODO. this should not be blocking
-        // Maybe we have to just return somewhere what node is being deleted?
-        self.delete_worker_node_cleanup(worker.worker_node.id.clone(), host_address.clone())
-            .await;
+        // TODO: should not be blocking
+        delete_worker_node_cleanup(
+            Arc::new(Mutex::new(*self)),
+            worker.worker_node.id.clone(),
+            host_address.clone(),
+        )
+        .await;
 
         // Notify frontends to delete compute node.
         if worker_type == WorkerType::ComputeNode {
@@ -708,4 +713,74 @@ mod tests {
         join_handle.await.unwrap();
         keep_alive_join_handle.abort();
     }
+}
+
+async fn delete_worker_node_cleanup<S>(
+    shared_manager: Arc<Mutex<ClusterManager<S>>>,
+    node_id: u32,
+    host_address: HostAddress,
+) where
+    S: MetaStore,
+{
+    let s_manager = shared_manager.clone();
+    tokio::task::spawn(async move {
+        let mut ticker = time::interval(Duration::from_millis(1100));
+        let mut log_ticker = time::interval(Duration::from_secs(60));
+        let start_time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_secs();
+        loop {
+            tokio::select! {
+                _ = log_ticker.tick() => {
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .expect("Time went backwards")
+                        .as_secs();
+                    tracing::warn!("Unable to delete compute node {:#?} with id {}. Trying since {} min",
+                        host_address,
+                        node_id,
+                        (now - start_time) / 60
+                    );
+                }
+                _ = ticker.tick() => {
+                    let manager = s_manager.lock().await;
+                    let mut core = manager.core.write().await;
+                    let worker = match core.get_worker_by_host_checked(host_address.clone()) {
+                        Ok(w) => w,
+                        Err(_) => {
+                            tracing::warn!(
+                                "Unable to retrieve deleting worker node at address {:#?}",
+                                host_address
+                            );
+                            return;
+                         }
+                    };
+
+                    if worker.worker_node.state != State::Deleting as i32 || worker.worker_node.id != node_id  {
+                        tracing::warn!(
+                            "Worker node changed. Expected state deleting, got {} AND ID {}, got {}. Assuming this is a different node. Aborting deletion.",
+                            worker.worker_node.state,
+                            node_id,
+                            worker.worker_node.id
+                        );
+                        return;
+                    }
+
+                    // delete node if we missed 3 heartbeats
+                    let latest_beat = worker.expire_at();
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .expect("Time went backwards")
+                        .as_secs();
+                    if now > latest_beat + 3 * manager.max_heartbeat_interval.as_secs() {
+                        core.delete_worker_node(worker);
+                        return;
+                    }
+                }
+            }
+        }
+    })
+    .await
+    .unwrap(); // TODO: Do I have to await unwrap here?
 }
