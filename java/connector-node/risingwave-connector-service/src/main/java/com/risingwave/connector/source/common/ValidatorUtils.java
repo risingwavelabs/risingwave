@@ -26,7 +26,7 @@ import org.slf4j.LoggerFactory;
 public final class ValidatorUtils {
     static final Logger LOG = LoggerFactory.getLogger(ValidatorUtils.class);
 
-    public static final String CONFIGED_SQL_FILE = "validate_sql.properties";
+    static final String VALIDATE_SQL_FILE = "validate_sql.properties";
 
     public static RuntimeException invalidArgument(String description) {
         return Status.INVALID_ARGUMENT.withDescription(description).asRuntimeException();
@@ -45,7 +45,7 @@ public final class ValidatorUtils {
     static {
         var props = new Properties();
         try (var input =
-                ValidatorUtils.class.getClassLoader().getResourceAsStream(CONFIGED_SQL_FILE)) {
+                ValidatorUtils.class.getClassLoader().getResourceAsStream(VALIDATE_SQL_FILE)) {
             props.load(input);
         } catch (IOException e) {
             LOG.error("failed to load sql statements", e);
@@ -57,18 +57,6 @@ public final class ValidatorUtils {
     public static String getSql(String name) {
         assert (storedSqls != null);
         return storedSqls.getProperty(name);
-    }
-
-    public static String getJdbcPrefix(SourceTypeE sourceType) {
-        switch (sourceType) {
-            case MYSQL:
-                return "jdbc:mysql";
-            case POSTGRES:
-            case CITUS:
-                return "jdbc:postgresql";
-            default:
-                throw ValidatorUtils.invalidArgument("Unknown source type: " + sourceType);
-        }
     }
 
     public static String getJdbcUrl(SourceTypeE sourceType, String host, String database) {

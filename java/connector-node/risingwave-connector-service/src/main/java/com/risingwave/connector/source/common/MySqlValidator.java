@@ -23,7 +23,7 @@ import java.sql.SQLException;
 import java.util.HashSet;
 import java.util.Map;
 
-public class MySqlValidator extends AbstractDatabaseValidator implements AutoCloseable {
+public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
     private final Map<String, String> userProps;
 
     private final TableSchema tableSchema;
@@ -48,7 +48,6 @@ public class MySqlValidator extends AbstractDatabaseValidator implements AutoClo
     public void validateDbConfig() {
         try {
             // TODO: check database server version
-
             validateBinlogConfig();
         } catch (SQLException e) {
             throw ValidatorUtils.internalError(e);

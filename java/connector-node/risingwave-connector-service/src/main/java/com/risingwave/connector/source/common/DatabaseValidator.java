@@ -14,15 +14,20 @@
 
 package com.risingwave.connector.source.common;
 
-/** Validate source database properties */
-public interface DatabaseValidator {
+public abstract class DatabaseValidator {
+
+    public void validateAll() {
+        validateDbConfig();
+        validateUserPrivilege();
+        validateTable();
+    }
 
     /** Validate the config of the upstream database */
-    void validateDbConfig();
+    abstract void validateDbConfig();
 
     /** Validate the required privileges to start the connector */
-    void validateUserPrivilege();
+    abstract void validateUserPrivilege();
 
     /** Validate the properties of the source table */
-    void validateTable();
+    abstract void validateTable();
 }

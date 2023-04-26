@@ -24,7 +24,7 @@ import java.util.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class PostgresValidator extends AbstractDatabaseValidator implements AutoCloseable {
+public class PostgresValidator extends DatabaseValidator implements AutoCloseable {
     static final Logger LOG = LoggerFactory.getLogger(PostgresValidator.class);
 
     private final Map<String, String> userProps;
@@ -50,7 +50,6 @@ public class PostgresValidator extends AbstractDatabaseValidator implements Auto
     @Override
     public void validateDbConfig() {
         // TODO: check database server version
-
         // check whether source db has enabled wal
         try (var stmt = jdbcConnection.createStatement()) {
             var res = stmt.executeQuery(ValidatorUtils.getSql("postgres.wal"));
