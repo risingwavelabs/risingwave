@@ -24,8 +24,8 @@ use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use super::iterator::test_utils::iterator_test_table_key_of;
 use super::{
-    CompressionAlgorithm, HummockResult, InMemWriter, SstableMeta, SstableWriterOptions,
-    DEFAULT_RESTART_INTERVAL,
+    create_monotonic_events, CompressionAlgorithm, HummockResult, InMemWriter, SstableMeta,
+    SstableWriterOptions, DEFAULT_RESTART_INTERVAL,
 };
 use crate::error::StorageResult;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
@@ -149,7 +149,9 @@ pub async fn gen_test_sstable_data(
 ) -> (Bytes, SstableMeta) {
     let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opts), opts);
     for (key, value) in kv_iter {
-        b.add(key.to_ref(), value.as_slice(), true).await.unwrap();
+        b.add_for_test(key.to_ref(), value.as_slice(), true)
+            .await
+            .unwrap();
     }
     let output = b.finish().await.unwrap();
     output.writer_output
@@ -198,7 +200,7 @@ pub async fn put_sst(
 }
 
 /// Generates a test table from the given `kv_iter` and put the kv value to `sstable_store`
-pub async fn gen_test_sstable_inner<B: AsRef<[u8]>>(
+pub async fn gen_test_sstable_inner<B: AsRef<[u8]> + Clone + Default + Eq>(
     opts: SstableBuilderOptions,
     object_id: HummockSstableObjectId,
     kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,
@@ -215,10 +217,53 @@ pub async fn gen_test_sstable_inner<B: AsRef<[u8]>>(
         .clone()
         .create_sst_writer(object_id, writer_opts);
     let mut b = SstableBuilder::for_test(object_id, writer, opts);
-    for (key, value) in kv_iter {
-        b.add(key.to_ref(), value.as_slice(), true).await.unwrap();
+
+    let mut last_key = FullKey::<B>::default();
+    let mut user_key_last_delete = HummockEpoch::MAX;
+    for (mut key, value) in kv_iter {
+        let mut is_new_user_key =
+            last_key.is_empty() || key.user_key.as_ref() != last_key.user_key.as_ref();
+        let epoch = key.epoch;
+        if is_new_user_key {
+            last_key = key.clone();
+            user_key_last_delete = HummockEpoch::MAX;
+        }
+
+        let mut earliest_delete_epoch = HummockEpoch::MAX;
+        for range_tombstone in &range_tombstones {
+            if range_tombstone
+                .start_user_key
+                .as_ref()
+                .le(&key.user_key.as_ref())
+                && range_tombstone
+                    .end_user_key
+                    .as_ref()
+                    .gt(&key.user_key.as_ref())
+                && range_tombstone.sequence >= key.epoch
+                && range_tombstone.sequence < earliest_delete_epoch
+            {
+                earliest_delete_epoch = range_tombstone.sequence;
+            }
+        }
+
+        if value.is_delete() {
+            user_key_last_delete = epoch;
+        } else if earliest_delete_epoch < user_key_last_delete {
+            user_key_last_delete = earliest_delete_epoch;
+
+            key.epoch = earliest_delete_epoch;
+            b.add(key.to_ref(), HummockValue::Delete, is_new_user_key)
+                .await
+                .unwrap();
+            key.epoch = epoch;
+            is_new_user_key = false;
+        }
+
+        b.add(key.to_ref(), value.as_slice(), is_new_user_key)
+            .await
+            .unwrap();
     }
-    b.add_delete_range(range_tombstones);
+    b.add_monotonic_deletes(create_monotonic_events(&range_tombstones));
     let output = b.finish().await.unwrap();
     output.writer_output.await.unwrap().unwrap();
     let table = sstable_store
@@ -232,7 +277,7 @@ pub async fn gen_test_sstable_inner<B: AsRef<[u8]>>(
 }
 
 /// Generate a test table from the given `kv_iter` and put the kv value to `sstable_store`
-pub async fn gen_test_sstable<B: AsRef<[u8]>>(
+pub async fn gen_test_sstable<B: AsRef<[u8]> + Clone + Default + Eq>(
     opts: SstableBuilderOptions,
     object_id: HummockSstableObjectId,
     kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,
@@ -251,7 +296,7 @@ pub async fn gen_test_sstable<B: AsRef<[u8]>>(
 }
 
 /// Generate a test table from the given `kv_iter` and put the kv value to `sstable_store`
-pub async fn gen_test_sstable_and_info<B: AsRef<[u8]>>(
+pub async fn gen_test_sstable_and_info<B: AsRef<[u8]> + Clone + Default + Eq>(
     opts: SstableBuilderOptions,
     object_id: HummockSstableObjectId,
     kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,

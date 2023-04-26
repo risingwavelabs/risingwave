@@ -56,6 +56,10 @@ impl WithOptions {
         &self.inner
     }
 
+    pub fn inner_mut(&mut self) -> &mut BTreeMap<String, String> {
+        &mut self.inner
+    }
+
     /// Take the value of the inner map.
     pub fn into_inner(self) -> BTreeMap<String, String> {
         self.inner.into_iter().collect()

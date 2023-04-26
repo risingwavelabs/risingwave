@@ -118,7 +118,7 @@ lazy_static! {
             // Pull correlated predicates up the algebra tree to unnest simple subquery.
             PullUpCorrelatedPredicateRule::create(),
         ],
-        ApplyOrder::TopDown,
+        ApplyOrder::BottomUp,
     );
 
     static ref UNION_MERGE: OptimizationStage = OptimizationStage::new(

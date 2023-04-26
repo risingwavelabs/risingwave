@@ -213,7 +213,8 @@ impl ApplyJoinTransposeRule {
                     .map(Some)
                     .collect_vec(),
             )
-            .inverse(),
+            .inverse()
+            .expect("must be invertible"),
             correlated_id,
         };
 
@@ -301,7 +302,8 @@ impl ApplyJoinTransposeRule {
                     .map(Some)
                     .collect_vec(),
             )
-            .inverse(),
+            .inverse()
+            .expect("must be invertible"),
             correlated_id,
         };
 
@@ -425,7 +427,8 @@ impl ApplyJoinTransposeRule {
                     .map(Some)
                     .collect_vec(),
             )
-            .inverse(),
+            .inverse()
+            .expect("must be invertible"),
             correlated_id,
         };
 

@@ -131,6 +131,8 @@ impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
     }
 
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        self.i2o_col_mapping().inverse()
+        self.i2o_col_mapping()
+            .inverse()
+            .expect("must be invertible")
     }
 }

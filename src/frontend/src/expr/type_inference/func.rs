@@ -553,6 +553,21 @@ fn infer_type_for_special(
                 .into()),
             }
         }
+        ExprType::ArrayPositions => {
+            ensure_arity!("array_positions", | inputs | == 2);
+            let common_type = align_array_and_element(0, 1, inputs);
+            match common_type {
+                Ok(_) => Ok(Some(DataType::List {
+                    datatype: Box::new(DataType::Int32),
+                })),
+                Err(_) => Err(ErrorCode::BindError(format!(
+                    "Cannot get position of {} in {}",
+                    inputs[1].return_type(),
+                    inputs[0].return_type()
+                ))
+                .into()),
+            }
+        }
         ExprType::ArrayDistinct => {
             ensure_arity!("array_distinct", | inputs | == 1);
             let ret_type = inputs[0].return_type();
@@ -590,6 +605,9 @@ fn infer_type_for_special(
                 _ => Ok(None),
             }
         }
+        ExprType::StringToArray => Ok(Some(DataType::List {
+            datatype: Box::new(DataType::Varchar),
+        })),
         ExprType::Cardinality => {
             ensure_arity!("cardinality", | inputs | == 1);
             let return_type = inputs[0].return_type();
@@ -605,6 +623,17 @@ fn infer_type_for_special(
                 DataType::List {
                     datatype: _list_elem_type,
                 } => Ok(Some(DataType::Int64)),
+                _ => Ok(None),
+            }
+        }
+        ExprType::TrimArray => {
+            ensure_arity!("trim_array", | inputs | == 2);
+
+            let owned = std::mem::replace(&mut inputs[1], ExprImpl::literal_bool(true));
+            inputs[1] = owned.cast_implicit(DataType::Int32)?;
+
+            match inputs[0].return_type() {
+                DataType::List { datatype: typ } => Ok(Some(DataType::List { datatype: typ })),
                 _ => Ok(None),
             }
         }

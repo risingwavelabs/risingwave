@@ -187,7 +187,7 @@ mod tests {
     use risingwave_common::types::Decimal;
 
     use super::*;
-    use crate::expr::AggKind;
+    use crate::function::aggregate::AggKind;
     use crate::vector_op::agg::aggregator::create_agg_state_unary;
 
     async fn eval_agg(
@@ -310,9 +310,9 @@ mod tests {
             Arc::new(input.into()),
             agg_type,
             return_type,
-            ArrayBuilderImpl::List(ListArrayBuilder::with_meta(
+            ArrayBuilderImpl::List(ListArrayBuilder::with_type(
                 0,
-                ArrayMeta::List {
+                DataType::List {
                     datatype: Box::new(DataType::Int32),
                 },
             )),

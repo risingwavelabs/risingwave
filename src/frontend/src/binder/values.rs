@@ -100,23 +100,11 @@ impl Binder {
             .collect::<Result<Vec<Vec<_>>>>()?;
         self.context.clause = None;
 
-        // Adding Null values in case user did not specify all columns. E.g.
-        // create table t1 (v1 int, v2 int); insert into t1 (v2) values (5);
-        let mut num_columns = bound[0].len();
+        let num_columns = bound[0].len();
         if bound.iter().any(|row| row.len() != num_columns) {
             return Err(
                 ErrorCode::BindError("VALUES lists must all be the same length".into()).into(),
             );
-        }
-        if let Some(expected_types) = &expected_types && expected_types.len() > num_columns {
-            let nulls_to_insert = expected_types.len() - num_columns;
-            for row in &mut bound {
-                for i in 0..nulls_to_insert {
-                    let t = expected_types[num_columns + i].clone();
-                    row.push(ExprImpl::literal_null(t));
-                }
-            }
-            num_columns = expected_types.len();
         }
 
         // Calculate column types.
@@ -138,6 +126,7 @@ impl Binder {
         let schema = Schema::new(
             types
                 .into_iter()
+                .take(num_columns)
                 .zip_eq_fast(0..num_columns)
                 .map(|(ty, col_id)| Field::with_name(ty, values_column_name(values_id, col_id)))
                 .collect(),
@@ -168,7 +157,7 @@ impl Binder {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::util::iter_util::zip_eq_fast;
+    use risingwave_common::util::iter_util::{zip_eq_fast, ZipEqFast};
     use risingwave_sqlparser::ast::{Expr, Value};
 
     use super::*;

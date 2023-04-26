@@ -70,9 +70,6 @@ pub mod write_limiter;
 pub use error::*;
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
 use risingwave_common_service::observer_manager::{NotificationClient, ObserverManager};
-use risingwave_hummock_sdk::filter_key_extractor::{
-    FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
-};
 pub use validator::*;
 use value::*;
 
@@ -80,6 +77,7 @@ use self::event_handler::ReadVersionMappingType;
 use self::iterator::HummockIterator;
 pub use self::sstable_store::*;
 use super::monitor::HummockStateStoreMetrics;
+use crate::filter_key_extractor::{FilterKeyExtractorManager, FilterKeyExtractorManagerRef};
 use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
 use crate::hummock::compactor::CompactorContext;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
@@ -146,6 +144,7 @@ impl HummockStorage {
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
+        filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         tracing: Arc<risingwave_tracing::RwTracingService>,
         compactor_metrics: Arc<CompactorMetrics>,
@@ -160,7 +159,6 @@ impl HummockStorage {
         )
         .await
         .map_err(HummockError::read_backup_error)?;
-        let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
         let write_limiter = Arc::new(WriteLimiter::default());
         let (event_tx, mut event_rx) = unbounded_channel();
 
@@ -335,6 +333,7 @@ impl HummockStorage {
             sstable_store,
             hummock_meta_client,
             notification_client,
+            Arc::new(FilterKeyExtractorManager::default()),
             Arc::new(HummockStateStoreMetrics::unused()),
             Arc::new(risingwave_tracing::RwTracingService::disabled()),
             Arc::new(CompactorMetrics::unused()),
@@ -361,17 +360,11 @@ pub async fn get_from_sstable_info(
 ) -> HummockResult<Option<HummockValue<Bytes>>> {
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
     let min_epoch = gen_min_epoch(full_key.epoch, read_options.retention_seconds.as_ref());
-    let ukey = &full_key.user_key;
-    let delete_epoch = if read_options.ignore_range_tombstone {
-        None
-    } else {
-        get_delete_range_epoch_from_sstable(sstable.value().as_ref(), &full_key)
-    };
 
     // Bloom filter key is the distribution key, which is no need to be the prefix of pk, and do not
     // contain `TablePrefix` and `VnodePrefix`.
     if let Some(hash) = dist_key_hash && !hit_sstable_bloom_filter(sstable.value(), hash, local_stats) {
-        if delete_epoch.is_some() {
+        if !read_options.ignore_range_tombstone && get_min_delete_range_epoch_from_sstable(sstable.value().as_ref(), full_key.user_key) <= full_key.epoch {
             return Ok(Some(HummockValue::Delete));
         }
 
@@ -383,12 +376,17 @@ pub async fn get_from_sstable_info(
     let mut iter = SstableIterator::create(
         sstable,
         sstable_store_ref.clone(),
-        Arc::new(SstableIteratorReadOptions::from(read_options)),
+        Arc::new(SstableIteratorReadOptions::from_read_options(read_options)),
     );
     iter.seek(full_key).await?;
     // Iterator has sought passed the borders.
     if !iter.is_valid() {
-        if delete_epoch.is_some() {
+        if !read_options.ignore_range_tombstone
+            && get_min_delete_range_epoch_from_sstable(
+                iter.sst().value().as_ref(),
+                full_key.user_key,
+            ) <= full_key.epoch
+        {
             return Ok(Some(HummockValue::Delete));
         }
         return Ok(None);
@@ -396,22 +394,21 @@ pub async fn get_from_sstable_info(
 
     // Iterator gets us the key, we tell if it's the key we want
     // or key next to it.
-    let value = if iter.key().user_key == *ukey {
+    let value = if iter.key().user_key == full_key.user_key {
         if iter.key().epoch <= min_epoch {
             None
-        } else if delete_epoch
-            .map(|epoch| epoch >= iter.key().epoch)
-            .unwrap_or(false)
-        {
-            Some(HummockValue::Delete)
         } else {
             Some(iter.value().to_bytes())
         }
-    } else if delete_epoch.is_some() {
+    } else if !read_options.ignore_range_tombstone
+        && get_min_delete_range_epoch_from_sstable(iter.sst().value().as_ref(), full_key.user_key)
+            <= full_key.epoch
+    {
         Some(HummockValue::Delete)
     } else {
         None
     };
+
     iter.collect_local_statistic(local_stats);
 
     Ok(value)
@@ -435,9 +432,10 @@ pub fn get_from_batch(
     imm: &ImmutableMemtable,
     table_key: TableKey<&[u8]>,
     read_epoch: HummockEpoch,
+    read_options: &ReadOptions,
     local_stats: &mut StoreLocalStatistic,
 ) -> Option<HummockValue<Bytes>> {
-    imm.get(table_key, read_epoch).map(|v| {
+    imm.get(table_key, read_epoch, read_options).map(|v| {
         local_stats.get_shared_buffer_hit_counts += 1;
         v
     })

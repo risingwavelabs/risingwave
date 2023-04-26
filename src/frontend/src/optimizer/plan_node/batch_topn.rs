@@ -35,11 +35,8 @@ pub struct BatchTopN {
 impl BatchTopN {
     pub fn new(logical: generic::TopN<PlanRef>) -> Self {
         assert!(logical.group_key.is_empty());
-        let base = PlanBase::new_logical_with_core(&logical);
-        let ctx = base.ctx;
-        let base = PlanBase::new_batch(
-            ctx,
-            base.schema,
+        let base = PlanBase::new_batch_from_logical(
+            &logical,
             logical.input.distribution().clone(),
             // BatchTopN outputs data in the order of specified order
             logical.order.clone(),
@@ -56,8 +53,14 @@ impl BatchTopN {
         let logical_partial_topn =
             generic::TopN::without_group(input, new_limit, new_offset, self.logical.order.clone());
         let batch_partial_topn = Self::new(logical_partial_topn);
-        let ensure_single_dist = RequiredDist::single()
-            .enforce_if_not_satisfies(batch_partial_topn.into(), &Order::any())?;
+        let single_dist = RequiredDist::single();
+        let ensure_single_dist = if !batch_partial_topn.distribution().satisfies(&single_dist) {
+            single_dist.enforce_if_not_satisfies(batch_partial_topn.into(), &Order::any())?
+        } else {
+            // The input's distribution is singleton, so use one phase topn is enough.
+            return Ok(batch_partial_topn.into());
+        };
+
         let batch_global_topn = self.clone_with_input(ensure_single_dist);
         Ok(batch_global_topn.into())
     }

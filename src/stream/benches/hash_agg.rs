@@ -15,12 +15,15 @@
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use futures::executor::block_on;
 use futures::StreamExt;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::field_generator::VarcharProperty;
+use risingwave_common::test_prelude::StreamChunkTestExt;
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::*;
+use risingwave_expr::function::aggregate::{AggArgs, AggCall, AggKind};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::StateStore;
-use risingwave_stream::executor::aggregation::{AggArgs, AggCall};
 use risingwave_stream::executor::test_utils::agg_executor::new_boxed_hash_agg_executor;
 use risingwave_stream::executor::test_utils::*;
 use risingwave_stream::executor::{BoxedExecutor, PkIndices};
@@ -81,15 +84,12 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
 
     let group_key_indices = vec![0, 1];
 
-    let append_only = false;
-
     let agg_calls = vec![
          AggCall {
             kind: AggKind::Count,
             args: AggArgs::None,
             return_type: DataType::Int64,
             column_orders: vec![],
-            append_only,
             filter: None,
             distinct: false,
          },
@@ -98,7 +98,6 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
             args: AggArgs::None,
             return_type: DataType::Int64,
             column_orders: vec![],
-            append_only,
             filter: Some(build_from_pretty("(less_than:boolean $2:int8 10000:int8)").into()),
             distinct: false,
          },
@@ -107,7 +106,6 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
             args: AggArgs::None,
             return_type: DataType::Int64,
             column_orders: vec![],
-            append_only,
             filter: Some(build_from_pretty("(and:boolean (greater_than_or_equal:boolean $2:int8 10000:int8) (less_than:boolean $2:int8 100000:int8))").into()),
             distinct: false,
          },
@@ -116,7 +114,6 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
             args: AggArgs::None,
             return_type: DataType::Int64,
             column_orders: vec![],
-            append_only,
             filter: Some(build_from_pretty("(greater_than_or_equal:boolean $2:int8 100000:int8)").into()),
             distinct: false,
         },
@@ -124,29 +121,26 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
         // It does not work can't diagnose root cause yet.
         // AggCall {
         //     kind: AggKind::Min,
-        //     args: AggArgs::Unary(DataType::Int64, 2),
+        //     args: FuncArgs::Unary(DataType::Int64, 2),
         //     return_type: DataType::Int64,
         //     column_orders: vec![],
-        //     append_only,
         //     filter: None,
         //     distinct: false,
         // },
         // AggCall {
         //     kind: AggKind::Max,
-        //     args: AggArgs::Unary(DataType::Int64, 2),
+        //     args: FuncArgs::Unary(DataType::Int64, 2),
         //     return_type: DataType::Int64,
         //     column_orders: vec![],
-        //     append_only,
         //     filter: None,
         //     distinct: false,
         // },
         // Not supported, just use extra sum + count
         // AggCall {
         //     kind: AggKind::Avg,
-        //     args: AggArgs::Unary(DataType::Int64, 2),
+        //     args: FuncArgs::Unary(DataType::Int64, 2),
         //     return_type: DataType::Int64,
         //     column_orders: vec![],
-        //     append_only,
         //     filter: None,
         //     distinct: false,
         // },
@@ -156,7 +150,6 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
             args: AggArgs::Unary(DataType::Int64, 2),
             return_type: DataType::Int64,
             column_orders: vec![],
-            append_only,
             filter: None,
             distinct: false,
         },
@@ -166,7 +159,6 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
             args: AggArgs::Unary(DataType::Int64, 2),
             return_type: DataType::Int64,
             column_orders: vec![],
-            append_only,
             filter: None,
             distinct: false,
         },
@@ -175,7 +167,6 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
             args: AggArgs::Unary(DataType::Int64, 2),
             return_type: DataType::Int64,
             column_orders: vec![],
-            append_only,
             filter: None,
             distinct: false,
         },
@@ -185,7 +176,12 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
 
     let num_of_chunks = 1000;
     let chunk_size = 1024;
-    let chunks = gen_data(num_of_chunks, chunk_size, &input_data_types);
+    let chunks = StreamChunk::gen_stream_chunks(
+        num_of_chunks,
+        chunk_size,
+        &input_data_types,
+        &VarcharProperty::RandomFixedLength(None),
+    );
 
     // ---- Create MockSourceExecutor ----
     let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
@@ -204,6 +200,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
     block_on(new_boxed_hash_agg_executor(
         store,
         Box::new(source),
+        false,
         agg_calls,
         row_count_index,
         group_key_indices,

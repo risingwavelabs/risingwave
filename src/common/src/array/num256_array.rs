@@ -22,9 +22,9 @@ use risingwave_pb::data::PbArray;
 
 use crate::array::{Array, ArrayBuilder, ArrayImpl, ArrayResult};
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::collection::estimate_size::EstimateSize;
+use crate::estimate_size::EstimateSize;
 use crate::types::num256::{Int256, Int256Ref};
-use crate::types::Scalar;
+use crate::types::{DataType, Scalar};
 
 #[derive(Debug)]
 pub struct Int256ArrayBuilder {
@@ -93,20 +93,24 @@ macro_rules! impl_array_for_num256 {
                 self.bitmap = bitmap;
             }
 
-            fn create_builder(&self, capacity: usize) -> super::ArrayBuilderImpl {
-                let array_builder = Self::Builder::new(capacity);
-                super::ArrayBuilderImpl::$variant_name(array_builder)
+            fn data_type(&self) -> DataType {
+                DataType::$variant_name
             }
         }
 
         impl ArrayBuilder for $array_builder {
             type ArrayType = $array;
 
-            fn with_meta(capacity: usize, _meta: super::ArrayMeta) -> Self {
+            fn new(capacity: usize) -> Self {
                 Self {
                     bitmap: BitmapBuilder::with_capacity(capacity),
                     data: Vec::with_capacity(capacity),
                 }
+            }
+        
+            fn with_type(capacity: usize, ty: DataType) -> Self {
+                assert_eq!(ty, DataType::$variant_name);
+                Self::new(capacity)
             }
 
             fn append_n(
