@@ -86,7 +86,7 @@ pub struct ComputeNodeOpts {
     pub parallelism: usize,
 
     /// Decides whether the compute node can be used for streaming and serving.
-    #[clap(long, value_enum, default_value_t = default_role())]
+    #[clap(long, env = "RW_COMPUTE_NODE_ROLE", value_enum, default_value_t = default_role())]
     pub role: Role,
 
     #[clap(flatten)]
