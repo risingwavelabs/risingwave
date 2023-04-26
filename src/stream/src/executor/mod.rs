@@ -143,7 +143,7 @@ pub use top_n::{
 pub use union::UnionExecutor;
 pub use values::ValuesExecutor;
 pub use watermark_filter::WatermarkFilterExecutor;
-pub use wrapper::WrapperExecutor;
+pub use wrapper::{curr_epoch, epoch, prev_epoch, WrapperExecutor};
 
 use self::barrier_align::AlignedMessageStream;
 

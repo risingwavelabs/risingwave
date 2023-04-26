@@ -24,9 +24,12 @@ use super::{
 use crate::task::ActorId;
 
 mod epoch_check;
+mod epoch_provide;
 mod schema_check;
 mod trace;
 mod update_check;
+
+pub use epoch_provide::{curr_epoch, epoch, prev_epoch};
 
 struct ExtraInfo {
     /// Index of input to this operator.
@@ -85,14 +88,7 @@ impl WrapperExecutor {
             extra.metrics,
             stream,
         );
-        // Await tree
-        let stream =
-            trace::instrument_await_tree(info.clone(), extra.actor_id, extra.executor_id, stream);
 
-        // Schema check
-        let stream = schema_check::schema_check(info.clone(), stream);
-        // Epoch check
-        let stream = epoch_check::epoch_check(info.clone(), stream);
         // Update check
         let stream = update_check::update_check(info, stream);
 
@@ -102,7 +98,7 @@ impl WrapperExecutor {
     #[allow(clippy::let_and_return)]
     fn wrap_release(
         enable_executor_row_count: bool,
-        info: Arc<ExecutorInfo>,
+        _info: Arc<ExecutorInfo>,
         extra: ExtraInfo,
         stream: impl MessageStream + 'static,
     ) -> impl MessageStream + 'static {
@@ -114,14 +110,6 @@ impl WrapperExecutor {
             extra.metrics,
             stream,
         );
-        // Await tree
-        let stream =
-            trace::instrument_await_tree(info.clone(), extra.actor_id, extra.executor_id, stream);
-
-        // Schema check
-        let stream = schema_check::schema_check(info.clone(), stream);
-        // Epoch check
-        let stream = epoch_check::epoch_check(info, stream);
 
         stream
     }
@@ -132,6 +120,20 @@ impl WrapperExecutor {
         extra: ExtraInfo,
         stream: impl MessageStream + 'static,
     ) -> BoxedMessageStream {
+        // -- Shared wrappers --
+
+        // Await tree
+        let stream =
+            trace::instrument_await_tree(info.clone(), extra.actor_id, extra.executor_id, stream);
+
+        // Schema check
+        let stream = schema_check::schema_check(info.clone(), stream);
+        // Epoch check
+        let stream = epoch_check::epoch_check(info.clone(), stream);
+
+        // Epoch provide
+        let stream = epoch_provide::epoch_provide(stream);
+
         if cfg!(debug_assertions) {
             Self::wrap_debug(enable_executor_row_count, info, extra, stream).boxed()
         } else {
