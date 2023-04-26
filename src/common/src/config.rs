@@ -224,9 +224,12 @@ pub struct MetaConfig {
     /// compactor_task_limit = core_num * max_compactor_task_multiplier;
     #[serde(default = "default::meta::max_compactor_task_multiplier")]
     pub max_compactor_task_multiplier: u32,
-    
-    #[serde(default = "default::meta::split_check_size_limit")]
-    pub split_check_size_limit: u64,
+
+    #[serde(default = "default::meta::move_table_size_limit")]
+    pub move_table_size_limit: u64,
+
+    #[serde(default = "default::meta::split_group_size_limit")]
+    pub split_group_size_limit: u64,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -603,8 +606,12 @@ mod default {
             2
         }
 
-        pub fn split_check_size_limit() -> u64 {
-            4 * 1024 * 1024 * 1024 // 4GB
+        pub fn move_table_size_limit() -> u64 {
+            5 * 1024 * 1024 * 1024 // 5GB
+        }
+
+        pub fn split_group_size_limit() -> u64 {
+            20 * 1024 * 1024 * 1024 // 20GB
         }
     }
 

@@ -151,7 +151,7 @@ where
             self.env.opts.periodic_space_reclaim_compaction_interval_sec,
             self.env.opts.periodic_ttl_reclaim_compaction_interval_sec,
             self.env.opts.periodic_compaction_interval_sec,
-            self.env.opts.periodic_compaction_interval_sec,
+            self.env.opts.periodic_split_compact_group_interval_sec,
         );
         self.schedule_loop(
             sched_channel.clone(),
@@ -484,9 +484,8 @@ where
             .await;
         group_infos.sort_by_key(|group| group.group_size);
         group_infos.reverse();
-        let group_split_limit = self.env.opts.split_check_size_limit;
-        let group_size_limit = group_split_limit * 2;
-        let table_split_limit = group_split_limit / 4;
+        let group_size_limit = self.env.opts.split_group_size_limit;
+        let table_split_limit = self.env.opts.move_table_size_limit;
         let mut table_infos = vec![];
         for group in &group_infos {
             if group.table_statistic.len() == 1 || group.group_size < group_size_limit {
@@ -517,9 +516,10 @@ where
                 if group.group_id == mv_group_id
                     || group.group_id == default_group_id
                     || group.group_id == parent_group_id
-                    || group.group_size + table_size > group_split_limit
-                    // do not move state-table from a small group to a large group
-                    || group.group_size + table_size * 2 > parent_group_size
+                    // do not move state-table to a large group.
+                    || group.group_size + table_size > group_size_limit
+                    // do not move state-table from group A to group B if this operation would make group B becomes larger than A.
+                    || group.group_size + table_size > parent_group_size - table_size
                 {
                     continue;
                 }

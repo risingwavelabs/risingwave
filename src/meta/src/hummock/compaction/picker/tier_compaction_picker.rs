@@ -165,43 +165,6 @@ impl TierCompactionPicker {
             {
                 continue;
             }
-
-            let mut overlap = self.overlap_strategy.create_overlap_info();
-            for sst in &select_tables {
-                overlap.update(sst);
-            }
-
-            assert!(overlap
-                .check_multiple_overlap(&l0.sub_levels[idx].table_infos)
-                .is_empty());
-            let mut target_level_idx = idx;
-            while target_level_idx > 0 {
-                if l0.sub_levels[target_level_idx - 1].level_type
-                    != LevelType::Nonoverlapping as i32
-                {
-                    break;
-                }
-                let mut overlap = false;
-                for idx in 0..select_tables.len() {
-                    let ssts = &select_tables[idx..(idx + 1)];
-                    if !self
-                        .overlap_strategy
-                        .check_base_level_overlap(
-                            ssts,
-                            &l0.sub_levels[target_level_idx - 1].table_infos,
-                        )
-                        .is_empty()
-                    {
-                        overlap = true;
-                        break;
-                    }
-                }
-                if overlap {
-                    break;
-                }
-                target_level_idx -= 1;
-            }
-
             let input_levels = vec![
                 InputLevel {
                     level_idx: 0,
@@ -211,13 +174,13 @@ impl TierCompactionPicker {
                 InputLevel {
                     level_idx: 0,
                     level_type: LevelType::Nonoverlapping as i32,
-                    table_infos: vec![],
+                    table_infos: target_tables,
                 },
             ];
             return Some(CompactionInput {
                 input_levels,
                 target_level: 0,
-                target_sub_level_id: l0.sub_levels[target_level_idx].sub_level_id,
+                target_sub_level_id: level.sub_level_id,
             });
         }
         None
