@@ -30,3 +30,23 @@ fn jsonb_agg(state: Option<Value>, input: Option<impl Into<Value>>) -> Value {
     array.push(input.map_or(Value::Null, Into::into));
     Value::Array(array)
 }
+
+#[aggregate("jsonb_object_agg(varchar, boolean) -> jsonb", state = "Value")]
+#[aggregate("jsonb_object_agg(varchar, *int) -> jsonb", state = "Value")]
+#[aggregate("jsonb_object_agg(varchar, *float) -> jsonb", state = "Value")]
+#[aggregate("jsonb_object_agg(varchar, varchar) -> jsonb", state = "Value")]
+#[aggregate("jsonb_object_agg(varchar, jsonb) -> jsonb", state = "Value")]
+fn jsonb_object_agg(
+    state: Option<Value>,
+    key: Option<&str>,
+    value: Option<impl Into<Value>>,
+) -> Option<Value> {
+    let Some(key) = key else { return state }; // keys can not be null
+    let mut map = match state {
+        Some(Value::Object(o)) => o,
+        None => Default::default(),
+        _ => unreachable!("invalid jsonb state"),
+    };
+    map.insert(key.into(), value.map_or(Value::Null, Into::into));
+    Some(Value::Object(map))
+}

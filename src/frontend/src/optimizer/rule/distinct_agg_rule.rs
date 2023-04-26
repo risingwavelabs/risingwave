@@ -291,6 +291,7 @@ impl DistinctAggRule {
                     | AggKind::StringAgg
                     | AggKind::ArrayAgg
                     | AggKind::JsonbAgg
+                    | AggKind::JsonbObjectAgg
                     | AggKind::FirstValue
                     | AggKind::StddevPop
                     | AggKind::StddevSamp

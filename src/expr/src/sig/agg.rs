@@ -207,6 +207,20 @@ pub fn infer_return_type(agg_kind: AggKind, inputs: &[DataType]) -> Option<DataT
             | DataType::Varchar],
         ) => DataType::Jsonb,
         (AggKind::JsonbAgg, _) => return None,
+
+        // JsonbObjectAgg
+        (
+            AggKind::JsonbObjectAgg,
+            [DataType::Varchar, DataType::Jsonb
+            | DataType::Boolean
+            | DataType::Int16
+            | DataType::Int32
+            | DataType::Int64
+            | DataType::Float32
+            | DataType::Float64
+            | DataType::Varchar],
+        ) => DataType::Jsonb,
+        (AggKind::JsonbObjectAgg, _) => return None,
     };
 
     Some(return_type)

@@ -51,17 +51,15 @@ impl AggCall {
         let agg_kind = AggKind::from_protobuf(agg_call.get_type()?)?;
         let args = match &agg_call.get_args()[..] {
             [] => AggArgs::None,
-            [arg] if agg_kind != AggKind::StringAgg => {
-                AggArgs::Unary(DataType::from(arg.get_type()?), arg.get_index() as usize)
-            }
-            [agg_arg, extra_arg] if agg_kind == AggKind::StringAgg => AggArgs::Binary(
+            [arg] => AggArgs::Unary(DataType::from(arg.get_type()?), arg.get_index() as usize),
+            [agg_arg, extra_arg] => AggArgs::Binary(
                 [
                     DataType::from(agg_arg.get_type()?),
                     DataType::from(extra_arg.get_type()?),
                 ],
                 [agg_arg.get_index() as usize, extra_arg.get_index() as usize],
             ),
-            _ => bail!("Too many/few arguments for {:?}", agg_kind),
+            _ => bail!("Too many arguments for {:?}", agg_kind),
         };
         let column_orders = agg_call
             .get_order_by()
@@ -106,6 +104,7 @@ pub enum AggKind {
     ApproxCountDistinct,
     ArrayAgg,
     JsonbAgg,
+    JsonbObjectAgg,
     FirstValue,
     VarPop,
     VarSamp,
@@ -131,6 +130,7 @@ impl AggKind {
             PbType::ApproxCountDistinct => Ok(AggKind::ApproxCountDistinct),
             PbType::ArrayAgg => Ok(AggKind::ArrayAgg),
             PbType::JsonbAgg => Ok(AggKind::JsonbAgg),
+            PbType::JsonbObjectAgg => Ok(AggKind::JsonbObjectAgg),
             PbType::FirstValue => Ok(AggKind::FirstValue),
             PbType::StddevPop => Ok(AggKind::StddevPop),
             PbType::StddevSamp => Ok(AggKind::StddevSamp),
@@ -157,6 +157,7 @@ impl AggKind {
             Self::ApproxCountDistinct => PbType::ApproxCountDistinct,
             Self::ArrayAgg => PbType::ArrayAgg,
             Self::JsonbAgg => PbType::JsonbAgg,
+            Self::JsonbObjectAgg => PbType::JsonbObjectAgg,
             Self::FirstValue => PbType::FirstValue,
             Self::StddevPop => PbType::StddevPop,
             Self::StddevSamp => PbType::StddevSamp,
