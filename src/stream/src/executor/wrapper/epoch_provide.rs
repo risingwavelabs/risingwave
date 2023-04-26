@@ -19,8 +19,8 @@ use risingwave_common::util::epoch;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{Message, MessageStream};
 
-/// Streams wrapped by `epoch_provide` is able to retrieve the current epoch from the `xxx`
-/// function.
+/// Streams wrapped by `epoch_provide` is able to retrieve the current epoch pair from the functions
+/// from [`epoch::task_local`].
 #[try_stream(ok = Message, error = StreamExecutorError)]
 pub async fn epoch_provide(input: impl MessageStream) {
     pin_mut!(input);
@@ -32,6 +32,8 @@ pub async fn epoch_provide(input: impl MessageStream) {
     } else {
         input.try_next().await?
     } {
+        // The inner executor has yielded a new barrier message. In next polls, we will provide the
+        // updated epoch pair.
         if let Message::Barrier(b) = &message {
             epoch = Some(b.epoch);
         }
