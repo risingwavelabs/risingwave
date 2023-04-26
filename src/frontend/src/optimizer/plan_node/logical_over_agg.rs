@@ -343,7 +343,7 @@ impl fmt::Display for LogicalOverAgg {
 
 impl ColPrunable for LogicalOverAgg {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
-        let input_cnt = self.input().schema().fields().len();
+        let input_cnt = self.input().schema().len();
         let raw_required_cols = {
             let mut tmp = FixedBitSet::with_capacity(input_cnt);
             required_cols
@@ -376,10 +376,8 @@ impl ColPrunable for LogicalOverAgg {
             tmp.union_with(&window_function_required_cols);
             tmp.ones().collect_vec()
         };
-        let input_col_change = ColIndexMapping::with_remaining_columns(
-            &input_required_cols,
-            self.input().schema().len(),
-        );
+        let input_col_change =
+            ColIndexMapping::with_remaining_columns(&input_required_cols, input_cnt);
         let new_over_agg = {
             let input = self.input().prune_col(&input_required_cols, ctx);
             self.rewrite_with_input_window(input, &window_functions, input_col_change)
@@ -390,11 +388,7 @@ impl ColPrunable for LogicalOverAgg {
         } else {
             // some columns are not needed so we did a projection to remove the columns.
             let mut new_output_cols = input_required_cols.clone();
-            new_output_cols.extend(
-                required_cols
-                    .iter()
-                    .filter(|&&x| x >= self.input().schema().len()),
-            );
+            new_output_cols.extend(required_cols.iter().filter(|&&x| x >= input_cnt));
             let mapping =
                 &ColIndexMapping::with_remaining_columns(&new_output_cols, self.schema().len());
             let output_required_cols = required_cols
