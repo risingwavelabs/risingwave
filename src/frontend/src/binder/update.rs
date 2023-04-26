@@ -95,7 +95,7 @@ impl Binder {
         // TODO(yuhao): update a table with generated columns
         if table_catalog.has_generated_column() {
             return Err(ErrorCode::BindError(
-                "Update a table with generated column has not been implemented.".to_string(),
+                "Update a table with generated columns is not supported.".to_string(),
             )
             .into());
         }
