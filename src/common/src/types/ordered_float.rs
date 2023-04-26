@@ -997,10 +997,12 @@ mod impl_from {
     impl_from_lossless!(i16, f32);
     impl_from_approx!(i32, f32);
     impl_from_approx!(i64, f32);
+    impl_from_approx!(u64, f32);
 
     impl_from_lossless!(i16, f64);
     impl_from_lossless!(i32, f64);
     impl_from_approx!(i64, f64);
+    impl_from_approx!(u64, f64);
 
     impl TryFrom<OrderedFloat<f64>> for OrderedFloat<f32> {
         type Error = &'static str;
