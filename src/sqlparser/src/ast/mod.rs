@@ -990,7 +990,7 @@ pub enum Statement {
         table_name: ObjectName,
         columns: Vec<OrderByExpr>,
         include: Vec<Ident>,
-        distributed_by: Vec<Ident>,
+        distributed_by: Vec<Expr>,
         unique: bool,
         if_not_exists: bool,
     },
