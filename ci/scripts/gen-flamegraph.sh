@@ -217,6 +217,7 @@ main() {
   echo "--- Machine Debug Info before Setup"
   print_machine_debug_info
 
+  # Sets nexmark queries. For example: NEXMARK_QUERIES="nexmark-q17 nexmark-q1"
   echo "--- Getting nexmark queries to run"
   get_nexmark_queries_to_run
 
