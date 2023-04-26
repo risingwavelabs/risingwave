@@ -18,17 +18,19 @@ get_nexmark_queries_to_run() {
 
   # every PR is an issue, we can use github api to pull it.
   echo "PULL_REQUEST: $PULL_REQUEST"
-  curl -L \
+  export NEXMARK_QUERIES=$(curl -L \
     -H "Accept: application/vnd.github+json" \
     -H "Authorization: Bearer $GITHUB_TOKEN"\
     -H "X-GitHub-Api-Version: 2022-11-28" \
     https://api.github.com/repos/risingwavelabs/risingwave/issues/"$PULL_REQUEST"/labels \
-  | parse_labels
+  | parse_labels)
+  echo "Nexmark queries to run: $NEXMARK_QUERIES"
 }
 
 # Meant to be piped into.
 parse_labels() {
   jq ".[] | .name"  \
+  | grep "nexmark-q" \
   | tr "\n" " " \
   | xargs echo -n
 }
