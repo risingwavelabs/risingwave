@@ -74,7 +74,7 @@ impl StreamEowcOverWindow {
         self.window_functions()[0].order_by[0].column_index
     }
 
-    fn infer_eowc_table(&self) -> TableCatalog {
+    fn infer_state_table(&self) -> TableCatalog {
         // The EOWC over window state table has the same schema as the input.
 
         let in_fields = self.logical.input.schema().fields();
@@ -135,7 +135,7 @@ impl StreamNode for StreamEowcOverWindow {
             .map(|o| o.to_protobuf())
             .collect();
         let state_table = self
-            .infer_eowc_table()
+            .infer_state_table()
             .with_id(state.gen_table_id_wrapped())
             .to_internal_table_prost();
 
