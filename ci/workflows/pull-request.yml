@@ -331,7 +331,7 @@ steps:
 #    timeout_in_minutes: 20
 
   # Generates cpu flamegraph if label `cpu_flamegraph` is added to PR.
-  - label: "Generate CPU flamegraph"
+  - label: "PULL_REQUEST=$$BUILDKITE_PULL_REQUEST Generate CPU flamegraph"
     command: "ci/scripts/gen-flamegraph.sh"
 #    depends_on: "cpu-flamegraph-env-build"
 
@@ -348,8 +348,6 @@ steps:
           mount-buildkite-agent: true
           environment:
             - GITHUB_TOKEN
-    env:
-      PULL_REQUEST: BUILDKITE_PULL_REQUEST
     # TODO(kwannoel): Here are the areas that can be further optimized:
     # - Nexmark event generation: ~3min for 100mil records.
     # - Generate Flamegraph: ~15min (see https://github.com/koute/not-perf/issues/30 on optimizing)
