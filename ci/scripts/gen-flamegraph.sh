@@ -280,7 +280,10 @@ main() {
   echo "--- Machine Debug Info After Nexmark events generated"
   print_machine_debug_info
 
-  run
+  for QUERY in $NEXMARK_QUERIES
+  do
+    run "$QUERY"
+  done
 
   # TODO(kwannoel): `trap ERR` and upload these logs.
   #  echo "--- Uploading rw logs"
