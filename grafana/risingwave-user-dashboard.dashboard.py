@@ -190,6 +190,7 @@ def section_cpu(outer_panels):
 
 def section_memory(outer_panels):
     panels = outer_panels.sub_panel()
+    meta_miss_filter = "type='meta_miss'"
     return [
         outer_panels.row_collapsed(
             "Memory",
@@ -299,6 +300,16 @@ def section_memory(outer_panels):
                             "memory cache - {{table_id}} @ {{type}} @ {{job}} @ {{instance}}",
                         ),
                         panels.target(
+                            f"sum(rate({metric('state_store_sst_store_block_request_counts', meta_miss_filter)}[$__rate_interval])) by (job, type)",
+                            "total_meta_miss_count - {{job}} @ {{instance}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Storage Bloom Filer",
+                    "Storage bloom filter statistics",
+                    [
+                        panels.target(
                             f"sum(rate({metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (job,instance,table_id)",
                             "bloom filter total - {{table_id}} @ {{job}} @ {{instance}}",
                         ),
@@ -306,6 +317,12 @@ def section_memory(outer_panels):
                             f"sum(rate({metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id)",
                             "bloom filter false positive  - {{table_id}} @ {{job}} @ {{instance}}",
                         ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Storage File Cache",
+                    "Storage file cache statistics",
+                    [
                         panels.target(
                             f"sum(rate({metric('file_cache_latency_count')}[$__rate_interval])) by (op, instance)",
                             "file cache {{op}} @ {{instance}}",
