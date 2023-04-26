@@ -16,6 +16,8 @@ use risingwave_common::bail;
 use risingwave_expr_macro::aggregate;
 use serde_json::Value;
 
+use crate::{ExprError, Result};
+
 #[aggregate("jsonb_agg(boolean) -> jsonb", state = "Value")]
 #[aggregate("jsonb_agg(*int) -> jsonb", state = "Value")]
 #[aggregate("jsonb_agg(*float) -> jsonb", state = "Value")]
@@ -40,13 +42,13 @@ fn jsonb_object_agg(
     state: Option<Value>,
     key: Option<&str>,
     value: Option<impl Into<Value>>,
-) -> Option<Value> {
-    let Some(key) = key else { return state }; // keys can not be null
+) -> Result<Option<Value>> {
+    let key = key.ok_or(ExprError::FieldNameNull)?;
     let mut map = match state {
         Some(Value::Object(o)) => o,
         None => Default::default(),
         _ => unreachable!("invalid jsonb state"),
     };
     map.insert(key.into(), value.map_or(Value::Null, Into::into));
-    Some(Value::Object(map))
+    Ok(Some(Value::Object(map)))
 }
