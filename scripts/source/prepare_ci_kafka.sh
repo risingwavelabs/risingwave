@@ -63,6 +63,7 @@ for filename in $kafka_data_files; do
     # binary data, one message a file, filename/topic ends with "bin"
     if [[ "$topic" = *bin ]]; then
         ${KCAT_BIN} -P -b 127.0.0.1:29092 -K ^ -t "$topic" "$filename"
+        ${KCAT_BIN} -C -b 127.0.0.1:29092 -K ";" -t "$topic"
     else
         cat "$filename" | ${KCAT_BIN} -P -b 127.0.0.1:29092 -t "$topic"
     fi
