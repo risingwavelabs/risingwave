@@ -41,10 +41,16 @@ pub const NO_OVERRIDE: Option<NoOverride> = None;
 ///
 /// The current implementation will log warnings if there are unrecognized fields.
 #[derive(Derivative)]
-#[derivative(Clone, Debug, Default)]
+#[derivative(Clone, Default)]
 pub struct Unrecognized<T: 'static> {
     inner: BTreeMap<String, Value>,
     _marker: std::marker::PhantomData<&'static T>,
+}
+
+impl<T> std::fmt::Debug for Unrecognized<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.inner.fmt(f)
+    }
 }
 
 impl<T> Unrecognized<T> {
@@ -452,6 +458,10 @@ pub struct StreamingDeveloperConfig {
     /// in remote exchange.
     #[serde(default = "default::developer::stream_exchange_batched_permits")]
     pub exchange_batched_permits: usize,
+
+    /// The maximum number of concurrent barriers in an exchange channel.
+    #[serde(default = "default::developer::stream_exchange_concurrent_barriers")]
+    pub exchange_concurrent_barriers: usize,
 }
 
 /// The subsections `[batch.developer]`.
@@ -770,6 +780,10 @@ mod default {
 
         pub fn stream_exchange_batched_permits() -> usize {
             1024
+        }
+
+        pub fn stream_exchange_concurrent_barriers() -> usize {
+            2
         }
     }
 

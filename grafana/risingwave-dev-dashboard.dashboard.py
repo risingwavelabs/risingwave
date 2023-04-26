@@ -1228,7 +1228,7 @@ def section_streaming_errors(outer_panels):
     ]
 
 
-def section_batch_exchange(outer_panels):
+def section_batch(outer_panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -1250,6 +1250,16 @@ def section_batch_exchange(outer_panels):
                     [
                         panels.target(
                             f"{metric('batch_task_num')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_row(
+                    "Batch Mem Usage",
+                    "All memory usage of batch executors in bytes",
+                    [
+                        panels.target(
+                            f"{metric('batch_total_mem')}",
                             "",
                         ),
                     ],
@@ -1387,16 +1397,26 @@ def section_hummock(panels):
                     "{{table_id}} @ {{type}} - {{job}} @ {{instance}}",
                 ),
                 panels.target(
+                    f"sum(rate({metric('state_store_sst_store_block_request_counts', meta_miss_filter)}[$__rate_interval])) by (job, instance, type)",
+                    "total_meta_miss_count - {{job}} @ {{instance}}",
+                ),
+                panels.target(
+                    f"sum(rate({metric('sstable_preload_io_count')}[$__rate_interval])) ",
+                    "preload iops",
+                ),
+            ],
+        ),
+        panels.timeseries_ops(
+            "File Cache Ops",
+            "",
+            [
+                panels.target(
                     f"sum(rate({metric('file_cache_latency_count')}[$__rate_interval])) by (op, instance)",
                     "file cache {{op}} @ {{instance}}",
                 ),
                 panels.target(
                     f"sum(rate({metric('file_cache_miss')}[$__rate_interval])) by (instance)",
                     "file cache miss @ {{instance}}",
-                ),
-                panels.target(
-                    f"sum(rate({metric('sstable_preload_io_count')}[$__rate_interval])) ",
-                    "preload iops",
                 ),
             ],
         ),
@@ -2429,7 +2449,7 @@ dashboard = Dashboard(
         *section_streaming_actors(panels),
         *section_streaming_exchange(panels),
         *section_streaming_errors(panels),
-        *section_batch_exchange(panels),
+        *section_batch(panels),
         *section_hummock(panels),
         *section_compaction(panels),
         *section_object_storage(panels),

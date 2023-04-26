@@ -6,6 +6,9 @@ max_heartbeat_interval_secs = 600
 [streaming]
 in_flight_barrier_nums = 10
 
+[streaming.developer]
+stream_exchange_concurrent_barriers = 10
+
 [storage]
 imm_merge_threshold = 2
 

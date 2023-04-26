@@ -68,12 +68,13 @@ select '2.5'::jsonb::double precision;
 ----
 2.5
 
-# This would fail after #5576 fixed
-# Because PG rounds differently for `decimal -> int` and `float8 -> int`
+# We represent numbers in jsonb as float8, while PostgreSQL uses decimal.
+# PG rounds differently for `decimal -> int` and `float8 -> int`
+# So this is different from PostgreSQL.
 query II
 select '2.5'::jsonb::smallint, '3.5'::jsonb::smallint;
 ----
-2 3
+2 4
 
 statement error cannot cast jsonb null to type boolean
 select 'null'::jsonb::bool;
