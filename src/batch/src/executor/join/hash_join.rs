@@ -37,7 +37,7 @@ use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
 use crate::risingwave_common::hash::NullBitmap;
-use crate::task::BatchTaskContext;
+use crate::task::{BatchTaskContext, StopFlag};
 
 /// Hash Join Executor
 ///
@@ -72,6 +72,8 @@ pub struct HashJoinExecutor<K> {
     null_matched: Vec<bool>,
     identity: String,
     chunk_size: usize,
+
+    stop_flag: Arc<StopFlag>,
     _phantom: PhantomData<K>,
 }
 
@@ -222,6 +224,9 @@ impl<K: HashKey> HashJoinExecutor<K> {
         let mut build_row_count = 0;
         #[for_await]
         for build_chunk in self.build_side_source.execute() {
+            if self.stop_flag.check_stop() {
+                return;
+            }
             let build_chunk = build_chunk?;
             if build_chunk.cardinality() > 0 {
                 build_row_count += build_chunk.cardinality();
@@ -237,9 +242,15 @@ impl<K: HashKey> HashJoinExecutor<K> {
 
         // Build hash map
         for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {
+            if self.stop_flag.check_stop() {
+                return;
+            }
             let build_keys = K::build(&self.build_key_idxs, build_chunk)?;
 
             for (build_row_id, build_key) in build_keys.into_iter().enumerate() {
+                if self.stop_flag.check_stop() {
+                    return;
+                }
                 // Only insert key to hash map if it is consistent with the null safe restriction.
                 if build_key.null_bitmap().is_subset(&null_matched) {
                     let row_id = RowId::new(build_chunk_id, build_row_id);
@@ -286,6 +297,9 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
             #[for_await]
             for chunk in stream {
+                if self.stop_flag.check_stop() {
+                    return;
+                }
                 for output_chunk in
                     output_chunk_builder.append_chunk(chunk?.reorder_columns(&self.output_indices))
                 {
@@ -308,6 +322,9 @@ impl<K: HashKey> HashJoinExecutor<K> {
             };
             #[for_await]
             for chunk in stream {
+                if self.stop_flag.check_stop() {
+                    return;
+                }
                 yield chunk?.reorder_columns(&self.output_indices)
             }
         }
@@ -1690,6 +1707,7 @@ impl BoxedExecutorBuilder for HashJoinExecutor<()> {
             identity: context.plan_node().get_identity().clone(),
             right_key_types,
             chunk_size: context.context.get_config().developer.chunk_size,
+            stop_flag: context.context.get_stop_flag(),
         }
         .dispatch())
     }
@@ -1707,6 +1725,7 @@ struct HashJoinExecutorArgs {
     identity: String,
     right_key_types: Vec<DataType>,
     chunk_size: usize,
+    stop_flag: Arc<StopFlag>,
 }
 
 impl HashKeyDispatcher for HashJoinExecutorArgs {
@@ -1724,6 +1743,7 @@ impl HashKeyDispatcher for HashJoinExecutorArgs {
             self.cond,
             self.identity,
             self.chunk_size,
+            self.stop_flag,
         ))
     }
 
@@ -1745,6 +1765,7 @@ impl<K> HashJoinExecutor<K> {
         cond: Option<BoxedExpression>,
         identity: String,
         chunk_size: usize,
+        stop_flag: Arc<StopFlag>,
     ) -> Self {
         assert_eq!(probe_key_idxs.len(), build_key_idxs.len());
         assert_eq!(probe_key_idxs.len(), null_matched.len());
@@ -1778,6 +1799,7 @@ impl<K> HashJoinExecutor<K> {
             cond,
             identity,
             chunk_size,
+            stop_flag,
             _phantom: PhantomData,
         }
     }
@@ -1785,6 +1807,7 @@ impl<K> HashJoinExecutor<K> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
 
     use futures::StreamExt;
     use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
@@ -1801,6 +1824,7 @@ mod tests {
     };
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::BoxedExecutor;
+    use crate::task::StopFlag;
 
     const CHUNK_SIZE: usize = 1024;
 
@@ -2016,6 +2040,7 @@ mod tests {
                 cond,
                 "HashJoinExecutor".to_string(),
                 chunk_size,
+                Arc::new(StopFlag::default()),
             ))
         }
 
