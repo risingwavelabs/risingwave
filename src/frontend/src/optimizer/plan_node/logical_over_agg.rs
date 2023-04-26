@@ -163,7 +163,7 @@ impl LogicalOverAgg {
                     Frame::Rows(FrameBound::CurrentRow, FrameBound::Following(offset))
                 }
             }
-            _ => window_function.frame.unwrap_or_else(|| {
+            _ => window_function.frame.unwrap_or({
                 if order_by.is_empty() {
                     Frame::Rows(
                         FrameBound::UnboundedPreceding,

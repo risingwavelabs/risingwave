@@ -260,7 +260,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 state.append(
                     key.clone(),
                     (&row)
-                        .project(&call.args.val_indices())
+                        .project(call.args.val_indices())
                         .into_owned_row()
                         .into_inner()
                         .into(),

@@ -165,8 +165,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for OverWindow<PlanRef> {
         let mapping =
             ColIndexMapping::identity_or_none(self.input.schema().len(), self.output_len());
         let fd_set = self.input.functional_dependency().clone();
-        let fd_set = mapping.rewrite_functional_dependency_set(fd_set);
-        fd_set
+        mapping.rewrite_functional_dependency_set(fd_set)
     }
 
     fn schema(&self) -> Schema {
