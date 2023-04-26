@@ -235,6 +235,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
             // Flush distinct dedup state.
             vars.distinct_dedup.flush(&mut this.distinct_dedup_tables)?;
+
             // Commit all state tables except for result table.
             futures::future::try_join_all(
                 this.all_state_tables_except_result_mut()
