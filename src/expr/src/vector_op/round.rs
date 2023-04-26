@@ -94,8 +94,10 @@ mod tests {
         assert_eq!(floor_f64(F64::from(-42.8)), F64::from(-43.0));
 
         assert_eq!(round_f64(F64::from(42.4)), F64::from(42.0));
-        assert_eq!(round_f64(F64::from(42.5)), F64::from(43.0));
-        assert_eq!(round_f64(F64::from(-6.5)), F64::from(-7.0));
+        assert_eq!(round_f64(F64::from(42.5)), F64::from(42.0));
+        assert_eq!(round_f64(F64::from(-6.5)), F64::from(-6.0));
+        assert_eq!(round_f64(F64::from(43.5)), F64::from(44.0));
+        assert_eq!(round_f64(F64::from(-7.5)), F64::from(-8.0));
     }
 
     #[test]
