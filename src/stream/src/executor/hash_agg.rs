@@ -518,6 +518,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // Flush distinct dedup state.
         vars.distinct_dedup.flush(&mut this.distinct_dedup_tables)?;
+        vars.distinct_dedup.update_epoch(epoch.curr);
 
         // Evict cache to target capacity.
         vars.agg_group_cache.evict();
