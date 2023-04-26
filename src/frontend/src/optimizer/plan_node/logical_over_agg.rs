@@ -308,6 +308,19 @@ impl PlanTreeNodeUnary for LogicalOverAgg {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(self.window_functions.clone(), input)
     }
+
+    #[must_use]
+    fn rewrite_with_input(
+        &self,
+        input: PlanRef,
+        input_col_change: ColIndexMapping,
+    ) -> (Self, ColIndexMapping) {
+        let over_agg =
+            self.rewrite_with_input_window(input, &self.window_functions, input_col_change);
+        // change the input columns index will not change the output column index
+        let out_col_change = ColIndexMapping::identity(over_agg.schema().len());
+        (over_agg, out_col_change)
+    }
 }
 
 impl_plan_tree_node_for_unary! { LogicalOverAgg }
