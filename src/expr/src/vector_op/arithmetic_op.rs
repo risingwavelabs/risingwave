@@ -16,8 +16,10 @@ use std::convert::TryInto;
 use std::fmt::Debug;
 
 use chrono::{Duration, NaiveDateTime};
-use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Float, Signed, Zero};
-use risingwave_common::types::{CheckedAdd, Date, Decimal, Interval, Time, Timestamp, F64};
+use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed, Zero};
+use risingwave_common::types::{
+    CheckedAdd, Date, Decimal, FloatExt, Interval, Time, Timestamp, F64,
+};
 use risingwave_expr_macro::function;
 use rust_decimal::MathematicalOps;
 
@@ -407,6 +409,7 @@ pub fn sqrt_decimal(expr: Decimal) -> Result<Decimal> {
 mod tests {
     use std::str::FromStr;
 
+    use num_traits::Float;
     use risingwave_common::types::num256::{Int256, Int256Ref};
     use risingwave_common::types::test_utils::IntervalTestExt;
     use risingwave_common::types::{Date, Decimal, Interval, Scalar, Timestamp, F32, F64};
