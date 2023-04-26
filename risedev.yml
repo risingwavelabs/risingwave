@@ -271,6 +271,30 @@ profile:
       - use: compute-node
       - use: frontend
 
+  3cn:
+    steps:
+      - use: minio
+      - use: etcd
+        unsafe-no-fsync: true
+        port: 2388
+        peer-port: 2389
+        exporter-port: 2379
+      - use: meta-node
+        port: 5690
+        dashboard-port: 5691
+        exporter-port: 1250
+      - use: compactor
+      - use: compute-node
+        port: 5687
+        exporter-port: 1222
+      - use: compute-node
+        port: 5688
+        exporter-port: 1223
+      - use: compute-node
+        port: 5689
+        exporter-port: 1224
+      - use: frontend
+
   java-binding-demo:
     steps:
       - use: minio
