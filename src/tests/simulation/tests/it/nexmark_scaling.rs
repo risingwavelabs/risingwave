@@ -159,6 +159,7 @@ macro_rules! test {
     };
 }
 
+// TODO: uncommet all of these tests again
 // q0, q1, q2: too trivial
 test!(q3);
 // test!(q4);
@@ -168,11 +169,10 @@ test!(q3);
 // test!(q8);
 // test!(q9);
 // // q10+: duplicated or unsupported
-// 
+//
 // // Self made queries.
 // test!(q101);
 // test!(q102);
 // test!(q103);
 // test!(q104);
 // test!(q105);
-// 

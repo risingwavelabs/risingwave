@@ -185,6 +185,9 @@ message ActivateWorkerNodeResponse {
   common.Status status = 1;
 }
 
+// TODO: Rename this Retire, Deactivate, Drop, Discontinue, forget 
+// Not drain, since we are not only draining, but also unscheduling 
+// This is not deleting the node, it just removes fragments from it and makes it unschedulable 
 message DeleteWorkerNodeRequest {
   common.HostAddress host = 1;
 }
