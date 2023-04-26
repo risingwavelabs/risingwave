@@ -160,7 +160,7 @@ impl AggArgs {
         let args = match args {
             [] => Self::None,
             [arg] => Self::Unary(DataType::from(arg.get_type()?), arg.get_index() as usize),
-            [arg1, arg2] => AggArgs::Binary(
+            [arg1, arg2] => Self::Binary(
                 [
                     DataType::from(arg1.get_type()?),
                     DataType::from(arg2.get_type()?),
