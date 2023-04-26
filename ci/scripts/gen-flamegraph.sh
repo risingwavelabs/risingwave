@@ -13,11 +13,6 @@ pushd ..
 
 # Buildkite does not support labels at the moment. Have to get via github api.
 get_nexmark_queries_to_run() {
-  # TODO: Move to install step
-  wget https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64
-  chmod +x jq-linux64
-  mv jq-linux64 /usr/local/bin/jq
-
   # every PR is an issue, we can use github api to pull it.
   echo "PULL_REQUEST: $PULL_REQUEST"
   export NEXMARK_QUERIES=$(curl -L \
@@ -56,6 +51,12 @@ print_machine_debug_info() {
 
 # NOTE(kwannoel) we can mirror the artifacts here in an s3 bucket if there are errors with access.
 install_all() {
+  # jq used to parse nexmark labels.
+  echo ">>> Installing jq"
+  wget https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64
+  chmod +x jq-linux64
+  mv jq-linux64 /usr/local/bin/jq
+
   echo ">>> Installing PromQL cli client"
   # Download promql
   wget https://github.com/nalbury/promql-cli/releases/download/v0.3.0/promql-v0.3.0-linux-amd64.tar.gz
@@ -270,12 +271,12 @@ main() {
   echo "--- Machine Debug Info before Setup"
   print_machine_debug_info
 
+  echo "--- Running setup"
+  setup
+
   # Sets nexmark queries. For example: NEXMARK_QUERIES="nexmark-q17 nexmark-q1"
   echo "--- Getting nexmark queries to run"
   get_nexmark_queries_to_run
-
-  echo "--- Running setup"
-  setup
 
   echo "--- Machine Debug Info after Setup"
   print_machine_debug_info
