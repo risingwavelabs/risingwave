@@ -272,6 +272,32 @@ impl LogicalOverAgg {
             frame,
         })
     }
+
+    #[must_use]
+    fn rewrite_with_input_window(
+        &self,
+        input: PlanRef,
+        window_functions: &[PlanWindowFunction],
+        input_col_change: ColIndexMapping,
+    ) -> Self {
+        let window_functions = window_functions
+            .iter()
+            .cloned()
+            .map(|mut window_function| {
+                window_function.args.iter_mut().for_each(|i| {
+                    *i = InputRef::new(input_col_change.map(i.index()), i.return_type())
+                });
+                window_function.order_by.iter_mut().for_each(|o| {
+                    o.column_index = input_col_change.map(o.column_index);
+                });
+                window_function.partition_by.iter_mut().for_each(|i| {
+                    *i = InputRef::new(input_col_change.map(i.index()), i.return_type())
+                });
+                window_function
+            })
+            .collect();
+        LogicalOverAgg::new(window_functions, input)
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalOverAgg {
@@ -304,13 +330,71 @@ impl fmt::Display for LogicalOverAgg {
 
 impl ColPrunable for LogicalOverAgg {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
-        let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
-        let new_input = {
-            let input = self.input();
-            let required = (0..input.schema().len()).collect_vec(); // TODO(rc): real pruning
-            input.prune_col(&required, ctx)
+        let input_cnt = self.input().schema().fields().len();
+        let raw_required_cols = {
+            let mut tmp = FixedBitSet::with_capacity(input_cnt);
+            required_cols
+                .iter()
+                .filter(|&&index| index < input_cnt)
+                .for_each(|&index| tmp.set(index, true));
+            tmp
         };
-        LogicalProject::with_mapping(self.clone_with_input(new_input).into(), mapping).into()
+
+        let (window_function_required_cols, window_functions) = {
+            let mut tmp = FixedBitSet::with_capacity(input_cnt);
+            let new_window_functions = required_cols
+                .iter()
+                .filter(|&&index| index >= input_cnt)
+                .map(|&index| {
+                    let index = index - input_cnt;
+                    let window_function = self.window_functions[index].clone();
+                    tmp.extend(window_function.args.iter().map(|x| x.index()));
+                    tmp.extend(window_function.partition_by.iter().map(|x| x.index()));
+                    tmp.extend(window_function.order_by.iter().map(|x| x.column_index));
+                    window_function
+                })
+                .collect_vec();
+            (tmp, new_window_functions)
+        };
+
+        let input_required_cols = {
+            let mut tmp = FixedBitSet::with_capacity(input_cnt);
+            tmp.union_with(&raw_required_cols);
+            tmp.union_with(&window_function_required_cols);
+            tmp.ones().collect_vec()
+        };
+        let input_col_change = ColIndexMapping::with_remaining_columns(
+            &input_required_cols,
+            self.input().schema().len(),
+        );
+        let new_over_agg = {
+            let input = self.input().prune_col(&input_required_cols, ctx);
+            self.rewrite_with_input_window(input, &window_functions, input_col_change)
+        };
+        if new_over_agg.schema().len() == required_cols.len() {
+            // current schema perfectly fit the required columns
+            new_over_agg.into()
+        } else {
+            // some columns are not needed so we did a projection to remove the columns.
+            let mut new_output_cols = input_required_cols.clone();
+            new_output_cols.extend(
+                required_cols
+                    .iter()
+                    .filter(|&&x| x >= self.input().schema().len()),
+            );
+            let mapping =
+                &ColIndexMapping::with_remaining_columns(&new_output_cols, self.schema().len());
+            let output_required_cols = required_cols
+                .iter()
+                .map(|&idx| mapping.map(idx))
+                .collect_vec();
+            let src_size = new_over_agg.schema().len();
+            LogicalProject::with_mapping(
+                new_over_agg.into(),
+                ColIndexMapping::with_remaining_columns(&output_required_cols, src_size),
+            )
+            .into()
+        }
     }
 }
 
