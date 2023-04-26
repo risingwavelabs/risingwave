@@ -11,6 +11,10 @@ pushd ..
 
 # Buildkite does not support labels at the moment. Have to get via github api.
 get_nexmark_queries_to_run() {
+  # TODO: Move to install step
+  wget https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64
+  mv jq-linux64 /usr/local/bin/jq
+
   echo "PULL_REQUEST: $PULL_REQUEST"
   curl -L \
     -H "Accept: application/vnd.github+json" \
