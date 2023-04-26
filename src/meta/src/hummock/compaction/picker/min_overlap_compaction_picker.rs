@@ -316,10 +316,7 @@ impl NonOverlapSubLevelPicker {
                 break;
             }
 
-            scores.push((
-                (select_level_count, all_file_size, all_file_count),
-                level_select_files,
-            ));
+            scores.push(((all_file_size, all_file_count), level_select_files));
         }
         if scores.is_empty() {
             return vec![];
@@ -327,24 +324,19 @@ impl NonOverlapSubLevelPicker {
 
         // The logic of sorting depends on the interval we expect to select.
         // 1. contain as many levels as possible
-        // 2. fewer write amps, in other words more independent intervals to ensure parallelism
-        // 3. fewer files in the bottom sub level, containing as many smaller intervals as possible.
+        // 2. fewer files in the bottom sub level, containing as many smaller intervals as possible.
         scores
             .into_iter()
             .sorted_by(
-                |((select_level_count, all_file_size, select_file_count), _x),
-                 ((select_level_count2, all_file_size2, select_file_count2), _y)| {
-                    select_level_count2
-                        .cmp(select_level_count)
+                |((all_file_size, select_file_count), x),
+                 ((all_file_size2, select_file_count2), y)| {
+                    y.len()
+                        .cmp(&x.len())
                         .then_with(|| select_file_count.cmp(select_file_count2))
                         .then_with(|| all_file_size.cmp(all_file_size2))
                 },
             )
-            .map(
-                |((_select_level_count, all_file_size, select_file_count), x)| {
-                    (all_file_size, select_file_count, x)
-                },
-            )
+            .map(|((all_file_size, select_file_count), x)| (all_file_size, select_file_count, x))
             .collect_vec()
     }
 }

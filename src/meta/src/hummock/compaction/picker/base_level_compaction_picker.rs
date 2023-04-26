@@ -183,8 +183,7 @@ impl LevelCompactionPicker {
                     continue;
                 }
 
-                let to_base_write_amp = target_level_size * 100 / total_select_size;
-                if to_base_write_amp > 100 * self.config.max_bytes_for_level_multiplier {
+                if total_select_size < target_level_size {
                     skip_by_write_amp = true;
                     continue;
                 }
@@ -441,7 +440,6 @@ pub mod tests {
         assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 5);
         assert_eq!(ret.input_levels[2].table_infos.len(), 2);
     }
-
     #[test]
     fn test_selecting_key_range_overlap() {
         // When picking L0->L1, all L1 files overlapped with selecting_key_range should be picked.
@@ -475,7 +473,7 @@ pub mod tests {
             member_table_ids: vec![1],
             ..Default::default()
         };
-        push_tables_level0_nonoverlapping(&mut levels, vec![generate_table(1, 1, 50, 60, 2)]);
+        push_tables_level0_nonoverlapping(&mut levels, vec![generate_table(1, 1, 50, 140, 2)]);
         push_tables_level0_nonoverlapping(
             &mut levels,
             vec![
