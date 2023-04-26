@@ -215,10 +215,14 @@ setup() {
 
 # Run benchmark for a query
 run() {
+  echo "--- Running benchmark for $QUERY"
   echo "--- Setting variables"
   QUERY_LABEL="$1"
-  QUERY_FILE_NAME="$(echo $QUERY_LABEL | sed 's/nexmark\-\(.*\)/\1/')"
+  QUERY_FILE_NAME="$(echo $QUERY_LABEL | sed 's/nexmark\-\(.*\)/\1.sql/')"
   QUERY_PATH="$QUERY_DIR/$QUERY_FILE_NAME"
+  echo "QUERY_LABEL: $QUERY_LABEL"
+  echo "QUERY_FILE_NAME: $QUERY_QUERY_FILE_NAME"
+  echo "QUERY_PATH: $QUERY_PATH"
 
   echo "--- Starting up RW"
   pushd risingwave
