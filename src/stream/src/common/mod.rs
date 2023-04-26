@@ -20,3 +20,4 @@ pub mod cache;
 mod column_mapping;
 pub mod log_store;
 pub mod table;
+pub mod metrics;

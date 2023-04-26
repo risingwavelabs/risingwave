@@ -27,7 +27,8 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
 use super::AggCall;
-use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::cache::{new_unbounded, ManagedLruCache, new_unbounded_with_metrics};
+use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::executor::StreamExecutorResult;
 
@@ -40,9 +41,9 @@ struct ColumnDeduplicater<S: StateStore> {
 }
 
 impl<S: StateStore> ColumnDeduplicater<S> {
-    fn new(watermark_epoch: &Arc<AtomicU64>) -> Self {
+    fn new(watermark_epoch: &Arc<AtomicU64>, metrics_info: MetricsInfo) -> Self {
         Self {
-            cache: new_unbounded(watermark_epoch.clone()),
+            cache: new_unbounded_with_metrics(watermark_epoch.clone(), metrics_info),
             _phantom: PhantomData,
         }
     }
@@ -194,7 +195,7 @@ pub struct DistinctDeduplicater<S: StateStore> {
 }
 
 impl<S: StateStore> DistinctDeduplicater<S> {
-    pub fn new(agg_calls: &[AggCall], watermark_epoch: &Arc<AtomicU64>) -> Self {
+    pub fn new(agg_calls: &[AggCall], watermark_epoch: &Arc<AtomicU64>, metrics_info: MetricsInfo) -> Self {
         let deduplicaters: HashMap<_, _> = agg_calls
             .iter()
             .enumerate()
@@ -203,7 +204,7 @@ impl<S: StateStore> DistinctDeduplicater<S> {
             .into_iter()
             .map(|(distinct_col, indices_and_calls)| {
                 let call_indices: Box<[_]> = indices_and_calls.into_iter().map(|v| v.0).collect();
-                let deduplicater = ColumnDeduplicater::new(watermark_epoch);
+                let deduplicater = ColumnDeduplicater::new(watermark_epoch, metrics_info.clone());
                 (distinct_col, (call_indices, deduplicater))
             })
             .collect();
@@ -380,7 +381,7 @@ mod tests {
             .values_mut()
             .for_each(|table| table.init_epoch(epoch));
 
-        let mut deduplicater = DistinctDeduplicater::new(&agg_calls, &Arc::new(AtomicU64::new(0)));
+        let mut deduplicater = DistinctDeduplicater::new(&agg_calls, &Arc::new(AtomicU64::new(0)), MetricsInfo::for_test());
 
         // --- chunk 1 ---
 
@@ -464,7 +465,7 @@ mod tests {
         }
 
         // test recovery
-        let mut deduplicater = DistinctDeduplicater::new(&agg_calls, &Arc::new(AtomicU64::new(0)));
+        let mut deduplicater = DistinctDeduplicater::new(&agg_calls, &Arc::new(AtomicU64::new(0)), MetricsInfo::for_test());
 
         // --- chunk 3 ---
 
@@ -551,7 +552,7 @@ mod tests {
             .values_mut()
             .for_each(|table| table.init_epoch(epoch));
 
-        let mut deduplicater = DistinctDeduplicater::new(&agg_calls, &Arc::new(AtomicU64::new(0)));
+        let mut deduplicater = DistinctDeduplicater::new(&agg_calls, &Arc::new(AtomicU64::new(0)), MetricsInfo::for_test());
 
         let chunk = StreamChunk::from_pretty(
             " I   I     I

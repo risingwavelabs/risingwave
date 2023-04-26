@@ -16,7 +16,8 @@ use std::hash::Hash;
 
 use risingwave_common::estimate_size::EstimateSize;
 
-use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::cache::{new_unbounded, ManagedLruCache, new_unbounded_with_metrics};
+use crate::common::metrics::MetricsInfo;
 use crate::task::AtomicU64Ref;
 
 /// [`DedupCache`] is used for key deduplication. Currently, the cache behaves like a set that only
@@ -26,8 +27,8 @@ pub struct DedupCache<K: Hash + Eq + EstimateSize> {
 }
 
 impl<K: Hash + Eq + EstimateSize> DedupCache<K> {
-    pub fn new(watermark_epoch: AtomicU64Ref) -> Self {
-        let cache = new_unbounded(watermark_epoch);
+    pub fn new(watermark_epoch: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
+        let cache = new_unbounded_with_metrics(watermark_epoch, metrics_info);
         Self { inner: cache }
     }
 
@@ -63,11 +64,13 @@ mod tests {
     use std::sync::atomic::AtomicU64;
     use std::sync::Arc;
 
+    use crate::common::metrics::MetricsInfo;
+
     use super::DedupCache;
 
     #[test]
     fn test_dedup_cache() {
-        let mut cache = DedupCache::new(Arc::new(AtomicU64::new(10000)));
+        let mut cache = DedupCache::new(Arc::new(AtomicU64::new(10000)), MetricsInfo::for_test());
 
         cache.insert(10);
         assert!(cache.contains(&10));

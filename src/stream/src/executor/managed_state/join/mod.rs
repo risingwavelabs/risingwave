@@ -23,6 +23,7 @@ use futures::StreamExt;
 use futures_async_stream::for_await;
 pub(super) use join_entry_state::JoinEntryState;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
+use prometheus::core::Metric;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
@@ -36,6 +37,7 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use crate::cache::{new_with_hasher_in, ManagedLruCache};
+use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
@@ -312,7 +314,9 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             table: degree_table,
         };
 
-        let cache = new_with_hasher_in(watermark_epoch, PrecomputedBuildHasher, alloc);
+        let metrics_info = MetricsInfo::new(metrics.clone(), join_table_id, actor_id);
+
+        let cache = new_with_hasher_in(watermark_epoch,  metrics_info ,PrecomputedBuildHasher, alloc);
 
         Self {
             inner: cache,

@@ -23,6 +23,8 @@ use lru::DefaultHasher;
 use risingwave_common::estimate_size::collections::lru::EstimatedLruCache;
 use risingwave_common::estimate_size::EstimateSize;
 
+use crate::common::metrics::MetricsInfo;
+
 /// The managed cache is a lru cache that bounds the memory usage by epoch.
 /// Should be used with `GlobalMemoryManager`.
 pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Global> {
@@ -30,6 +32,7 @@ pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Globa
     /// The entry with epoch less than water should be evicted.
     /// Should only be updated by the `GlobalMemoryManager`.
     watermark_epoch: Arc<AtomicU64>,
+    metrics_info: Option<MetricsInfo>,
 }
 
 impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Allocator>
@@ -69,6 +72,18 @@ pub fn new_unbounded<K: Hash + Eq + EstimateSize, V: EstimateSize>(
     ManagedLruCache {
         inner: EstimatedLruCache::unbounded(),
         watermark_epoch,
+        metrics_info: None,
+    }
+}
+
+pub fn new_unbounded_with_metrics<K: Hash + Eq + EstimateSize, V: EstimateSize>(
+    watermark_epoch: Arc<AtomicU64>,
+    metrics_info: MetricsInfo,
+) -> ManagedLruCache<K, V> {
+    ManagedLruCache {
+        inner: EstimatedLruCache::unbounded(),
+        watermark_epoch,
+        metrics_info: Some(metrics_info),
     }
 }
 
@@ -79,21 +94,25 @@ pub fn new_with_hasher_in<
     A: Clone + Allocator,
 >(
     watermark_epoch: Arc<AtomicU64>,
+    metrics_info: MetricsInfo,
     hasher: S,
     alloc: A,
 ) -> ManagedLruCache<K, V, S, A> {
     ManagedLruCache {
         inner: EstimatedLruCache::unbounded_with_hasher_in(hasher, alloc),
         watermark_epoch,
+        metrics_info: Some(metrics_info),
     }
 }
 
 pub fn new_with_hasher<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher>(
     watermark_epoch: Arc<AtomicU64>,
+    metrics_info: MetricsInfo,
     hasher: S,
 ) -> ManagedLruCache<K, V, S> {
     ManagedLruCache {
         inner: EstimatedLruCache::unbounded_with_hasher(hasher),
         watermark_epoch,
+        metrics_info: Some(metrics_info),
     }
 }

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -22,8 +24,10 @@ use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_storage::StateStore;
 
 use super::cache::DedupCache;
+use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorError;
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message,
     PkIndices, PkIndicesRef, StreamExecutorResult,
@@ -51,12 +55,15 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
         executor_id: u64,
         ctx: ActorContextRef,
         watermark_epoch: AtomicU64Ref,
+        metrics: Arc<StreamingMetrics>,
     ) -> Self {
         let schema = input.schema().clone();
+        let metrics_info = MetricsInfo::new(metrics, state_table.table_id(), ctx.id);
+
         Self {
             input: Some(input),
             state_table,
-            cache: DedupCache::new(watermark_epoch),
+            cache: DedupCache::new(watermark_epoch, metrics_info),
             pk_indices,
             identity: format!("AppendOnlyDedupExecutor {:X}", executor_id),
             schema,
@@ -257,6 +264,7 @@ mod tests {
             1,
             ActorContext::create(123),
             Arc::new(AtomicU64::new(0)),
+            Arc::new(StreamingMetrics::unused()),
         ))
         .execute();
 
