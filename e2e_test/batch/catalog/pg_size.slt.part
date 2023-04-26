@@ -1,0 +1,30 @@
+statement ok
+create table t (v1 int);
+
+statement ok
+insert into t values (3);
+
+sleep 20s
+
+query T
+SELECT pg_table_size('t') != 0;
+----
+t
+
+query T
+SELECT pg_indexes_size('t') = 0;
+----
+t
+
+statement ok
+create index t_idx on t (v1);
+
+sleep 10s
+
+query T
+SELECT pg_indexes_size('t') != 0;
+----
+t
+
+statement ok
+drop table t;
