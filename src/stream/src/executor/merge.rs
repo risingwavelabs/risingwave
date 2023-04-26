@@ -449,7 +449,7 @@ mod tests {
         ExchangeService, ExchangeServiceServer,
     };
     use risingwave_pb::task_service::{
-        GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
+        GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse, PbPermits,
     };
     use risingwave_rpc_client::ComputeClientPool;
     use tokio::time::sleep;
@@ -691,7 +691,7 @@ mod tests {
                         ),
                     ),
                 }),
-                permits: 1,
+                permits: Some(PbPermits::default()),
             }))
             .await
             .unwrap();
@@ -705,7 +705,7 @@ mod tests {
                         ),
                     ),
                 }),
-                permits: 0,
+                permits: Some(PbPermits::default()),
             }))
             .await
             .unwrap();
