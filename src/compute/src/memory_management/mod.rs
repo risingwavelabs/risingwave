@@ -44,9 +44,9 @@ pub const COMPACTOR_MEMORY_PROPORTION: f64 = 0.1;
 pub const STORAGE_BLOCK_CACHE_MEMORY_PROPORTION: f64 = 0.3;
 
 pub const STORAGE_META_CACHE_MAX_MEMORY_MB: usize = 4096;
-pub const STORAGE_META_CACHE_MEMORY_PROPORTION: f64 = 0.3;
+pub const STORAGE_META_CACHE_MEMORY_PROPORTION: f64 = 0.35;
 pub const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.3;
-pub const STORAGE_FILE_CACHE_MEMORY_PROPORTION: f64 = 0.1;
+pub const STORAGE_FILE_CACHE_MEMORY_PROPORTION: f64 = 0.05;
 pub const STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO: usize = 70;
 
 /// `MemoryControlStats` contains the necessary information for memory control, including both batch
@@ -159,7 +159,6 @@ pub fn storage_memory_config(
     } else {
         (STORAGE_MEMORY_PROPORTION + COMPACTOR_MEMORY_PROPORTION, 0.0)
     };
-    println!("storage_memory_proportion: {}", storage_memory_proportion);
     let mut block_cache_capacity_mb = storage_config.block_cache_capacity_mb.unwrap_or(
         ((non_reserved_memory_bytes as f64
             * storage_memory_proportion
@@ -247,9 +246,9 @@ mod tests {
         let memory_config =
             storage_memory_config(total_non_reserved_memory_bytes, true, &storage_config);
         assert_eq!(memory_config.block_cache_capacity_mb, 737);
-        assert_eq!(memory_config.meta_cache_capacity_mb, 737);
+        assert_eq!(memory_config.meta_cache_capacity_mb, 860);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
-        assert_eq!(memory_config.file_cache_total_buffer_capacity_mb, 245);
+        assert_eq!(memory_config.file_cache_total_buffer_capacity_mb, 122);
         assert_eq!(memory_config.compactor_memory_limit_mb, 819);
 
         storage_config.block_cache_capacity_mb = Some(512);

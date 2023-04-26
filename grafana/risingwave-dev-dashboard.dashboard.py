@@ -1387,16 +1387,26 @@ def section_hummock(panels):
                     "{{table_id}} @ {{type}} - {{job}} @ {{instance}}",
                 ),
                 panels.target(
+                    f"sum(rate({metric('state_store_sst_store_block_request_counts', meta_miss_filter)}[$__rate_interval])) by (job, instance, type)",
+                    "total_meta_miss_count - {{job}} @ {{instance}}",
+                ),
+                panels.target(
+                    f"sum(rate({metric('sstable_preload_io_count')}[$__rate_interval])) ",
+                    "preload iops",
+                ),
+            ],
+        ),
+        panels.timeseries_ops(
+            "File Cache Ops",
+            "",
+            [
+                panels.target(
                     f"sum(rate({metric('file_cache_latency_count')}[$__rate_interval])) by (op, instance)",
                     "file cache {{op}} @ {{instance}}",
                 ),
                 panels.target(
                     f"sum(rate({metric('file_cache_miss')}[$__rate_interval])) by (instance)",
                     "file cache miss @ {{instance}}",
-                ),
-                panels.target(
-                    f"sum(rate({metric('sstable_preload_io_count')}[$__rate_interval])) ",
-                    "preload iops",
                 ),
             ],
         ),
