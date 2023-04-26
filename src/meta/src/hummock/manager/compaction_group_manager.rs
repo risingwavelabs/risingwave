@@ -807,6 +807,9 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::Level0StopWriteThresholdSubLevelNumber(c) => {
                 target.level0_stop_write_threshold_sub_level_number = *c;
             }
+            MutableConfig::Level0SubLevelCompactLevelCount(c) => {
+                target.level0_sub_level_compact_level_count = *c;
+            }
         }
     }
 }

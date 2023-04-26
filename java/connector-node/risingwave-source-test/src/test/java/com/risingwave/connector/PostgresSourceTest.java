@@ -16,8 +16,7 @@ package com.risingwave.connector;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.*;
 
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.Data;
@@ -141,11 +140,16 @@ public class PostgresSourceTest {
         Future<Integer> countResult = executorService.submit(countTask);
         int count = countResult.get();
         LOG.info("number of cdc messages received: {}", count);
-        assertEquals(10000, count);
-        // cleanup
-        query = "DROP TABLE orders";
-        SourceTestClient.performQuery(connection, query);
-        connection.close();
+        try {
+            assertEquals(10000, count);
+        } catch (Exception e) {
+            Assert.fail("validate rpc fail: " + e.getMessage());
+        } finally {
+            // cleanup
+            query = "DROP TABLE orders";
+            SourceTestClient.performQuery(connection, query);
+            connection.close();
+        }
     }
 
     // test whether validation catches permission errors
@@ -184,56 +188,52 @@ public class PostgresSourceTest {
                                         .build())
                         .addPkIndices(0)
                         .build();
-        Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream1 =
-                testClient.getEventStreamValidate(
-                        pg.getJdbcUrl(),
-                        pg.getHost(),
-                        "debezium",
-                        pg.getPassword(),
-                        ConnectorServiceProto.SourceType.POSTGRES,
-                        tableSchema,
-                        "test",
-                        "orders");
-        StatusRuntimeException exception1 =
-                assertThrows(
-                        StatusRuntimeException.class,
-                        () -> {
-                            eventStream1.hasNext();
-                        });
-        assertEquals(
-                "INVALID_ARGUMENT: INTERNAL: The publication 'dbz_publication' does not cover all necessary columns in table orders",
-                exception1.getMessage());
-        query = "DROP PUBLICATION dbz_publication";
-        SourceTestClient.performQuery(connDbz, query);
-        // revoke superuser and replication, check if reports error
-        query = "ALTER USER debezium nosuperuser noreplication";
-        SourceTestClient.performQuery(connDbz, query);
-        Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream2 =
-                testClient.getEventStreamValidate(
-                        pg.getJdbcUrl(),
-                        pg.getHost(),
-                        "debezium",
-                        pg.getPassword(),
-                        ConnectorServiceProto.SourceType.POSTGRES,
-                        tableSchema,
-                        "test",
-                        "orders");
-        StatusRuntimeException exception2 =
-                assertThrows(
-                        StatusRuntimeException.class,
-                        () -> {
-                            eventStream2.hasNext();
-                        });
-        assertEquals(
-                "INVALID_ARGUMENT: INTERNAL: Postgres user must be superuser or replication role to start walsender.",
-                exception2.getMessage());
-        // cleanup
-        query = "DROP TABLE orders";
-        SourceTestClient.performQuery(connDbz, query);
-        query = "DROP USER debezium";
-        SourceTestClient.performQuery(connPg, query);
-        connDbz.close();
-        connPg.close();
+
+        try {
+            var resp =
+                    testClient.validateSource(
+                            pg.getJdbcUrl(),
+                            pg.getHost(),
+                            "debezium",
+                            pg.getPassword(),
+                            ConnectorServiceProto.SourceType.POSTGRES,
+                            tableSchema,
+                            "test",
+                            "orders");
+            assertEquals(
+                    "INVALID_ARGUMENT: The publication 'dbz_publication' does not cover all necessary columns in table orders",
+                    resp.getError().getErrorMessage());
+            query = "DROP PUBLICATION dbz_publication";
+            SourceTestClient.performQuery(connDbz, query);
+            // revoke superuser and replication, check if reports error
+            query = "ALTER USER debezium nosuperuser noreplication";
+            SourceTestClient.performQuery(connDbz, query);
+
+            resp =
+                    testClient.validateSource(
+                            pg.getJdbcUrl(),
+                            pg.getHost(),
+                            "debezium",
+                            pg.getPassword(),
+                            ConnectorServiceProto.SourceType.POSTGRES,
+                            tableSchema,
+                            "test",
+                            "orders");
+
+            assertEquals(
+                    "INVALID_ARGUMENT: Postgres user must be superuser or replication role to start walsender.",
+                    resp.getError().getErrorMessage());
+        } catch (Exception e) {
+            Assert.fail("validate rpc fail: " + e.getMessage());
+        } finally {
+            // cleanup
+            query = "DROP TABLE orders";
+            SourceTestClient.performQuery(connDbz, query);
+            query = "DROP USER debezium";
+            SourceTestClient.performQuery(connPg, query);
+            connDbz.close();
+            connPg.close();
+        }
     }
 
     // generates test cases for the risingwave debezium parser

@@ -21,14 +21,14 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use tokio::task::JoinHandle;
 
-use super::CompactionDeleteRanges;
+use super::{CompactionDeleteRanges, MonotonicDeleteEvent};
 use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::sstable::filter::FilterBuilder;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BatchUploadWriter, CachePolicy, DeleteRangeTombstone, HummockResult, MemoryLimiter,
-    SstableBuilder, SstableBuilderOptions, SstableWriter, SstableWriterOptions, XorFilterBuilder,
+    BatchUploadWriter, CachePolicy, HummockResult, MemoryLimiter, SstableBuilder,
+    SstableBuilderOptions, SstableWriter, SstableWriterOptions, XorFilterBuilder,
 };
 use crate::monitor::CompactorMetrics;
 
@@ -161,10 +161,10 @@ where
         }
         if let Some(builder) = self.current_builder.as_ref() {
             if is_new_user_key && (switch_builder || builder.reach_capacity()) {
-                let delete_ranges = self
+                let monotonic_deletes = self
                     .del_agg
-                    .get_tombstone_between(&self.last_sealed_key.as_ref(), &full_key.user_key);
-                self.seal_current(delete_ranges).await?;
+                    .get_tombstone_between(self.last_sealed_key.as_ref(), full_key.user_key);
+                self.seal_current(monotonic_deletes).await?;
                 self.last_sealed_key.extend_from_other(&full_key.user_key);
             }
         }
@@ -184,10 +184,10 @@ where
     /// will be no-op.
     pub async fn seal_current(
         &mut self,
-        range_tombstones: Vec<DeleteRangeTombstone>,
+        monotonic_deletes: Vec<MonotonicDeleteEvent>,
     ) -> HummockResult<()> {
         if let Some(mut builder) = self.current_builder.take() {
-            builder.add_delete_range(range_tombstones);
+            builder.add_monotonic_deletes(monotonic_deletes);
             let builder_output = builder.finish().await?;
             {
                 // report
@@ -241,14 +241,14 @@ where
         } else {
             FullKey::decode(&self.key_range.right).user_key.to_vec()
         };
-        let delete_ranges = self
+        let monotonic_deletes = self
             .del_agg
-            .get_tombstone_between(&self.last_sealed_key.as_ref(), &largest_user_key.as_ref());
-        if !delete_ranges.is_empty() && self.current_builder.is_none() {
+            .get_tombstone_between(self.last_sealed_key.as_ref(), largest_user_key.as_ref());
+        if !monotonic_deletes.is_empty() && self.current_builder.is_none() {
             let builder = self.builder_factory.open_builder().await?;
             self.current_builder = Some(builder);
         }
-        self.seal_current(delete_ranges).await?;
+        self.seal_current(monotonic_deletes).await?;
         Ok(self.sst_outputs)
     }
 }
@@ -312,7 +312,8 @@ mod tests {
     use crate::hummock::sstable::utils::CompressionAlgorithm;
     use crate::hummock::test_utils::{default_builder_opt_for_test, test_key_of, test_user_key_of};
     use crate::hummock::{
-        CompactionDeleteRangesBuilder, SstableBuilderOptions, DEFAULT_RESTART_INTERVAL,
+        create_monotonic_events, CompactionDeleteRangesBuilder, DeleteRangeTombstone,
+        SstableBuilderOptions, DEFAULT_RESTART_INTERVAL,
     };
 
     #[tokio::test]
@@ -427,15 +428,16 @@ mod tests {
         let opts = default_builder_opt_for_test();
         let table_id = TableId::default();
         let mut builder = CompactionDeleteRangesBuilder::default();
-        builder.add_tombstone(vec![
-            DeleteRangeTombstone::new(table_id, b"k".to_vec(), b"kkk".to_vec(), 100),
-            DeleteRangeTombstone::new(table_id, b"aaa".to_vec(), b"ddd".to_vec(), 200),
+        let events = create_monotonic_events(vec![
+            DeleteRangeTombstone::new_for_test(table_id, b"aaa".to_vec(), b"ddd".to_vec(), 200),
+            DeleteRangeTombstone::new_for_test(table_id, b"k".to_vec(), b"kkk".to_vec(), 100),
         ]);
+        builder.add_delete_events(events);
         let mut builder = CapacitySplitTableBuilder::new(
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
             Arc::new(CompactorMetrics::unused()),
             None,
-            builder.build_for_compaction(0, false),
+            builder.build_for_compaction(false),
             KeyRange::inf(),
             false,
         );
@@ -457,7 +459,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             key_range.left,
-            FullKey::for_test(table_id, b"aaa", 200).encode()
+            FullKey::for_test(table_id, b"aaa", u64::MAX).encode()
         );
         assert_eq!(
             key_range.right,
@@ -478,15 +480,15 @@ mod tests {
         };
         let table_id = TableId::new(1);
         let mut builder = CompactionDeleteRangesBuilder::default();
-        builder.add_tombstone(vec![
-            DeleteRangeTombstone::new(table_id, b"k".to_vec(), b"kkk".to_vec(), 100),
-            DeleteRangeTombstone::new(table_id, b"aaa".to_vec(), b"ddd".to_vec(), 200),
-        ]);
+        builder.add_delete_events(create_monotonic_events(vec![
+            DeleteRangeTombstone::new(table_id, b"k".to_vec(), false, b"kkk".to_vec(), true, 100),
+            DeleteRangeTombstone::new(table_id, b"aaa".to_vec(), true, b"ddd".to_vec(), true, 200),
+        ]));
         let builder = CapacitySplitTableBuilder::new(
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
             Arc::new(CompactorMetrics::unused()),
             None,
-            builder.build_for_compaction(0, false),
+            builder.build_for_compaction(false),
             KeyRange::inf(),
             false,
         );

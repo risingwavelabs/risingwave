@@ -38,7 +38,7 @@ use crate::optimizer::plan_node::{
     LogicalFilter, LogicalScan, PredicatePushdownContext, RewriteStreamContext,
     StreamDynamicFilter, StreamFilter, StreamTableScan, StreamTemporalJoin, ToStreamContext,
 };
-use crate::optimizer::plan_visitor::{MaxOneRowVisitor, PlanVisitor};
+use crate::optimizer::plan_visitor::LogicalCardinalityExt;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay};
 
@@ -1112,7 +1112,7 @@ impl LogicalJoin {
         }
 
         // Check if right side is a scalar
-        if !MaxOneRowVisitor.visit(self.right()) {
+        if !self.right().max_one_row() {
             return Ok(None);
         }
         if self.right().schema().len() != 1 {

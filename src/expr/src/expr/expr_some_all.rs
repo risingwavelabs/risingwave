@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use itertools::{multizip, Itertools};
-use risingwave_common::array::{Array, ArrayMeta, ArrayRef, BoolArray, DataChunk};
+use risingwave_common::array::{Array, ArrayRef, BoolArray, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -88,7 +88,7 @@ impl Expression for SomeAllExpression {
         let mut num_array = Vec::with_capacity(data_chunk.capacity());
 
         let arr_right_inner = arr_right.as_list();
-        let ArrayMeta::List { datatype } = arr_right_inner.array_meta() else {
+        let DataType::List { datatype } = arr_right_inner.data_type() else {
             unreachable!()
         };
         let capacity = arr_right_inner

@@ -51,12 +51,14 @@ pub mod constants;
 pub mod estimate_size;
 pub mod field_generator;
 pub mod hash;
+pub mod memory;
 pub mod monitor;
 pub mod row;
 pub mod session_config;
 pub mod system_param;
 pub mod telemetry;
 
+pub mod metrics;
 pub mod test_utils;
 pub mod types;
 

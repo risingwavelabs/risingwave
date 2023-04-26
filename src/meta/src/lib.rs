@@ -298,8 +298,8 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
 }
 
 fn validate_config(config: &RwConfig) {
-    if config.meta.meta_leader_lease_secs <= 1 {
-        let error_msg = "meta leader lease secs should be larger than 1";
+    if config.meta.meta_leader_lease_secs <= 2 {
+        let error_msg = "meta leader lease secs should be larger than 2";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }

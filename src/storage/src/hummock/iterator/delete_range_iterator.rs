@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeSet, BinaryHeap};
 
-use risingwave_hummock_sdk::key::UserKey;
+use risingwave_hummock_sdk::key::{PointRange, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferDeleteRangeIterator;
@@ -27,7 +27,7 @@ use crate::hummock::SstableDeleteRangeIterator;
 /// - if you want to iterate from the beginning, you need to then call its `rewind` method.
 /// - if you want to iterate from some specific position, you need to then call its `seek` method.
 pub trait DeleteRangeIterator {
-    /// Retrieves the next user key that changes current epoch.
+    /// Retrieves the next extended user key that changes current epoch.
     ///
     /// Note:
     /// - Before calling this function, makes sure the iterator `is_valid`.
@@ -35,7 +35,7 @@ pub trait DeleteRangeIterator {
     ///
     /// # Panics
     /// This function will panic if the iterator is invalid.
-    fn next_user_key(&self) -> UserKey<&[u8]>;
+    fn next_extended_user_key(&self) -> PointRange<&[u8]>;
 
     /// Retrieves the epoch of the current range delete.
     /// It returns the epoch between the previous `next_user_key` (inclusive) and the current
@@ -95,10 +95,10 @@ pub enum RangeIteratorTyped {
 }
 
 impl DeleteRangeIterator for RangeIteratorTyped {
-    fn next_user_key(&self) -> UserKey<&[u8]> {
+    fn next_extended_user_key(&self) -> PointRange<&[u8]> {
         match self {
-            RangeIteratorTyped::Sst(sst) => sst.next_user_key(),
-            RangeIteratorTyped::Batch(batch) => batch.next_user_key(),
+            RangeIteratorTyped::Sst(sst) => sst.next_extended_user_key(),
+            RangeIteratorTyped::Batch(batch) => batch.next_extended_user_key(),
         }
     }
 
@@ -148,7 +148,8 @@ impl DeleteRangeIterator for RangeIteratorTyped {
 
 impl PartialEq<Self> for RangeIteratorTyped {
     fn eq(&self, other: &Self) -> bool {
-        self.next_user_key().eq(&other.next_user_key())
+        self.next_extended_user_key()
+            .eq(&other.next_extended_user_key())
     }
 }
 
@@ -162,7 +163,9 @@ impl Eq for RangeIteratorTyped {}
 
 impl Ord for RangeIteratorTyped {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        other.next_user_key().cmp(&self.next_user_key())
+        other
+            .next_extended_user_key()
+            .cmp(&self.next_extended_user_key())
     }
 }
 
@@ -226,16 +229,17 @@ impl ForwardMergeRangeIterator {
 }
 
 impl ForwardMergeRangeIterator {
-    pub(super) fn next_until(&mut self, target_user_key: &UserKey<&[u8]>) {
-        while self.is_valid() && self.next_user_key().le(target_user_key) {
+    pub(super) fn next_until(&mut self, target_user_key: UserKey<&[u8]>) {
+        let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
+        while self.is_valid() && self.next_extended_user_key().le(&target_extended_user_key) {
             self.next();
         }
     }
 }
 
 impl DeleteRangeIterator for ForwardMergeRangeIterator {
-    fn next_user_key(&self) -> UserKey<&[u8]> {
-        self.heap.peek().unwrap().next_user_key()
+    fn next_extended_user_key(&self) -> PointRange<&[u8]> {
+        self.heap.peek().unwrap().next_extended_user_key()
     }
 
     fn current_epoch(&self) -> HummockEpoch {
@@ -248,7 +252,7 @@ impl DeleteRangeIterator for ForwardMergeRangeIterator {
     fn next(&mut self) {
         self.tmp_buffer
             .push(self.heap.pop().expect("no inner iter"));
-        while let Some(node) = self.heap.peek() && node.is_valid() && node.next_user_key() == self.tmp_buffer[0].next_user_key() {
+        while let Some(node) = self.heap.peek() && node.is_valid() && node.next_extended_user_key() == self.tmp_buffer[0].next_extended_user_key() {
             self.tmp_buffer.push(self.heap.pop().unwrap());
         }
         for node in &self.tmp_buffer {

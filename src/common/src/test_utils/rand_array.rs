@@ -19,7 +19,6 @@
 use std::sync::Arc;
 
 use chrono::Datelike;
-use num_traits::FromPrimitive;
 use rand::distributions::Standard;
 use rand::prelude::Distribution;
 use rand::rngs::SmallRng;
@@ -68,7 +67,7 @@ impl RandValue for Box<[u8]> {
 
 impl RandValue for Decimal {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
-        Decimal::from_f64((rand.gen::<u32>() as f64) + 0.1f64).unwrap()
+        Decimal::try_from((rand.gen::<u32>() as f64) + 0.1f64).unwrap()
     }
 }
 

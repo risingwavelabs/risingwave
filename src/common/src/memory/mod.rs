@@ -12,19 +12,5 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg(madsim)]
-
-use anyhow::Result;
-use risingwave_simulation::cluster::{Cluster, Configuration};
-use risingwave_simulation::utils::AssertResult;
-
-#[madsim::test]
-async fn test_hello() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
-    cluster
-        .run("select concat_ws(', ', 'hello', 'world');")
-        .await?
-        .assert_result_eq("hello, world");
-
-    Ok(())
-}
+mod mem_context;
+pub use mem_context::*;

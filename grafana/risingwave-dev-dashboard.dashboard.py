@@ -1239,7 +1239,7 @@ def section_batch_exchange(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"{metric('batch_task_exchange_recv_row_number')}",
+                            f"{metric('batch_exchange_recv_row_number')}",
                             "{{query_id}} : {{source_stage_id}}.{{source_task_id}} -> {{target_stage_id}}.{{target_task_id}}",
                         ),
                     ],
@@ -1387,16 +1387,26 @@ def section_hummock(panels):
                     "{{table_id}} @ {{type}} - {{job}} @ {{instance}}",
                 ),
                 panels.target(
+                    f"sum(rate({metric('state_store_sst_store_block_request_counts', meta_miss_filter)}[$__rate_interval])) by (job, instance, type)",
+                    "total_meta_miss_count - {{job}} @ {{instance}}",
+                ),
+                panels.target(
+                    f"sum(rate({metric('sstable_preload_io_count')}[$__rate_interval])) ",
+                    "preload iops",
+                ),
+            ],
+        ),
+        panels.timeseries_ops(
+            "File Cache Ops",
+            "",
+            [
+                panels.target(
                     f"sum(rate({metric('file_cache_latency_count')}[$__rate_interval])) by (op, instance)",
                     "file cache {{op}} @ {{instance}}",
                 ),
                 panels.target(
                     f"sum(rate({metric('file_cache_miss')}[$__rate_interval])) by (instance)",
                     "file cache miss @ {{instance}}",
-                ),
-                panels.target(
-                    f"sum(rate({metric('sstable_preload_io_count')}[$__rate_interval])) ",
-                    "preload iops",
                 ),
             ],
         ),
@@ -2366,6 +2376,16 @@ def section_connector_node(outer_panels):
                         panels.target(
                             f"rate({metric('connector_source_rows_received')}[$__interval])",
                             "{{source_type}} @ {{source_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "Connector Sink Throughput(rows)",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('connector_sink_rows_received')}[$__interval])",
+                            "{{connector_type}} @ {{sink_id}}",
                         ),
                     ],
                 ),

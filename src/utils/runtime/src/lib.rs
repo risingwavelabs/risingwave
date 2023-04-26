@@ -166,6 +166,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         #[cfg(debug_assertions)]
         let filter = filter.with_default(Level::DEBUG);
 
+        #[cfg(not(debug_assertions))]
+        let filter = filter.with_default(Level::INFO);
+
         let filter = settings
             .targets
             .into_iter()
@@ -175,11 +178,18 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
 
         layers.push(fmt_layer.with_filter(to_env_filter(filter)).boxed());
     };
+    let default_query_log_path = "./".to_string();
 
     let query_log_path = std::env::var("RW_QUERY_LOG_PATH");
     if query_log_path.is_ok() || ENABLE_QUERY_LOG_FILE {
-        let query_log_path = query_log_path.unwrap_or(".risingwave/log".to_string());
+        let query_log_path = query_log_path.unwrap_or(default_query_log_path.clone());
         let query_log_path = PathBuf::from(query_log_path);
+        std::fs::create_dir_all(query_log_path.clone()).unwrap_or_else(|e| {
+            panic!(
+                "failed to create directory '{}' for query log: {e}",
+                query_log_path.display()
+            )
+        });
         let file = std::fs::OpenOptions::new()
             .create(true)
             .write(true)
@@ -199,31 +209,40 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_writer(std::sync::Mutex::new(file))
             .with_filter(filter::Targets::new().with_target("pgwire_query_log", Level::TRACE));
         layers.push(layer.boxed());
+    }
 
-        // also dump slow query log
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(query_log_path.join("slow_query.log"))
-            .unwrap_or_else(|e| {
-                panic!(
-                    "failed to create '{}/slow_query.log': {e}",
-                    query_log_path.display()
-                )
-            });
-        let layer = tracing_subscriber::fmt::layer()
-            .with_ansi(false)
-            .with_level(false)
-            .with_file(false)
-            .with_target(false)
-            .with_writer(std::sync::Mutex::new(file))
-            .with_filter(
-                filter::Targets::new()
-                    .with_target("risingwave_frontend_slow_query_log", Level::TRACE),
-            );
-        layers.push(layer.boxed());
-    };
+    let slow_query_log_path = std::env::var("RW_QUERY_LOG_PATH");
+    let slow_query_log_path = slow_query_log_path.unwrap_or(default_query_log_path);
+    let slow_query_log_path = PathBuf::from(slow_query_log_path);
+    // slow query log is always enabled
+    // also dump slow query log
+    std::fs::create_dir_all(slow_query_log_path.clone()).unwrap_or_else(|e| {
+        panic!(
+            "failed to create directory '{}' for slow query log: {e}",
+            slow_query_log_path.display()
+        )
+    });
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(slow_query_log_path.join("slow_query.log"))
+        .unwrap_or_else(|e| {
+            panic!(
+                "failed to create '{}/slow_query.log': {e}",
+                slow_query_log_path.display()
+            )
+        });
+    let layer = tracing_subscriber::fmt::layer()
+        .with_ansi(false)
+        .with_level(false)
+        .with_file(false)
+        .with_target(false)
+        .with_writer(std::sync::Mutex::new(file))
+        .with_filter(
+            filter::Targets::new().with_target("risingwave_frontend_slow_query_log", Level::TRACE),
+        );
+    layers.push(layer.boxed());
 
     if settings.enable_tokio_console {
         let (console_layer, server) = console_subscriber::ConsoleLayer::builder()
