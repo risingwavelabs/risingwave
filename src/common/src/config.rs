@@ -591,7 +591,7 @@ mod default {
         }
 
         pub fn periodic_space_reclaim_compaction_interval_sec() -> u64 {
-            180 // 5min
+            3600 // 60min
         }
 
         pub fn periodic_ttl_reclaim_compaction_interval_sec() -> u64 {

@@ -216,7 +216,6 @@ impl HummockVersionExt for HummockVersion {
                 .map(|level| level.total_file_size)
                 .sum::<u64>()
                 + group.l0.as_ref().unwrap().total_file_size;
-            // only calculate the bottommost too level.
             let mut table_statistic: HashMap<StateTableId, u64> = HashMap::new();
             let member_table_id: HashSet<u32> = HashSet::from_iter(group.member_table_ids.clone());
             for level in &group.l0.as_ref().unwrap().sub_levels {
@@ -238,7 +237,7 @@ impl HummockVersionExt for HummockVersion {
 
             for level in &group.levels {
                 for sst in &level.table_infos {
-                    if sst.table_ids.len() > 2 {
+                    if sst.table_ids.len() > 1 {
                         // do not calculate size for small state-table.
                         continue;
                     }
