@@ -15,9 +15,7 @@
 use async_trait::async_trait;
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::array::Op;
 use risingwave_common::catalog::Schema;
-use risingwave_common::field_generator::FieldGeneratorImpl;
 use risingwave_common::types::{DataType, ScalarImpl};
 use tokio::sync::mpsc;
 
@@ -546,51 +544,4 @@ pub mod top_n_executor {
         )
         .await
     }
-}
-
-/// Generate `num_of_chunks` data chunks with type `data_types`,
-/// where each data chunk has cardinality of `chunk_size`.
-/// TODO(kwannoel): Generate different types of op, different vis.
-pub fn gen_data(
-    num_of_chunks: usize,
-    chunk_size: usize,
-    data_types: &[DataType],
-) -> Vec<StreamChunk> {
-    const SEED: u64 = 0xFF67FEABBAEF76FF;
-
-    let mut ret = Vec::<StreamChunk>::with_capacity(num_of_chunks);
-
-    for i in 0..num_of_chunks {
-        let mut ops = Vec::new();
-        let mut columns = Vec::new();
-        for _ in 0..chunk_size {
-            ops.push(Op::Insert);
-        }
-        // Generate columns of this chunk.
-        for data_type in data_types {
-            let mut array_builder = data_type.create_array_builder(chunk_size);
-            for j in 0..chunk_size {
-                // FIXME(kwannoel): This is specific to q17, this should be a configurable
-                // parameter instead.
-                // We overwrite default, we want to simulate a fixed date string.
-                // q17 has a `to_char('YYYY-DD-MM', <timestamp>)`,
-                // and within a short-span of time,
-                // this defaults to a single fixed date. Hence we use that here too.
-                // Currently `gen_data` is only used by q17 bench so it is fine for now.
-                if *data_type == DataType::Varchar {
-                    array_builder.append_datum(&Some("2022-02-02".into()));
-                } else {
-                    let mut data_gen =
-                        FieldGeneratorImpl::with_number_random(data_type.clone(), None, None, SEED)
-                            .unwrap();
-                    let datum = data_gen.generate_datum(((i + 1) * (j + 1)) as u64);
-                    array_builder.append_datum(datum);
-                }
-            }
-            columns.push(array_builder.finish().into());
-        }
-        let chunk = StreamChunk::new(ops, columns, None);
-        ret.push(chunk);
-    }
-    ret
 }

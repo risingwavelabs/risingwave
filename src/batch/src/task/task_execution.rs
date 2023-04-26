@@ -380,7 +380,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             trace!("Executing plan [{:?}]", task_id);
             let sender = sender;
             let mut state_tx = state_tx;
-            let task_metrics = t_1.context.task_metrics();
+            let batch_metrics = t_1.context.batch_metrics();
 
             let task = |task_id: TaskId| async move {
                 // We should only pass a reference of sender to execution because we should only
@@ -396,15 +396,15 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     .await;
             };
 
-            if let Some(task_metrics) = task_metrics {
+            if let Some(batch_metrics) = batch_metrics {
                 let monitor = TaskMonitor::new();
                 let instrumented_task = AssertUnwindSafe(monitor.instrument(task(task_id.clone())));
                 if let Err(error) = instrumented_task.catch_unwind().await {
                     error!("Batch task {:?} panic: {:?}", task_id, error);
                 }
                 let cumulative = monitor.cumulative();
-                let labels = &task_metrics.task_labels();
-                let task_metrics = &task_metrics.metrics;
+                let labels = &batch_metrics.task_labels();
+                let task_metrics = batch_metrics.get_task_metrics();
                 task_metrics
                     .task_first_poll_delay
                     .with_label_values(labels)
@@ -544,9 +544,22 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                               break;
                         },
                         None => {
-                             debug!("Batch task {:?} finished successfully.", self.task_id);
-                             state = TaskStatus::Finished;
-                             break;
+                            // TODO(ZENOTME): enable this when all executors support early stop. #9418
+                            // if self.context.get_stop_flag_ref().check_stop() {
+                            //     // Task stop by reading stop flag. It can be either cancelled or aborted.
+                            //     if let Some(error_reason) = self.context.get_stop_flag_ref().get_stop_reason() {
+                            //         state = TaskStatus::Aborted;
+                            //         error = Some(Aborted(error_reason));
+                            //     } else {
+                            //         state = TaskStatus::Cancelled;
+                            //     }
+                            // } else {
+                            //     debug!("Batch task {:?} finished successfully.", self.task_id);
+                            //     state = TaskStatus::Finished;
+                            // }
+                            debug!("Batch task {:?} finished successfully.", self.task_id);
+                            state = TaskStatus::Finished;
+                            break;
                         }
                     }
                 }
@@ -581,6 +594,9 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
     pub fn abort(&self, err_msg: String) {
         if let Some(sender) = self.shutdown_tx.lock().take() {
+            self.context
+                .get_stop_flag_ref()
+                .set_stop(Some(err_msg.clone()));
             // No need to set state to be Aborted here cuz it will be set by shutdown receiver.
             // Stop task execution.
             if sender.send(err_msg).is_err() {
@@ -593,6 +609,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
     pub fn cancel(&self) {
         if let Some(sender) = self.shutdown_tx.lock().take() {
+            self.context.get_stop_flag_ref().set_stop(None);
             // Drop sender directly to mark cancel without error.
             drop(sender);
         };

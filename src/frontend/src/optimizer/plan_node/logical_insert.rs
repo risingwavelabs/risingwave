@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, TableVersionId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
@@ -23,6 +24,7 @@ use super::{
     PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
+use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -40,19 +42,22 @@ pub struct LogicalInsert {
     table_id: TableId,
     table_version_id: TableVersionId,
     input: PlanRef,
-    column_indices: Vec<usize>, // columns in which to insert
+    column_indices: Vec<usize>,              // columns in which to insert
+    default_columns: Vec<(usize, ExprImpl)>, // columns to be set to default
     row_id_index: Option<usize>,
     returning: bool,
 }
 
 impl LogicalInsert {
     /// Create a [`LogicalInsert`] node. Used internally by optimizer.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         input: PlanRef,
         table_name: String,
         table_id: TableId,
         table_version_id: TableVersionId,
         column_indices: Vec<usize>,
+        default_columns: Vec<(usize, ExprImpl)>,
         row_id_index: Option<usize>,
         returning: bool,
     ) -> Self {
@@ -71,18 +76,21 @@ impl LogicalInsert {
             table_version_id,
             input,
             column_indices,
+            default_columns,
             row_id_index,
             returning,
         }
     }
 
     /// Create a [`LogicalInsert`] node. Used by planner.
+    #[allow(clippy::too_many_arguments)]
     pub fn create(
         input: PlanRef,
         table_name: String,
         table_id: TableId,
         table_version_id: TableVersionId,
         column_indices: Vec<usize>,
+        default_columns: Vec<(usize, ExprImpl)>,
         row_id_index: Option<usize>,
         returning: bool,
     ) -> Result<Self> {
@@ -92,15 +100,17 @@ impl LogicalInsert {
             table_id,
             table_version_id,
             column_indices,
+            default_columns,
             row_id_index,
             returning,
         ))
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+        let verbose = self.ctx().is_explain_verbose();
         write!(
             f,
-            "{} {{ table: {}{} }}",
+            "{} {{ table: {}{}",
             name,
             self.table_name,
             if self.returning {
@@ -108,13 +118,41 @@ impl LogicalInsert {
             } else {
                 ""
             }
-        )
+        )?;
+        if verbose {
+            write!(
+                f,
+                ", mapping: [{}]",
+                self.column_indices()
+                    .iter()
+                    .cloned()
+                    .enumerate()
+                    .map(|(k, v)| format!("{}:{}", k, v))
+                    .join(", ")
+            )?;
+            if !self.default_columns.is_empty() {
+                write!(
+                    f,
+                    ", default: [{}]",
+                    self.default_columns()
+                        .into_iter()
+                        .map(|(k, v)| format!("{}<-{:?}", k, v))
+                        .join(", ")
+                )?;
+            }
+        }
+        write!(f, " }}")
     }
 
     // Get the column indexes in which to insert to
     #[must_use]
     pub fn column_indices(&self) -> Vec<usize> {
         self.column_indices.clone()
+    }
+
+    #[must_use]
+    pub fn default_columns(&self) -> Vec<(usize, ExprImpl)> {
+        self.default_columns.clone()
     }
 
     #[must_use]
@@ -148,6 +186,7 @@ impl PlanTreeNodeUnary for LogicalInsert {
             self.table_id,
             self.table_version_id,
             self.column_indices.clone(),
+            self.default_columns.clone(),
             self.row_id_index,
             self.returning,
         )

@@ -18,6 +18,7 @@
 //! for the rationale behind this approach.
 
 #![feature(stmt_expr_attributes)]
+#![cfg(madsim)]
 
 // TODO: uncomment all of these mods again.
 // mod cascade_materialized_view;
@@ -31,3 +32,5 @@ mod nexmark_scaling;
 // mod nexmark_source;
 // mod singleton_migration;
 // mod streaming_parallelism;
+// mod recovery;
+// mod scale;

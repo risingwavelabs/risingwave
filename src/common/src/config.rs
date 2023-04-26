@@ -41,10 +41,16 @@ pub const NO_OVERRIDE: Option<NoOverride> = None;
 ///
 /// The current implementation will log warnings if there are unrecognized fields.
 #[derive(Derivative)]
-#[derivative(Clone, Debug, Default)]
+#[derivative(Clone, Default)]
 pub struct Unrecognized<T: 'static> {
     inner: BTreeMap<String, Value>,
     _marker: std::marker::PhantomData<&'static T>,
+}
+
+impl<T> std::fmt::Debug for Unrecognized<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.inner.fmt(f)
+    }
 }
 
 impl<T> Unrecognized<T> {
@@ -452,6 +458,10 @@ pub struct StreamingDeveloperConfig {
     /// in remote exchange.
     #[serde(default = "default::developer::stream_exchange_batched_permits")]
     pub exchange_batched_permits: usize,
+
+    /// The maximum number of concurrent barriers in an exchange channel.
+    #[serde(default = "default::developer::stream_exchange_concurrent_barriers")]
+    pub exchange_concurrent_barriers: usize,
 }
 
 /// The subsections `[batch.developer]`.
@@ -473,61 +483,62 @@ pub struct BatchDeveloperConfig {
     pub chunk_size: usize,
 }
 
-/// The section `[system]` in `risingwave.toml`.
+/// The section `[system]` in `risingwave.toml`. This section is only for testing purpose and should
+/// not be documented.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct SystemConfig {
     /// The interval of periodic barrier.
     #[serde(default = "default::system::barrier_interval_ms")]
-    pub barrier_interval_ms: u32,
+    pub barrier_interval_ms: Option<u32>,
 
     /// There will be a checkpoint for every n barriers
     #[serde(default = "default::system::checkpoint_frequency")]
-    pub checkpoint_frequency: u64,
+    pub checkpoint_frequency: Option<u64>,
 
     /// Target size of the Sstable.
     #[serde(default = "default::system::sstable_size_mb")]
-    pub sstable_size_mb: u32,
+    pub sstable_size_mb: Option<u32>,
 
     /// Size of each block in bytes in SST.
     #[serde(default = "default::system::block_size_kb")]
-    pub block_size_kb: u32,
+    pub block_size_kb: Option<u32>,
 
     /// False positive probability of bloom filter.
     #[serde(default = "default::system::bloom_false_positive")]
-    pub bloom_false_positive: f64,
+    pub bloom_false_positive: Option<f64>,
 
     #[serde(default = "default::system::state_store")]
-    pub state_store: String,
+    pub state_store: Option<String>,
 
     /// Remote directory for storing data and metadata objects.
     #[serde(default = "default::system::data_directory")]
-    pub data_directory: String,
+    pub data_directory: Option<String>,
 
     /// Remote storage url for storing snapshots.
     #[serde(default = "default::system::backup_storage_url")]
-    pub backup_storage_url: String,
+    pub backup_storage_url: Option<String>,
 
     /// Remote directory for storing snapshots.
     #[serde(default = "default::system::backup_storage_directory")]
-    pub backup_storage_directory: String,
+    pub backup_storage_directory: Option<String>,
 
     #[serde(default = "default::system::telemetry_enabled")]
-    pub telemetry_enabled: bool,
+    pub telemetry_enabled: Option<bool>,
 }
 
 impl SystemConfig {
     pub fn into_init_system_params(self) -> SystemParams {
         SystemParams {
-            barrier_interval_ms: Some(self.barrier_interval_ms),
-            checkpoint_frequency: Some(self.checkpoint_frequency),
-            sstable_size_mb: Some(self.sstable_size_mb),
-            block_size_kb: Some(self.block_size_kb),
-            bloom_false_positive: Some(self.bloom_false_positive),
-            state_store: Some(self.state_store),
-            data_directory: Some(self.data_directory),
-            backup_storage_url: Some(self.backup_storage_url),
-            backup_storage_directory: Some(self.backup_storage_directory),
-            telemetry_enabled: Some(self.telemetry_enabled),
+            barrier_interval_ms: self.barrier_interval_ms,
+            checkpoint_frequency: self.checkpoint_frequency,
+            sstable_size_mb: self.sstable_size_mb,
+            block_size_kb: self.block_size_kb,
+            bloom_false_positive: self.bloom_false_positive,
+            state_store: self.state_store,
+            data_directory: self.data_directory,
+            backup_storage_url: self.backup_storage_url,
+            backup_storage_directory: self.backup_storage_directory,
+            telemetry_enabled: self.telemetry_enabled,
         }
     }
 }
@@ -770,48 +781,52 @@ mod default {
         pub fn stream_exchange_batched_permits() -> usize {
             1024
         }
+
+        pub fn stream_exchange_concurrent_barriers() -> usize {
+            2
+        }
     }
 
     pub mod system {
         use crate::system_param;
 
-        pub fn barrier_interval_ms() -> u32 {
+        pub fn barrier_interval_ms() -> Option<u32> {
             system_param::default::barrier_interval_ms()
         }
 
-        pub fn checkpoint_frequency() -> u64 {
+        pub fn checkpoint_frequency() -> Option<u64> {
             system_param::default::checkpoint_frequency()
         }
 
-        pub fn sstable_size_mb() -> u32 {
+        pub fn sstable_size_mb() -> Option<u32> {
             system_param::default::sstable_size_mb()
         }
 
-        pub fn block_size_kb() -> u32 {
+        pub fn block_size_kb() -> Option<u32> {
             system_param::default::block_size_kb()
         }
 
-        pub fn bloom_false_positive() -> f64 {
+        pub fn bloom_false_positive() -> Option<f64> {
             system_param::default::bloom_false_positive()
         }
 
-        pub fn state_store() -> String {
+        pub fn state_store() -> Option<String> {
             system_param::default::state_store()
         }
 
-        pub fn data_directory() -> String {
+        pub fn data_directory() -> Option<String> {
             system_param::default::data_directory()
         }
 
-        pub fn backup_storage_url() -> String {
+        pub fn backup_storage_url() -> Option<String> {
             system_param::default::backup_storage_url()
         }
 
-        pub fn backup_storage_directory() -> String {
+        pub fn backup_storage_directory() -> Option<String> {
             system_param::default::backup_storage_directory()
         }
 
-        pub fn telemetry_enabled() -> bool {
+        pub fn telemetry_enabled() -> Option<bool> {
             system_param::default::telemetry_enabled()
         }
     }

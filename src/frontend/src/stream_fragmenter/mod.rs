@@ -25,7 +25,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag,
+    DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag, NoOpNode,
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
@@ -92,6 +92,23 @@ impl BuildFragmentGraphState {
 
     pub fn get_share_stream_node(&mut self, operator_id: u32) -> Option<&StreamNode> {
         self.share_stream_node_mapping.get(&operator_id)
+    }
+
+    /// Generate a new stream node with `NoOp` body and the given `input`. The properties of the
+    /// stream node will also be copied from the `input` node.
+    pub fn gen_no_op_stream_node(&mut self, input: StreamNode) -> StreamNode {
+        StreamNode {
+            operator_id: self.gen_operator_id() as u64,
+            identity: "StreamNoOp".into(),
+            node_body: Some(NodeBody::NoOp(NoOpNode {})),
+
+            // Take input's properties.
+            stream_key: input.stream_key.clone(),
+            append_only: input.append_only,
+            fields: input.fields.clone(),
+
+            input: vec![input],
+        }
     }
 }
 
@@ -204,6 +221,11 @@ pub(self) fn build_and_add_fragment(
             let mut fragment = state.new_stream_fragment();
             let node = build_fragment(state, &mut fragment, stream_node)?;
 
+            // It's possible that the stream node is rewritten while building the fragment, for
+            // example, empty fragment to no-op fragment. We get the operator id again instead of
+            // using the original one.
+            let operator_id = node.operator_id as u32;
+
             assert!(fragment.node.is_none());
             fragment.node = Some(Box::new(node));
             let fragment_ref = Rc::new(fragment);
@@ -281,6 +303,14 @@ fn build_fragment(
         }
     }
 
+    // Usually we do not expect exchange node to be visited here, which should be handled by the
+    // following logic of "visit children" instead. If it does happen (for example, `Share` will be
+    // transformed to an `Exchange`), it means we have an empty fragment and we need to add a no-op
+    // node to it, so that the meta service can handle it correctly.
+    if let NodeBody::Exchange(_) = stream_node.node_body.as_ref().unwrap() {
+        stream_node = state.gen_no_op_stream_node(stream_node);
+    }
+
     // Visit plan children.
     stream_node.input = stream_node
         .input
@@ -297,14 +327,76 @@ fn build_fragment(
                     // Exchange node should have only one input.
                     let [input]: [_; 1] = std::mem::take(&mut child_node.input).try_into().unwrap();
                     let child_fragment = build_and_add_fragment(state, input)?;
-                    state.fragment_graph.add_edge(
+
+                    let result = state.fragment_graph.try_add_edge(
                         child_fragment.fragment_id,
                         current_fragment.fragment_id,
                         StreamFragmentEdge {
-                            dispatch_strategy: exchange_node_strategy,
+                            dispatch_strategy: exchange_node_strategy.clone(),
+                            // Always use the exchange operator id as the link id.
                             link_id: child_node.operator_id,
                         },
                     );
+
+                    // It's possible that there're multiple edges between two fragments, while the
+                    // meta service and the compute node does not expect this. In this case, we
+                    // manually insert a fragment of `NoOp` between the two fragments.
+                    if result.is_err() {
+                        // Assign a new operator id for the `Exchange`, so we can distinguish it
+                        // from duplicate edges and break the sharing.
+                        child_node.operator_id = state.gen_operator_id() as u64;
+
+                        // Take the upstream plan node as the reference for properties of `NoOp`.
+                        let ref_fragment_node = child_fragment.node.as_ref().unwrap();
+                        let no_shuffle_strategy = DispatchStrategy {
+                            r#type: DispatcherType::NoShuffle as i32,
+                            dist_key_indices: vec![],
+                            output_indices: (0..ref_fragment_node.fields.len() as u32).collect(),
+                        };
+
+                        let no_shuffle_exchange_operator_id = state.gen_operator_id() as u64;
+
+                        let no_op_fragment = {
+                            let node = state.gen_no_op_stream_node(StreamNode {
+                                operator_id: no_shuffle_exchange_operator_id,
+                                identity: "StreamNoShuffleExchange".into(),
+                                node_body: Some(NodeBody::Exchange(ExchangeNode {
+                                    strategy: Some(no_shuffle_strategy.clone()),
+                                })),
+                                input: vec![],
+
+                                // Take reference's properties.
+                                stream_key: ref_fragment_node.stream_key.clone(),
+                                append_only: ref_fragment_node.append_only,
+                                fields: ref_fragment_node.fields.clone(),
+                            });
+
+                            let mut fragment = state.new_stream_fragment();
+                            fragment.node = Some(node.into());
+                            Rc::new(fragment)
+                        };
+
+                        state.fragment_graph.add_fragment(no_op_fragment.clone());
+
+                        state.fragment_graph.add_edge(
+                            child_fragment.fragment_id,
+                            no_op_fragment.fragment_id,
+                            StreamFragmentEdge {
+                                // Use `NoShuffle` exhcnage strategy for upstream edge.
+                                dispatch_strategy: no_shuffle_strategy,
+                                link_id: no_shuffle_exchange_operator_id,
+                            },
+                        );
+                        state.fragment_graph.add_edge(
+                            no_op_fragment.fragment_id,
+                            current_fragment.fragment_id,
+                            StreamFragmentEdge {
+                                // Use the original exchange strategy for downstream edge.
+                                dispatch_strategy: exchange_node_strategy,
+                                link_id: child_node.operator_id,
+                            },
+                        );
+                    }
 
                     Ok(child_node)
                 }

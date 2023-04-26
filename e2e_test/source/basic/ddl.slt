@@ -97,6 +97,42 @@ create source s with (
   connection.name = 'nonexist',
 ) row format json;
 
+# `DEBEZIUM_MONGO_JSON` requires the source table have `_id` and `payload` columns.
+statement error
+create source s (
+  a int,
+  b int
+) with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  connection.name = 'nonexist',
+) row format DEBEZIUM_MONGO_JSON;
+
+# `DEBEZIUM_MONGO_JSON` requires the `_id` column is primary key.
+statement error
+create source s (
+  _id jsonb,
+  payload jsonb
+) with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  connection.name = 'nonexist',
+) row format DEBEZIUM_MONGO_JSON;
+
+# `DEBEZIUM_MONGO_JSON` requires the `payload` column is jsonb type.
+statement error
+create source s (
+  _id varchar primary key,
+  payload int
+) with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  connection.name = 'nonexist',
+) row format DEBEZIUM_MONGO_JSON;
+
 statement ok
 create source s with (
   connector = 'kafka',

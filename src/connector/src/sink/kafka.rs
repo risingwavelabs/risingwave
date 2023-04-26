@@ -20,7 +20,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::anyhow;
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::message::ToBytes;
-use rdkafka::producer::{BaseRecord, DefaultProducerContext, Producer, ThreadedProducer};
+use rdkafka::producer::{BaseRecord, Producer, ThreadedProducer};
 use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
@@ -35,6 +35,7 @@ use super::{
 };
 use crate::common::KafkaCommon;
 use crate::sink::{datum_to_json_object, record_to_json, Result};
+use crate::source::kafka::PrivateLinkProducerContext;
 use crate::{
     deserialize_bool_from_string, deserialize_duration_from_string, deserialize_u32_from_string,
 };
@@ -67,6 +68,8 @@ pub struct KafkaConfig {
     #[serde(skip_serializing)]
     pub connector: String, // Must be "kafka" here.
 
+    // #[serde(rename = "connection.name")]
+    // pub connection: String,
     #[serde(flatten)]
     pub common: KafkaCommon,
 
@@ -501,12 +504,12 @@ fn schema_to_json(schema: &Schema) -> Value {
 /// the struct conducts all transactions with Kafka
 pub struct KafkaTransactionConductor {
     properties: KafkaConfig,
-    inner: ThreadedProducer<DefaultProducerContext>,
+    inner: ThreadedProducer<PrivateLinkProducerContext>,
 }
 
 impl KafkaTransactionConductor {
     async fn new(mut config: KafkaConfig) -> Result<Self> {
-        let inner: ThreadedProducer<DefaultProducerContext> = {
+        let inner: ThreadedProducer<PrivateLinkProducerContext> = {
             let mut c = ClientConfig::new();
             config.common.set_security_properties(&mut c);
             c.set("bootstrap.servers", &config.common.brokers)
@@ -515,7 +518,9 @@ impl KafkaTransactionConductor {
             if config.use_transaction {
                 c.set("transactional.id", &config.identifier); // required by kafka transaction
             }
-            c.create().await?
+            let client_ctx =
+                PrivateLinkProducerContext::new(config.common.broker_rewrite_map.clone())?;
+            c.create_with_context(client_ctx).await?
         };
 
         if config.use_transaction {
@@ -768,10 +773,11 @@ mod test {
 
         let json_chunk = chunk_to_json(chunk, &schema).unwrap();
         let schema_json = schema_to_json(&schema);
-        assert_eq!(schema_json.to_string(), "{\"fields\":[{\"field\":\"before\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float32\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"optional\":true,\"type\":\"struct\"},{\"field\":\"after\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float32\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"optional\":true,\"type\":\"struct\"}],\"optional\":false,\"type\":\"struct\"}");
+        assert_eq!(schema_json, serde_json::from_str::<Value>("{\"fields\":[{\"field\":\"before\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float32\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"optional\":true,\"type\":\"struct\"},{\"field\":\"after\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float32\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"optional\":true,\"type\":\"struct\"}],\"optional\":false,\"type\":\"struct\"}").unwrap());
         assert_eq!(
-            json_chunk[0].as_str(),
-            "{\"v1\":0,\"v2\":0.0,\"v3\":{\"v4\":0,\"v5\":0.0}}"
+            serde_json::from_str::<Value>(&json_chunk[0]).unwrap(),
+            serde_json::from_str::<Value>("{\"v1\":0,\"v2\":0.0,\"v3\":{\"v4\":0,\"v5\":0.0}}")
+                .unwrap()
         );
 
         Ok(())

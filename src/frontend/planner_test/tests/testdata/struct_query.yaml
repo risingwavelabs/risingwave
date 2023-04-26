@@ -254,12 +254,19 @@
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select (v1).v2 from t;
-  binder_error: 'Bind error: column notation .v2 applied to type bigint, which is not a composite type'
+  binder_error: |-
+    Bind error: failed to bind expression: (v1).v2
+
+    Caused by:
+      Bind error: column notation .v2 applied to type bigint, which is not a composite type
 - sql: |
     create materialized view t as select * from s;
     select (country + country) from t;
   binder_error: |-
-    Feature is not yet implemented: Add[Struct, Struct]
+    Bind error: failed to bind expression: (country + country)
+
+    Caused by:
+      Feature is not yet implemented: Add[Struct, Struct]
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
   create_source:
     row_format: protobuf
@@ -280,7 +287,11 @@
 - sql: |
     create materialized view t as select * from s;
     select avg(country) from t;
-  binder_error: 'Invalid input syntax: Invalid aggregation: avg(struct<address varchar,zipcode varchar>)'
+  binder_error: |-
+    Bind error: failed to bind expression: avg(country)
+
+    Caused by:
+      Invalid input syntax: Invalid aggregation: avg(struct<address varchar,zipcode varchar>)
   create_source:
     row_format: protobuf
     name: s
@@ -300,7 +311,11 @@
 - sql: |
     create materialized view t as select * from s;
     select (country).city from t;
-  binder_error: 'Bind error: column "city" not found in struct type'
+  binder_error: |-
+    Bind error: failed to bind expression: (country).city
+
+    Caused by:
+      Bind error: column "city" not found in struct type
   create_source:
     row_format: protobuf
     name: s
@@ -340,7 +355,7 @@
 - sql: |
     insert into s values (1,2,(1,2,(1,2,null)));
   logical_plan: |
-    LogicalInsert { table: s }
+    LogicalInsert { table: s, mapping: [0:0, 1:1, 2:2] }
     └─LogicalValues { rows: [[1:Int32, 2:Int32, Row(1:Int32, 2:Int32, Row(1:Int32, 2:Int32, null:Int32))]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32, *VALUES*_0.column_2:Struct(StructType { fields: [Int32, Int32, Struct(StructType { fields: [Int32, Int32, Int32], field_names: ["v1", "v2", "v3"] })], field_names: ["v1", "v2", "v3"] })] } }
   create_table_with_connector:
     row_format: protobuf

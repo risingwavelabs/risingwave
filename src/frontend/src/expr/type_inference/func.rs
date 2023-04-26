@@ -73,7 +73,7 @@ pub fn infer_some_all(
         Some(DataTypeName::from(*datatype))
     } else {
         return Err(ErrorCode::BindError(
-            "op ANY/ALL (array) requires array on right side".to_string(),
+            "op SOME/ANY/ALL (array) requires array on right side".to_string(),
         )
         .into());
     };
@@ -605,6 +605,9 @@ fn infer_type_for_special(
                 _ => Ok(None),
             }
         }
+        ExprType::StringToArray => Ok(Some(DataType::List {
+            datatype: Box::new(DataType::Varchar),
+        })),
         ExprType::Cardinality => {
             ensure_arity!("cardinality", | inputs | == 1);
             let return_type = inputs[0].return_type();
@@ -620,6 +623,17 @@ fn infer_type_for_special(
                 DataType::List {
                     datatype: _list_elem_type,
                 } => Ok(Some(DataType::Int64)),
+                _ => Ok(None),
+            }
+        }
+        ExprType::TrimArray => {
+            ensure_arity!("trim_array", | inputs | == 2);
+
+            let owned = std::mem::replace(&mut inputs[1], ExprImpl::literal_bool(true));
+            inputs[1] = owned.cast_implicit(DataType::Int32)?;
+
+            match inputs[0].return_type() {
+                DataType::List { datatype: typ } => Ok(Some(DataType::List { datatype: typ })),
                 _ => Ok(None),
             }
         }

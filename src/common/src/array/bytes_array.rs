@@ -19,10 +19,9 @@ use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{ArrayType, PbArray};
 
-use super::{Array, ArrayBuilder, ArrayMeta};
-use crate::array::ArrayBuilderImpl;
+use super::{Array, ArrayBuilder, DataType};
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::collection::estimate_size::EstimateSize;
+use crate::estimate_size::EstimateSize;
 use crate::util::iter_util::ZipEqDebug;
 
 /// `BytesArray` is a collection of Rust `[u8]`s.
@@ -112,9 +111,8 @@ impl Array for BytesArray {
         self.bitmap = bitmap;
     }
 
-    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
-        let array_builder = BytesArrayBuilder::new(capacity);
-        ArrayBuilderImpl::Bytea(array_builder)
+    fn data_type(&self) -> DataType {
+        DataType::Bytea
     }
 }
 
@@ -158,7 +156,7 @@ pub struct BytesArrayBuilder {
 impl ArrayBuilder for BytesArrayBuilder {
     type ArrayType = BytesArray;
 
-    fn with_meta(capacity: usize, _meta: ArrayMeta) -> Self {
+    fn new(capacity: usize) -> Self {
         let mut offset = Vec::with_capacity(capacity + 1);
         offset.push(0);
         Self {
@@ -166,6 +164,11 @@ impl ArrayBuilder for BytesArrayBuilder {
             data: Vec::with_capacity(capacity),
             bitmap: BitmapBuilder::with_capacity(capacity),
         }
+    }
+
+    fn with_type(capacity: usize, ty: DataType) -> Self {
+        assert_eq!(ty, DataType::Bytea);
+        Self::new(capacity)
     }
 
     fn append_n<'a>(&'a mut self, n: usize, value: Option<&'a [u8]>) {

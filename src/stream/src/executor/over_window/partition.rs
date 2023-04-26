@@ -13,18 +13,20 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_expr::function::window::WindowFuncCall;
 
 use super::state::{create_window_state, StateKey, WindowState};
+use crate::executor::StreamExecutorResult;
 
 pub(super) struct Partition {
     pub states: Vec<Box<dyn WindowState + Send>>,
 }
 
 impl Partition {
-    pub fn new(calls: &[WindowFuncCall]) -> Self {
-        let states = calls.iter().map(create_window_state).collect();
-        Self { states }
+    pub fn new(calls: &[WindowFuncCall]) -> StreamExecutorResult<Self> {
+        let states = calls.iter().map(create_window_state).try_collect()?;
+        Ok(Self { states })
     }
 
     pub fn is_aligned(&self) -> bool {
@@ -48,5 +50,13 @@ impl Partition {
         self.states
             .first()
             .and_then(|state| state.curr_window().key)
+    }
+}
+
+impl EstimateSize for Partition {
+    fn estimated_heap_size(&self) -> usize {
+        // FIXME: implement correct size
+        // https://github.com/risingwavelabs/risingwave/issues/8957
+        0
     }
 }
