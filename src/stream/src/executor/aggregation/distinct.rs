@@ -27,7 +27,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
 use super::AggCall;
-use crate::cache::{new_unbounded, ManagedLruCache, new_unbounded_with_metrics};
+use crate::cache::{new_unbounded_with_metrics, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::executor::StreamExecutorResult;
@@ -195,7 +195,11 @@ pub struct DistinctDeduplicater<S: StateStore> {
 }
 
 impl<S: StateStore> DistinctDeduplicater<S> {
-    pub fn new(agg_calls: &[AggCall], watermark_epoch: &Arc<AtomicU64>, metrics_info: MetricsInfo) -> Self {
+    pub fn new(
+        agg_calls: &[AggCall],
+        watermark_epoch: &Arc<AtomicU64>,
+        metrics_info: MetricsInfo,
+    ) -> Self {
         let deduplicaters: HashMap<_, _> = agg_calls
             .iter()
             .enumerate()
@@ -381,7 +385,11 @@ mod tests {
             .values_mut()
             .for_each(|table| table.init_epoch(epoch));
 
-        let mut deduplicater = DistinctDeduplicater::new(&agg_calls, &Arc::new(AtomicU64::new(0)), MetricsInfo::for_test());
+        let mut deduplicater = DistinctDeduplicater::new(
+            &agg_calls,
+            &Arc::new(AtomicU64::new(0)),
+            MetricsInfo::for_test(),
+        );
 
         // --- chunk 1 ---
 
@@ -465,7 +473,11 @@ mod tests {
         }
 
         // test recovery
-        let mut deduplicater = DistinctDeduplicater::new(&agg_calls, &Arc::new(AtomicU64::new(0)), MetricsInfo::for_test());
+        let mut deduplicater = DistinctDeduplicater::new(
+            &agg_calls,
+            &Arc::new(AtomicU64::new(0)),
+            MetricsInfo::for_test(),
+        );
 
         // --- chunk 3 ---
 
@@ -552,7 +564,11 @@ mod tests {
             .values_mut()
             .for_each(|table| table.init_epoch(epoch));
 
-        let mut deduplicater = DistinctDeduplicater::new(&agg_calls, &Arc::new(AtomicU64::new(0)), MetricsInfo::for_test());
+        let mut deduplicater = DistinctDeduplicater::new(
+            &agg_calls,
+            &Arc::new(AtomicU64::new(0)),
+            MetricsInfo::for_test(),
+        );
 
         let chunk = StreamChunk::from_pretty(
             " I   I     I

@@ -23,7 +23,6 @@ use futures::StreamExt;
 use futures_async_stream::for_await;
 pub(super) use join_entry_state::JoinEntryState;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
-use prometheus::core::Metric;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
@@ -316,7 +315,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
         let metrics_info = MetricsInfo::new(metrics.clone(), join_table_id, actor_id);
 
-        let cache = new_with_hasher_in(watermark_epoch,  metrics_info ,PrecomputedBuildHasher, alloc);
+        let cache =
+            new_with_hasher_in(watermark_epoch, metrics_info, PrecomputedBuildHasher, alloc);
 
         Self {
             inner: cache,

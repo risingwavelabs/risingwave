@@ -81,6 +81,7 @@ pub struct StreamingMetrics {
     // Memory management
     // FIXME(yuhao): use u64 here
     pub lru_current_watermark_time_ms: IntGauge,
+    pub lru_evicted_watermark_time_ms: GenericGaugeVec<AtomicI64>,
     pub lru_physical_now_ms: IntGauge,
     pub lru_runtime_loop_count: IntCounter,
     pub lru_watermark_step: IntGauge,
@@ -421,6 +422,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let lru_evicted_watermark_time_ms = register_int_gauge_vec_with_registry!(
+            "lru_evicted_watermark_time_ms",
+            "The latest evicted watermark time by actors",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
         let lru_physical_now_ms = register_int_gauge_with_registry!(
             "lru_physical_now_ms",
             "Current physical time in Risingwave(ms)",
@@ -515,6 +524,7 @@ impl StreamingMetrics {
             barrier_sync_latency,
             sink_commit_duration,
             lru_current_watermark_time_ms,
+            lru_evicted_watermark_time_ms,
             lru_physical_now_ms,
             lru_runtime_loop_count,
             lru_watermark_step,

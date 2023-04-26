@@ -16,7 +16,7 @@ use std::hash::Hash;
 
 use risingwave_common::estimate_size::EstimateSize;
 
-use crate::cache::{new_unbounded, ManagedLruCache, new_unbounded_with_metrics};
+use crate::cache::{new_unbounded_with_metrics, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::task::AtomicU64Ref;
 
@@ -64,9 +64,8 @@ mod tests {
     use std::sync::atomic::AtomicU64;
     use std::sync::Arc;
 
-    use crate::common::metrics::MetricsInfo;
-
     use super::DedupCache;
+    use crate::common::metrics::MetricsInfo;
 
     #[test]
     fn test_dedup_cache() {

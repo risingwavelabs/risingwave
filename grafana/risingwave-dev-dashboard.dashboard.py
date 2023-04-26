@@ -2338,6 +2338,16 @@ def section_memory_manager(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_ms(
+                    "LRU manager diff between current watermark and evicted watermark time (ms) for actors",
+                    "The evicted_watermark_time is the last watermark a actor evicted by",
+                    [
+                        panels.target(
+                            f"{metric('lru_current_watermark_time_ms')} - {metric('lru_evicted_watermark_time_ms')}",
+                            "table {{table_id}} actor {{actor_id}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_memory(
                     "The memory allocated by jemalloc",
                     "",

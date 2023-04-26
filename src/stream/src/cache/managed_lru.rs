@@ -22,6 +22,7 @@ use std::sync::Arc;
 use lru::DefaultHasher;
 use risingwave_common::estimate_size::collections::lru::EstimatedLruCache;
 use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common::util::epoch::Epoch;
 
 use crate::common::metrics::MetricsInfo;
 
@@ -42,6 +43,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
     pub fn evict(&mut self) {
         let epoch = self.watermark_epoch.load(Ordering::Relaxed);
         self.inner.evict_by_epoch(epoch);
+        self.report_evicted_watermark(epoch);
     }
 
     /// Evict epochs lower than the watermark, except those entry which touched in this epoch
@@ -49,6 +51,17 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
         let epoch = self.watermark_epoch.load(Ordering::Relaxed);
         let epoch = min(epoch, self.inner.current_epoch());
         self.inner.evict_by_epoch(epoch);
+        self.report_evicted_watermark(epoch);
+    }
+
+    fn report_evicted_watermark(&self, epoch: u64) {
+        if let Some(metrics_info) = self.metrics_info.as_ref() {
+            metrics_info
+                .metrics
+                .lru_evicted_watermark_time_ms
+                .with_label_values(&[&metrics_info.table_id, &metrics_info.actor_id])
+                .set(Epoch(epoch).physical_time() as _);
+        };
     }
 }
 

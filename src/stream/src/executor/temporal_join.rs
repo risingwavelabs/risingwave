@@ -33,7 +33,7 @@ use risingwave_storage::StateStore;
 use super::{Barrier, Executor, Message, MessageStream, StreamExecutorError, StreamExecutorResult};
 use crate::cache::{cache_may_stale, new_with_hasher_in, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
-use crate::common::{StreamChunkBuilder, metrics};
+use crate::common::StreamChunkBuilder;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, BoxedExecutor, JoinType, JoinTypePrimitive, PkIndices};
 use crate::task::AtomicU64Ref;
@@ -197,7 +197,12 @@ impl<S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<S, T> {
 
         let metrics_info = MetricsInfo::new(metrics.clone(), table.table_id().table_id, ctx.id);
 
-        let cache = new_with_hasher_in(watermark_epoch, metrics_info ,DefaultHasher::default(), alloc);
+        let cache = new_with_hasher_in(
+            watermark_epoch,
+            metrics_info,
+            DefaultHasher::default(),
+            alloc,
+        );
 
         Self {
             ctx,

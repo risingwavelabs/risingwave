@@ -20,7 +20,6 @@ use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use iter_chunks::IterChunks;
 use itertools::Itertools;
-use prometheus::core::Metric;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
@@ -532,13 +531,25 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             inner: mut this,
         } = self;
 
-        let metrics_info = MetricsInfo::new(this.metrics.clone(), this.result_table.table_id(), this.actor_ctx.id);
+        let metrics_info = MetricsInfo::new(
+            this.metrics.clone(),
+            this.result_table.table_id(),
+            this.actor_ctx.id,
+        );
 
         let mut vars = ExecutionVars {
             stats: ExecutionStats::new(),
-            agg_group_cache: new_with_hasher(this.watermark_epoch.clone(), metrics_info.clone(), PrecomputedBuildHasher),
+            agg_group_cache: new_with_hasher(
+                this.watermark_epoch.clone(),
+                metrics_info.clone(),
+                PrecomputedBuildHasher,
+            ),
             group_change_set: HashSet::new(),
-            distinct_dedup: DistinctDeduplicater::new(&this.agg_calls, &this.watermark_epoch, metrics_info),
+            distinct_dedup: DistinctDeduplicater::new(
+                &this.agg_calls,
+                &this.watermark_epoch,
+                metrics_info,
+            ),
             buffered_watermarks: vec![None; this.group_key_indices.len()],
             window_watermark: None,
             chunk_builder: ChunkBuilder::new(this.chunk_size, &this.info.schema.data_types()),

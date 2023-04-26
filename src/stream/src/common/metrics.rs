@@ -14,14 +14,14 @@
 
 use std::sync::Arc;
 
-use crate::task::ActorId;
 use crate::executor::monitor::StreamingMetrics;
+use crate::task::ActorId;
 
 #[derive(Clone)]
 pub struct MetricsInfo {
-    metrics: Arc<StreamingMetrics>,
-    table_id: String,
-    actor_id: String,
+    pub metrics: Arc<StreamingMetrics>,
+    pub table_id: String,
+    pub actor_id: String,
 }
 
 impl MetricsInfo {
