@@ -211,31 +211,8 @@ setup() {
   configure_all
 }
 
-############## MAIN
-
-main() {
-  echo "--- Machine Debug Info before Setup"
-  print_machine_debug_info
-
-  # Sets nexmark queries. For example: NEXMARK_QUERIES="nexmark-q17 nexmark-q1"
-  echo "--- Getting nexmark queries to run"
-  get_nexmark_queries_to_run
-
-  echo "--- Running setup"
-  setup
-
-  echo "--- Machine Debug Info after Setup"
-  print_machine_debug_info
-
-  echo "--- Starting kafka"
-  start_kafka
-
-  echo "--- Spawning nexmark events"
-  gen_events
-
-  echo "--- Machine Debug Info After Nexmark events generated"
-  print_machine_debug_info
-
+# Run benchmark for a query
+run() {
   echo "--- Starting up RW"
   pushd risingwave
   ./risedev d ci-gen-cpu-flamegraph
@@ -269,6 +246,34 @@ main() {
 
   echo "--- Uploading flamegraph"
   buildkite-agent artifact upload ./perf.svg
+}
+
+############## MAIN
+
+main() {
+  echo "--- Machine Debug Info before Setup"
+  print_machine_debug_info
+
+  # Sets nexmark queries. For example: NEXMARK_QUERIES="nexmark-q17 nexmark-q1"
+  echo "--- Getting nexmark queries to run"
+  get_nexmark_queries_to_run
+
+  echo "--- Running setup"
+  setup
+
+  echo "--- Machine Debug Info after Setup"
+  print_machine_debug_info
+
+  echo "--- Starting kafka"
+  start_kafka
+
+  echo "--- Spawning nexmark events"
+  gen_events
+
+  echo "--- Machine Debug Info After Nexmark events generated"
+  print_machine_debug_info
+
+  run
 
   # TODO(kwannoel): `trap ERR` and upload these logs.
   #  echo "--- Uploading rw logs"
