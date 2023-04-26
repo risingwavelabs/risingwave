@@ -59,7 +59,8 @@ public final class ValidatorUtils {
         return storedSqls.getProperty(name);
     }
 
-    public static String getJdbcUrl(SourceTypeE sourceType, String host, String port, String database) {
+    public static String getJdbcUrl(
+            SourceTypeE sourceType, String host, String port, String database) {
         switch (sourceType) {
             case MYSQL:
                 return String.format("jdbc:mysql://%s:%s/%s", host, port, database);
