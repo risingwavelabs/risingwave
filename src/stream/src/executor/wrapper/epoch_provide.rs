@@ -14,38 +14,10 @@
 
 use futures::{pin_mut, TryStreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::epoch;
 
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{Message, MessageStream};
-
-tokio::task_local! {
-    static EPOCH: EpochPair;
-}
-
-/// Retrieve the current epoch from the task local storage.
-///
-/// This value is updated after every yield of the barrier message. **Panics** if the first barrier
-/// message is not yielded.
-pub fn curr_epoch() -> u64 {
-    EPOCH.with(|e| e.curr)
-}
-
-/// Retrieve the previous epoch from the task local storage.
-///
-/// This value is updated after every yield of the barrier message. **Panics** if the first barrier
-/// message is not yielded.
-pub fn prev_epoch() -> u64 {
-    EPOCH.with(|e| e.prev)
-}
-
-/// Retrieve the epoch pair from the task local storage.
-///
-/// This value is updated after every yield of the barrier message. **Panics** if the first barrier
-/// message is not yielded.
-pub fn epoch() -> EpochPair {
-    EPOCH.get()
-}
 
 /// Streams wrapped by `epoch_provide` is able to retrieve the current epoch from the `xxx`
 /// function.
@@ -56,7 +28,7 @@ pub async fn epoch_provide(input: impl MessageStream) {
     let mut epoch = None;
 
     while let Some(message) = if let Some(epoch) = epoch {
-        EPOCH.scope(epoch, input.try_next()).await?
+        epoch::task_local::scope(epoch, input.try_next()).await?
     } else {
         input.try_next().await?
     } {

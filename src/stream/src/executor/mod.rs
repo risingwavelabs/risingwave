@@ -143,13 +143,15 @@ pub use top_n::{
 pub use union::UnionExecutor;
 pub use values::ValuesExecutor;
 pub use watermark_filter::WatermarkFilterExecutor;
-pub use wrapper::{curr_epoch, epoch, prev_epoch, WrapperExecutor};
+pub use wrapper::WrapperExecutor;
 
 use self::barrier_align::AlignedMessageStream;
 
 pub type BoxedExecutor = Box<dyn Executor>;
 pub type MessageStreamItem = StreamExecutorResult<Message>;
 pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
+
+pub use risingwave_common::util::epoch::task_local::{curr_epoch, epoch, prev_epoch};
 
 pub trait MessageStream = futures::Stream<Item = MessageStreamItem> + Send;
 

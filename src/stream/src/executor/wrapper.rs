@@ -29,8 +29,6 @@ mod schema_check;
 mod trace;
 mod update_check;
 
-pub use epoch_provide::{curr_epoch, epoch, prev_epoch};
-
 struct ExtraInfo {
     /// Index of input to this operator.
     input_pos: usize,

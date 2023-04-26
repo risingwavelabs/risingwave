@@ -124,6 +124,52 @@ impl EpochPair {
         Self::new(curr, curr - 1)
     }
 }
+
+/// Task-local storage for the epoch pair.
+pub mod task_local {
+    use futures::Future;
+    use tokio::task::futures::TaskLocalFuture;
+    use tokio::task_local;
+
+    use super::{Epoch, EpochPair};
+
+    task_local! {
+        static TASK_LOCAL_EPOCH_PAIR: EpochPair;
+    }
+
+    /// Retrieve the current epoch from the task local storage.
+    ///
+    /// This value is updated after every yield of the barrier message. Returns `None` if the first
+    /// barrier message is not yielded.
+    pub fn curr_epoch() -> Option<Epoch> {
+        TASK_LOCAL_EPOCH_PAIR.try_with(|e| Epoch(e.curr)).ok()
+    }
+
+    /// Retrieve the previous epoch from the task local storage.
+    ///
+    /// This value is updated after every yield of the barrier message. Returns `None` if the first
+    /// barrier message is not yielded.
+    pub fn prev_epoch() -> Option<Epoch> {
+        TASK_LOCAL_EPOCH_PAIR.try_with(|e| Epoch(e.prev)).ok()
+    }
+
+    /// Retrieve the epoch pair from the task local storage.
+    ///
+    /// This value is updated after every yield of the barrier message. Returns `None` if the first
+    /// barrier message is not yielded.
+    pub fn epoch() -> Option<EpochPair> {
+        TASK_LOCAL_EPOCH_PAIR.try_with(|e| *e).ok()
+    }
+
+    /// Provides the given epoch pair in the task local storage for the scope of the given future.
+    pub fn scope<F>(epoch: EpochPair, f: F) -> TaskLocalFuture<EpochPair, F>
+    where
+        F: Future,
+    {
+        TASK_LOCAL_EPOCH_PAIR.scope(epoch, f)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::{Local, TimeZone, Utc};
