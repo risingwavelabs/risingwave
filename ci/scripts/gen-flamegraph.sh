@@ -226,6 +226,7 @@ run() {
   echo "QUERY_LABEL: $QUERY_LABEL"
   echo "QUERY_FILE_NAME: $QUERY_FILE_NAME"
   echo "QUERY_PATH: $QUERY_PATH"
+  echo "FLAMEGRAPH_PATH: $FLAMEGRAPH_PATH"
 
   echo "--- Starting up RW"
   pushd risingwave
