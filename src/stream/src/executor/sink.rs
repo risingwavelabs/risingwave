@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use futures::stream::select;
-use futures::{FutureExt, Stream, StreamExt};
+use futures::{FutureExt, StreamExt};
 use futures_async_stream::try_stream;
 use prometheus::Histogram;
 use risingwave_common::array::{Op, StreamChunk};
@@ -26,24 +26,23 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_connector::sink::catalog::SinkType;
 use risingwave_connector::sink::{Sink, SinkConfig, SinkImpl};
-use risingwave_connector::ConnectorParams;
+use risingwave_connector::{dispatch_sink, ConnectorParams};
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, Message};
 use crate::common::log_store::{LogReader, LogStoreFactory, LogStoreReadItem, LogWriter};
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{expect_first_barrier, ActorContextRef, PkIndices};
+use crate::executor::{expect_first_barrier, ActorContextRef, BoxedMessageStream, PkIndices};
 
 pub struct SinkExecutor<F: LogStoreFactory> {
     input: BoxedExecutor,
     metrics: Arc<StreamingMetrics>,
+    sink: SinkImpl,
     config: SinkConfig,
     identity: String,
-    connector_params: ConnectorParams,
     schema: Schema,
     pk_indices: Vec<usize>,
     sink_type: SinkType,
-    sink_id: u64,
     actor_context: ActorContextRef,
     log_reader: F::Reader,
     log_writer: F::Writer,
@@ -97,42 +96,37 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         sink_id: u64,
         actor_context: ActorContextRef,
         log_store_factory: F,
-    ) -> Self {
+    ) -> StreamExecutorResult<Self> {
         let (log_reader, log_writer) = log_store_factory.build().await;
-        Self {
-            input: materialize_executor,
-            metrics,
-            config,
-            identity: format!("SinkExecutor {:X?}", executor_id),
-            pk_indices,
-            schema,
+        let sink = build_sink(
+            config.clone(),
+            schema.clone(),
+            pk_indices.clone(),
             connector_params,
             sink_type,
             sink_id,
+        )
+        .await?;
+        Ok(Self {
+            input: materialize_executor,
+            metrics,
+            sink,
+            config,
+            identity: format!("SinkExecutor {:X?}", executor_id),
+            schema,
+            sink_type,
+            pk_indices,
             actor_context,
             log_reader,
             log_writer,
-        }
+        })
     }
 
-    fn execute_inner(self) -> impl Stream<Item = StreamExecutorResult<Message>> {
-        let config = self.config.clone();
-        let schema = self.schema.clone();
-
+    fn execute_inner(self) -> BoxedMessageStream {
         let metrics = self
             .metrics
             .sink_commit_duration
             .with_label_values(&[self.identity.as_str(), self.config.get_connector()]);
-        let consume_log_stream = Self::execute_consume_log(
-            config,
-            schema,
-            self.pk_indices,
-            self.connector_params,
-            self.sink_type,
-            self.sink_id,
-            self.log_reader,
-            metrics,
-        );
 
         let write_log_stream = Self::execute_write_log(
             self.input,
@@ -142,7 +136,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             self.actor_context,
         );
 
-        select(consume_log_stream.into_stream(), write_log_stream)
+        dispatch_sink!(self.sink, sink, {
+            let consume_log_stream = Self::execute_consume_log(sink, self.log_reader, metrics);
+            select(consume_log_stream.into_stream(), write_log_stream).boxed()
+        })
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -203,79 +200,97 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         }
     }
 
-    #[expect(clippy::too_many_arguments)]
-    async fn execute_consume_log<R: LogReader>(
-        config: SinkConfig,
-        schema: Schema,
-        pk_indices: Vec<usize>,
-        connector_params: ConnectorParams,
-        sink_type: SinkType,
-        sink_id: u64,
+    async fn execute_consume_log<S: Sink, R: LogReader>(
+        mut sink: S,
         mut log_reader: R,
         sink_commit_duration_metrics: Histogram,
     ) -> StreamExecutorResult<Message> {
-        let mut sink = build_sink(
-            config,
-            schema,
-            pk_indices,
-            connector_params,
-            sink_type,
-            sink_id,
-        )
-        .await?;
+        log_reader.init().await?;
 
-        let mut epoch = log_reader.init().await?;
+        enum LogConsumerState {
+            /// Mark that the log consumer is not initialized yet
+            Uninitialized,
 
-        // the flag is required because kafka transaction requires at least one
-        // message, so we should abort the transaction if the flag is true.
-        let mut empty_checkpoint_flag = true;
-        let mut in_transaction = false;
+            /// Mark that there is some data written in this checkpoint.
+            Writing { curr_epoch: u64 },
+
+            /// Mark that the consumer has been checkpointed and there is no new data written after
+            /// the checkpoint
+            Checkpointed { prev_epoch: u64 },
+        }
+
+        let mut state = LogConsumerState::Uninitialized;
 
         loop {
-            let item: LogStoreReadItem = log_reader.next_item().await?;
+            let (epoch, item): (u64, LogStoreReadItem) = log_reader.next_item().await?;
             match item {
                 LogStoreReadItem::StreamChunk(chunk) => {
-                    // NOTE: We start the txn here because a force-append-only sink might
-                    // receive a data chunk full of DELETE messages and then drop all of them.
-                    // At this point (instead of the point above when we receive the upstream
-                    // data chunk), we make sure that we do have data to send out, and we can
-                    // thus mark the txn as started.
-                    if !in_transaction {
-                        sink.begin_epoch(epoch).await?;
-                        in_transaction = true;
-                    }
+                    state = match state {
+                        LogConsumerState::Uninitialized => {
+                            sink.begin_epoch(epoch).await?;
+                            LogConsumerState::Writing { curr_epoch: epoch }
+                        }
+                        LogConsumerState::Writing { curr_epoch } => {
+                            assert!(
+                                epoch >= curr_epoch,
+                                "new epoch {} should not be below the current epoch {}",
+                                epoch,
+                                curr_epoch
+                            );
+                            LogConsumerState::Writing { curr_epoch: epoch }
+                        }
+                        LogConsumerState::Checkpointed { prev_epoch } => {
+                            assert!(
+                                epoch > prev_epoch,
+                                "new epoch {} should be greater than prev epoch {}",
+                                epoch,
+                                prev_epoch
+                            );
+                            sink.begin_epoch(epoch).await?;
+                            LogConsumerState::Writing { curr_epoch: epoch }
+                        }
+                    };
 
                     if let Err(e) = sink.write_batch(chunk.clone()).await {
                         sink.abort().await?;
                         return Err(e.into());
                     }
-                    empty_checkpoint_flag = false;
                 }
-                LogStoreReadItem::Barrier {
-                    next_epoch,
-                    is_checkpoint,
-                } => {
-                    assert!(next_epoch > epoch);
-                    if is_checkpoint {
-                        if in_transaction {
-                            if empty_checkpoint_flag {
-                                sink.abort().await?;
-                                tracing::debug!(
-                                    "transaction abort due to empty epoch, epoch: {:?}",
-                                    epoch
-                                );
-                            } else {
+                LogStoreReadItem::Barrier { is_checkpoint } => {
+                    state = match state {
+                        LogConsumerState::Uninitialized => {
+                            LogConsumerState::Checkpointed { prev_epoch: epoch }
+                        }
+                        LogConsumerState::Writing { curr_epoch } => {
+                            assert!(
+                                epoch >= curr_epoch,
+                                "barrier epoch {} should not be below current epoch {}",
+                                epoch,
+                                curr_epoch
+                            );
+                            if is_checkpoint {
                                 let start_time = Instant::now();
                                 sink.commit().await?;
                                 sink_commit_duration_metrics
                                     .observe(start_time.elapsed().as_millis() as f64);
+                                LogConsumerState::Checkpointed { prev_epoch: epoch }
+                            } else {
+                                LogConsumerState::Writing { curr_epoch: epoch }
                             }
                         }
+                        LogConsumerState::Checkpointed { prev_epoch } => {
+                            assert!(
+                                epoch > prev_epoch,
+                                "checkpoint epoch {} should be greater than prev checkpoint epoch: {}",
+                                epoch,
+                                prev_epoch
+                            );
+                            LogConsumerState::Checkpointed { prev_epoch: epoch }
+                        }
+                    };
+                    if is_checkpoint {
                         log_reader.truncate().await?;
-                        in_transaction = false;
-                        empty_checkpoint_flag = true;
                     }
-                    epoch = next_epoch;
                 }
             }
         }
@@ -283,9 +298,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 }
 
 impl<F: LogStoreFactory> Executor for SinkExecutor<F> {
-    fn execute(self: Box<Self>) -> super::BoxedMessageStream {
-        // TODO: dispatch in enum
-        self.execute_inner().boxed()
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        self.execute_inner()
     }
 
     fn schema(&self) -> &Schema {
@@ -365,7 +379,8 @@ mod test {
             ActorContext::create(0),
             BoundedInMemLogStoreFactory::new(1),
         )
-        .await;
+        .await
+        .unwrap();
 
         let mut executor = SinkExecutor::execute(Box::new(sink_executor));
 
@@ -399,5 +414,71 @@ mod test {
 
         // The last barrier message.
         executor.next().await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_empty_barrier_sink() {
+        use risingwave_common::catalog::Field;
+        use risingwave_common::types::DataType;
+
+        use crate::executor::Barrier;
+
+        let properties = maplit::hashmap! {
+            "connector".into() => "blackhole".into(),
+            "type".into() => "append-only".into(),
+            "force_append_only".into() => "true".into()
+        };
+        let schema = Schema::new(vec![
+            Field::with_name(DataType::Int64, "v1"),
+            Field::with_name(DataType::Int64, "v2"),
+        ]);
+        let pk = vec![0];
+
+        let mock = MockSource::with_messages(
+            schema.clone(),
+            pk.clone(),
+            vec![
+                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Barrier(Barrier::new_test_barrier(3)),
+            ],
+        );
+
+        let config = SinkConfig::from_hashmap(properties).unwrap();
+        let sink_executor = SinkExecutor::new(
+            Box::new(mock),
+            Arc::new(StreamingMetrics::unused()),
+            config,
+            0,
+            Default::default(),
+            schema.clone(),
+            pk.clone(),
+            SinkType::ForceAppendOnly,
+            0,
+            ActorContext::create(0),
+            BoundedInMemLogStoreFactory::new(1),
+        )
+        .await
+        .unwrap();
+
+        let mut executor = SinkExecutor::execute(Box::new(sink_executor));
+
+        // Barrier message.
+        assert_eq!(
+            executor.next().await.unwrap().unwrap(),
+            Message::Barrier(Barrier::new_test_barrier(1))
+        );
+
+        // Barrier message.
+        assert_eq!(
+            executor.next().await.unwrap().unwrap(),
+            Message::Barrier(Barrier::new_test_barrier(2))
+        );
+
+        // The last barrier message.
+        assert_eq!(
+            executor.next().await.unwrap().unwrap(),
+            Message::Barrier(Barrier::new_test_barrier(3))
+        );
     }
 }
