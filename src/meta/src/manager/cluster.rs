@@ -164,66 +164,6 @@ where
         Ok(())
     }
 
-    // TODO: delete this function
-    /// Remove a 'deleting' worker node after it missed 3 heartbeats
-    async fn delete_worker_node_cleanup(&self, node_id: u32, host_address: HostAddress) {
-        let mut ticker = time::interval(Duration::from_millis(1100));
-        let mut log_ticker = time::interval(Duration::from_secs(60));
-        let start_time = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards")
-            .as_secs();
-        loop {
-            tokio::select! {
-                _ = log_ticker.tick() => {
-                    let now = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .expect("Time went backwards")
-                        .as_secs();
-                    tracing::warn!("Unable to delete compute node {:#?} with id {}. Trying since {} min",
-                        host_address,
-                        node_id,
-                        (now - start_time) / 60
-                    );
-                }
-                _ = ticker.tick() => {
-                    let mut core = self.core.write().await;
-                    let worker = match core.get_worker_by_host_checked(host_address.clone()) {
-                        Ok(w) => w,
-                        Err(_) => {
-                            tracing::warn!(
-                                "Unable to retrieve deleting worker node at address {:#?}",
-                                host_address
-                            );
-                            return;
-                         }
-                    };
-
-                    if worker.worker_node.state != State::Deleting as i32 || worker.worker_node.id != node_id  {
-                        tracing::warn!(
-                            "Worker node changed. Expected state deleting, got {} AND ID {}, got {}. Assuming this is a different node. Aborting deletion.",
-                            worker.worker_node.state,
-                            node_id,
-                            worker.worker_node.id
-                        );
-                        return;
-                    }
-
-                    // delete node if we missed 3 heartbeats
-                    let latest_beat = worker.expire_at();
-                    let now = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .expect("Time went backwards")
-                        .as_secs();
-                    if now > latest_beat + 3 * self.max_heartbeat_interval.as_secs() {
-                        core.delete_worker_node(worker);
-                        return;
-                    }
-                }
-            }
-        }
-    }
-
     // todo: instead of passing self pass arc mutex
     pub async fn delete_worker_node(&self, host_address: HostAddress) -> MetaResult<WorkerType> {
         let core = self.core.write().await;
