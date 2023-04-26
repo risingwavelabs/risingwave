@@ -20,6 +20,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay};
 use risingwave_expr::function::window::{Frame, WindowFuncKind};
+use risingwave_pb::expr::PbWindowFunction;
 
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::{InputRef, InputRefDisplay};
@@ -90,6 +91,29 @@ impl<'a> std::fmt::Debug for PlanWindowFunctionDisplay<'a> {
             f.write_str(")")?;
 
             Ok(())
+        }
+    }
+}
+
+impl PlanWindowFunction {
+    pub fn to_protobuf(&self) -> PbWindowFunction {
+        use risingwave_pb::expr::window_function::{PbGeneralType, PbType};
+        use WindowFuncKind::*;
+
+        let r#type = match self.kind {
+            RowNumber => PbType::General(PbGeneralType::RowNumber as _),
+            Rank => PbType::General(PbGeneralType::Rank as _),
+            DenseRank => PbType::General(PbGeneralType::DenseRank as _),
+            Lag => PbType::General(PbGeneralType::Lag as _),
+            Lead => PbType::General(PbGeneralType::Lead as _),
+            Aggregate(agg_kind) => PbType::Aggregate(agg_kind.to_protobuf() as _),
+        };
+
+        PbWindowFunction {
+            r#type: Some(r#type),
+            args: self.args.iter().map(InputRef::to_proto).collect(),
+            return_type: Some(self.return_type.to_protobuf()),
+            frame: Some(self.frame.to_protobuf()),
         }
     }
 }

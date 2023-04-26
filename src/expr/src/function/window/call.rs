@@ -64,6 +64,17 @@ impl Frame {
         };
         Ok(frame)
     }
+
+    pub fn to_protobuf(&self) -> PbWindowFrame {
+        use risingwave_pb::expr::window_frame::PbType;
+        match self {
+            Frame::Rows(start, end) => PbWindowFrame {
+                r#type: PbType::Rows as _,
+                start: Some(start.to_protobuf()),
+                end: Some(end.to_protobuf()),
+            },
+        }
+    }
 }
 
 impl Frame {
@@ -137,7 +148,7 @@ impl<T: Ord> PartialOrd for FrameBound<T> {
 }
 
 impl FrameBound<usize> {
-    fn from_protobuf(bound: &PbBound) -> Result<Self> {
+    pub fn from_protobuf(bound: &PbBound) -> Result<Self> {
         use risingwave_pb::expr::window_frame::bound::PbOffset;
         use risingwave_pb::expr::window_frame::PbBoundType;
 
@@ -154,6 +165,23 @@ impl FrameBound<usize> {
             PbOffset::Datum(_) => bail!("offset of `FrameBound<usize>` must be `Integer`"),
         };
         Ok(bound)
+    }
+
+    pub fn to_protobuf(&self) -> PbBound {
+        use risingwave_pb::expr::window_frame::bound::PbOffset;
+        use risingwave_pb::expr::window_frame::PbBoundType;
+
+        let (r#type, offset) = match self {
+            Self::UnboundedPreceding => (PbBoundType::UnboundedPreceding, PbOffset::Integer(0)),
+            Self::Preceding(offset) => (PbBoundType::Preceding, PbOffset::Integer(*offset as _)),
+            Self::CurrentRow => (PbBoundType::CurrentRow, PbOffset::Integer(0)),
+            Self::Following(offset) => (PbBoundType::Following, PbOffset::Integer(*offset as _)),
+            Self::UnboundedFollowing => (PbBoundType::UnboundedFollowing, PbOffset::Integer(0)),
+        };
+        PbBound {
+            r#type: r#type as _,
+            offset: Some(offset),
+        }
     }
 }
 
