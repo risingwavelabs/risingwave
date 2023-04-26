@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{FullKey, UserKey};
+use risingwave_common::must_match;
+use risingwave_hummock_sdk::key::{FullKey, PointRange, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
@@ -87,14 +89,17 @@ pub fn gen_dummy_sst_info(
     epoch: HummockEpoch,
 ) -> SstableInfo {
     let mut min_table_key: Vec<u8> = batches[0].start_table_key().to_vec();
-    let mut max_table_key: Vec<u8> = batches[0].end_table_key().to_vec();
+    let mut max_table_key: Vec<u8> =
+        must_match!(batches[0].end_table_key(), Bound::Included(table_key) => table_key.to_vec());
     let mut file_size = 0;
     for batch in batches.iter().skip(1) {
         if min_table_key.as_slice() > *batch.start_table_key() {
             min_table_key = batch.start_table_key().to_vec();
         }
-        if max_table_key.as_slice() < *batch.end_table_key() {
-            max_table_key = batch.end_table_key().to_vec();
+        if max_table_key.as_slice()
+            < must_match!(batch.end_table_key(), Bound::Included(table_key) => *table_key)
+        {
+            max_table_key = must_match!(batch.end_table_key(), Bound::Included(table_key) => table_key.to_vec());
         }
         file_size += batch.size() as u64;
     }
@@ -230,15 +235,13 @@ pub async fn gen_test_sstable_inner<B: AsRef<[u8]> + Clone + Default + Eq>(
         }
 
         let mut earliest_delete_epoch = HummockEpoch::MAX;
+        let extended_user_key = PointRange::from_user_key(key.user_key.as_ref(), false);
         for range_tombstone in &range_tombstones {
             if range_tombstone
                 .start_user_key
                 .as_ref()
-                .le(&key.user_key.as_ref())
-                && range_tombstone
-                    .end_user_key
-                    .as_ref()
-                    .gt(&key.user_key.as_ref())
+                .le(&extended_user_key)
+                && range_tombstone.end_user_key.as_ref().gt(&extended_user_key)
                 && range_tombstone.sequence >= key.epoch
                 && range_tombstone.sequence < earliest_delete_epoch
             {
@@ -263,7 +266,7 @@ pub async fn gen_test_sstable_inner<B: AsRef<[u8]> + Clone + Default + Eq>(
             .await
             .unwrap();
     }
-    b.add_monotonic_deletes(create_monotonic_events(&range_tombstones));
+    b.add_monotonic_deletes(create_monotonic_events(range_tombstones));
     let output = b.finish().await.unwrap();
     output.writer_output.await.unwrap().unwrap();
     let table = sstable_store

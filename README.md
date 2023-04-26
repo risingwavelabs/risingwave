@@ -18,7 +18,7 @@ Learn more at [Introduction to RisingWave](https://www.risingwave.dev/docs/curre
 
 ## RisingWave Cloud
 
-RisingWave Cloud is the fully managed service of RisingWave Database. It is now in Beta. Feel free to try out at: [risingwave.com/cloud](risingwave.com/cloud).
+RisingWave Cloud is the fully managed service of RisingWave Database. It is now in Beta. Feel free to try out at: [risingwave.com/cloud](https://risingwave.com/cloud).
 
 ## Notes on telemetry
 

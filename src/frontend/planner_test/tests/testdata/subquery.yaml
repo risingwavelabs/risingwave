@@ -20,7 +20,11 @@
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select v1 from (select v2, v1 as v3 from t) where v2 > 1;
-  binder_error: 'Item not found: Invalid column: v1'
+  binder_error: |-
+    Bind error: failed to bind expression: v1
+
+    Caused by:
+      Item not found: Invalid column: v1
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select v3 from (select v2, v1 as v3 from t) where v2 > 1;
@@ -87,15 +91,27 @@
 - sql: |
     create table t(x int);
     select * from t, (select * from t as t2 order by t.x desc) as t3;
-  binder_error: 'Item not found: Invalid column: x'
+  binder_error: |-
+    Bind error: failed to bind expression: t.x
+
+    Caused by:
+      Item not found: Invalid column: x
 - sql: |
     create table t(x int);
     select * from t, (select t.x) as t1;
-  binder_error: 'Item not found: Invalid column: x'
+  binder_error: |-
+    Bind error: failed to bind expression: t.x
+
+    Caused by:
+      Item not found: Invalid column: x
 - sql: |
     create table t(x int);
     select * from t CROSS JOIN (select t.x) as t1;
-  binder_error: 'Item not found: Invalid column: x'
+  binder_error: |-
+    Bind error: failed to bind expression: t.x
+
+    Caused by:
+      Item not found: Invalid column: x
 - sql: |
     create table ab (a int, b int);
     create table bc (b int, c int);
@@ -121,7 +137,14 @@
           select * from t where v1 = c
       ) as t0
     );
-  binder_error: 'Item not found: Invalid column: c'
+  binder_error: |-
+    Bind error: failed to bind expression: EXISTS (SELECT * FROM bc, (SELECT * FROM t WHERE v1 = c) AS t0)
+
+    Caused by:
+      Bind error: failed to bind expression: v1 = c
+
+    Caused by:
+      Item not found: Invalid column: c
 - name: We need to ensure doubly nested reference to a left table is not permitted
   sql: |
     create table ab (a int, b int);
@@ -132,7 +155,11 @@
           select * from t where v1 = a
       ) as t0
     );
-  binder_error: 'Item not found: Invalid column: a'
+  binder_error: |-
+    Bind error: failed to bind expression: v1 = a
+
+    Caused by:
+      Item not found: Invalid column: a
 - sql: |
     create table t1 (x int, y int);
     create table t2 (x int, y int);
@@ -247,14 +274,12 @@
     └─LogicalFilter { predicate: IsNotNull(auction.date_time) }
       └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(auction.date_time, auction.date_time), output: all }
         ├─LogicalScan { table: auction, columns: [auction.date_time], predicate: IsNotNull(auction.date_time) }
-        └─LogicalProject { exprs: [auction.date_time] }
-          └─LogicalProject { exprs: [auction.date_time, auction.date_time] }
-            └─LogicalAgg { group_key: [auction.date_time], aggs: [] }
-              └─LogicalJoin { type: Inner, on: true, output: all }
-                ├─LogicalAgg { group_key: [auction.date_time], aggs: [] }
-                | └─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
-                |   └─LogicalScan { table: auction, columns: [auction.date_time], predicate: IsNotNull(auction.date_time) }
-                └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+        └─LogicalAgg { group_key: [auction.date_time], aggs: [] }
+          └─LogicalJoin { type: Inner, on: true, output: all }
+            ├─LogicalAgg { group_key: [auction.date_time], aggs: [] }
+            | └─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
+            |   └─LogicalScan { table: auction, columns: [auction.date_time], predicate: IsNotNull(auction.date_time) }
+            └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
     BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
     └─BatchExchange { order: [], dist: Single }
@@ -263,17 +288,16 @@
           ├─BatchExchange { order: [], dist: HashShard(auction.date_time) }
           | └─BatchFilter { predicate: IsNotNull(auction.date_time) }
           |   └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
-          └─BatchProject { exprs: [auction.date_time] }
-            └─BatchHashAgg { group_key: [auction.date_time], aggs: [] }
-              └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
-                └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
-                  ├─BatchExchange { order: [], dist: Single }
-                  | └─BatchHashAgg { group_key: [auction.date_time], aggs: [] }
-                  |   └─BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
-                  |     └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
-                  |       └─BatchFilter { predicate: IsNotNull(auction.date_time) }
-                  |         └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
-                  └─BatchValues { rows: [[]] }
+          └─BatchHashAgg { group_key: [auction.date_time], aggs: [] }
+            └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
+              └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+                ├─BatchExchange { order: [], dist: Single }
+                | └─BatchHashAgg { group_key: [auction.date_time], aggs: [] }
+                |   └─BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
+                |     └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
+                |       └─BatchFilter { predicate: IsNotNull(auction.date_time) }
+                |         └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
+                └─BatchValues { rows: [[]] }
   stream_error: |-
     Not supported: streaming nested-loop join
     HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.

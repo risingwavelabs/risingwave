@@ -123,6 +123,7 @@ where
 
         #[for_await]
         for msg in input {
+            self.inner.evict();
             let msg = msg?;
             match msg {
                 Message::Watermark(watermark) => {
@@ -138,7 +139,6 @@ where
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         self.inner.update_vnode_bitmap(vnode_bitmap);
                     }
-                    self.inner.evict();
                     yield Message::Barrier(barrier)
                 }
             };

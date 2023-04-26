@@ -1239,7 +1239,7 @@ def section_batch_exchange(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"{metric('batch_task_exchange_recv_row_number')}",
+                            f"{metric('batch_exchange_recv_row_number')}",
                             "{{query_id}} : {{source_stage_id}}.{{source_task_id}} -> {{target_stage_id}}.{{target_task_id}}",
                         ),
                     ],
@@ -2366,6 +2366,16 @@ def section_connector_node(outer_panels):
                         panels.target(
                             f"rate({metric('connector_source_rows_received')}[$__interval])",
                             "{{source_type}} @ {{source_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "Connector Sink Throughput(rows)",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('connector_sink_rows_received')}[$__interval])",
+                            "{{connector_type}} @ {{sink_id}}",
                         ),
                     ],
                 ),
