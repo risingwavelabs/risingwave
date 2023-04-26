@@ -16,7 +16,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{FieldDisplay, Schema};
+use risingwave_common::catalog::FieldDisplay;
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
@@ -28,7 +28,6 @@ use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
 use crate::optimizer::PlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::ConditionDisplay;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamDynamicFilter {
@@ -83,20 +82,7 @@ impl fmt::Display for StreamDynamicFilter {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("StreamDynamicFilter");
 
-        let mut concat_schema = self.left().schema().fields.clone();
-        concat_schema.extend(self.right().schema().fields.clone());
-        let concat_schema = Schema::new(concat_schema);
-
-        let predicate = self.core.predicate();
-
-        builder.field(
-            "predicate",
-            &ConditionDisplay {
-                condition: &predicate,
-                input_schema: &concat_schema,
-            },
-        );
-
+        self.core.fmt_fields_with_builder(&mut builder);
         let watermark_columns = &self.base.watermark_columns;
         if self.base.watermark_columns.count_ones(..) > 0 {
             let schema = self.schema();
