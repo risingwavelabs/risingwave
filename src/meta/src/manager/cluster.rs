@@ -240,13 +240,12 @@ where
         // TODO: should not be blocking
         // Alternative write a function that is called on startup of cluster manager that checks for
         // deleted nodes every so and so seconds
-        delete_worker_node_cleanup(
+        tokio::task::spawn(delete_worker_node_cleanup(
             self.core.clone(),
             worker.worker_node.id.clone(),
             host_address.clone(),
             self.max_heartbeat_interval.clone(),
-        )
-        .await;
+        ));
 
         // Notify frontends to delete compute node.
         if worker_type == WorkerType::ComputeNode {
@@ -742,7 +741,7 @@ async fn delete_worker_node_cleanup(
                         .duration_since(UNIX_EPOCH)
                         .expect("Time went backwards")
                         .as_secs();
-                    tracing::warn!("Unable to delete compute node {:#?} with id {}. Trying since {} min",
+                    tracing::warn!("Compute {:#?} with id {} is still deleting. Trying since {} min",
                         host_address,
                         node_id,
                         (now - start_time) / 60
