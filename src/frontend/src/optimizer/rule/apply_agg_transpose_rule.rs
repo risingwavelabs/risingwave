@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use fixedbitset::FixedBitSet;
 use risingwave_common::types::DataType;
 use risingwave_expr::function::aggregate::AggKind;
 use risingwave_pb::plan_common::JoinType;
@@ -144,8 +145,8 @@ impl Rule for ApplyAggTransposeRule {
                     }
                 });
             }
-            let mut group_keys: Vec<usize> = (0..apply_left_len).collect();
-            group_keys.extend(agg_group_key.into_iter().map(|key| key + apply_left_len));
+            let mut group_keys: FixedBitSet = (0..apply_left_len).collect();
+            group_keys.extend(agg_group_key.ones().map(|key| key + apply_left_len));
             Agg::new(agg_calls, group_keys, node).into()
         };
 
