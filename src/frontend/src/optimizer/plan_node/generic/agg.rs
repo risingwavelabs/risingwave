@@ -391,6 +391,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 | AggKind::Max
                 | AggKind::StringAgg
                 | AggKind::ArrayAgg
+                | AggKind::JsonbAgg
                 | AggKind::FirstValue => {
                     if !in_append_only {
                         // columns with order requirement in state table
@@ -683,6 +684,9 @@ impl PlanAggCall {
             }
             AggKind::ArrayAgg => {
                 panic!("2-phase ArrayAgg is not supported yet")
+            }
+            AggKind::JsonbAgg => {
+                panic!("2-phase JsonbAgg is not supported yet")
             }
             AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp => {
                 panic!("Stddev/Var aggregation should have been rewritten to Sum, Count and Case")

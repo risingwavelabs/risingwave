@@ -274,6 +274,7 @@ message AggCall {
     BIT_XOR = 17;
     BOOL_AND = 18;
     BOOL_OR = 19;
+    JSONB_AGG = 20;
   }
   Type type = 1;
   repeated InputRef args = 2;

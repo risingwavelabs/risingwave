@@ -290,6 +290,7 @@ impl DistinctAggRule {
                     | AggKind::Avg
                     | AggKind::StringAgg
                     | AggKind::ArrayAgg
+                    | AggKind::JsonbAgg
                     | AggKind::FirstValue
                     | AggKind::StddevPop
                     | AggKind::StddevSamp

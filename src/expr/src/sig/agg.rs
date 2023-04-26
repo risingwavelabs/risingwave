@@ -193,6 +193,20 @@ pub fn infer_return_type(agg_kind: AggKind, inputs: &[DataType]) -> Option<DataT
             datatype: Box::new(input.clone()),
         },
         (AggKind::ArrayAgg, _) => return None,
+
+        // JsonbAgg
+        (
+            AggKind::JsonbAgg,
+            [DataType::Jsonb
+            | DataType::Boolean
+            | DataType::Int16
+            | DataType::Int32
+            | DataType::Int64
+            | DataType::Float32
+            | DataType::Float64
+            | DataType::Varchar],
+        ) => DataType::Jsonb,
+        (AggKind::JsonbAgg, _) => return None,
     };
 
     Some(return_type)
