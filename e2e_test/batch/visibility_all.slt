@@ -1,6 +1,0 @@
-statement ok
-SET VISIBILITY_MODE TO all;
-
-include ./local_mode.slt
-include ./distribution_mode.slt
-
