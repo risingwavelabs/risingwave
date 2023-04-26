@@ -18,8 +18,11 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::generic::{self, PlanWindowFunction};
+use super::utils::TableCatalogBuilder;
+use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::TableCatalog;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamEowcOverWindow {
@@ -54,6 +57,43 @@ impl StreamEowcOverWindow {
         );
         StreamEowcOverWindow { base, logical }
     }
+
+    fn window_functions(&self) -> &[PlanWindowFunction] {
+        &self.logical.window_functions
+    }
+
+    fn partition_key_indices(&self) -> Vec<usize> {
+        self.window_functions()[0]
+            .partition_by
+            .iter()
+            .map(|i| i.index())
+            .collect()
+    }
+
+    fn order_key_index(&self) -> usize {
+        self.window_functions()[0].order_by[0].column_index
+    }
+
+    fn infer_eowc_table(&self) -> TableCatalog {
+        // The EOWC over window state table has the same schema as the input.
+
+        let in_fields = self.logical.input.schema().fields();
+        let mut tbl_builder =
+            TableCatalogBuilder::new(self.ctx().with_options().internal_table_subset());
+        for field in in_fields {
+            tbl_builder.add_column(field);
+        }
+
+        let partition_key_indices = self.partition_key_indices();
+        for &idx in &partition_key_indices {
+            tbl_builder.add_order_column(idx, OrderType::ascending());
+        }
+        tbl_builder.add_order_column(self.order_key_index(), OrderType::ascending());
+
+        let in_dist_key = self.logical.input.distribution().dist_column_indices();
+        let read_prefix_len_hint = partition_key_indices.len();
+        tbl_builder.build(in_dist_key.to_vec(), read_prefix_len_hint)
+    }
 }
 
 impl fmt::Display for StreamEowcOverWindow {
@@ -76,8 +116,35 @@ impl PlanTreeNodeUnary for StreamEowcOverWindow {
 impl_plan_tree_node_for_unary! { StreamEowcOverWindow }
 
 impl StreamNode for StreamEowcOverWindow {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        todo!() // TODO()
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
+        use risingwave_pb::stream_plan::*;
+
+        let calls = self
+            .window_functions()
+            .iter()
+            .map(PlanWindowFunction::to_protobuf)
+            .collect();
+        let partition_by = self.window_functions()[0]
+            .partition_by
+            .iter()
+            .map(|i| i.index() as _)
+            .collect();
+        let order_by = self.window_functions()[0]
+            .order_by
+            .iter()
+            .map(|o| o.to_protobuf())
+            .collect();
+        let state_table = self
+            .infer_eowc_table()
+            .with_id(state.gen_table_id_wrapped())
+            .to_internal_table_prost();
+
+        PbNodeBody::EowcOverWindow(EowcOverWindowNode {
+            calls,
+            partition_by,
+            order_by,
+            state_table: Some(state_table),
+        })
     }
 }
 impl ExprRewritable for StreamEowcOverWindow {}
