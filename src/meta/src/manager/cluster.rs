@@ -17,7 +17,6 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use futures::Future;
 use itertools::Itertools;
 use risingwave_common::hash::ParallelUnitId;
 use risingwave_pb::common::worker_node::State;
@@ -25,9 +24,9 @@ use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::oneshot::Sender;
-use tokio::sync::{Mutex, RwLock, RwLockReadGuard};
+use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
-use tokio::{task, time};
+use tokio::time;
 
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
 use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
@@ -64,7 +63,7 @@ pub struct ClusterManager<S: MetaStore> {
 
     max_heartbeat_interval: Duration,
 
-    core: RwLock<ClusterManagerCore>,
+    core: Arc<RwLock<ClusterManagerCore>>,
 }
 
 impl<S> ClusterManager<S>
@@ -75,23 +74,11 @@ where
         let meta_store = env.meta_store_ref();
         let core = ClusterManagerCore::new(meta_store.clone()).await?;
 
-        let s = Arc::new(Mutex::new(Self {
+        Ok(Self {
             env,
             max_heartbeat_interval,
-            core: RwLock::new(core),
-        }));
-
-        let h = HostAddress {
-            host: "".to_owned(),
-            port: 1,
-        };
-        delete_worker_node_cleanup(s, 1, h);
-
-        // remove deleting if they missed heartbeats
-        // s.worker_node_cleanup_daemon();
-
-        let x = s.lock().await;
-        Ok(x)
+            core: RwLock::new(core).into(),
+        })
     }
 
     /// Used in `NotificationService::subscribe`.
@@ -254,9 +241,10 @@ where
         // Alternative write a function that is called on startup of cluster manager that checks for
         // deleted nodes every so and so seconds
         delete_worker_node_cleanup(
-            Arc::new(Mutex::new(*self)),
+            self.core.clone(),
             worker.worker_node.id.clone(),
             host_address.clone(),
+            self.max_heartbeat_interval.clone(),
         )
         .await;
 
@@ -732,14 +720,14 @@ mod tests {
     }
 }
 
-async fn delete_worker_node_cleanup<S>(
-    shared_manager: Arc<Mutex<ClusterManager<S>>>,
+// TODO: Right now we are cleaning up each worker one by one. Do we want this or do we want a
+// garbage collector instead that just iterates over all workers?
+async fn delete_worker_node_cleanup(
+    shared_core: Arc<RwLock<ClusterManagerCore>>,
     node_id: u32,
     host_address: HostAddress,
-) where
-    S: MetaStore,
-{
-    let s_manager = shared_manager.clone();
+    max_heartbeat_interval: Duration,
+) {
     tokio::task::spawn(async move {
         let mut ticker = time::interval(Duration::from_millis(1100));
         let mut log_ticker = time::interval(Duration::from_secs(60));
@@ -761,8 +749,8 @@ async fn delete_worker_node_cleanup<S>(
                     );
                 }
                 _ = ticker.tick() => {
-                    let manager = s_manager.lock().await;
-                    let mut core = manager.core.write().await;
+                   // let mut core = manager.core.write().await;
+                    let mut core = shared_core.write().await;
                     let worker = match core.get_worker_by_host_checked(host_address.clone()) {
                         Ok(w) => w,
                         Err(_) => {
@@ -790,7 +778,7 @@ async fn delete_worker_node_cleanup<S>(
                         .duration_since(UNIX_EPOCH)
                         .expect("Time went backwards")
                         .as_secs();
-                    if now > latest_beat + 3 * manager.max_heartbeat_interval.as_secs() {
+                    if now > latest_beat + 3 * max_heartbeat_interval.as_secs() {
                         core.delete_worker_node(worker);
                         return;
                     }
