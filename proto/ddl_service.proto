@@ -264,6 +264,7 @@ message CreateConnectionRequest {
   oneof payload {
     PrivateLink private_link = 4;
   }
+  uint32 owner_id = 5;
 }
 
 message CreateConnectionResponse {
@@ -285,6 +286,14 @@ message DropConnectionRequest {
 message DropConnectionResponse {
   common.Status status = 1;
   uint64 version = 2;
+}
+
+message GetTablesRequest {
+  repeated uint32 table_ids = 1;
+}
+
+message GetTablesResponse {
+  map<uint32, catalog.Table> tables = 1;
 }
 
 service DdlService {
@@ -314,4 +323,5 @@ service DdlService {
   rpc CreateConnection(CreateConnectionRequest) returns (CreateConnectionResponse);
   rpc ListConnections(ListConnectionsRequest) returns (ListConnectionsResponse);
   rpc DropConnection(DropConnectionRequest) returns (DropConnectionResponse);
+  rpc GetTables(GetTablesRequest) returns (GetTablesResponse);
 }

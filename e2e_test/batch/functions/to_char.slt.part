@@ -12,3 +12,28 @@ query T
 SELECT to_char(timestamp '2006-01-02 15:04:05', 'yyyy-mm-dd hh24:mi:ss');
 ----
 2006-01-02 15:04:05
+
+query T
+SELECT to_char(timestamp '2006-01-02 15:04:05.003', 'yyyy-mm-dd hh24:mi:ss.ms');
+----
+2006-01-02 15:04:05.003
+
+query T
+SELECT to_char(timestamp '2006-01-02 15:04:05.113223', 'yyyy-mm-dd hh24:mi:ss.us');
+----
+2006-01-02 15:04:05.113223
+
+query T
+SELECT to_char(timestamp '2006-01-02 15:04:05.113223', 'yyyy-mm-dd hh24:mi:ss.ms');
+----
+2006-01-02 15:04:05.113
+
+query T
+SELECT to_char(timestamp '2006-01-02 15:04:05.3', 'yyyy-mm-dd hh24:mi:ss.ms');
+----
+2006-01-02 15:04:05.300
+
+query T
+SELECT to_char(timestamp '2006-01-02 15:04:05.3', 'yyyy-mm-dd hh24:mi:ss.us');
+----
+2006-01-02 15:04:05.300000

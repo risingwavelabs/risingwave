@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod top_n_state;
+mod kind;
+pub use kind::*;
 
-use risingwave_common::row::{self, Row};
-pub use top_n_state::{ManagedTopNState, TopNStateRow};
-
-pub trait GroupKey = Row + Send + Sync;
-pub(crate) const NO_GROUP_KEY: Option<row::Empty> = None;
+mod call;
+pub use call::*;

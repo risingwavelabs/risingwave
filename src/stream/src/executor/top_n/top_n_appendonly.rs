@@ -21,16 +21,16 @@ use risingwave_storage::StateStore;
 
 use super::top_n_cache::AppendOnlyTopNCacheTrait;
 use super::utils::*;
-use super::TopNCache;
+use super::{ManagedTopNState, TopNCache, NO_GROUP_KEY};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::top_n::{ManagedTopNState, NO_GROUP_KEY};
 use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Watermark};
 
-/// If the input contains only append, `AppendOnlyTopNExecutor` does not need
-/// to keep all the data records/rows that have been seen. As long as a record
-/// is no longer being in the result set, it can be deleted.
+/// If the input is append-only, `AppendOnlyGroupTopNExecutor` does not need
+/// to keep all the rows seen. As long as a record
+/// is no longer in the result set, it can be deleted.
+///
 /// TODO: Optimization: primary key may contain several columns and is used to determine
 /// the order, therefore the value part should not contain the same columns to save space.
 pub type AppendOnlyTopNExecutor<S, const WITH_TIES: bool> =

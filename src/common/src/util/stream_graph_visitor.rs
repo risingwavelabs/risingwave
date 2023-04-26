@@ -143,9 +143,13 @@ where
                     always!(source.state_table, "Source");
                 }
             }
+
+            // Now
             NodeBody::Now(node) => {
                 always!(node.state_table, "Now");
             }
+
+            // Watermark filter
             NodeBody::WatermarkFilter(node) => {
                 assert!(!node.tables.is_empty());
                 repeated!(node.tables, "WatermarkFilter");
@@ -156,6 +160,11 @@ where
                 always!(node.table, "Arrange");
             }
 
+            // Dedup
+            NodeBody::AppendOnlyDedup(node) => {
+                always!(node.state_table, "AppendOnlyDedup");
+            }
+
             // Note: add internal tables for new nodes here.
             _ => {}
         }
@@ -163,7 +172,7 @@ where
 }
 
 /// Visit the internal tables of a [`StreamFragment`].
-pub(super) fn visit_internal_tables<F>(fragment: &mut StreamFragment, f: F)
+pub fn visit_internal_tables<F>(fragment: &mut StreamFragment, f: F)
 where
     F: FnMut(&mut Table, &str),
 {

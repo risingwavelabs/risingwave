@@ -25,7 +25,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::{GIT_SHA, RW_VERSION};
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::function::aggregate::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, WindowSpec};
 
 use crate::binder::bind_context::Clause;
@@ -358,19 +358,19 @@ impl Binder {
                 ("exp", raw_call(ExprType::Exp)),
                 ("mod", raw_call(ExprType::Modulus)),
                 ("sin", raw_call(ExprType::Sin)),
-                ("cos", raw_call(ExprType::Cos)), 
-                ("tan", raw_call(ExprType::Tan)), 
-                ("cot", raw_call(ExprType::Cot)), 
-                ("asin", raw_call(ExprType::Asin)), 
-                ("acos", raw_call(ExprType::Acos)), 
-                ("atan", raw_call(ExprType::Atan)), 
-                ("atan2", raw_call(ExprType::Atan2)),   
-                ("sind", raw_call(ExprType::Sind)),     
-                ("cosd", raw_call(ExprType::Cosd)), 
-                ("tand", raw_call(ExprType::Tand)), 
+                ("cos", raw_call(ExprType::Cos)),
+                ("tan", raw_call(ExprType::Tan)),
+                ("cot", raw_call(ExprType::Cot)),
+                ("asin", raw_call(ExprType::Asin)),
+                ("acos", raw_call(ExprType::Acos)),
+                ("atan", raw_call(ExprType::Atan)),
+                ("atan2", raw_call(ExprType::Atan2)),
+                ("sind", raw_call(ExprType::Sind)),
+                ("cosd", raw_call(ExprType::Cosd)),
+                ("tand", raw_call(ExprType::Tand)),
                 ("degrees", raw_call(ExprType::Degrees)),
                 ("radians", raw_call(ExprType::Radians)),
-                ("sqrt", raw_call(ExprType::Sqrt)),     
+                ("sqrt", raw_call(ExprType::Sqrt)),
 
                 (
                     "to_timestamp",
@@ -418,6 +418,7 @@ impl Binder {
                 ("to_ascii", raw_call(ExprType::ToAscii)),
                 ("to_hex", raw_call(ExprType::ToHex)),
                 ("quote_ident", raw_call(ExprType::QuoteIdent)),
+                ("string_to_array", raw_call(ExprType::StringToArray)),
                 // array
                 ("array_cat", raw_call(ExprType::ArrayCat)),
                 ("array_append", raw_call(ExprType::ArrayAppend)),
@@ -428,6 +429,8 @@ impl Binder {
                 ("array_length", raw_call(ExprType::ArrayLength)),
                 ("cardinality", raw_call(ExprType::Cardinality)),
                 ("array_remove", raw_call(ExprType::ArrayRemove)),
+                ("array_positions", raw_call(ExprType::ArrayPositions)),
+                ("trim_array", raw_call(ExprType::TrimArray)),
                 // int256
                 ("hex_to_int256", raw_call(ExprType::HexToInt256)),
                 // jsonb

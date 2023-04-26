@@ -231,6 +231,8 @@ impl Cluster {
                 "etcd:2388",
                 "--state-store",
                 "hummock+minio://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
+                "--data-directory",
+                "hummock_001",
             ]);
             handle
                 .create_node()

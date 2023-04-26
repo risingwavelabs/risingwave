@@ -22,9 +22,9 @@ use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::{Array, ArrayBuilder, ArrayResult};
 use crate::array::serial_array::Serial;
-use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayMeta};
+use crate::array::{ArrayImpl, DataType};
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::collection::estimate_size::EstimateSize;
+use crate::estimate_size::EstimateSize;
 use crate::for_all_native_types;
 use crate::types::decimal::Decimal;
 use crate::types::interval::Interval;
@@ -39,6 +39,8 @@ where
         + Scalar<ScalarRefType<'a> = Self>
         + ScalarRef<'a, ScalarType = Self>,
 {
+    /// The data type.
+    const DATA_TYPE: DataType;
     // array methods
     /// A helper to convert a primitive array to `ArrayImpl`.
     fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl;
@@ -48,8 +50,6 @@ where
     fn try_into_array_ref(arr: &ArrayImpl) -> Option<&PrimitiveArray<Self>>;
     /// Returns array type of the primitive array
     fn array_type() -> ArrayType;
-    /// Creates an `ArrayBuilder` for this primitive type
-    fn create_array_builder(capacity: usize) -> ArrayBuilderImpl;
 
     // item methods
     fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize>;
@@ -57,6 +57,8 @@ where
 
 macro_rules! impl_array_methods {
     ($scalar_type:ty, $array_type_pb:ident, $array_impl_variant:ident) => {
+        const DATA_TYPE: DataType = DataType::$array_impl_variant;
+
         fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl {
             ArrayImpl::$array_impl_variant(arr)
         }
@@ -77,11 +79,6 @@ macro_rules! impl_array_methods {
 
         fn array_type() -> ArrayType {
             ArrayType::$array_type_pb
-        }
-
-        fn create_array_builder(capacity: usize) -> ArrayBuilderImpl {
-            let array_builder = PrimitiveArrayBuilder::<$scalar_type>::new(capacity);
-            ArrayBuilderImpl::$array_impl_variant(array_builder)
         }
     };
 }
@@ -220,8 +217,8 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
         self.bitmap = bitmap;
     }
 
-    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
-        T::create_array_builder(capacity)
+    fn data_type(&self) -> DataType {
+        T::DATA_TYPE
     }
 }
 
@@ -235,11 +232,19 @@ pub struct PrimitiveArrayBuilder<T: PrimitiveArrayItemType> {
 impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
     type ArrayType = PrimitiveArray<T>;
 
-    fn with_meta(capacity: usize, _meta: ArrayMeta) -> Self {
+    fn new(capacity: usize) -> Self {
         Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: Vec::with_capacity(capacity),
         }
+    }
+
+    fn with_type(capacity: usize, ty: DataType) -> Self {
+        // Timestamptz shares the same underlying type as Int64
+        assert!(
+            ty == T::DATA_TYPE || ty == DataType::Timestamptz && T::DATA_TYPE == DataType::Int64
+        );
+        Self::new(capacity)
     }
 
     fn append_n(&mut self, n: usize, value: Option<T>) {

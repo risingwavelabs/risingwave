@@ -242,7 +242,7 @@ message CompactTask {
     PENDING = 1;
     SUCCESS = 2;
     HEARTBEAT_CANCELED = 3;
-    NO_AVAIL_CANCELED = 4;
+    NO_AVAIL_RESOURCE_CANCELED = 4;
     ASSIGN_FAIL_CANCELED = 5;
     SEND_FAIL_CANCELED = 6;
     MANUAL_CANCELED = 7;
@@ -545,6 +545,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint32 compaction_filter_mask = 8;
       uint32 max_sub_compaction = 9;
       uint64 level0_stop_write_threshold_sub_level_number = 10;
+      uint32 level0_sub_level_compact_level_count = 11;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -632,6 +633,7 @@ message CompactionConfig {
   // soft limit for max number of sub level number
   uint64 level0_stop_write_threshold_sub_level_number = 15;
   uint64 level0_max_compact_file_number = 16;
+  uint32 level0_sub_level_compact_level_count = 17;
 }
 
 message TableStats {

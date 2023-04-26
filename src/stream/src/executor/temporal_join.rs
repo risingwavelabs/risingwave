@@ -31,7 +31,7 @@ use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::StateStore;
 
 use super::{Barrier, Executor, Message, MessageStream, StreamExecutorError, StreamExecutorResult};
-use crate::cache::{cache_may_stale, new_with_hasher_in, ExecutorCache};
+use crate::cache::{cache_may_stale, new_with_hasher_in, ManagedLruCache};
 use crate::common::StreamChunkBuilder;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, BoxedExecutor, JoinType, JoinTypePrimitive, PkIndices};
@@ -59,7 +59,7 @@ pub struct TemporalJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
 struct TemporalSide<S: StateStore> {
     source: StorageTable<S>,
     table_output_indices: Vec<usize>,
-    cache: ExecutorCache<OwnedRow, Option<OwnedRow>, DefaultHasher, SharedStatsAlloc<Global>>,
+    cache: ManagedLruCache<OwnedRow, Option<OwnedRow>, DefaultHasher, SharedStatsAlloc<Global>>,
 }
 
 impl<S: StateStore> TemporalSide<S> {
@@ -86,7 +86,7 @@ impl<S: StateStore> TemporalSide<S> {
     fn update(&mut self, payload: Vec<StreamChunk>, join_keys: &[usize]) {
         payload.iter().flat_map(|c| c.rows()).for_each(|(op, row)| {
             let key = row.project(join_keys).into_owned_row();
-            if let Some(value) = self.cache.get_mut(&key) {
+            if let Some(mut value) = self.cache.get_mut(&key) {
                 match op {
                     Op::Insert | Op::UpdateInsert => *value = Some(row.into_owned_row()),
                     Op::Delete | Op::UpdateDelete => *value = None,
@@ -194,11 +194,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<S, T> {
 
         let alloc = StatsAlloc::new(Global).shared();
 
-        let cache = ExecutorCache::new(new_with_hasher_in(
-            watermark_epoch,
-            DefaultHasher::default(),
-            alloc,
-        ));
+        let cache = new_with_hasher_in(watermark_epoch, DefaultHasher::default(), alloc);
 
         Self {
             ctx,

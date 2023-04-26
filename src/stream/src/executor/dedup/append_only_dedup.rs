@@ -75,6 +75,8 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
 
+        let mut commit_data = false;
+
         #[for_await]
         for msg in input {
             match msg? {
@@ -122,13 +124,17 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
                         let chunk = StreamChunk::new(ops, columns, Some(vis));
                         self.state_table.write_chunk(chunk.clone());
 
+                        commit_data = true;
+
                         yield Message::Chunk(chunk);
                     }
                 }
 
                 Message::Barrier(barrier) => {
-                    if barrier.checkpoint {
+                    if commit_data {
+                        // Only commit when we have new data in this epoch.
                         self.state_table.commit(barrier.epoch).await?;
+                        commit_data = false;
                     } else {
                         self.state_table.commit_no_data_expected(barrier.epoch);
                     }
@@ -158,22 +164,26 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
         &mut self,
         keys: impl Iterator<Item = &'a OwnedRow>,
     ) -> StreamExecutorResult<()> {
+        let mut read_from_storage = false;
         let mut futures = vec![];
         for key in keys {
             if self.cache.contains(key) {
                 continue;
             }
+            read_from_storage = true;
 
             let table = &self.state_table;
             futures.push(async move { (key, table.get_encoded_row(key).await) });
         }
 
-        let mut buffered = stream::iter(futures).buffer_unordered(10).fuse();
-        while let Some(result) = buffered.next().await {
-            let (key, value) = result;
-            if value?.is_some() {
-                // Only insert into the cache when we have this key in storage.
-                self.cache.insert(key.to_owned());
+        if read_from_storage {
+            let mut buffered = stream::iter(futures).buffer_unordered(10).fuse();
+            while let Some(result) = buffered.next().await {
+                let (key, value) = result;
+                if value?.is_some() {
+                    // Only insert into the cache when we have this key in storage.
+                    self.cache.insert(key.to_owned());
+                }
             }
         }
 

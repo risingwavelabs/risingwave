@@ -15,6 +15,7 @@
 //! Build executor from protobuf.
 
 mod agg_common;
+mod append_only_dedup;
 mod barrier_recv;
 mod batch_query;
 mod chain;
@@ -33,6 +34,7 @@ mod lookup;
 mod lookup_union;
 mod merge;
 mod mview;
+mod no_op;
 mod now;
 mod project;
 mod project_set;
@@ -53,6 +55,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamNode, TemporalJoinNode};
 use risingwave_storage::StateStore;
 
+use self::append_only_dedup::*;
 use self::barrier_recv::*;
 use self::batch_query::*;
 use self::chain::*;
@@ -71,6 +74,7 @@ use self::lookup::*;
 use self::lookup_union::*;
 use self::merge::*;
 use self::mview::*;
+use self::no_op::*;
 use self::now::NowExecutorBuilder;
 use self::project::*;
 use self::project_set::*;
@@ -158,5 +162,7 @@ pub async fn create_executor(
         NodeBody::TemporalJoin => TemporalJoinExecutorBuilder,
         NodeBody::Values => ValuesExecutorBuilder,
         NodeBody::BarrierRecv => BarrierRecvExecutorBuilder,
+        NodeBody::AppendOnlyDedup => AppendOnlyDedupExecutorBuilder,
+        NodeBody::NoOp => NoOpExecutorBuilder,
     }
 }

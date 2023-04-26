@@ -18,7 +18,7 @@ use std::mem;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::types::DataType;
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::function::aggregate::AggKind;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{ExprType, FunctionCall, InputRef, Literal};
@@ -275,7 +275,10 @@ impl DistinctAggRule {
                 // final agg so we use exhaustive match here to make compiler remind
                 // people adding new `AggKind` to update it.
                 match agg_call.agg_kind {
-                    AggKind::Min
+                    AggKind::BitAnd
+                    | AggKind::BitOr
+                    | AggKind::BitXor
+                    | AggKind::Min
                     | AggKind::Max
                     | AggKind::Sum
                     | AggKind::Sum0
