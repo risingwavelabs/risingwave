@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use fixedbitset::FixedBitSet;
+use itertools::Itertools;
+
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
 use crate::optimizer::plan_node::generic::Agg;
@@ -21,7 +24,7 @@ pub struct AggProjectMergeRule {}
 impl Rule for AggProjectMergeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let agg = plan.as_logical_agg()?;
-        let (mut agg_calls, mut agg_group_keys, input) = agg.clone().decompose();
+        let (mut agg_calls, agg_group_keys, input) = agg.clone().decompose();
         let proj = input.as_logical_project()?;
 
         // only apply when the input proj is all input-ref
@@ -32,17 +35,37 @@ impl Rule for AggProjectMergeRule {
         let proj_o2i = proj.o2i_col_mapping();
         let new_input = proj.input();
 
-        // modify group key according to projection
-        agg_group_keys
-            .iter_mut()
-            .for_each(|x| *x = proj_o2i.map(*x));
-
         // modify agg calls according to projection
         agg_calls
             .iter_mut()
             .for_each(|x| x.rewrite_input_index(proj_o2i.clone()));
 
-        Some(Agg::new(agg_calls, agg_group_keys, new_input).into())
+        // modify group key according to projection
+        let new_agg_group_keys_in_vec: Vec<usize> =
+            agg_group_keys.ones().map(|x| proj_o2i.map(x)).collect_vec();
+
+        let new_agg_group_keys = FixedBitSet::from_iter(new_agg_group_keys_in_vec.iter().cloned());
+
+        if new_agg_group_keys.ones().collect_vec() != new_agg_group_keys_in_vec {
+            // Need a project
+            let new_agg_group_keys_cardinality = new_agg_group_keys.count_ones(..);
+            let out_col_idx = new_agg_group_keys_in_vec
+                .into_iter()
+                .map(|x| new_agg_group_keys.ones().position(|y| y == x).unwrap())
+                .chain(
+                    new_agg_group_keys_cardinality
+                        ..new_agg_group_keys_cardinality + agg_calls.len(),
+                );
+            Some(
+                LogicalProject::with_out_col_idx(
+                    Agg::new(agg_calls, new_agg_group_keys.clone(), new_input).into(),
+                    out_col_idx,
+                )
+                .into(),
+            )
+        } else {
+            Some(Agg::new(agg_calls, new_agg_group_keys, new_input).into())
+        }
     }
 }
 

@@ -302,7 +302,9 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 5
+    # Extra 2 minutes to account for docker-compose latency.
+    # See: https://github.com/risingwavelabs/risingwave/issues/9423#issuecomment-1521222169
+    timeout_in_minutes: 7
 
   - label: "release"
     command: "ci/scripts/release.sh"

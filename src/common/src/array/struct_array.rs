@@ -315,6 +315,16 @@ impl Ord for StructValue {
     }
 }
 
+impl EstimateSize for StructValue {
+    fn estimated_heap_size(&self) -> usize {
+        // TODO: Try speed up this process.
+        self.fields
+            .iter()
+            .map(|datum| datum.estimated_heap_size())
+            .sum()
+    }
+}
+
 impl StructValue {
     pub fn new(fields: Vec<Datum>) -> Self {
         Self {

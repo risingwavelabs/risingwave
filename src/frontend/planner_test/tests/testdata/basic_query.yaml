@@ -140,7 +140,11 @@
 - sql: |
     create table t1 (x int);
     select * from t1 where EXISTS(select * where t1.x=1);
-  binder_error: 'Bind error: SELECT * with no tables specified is not valid'
+  binder_error: |-
+    Bind error: failed to bind expression: EXISTS (SELECT * WHERE t1.x = 1)
+
+    Caused by:
+      Bind error: SELECT * with no tables specified is not valid
 - sql: |
     select *;
   binder_error: 'Bind error: SELECT * with no tables specified is not valid'
@@ -164,7 +168,10 @@
     create table t(v1 int);
     select v1 from t where exists (values(v1));
   binder_error: |-
-    Feature is not yet implemented: CorrelatedInputRef in VALUES
+    Bind error: failed to bind expression: EXISTS (VALUES (v1))
+
+    Caused by:
+      Feature is not yet implemented: CorrelatedInputRef in VALUES
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     create table t (v1 bigint, v2 double precision);

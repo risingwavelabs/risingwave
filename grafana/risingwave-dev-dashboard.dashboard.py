@@ -1239,7 +1239,7 @@ def section_batch_exchange(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"{metric('batch_task_exchange_recv_row_number')}",
+                            f"{metric('batch_exchange_recv_row_number')}",
                             "{{query_id}} : {{source_stage_id}}.{{source_task_id}} -> {{target_stage_id}}.{{target_task_id}}",
                         ),
                     ],
