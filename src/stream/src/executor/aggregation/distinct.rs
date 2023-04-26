@@ -173,11 +173,6 @@ impl<S: StateStore> ColumnDeduplicater<S> {
         // `self.cache.evict()` too.
         self.cache.evict();
     }
-
-    pub fn update_epoch(&mut self, epoch: u64) {
-        // Update the current epoch in `ManagedLruCache`
-        self.cache.update_epoch(epoch)
-    }
 }
 
 /// # Safety
@@ -266,12 +261,6 @@ impl<S: StateStore> DistinctDeduplicater<S> {
             deduplicater.flush(dedup_table);
         }
         Ok(())
-    }
-
-    pub fn update_epoch(&mut self, epoch: u64) {
-        for (_, deduplicater) in self.deduplicaters.values_mut() {
-            deduplicater.update_epoch(epoch)
-        }
     }
 }
 
