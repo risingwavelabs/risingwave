@@ -21,8 +21,8 @@ get_nexmark_queries_to_run() {
     -H "Accept: application/vnd.github+json" \
     -H "Authorization: Bearer $GITHUB_TOKEN"\
     -H "X-GitHub-Api-Version: 2022-11-28" \
-    https://api.github.com/repos/risingwavelabs/risingwave/pull/"$PULL_REQUEST"/labels \
-  | parse_labels
+    https://api.github.com/repos/risingwavelabs/risingwave/pull/"$PULL_REQUEST"/labels
+  # | parse_labels
 }
 
 # Meant to be piped into.
