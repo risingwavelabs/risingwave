@@ -93,20 +93,22 @@ pub trait ExprRewriter {
         let WindowFunction {
             args,
             return_type,
-            function_type,
+            kind,
             partition_by,
             order_by,
+            frame,
         } = window_func;
         let args = args
             .into_iter()
             .map(|expr| self.rewrite_expr(expr))
             .collect();
         WindowFunction {
+            kind,
             args,
             return_type,
-            function_type,
             partition_by,
             order_by,
+            frame,
         }
         .into()
     }

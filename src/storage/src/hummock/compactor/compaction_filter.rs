@@ -75,7 +75,7 @@ impl CompactionFilter for TtlCompactionFilter {
         if let Some((last_table_id, ttl_mill)) = self.last_table_and_ttl.as_ref() {
             if *last_table_id == table_id {
                 let min_epoch = Epoch(self.expire_epoch).subtract_ms(*ttl_mill);
-                return Epoch(epoch) <= min_epoch;
+                return Epoch(epoch) < min_epoch;
             }
         }
         match self.table_id_to_ttl.get(&table_id) {
@@ -85,7 +85,7 @@ impl CompactionFilter for TtlCompactionFilter {
                 let ttl_mill = *ttl_second_u32 as u64 * 1000;
                 let min_epoch = Epoch(self.expire_epoch).subtract_ms(ttl_mill);
                 self.last_table_and_ttl = Some((table_id, ttl_mill));
-                Epoch(epoch) <= min_epoch
+                Epoch(epoch) < min_epoch
             }
             None => false,
         }

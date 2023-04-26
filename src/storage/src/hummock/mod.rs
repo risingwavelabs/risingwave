@@ -90,7 +90,7 @@ use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::store::version::HummockVersionReader;
 use crate::hummock::write_limiter::{WriteLimiter, WriteLimiterRef};
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
-use crate::store::{gen_min_epoch, NewLocalOptions, ReadOptions};
+use crate::store::{NewLocalOptions, ReadOptions};
 
 struct HummockStorageShutdownGuard {
     shutdown_sender: UnboundedSender<HummockEvent>,
@@ -357,15 +357,17 @@ pub async fn get_from_sstable_info(
     read_options: &ReadOptions,
     dist_key_hash: Option<u64>,
     local_stats: &mut StoreLocalStatistic,
-) -> HummockResult<Option<HummockValue<Bytes>>> {
+) -> HummockResult<Option<(HummockValue<Bytes>, HummockEpoch)>> {
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
-    let min_epoch = gen_min_epoch(full_key.epoch, read_options.retention_seconds.as_ref());
 
     // Bloom filter key is the distribution key, which is no need to be the prefix of pk, and do not
     // contain `TablePrefix` and `VnodePrefix`.
     if let Some(hash) = dist_key_hash && !hit_sstable_bloom_filter(sstable.value(), hash, local_stats) {
-        if !read_options.ignore_range_tombstone && get_min_delete_range_epoch_from_sstable(sstable.value().as_ref(), full_key.user_key) <= full_key.epoch {
-            return Ok(Some(HummockValue::Delete));
+        if !read_options.ignore_range_tombstone {
+            let delete_epoch = get_min_delete_range_epoch_from_sstable(sstable.value().as_ref(), full_key.user_key);
+            if delete_epoch <= full_key.epoch {
+                return Ok(Some((HummockValue::Delete, delete_epoch)));
+            }
         }
 
         return Ok(None);
@@ -381,30 +383,31 @@ pub async fn get_from_sstable_info(
     iter.seek(full_key).await?;
     // Iterator has sought passed the borders.
     if !iter.is_valid() {
-        if !read_options.ignore_range_tombstone
-            && get_min_delete_range_epoch_from_sstable(
+        if !read_options.ignore_range_tombstone {
+            let delete_epoch = get_min_delete_range_epoch_from_sstable(
                 iter.sst().value().as_ref(),
                 full_key.user_key,
-            ) <= full_key.epoch
-        {
-            return Ok(Some(HummockValue::Delete));
+            );
+            if delete_epoch <= full_key.epoch {
+                return Ok(Some((HummockValue::Delete, delete_epoch)));
+            }
         }
+
         return Ok(None);
     }
 
     // Iterator gets us the key, we tell if it's the key we want
     // or key next to it.
     let value = if iter.key().user_key == full_key.user_key {
-        if iter.key().epoch <= min_epoch {
-            None
+        Some((iter.value().to_bytes(), iter.key().epoch))
+    } else if !read_options.ignore_range_tombstone {
+        let delete_epoch =
+            get_min_delete_range_epoch_from_sstable(iter.sst().value().as_ref(), full_key.user_key);
+        if delete_epoch <= full_key.epoch {
+            Some((HummockValue::Delete, delete_epoch))
         } else {
-            Some(iter.value().to_bytes())
+            None
         }
-    } else if !read_options.ignore_range_tombstone
-        && get_min_delete_range_epoch_from_sstable(iter.sst().value().as_ref(), full_key.user_key)
-            <= full_key.epoch
-    {
-        Some(HummockValue::Delete)
     } else {
         None
     };
@@ -434,7 +437,7 @@ pub fn get_from_batch(
     read_epoch: HummockEpoch,
     read_options: &ReadOptions,
     local_stats: &mut StoreLocalStatistic,
-) -> Option<HummockValue<Bytes>> {
+) -> Option<(HummockValue<Bytes>, HummockEpoch)> {
     imm.get(table_key, read_epoch, read_options).map(|v| {
         local_stats.get_shared_buffer_hit_counts += 1;
         v

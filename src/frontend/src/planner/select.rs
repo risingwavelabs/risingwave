@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
@@ -204,7 +205,7 @@ impl Planner {
     /// Helper to create an `EXISTS` boolean operator with the given `input`.
     /// It is represented by `Project([$0 >= 1]) -> Agg(count(*)) -> input`
     fn create_exists(&self, input: PlanRef) -> Result<PlanRef> {
-        let count_star = Agg::new(vec![PlanAggCall::count_star()], vec![], input);
+        let count_star = Agg::new(vec![PlanAggCall::count_star()], FixedBitSet::new(), input);
         let ge = FunctionCall::new(
             ExprType::GreaterThanOrEqual,
             vec![

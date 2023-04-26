@@ -21,9 +21,7 @@ use crate::optimizer::plan_node::{ColumnPruningContext, PredicatePushdownContext
 use crate::optimizer::plan_rewriter::ShareSourceRewriter;
 #[cfg(debug_assertions)]
 use crate::optimizer::plan_visitor::InputRefValidator;
-use crate::optimizer::plan_visitor::{
-    has_logical_apply, has_logical_over_agg, HasMaxOneRowApply, PlanVisitor,
-};
+use crate::optimizer::plan_visitor::{has_logical_apply, HasMaxOneRowApply, PlanVisitor};
 use crate::optimizer::rule::*;
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
@@ -160,13 +158,13 @@ lazy_static! {
     );
 
     static ref LEFT_DEEP_JOIN_REORDER: OptimizationStage = OptimizationStage::new(
-        "Join Reorder".to_string(),
+        "Join Ordering".to_string(),
         vec![LeftDeepTreeJoinOrderingRule::create()],
         ApplyOrder::TopDown,
     );
 
     static ref BUSHY_TREE_JOIN_REORDER: OptimizationStage = OptimizationStage::new(
-        "Bushy tree join ordering Rule".to_string(),
+        "Join Ordering".to_string(),
         vec![BushyTreeJoinOrderingRule::create()],
         ApplyOrder::TopDown,
     );
@@ -178,7 +176,7 @@ lazy_static! {
     );
 
     static ref PUSH_CALC_OF_JOIN: OptimizationStage = OptimizationStage::new(
-        "Push Down the Calculation of Inputs of Join's Condition",
+        "Push down the calculation of inputs of join's condition",
         vec![PushCalculationOfJoinRule::create()],
         ApplyOrder::TopDown,
     );
@@ -227,13 +225,6 @@ lazy_static! {
             TrivialProjectToValuesRule::create(),
             UnionInputValuesMergeRule::create(),
         ],
-        ApplyOrder::TopDown,
-    );
-
-
-    static ref DEDUP_GROUP_KEYS: OptimizationStage = OptimizationStage::new(
-        "Dedup Group keys",
-        vec![AggDedupGroupKeyRule::create()],
         ApplyOrder::TopDown,
     );
 
@@ -425,16 +416,6 @@ impl LogicalOptimizer {
 
         plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
 
-        if has_logical_over_agg(plan.clone()) {
-            return Err(ErrorCode::InternalError(format!(
-                "OverAgg can not be transformed. Plan:\n{}",
-                plan.explain_to_string().unwrap()
-            ))
-            .into());
-        }
-
-        plan = plan.optimize_by_rules(&DEDUP_GROUP_KEYS);
-
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 
@@ -496,16 +477,6 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&PULL_UP_HOP);
 
         plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
-
-        if has_logical_over_agg(plan.clone()) {
-            return Err(ErrorCode::InternalError(format!(
-                "OverAgg can not be transformed. Plan:\n{}",
-                plan.explain_to_string().unwrap()
-            ))
-            .into());
-        }
-
-        plan = plan.optimize_by_rules(&DEDUP_GROUP_KEYS);
 
         plan = plan.optimize_by_rules(&TOP_N_AGG_ON_INDEX);
 

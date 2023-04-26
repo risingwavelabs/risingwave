@@ -54,8 +54,17 @@ async fn build_sink(
     pk_indices: PkIndices,
     connector_params: ConnectorParams,
     sink_type: SinkType,
+    sink_id: u64,
 ) -> StreamExecutorResult<SinkImpl> {
-    Ok(SinkImpl::new(config, schema, pk_indices, connector_params, sink_type).await?)
+    Ok(SinkImpl::new(
+        config,
+        schema,
+        pk_indices,
+        connector_params,
+        sink_type,
+        sink_id,
+    )
+    .await?)
 }
 
 // Drop all the DELETE messages in this chunk and convert UPDATE INSERT into INSERT.
@@ -84,6 +93,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         schema: Schema,
         pk_indices: Vec<usize>,
         sink_type: SinkType,
+        sink_id: u64,
         actor_context: ActorContextRef,
         log_store_factory: F,
     ) -> StreamExecutorResult<Self> {
@@ -94,6 +104,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             pk_indices.clone(),
             connector_params,
             sink_type,
+            sink_id,
         )
         .await?;
         Ok(Self {
@@ -364,6 +375,7 @@ mod test {
             schema.clone(),
             pk.clone(),
             SinkType::ForceAppendOnly,
+            0,
             ActorContext::create(0),
             BoundedInMemLogStoreFactory::new(1),
         )
@@ -442,6 +454,7 @@ mod test {
             schema.clone(),
             pk.clone(),
             SinkType::ForceAppendOnly,
+            0,
             ActorContext::create(0),
             BoundedInMemLogStoreFactory::new(1),
         )
