@@ -16,7 +16,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_batch::executor::{BatchManagerMetrics, BatchTaskMetrics};
+use risingwave_batch::monitor::{BatchExecutorMetrics, BatchManagerMetrics, BatchTaskMetrics};
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{
@@ -62,8 +62,7 @@ use tokio::task::JoinHandle;
 
 use crate::memory_management::memory_manager::GlobalMemoryManager;
 use crate::memory_management::{
-    memory_control_policy_from_config, reserve_memory_bytes, storage_memory_config,
-    MIN_COMPUTE_MEMORY_MB,
+    build_memory_control_policy, reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB,
 };
 use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
@@ -137,7 +136,15 @@ pub async fn compute_node_serve(
         reserved_memory_bytes,
     );
 
-    let memory_control_policy = memory_control_policy_from_config(&opts).unwrap();
+    // NOTE: Due to some limits, we use `compute_memory_bytes + storage_memory_bytes` as
+    // `total_compute_memory_bytes` for memory control. This is just a workaround for some
+    // memory control issues and should be modified as soon as we figure out a better solution.
+    //
+    // Related issues:
+    // - https://github.com/risingwavelabs/risingwave/issues/8696
+    // - https://github.com/risingwavelabs/risingwave/issues/8822
+    let total_memory_bytes = compute_memory_bytes + storage_memory_bytes;
+    let memory_control_policy = build_memory_control_policy(total_memory_bytes).unwrap();
 
     let storage_opts = Arc::new(StorageOpts::from((
         &config,
@@ -156,6 +163,7 @@ pub async fn compute_node_serve(
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
     let batch_task_metrics = Arc::new(BatchTaskMetrics::new(registry.clone()));
+    let batch_executor_metrics = Arc::new(BatchExecutorMetrics::new(registry.clone()));
     let batch_manager_metrics = BatchManagerMetrics::new(registry.clone());
     let exchange_srv_metrics = Arc::new(ExchangeServiceMetrics::new(registry.clone()));
 
@@ -279,15 +287,7 @@ pub async fn compute_node_serve(
     let batch_mgr_clone = batch_mgr.clone();
     let stream_mgr_clone = stream_mgr.clone();
 
-    // NOTE: Due to some limits, we use `compute_memory_bytes + storage_memory_bytes` as
-    // `total_compute_memory_bytes` for memory control. This is just a workaround for some
-    // memory control issues and should be modified as soon as we figure out a better solution.
-    //
-    // Related issues:
-    // - https://github.com/risingwavelabs/risingwave/issues/8696
-    // - https://github.com/risingwavelabs/risingwave/issues/8822
     let memory_mgr = GlobalMemoryManager::new(
-        compute_memory_bytes + storage_memory_bytes,
         system_params.barrier_interval_ms(),
         streaming_metrics.clone(),
         memory_control_policy,
@@ -315,6 +315,7 @@ pub async fn compute_node_serve(
         worker_id,
         state_store.clone(),
         batch_task_metrics.clone(),
+        batch_executor_metrics.clone(),
         client_pool,
         dml_mgr.clone(),
         source_metrics.clone(),

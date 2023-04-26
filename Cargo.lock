@@ -2811,9 +2811,9 @@ dependencies = [
 
 [[package]]
 name = "halfbrown"
-version = "0.1.18"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e2a3c70a9c00cc1ee87b54e89f9505f73bb17d63f1b25c9a462ba8ef885444f"
+checksum = "389d755cc2bcc8cdb7554b89ddaa59d9275a727ec8915b0e2bc4176c33cc39cb"
 dependencies = [
  "hashbrown 0.13.2",
  "serde",
@@ -5731,6 +5731,7 @@ dependencies = [
  "minitrace",
  "num-traits",
  "parking_lot 0.12.1",
+ "paste",
  "prometheus",
  "rand 0.8.5",
  "risingwave_common",
@@ -5862,6 +5863,7 @@ dependencies = [
  "futures-async-stream",
  "hex",
  "humantime",
+ "hytra",
  "itertools",
  "itoa",
  "libc",
@@ -5883,6 +5885,7 @@ dependencies = [
  "rand 0.8.5",
  "regex",
  "reqwest",
+ "risingwave_common_proc_macro",
  "risingwave_pb",
  "rust_decimal",
  "ryu",
@@ -6157,6 +6160,7 @@ dependencies = [
  "dyn-clone",
  "either",
  "futures-util",
+ "hex",
  "itertools",
  "madsim-tokio",
  "md5",
@@ -7337,9 +7341,9 @@ dependencies = [
 
 [[package]]
 name = "simd-json"
-version = "0.8.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1663db38e6e50038d4de020667c364490d43473ad6d073822a6af6576fc343a5"
+checksum = "17c317658b6755f4acf95e96aebec72985534673261d65f27624a484b0213f5f"
 dependencies = [
  "halfbrown",
  "lexical-core",
@@ -8512,9 +8516,9 @@ dependencies = [
 
 [[package]]
 name = "value-trait"
-version = "0.5.1"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "995de1aa349a0dc50f4aa40870dce12961a30229027230bad09acd2843edbe9e"
+checksum = "733e1909354ceff16f7e1f7ddebc063455b8fda4968d91760a7c6115b96647a5"
 dependencies = [
  "float-cmp",
  "halfbrown",
@@ -8893,8 +8897,6 @@ dependencies = [
  "clap 4.1.11",
  "combine",
  "criterion",
- "crossbeam-channel",
- "crossbeam-deque",
  "crossbeam-epoch",
  "crossbeam-utils",
  "either",

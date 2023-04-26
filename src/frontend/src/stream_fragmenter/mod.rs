@@ -93,6 +93,23 @@ impl BuildFragmentGraphState {
     pub fn get_share_stream_node(&mut self, operator_id: u32) -> Option<&StreamNode> {
         self.share_stream_node_mapping.get(&operator_id)
     }
+
+    /// Generate a new stream node with `NoOp` body and the given `input`. The properties of the
+    /// stream node will also be copied from the `input` node.
+    pub fn gen_no_op_stream_node(&mut self, input: StreamNode) -> StreamNode {
+        StreamNode {
+            operator_id: self.gen_operator_id() as u64,
+            identity: "StreamNoOp".into(),
+            node_body: Some(NodeBody::NoOp(NoOpNode {})),
+
+            // Take input's properties.
+            stream_key: input.stream_key.clone(),
+            append_only: input.append_only,
+            fields: input.fields.clone(),
+
+            input: vec![input],
+        }
+    }
 }
 
 pub fn build_graph(plan_node: PlanRef) -> StreamFragmentGraphProto {
@@ -204,6 +221,11 @@ pub(self) fn build_and_add_fragment(
             let mut fragment = state.new_stream_fragment();
             let node = build_fragment(state, &mut fragment, stream_node)?;
 
+            // It's possible that the stream node is rewritten while building the fragment, for
+            // example, empty fragment to no-op fragment. We get the operator id again instead of
+            // using the original one.
+            let operator_id = node.operator_id as u32;
+
             assert!(fragment.node.is_none());
             fragment.node = Some(Box::new(node));
             let fragment_ref = Rc::new(fragment);
@@ -281,6 +303,14 @@ fn build_fragment(
         }
     }
 
+    // Usually we do not expect exchange node to be visited here, which should be handled by the
+    // following logic of "visit children" instead. If it does happen (for example, `Share` will be
+    // transformed to an `Exchange`), it means we have an empty fragment and we need to add a no-op
+    // node to it, so that the meta service can handle it correctly.
+    if let NodeBody::Exchange(_) = stream_node.node_body.as_ref().unwrap() {
+        stream_node = state.gen_no_op_stream_node(stream_node);
+    }
+
     // Visit plan children.
     stream_node.input = stream_node
         .input
@@ -324,25 +354,22 @@ fn build_fragment(
                             output_indices: (0..ref_fragment_node.fields.len() as u32).collect(),
                         };
 
-                        let no_op_operator_id = state.gen_operator_id() as u64;
                         let no_shuffle_exchange_operator_id = state.gen_operator_id() as u64;
 
                         let no_op_fragment = {
-                            let node = StreamNode {
-                                operator_id: no_op_operator_id,
-                                identity: "StreamNoOp".into(),
-                                node_body: Some(NodeBody::NoOp(NoOpNode {})),
-                                input: vec![StreamNode {
-                                    operator_id: no_shuffle_exchange_operator_id,
-                                    identity: "StreamNoShuffleExchange".into(),
-                                    node_body: Some(NodeBody::Exchange(ExchangeNode {
-                                        strategy: Some(no_shuffle_strategy.clone()),
-                                    })),
-                                    input: vec![],
-                                    ..*ref_fragment_node.clone()
-                                }],
-                                ..*ref_fragment_node.clone()
-                            };
+                            let node = state.gen_no_op_stream_node(StreamNode {
+                                operator_id: no_shuffle_exchange_operator_id,
+                                identity: "StreamNoShuffleExchange".into(),
+                                node_body: Some(NodeBody::Exchange(ExchangeNode {
+                                    strategy: Some(no_shuffle_strategy.clone()),
+                                })),
+                                input: vec![],
+
+                                // Take reference's properties.
+                                stream_key: ref_fragment_node.stream_key.clone(),
+                                append_only: ref_fragment_node.append_only,
+                                fields: ref_fragment_node.fields.clone(),
+                            });
 
                             let mut fragment = state.new_stream_fragment();
                             fragment.node = Some(node.into());

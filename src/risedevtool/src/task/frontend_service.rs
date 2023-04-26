@@ -87,6 +87,8 @@ impl Task for FrontendService {
         let mut cmd = self.frontend()?;
 
         cmd.env("RUST_BACKTRACE", "1");
+        // FIXME: Otherwise, CI will throw log size too large error
+        // cmd.env("RW_QUERY_LOG_PATH", DEFAULT_QUERY_LOG_PATH);
 
         let prefix_config = env::var("PREFIX_CONFIG")?;
         cmd.arg("--config-path")

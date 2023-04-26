@@ -343,6 +343,78 @@ pub(crate) async fn resolve_source_schema(
                 ..Default::default()
             }
         }
+        SourceSchema::DebeziumMongoJson => {
+            if columns.is_empty() {
+                let mut col_id_gen = ColumnIdGenerator::new_initial();
+                let pk_id = col_id_gen.generate("_id");
+                columns.push(ColumnCatalog {
+                    column_desc: ColumnDesc {
+                        data_type: DataType::Varchar,
+                        column_id: pk_id,
+                        name: "_id".to_string(),
+                        field_descs: vec![],
+                        type_name: "".to_string(),
+                        generated_column: None,
+                    },
+                    is_hidden: false,
+                });
+                columns.push(ColumnCatalog {
+                    column_desc: ColumnDesc {
+                        data_type: DataType::Jsonb,
+                        column_id: col_id_gen.generate("payload"),
+                        name: "payload".to_string(),
+                        field_descs: vec![],
+                        type_name: "".to_string(),
+                        generated_column: None,
+                    },
+                    is_hidden: false,
+                });
+                pk_column_ids.push(pk_id);
+                row_id_index.take();
+            }
+
+            // return err if user has not specified a pk
+            if row_id_index.is_some() {
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must be specified when creating source with row format debezium."
+                        .to_string(),
+                )));
+            }
+            'check_pk: {
+                if pk_column_ids.len() == 1 {
+                    let pk_column = columns
+                        .iter()
+                        .find(|col| col.column_id() == pk_column_ids[0])
+                        .unwrap();
+                    if pk_column.name() == "_id"
+                        && matches!(
+                            pk_column.data_type(),
+                            DataType::Jsonb | DataType::Varchar | DataType::Int32 | DataType::Int64
+                        )
+                    {
+                        break 'check_pk;
+                    }
+                }
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must named as `_id` with supported datatypes (Jsonb Varchar Int32 Int64)."
+                        .to_string(),
+                )));
+            }
+            let _ = columns
+                .iter()
+                .find(|col| col.name() == "payload" && matches!(col.data_type(), DataType::Jsonb))
+                .ok_or_else(|| {
+                    RwError::from(ProtocolError(
+                "A column named as `payload` with supported datatypes Jsonb must exist in table."
+                    .to_string(),
+            ))
+                })?;
+
+            StreamSourceInfo {
+                row_format: RowFormatType::DebeziumMongoJson as i32,
+                ..Default::default()
+            }
+        }
 
         SourceSchema::CanalJson => {
             // return err if user has not specified a pk
@@ -495,7 +567,7 @@ pub(super) fn bind_source_watermark(
 static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, Vec<RowFormatType>>> = LazyLock::new(
     || {
         convert_args!(hashmap!(
-                KAFKA_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::DebeziumAvro, RowFormatType::UpsertJson, RowFormatType::UpsertAvro],
+                KAFKA_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::DebeziumAvro,RowFormatType::DebeziumMongoJson, RowFormatType::UpsertJson, RowFormatType::UpsertAvro],
                 PULSAR_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
                 KINESIS_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
                 GOOGLE_PUBSUB_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
@@ -515,6 +587,7 @@ fn source_shema_to_row_format(source_schema: &SourceSchema) -> RowFormatType {
         SourceSchema::Protobuf(_) => RowFormatType::Protobuf,
         SourceSchema::Json => RowFormatType::Json,
         SourceSchema::DebeziumJson => RowFormatType::DebeziumJson,
+        SourceSchema::DebeziumMongoJson => RowFormatType::DebeziumMongoJson,
         SourceSchema::DebeziumAvro(_) => RowFormatType::DebeziumAvro,
         SourceSchema::UpsertJson => RowFormatType::UpsertJson,
         SourceSchema::UpsertAvro(_) => RowFormatType::UpsertAvro,
