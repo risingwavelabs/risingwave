@@ -12,12 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::rc::Rc;
-
-use futures::StreamExt;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
-use pgwire::pg_response::{PgResponse, RowSetResult, StatementType};
+use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
@@ -38,44 +35,7 @@ use crate::optimizer::OptimizerContext;
 use crate::scheduler::BatchPlanFragmenter;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::explain_stream_graph;
-use crate::{OptimizerContextRef, PgResponseStream};
-
-// Statement::CreateTable {
-//     name,
-//     columns,
-//     constraints,
-//     source_schema,
-//     source_watermarks,
-//     append_only,
-//     ..
-// } => match check_create_table_with_source(&handler_args.with_options, source_schema)?
-// {     Some(s) => {
-//         gen_create_table_plan_with_source(
-//             context,
-//             name,
-//             columns,
-//             constraints,
-//             s,
-//             source_watermarks,
-//             ColumnIdGenerator::new_initial(),
-//             append_only,
-//         )
-//         .await?
-//         .0
-//     }
-//     None => {
-//         gen_create_table_plan(
-//             context,
-//             name,
-//             columns,
-//             constraints,
-//             ColumnIdGenerator::new_initial(),
-//             source_watermarks,
-//             append_only,
-//         )?
-//         .0
-//     }
-// },
+use crate::OptimizerContextRef;
 
 async fn do_handle_explain(
     context: OptimizerContext,
@@ -86,56 +46,106 @@ async fn do_handle_explain(
     let mut plan_fragmenter = None;
 
     {
-        let context: OptimizerContextRef = context.into();
         let session = context.session_ctx().clone();
 
-        let plan = match stmt {
-            // -- Streaming DDLs --
-            Statement::CreateView {
-                or_replace: false,
-                materialized: true,
-                query,
+        let (plan, context) = match stmt {
+            Statement::CreateTable {
                 name,
                 columns,
+                constraints,
+                source_schema,
+                source_watermarks,
+                append_only,
                 ..
-            } => gen_create_mv_plan(&session, context.clone(), *query, name, columns).map(|x| x.0),
+            } => {
+                let with_options = context.with_options();
+                let plan = match check_create_table_with_source(with_options, source_schema)? {
+                    Some(s) => {
+                        gen_create_table_plan_with_source(
+                            context,
+                            name,
+                            columns,
+                            constraints,
+                            s,
+                            source_watermarks,
+                            ColumnIdGenerator::new_initial(),
+                            append_only,
+                        )
+                        .await?
+                        .0
+                    }
+                    None => {
+                        gen_create_table_plan(
+                            context,
+                            name,
+                            columns,
+                            constraints,
+                            ColumnIdGenerator::new_initial(),
+                            source_watermarks,
+                            append_only,
+                        )?
+                        .0
+                    }
+                };
+                let context = plan.ctx();
 
-            Statement::CreateSink { stmt } => {
-                gen_sink_plan(&session, context.clone(), stmt).map(|x| x.0)
-            }
-
-            Statement::CreateIndex {
-                name,
-                table_name,
-                columns,
-                include,
-                distributed_by,
-                ..
-            } => gen_create_index_plan(
-                &session,
-                context.clone(),
-                name,
-                table_name,
-                columns,
-                include,
-                distributed_by,
-            )
-            .map(|x| x.0),
-
-            // -- Batch Queries --
-            Statement::Insert { .. }
-            | Statement::Delete { .. }
-            | Statement::Update { .. }
-            | Statement::Query { .. } => {
-                gen_batch_plan_by_statement(&session, context.clone(), stmt).map(|x| x.plan)
+                (Ok(plan), context)
             }
 
             _ => {
-                return Err(ErrorCode::NotImplemented(
-                    format!("unsupported statement {:?}", stmt),
-                    None.into(),
-                )
-                .into())
+                let context: OptimizerContextRef = context.into();
+                let plan = match stmt {
+                    // -- Streaming DDLs --
+                    Statement::CreateView {
+                        or_replace: false,
+                        materialized: true,
+                        query,
+                        name,
+                        columns,
+                        ..
+                    } => gen_create_mv_plan(&session, context.clone(), *query, name, columns)
+                        .map(|x| x.0),
+
+                    Statement::CreateSink { stmt } => {
+                        gen_sink_plan(&session, context.clone(), stmt).map(|x| x.0)
+                    }
+
+                    Statement::CreateIndex {
+                        name,
+                        table_name,
+                        columns,
+                        include,
+                        distributed_by,
+                        ..
+                    } => gen_create_index_plan(
+                        &session,
+                        context.clone(),
+                        name,
+                        table_name,
+                        columns,
+                        include,
+                        distributed_by,
+                    )
+                    .map(|x| x.0),
+
+                    // -- Batch Queries --
+                    Statement::Insert { .. }
+                    | Statement::Delete { .. }
+                    | Statement::Update { .. }
+                    | Statement::Query { .. } => {
+                        gen_batch_plan_by_statement(&session, context.clone(), stmt).map(|x| x.plan)
+                    }
+
+                    _ => {
+                        return Err(ErrorCode::NotImplemented(
+                            format!("unsupported statement {:?}", stmt),
+                            None.into(),
+                        )
+                        .into())
+                    }
+                };
+
+                (plan, context)
             }
         };
 
