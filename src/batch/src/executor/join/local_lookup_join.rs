@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::buffer::BitmapBuilder;
@@ -44,7 +43,7 @@ use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, DummyExecutor, Executor,
     ExecutorBuilder, JoinType, LookupJoinBase,
 };
-use crate::task::{BatchTaskContext, StopFlag, TaskId};
+use crate::task::{BatchTaskContext, TaskId};
 
 /// Inner side executor builder for the `LocalLookupJoinExecutor`
 struct InnerSideExecutorBuilder<C> {
@@ -402,7 +401,6 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             output_indices,
             chunk_size,
             identity: source.plan_node().get_identity().clone(),
-            stop_flag: source.context.get_stop_flag(),
         }
         .dispatch())
     }
@@ -424,7 +422,6 @@ struct LocalLookupJoinExecutorArgs {
     output_indices: Vec<usize>,
     chunk_size: usize,
     identity: String,
-    stop_flag: Arc<StopFlag>,
 }
 
 impl HashKeyDispatcher for LocalLookupJoinExecutorArgs {
@@ -448,7 +445,6 @@ impl HashKeyDispatcher for LocalLookupJoinExecutorArgs {
             chunk_size: self.chunk_size,
             identity: self.identity,
             _phantom: PhantomData,
-            stop_flag: self.stop_flag,
         }))
     }
 
@@ -459,8 +455,6 @@ impl HashKeyDispatcher for LocalLookupJoinExecutorArgs {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::hash::HashKeyDispatcher;
@@ -475,7 +469,6 @@ mod tests {
         diff_executor_output, FakeInnerSideExecutorBuilder, MockExecutor,
     };
     use crate::executor::{BoxedExecutor, SortExecutor};
-    use crate::task::StopFlag;
 
     const CHUNK_SIZE: usize = 1024;
 
@@ -551,7 +544,6 @@ mod tests {
             output_indices: (0..original_schema.len()).collect(),
             chunk_size: CHUNK_SIZE,
             identity: "TestLookupJoinExecutor".to_string(),
-            stop_flag: Arc::new(StopFlag::default()),
         }
         .dispatch()
     }

@@ -14,7 +14,6 @@
 
 use std::marker::PhantomData;
 use std::mem::swap;
-use std::sync::Arc;
 
 use futures::pin_mut;
 use itertools::Itertools;
@@ -40,7 +39,7 @@ use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, BufferChunkExecutor, Executor,
     ExecutorBuilder, LookupExecutorBuilder, LookupJoinBase,
 };
-use crate::task::{BatchTaskContext, StopFlag};
+use crate::task::BatchTaskContext;
 
 /// Distributed Lookup Join Executor.
 /// High level Execution flow:
@@ -258,7 +257,6 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
                 output_indices,
                 chunk_size,
                 identity: source.plan_node().get_identity().clone(),
-                stop_flag: source.context.get_stop_flag(),
             }
             .dispatch())
         })
@@ -281,7 +279,6 @@ struct DistributedLookupJoinExecutorArgs {
     output_indices: Vec<usize>,
     chunk_size: usize,
     identity: String,
-    stop_flag: Arc<StopFlag>,
 }
 
 impl HashKeyDispatcher for DistributedLookupJoinExecutorArgs {
@@ -306,7 +303,6 @@ impl HashKeyDispatcher for DistributedLookupJoinExecutorArgs {
                 chunk_size: self.chunk_size,
                 identity: self.identity,
                 _phantom: PhantomData,
-                stop_flag: self.stop_flag,
             },
         ))
     }

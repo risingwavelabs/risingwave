@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use futures_async_stream::try_stream;
 use risingwave_common::array::data_chunk_iter::RowRef;
 use risingwave_common::array::{Array, DataChunk};
@@ -35,7 +33,7 @@ use crate::executor::join::{concatenate, convert_row_to_chunk, JoinType};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
-use crate::task::{BatchTaskContext, StopFlag};
+use crate::task::BatchTaskContext;
 
 /// Nested loop join executor.
 ///
@@ -67,8 +65,6 @@ pub struct NestedLoopJoinExecutor {
 
     /// Memory context used for recording memory usage of executor.
     mem_context: Option<MemoryContextRef>,
-
-    stop_flag: Arc<StopFlag>,
 }
 
 impl Executor for NestedLoopJoinExecutor {
@@ -98,9 +94,6 @@ impl NestedLoopJoinExecutor {
             let mut ret = Vec::with_capacity(1024);
             #[for_await]
             for chunk in self.left_child.execute() {
-                if self.stop_flag.check_stop() {
-                    return Ok(());
-                }
                 let c = chunk?;
                 if let Some(m) = &self.mem_context {
                     trace!("Estimated chunk size is {:?}", c.estimated_heap_size());
@@ -131,9 +124,6 @@ impl NestedLoopJoinExecutor {
             left,
             self.right_child,
         ) {
-            if self.stop_flag.check_stop() {
-                return Ok(());
-            }
             yield chunk?.reorder_columns(&self.output_indices)
         }
 
@@ -194,7 +184,6 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
             identity,
             source.context.get_config().developer.chunk_size,
             mem_context,
-            source.context.get_stop_flag(),
         )))
     }
 }
@@ -210,7 +199,6 @@ impl NestedLoopJoinExecutor {
         identity: String,
         chunk_size: usize,
         mem_context: Option<MemoryContextRef>,
-        stop_flag: Arc<StopFlag>,
     ) -> Self {
         // TODO(Bowen): Merge this with derive schema in Logical Join (#790).
         let original_schema = match join_type {
@@ -241,7 +229,6 @@ impl NestedLoopJoinExecutor {
             identity,
             chunk_size,
             mem_context,
-            stop_flag,
         }
     }
 }
@@ -503,8 +490,6 @@ impl NestedLoopJoinExecutor {
 }
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
@@ -514,7 +499,6 @@ mod tests {
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
     use crate::executor::BoxedExecutor;
-    use crate::task::StopFlag;
 
     const CHUNK_SIZE: usize = 1024;
 
@@ -633,7 +617,6 @@ mod tests {
                 "NestedLoopJoinExecutor".into(),
                 CHUNK_SIZE,
                 None,
-                Arc::new(StopFlag::new()),
             ))
         }
 
