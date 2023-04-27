@@ -13,6 +13,7 @@ pushd ..
 
 # Buildkite does not support labels at the moment. Have to get via github api.
 get_nexmark_queries_to_run() {
+  set +u
   if [[ -z "$NEXMARK_QUERIES" ]]; then
     # every PR is an issue, we can use github api to pull it.
     echo "PULL_REQUEST: $PULL_REQUEST"
@@ -27,6 +28,7 @@ get_nexmark_queries_to_run() {
   else
     echo "NEXMARK_QUERIES already set."
   fi
+  set -u
   echo "Nexmark queries to run: $NEXMARK_QUERIES"
 }
 
