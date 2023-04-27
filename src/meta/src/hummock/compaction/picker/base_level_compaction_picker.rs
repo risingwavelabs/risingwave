@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -148,8 +147,6 @@ impl LevelCompactionPicker {
 
         {
             for (total_select_size, _, level_select_table) in l0_select_tables_vec {
-                let mut sst_id_set = BTreeSet::default();
-
                 let l0_select_tables = level_select_table
                     .iter()
                     .flat_map(|select_tables| select_tables.clone())
@@ -158,13 +155,8 @@ impl LevelCompactionPicker {
                 let target_level_ssts = overlap_strategy
                     .check_base_level_overlap(&l0_select_tables, &target_level.table_infos);
 
-                for sst in &l0_select_tables {
-                    sst_id_set.insert(sst.sst_id);
-                }
-
                 let mut target_level_size = 0;
                 let mut pending_compact = false;
-                let mut target_overlap_sst_ids = BTreeSet::default();
                 for sst in &target_level_ssts {
                     if level_handlers[target_level.level_idx as usize]
                         .is_pending_compact(&sst.sst_id)
@@ -173,7 +165,6 @@ impl LevelCompactionPicker {
                         break;
                     }
 
-                    target_overlap_sst_ids.insert(sst.sst_id);
                     target_level_size += sst.file_size;
                 }
 
