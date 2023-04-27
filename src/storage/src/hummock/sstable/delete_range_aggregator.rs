@@ -14,9 +14,9 @@
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
+use std::future::Future;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::{PointRange, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
@@ -357,8 +357,11 @@ impl SstableDeleteRangeIterator {
     }
 }
 
-#[async_trait]
 impl DeleteRangeIterator for SstableDeleteRangeIterator {
+    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+
     fn next_extended_user_key(&self) -> PointRange<&[u8]> {
         self.table.value().meta.monotonic_tombstone_events[self.next_idx]
             .event_key
@@ -373,27 +376,33 @@ impl DeleteRangeIterator for SstableDeleteRangeIterator {
         }
     }
 
-    async fn next(&mut self) -> HummockResult<()> {
-        self.next_idx += 1;
-        Ok(())
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async move {
+            self.next_idx += 1;
+            Ok(())
+        }
     }
 
-    async fn rewind(&mut self) -> HummockResult<()> {
-        self.next_idx = 0;
-        Ok(())
+    fn rewind(&mut self) -> Self::RewindFuture<'_> {
+        async move {
+            self.next_idx = 0;
+            Ok(())
+        }
     }
 
-    async fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) -> HummockResult<()> {
-        let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
-        self.next_idx = self
-            .table
-            .value()
-            .meta
-            .monotonic_tombstone_events
-            .partition_point(|MonotonicDeleteEvent { event_key, .. }| {
-                event_key.as_ref().le(&target_extended_user_key)
-            });
-        Ok(())
+    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) -> Self::SeekFuture<'_> {
+        async move {
+            let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
+            self.next_idx = self
+                .table
+                .value()
+                .meta
+                .monotonic_tombstone_events
+                .partition_point(|MonotonicDeleteEvent { event_key, .. }| {
+                    event_key.as_ref().le(&target_extended_user_key)
+                });
+            Ok(())
+        }
     }
 
     fn is_valid(&self) -> bool {

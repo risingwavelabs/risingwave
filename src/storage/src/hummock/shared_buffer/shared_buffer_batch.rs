@@ -21,7 +21,6 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, LazyLock};
 
-use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
@@ -792,8 +791,11 @@ impl SharedBufferDeleteRangeIterator {
     }
 }
 
-#[async_trait]
 impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
+    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+
     fn next_extended_user_key(&self) -> PointRange<&[u8]> {
         self.inner.monotonic_tombstone_events[self.next_idx]
             .event_key
@@ -808,24 +810,30 @@ impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
         }
     }
 
-    async fn next(&mut self) -> HummockResult<()> {
-        self.next_idx += 1;
-        Ok(())
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async move {
+            self.next_idx += 1;
+            Ok(())
+        }
     }
 
-    async fn rewind(&mut self) -> HummockResult<()> {
-        self.next_idx = 0;
-        Ok(())
+    fn rewind(&mut self) -> Self::RewindFuture<'_> {
+        async move {
+            self.next_idx = 0;
+            Ok(())
+        }
     }
 
-    async fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) -> HummockResult<()> {
-        let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
-        self.next_idx = self.inner.monotonic_tombstone_events.partition_point(
-            |MonotonicDeleteEvent { event_key, .. }| {
-                event_key.as_ref().le(&target_extended_user_key)
-            },
-        );
-        Ok(())
+    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) -> Self::SeekFuture<'a> {
+        async move {
+            let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
+            self.next_idx = self.inner.monotonic_tombstone_events.partition_point(
+                |MonotonicDeleteEvent { event_key, .. }| {
+                    event_key.as_ref().le(&target_extended_user_key)
+                },
+            );
+            Ok(())
+        }
     }
 
     fn is_valid(&self) -> bool {

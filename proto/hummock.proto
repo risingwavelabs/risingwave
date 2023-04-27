@@ -21,6 +21,7 @@ message SstableInfo {
   uint64 min_epoch = 9;
   uint64 max_epoch = 10;
   uint64 uncompressed_file_size = 11;
+  uint64 range_tombstone_count = 12;
 }
 
 enum LevelType {

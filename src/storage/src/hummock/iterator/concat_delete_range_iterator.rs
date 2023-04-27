@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_trait::async_trait;
+use std::future::Future;
+
 use risingwave_hummock_sdk::key::{FullKey, PointRange, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::SstableInfo;
@@ -49,13 +50,13 @@ impl ConcatDeleteRangeIterator {
     ) -> HummockResult<()> {
         self.current.take();
         if idx < self.sstables.len() {
+            if self.sstables[idx].range_tombstone_count == 0 {
+                return Ok(());
+            }
             let table = self
                 .sstable_store
                 .sstable(&self.sstables[idx], &mut self.stats)
                 .await?;
-            if table.value().meta.monotonic_tombstone_events.is_empty() {
-                return Ok(());
-            }
             let mut sstable_iter = SstableDeleteRangeIterator::new(table);
 
             if let Some(key) = seek_key {
@@ -71,8 +72,11 @@ impl ConcatDeleteRangeIterator {
     }
 }
 
-#[async_trait]
 impl DeleteRangeIterator for ConcatDeleteRangeIterator {
+    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+
     fn next_extended_user_key(&self) -> PointRange<&[u8]> {
         self.current.as_ref().unwrap().next_extended_user_key()
     }
@@ -81,40 +85,57 @@ impl DeleteRangeIterator for ConcatDeleteRangeIterator {
         self.current.as_ref().unwrap().current_epoch()
     }
 
-    async fn next(&mut self) -> HummockResult<()> {
-        if let Some(iter) = self.current.as_mut() {
-            if iter.is_valid() {
-                iter.next().await?;
-            } else {
-                let mut idx = self.idx;
-                while idx + 1 < self.sstables.len() && !self.is_valid() {
-                    self.seek_idx(idx + 1, None).await?;
-                    idx += 1;
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async {
+            if let Some(iter) = self.current.as_mut() {
+                if iter.is_valid() {
+                    iter.next().await?;
+                } else {
+                    let mut idx = self.idx;
+                    while idx + 1 < self.sstables.len() && !self.is_valid() {
+                        self.seek_idx(idx + 1, None).await?;
+                        idx += 1;
+                    }
                 }
             }
+            Ok(())
         }
-        Ok(())
     }
 
-    async fn rewind(&mut self) -> HummockResult<()> {
-        self.seek_idx(0, None).await
+    fn rewind(&mut self) -> Self::RewindFuture<'_> {
+        async move {
+            let mut idx = 0;
+            while idx < self.sstables.len() && self.sstables[idx].range_tombstone_count == 0 {
+                idx += 1;
+            }
+            self.current.take();
+            self.seek_idx(0, None).await?;
+            while idx + 1 < self.sstables.len() && !self.is_valid() {
+                self.seek_idx(idx + 1, None).await?;
+                idx += 1;
+            }
+            Ok(())
+        }
     }
 
-    async fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) -> HummockResult<()> {
-        let mut idx = self
-            .sstables
-            .partition_point(|sst| {
-                FullKey::decode(&sst.key_range.as_ref().unwrap().left)
-                    .user_key
-                    .le(&target_user_key)
-            })
-            .saturating_sub(1); // considering the boundary of 0
-        self.seek_idx(idx, Some(target_user_key)).await?;
-        while idx + 1 < self.sstables.len() && !self.is_valid() {
-            self.seek_idx(idx + 1, None).await?;
-            idx += 1;
+    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) -> Self::SeekFuture<'_> {
+        async move {
+            let mut idx = self
+                .sstables
+                .partition_point(|sst| {
+                    FullKey::decode(&sst.key_range.as_ref().unwrap().left)
+                        .user_key
+                        .le(&target_user_key)
+                })
+                .saturating_sub(1); // considering the boundary of 0
+            self.current.take();
+            self.seek_idx(idx, Some(target_user_key)).await?;
+            while idx + 1 < self.sstables.len() && !self.is_valid() {
+                self.seek_idx(idx + 1, None).await?;
+                idx += 1;
+            }
+            Ok(())
         }
-        Ok(())
     }
 
     fn is_valid(&self) -> bool {
