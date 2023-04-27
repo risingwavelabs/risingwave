@@ -4,9 +4,33 @@
 # The feedback loop is too long otherwise.
 set -euo pipefail
 
+QUERY_DIR="/risingwave/ci/scripts/sql/nexmark"
+
 # TODO(kwannoel): This is a workaround since workdir is `/risingwave` in the docker container.
 # Perhaps we should have a new docker container just for benchmarking?
 pushd ..
+
+
+# Buildkite does not support labels at the moment. Have to get via github api.
+get_nexmark_queries_to_run() {
+  # every PR is an issue, we can use github api to pull it.
+  echo "PULL_REQUEST: $PULL_REQUEST"
+  export NEXMARK_QUERIES=$(curl -L \
+    -H "Accept: application/vnd.github+json" \
+    -H "Authorization: Bearer $GITHUB_TOKEN"\
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    https://api.github.com/repos/risingwavelabs/risingwave/issues/"$PULL_REQUEST"/labels \
+  | parse_labels)
+  echo "Nexmark queries to run: $NEXMARK_QUERIES"
+}
+
+# Meant to be piped into.
+parse_labels() {
+  jq ".[] | .name"  \
+  | grep "nexmark-q" \
+  | tr "\n" " " \
+  | xargs echo -n
+}
 
 install_aws_cli() {
   echo ">>> Install aws cli"
@@ -27,6 +51,12 @@ print_machine_debug_info() {
 
 # NOTE(kwannoel) we can mirror the artifacts here in an s3 bucket if there are errors with access.
 install_all() {
+  # jq used to parse nexmark labels.
+  echo ">>> Installing jq"
+  wget https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64
+  chmod +x jq-linux64
+  mv jq-linux64 /usr/local/bin/jq
+
   echo ">>> Installing PromQL cli client"
   # Download promql
   wget https://github.com/nalbury/promql-cli/releases/download/v0.3.0/promql-v0.3.0-linux-amd64.tar.gz
@@ -127,7 +157,10 @@ start_kafka() {
   ./kafka_2.13-3.4.0/bin/zookeeper-server-start.sh ./kafka_2.13-3.4.0/config/zookeeper.properties > zookeeper.log 2>&1 &
   ./kafka_2.13-3.4.0/bin/kafka-server-start.sh ./kafka_2.13-3.4.0/config/server.properties --override num.partitions=8 > kafka.log 2>&1 &
   echo "Should have zookeeper and kafka running"
-  ps
+  echo "zookeeper PID: "
+  pgrep zookeeper
+  echo "kafka PID: "
+  pgrep kafka
   sleep 10
   # TODO(kwannoel): `trap ERR` and upload these logs.
   # buildkite-agent artifact upload ./zookeeper.log
@@ -183,26 +216,18 @@ setup() {
   configure_all
 }
 
-############## MAIN
-
-main() {
-  echo "--- Machine Debug Info before Setup"
-  print_machine_debug_info
-
-  echo "--- Running setup"
-  setup
-
-  echo "--- Machine Debug Info after Setup"
-  print_machine_debug_info
-
-  echo "--- Starting kafka"
-  start_kafka
-
-  echo "--- Spawning nexmark events"
-  gen_events
-
-  echo "--- Machine Debug Info After Nexmark events generated"
-  print_machine_debug_info
+# Run benchmark for a query
+run() {
+  echo "--- Running benchmark for $QUERY"
+  echo "--- Setting variables"
+  QUERY_LABEL="$1"
+  QUERY_FILE_NAME="$(echo $QUERY_LABEL | sed 's/nexmark\-\(.*\)/\1.sql/')"
+  QUERY_PATH="$QUERY_DIR/$QUERY_FILE_NAME"
+  FLAMEGRAPH_PATH="perf-$QUERY_LABEL.svg"
+  echo "QUERY_LABEL: $QUERY_LABEL"
+  echo "QUERY_FILE_NAME: $QUERY_FILE_NAME"
+  echo "QUERY_PATH: $QUERY_PATH"
+  echo "FLAMEGRAPH_PATH: $FLAMEGRAPH_PATH"
 
   echo "--- Starting up RW"
   pushd risingwave
@@ -217,7 +242,7 @@ main() {
 
   echo "--- Running Benchmarks"
   # TODO(kwannoel): Allow users to configure which query they want to run.
-  psql -h localhost -p 4566 -d dev -U root -f risingwave/ci/scripts/sql/nexmark/q17.sql
+  psql -h localhost -p 4566 -d dev -U root -f $QUERY_PATH
 
   echo "--- Start Profiling"
   start_nperf
@@ -234,9 +259,41 @@ main() {
 
   echo "--- Generate flamegraph"
   gen_cpu_flamegraph
+  mv perf.svg $FLAMEGRAPH_PATH
 
   echo "--- Uploading flamegraph"
-  buildkite-agent artifact upload ./perf.svg
+  buildkite-agent artifact upload "./$FLAMEGRAPH_PATH"
+}
+
+############## MAIN
+
+main() {
+  echo "--- Machine Debug Info before Setup"
+  print_machine_debug_info
+
+  echo "--- Running setup"
+  setup
+
+  # Sets nexmark queries. For example: NEXMARK_QUERIES="nexmark-q17 nexmark-q1"
+  echo "--- Getting nexmark queries to run"
+  get_nexmark_queries_to_run
+
+  echo "--- Machine Debug Info after Setup"
+  print_machine_debug_info
+
+  echo "--- Starting kafka"
+  start_kafka
+
+  echo "--- Spawning nexmark events"
+  gen_events
+
+  echo "--- Machine Debug Info After Nexmark events generated"
+  print_machine_debug_info
+
+  for QUERY in $NEXMARK_QUERIES
+  do
+    run "$QUERY"
+  done
 
   # TODO(kwannoel): `trap ERR` and upload these logs.
   #  echo "--- Uploading rw logs"
