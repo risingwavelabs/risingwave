@@ -211,6 +211,7 @@ stop_processes() {
   # stop rw
   pushd risingwave
   ./risedev k
+  ./risedev clean-data
   popd
 }
 
