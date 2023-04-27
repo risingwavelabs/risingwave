@@ -46,6 +46,8 @@ message Source {
   optional uint32 row_id_index = 5;
   // Columns of the source.
   repeated plan_common.ColumnCatalog columns = 6;
+  // Columns with default expr
+  plan_common.DefaultColumns default_columns = 15;
   // Column id of the primary key specified by the user. If the user does not
   // specify a primary key, the vector will be empty.
   repeated int32 pk_column_ids = 7;
@@ -176,7 +178,8 @@ message Table {
   uint32 database_id = 3;
   string name = 4;
   repeated plan_common.ColumnCatalog columns = 5;
-  repeated common.ColumnOrder pk = 6;
+  plan_common.DefaultColumns default_columns = 6;
+  repeated common.ColumnOrder pk = 7;
   repeated uint32 dependent_relations = 8;
   oneof optional_associated_source_id {
     uint32 associated_source_id = 9;

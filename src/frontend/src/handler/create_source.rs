@@ -38,7 +38,7 @@ use risingwave_connector::source::{
     PULSAR_CONNECTOR,
 };
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
-use risingwave_pb::plan_common::RowFormatType;
+use risingwave_pb::plan_common::{DefaultColumns, IndexAndExpr, RowFormatType};
 use risingwave_sqlparser::ast::{
     AvroSchema, CreateSourceStatement, DebeziumAvroSchema, ProtobufSchema, SourceSchema,
     SourceWatermark,
@@ -758,7 +758,8 @@ pub async fn handle_create_source(
     // TODO(yuhao): allow multiple watermark on source.
     assert!(watermark_descs.len() <= 1);
 
-    bind_sql_column_constraints(&session, name.clone(), &mut columns, stmt.columns)?;
+    let default_columns =
+        bind_sql_column_constraints(&session, name.clone(), &mut columns, stmt.columns)?;
 
     if row_id_index.is_none() && columns.iter().any(|c| c.is_generated()) {
         // TODO(yuhao): allow delete from a non append only source
@@ -800,6 +801,20 @@ pub async fn handle_create_source(
         name,
         row_id_index,
         columns,
+        default_columns: if default_columns.is_empty() {
+            None
+        } else {
+            Some(DefaultColumns {
+                default_columns: default_columns
+                    .iter()
+                    .cloned()
+                    .map(|(i, expr)| IndexAndExpr {
+                        index: i as u32,
+                        expr: Some(expr.to_expr_proto()),
+                    })
+                    .collect_vec(),
+            })
+        },
         pk_column_ids,
         properties: with_options.into_inner().into_iter().collect(),
         info: Some(source_info),

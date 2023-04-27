@@ -27,6 +27,7 @@ use super::derive::derive_columns;
 use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::catalog::FragmentId;
+use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::derive::derive_pk;
 use crate::optimizer::plan_node::{PlanBase, PlanNodeMeta};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -73,6 +74,7 @@ impl StreamMaterialize {
             name,
             user_order_by,
             columns,
+            vec![],
             definition,
             ConflictBehavior::NoCheck,
             None,
@@ -96,6 +98,7 @@ impl StreamMaterialize {
         user_distributed_by: RequiredDist,
         user_order_by: Order,
         columns: Vec<ColumnCatalog>,
+        default_columns: Vec<(usize, ExprImpl)>,
         definition: String,
         conflict_behavior: ConflictBehavior,
         pk_column_indices: Vec<usize>,
@@ -109,6 +112,7 @@ impl StreamMaterialize {
             name,
             user_order_by,
             columns,
+            default_columns,
             definition,
             conflict_behavior,
             Some(pk_column_indices),
@@ -162,6 +166,7 @@ impl StreamMaterialize {
         name: String,
         user_order_by: Order,
         columns: Vec<ColumnCatalog>,
+        default_columns: Vec<(usize, ExprImpl)>,
         definition: String,
         conflict_behavior: ConflictBehavior,
         pk_column_indices: Option<Vec<usize>>, // Is some when create table
@@ -194,6 +199,7 @@ impl StreamMaterialize {
             associated_source_id: None,
             name,
             columns,
+            default_columns,
             pk,
             stream_key,
             distribution_key,

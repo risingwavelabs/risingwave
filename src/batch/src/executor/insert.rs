@@ -27,7 +27,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::IndexAndExpr;
+use risingwave_pb::plan_common::IndexAndExpr;
 use risingwave_source::dml_manager::DmlManagerRef;
 
 use crate::executor::{
@@ -209,7 +209,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             .collect();
         let sorted_default_columns = if let Some(default_columns) = &insert_node.default_columns {
             let mut default_columns = default_columns
-                .get_default_column()
+                .get_default_columns()
                 .iter()
                 .cloned()
                 .map(|IndexAndExpr { index: i, expr: e }| {

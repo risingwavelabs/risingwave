@@ -74,14 +74,6 @@ message FilterNode {
   expr.ExprNode search_condition = 1;
 }
 
-message IndexAndExpr {
-  uint32 index = 1;
-  expr.ExprNode expr = 2;
-}
-
-message DefaultColumns {
-  repeated IndexAndExpr default_column = 1;
-}
 
 message InsertNode {
   // Id of the table to perform inserting.
@@ -89,7 +81,7 @@ message InsertNode {
   // Version of the table.
   uint64 table_version_id = 5;
   repeated uint32 column_indices = 2;
-  DefaultColumns default_columns = 6;
+  plan_common.DefaultColumns default_columns = 6;
   // An optional field and will be `None` for tables without user-defined pk.
   // The `BatchInsertExecutor` should add a column with NULL value which will
   // be filled in streaming.

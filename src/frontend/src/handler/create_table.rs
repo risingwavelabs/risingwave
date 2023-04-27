@@ -25,7 +25,7 @@ use risingwave_common::catalog::{
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, WatermarkDesc};
-use risingwave_pb::plan_common::GeneratedColumnDesc;
+use risingwave_pb::plan_common::{DefaultColumns, GeneratedColumnDesc, IndexAndExpr};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     ColumnDef, ColumnOption, DataType as AstDataType, ObjectName, SourceSchema, SourceWatermark,
@@ -198,7 +198,7 @@ pub fn bind_sql_column_constraints(
     table_name: String,
     column_catalogs: &mut [ColumnCatalog],
     columns: Vec<ColumnDef>,
-) -> Result<()> {
+) -> Result<Vec<(usize, ExprImpl)>> {
     let generated_column_names = {
         let mut names = vec![];
         for column in &columns {
@@ -214,6 +214,8 @@ pub fn bind_sql_column_constraints(
 
     let mut binder = Binder::new_for_ddl(session);
     binder.bind_columns_to_context(table_name.clone(), column_catalogs.to_vec())?;
+
+    let mut default_columns = vec![];
     for column in columns {
         for option_def in column.options {
             match option_def.option {
@@ -236,6 +238,12 @@ pub fn bind_sql_column_constraints(
                 ColumnOption::Unique { is_primary: true } => {
                     // Bind primary key in `bind_sql_table_column_constraints`
                 }
+                ColumnOption::Default { 0: expr } => {
+                    let idx = binder
+                        .get_column_binding_index(table_name.clone(), &column.name.real_value())?;
+                    let expr_impl = binder.bind_expr(expr)?;
+                    default_columns.push((idx, expr_impl))
+                }
                 _ => {
                     return Err(ErrorCode::NotImplemented(
                         format!("column constraints \"{}\"", option_def),
@@ -246,7 +254,7 @@ pub fn bind_sql_column_constraints(
             }
         }
     }
-    Ok(())
+    Ok(default_columns)
 }
 
 /// Binds constraints that can be specified in both column definitions and table definition.
@@ -280,6 +288,9 @@ pub fn bind_sql_table_column_constraints(
                 }
                 ColumnOption::GeneratedColumns(_) => {
                     // Bind generated columns in `bind_sql_column_constraints`
+                }
+                ColumnOption::Default { .. } => {
+                    // Bind default columns in `bind_sql_column_constraints`
                 }
                 _ => {
                     return Err(ErrorCode::NotImplemented(
@@ -398,7 +409,8 @@ pub(crate) async fn gen_create_table_plan_with_source(
     )
     .await?;
 
-    bind_sql_column_constraints(session, table_name.real_value(), &mut columns, column_defs)?;
+    let default_columns =
+        bind_sql_column_constraints(session, table_name.real_value(), &mut columns, column_defs)?;
 
     if row_id_index.is_none() && columns.iter().any(|c| c.is_generated()) {
         // TODO(yuhao): allow delete from a non append only source
@@ -412,6 +424,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         context.into(),
         table_name,
         columns,
+        default_columns,
         properties,
         pk_column_ids,
         row_id_index,
@@ -475,7 +488,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
         &columns,
     )?;
 
-    bind_sql_column_constraints(
+    let default_columns = bind_sql_column_constraints(
         context.session_ctx(),
         table_name.real_value(),
         &mut columns,
@@ -486,6 +499,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
         context.into(),
         table_name,
         columns,
+        default_columns,
         properties,
         pk_column_ids,
         row_id_index,
@@ -502,6 +516,7 @@ fn gen_table_plan_inner(
     context: OptimizerContextRef,
     table_name: ObjectName,
     columns: Vec<ColumnCatalog>,
+    default_columns: Vec<(usize, ExprImpl)>,
     properties: HashMap<String, String>,
     pk_column_ids: Vec<ColumnId>,
     row_id_index: Option<usize>,
@@ -527,6 +542,20 @@ fn gen_table_plan_inner(
             .iter()
             .map(|column| column.to_protobuf())
             .collect_vec(),
+        default_columns: if default_columns.is_empty() {
+            None
+        } else {
+            Some(DefaultColumns {
+                default_columns: default_columns
+                    .iter()
+                    .cloned()
+                    .map(|(i, expr)| IndexAndExpr {
+                        index: i as u32,
+                        expr: Some(expr.to_expr_proto()),
+                    })
+                    .collect_vec(),
+            })
+        },
         pk_column_ids: pk_column_ids.iter().map(Into::into).collect_vec(),
         properties,
         info: Some(source_info),
@@ -577,6 +606,7 @@ fn gen_table_plan_inner(
     let materialize = plan_root.gen_table_plan(
         name,
         columns,
+        default_columns,
         definition,
         pk_column_ids,
         row_id_index,

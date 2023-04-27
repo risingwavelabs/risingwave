@@ -111,6 +111,7 @@ async fn compaction_test(
         database_id: 1,
         name: "delete-key-table".to_string(),
         columns: vec![],
+        default_columns: None,
         pk: vec![],
         dependent_relations: vec![],
         distribution_key: vec![],

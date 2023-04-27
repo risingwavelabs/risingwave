@@ -101,6 +101,7 @@ impl Binder {
         self.bind_table(schema_name.as_deref(), &table_name, None)?;
 
         let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, true)?;
+        let default_columns_from_catalog = table_catalog.default_columns_as_map();
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");
@@ -249,7 +250,12 @@ impl Binder {
             .map(|i| {
                 (
                     i,
-                    ExprImpl::literal_null(cols_to_insert_in_table[i].data_type().clone()),
+                    default_columns_from_catalog
+                        .get(&i)
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            ExprImpl::literal_null(cols_to_insert_in_table[i].data_type().clone())
+                        }),
                 )
             })
             .collect_vec();

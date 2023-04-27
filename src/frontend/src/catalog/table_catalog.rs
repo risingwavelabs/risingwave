@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
@@ -24,8 +24,10 @@ use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
 use risingwave_pb::catalog::PbTable;
+use risingwave_pb::plan_common::{DefaultColumns, IndexAndExpr};
 
 use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId};
+use crate::expr::{Expr, ExprImpl};
 use crate::user::UserId;
 use crate::WithOptions;
 
@@ -73,6 +75,9 @@ pub struct TableCatalog {
 
     /// All columns in this table.
     pub columns: Vec<ColumnCatalog>,
+
+    /// Columns with a default expr
+    pub default_columns: Vec<(usize, ExprImpl)>,
 
     /// Key used as materialize's storage key prefix, including MV order columns and stream_key.
     pub pk: Vec<ColumnOrder>,
@@ -272,6 +277,18 @@ impl TableCatalog {
         &self.columns
     }
 
+    pub fn default_columns(&self) -> &[(usize, ExprImpl)] {
+        &self.default_columns
+    }
+
+    pub fn default_columns_as_map(&self) -> BTreeMap<usize, ExprImpl> {
+        self.default_columns
+            .iter()
+            .cloned()
+            .map(|ie| (ie.0, ie.1))
+            .collect()
+    }
+
     /// Get a reference to the table catalog's pk desc.
     pub fn pk(&self) -> &[ColumnOrder] {
         self.pk.as_ref()
@@ -348,6 +365,21 @@ impl TableCatalog {
             database_id,
             name: self.name.clone(),
             columns: self.columns().iter().map(|c| c.to_protobuf()).collect(),
+            default_columns: if self.default_columns.is_empty() {
+                None
+            } else {
+                Some(DefaultColumns {
+                    default_columns: self
+                        .default_columns()
+                        .iter()
+                        .cloned()
+                        .map(|(i, expr)| IndexAndExpr {
+                            index: i as u32,
+                            expr: Some(expr.to_expr_proto()),
+                        })
+                        .collect_vec(),
+                })
+            },
             pk: self.pk.iter().map(|o| o.to_protobuf()).collect(),
             stream_key: self.stream_key.iter().map(|x| *x as _).collect(),
             dependent_relations: vec![],
@@ -431,6 +463,18 @@ impl From<PbTable> for TableCatalog {
             name,
             pk,
             columns,
+            default_columns: tb.default_columns.map_or(vec![], |dc| {
+                dc.default_columns
+                    .into_iter()
+                    .map(|IndexAndExpr { index, expr }| {
+                        (
+                            index as usize,
+                            ExprImpl::from_expr_proto(&expr.unwrap())
+                                .expect("expr in default columns corrupted"),
+                        )
+                    })
+                    .collect()
+            }),
             table_type: TableType::from_prost(table_type),
             distribution_key: tb
                 .distribution_key
@@ -511,6 +555,7 @@ mod tests {
                     is_hidden: false,
                 },
             ],
+            default_columns: None,
             pk: vec![ColumnOrder::new(0, OrderType::ascending()).to_protobuf()],
             stream_key: vec![0],
             dependent_relations: vec![],
@@ -566,6 +611,7 @@ mod tests {
                         is_hidden: false
                     }
                 ],
+                default_columns: vec![],
                 stream_key: vec![0],
                 pk: vec![ColumnOrder::new(0, OrderType::ascending())],
                 distribution_key: vec![],

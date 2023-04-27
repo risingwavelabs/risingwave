@@ -83,3 +83,12 @@ enum RowFormatType {
   UPSERT_AVRO = 11;
   DEBEZIUM_MONGO_JSON = 12;
 }
+
+message IndexAndExpr {
+  uint32 index = 1;
+  expr.ExprNode expr = 2;
+}
+
+message DefaultColumns {
+  repeated IndexAndExpr default_columns = 1;
+}

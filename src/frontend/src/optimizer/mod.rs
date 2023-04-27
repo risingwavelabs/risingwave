@@ -53,7 +53,7 @@ use self::plan_visitor::InputRefValidator;
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
-use crate::expr::InputRef;
+use crate::expr::{ExprImpl, InputRef};
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive,
 };
@@ -386,6 +386,7 @@ impl PlanRoot {
         &mut self,
         table_name: String,
         columns: Vec<ColumnCatalog>,
+        default_columns: Vec<(usize, ExprImpl)>,
         definition: String,
         pk_column_ids: Vec<ColumnId>,
         row_id_index: Option<usize>,
@@ -456,6 +457,7 @@ impl PlanRoot {
             table_required_dist,
             Order::any(),
             columns,
+            default_columns,
             definition,
             conflict_behavior,
             pk_column_indices,
