@@ -64,7 +64,7 @@ for filename in $kafka_data_files; do
     if [[ "$topic" = *bin ]]; then
         ${KCAT_BIN} -P -b 127.0.0.1:29092 -t "$topic" "$filename"
     else
-        cat "$filename" | ${KCAT_BIN} -P -b 127.0.0.1:29092 -t "$topic"
+        cat "$filename" | ${KCAT_BIN} -P -K ^  -b 127.0.0.1:29092 -t "$topic"
     fi
     ) &
 done

@@ -1228,7 +1228,7 @@ def section_streaming_errors(outer_panels):
     ]
 
 
-def section_batch_exchange(outer_panels):
+def section_batch(outer_panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -1250,6 +1250,16 @@ def section_batch_exchange(outer_panels):
                     [
                         panels.target(
                             f"{metric('batch_task_num')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_row(
+                    "Batch Mem Usage",
+                    "All memory usage of batch executors in bytes",
+                    [
+                        panels.target(
+                            f"{metric('batch_total_mem')}",
                             "",
                         ),
                     ],
@@ -2439,7 +2449,7 @@ dashboard = Dashboard(
         *section_streaming_actors(panels),
         *section_streaming_exchange(panels),
         *section_streaming_errors(panels),
-        *section_batch_exchange(panels),
+        *section_batch(panels),
         *section_hummock(panels),
         *section_compaction(panels),
         *section_object_storage(panels),

@@ -32,8 +32,8 @@ pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
 /// The memory reserved for system usage (stack and code segment of processes, allocation
 /// overhead, network buffer, etc.) in megabytes.
 pub const MIN_SYSTEM_RESERVED_MEMORY_MB: usize = 512;
-pub const MAX_SYSTEM_RESERVED_MEMORY_MB: usize = 2700;
-pub const SYSTEM_RESERVED_MEMORY_PROPORTION: f64 = 0.2;
+pub const MAX_SYSTEM_RESERVED_MEMORY_MB: usize = 2048;
+pub const SYSTEM_RESERVED_MEMORY_PROPORTION: f64 = 0.1;
 
 pub const STORAGE_MEMORY_PROPORTION: f64 = 0.3;
 
@@ -187,7 +187,6 @@ mod tests {
     use risingwave_common::config::StorageConfig;
 
     use super::{reserve_memory_bytes, storage_memory_config};
-    use crate::memory_management::MAX_SYSTEM_RESERVED_MEMORY_MB;
 
     #[test]
     fn test_reserve_memory_bytes() {
@@ -198,13 +197,13 @@ mod tests {
 
         // reserve based on proportion
         let (reserved, non_reserved) = reserve_memory_bytes(10 << 30);
-        assert_eq!(reserved, 2 << 30);
-        assert_eq!(non_reserved, 8 << 30);
+        assert_eq!(reserved, 1 << 30);
+        assert_eq!(non_reserved, 9 << 30);
 
-        // at most 3 GB
+        // at most 2 GB
         let (reserved, non_reserved) = reserve_memory_bytes(100 << 30);
-        assert_eq!(reserved, MAX_SYSTEM_RESERVED_MEMORY_MB * 1024 * 1024);
-        assert_eq!(non_reserved, (100 << 30) - reserved);
+        assert_eq!(reserved, 2 << 30);
+        assert_eq!(non_reserved, 98 << 30);
     }
 
     #[test]

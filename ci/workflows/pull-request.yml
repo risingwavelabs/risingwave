@@ -281,7 +281,7 @@ steps:
           environment:
             - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 18
+    timeout_in_minutes: 21
 
   - label: "recovery test (deterministic simulation)"
     command: "TEST_NUM=8 KILL_RATE=0.5 ci/scripts/deterministic-recovery-test.sh"
@@ -331,8 +331,8 @@ steps:
     timeout_in_minutes: 20
 
   # Generates cpu flamegraph if label `cpu_flamegraph` is added to PR.
-  - label: "Generate CPU flamegraph"
-    command: "ci/scripts/gen-flamegraph.sh"
+  - label: Generate CPU flamegraph"
+    command: "PULL_REQUEST=$BUILDKITE_PULL_REQUEST ci/scripts/gen-flamegraph.sh"
     depends_on: "cpu-flamegraph-env-build"
 
     if: build.pull_request.labels includes "cpu_flamegraph"
@@ -352,4 +352,4 @@ steps:
     # - Nexmark event generation: ~3min for 100mil records.
     # - Generate Flamegraph: ~15min (see https://github.com/koute/not-perf/issues/30 on optimizing)
     # - Building RW artifacts: ~8min
-    timeout_in_minutes: 50
+    timeout_in_minutes: 60 # ~3-4 queries can run
