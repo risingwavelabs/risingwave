@@ -141,7 +141,7 @@ impl OptimizerContext {
     }
 
     pub fn explain_type(&self) -> ExplainType {
-        self.explain_options.explain_type
+        self.explain_options.explain_type.clone()
     }
 
     pub fn is_explain_logical(&self) -> bool {
