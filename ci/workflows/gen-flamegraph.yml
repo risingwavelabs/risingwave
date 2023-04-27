@@ -25,12 +25,10 @@ steps:
                 command: "ci/build-ci-image.sh"
                 label: "ci build images"
   - wait
-  -
   # Generates cpu flamegraph env
   - label: "cpu-flamegraph-env-build"
     key: "cpu-flamegraph-env-build"
     command: "ci/scripts/flamegraph-env-build.sh"
-    if: build.pull_request.labels includes "cpu_flamegraph"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
@@ -48,9 +46,6 @@ steps:
   - label: "Generate CPU flamegraph"
     command: "NEXMARK_QUERIES=$NEXMARK_QUERIES ci/scripts/gen-flamegraph.sh"
     depends_on: "cpu-flamegraph-env-build"
-
-    if: build.pull_request.labels includes "cpu_flamegraph"
-
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
