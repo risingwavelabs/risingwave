@@ -202,7 +202,6 @@ impl OpenDalStreamingUploader {
     }
 }
 
-unsafe impl Send for OpenDalStreamingUploader {}
 unsafe impl Sync for OpenDalStreamingUploader {}
 
 const OPENDAL_BUFFER_SIZE: u64 = 8 * 1024 * 1024;
@@ -210,7 +209,6 @@ const OPENDAL_BUFFER_SIZE: u64 = 8 * 1024 * 1024;
 impl StreamingUploader for OpenDalStreamingUploader {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
         self.writer.write(data).await?;
-        // self.buffer.put(data);
         Ok(())
     }
 
