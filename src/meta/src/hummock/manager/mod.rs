@@ -111,7 +111,6 @@ pub struct HummockManager<S: MetaStore> {
     // CompactionGroupId
     compaction_request_channel: parking_lot::RwLock<Option<CompactionRequestChannelRef>>,
     compaction_resume_notifier: parking_lot::RwLock<Option<Arc<Notify>>>,
-    compaction_tasks_to_cancel: parking_lot::Mutex<Vec<HummockCompactionTaskId>>,
 
     pub compactor_manager: CompactorManagerRef,
     event_sender: HummockManagerEventSender,
@@ -169,6 +168,7 @@ use risingwave_hummock_sdk::table_stats::{
 };
 use risingwave_object_store::object::{parse_remote_object_store, ObjectStoreRef};
 use risingwave_pb::catalog::Table;
+use risingwave_pb::hummock::level_handler::RunningCompactTask;
 use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::PbCompactionGroupInfo;
 use risingwave_pb::meta::relation::RelationInfo;
@@ -313,7 +313,6 @@ where
             compaction_group_manager,
             compaction_request_channel: parking_lot::RwLock::new(None),
             compaction_resume_notifier: parking_lot::RwLock::new(None),
-            compaction_tasks_to_cancel: parking_lot::Mutex::new(vec![]),
             compactor_manager,
             latest_snapshot: ArcSwap::from_pointee(HummockSnapshot {
                 committed_epoch: INVALID_EPOCH,
@@ -351,14 +350,8 @@ where
                         return;
                     }
                 }
-                let mut split_cancel = {
-                    let mut manager_cancel = hummock_manager.compaction_tasks_to_cancel.lock();
-                    manager_cancel.drain(..).collect_vec()
-                };
-                split_cancel.sort();
-                split_cancel.dedup();
                 // TODO: add metrics to track expired tasks
-                for (context_id, mut task) in compactor_manager.get_expired_tasks(split_cancel) {
+                for (context_id, mut task) in compactor_manager.get_expired_tasks() {
                     tracing::info!("Task with task_id {} with context_id {context_id} has expired due to lack of visible progress", task.task_id);
                     if let Some(compactor) = compactor_manager.get_compactor(context_id) {
                         // Forcefully cancel the task so that it terminates early on the compactor
@@ -2130,7 +2123,7 @@ where
                 })
                 .collect_vec()
         };
-        let mut slowdown_groups = HashMap::default();
+        let mut slowdown_groups: HashMap<u64, u64> = HashMap::default();
         {
             let manager = self.compaction_group_manager.read().await;
             for (group_id, l0_file_size) in groups {
@@ -2146,10 +2139,10 @@ where
         if slowdown_groups.is_empty() {
             return;
         }
-        let mut pending_tasks = HashMap::default();
+        let mut pending_tasks: HashMap<u64, (u64, usize, RunningCompactTask)> = HashMap::default();
         {
             let compaction_guard = read_lock!(self, compaction).await;
-            for (group_id, _) in &slowdown_groups {
+            for group_id in slowdown_groups.keys() {
                 if let Some(status) = compaction_guard.compaction_statuses.get(group_id) {
                     for (idx, level_handler) in status.level_handlers.iter().enumerate() {
                         let tasks = level_handler.get_pending_tasks();
@@ -2163,7 +2156,7 @@ where
                 }
             }
         }
-        let task_ids = pending_tasks.keys().into_iter().cloned().collect_vec();
+        let task_ids = pending_tasks.keys().cloned().collect_vec();
         let task_infos = self
             .compactor_manager
             .check_tasks_status(&task_ids, Duration::from_secs(MAX_COMPACTION_DURATION_SEC));
