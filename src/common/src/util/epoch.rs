@@ -128,7 +128,6 @@ impl EpochPair {
 /// Task-local storage for the epoch pair.
 pub mod task_local {
     use futures::Future;
-    use tokio::task::futures::TaskLocalFuture;
     use tokio::task_local;
 
     use super::{Epoch, EpochPair};
@@ -162,11 +161,11 @@ pub mod task_local {
     }
 
     /// Provides the given epoch pair in the task local storage for the scope of the given future.
-    pub fn scope<F>(epoch: EpochPair, f: F) -> TaskLocalFuture<EpochPair, F>
+    pub async fn scope<F>(epoch: EpochPair, f: F) -> F::Output
     where
         F: Future,
     {
-        TASK_LOCAL_EPOCH_PAIR.scope(epoch, f)
+        TASK_LOCAL_EPOCH_PAIR.scope(epoch, f).await
     }
 }
 
