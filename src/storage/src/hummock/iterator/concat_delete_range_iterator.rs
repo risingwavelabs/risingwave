@@ -109,7 +109,7 @@ impl DeleteRangeIterator for ConcatDeleteRangeIterator {
                 idx += 1;
             }
             self.current.take();
-            self.seek_idx(0, None).await?;
+            self.seek_idx(idx, None).await?;
             while idx + 1 < self.sstables.len() && !self.is_valid() {
                 self.seek_idx(idx + 1, None).await?;
                 idx += 1;
