@@ -163,14 +163,15 @@ impl LogicalOverAgg {
                     Frame::Rows(FrameBound::CurrentRow, FrameBound::Following(offset))
                 }
             }
-            _ => window_function.frame.unwrap_or({
+            WindowFuncKind::Aggregate(_) => window_function.frame.unwrap_or({
+                // FIXME(rc): The following 2 cases should both be `Frame::Range(Unbounded,
+                // CurrentRow)` but we don't support yet.
                 if order_by.is_empty() {
                     Frame::Rows(
                         FrameBound::UnboundedPreceding,
                         FrameBound::UnboundedFollowing,
                     )
                 } else {
-                    // FIXME(rc): Should be `Frame::Range` but we don't support yet.
                     Frame::Rows(FrameBound::UnboundedPreceding, FrameBound::CurrentRow)
                 }
             }),
