@@ -408,7 +408,7 @@ impl FunctionAttr {
                         let ArrayBuilderImpl::#ret_variant(builder) = builder else {
                             bail!("output type mismatch. expect: {}", stringify!(#ret_variant));
                         };
-                        match self.state.take() {
+                        match std::mem::replace(&mut self.state, #init_state) {
                             Some(state) => builder.append(Some(<#ret_owned>::from(state).as_scalar_ref())),
                             None => builder.append_null(),
                         }
