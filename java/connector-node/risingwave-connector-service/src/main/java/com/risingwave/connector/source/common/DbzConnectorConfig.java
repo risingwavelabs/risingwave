@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.sourcenode.common;
+package com.risingwave.connector.source.common;
 
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.ConfigurableOffsetBackingStore;

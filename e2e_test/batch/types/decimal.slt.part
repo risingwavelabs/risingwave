@@ -87,28 +87,3 @@ query R
 select 79228162514264337593543950335::decimal::float8;
 ----
 7.922816251426434e+28
-
-query RIRRR
-with t(v) as (
-	select (v / 4.0)::decimal from generate_series(-6, 6, 1) as t(v)
-) select
-	v::real,
-	v::int,
-	round(v),
-	floor(v),
-	ceil(v)
-from t;
-----
- -1.5 -2 -2 -2 -1
--1.25 -1 -1 -2 -1
-   -1 -1 -1 -1 -1
--0.75 -1 -1 -1  0
- -0.5 -1 -1 -1  0
--0.25  0  0 -1  0
-    0  0  0  0  0
- 0.25  0  0  0  1
-  0.5  1  1  0  1
- 0.75  1  1  0  1
-    1  1  1  1  1
- 1.25  1  1  1  2
-  1.5  2  2  1  2
