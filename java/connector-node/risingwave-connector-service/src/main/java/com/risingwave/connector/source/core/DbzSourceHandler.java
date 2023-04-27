@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.sourcenode.core;
+package com.risingwave.connector.source.core;
 
 import com.risingwave.connector.api.source.CdcEngineRunner;
 import com.risingwave.connector.api.source.SourceHandler;
+import com.risingwave.connector.source.common.DbzConnectorConfig;
 import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
-import com.risingwave.sourcenode.common.DbzConnectorConfig;
 import io.grpc.Context;
 import io.grpc.stub.ServerCallStreamObserver;
 import java.util.concurrent.TimeUnit;
