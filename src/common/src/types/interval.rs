@@ -254,12 +254,12 @@ impl Interval {
     fn from_floats(months: f64, days: f64, usecs: f64) -> Option<Self> {
         // TSROUND in include/datatype/timestamp.h
         // round eagerly at usecs precision because floats are imprecise
-        // should round to even #5576
-        let months_round_usecs =
-            |months: f64| (months * (USECS_PER_MONTH as f64)).round() / (USECS_PER_MONTH as f64);
+        let months_round_usecs = |months: f64| {
+            (months * (USECS_PER_MONTH as f64)).round_ties_even() / (USECS_PER_MONTH as f64)
+        };
 
         let days_round_usecs =
-            |days: f64| (days * (USECS_PER_DAY as f64)).round() / (USECS_PER_DAY as f64);
+            |days: f64| (days * (USECS_PER_DAY as f64)).round_ties_even() / (USECS_PER_DAY as f64);
 
         let trunc_fract = |num: f64| (num.trunc(), num.fract());
 
@@ -293,7 +293,7 @@ impl Interval {
 
         // Handle usecs
         let result_usecs = usecs + leftover_usecs;
-        let usecs = result_usecs.round();
+        let usecs = result_usecs.round_ties_even();
         if usecs.is_nan() || usecs < (i64::MIN as f64) || usecs > (i64::MAX as f64) {
             return None;
         }
@@ -1362,7 +1362,7 @@ impl Interval {
                     result = match interval_unit {
                         Second => {
                             // If unsatisfied precision is passed as input, we should not return None (Error).
-                            let usecs = (second.into_inner() * (USECS_PER_SEC as f64)).round() as i64;
+                            let usecs = (second.into_inner() * (USECS_PER_SEC as f64)).round_ties_even() as i64;
                             Some(Interval::from_month_day_usec(0, 0, usecs))
                         }
                         _ => None,
