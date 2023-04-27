@@ -244,7 +244,7 @@ impl SysCatalogReaderImpl {
         Ok(ddl_grogress)
     }
 
-    pub(super) async fn read_table_stats(&self) -> Result<Vec<OwnedRow>> {
+    pub(super) fn read_table_stats(&self) -> Result<Vec<OwnedRow>> {
         let catalog = self.catalog_reader.read_guard();
         let table_stats = catalog.table_stats();
         let mut rows = vec![];
