@@ -164,28 +164,29 @@ async fn do_handle_explain(
             blocks.extend(trace);
         }
 
-        // Throw the error.
-        let plan = plan?;
-
         match explain_type {
-            ExplainType::DistSql => match plan.convention() {
-                Convention::Logical => unreachable!(),
-                Convention::Batch => {
-                    batch_plan_fragmenter = Some(BatchPlanFragmenter::new(
-                        session.env().worker_node_manager_ref(),
-                        session.env().catalog_reader().clone(),
-                        session.config().get_batch_parallelism(),
-                        plan,
-                    )?);
+            ExplainType::DistSql => {
+                if let Ok(plan) = &plan {
+                    match plan.convention() {
+                        Convention::Logical => unreachable!(),
+                        Convention::Batch => {
+                            batch_plan_fragmenter = Some(BatchPlanFragmenter::new(
+                                session.env().worker_node_manager_ref(),
+                                session.env().catalog_reader().clone(),
+                                session.config().get_batch_parallelism(),
+                                plan.clone(),
+                            )?);
+                        }
+                        Convention::Stream => {
+                            let graph = build_graph(plan.clone());
+                            blocks.push(explain_stream_graph(&graph, explain_verbose));
+                        }
+                    }
                 }
-                Convention::Stream => {
-                    let graph = build_graph(plan);
-                    blocks.push(explain_stream_graph(&graph, explain_verbose));
-                }
-            },
+            }
             ExplainType::Physical => {
                 // if explain trace is on, the plan has been in the rows
-                if !explain_trace {
+                if !explain_trace && let Ok(plan) = &plan {
                     let output = plan.explain_to_string()?;
                     blocks.push(output);
                 }
@@ -200,6 +201,9 @@ async fn do_handle_explain(
                 }
             }
         }
+
+        // Throw the error.
+        plan?;
     }
 
     if let Some(fragmenter) = batch_plan_fragmenter {
