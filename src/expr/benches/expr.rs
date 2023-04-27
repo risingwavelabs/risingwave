@@ -300,7 +300,7 @@ fn bench_expr(c: &mut Criterion) {
         };
         // to workaround the lifetime issue
         let agg = RefCell::new(agg);
-        c.bench_function(&sig.to_string_no_return(), |bencher| {
+        c.bench_function(&format!("{sig:?}"), |bencher| {
             #[allow(clippy::await_holding_refcell_ref)]
             bencher.to_async(FuturesExecutor).iter(|| async {
                 agg.borrow_mut()

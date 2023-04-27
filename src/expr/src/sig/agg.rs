@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::LazyLock;
 
 use itertools::Itertools;
@@ -31,7 +32,7 @@ pub static AGG_FUNC_SIG_MAP: LazyLock<AggFuncSigMap> = LazyLock::new(|| unsafe {
 });
 
 // Same as FuncSign in func.rs except this is for aggregate function
-#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+#[derive(PartialEq, Eq, Hash, Clone)]
 pub struct AggFuncSig {
     pub func: AggKind,
     pub inputs_type: &'static [DataTypeName],
@@ -39,16 +40,16 @@ pub struct AggFuncSig {
     pub build: fn(agg: AggCall) -> Result<BoxedAggState>,
 }
 
-impl AggFuncSig {
-    /// Returns a string describing the aggregation without return type.
-    pub fn to_string_no_return(&self) -> String {
-        format!(
+impl fmt::Debug for AggFuncSig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = format!(
             "{}({})->{:?}",
             self.func,
             self.inputs_type.iter().map(|t| format!("{t:?}")).join(","),
             self.ret_type
         )
-        .to_lowercase()
+        .to_lowercase();
+        f.write_str(&s)
     }
 }
 
