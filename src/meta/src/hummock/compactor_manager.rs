@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Deref;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 
 use fail::fail_point;
 use itertools::Itertools;
@@ -39,6 +39,10 @@ use crate::MetaResult;
 
 pub type CompactorManagerRef = Arc<CompactorManager>;
 
+pub const TASK_RUN_TOO_LONG: &'static str = "running too long";
+pub const TASK_NOT_FOUND: &'static str = "task not found";
+pub const TASK_NORMAL: &'static str = "task is normal, please wait some time";
+
 /// Wraps the stream between meta node and compactor node.
 /// Compactor node will re-establish the stream when the previous one fails.
 #[derive(Debug)]
@@ -55,6 +59,7 @@ struct TaskHeartbeat {
     task: CompactTask,
     num_ssts_sealed: u32,
     num_ssts_uploaded: u32,
+    create_time: Instant,
     expire_at: u64,
 }
 
@@ -282,6 +287,39 @@ impl CompactorManager {
         self.task_heartbeats.write().remove(&context_id).is_some()
     }
 
+    pub fn check_tasks_status(
+        &self,
+        tasks: &[HummockCompactionTaskId],
+        slow_task_duration: Duration,
+    ) -> HashMap<HummockCompactionTaskId, (Duration, &'static str)> {
+        let guard = self.task_heartbeats.read();
+        let task_heartbeats = guard.deref();
+        let tasks_ids: HashSet<u64> = HashSet::from_iter(tasks.to_vec());
+        let mut ret = HashMap::default();
+        for (_, heartbeats) in task_heartbeats {
+            for TaskHeartbeat {
+                task, create_time, ..
+            } in heartbeats.values()
+            {
+                if !tasks_ids.contains(&task.task_id) {
+                    continue;
+                }
+                let pending_time = create_time.elapsed();
+                if pending_time > slow_task_duration {
+                    ret.insert(task.task_id, (pending_time, TASK_RUN_TOO_LONG));
+                } else {
+                    ret.insert(task.task_id, (pending_time, TASK_NORMAL));
+                }
+            }
+        }
+        for task_id in tasks {
+            if !ret.contains_key(task_id) {
+                ret.insert(*task_id, (Duration::from_secs(0), TASK_NOT_FOUND));
+            }
+        }
+        ret
+    }
+
     pub fn get_expired_tasks(
         &self,
         split_cancel: Vec<HummockCompactionTaskId>,
@@ -360,6 +398,7 @@ impl CompactorManager {
                 task,
                 num_ssts_sealed: 0,
                 num_ssts_uploaded: 0,
+                create_time: Instant::now(),
                 expire_at: now + self.task_expiry_seconds,
             },
         );

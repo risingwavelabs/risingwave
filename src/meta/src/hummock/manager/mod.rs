@@ -17,7 +17,7 @@ use std::borrow::{Borrow, BorrowMut};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::DerefMut;
 use std::sync::{Arc, LazyLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use arc_swap::ArcSwap;
 use fail::fail_point;
@@ -49,6 +49,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{Notify, RwLockWriteGuard};
 use tokio::task::JoinHandle;
+use tracing::warn;
 
 use crate::hummock::compaction::{
     CompactStatus, LocalSelectorStatistic, ManualCompactionOption, ScaleCompactorInfo,
@@ -59,7 +60,7 @@ use crate::hummock::metrics_utils::{
     trigger_delta_log_stats, trigger_lsm_stat, trigger_pin_unpin_snapshot_state,
     trigger_pin_unpin_version_state, trigger_sst_stat, trigger_version_stat,
 };
-use crate::hummock::CompactorManagerRef;
+use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, IdCategory, LocalNotification, MetaSrvEnv, META_NODE_ID,
 };
@@ -246,7 +247,7 @@ where
             compaction_group_manager,
             catalog_manager,
         )
-            .await
+        .await
     }
 
     #[cfg(any(test, feature = "test"))]
@@ -271,8 +272,8 @@ where
             compaction_group_manager,
             catalog_manager,
         )
-            .await
-            .unwrap()
+        .await
+        .unwrap()
     }
 
     async fn new_impl(
@@ -292,7 +293,7 @@ where
                 metrics.object_store_metric.clone(),
                 "Version Checkpoint",
             )
-                .await,
+            .await,
         );
         let checkpoint_path = version_checkpoint_path(state_store_dir);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -388,7 +389,7 @@ where
             compaction_guard.borrow_mut(),
             versioning_guard.borrow_mut(),
         )
-            .await
+        .await
     }
 
     /// Load state from meta store.
@@ -470,7 +471,7 @@ where
                 committed_epoch: redo_state.max_committed_epoch,
                 current_epoch: redo_state.max_committed_epoch,
             }
-                .into(),
+            .into(),
         );
         versioning_guard.current_version = redo_state;
         versioning_guard.branched_ssts = versioning_guard.current_version.build_branched_sst_info();
@@ -778,7 +779,7 @@ where
             compaction_statuses,
             &group_config.compaction_config,
         )
-            .await?;
+        .await?;
 
         let mut compact_status = match compaction.compaction_statuses.get_mut(&compaction_group_id)
         {
@@ -1368,7 +1369,7 @@ where
             &sst_to_context,
             &versioning.current_version,
         )
-            .await?;
+        .await?;
 
         // Consume and aggregate table stats.
         let mut table_stats_change = PbTableStatsMap::default();
@@ -1425,7 +1426,7 @@ where
                 }
                 let is_trivial_adjust = group_table_ids.len() == 1
                     && group_table_ids.first_key_value().unwrap().1.len()
-                    == sst.get_table_ids().len();
+                        == sst.get_table_ids().len();
                 if is_trivial_adjust {
                     *compaction_group_id = *group_table_ids.first_key_value().unwrap().0;
                     // is_sst_belong_to_group_declared = true;
@@ -1653,8 +1654,8 @@ where
             compaction_guard.borrow_mut(),
             versioning_guard.borrow_mut(),
         )
-            .await
-            .expect("Failed to load state from meta store");
+        .await
+        .expect("Failed to load state from meta store");
         let (loaded_state, load_branched_ssts) =
             get_state(compaction_guard.borrow(), versioning_guard.borrow());
         assert_eq!(branched_ssts, load_branched_ssts);
@@ -1899,7 +1900,7 @@ where
                     "trigger_manual_compaction No compactor is available. compaction_group {}",
                     compaction_group
                 )
-                    .into());
+                .into());
             }
         };
 
@@ -1923,7 +1924,7 @@ where
                     err,
                     compaction_group
                 )
-                    .into());
+                .into());
             }
         };
 
@@ -2106,7 +2107,76 @@ where
 
     #[named]
     pub async fn check_dead_task(&self) {
-
+        const MAX_COMPACTION_L0_MULTIPLIER: u64 = 32;
+        const MAX_COMPACTION_DURATION_SEC: u64 = 20 * 60;
+        let groups = {
+            let versioning_guard = read_lock!(self, versioning).await;
+            versioning_guard
+                .current_version
+                .levels
+                .iter()
+                .map(|(id, group)| {
+                    (
+                        *id,
+                        group
+                            .l0
+                            .as_ref()
+                            .unwrap()
+                            .sub_levels
+                            .iter()
+                            .map(|level| level.total_file_size)
+                            .sum::<u64>(),
+                    )
+                })
+                .collect_vec()
+        };
+        let mut slowdown_groups = HashMap::default();
+        {
+            let manager = self.compaction_group_manager.read().await;
+            for (group_id, l0_file_size) in groups {
+                let group = manager.get_compaction_group_config(group_id);
+                if l0_file_size
+                    > MAX_COMPACTION_L0_MULTIPLIER
+                        * group.compaction_config.max_bytes_for_level_base
+                {
+                    slowdown_groups.insert(group_id, l0_file_size);
+                }
+            }
+        }
+        if slowdown_groups.is_empty() {
+            return;
+        }
+        let mut pending_tasks = HashMap::default();
+        {
+            let compaction_guard = read_lock!(self, compaction).await;
+            for (group_id, _) in &slowdown_groups {
+                if let Some(status) = compaction_guard.compaction_statuses.get(group_id) {
+                    for (idx, level_handler) in status.level_handlers.iter().enumerate() {
+                        let tasks = level_handler.get_pending_tasks();
+                        if tasks.is_empty() {
+                            continue;
+                        }
+                        for task in tasks {
+                            pending_tasks.insert(task.task_id, (*group_id, idx, task));
+                        }
+                    }
+                }
+            }
+        }
+        let task_ids = pending_tasks.keys().into_iter().cloned().collect_vec();
+        let task_infos = self
+            .compactor_manager
+            .check_tasks_status(&task_ids, Duration::from_secs(MAX_COMPACTION_DURATION_SEC));
+        for (task_id, (compact_time, status)) in task_infos {
+            if status == TASK_NORMAL {
+                continue;
+            }
+            if let Some((group_id, level_id, task)) = pending_tasks.get(&task_id) {
+                let group_size = *slowdown_groups.get(group_id).unwrap();
+                warn!("COMPACTION SLOW: the task-{} of group-{}(size: {}MB) level-{} has not finished after {:?}, {}, it may cause pending sstable files({:?}) blocking other task.",
+                    task_id, *group_id,group_size / 1024 / 1024,*level_id, compact_time, status, task.ssts);
+            }
+        }
     }
 }
 

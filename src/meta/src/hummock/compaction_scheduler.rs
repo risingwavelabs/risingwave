@@ -20,6 +20,7 @@ use futures::future::{Either, Shared};
 use futures::stream::BoxStream;
 use futures::{FutureExt, Stream, StreamExt};
 use parking_lot::Mutex;
+use risingwave_common::util::select_all;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
@@ -30,7 +31,6 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::Notify;
 use tokio_stream::wrappers::{IntervalStream, UnboundedReceiverStream};
-use risingwave_common::util::select_all;
 
 use super::Compactor;
 use crate::hummock::compaction::{
@@ -392,9 +392,9 @@ where
                                 .await;
                                 continue;
                             }
-                            SchedulerEvent::CheckDeadTaskTrigger =>{
-                                self.hummock_manager.check_dead_task()
-                            },
+                            SchedulerEvent::CheckDeadTaskTrigger => {
+                                self.hummock_manager.check_dead_task().await;
+                            }
                         }
                     }
                 }
@@ -517,9 +517,8 @@ where
             .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let ttl_reclaim_trigger = IntervalStream::new(min_ttl_reclaim_trigger_interval)
             .map(|_| SchedulerEvent::TtlReclaimTrigger);
-        let mut check_compact_trigger_interval = tokio::time::interval(Duration::from_secs(
-            CHECK_PENDING_TASK_PERIOD_SEC,
-        ));
+        let mut check_compact_trigger_interval =
+            tokio::time::interval(Duration::from_secs(CHECK_PENDING_TASK_PERIOD_SEC));
         check_compact_trigger_interval
             .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let check_compact_trigger = IntervalStream::new(check_compact_trigger_interval)
@@ -529,7 +528,7 @@ where
             Box::pin(dynamic_tick_trigger),
             Box::pin(space_reclaim_trigger),
             Box::pin(ttl_reclaim_trigger),
-            Box::pin(check_compact_trigger)
+            Box::pin(check_compact_trigger),
         ];
         select_all(triggers)
     }
