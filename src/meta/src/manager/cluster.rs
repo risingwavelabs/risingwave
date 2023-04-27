@@ -178,15 +178,9 @@ where
         let worker_node = worker_ref.to_protobuf();
         let worker_id = worker_ref.worker_id();
 
-        // Persist deletion.
-        // TODO: I have to update that node also on meta store
-        Worker::delete(self.env.meta_store(), &host_address).await?;
+        // Persist that node has state deleting
+        Worker::insert(&worker_ref, self.env.meta_store()).await?;
 
-        // TODO: write this cleanup as part of the heartbeat function
-        // every interval check that
-        // TODO: should not be blocking
-        // Alternative write a function that is called on startup of cluster manager that checks for
-        // deleted nodes every so and so seconds
         tokio::task::spawn(delete_worker_node_cleanup(
             self.core.clone(),
             worker_id,
