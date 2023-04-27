@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -296,7 +296,7 @@ impl CompactorManager {
         let task_heartbeats = guard.deref();
         let tasks_ids: HashSet<u64> = HashSet::from_iter(tasks.to_vec());
         let mut ret = HashMap::default();
-        for (_, heartbeats) in task_heartbeats {
+        for heartbeats in task_heartbeats.values() {
             for TaskHeartbeat {
                 task, create_time, ..
             } in heartbeats.values()
@@ -331,26 +331,6 @@ impl CompactorManager {
             .into_iter()
             .map(|(_, info)| info)
             .collect_vec()
-    }
-
-    fn get_group_split_expired_tasks(
-        task_heartbeats: &HashMap<
-            HummockContextId,
-            HashMap<HummockCompactionTaskId, TaskHeartbeat>,
-        >,
-        split_cancel: &[HummockCompactionTaskId],
-    ) -> BTreeMap<HummockCompactionTaskId, (HummockContextId, CompactTask)> {
-        let mut ret = BTreeMap::new();
-        for (context_id, heartbeats) in task_heartbeats {
-            {
-                for TaskHeartbeat { task, .. } in heartbeats.values() {
-                    if split_cancel.binary_search(&task.task_id).is_ok() {
-                        ret.insert(task.get_task_id(), (*context_id, task.clone()));
-                    }
-                }
-            }
-        }
-        ret
     }
 
     fn get_heartbeat_expired_tasks(
