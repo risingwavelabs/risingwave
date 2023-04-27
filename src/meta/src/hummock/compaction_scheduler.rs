@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::future::{Either, Shared};
-use futures::stream::select;
+use futures::stream::BoxStream;
 use futures::{FutureExt, Stream, StreamExt};
 use parking_lot::Mutex;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
@@ -30,6 +30,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::Notify;
 use tokio_stream::wrappers::{IntervalStream, UnboundedReceiverStream};
+use risingwave_common::util::select_all;
 
 use super::Compactor;
 use crate::hummock::compaction::{
@@ -44,6 +45,8 @@ pub type CompactionSchedulerRef<S> = Arc<CompactionScheduler<S>>;
 pub type CompactionRequestChannelRef = Arc<CompactionRequestChannel>;
 
 type CompactionRequestChannelItem = (CompactionGroupId, compact_task::TaskType);
+
+const CHECK_PENDING_TASK_PERIOD_SEC: u64 = 300;
 
 /// [`CompactionRequestChannel`] wrappers a mpsc channel and deduplicate requests from same
 /// compaction groups.
@@ -389,6 +392,9 @@ where
                                 .await;
                                 continue;
                             }
+                            SchedulerEvent::CheckDeadTaskTrigger =>{
+                                self.hummock_manager.check_dead_task()
+                            },
                         }
                     }
                 }
@@ -473,6 +479,7 @@ enum SchedulerEvent {
     DynamicTrigger,
     SpaceReclaimTrigger,
     TtlReclaimTrigger,
+    CheckDeadTaskTrigger,
 }
 
 impl<S> CompactionScheduler<S>
@@ -510,14 +517,21 @@ where
             .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let ttl_reclaim_trigger = IntervalStream::new(min_ttl_reclaim_trigger_interval)
             .map(|_| SchedulerEvent::TtlReclaimTrigger);
-
-        select(
-            dynamic_channel_trigger,
-            select(
-                dynamic_tick_trigger,
-                select(space_reclaim_trigger, ttl_reclaim_trigger),
-            ),
-        )
+        let mut check_compact_trigger_interval = tokio::time::interval(Duration::from_secs(
+            CHECK_PENDING_TASK_PERIOD_SEC,
+        ));
+        check_compact_trigger_interval
+            .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let check_compact_trigger = IntervalStream::new(check_compact_trigger_interval)
+            .map(|_| SchedulerEvent::CheckDeadTaskTrigger);
+        let triggers: Vec<BoxStream<'static, SchedulerEvent>> = vec![
+            Box::pin(dynamic_channel_trigger),
+            Box::pin(dynamic_tick_trigger),
+            Box::pin(space_reclaim_trigger),
+            Box::pin(ttl_reclaim_trigger),
+            Box::pin(check_compact_trigger)
+        ];
+        select_all(triggers)
     }
 }
 

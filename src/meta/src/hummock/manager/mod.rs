@@ -246,7 +246,7 @@ where
             compaction_group_manager,
             catalog_manager,
         )
-        .await
+            .await
     }
 
     #[cfg(any(test, feature = "test"))]
@@ -271,8 +271,8 @@ where
             compaction_group_manager,
             catalog_manager,
         )
-        .await
-        .unwrap()
+            .await
+            .unwrap()
     }
 
     async fn new_impl(
@@ -292,7 +292,7 @@ where
                 metrics.object_store_metric.clone(),
                 "Version Checkpoint",
             )
-            .await,
+                .await,
         );
         let checkpoint_path = version_checkpoint_path(state_store_dir);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -388,7 +388,7 @@ where
             compaction_guard.borrow_mut(),
             versioning_guard.borrow_mut(),
         )
-        .await
+            .await
     }
 
     /// Load state from meta store.
@@ -470,7 +470,7 @@ where
                 committed_epoch: redo_state.max_committed_epoch,
                 current_epoch: redo_state.max_committed_epoch,
             }
-            .into(),
+                .into(),
         );
         versioning_guard.current_version = redo_state;
         versioning_guard.branched_ssts = versioning_guard.current_version.build_branched_sst_info();
@@ -778,7 +778,7 @@ where
             compaction_statuses,
             &group_config.compaction_config,
         )
-        .await?;
+            .await?;
 
         let mut compact_status = match compaction.compaction_statuses.get_mut(&compaction_group_id)
         {
@@ -1368,7 +1368,7 @@ where
             &sst_to_context,
             &versioning.current_version,
         )
-        .await?;
+            .await?;
 
         // Consume and aggregate table stats.
         let mut table_stats_change = PbTableStatsMap::default();
@@ -1425,7 +1425,7 @@ where
                 }
                 let is_trivial_adjust = group_table_ids.len() == 1
                     && group_table_ids.first_key_value().unwrap().1.len()
-                        == sst.get_table_ids().len();
+                    == sst.get_table_ids().len();
                 if is_trivial_adjust {
                     *compaction_group_id = *group_table_ids.first_key_value().unwrap().0;
                     // is_sst_belong_to_group_declared = true;
@@ -1653,8 +1653,8 @@ where
             compaction_guard.borrow_mut(),
             versioning_guard.borrow_mut(),
         )
-        .await
-        .expect("Failed to load state from meta store");
+            .await
+            .expect("Failed to load state from meta store");
         let (loaded_state, load_branched_ssts) =
             get_state(compaction_guard.borrow(), versioning_guard.borrow());
         assert_eq!(branched_ssts, load_branched_ssts);
@@ -1716,7 +1716,7 @@ where
             assert!(
                 group.id == StaticCompactionGroupId::NewCompactionGroup as u64
                     || (group.id >= StaticCompactionGroupId::StateDefault as u64
-                        && group.id <= StaticCompactionGroupId::MaterializedView as u64),
+                    && group.id <= StaticCompactionGroupId::MaterializedView as u64),
                 "compaction group id should be either NewCompactionGroup to create new one, or predefined static ones."
             );
         }
@@ -1899,7 +1899,7 @@ where
                     "trigger_manual_compaction No compactor is available. compaction_group {}",
                     compaction_group
                 )
-                .into());
+                    .into());
             }
         };
 
@@ -1923,7 +1923,7 @@ where
                     err,
                     compaction_group
                 )
-                .into());
+                    .into());
             }
         };
 
@@ -2102,6 +2102,11 @@ where
             }
         });
         (join_handle, shutdown_tx)
+    }
+
+    #[named]
+    pub async fn check_dead_task(&self) {
+
     }
 }
 
