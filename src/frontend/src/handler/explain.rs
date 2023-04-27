@@ -43,13 +43,13 @@ async fn do_handle_explain(
     blocks: &mut Vec<String>,
 ) -> Result<()> {
     // Workaround to avoid `Rc` across `await` point.
-    let mut plan_fragmenter = None;
+    let mut batch_plan_fragmenter = None;
 
     {
         let session = context.session_ctx().clone();
 
         let (plan, context) = match stmt {
-            // `CREATE TABLE` may take the ownership of the `OptimizerContext` to avoid `Rc` across
+            // `CREATE TABLE` takes the ownership of the `OptimizerContext` to avoid `Rc` across
             // `await` point. We can only take the reference back from the `PlanRef` if it's
             // successfully planned.
             Statement::CreateTable {
@@ -171,7 +171,7 @@ async fn do_handle_explain(
             ExplainType::DistSql => match plan.convention() {
                 Convention::Logical => unreachable!(),
                 Convention::Batch => {
-                    plan_fragmenter = Some(BatchPlanFragmenter::new(
+                    batch_plan_fragmenter = Some(BatchPlanFragmenter::new(
                         session.env().worker_node_manager_ref(),
                         session.env().catalog_reader().clone(),
                         session.config().get_batch_parallelism(),
@@ -184,14 +184,14 @@ async fn do_handle_explain(
                 }
             },
             ExplainType::Physical => {
-                // if explain trace is open, the plan has been in the rows
+                // if explain trace is on, the plan has been in the rows
                 if !explain_trace {
                     let output = plan.explain_to_string()?;
                     blocks.push(output);
                 }
             }
             ExplainType::Logical => {
-                // if explain trace is open, the plan has been in the rows
+                // if explain trace is on, the plan has been in the rows
                 if !explain_trace {
                     let output = context.take_logical().ok_or_else(|| {
                         ErrorCode::InternalError("Logical plan not found for query".into())
@@ -202,8 +202,8 @@ async fn do_handle_explain(
         }
     }
 
-    if let Some(plan_fragmenter) = plan_fragmenter {
-        let query = plan_fragmenter.generate_complete_query().await?;
+    if let Some(fragmenter) = batch_plan_fragmenter {
+        let query = fragmenter.generate_complete_query().await?;
         let stage_graph_json = serde_json::to_string_pretty(&query.stage_graph).unwrap();
         blocks.push(stage_graph_json);
     }
@@ -228,12 +228,14 @@ pub async fn handle_explain(
 
     if let Err(e) = result {
         if options.trace {
+            // If `trace` is on, we include the error in the output with partial traces.
             blocks.push(if options.verbose {
                 format!("{:?}", e)
             } else {
                 format!("{}", e)
             });
         } else {
+            // Else, directly return the error.
             return Err(e);
         }
     }
