@@ -75,7 +75,6 @@ use futures_util::TryFutureExt;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
-use risingwave_common::util::epoch::Epoch;
 use static_assertions::const_assert;
 
 pub use self::build::*;
@@ -193,24 +192,3 @@ pub type ExpressionRef = Arc<dyn Expression>;
 /// See also <https://github.com/risingwavelabs/risingwave/issues/4625>.
 #[allow(dead_code)]
 const STRICT_MODE: bool = false;
-
-/// The context used by expressions.
-#[derive(Clone)]
-pub struct ExprContext {
-    /// The epoch that an executor currently in.
-    curr_epoch: Epoch,
-}
-
-impl ExprContext {
-    pub fn new(curr_epoch: Epoch) -> Self {
-        Self { curr_epoch }
-    }
-
-    pub fn get_proctime(&self) -> u64 {
-        self.curr_epoch.as_unix_millis() * 1000
-    }
-}
-
-tokio::task_local! {
-    pub static CONTEXT: ExprContext;
-}

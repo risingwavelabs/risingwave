@@ -53,8 +53,10 @@ impl MemoryControl for JemallocMemoryControl {
         _stream_manager: Arc<LocalStreamManager>,
         watermark_epoch: Arc<AtomicU64>,
     ) -> MemoryControlStats {
-        let jemalloc_allocated_mib =
-            advance_jemalloc_epoch(prev_memory_stats.jemalloc_allocated_mib);
+        let (jemalloc_allocated_mib, jemalloc_active_mib) = advance_jemalloc_epoch(
+            prev_memory_stats.jemalloc_allocated_mib,
+            prev_memory_stats.jemalloc_active_mib,
+        );
 
         // Streaming memory control
         //
@@ -73,6 +75,7 @@ impl MemoryControl for JemallocMemoryControl {
 
         MemoryControlStats {
             jemalloc_allocated_mib,
+            jemalloc_active_mib,
             lru_watermark_step,
             lru_watermark_time_ms,
             lru_physical_now_ms: lru_physical_now,
@@ -80,19 +83,29 @@ impl MemoryControl for JemallocMemoryControl {
     }
 }
 
-fn advance_jemalloc_epoch(prev_jemalloc_allocated_mib: usize) -> usize {
+fn advance_jemalloc_epoch(
+    prev_jemalloc_allocated_mib: usize,
+    prev_jemalloc_active_mib: usize,
+) -> (usize, usize) {
     use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
 
     let jemalloc_epoch_mib = jemalloc_epoch::mib().unwrap();
-    let jemalloc_allocated_mib = jemalloc_stats::allocated::mib().unwrap();
-
     if let Err(e) = jemalloc_epoch_mib.advance() {
         tracing::warn!("Jemalloc epoch advance failed! {:?}", e);
     }
-    jemalloc_allocated_mib.read().unwrap_or_else(|e| {
-        tracing::warn!("Jemalloc read allocated failed! {:?}", e);
-        prev_jemalloc_allocated_mib
-    })
+
+    let jemalloc_allocated_mib = jemalloc_stats::allocated::mib().unwrap();
+    let jemalloc_active_mib = jemalloc_stats::active::mib().unwrap();
+    (
+        jemalloc_allocated_mib.read().unwrap_or_else(|e| {
+            tracing::warn!("Jemalloc read allocated failed! {:?}", e);
+            prev_jemalloc_allocated_mib
+        }),
+        jemalloc_active_mib.read().unwrap_or_else(|e| {
+            tracing::warn!("Jemalloc read active failed! {:?}", e);
+            prev_jemalloc_active_mib
+        }),
+    )
 }
 
 fn calculate_lru_watermark(
