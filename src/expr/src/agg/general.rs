@@ -109,7 +109,7 @@ fn first<T>(state: T, _: T) -> T {
 /// statement ok
 /// drop table t;
 /// ```
-#[aggregate("count(*) -> int64")] // we have a hack for `count` that the initial state is 0
+#[aggregate("count(*) -> int64", init_state = "Some(0)")]
 fn count<T>(state: i64, _: T) -> i64 {
     state + 1
 }

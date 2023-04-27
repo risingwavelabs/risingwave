@@ -337,6 +337,10 @@ impl FunctionAttr {
             Some(_) => quote! { self.state = state; },
             None => quote! { self.state = state.map(|x| x.to_owned_scalar()); },
         };
+        let init_state = match &self.init_state {
+            Some(s) => s.parse().unwrap(),
+            _ => quote! { None },
+        };
         let fn_name = format_ident!("{}", self.user_fn.name);
         let mut next_state = quote! { #fn_name(state, #args) };
         next_state = match self.user_fn.return_type {
@@ -349,8 +353,8 @@ impl FunctionAttr {
             if self.args.len() > 1 {
                 todo!("support multiple arguments for non-option functions");
             }
-            let first_state = match self.name.as_str() {
-                "count" => quote! { unreachable!() }, // XXX: special hack for `count`
+            let first_state = match &self.init_state {
+                Some(_) => quote! { unreachable!() },
                 _ => quote! { Some(v0.into()) },
             };
             next_state = quote! {
@@ -361,10 +365,6 @@ impl FunctionAttr {
                 }
             };
         }
-        let init_state = match self.name.as_str() {
-            "count" => quote! { Some(0) }, // XXX: special hack for `count`
-            _ => quote! { None },
-        };
 
         Ok(quote! {
             |agg| {

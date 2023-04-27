@@ -53,6 +53,7 @@ impl FunctionAttr {
             ret: ret.trim().to_string(),
             batch_fn: find_argument(attr, "batch_fn"),
             state: find_argument(attr, "state"),
+            init_state: find_argument(attr, "init_state"),
             user_fn,
         })
     }

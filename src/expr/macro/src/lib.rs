@@ -111,6 +111,7 @@ struct FunctionAttr {
     ret: String,
     batch_fn: Option<String>,
     state: Option<String>,
+    init_state: Option<String>,
     user_fn: UserFunctionAttr,
 }
 
