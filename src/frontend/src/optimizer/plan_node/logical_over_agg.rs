@@ -274,7 +274,7 @@ impl LogicalOverAgg {
     }
 
     #[must_use]
-    fn rewrite_with_input_window(
+    fn rewrite_with_input_and_window(
         &self,
         input: PlanRef,
         window_functions: &[PlanWindowFunction],
@@ -316,7 +316,7 @@ impl PlanTreeNodeUnary for LogicalOverAgg {
         input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
         let over_agg =
-            self.rewrite_with_input_window(input, &self.window_functions, input_col_change);
+            self.rewrite_with_input_and_window(input, &self.window_functions, input_col_change);
         // change the input columns index will not change the output column index
         let out_col_change = ColIndexMapping::identity(over_agg.schema().len());
         (over_agg, out_col_change)
@@ -380,7 +380,7 @@ impl ColPrunable for LogicalOverAgg {
             ColIndexMapping::with_remaining_columns(&input_required_cols, input_cnt);
         let new_over_agg = {
             let input = self.input().prune_col(&input_required_cols, ctx);
-            self.rewrite_with_input_window(input, &window_functions, input_col_change)
+            self.rewrite_with_input_and_window(input, &window_functions, input_col_change)
         };
         if new_over_agg.schema().len() == required_cols.len() {
             // current schema perfectly fit the required columns
