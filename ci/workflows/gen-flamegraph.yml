@@ -45,7 +45,7 @@ steps:
     timeout_in_minutes: 20
 
   # Generates cpu flamegraph if label `cpu_flamegraph` is added to PR.
-  - label: Generate CPU flamegraph"
+  - label: "Generate CPU flamegraph"
     command: "NEXMARK_QUERIES=$NEXMARK_QUERIES ci/scripts/gen-flamegraph.sh"
     depends_on: "cpu-flamegraph-env-build"
 
