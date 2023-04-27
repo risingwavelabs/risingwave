@@ -230,9 +230,9 @@ pub async fn handle_explain(
         if options.trace {
             // If `trace` is on, we include the error in the output with partial traces.
             blocks.push(if options.verbose {
-                format!("{:?}", e)
+                format!("ERROR: {:?}", e)
             } else {
-                format!("{}", e)
+                format!("ERROR: {}", e)
             });
         } else {
             // Else, directly return the error.
