@@ -4,7 +4,7 @@ create table t (v1 int);
 statement ok
 insert into t values (3);
 
-sleep 20s
+sleep 30s
 
 query T
 SELECT pg_table_size('t') != 0;
