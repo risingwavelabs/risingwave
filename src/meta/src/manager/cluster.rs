@@ -674,24 +674,28 @@ async fn delete_worker_node_cleanup(
 ) {
     tokio::task::spawn(async move {
         let mut ticker = time::interval(Duration::from_millis(1100));
-        let mut log_ticker = time::interval(Duration::from_secs(60));
+        let mut log_ticker = time::interval(Duration::from_secs(60)); // todo: ignore first tick
         let start_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards")
             .as_secs();
+        let mut first_log_tick = true; 
         loop {
             tokio::select! {
                 _ = log_ticker.tick() => {
-                    let now = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .expect("Time went backwards")
-                        .as_secs();
-                    tracing::warn!("Compute node at {}:{} with id {} is still deleting. Trying since {} min",
-                        host_address.host,
-                        host_address.port,
-                        node_id,
-                        (now - start_time) / 60
-                    );
+                    if !first_log_tick {
+                        let now = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .expect("Time went backwards")
+                            .as_secs();
+                        tracing::warn!("Compute node at {}:{} with id {} is still deleting. Trying since {} min",
+                            host_address.host,
+                            host_address.port,
+                            node_id,
+                            (now - start_time) / 60
+                        );
+                    }
+                    first_log_tick = true; 
                 }
                 _ = ticker.tick() => {
                     let mut core = shared_core.write().await;
