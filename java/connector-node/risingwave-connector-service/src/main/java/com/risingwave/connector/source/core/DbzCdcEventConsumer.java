@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.sourcenode.core;
+package com.risingwave.connector.source.core;
 
 import com.risingwave.connector.cdc.debezium.internal.DebeziumOffset;
 import com.risingwave.connector.cdc.debezium.internal.DebeziumOffsetSerializer;
