@@ -28,6 +28,8 @@ use crate::{ExprError, Result};
 #[aggregate("sum(float64) -> float64")]
 #[aggregate("sum(decimal) -> decimal")]
 #[aggregate("sum(interval) -> interval")]
+#[aggregate("sum(int256) -> int256", state = "Int256")]
+#[aggregate("sum0(int64) -> int64", init_state = "Some(0)")]
 fn sum<S, T>(state: S, input: T) -> Result<S>
 where
     S: From<T> + CheckedAdd<Output = S>,
