@@ -495,7 +495,7 @@ impl Binder {
             FunctionCall::new(
                 ExprType::Equal,
                 vec![
-                    table_id.into(),
+                    table_id,
                     InputRef::new(RW_TABLE_STATS_TABLE_ID_INDEX, DataType::Int32).into(),
                 ],
             )?
