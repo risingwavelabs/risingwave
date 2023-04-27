@@ -198,7 +198,6 @@ impl TierCompactionPicker {
                 continue;
             }
 
-
             // support trivial move cross multi sub_levels
             let mut overlap = self.overlap_strategy.create_overlap_info();
             for sst in &select_tables {
