@@ -676,6 +676,7 @@ mod stream_project;
 mod stream_project_set;
 mod stream_row_id_gen;
 mod stream_sink;
+mod stream_sort;
 mod stream_source;
 mod stream_table_scan;
 mod stream_topn;
@@ -757,6 +758,7 @@ pub use stream_project_set::StreamProjectSet;
 pub use stream_row_id_gen::StreamRowIdGen;
 pub use stream_share::StreamShare;
 pub use stream_sink::StreamSink;
+pub use stream_sort::StreamSort;
 pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_temporal_join::StreamTemporalJoin;
@@ -864,6 +866,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Values }
             , { Stream, Dedup }
             , { Stream, EowcOverWindow }
+            , { Stream, Sort }
         }
     };
 }
@@ -969,6 +972,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Values }
             , { Stream, Dedup }
             , { Stream, EowcOverWindow }
+            , { Stream, Sort }
         }
     };
 }
