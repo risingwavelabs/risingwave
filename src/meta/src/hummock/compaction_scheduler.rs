@@ -13,9 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 use std::time::Duration;
 
 use futures::future::{Either, Shared};
@@ -33,7 +31,7 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::Notify;
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::wrappers::{IntervalStream, UnboundedReceiverStream};
 use tracing::log::info;
 
 use super::Compactor;
@@ -563,6 +561,7 @@ pub enum SchedulerEvent {
     SpaceReclaimTrigger,
     TtlReclaimTrigger,
     GroupSplitTrigger,
+    CheckDeadTaskTrigger,
 }
 
 impl<S> CompactionScheduler<S>
@@ -583,7 +582,7 @@ where
             tokio::time::interval(Duration::from_secs(periodic_compaction_interval_sec));
         min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let dynamic_tick_trigger =
-            IntervalStream::new(min_trigger_interval, SchedulerEvent::DynamicTrigger);
+            IntervalStream::new(min_trigger_interval).map(|_| SchedulerEvent::DynamicTrigger);
 
         let mut min_space_reclaim_trigger_interval = tokio::time::interval(Duration::from_secs(
             periodic_space_reclaim_compaction_interval_sec,
@@ -591,28 +590,28 @@ where
 
         min_space_reclaim_trigger_interval
             .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let space_reclaim_trigger = IntervalStream::new(
-            min_space_reclaim_trigger_interval,
-            SchedulerEvent::SpaceReclaimTrigger,
-        );
+        let space_reclaim_trigger = IntervalStream::new(min_space_reclaim_trigger_interval)
+            .map(|_| SchedulerEvent::SpaceReclaimTrigger);
 
         let mut min_ttl_reclaim_trigger_interval = tokio::time::interval(Duration::from_secs(
             periodic_ttl_reclaim_compaction_interval_sec,
         ));
         min_ttl_reclaim_trigger_interval
             .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let ttl_reclaim_trigger = IntervalStream::new(
-            min_ttl_reclaim_trigger_interval,
-            SchedulerEvent::TtlReclaimTrigger,
-        );
+        let ttl_reclaim_trigger = IntervalStream::new(min_ttl_reclaim_trigger_interval)
+            .map(|_| SchedulerEvent::TtlReclaimTrigger);
+        let mut check_compact_trigger_interval =
+            tokio::time::interval(Duration::from_secs(CHECK_PENDING_TASK_PERIOD_SEC));
+        check_compact_trigger_interval
+            .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let check_compact_trigger = IntervalStream::new(check_compact_trigger_interval)
+            .map(|_| SchedulerEvent::CheckDeadTaskTrigger);
         let mut split_group_trigger_interval =
             tokio::time::interval(Duration::from_secs(periodic_check_split_group_interval_sec));
         split_group_trigger_interval
             .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let split_group_trigger = IntervalStream::new(
-            split_group_trigger_interval,
-            SchedulerEvent::GroupSplitTrigger,
-        );
+        let split_group_trigger = IntervalStream::new(split_group_trigger_interval)
+            .map(|_| SchedulerEvent::GroupSplitTrigger);
         let triggers: Vec<BoxStream<'static, SchedulerEvent>> = vec![
             Box::pin(dynamic_channel_trigger),
             Box::pin(dynamic_tick_trigger),
