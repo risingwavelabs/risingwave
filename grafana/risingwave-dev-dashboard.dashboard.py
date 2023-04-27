@@ -2359,11 +2359,21 @@ def section_memory_manager(outer_panels):
                     ],
                 ),
                 panels.timeseries_memory(
-                    "The memory allocated by jemalloc",
+                    "The allocated memory of jemalloc",
                     "",
                     [
                         panels.target(
                             f"{metric('jemalloc_allocated_bytes')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_memory(
+                    "The active memory of jemalloc",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('jemalloc_active_bytes')}",
                             "",
                         ),
                     ],

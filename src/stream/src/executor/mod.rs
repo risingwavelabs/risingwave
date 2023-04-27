@@ -151,6 +151,8 @@ pub type BoxedExecutor = Box<dyn Executor>;
 pub type MessageStreamItem = StreamExecutorResult<Message>;
 pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
 
+pub use risingwave_common::util::epoch::task_local::{curr_epoch, epoch, prev_epoch};
+
 pub trait MessageStream = futures::Stream<Item = MessageStreamItem> + Send;
 
 /// Static information of an executor.
