@@ -330,12 +330,12 @@ impl FunctionAttr {
             quote! { let #v = #a.value_at(row_id); }
         });
         let let_state = match &self.state {
-            Some(_) => quote! { let mut state = self.state.take(); },
-            None => quote! { let mut state = self.state.as_ref().map(|x| x.as_scalar_ref()); },
+            Some(_) => quote! { self.state.take() },
+            None => quote! { self.state.as_ref().map(|x| x.as_scalar_ref()) },
         };
         let assign_state = match &self.state {
-            Some(_) => quote! { self.state = state; },
-            None => quote! { self.state = state.map(|x| x.to_owned_scalar()); },
+            Some(_) => quote! { state },
+            None => quote! { state.map(|x| x.to_owned_scalar()) },
         };
         let init_state = match &self.init_state {
             Some(s) => s.parse().unwrap(),
@@ -351,7 +351,7 @@ impl FunctionAttr {
         };
         if !self.user_fn.arg_option {
             if self.args.len() > 1 {
-                todo!("support multiple arguments for non-option functions");
+                todo!("multiple arguments are not supported for non-option function");
             }
             let first_state = match &self.init_state {
                 Some(_) => quote! { unreachable!() },
@@ -393,7 +393,7 @@ impl FunctionAttr {
                         end_row_id: usize,
                     ) -> Result<()> {
                         #(#let_arrays)*
-                        #let_state
+                        let mut state = #let_state;
                         for row_id in start_row_id..end_row_id {
                             if !input.vis().is_set(row_id) {
                                 continue;
@@ -401,7 +401,7 @@ impl FunctionAttr {
                             #(#let_values)*
                             state = #next_state;
                         }
-                        #assign_state
+                        self.state = #assign_state;
                         Ok(())
                     }
                     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
