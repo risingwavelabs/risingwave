@@ -140,8 +140,12 @@ impl OptimizerContext {
         self.explain_options.trace
     }
 
+    pub fn explain_type(&self) -> ExplainType {
+        self.explain_options.explain_type
+    }
+
     pub fn is_explain_logical(&self) -> bool {
-        self.explain_options.explain_type == ExplainType::Logical
+        self.explain_type() == ExplainType::Logical
     }
 
     pub fn trace(&self, str: impl Into<String>) {
