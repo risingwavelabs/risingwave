@@ -14,11 +14,15 @@
 
 use std::collections::{BTreeSet, BinaryHeap};
 
+use async_trait::async_trait;
 use risingwave_hummock_sdk::key::{PointRange, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_pb::hummock::SstableInfo;
 
+use crate::hummock::iterator::concat_delete_range_iterator::ConcatDeleteRangeIterator;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferDeleteRangeIterator;
-use crate::hummock::SstableDeleteRangeIterator;
+use crate::hummock::sstable_store::SstableStoreRef;
+use crate::hummock::{HummockResult, SstableDeleteRangeIterator};
 
 /// `DeleteRangeIterator` defines the interface of all delete-range iterators, which is used to
 /// filter keys deleted by some range tombstone
@@ -26,6 +30,7 @@ use crate::hummock::SstableDeleteRangeIterator;
 /// After creating the iterator instance,
 /// - if you want to iterate from the beginning, you need to then call its `rewind` method.
 /// - if you want to iterate from some specific position, you need to then call its `seek` method.
+#[async_trait]
 pub trait DeleteRangeIterator {
     /// Retrieves the next extended user key that changes current epoch.
     ///
@@ -62,7 +67,7 @@ pub trait DeleteRangeIterator {
     ///
     /// # Panics
     /// This function will panic if the iterator is invalid.
-    fn next(&mut self);
+    async fn next(&mut self) -> HummockResult<()>;
 
     /// Resets the position of the iterator.
     ///
@@ -70,7 +75,7 @@ pub trait DeleteRangeIterator {
     /// - Do not decide whether the position is valid or not by checking the returned error of this
     ///   function. This function WON'T return an `Err` if invalid. You should check `is_valid`
     ///   before starting iteration.
-    fn rewind(&mut self);
+    async fn rewind(&mut self) -> HummockResult<()>;
 
     /// Resets iterator and seeks to the first tombstone whose left-end >= provided key, we use this
     /// method to skip tombstones which do not overlap with the provided key.
@@ -79,7 +84,7 @@ pub trait DeleteRangeIterator {
     /// - Do not decide whether the position is valid or not by checking the returned error of this
     ///   function. This function WON'T return an `Err` if invalid. You should check `is_valid`
     ///   before starting iteration.
-    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>);
+    async fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) -> HummockResult<()>;
 
     /// Indicates whether the iterator can be used.
     ///
@@ -92,13 +97,16 @@ pub trait DeleteRangeIterator {
 pub enum RangeIteratorTyped {
     Sst(SstableDeleteRangeIterator),
     Batch(SharedBufferDeleteRangeIterator),
+    Concat(ConcatDeleteRangeIterator),
 }
 
+#[async_trait]
 impl DeleteRangeIterator for RangeIteratorTyped {
     fn next_extended_user_key(&self) -> PointRange<&[u8]> {
         match self {
             RangeIteratorTyped::Sst(sst) => sst.next_extended_user_key(),
             RangeIteratorTyped::Batch(batch) => batch.next_extended_user_key(),
+            RangeIteratorTyped::Concat(batch) => batch.next_extended_user_key(),
         }
     }
 
@@ -106,35 +114,31 @@ impl DeleteRangeIterator for RangeIteratorTyped {
         match self {
             RangeIteratorTyped::Sst(sst) => sst.current_epoch(),
             RangeIteratorTyped::Batch(batch) => batch.current_epoch(),
+            RangeIteratorTyped::Concat(batch) => batch.current_epoch(),
         }
     }
 
-    fn next(&mut self) {
+    async fn next(&mut self) -> HummockResult<()> {
         match self {
-            RangeIteratorTyped::Sst(sst) => {
-                sst.next();
-            }
-            RangeIteratorTyped::Batch(batch) => {
-                batch.next();
-            }
+            RangeIteratorTyped::Sst(sst) => sst.next().await,
+            RangeIteratorTyped::Batch(batch) => batch.next().await,
+            RangeIteratorTyped::Concat(iter) => iter.next().await,
         }
     }
 
-    fn rewind(&mut self) {
+    async fn rewind(&mut self) -> HummockResult<()> {
         match self {
-            RangeIteratorTyped::Sst(sst) => {
-                sst.rewind();
-            }
-            RangeIteratorTyped::Batch(batch) => {
-                batch.rewind();
-            }
+            RangeIteratorTyped::Sst(sst) => sst.rewind().await,
+            RangeIteratorTyped::Batch(batch) => batch.rewind().await,
+            RangeIteratorTyped::Concat(iter) => iter.rewind().await,
         }
     }
 
-    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
+    async fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) -> HummockResult<()> {
         match self {
-            RangeIteratorTyped::Sst(sst) => sst.seek(target_user_key),
-            RangeIteratorTyped::Batch(batch) => batch.seek(target_user_key),
+            RangeIteratorTyped::Sst(sst) => sst.seek(target_user_key).await,
+            RangeIteratorTyped::Batch(batch) => batch.seek(target_user_key).await,
+            RangeIteratorTyped::Concat(iter) => iter.seek(target_user_key).await,
         }
     }
 
@@ -142,6 +146,7 @@ impl DeleteRangeIterator for RangeIteratorTyped {
         match self {
             RangeIteratorTyped::Sst(sst) => sst.is_valid(),
             RangeIteratorTyped::Batch(batch) => batch.is_valid(),
+            RangeIteratorTyped::Concat(iter) => iter.is_valid(),
         }
     }
 }
@@ -226,17 +231,27 @@ impl ForwardMergeRangeIterator {
     pub fn add_sst_iter(&mut self, iter: SstableDeleteRangeIterator) {
         self.unused_iters.push(RangeIteratorTyped::Sst(iter));
     }
-}
 
-impl ForwardMergeRangeIterator {
-    pub(super) fn next_until(&mut self, target_user_key: UserKey<&[u8]>) {
-        let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
-        while self.is_valid() && self.next_extended_user_key().le(&target_extended_user_key) {
-            self.next();
-        }
+    pub fn add_concat_iter(&mut self, sstables: Vec<SstableInfo>, sstable_store: SstableStoreRef) {
+        self.unused_iters
+            .push(RangeIteratorTyped::Concat(ConcatDeleteRangeIterator::new(
+                sstables,
+                sstable_store,
+            )))
     }
 }
 
+impl ForwardMergeRangeIterator {
+    pub(super) async fn next_until(&mut self, target_user_key: UserKey<&[u8]>) -> HummockResult<()> {
+        let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
+        while self.is_valid() && self.next_extended_user_key().le(&target_extended_user_key) {
+            self.next().await?;
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
 impl DeleteRangeIterator for ForwardMergeRangeIterator {
     fn next_extended_user_key(&self) -> PointRange<&[u8]> {
         self.heap.peek().unwrap().next_extended_user_key()
@@ -249,7 +264,7 @@ impl DeleteRangeIterator for ForwardMergeRangeIterator {
             .map_or(HummockEpoch::MIN, |epoch| *epoch)
     }
 
-    fn next(&mut self) {
+    async fn next(&mut self) -> HummockResult<()> {
         self.tmp_buffer
             .push(self.heap.pop().expect("no inner iter"));
         while let Some(node) = self.heap.peek() && node.is_valid() && node.next_extended_user_key() == self.tmp_buffer[0].next_extended_user_key() {
@@ -263,7 +278,7 @@ impl DeleteRangeIterator for ForwardMergeRangeIterator {
         }
         // Correct because ranges in an epoch won't intersect.
         for mut node in std::mem::take(&mut self.tmp_buffer) {
-            node.next();
+            node.next().await?;
             if node.is_valid() {
                 let epoch = node.current_epoch();
                 if epoch != HummockEpoch::MAX {
@@ -275,13 +290,14 @@ impl DeleteRangeIterator for ForwardMergeRangeIterator {
                 self.unused_iters.push(node);
             }
         }
+        Ok(())
     }
 
-    fn rewind(&mut self) {
+    async fn rewind(&mut self) -> HummockResult<()> {
         self.current_epochs.clear();
         self.unused_iters.extend(self.heap.drain());
         for mut node in self.unused_iters.drain(..) {
-            node.rewind();
+            node.rewind().await?;
             if node.is_valid() {
                 let epoch = node.current_epoch();
                 if epoch != HummockEpoch::MAX {
@@ -290,26 +306,26 @@ impl DeleteRangeIterator for ForwardMergeRangeIterator {
                 self.heap.push(node);
             }
         }
+        Ok(())
     }
 
-    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
+    async fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) -> HummockResult<()> {
         self.current_epochs.clear();
-        self.unused_iters.extend(self.heap.drain());
-        self.heap = self
-            .unused_iters
-            .drain_filter(|node| {
-                node.seek(target_user_key);
-                if node.is_valid() {
-                    let epoch = node.current_epoch();
-                    if epoch != HummockEpoch::MAX {
-                        self.current_epochs.insert(epoch);
-                    }
-                    true
-                } else {
-                    false
+        let mut iters = std::mem::take(&mut self.unused_iters);
+        iters.extend(self.heap.drain());
+        for mut node in iters {
+            node.seek(target_user_key).await?;
+            if node.is_valid() {
+                let epoch = node.current_epoch();
+                if epoch != HummockEpoch::MAX {
+                    self.current_epochs.insert(epoch);
                 }
-            })
-            .collect();
+                self.heap.push(node);
+            } else {
+                self.unused_iters.push(node);
+            }
+        }
+        Ok(())
     }
 
     fn is_valid(&self) -> bool {

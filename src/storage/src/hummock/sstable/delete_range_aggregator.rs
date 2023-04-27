@@ -16,6 +16,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::{PointRange, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
@@ -25,7 +26,7 @@ use super::DeleteRangeTombstone;
 use super::MonotonicDeleteEvent;
 use crate::hummock::iterator::DeleteRangeIterator;
 use crate::hummock::sstable_store::TableHolder;
-use crate::hummock::Sstable;
+use crate::hummock::{HummockResult, Sstable};
 
 pub struct SortedBoundary {
     sequence: HummockEpoch,
@@ -356,6 +357,7 @@ impl SstableDeleteRangeIterator {
     }
 }
 
+#[async_trait]
 impl DeleteRangeIterator for SstableDeleteRangeIterator {
     fn next_extended_user_key(&self) -> PointRange<&[u8]> {
         self.table.value().meta.monotonic_tombstone_events[self.next_idx]
@@ -371,15 +373,17 @@ impl DeleteRangeIterator for SstableDeleteRangeIterator {
         }
     }
 
-    fn next(&mut self) {
+    async fn next(&mut self) -> HummockResult<()> {
         self.next_idx += 1;
+        Ok(())
     }
 
-    fn rewind(&mut self) {
+    async fn rewind(&mut self) -> HummockResult<()> {
         self.next_idx = 0;
+        Ok(())
     }
 
-    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
+    async fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) -> HummockResult<()> {
         let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
         self.next_idx = self
             .table
@@ -389,6 +393,7 @@ impl DeleteRangeIterator for SstableDeleteRangeIterator {
             .partition_point(|MonotonicDeleteEvent { event_key, .. }| {
                 event_key.as_ref().le(&target_extended_user_key)
             });
+        Ok(())
     }
 
     fn is_valid(&self) -> bool {

@@ -21,6 +21,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, LazyLock};
 
+use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
@@ -791,6 +792,7 @@ impl SharedBufferDeleteRangeIterator {
     }
 }
 
+#[async_trait]
 impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
     fn next_extended_user_key(&self) -> PointRange<&[u8]> {
         self.inner.monotonic_tombstone_events[self.next_idx]
@@ -806,21 +808,24 @@ impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
         }
     }
 
-    fn next(&mut self) {
+    async fn next(&mut self) -> HummockResult<()> {
         self.next_idx += 1;
+        Ok(())
     }
 
-    fn rewind(&mut self) {
+    async fn rewind(&mut self) -> HummockResult<()> {
         self.next_idx = 0;
+        Ok(())
     }
 
-    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
+    async fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) -> HummockResult<()> {
         let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
         self.next_idx = self.inner.monotonic_tombstone_events.partition_point(
             |MonotonicDeleteEvent { event_key, .. }| {
                 event_key.as_ref().le(&target_extended_user_key)
             },
         );
+        Ok(())
     }
 
     fn is_valid(&self) -> bool {
