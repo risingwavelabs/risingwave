@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.sourcenode.core;
+package com.risingwave.connector.source.core;
 
 import com.risingwave.connector.api.source.SourceHandler;
 import com.risingwave.connector.api.source.SourceTypeE;
-import com.risingwave.sourcenode.common.DbzConnectorConfig;
+import com.risingwave.connector.source.common.DbzConnectorConfig;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
