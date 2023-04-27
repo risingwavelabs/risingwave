@@ -13,14 +13,22 @@ pushd ..
 
 # Buildkite does not support labels at the moment. Have to get via github api.
 get_nexmark_queries_to_run() {
-  # every PR is an issue, we can use github api to pull it.
-  echo "PULL_REQUEST: $PULL_REQUEST"
-  export NEXMARK_QUERIES=$(curl -L \
-    -H "Accept: application/vnd.github+json" \
-    -H "Authorization: Bearer $GITHUB_TOKEN"\
-    -H "X-GitHub-Api-Version: 2022-11-28" \
-    https://api.github.com/repos/risingwavelabs/risingwave/issues/"$PULL_REQUEST"/labels \
-  | parse_labels)
+  set +u
+  if [[ -z "$NEXMARK_QUERIES" ]]; then
+    # every PR is an issue, we can use github api to pull it.
+    echo "PULL_REQUEST: $PULL_REQUEST"
+    export NEXMARK_QUERIES=$(curl -L \
+      -H "Accept: application/vnd.github+json" \
+      -H "Authorization: Bearer $GITHUB_TOKEN"\
+      -H "X-GitHub-Api-Version: 2022-11-28" \
+      https://api.github.com/repos/risingwavelabs/risingwave/issues/"$PULL_REQUEST"/labels \
+    | parse_labels)
+  elif [[ "$NEXMARK_QUERIES" == "all" ]]; then
+    export NEXMARK_QUERIES="$(ls $QUERY_DIR | sed -n 's/^q\([0-9]*\)\.sql/\1/p' | sort -n | sed 's/\(.*\)/nexmark-q\1/')"
+  else
+    echo "NEXMARK_QUERIES already set."
+  fi
+  set -u
   echo "Nexmark queries to run: $NEXMARK_QUERIES"
 }
 
@@ -156,11 +164,6 @@ start_nperf() {
 start_kafka() {
   ./kafka_2.13-3.4.0/bin/zookeeper-server-start.sh ./kafka_2.13-3.4.0/config/zookeeper.properties > zookeeper.log 2>&1 &
   ./kafka_2.13-3.4.0/bin/kafka-server-start.sh ./kafka_2.13-3.4.0/config/server.properties --override num.partitions=8 > kafka.log 2>&1 &
-  echo "Should have zookeeper and kafka running"
-  echo "zookeeper PID: "
-  pgrep zookeeper
-  echo "kafka PID: "
-  pgrep kafka
   sleep 10
   # TODO(kwannoel): `trap ERR` and upload these logs.
   # buildkite-agent artifact upload ./zookeeper.log
@@ -205,6 +208,7 @@ stop_processes() {
   # stop rw
   pushd risingwave
   ./risedev k
+  ./risedev clean-data
   popd
 }
 
@@ -263,6 +267,10 @@ run() {
 
   echo "--- Uploading flamegraph"
   buildkite-agent artifact upload "./$FLAMEGRAPH_PATH"
+
+  echo "--- Machine Debug Info After running $QUERY"
+  print_machine_debug_info
+
 }
 
 ############## MAIN

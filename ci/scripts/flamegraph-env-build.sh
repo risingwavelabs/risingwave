@@ -7,6 +7,7 @@ source ci/scripts/common.sh
 
 ############# INSTALL NEXMARK BENCH
 
+echo "--- Installing nexmark-bench"
 echo "CUR_DIR: $PWD"
 pushd ..
 git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/nexmark-bench.git
