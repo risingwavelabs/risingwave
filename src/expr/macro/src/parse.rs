@@ -51,7 +51,7 @@ impl FunctionAttr {
                 args.split(',').map(|s| s.trim().to_string()).collect()
             },
             ret: ret.trim().to_string(),
-            batch: find_argument(attr, "batch"),
+            batch_fn: find_argument(attr, "batch_fn"),
             state: find_argument(attr, "state"),
             user_fn,
         })

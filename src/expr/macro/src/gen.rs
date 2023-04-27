@@ -127,14 +127,14 @@ impl FunctionAttr {
         } else if self.args.iter().all(|t| t == "boolean")
             && self.ret == "boolean"
             && !self.user_fn.return_type.contains_result()
-            && self.batch.is_some()
+            && self.batch_fn.is_some()
         {
             let template_struct = match num_args {
                 1 => format_ident!("BooleanUnaryExpression"),
                 2 => format_ident!("BooleanBinaryExpression"),
                 _ => return Err(Error::new(Span::call_site(), "unsupported arguments")),
             };
-            let batch = format_ident!("{}", self.batch.as_ref().unwrap());
+            let batch_fn = format_ident!("{}", self.batch_fn.as_ref().unwrap());
             let args = (0..num_args).map(|i| format_ident!("x{i}"));
             let args1 = args.clone();
             let func = if self.user_fn.arg_option && self.user_fn.return_type == ReturnType::Option
@@ -155,7 +155,7 @@ impl FunctionAttr {
             quote! {
                 Ok(Box::new(crate::expr::template_fast::#template_struct::new(
                     #(#exprs,)*
-                    #batch,
+                    #batch_fn,
                     |#(#args),*| #func,
                 )))
             }
