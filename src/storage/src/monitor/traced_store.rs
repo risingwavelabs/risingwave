@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound;
-
 use bytes::Bytes;
 use futures::{Future, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
@@ -21,11 +19,11 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::opts::{NewLocalOptions, ReadOptions, WriteOptions};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
-    init_collector, should_use_trace, trace, trace_result, ConcurrentId, Operation,
-    OperationResult, StorageType, TraceResult, TraceSpan, TracedBytes, TracedNewLocalOpts,
-    LOCAL_ID,
+    init_collector, should_use_trace, trace, trace_result, ConcurrentId, MayTraceSpan, Operation,
+    OperationResult, StorageType, TraceResult, TraceSpan, TracedBytes, LOCAL_ID,
 };
 
+use super::identity;
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
@@ -34,7 +32,6 @@ use crate::store::*;
 use crate::{
     define_local_state_store_associated_type, define_state_store_associated_type,
     define_state_store_read_associated_type, define_state_store_write_associated_type, StateStore,
-    StateStoreIter,
 };
 
 #[derive(Clone)]
@@ -70,7 +67,7 @@ impl<S> TracedStateStore<S> {
         &'a self,
         table_id: TableId,
         iter_stream_future: impl Future<Output = StorageResult<St>> + 'a,
-        span: Option<TraceSpan>,
+        span: MayTraceSpan,
     ) -> StorageResult<TracedStateStoreIterStream<'s, St>> {
         let iter_stream = iter_stream_future
             .await
@@ -85,11 +82,6 @@ impl<S> TracedStateStore<S> {
 
 type TracedStateStoreIterStream<'s, S: StateStoreIterItemStream + 's> =
     impl StateStoreIterItemStream + 's;
-impl<S: StateStoreRead> TracedStateStore<S> {
-    pub fn inner(&self) -> &S {
-        &self.inner
-    }
-}
 
 impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
     type FlushFuture<'a> = impl Future<Output = StorageResult<usize>> + 'a;
@@ -116,8 +108,16 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
     }
 
     fn insert(&mut self, key: Bytes, new_val: Bytes, old_val: Option<Bytes>) -> StorageResult<()> {
-        // TODO: collect metrics
-        self.inner.insert(key, new_val, old_val)
+        let span = TraceSpan::new_insert_span(
+            key.clone(),
+            new_val.clone(),
+            old_val.clone(),
+            self.storage_type,
+        );
+        let res = self.inner.insert(key, new_val, old_val);
+
+        span.may_send_result(OperationResult::Insert(res.into()));
+        res
     }
 
     fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
@@ -193,9 +193,20 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
 
     fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
         async move {
-            let span = trace!(GET, key, epoch, read_options, self.storage_type);
+            let span = TraceSpan::new_get_span(
+                key.clone(),
+                epoch,
+                read_options.clone(),
+                self.storage_type,
+            );
+
             let res: StorageResult<Option<Bytes>> = self.inner.get(key, epoch, read_options).await;
-            trace_result!(GET, span, res);
+
+            span.may_send_result(OperationResult::Get(TraceResult::from(
+                res.as_ref()
+                    .map(|o| o.as_ref().map(|b| TracedBytes::from(b.clone()))),
+            )));
+
             res
         }
     }
@@ -207,15 +218,19 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
         async move {
-            let span = trace!(ITER, key_range, epoch, read_options, self.storage_type);
-            let iter = self
-                .traced_iter(
-                    read_options.table_id,
-                    self.inner.iter(key_range, epoch, read_options),
-                    span,
-                )
-                .await;
-            iter
+            let span = TraceSpan::new_iter_span(
+                key_range.clone(),
+                epoch,
+                read_options.clone(),
+                self.storage_type,
+            );
+            self.traced_iter(
+                read_options.table_id,
+                self.inner.iter(key_range, epoch, read_options),
+                span,
+            )
+            .await
+            .map_ok(identity)
         }
     }
 }
@@ -262,6 +277,12 @@ impl TracedStateStore<HummockStorage> {
     }
 }
 
+impl<S> TracedStateStore<S> {
+    pub fn inner(&self) -> &S {
+        &self.inner
+    }
+}
+
 impl<S> Drop for TracedStateStore<S> {
     fn drop(&mut self) {
         if let StorageType::Local(_, _) = self.storage_type {
@@ -272,11 +293,11 @@ impl<S> Drop for TracedStateStore<S> {
 
 pub struct TracedStateStoreIter<S> {
     inner: S,
-    span: Option<TraceSpan>,
+    span: MayTraceSpan,
 }
 
 impl<S> TracedStateStoreIter<S> {
-    fn new(inner: S, span: Option<TraceSpan>) -> Self {
+    fn new(inner: S, span: MayTraceSpan) -> Self {
         TracedStateStoreIter { inner, span }
     }
 }
@@ -292,12 +313,11 @@ impl<S: StateStoreIterItemStream> TracedStateStoreIter<S> {
             .await
             .inspect_err(|e| tracing::error!("Failed in next: {:?}", e))?
         {
-            if let Some(ref span) = self.span {
-                span.send_result(OperationResult::IterNext(TraceResult::Ok(Some((
+            self.span
+                .may_send_result(OperationResult::IterNext(TraceResult::Ok(Some((
                     TracedBytes::from(key.user_key.table_key.to_vec()),
                     TracedBytes::from(value.clone()),
-                )))))
-            }
+                )))));
             yield (key, value);
         }
     }

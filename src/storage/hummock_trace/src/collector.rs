@@ -15,6 +15,7 @@
 use std::env;
 use std::fs::{create_dir_all, OpenOptions};
 use std::io::BufWriter;
+use std::ops::Bound;
 use std::path::Path;
 use std::sync::atomic::AtomicU64;
 use std::sync::LazyLock;
@@ -31,7 +32,7 @@ use tokio::task_local;
 use crate::write::{TraceWriter, TraceWriterImpl};
 use crate::{
     ConcurrentIdGenerator, Operation, OperationResult, Record, RecordId, RecordIdGenerator,
-    UniqueIdGenerator,
+    TraceResult, TracedBytes, TracedIterRange, UniqueIdGenerator,
 };
 
 static GLOBAL_COLLECTOR: LazyLock<GlobalCollector> = LazyLock::new(GlobalCollector::new);
@@ -136,6 +137,24 @@ pub struct TraceSpan {
     storage_type: StorageType,
 }
 
+#[must_use = "TraceSpan Lifetime is important"]
+#[derive(Clone)]
+pub struct MayTraceSpan(Option<TraceSpan>);
+
+impl From<Option<TraceSpan>> for MayTraceSpan {
+    fn from(value: Option<TraceSpan>) -> Self {
+        Self(value)
+    }
+}
+
+impl MayTraceSpan {
+    pub fn may_send_result(&self, res: OperationResult) {
+        if let Some(span) = &self.0 {
+            span.send_result(res)
+        }
+    }
+}
+
 impl TraceSpan {
     pub fn new(tx: Sender<RecordMsg>, id: RecordId, storage_type: StorageType) -> Self {
         Self {
@@ -145,20 +164,65 @@ impl TraceSpan {
         }
     }
 
-    pub fn new_global(op: Operation, storage_type: StorageType) -> Option<Self> {
+    pub fn new_global(op: Operation, storage_type: StorageType) -> MayTraceSpan {
         match should_use_trace() {
-            true => Some(Self::new_to_global(op, storage_type)),
-            false => None,
+            true => Some(Self::new_to_global(op, storage_type)).into(),
+            false => None.into(),
         }
     }
 
-    pub fn new_get(
+    pub fn new_get_span(
         key: Bytes,
         epoch: u64,
         read_options: ReadOptions,
         storage_type: StorageType,
-    ) -> Option<Self> {
+    ) -> MayTraceSpan {
         Self::new_global(Operation::get(key, epoch, read_options), storage_type)
+    }
+
+    pub fn new_iter_span(
+        key_range: (Bound<Bytes>, Bound<Bytes>),
+        epoch: u64,
+        read_options: ReadOptions,
+        storage_type: StorageType,
+    ) -> MayTraceSpan {
+        Self::new_global(
+            Operation::Iter {
+                key_range: (
+                    key_range.0.as_ref().map(|v| v.clone().into()),
+                    key_range.1.as_ref().map(|v| v.clone().into()),
+                ),
+                epoch,
+                read_options: read_options.into(),
+            },
+            storage_type,
+        )
+    }
+
+    pub fn new_insert_span(
+        key: Bytes,
+        new_val: Bytes,
+        old_val: Option<Bytes>,
+        storage_type: StorageType,
+    ) -> MayTraceSpan {
+        Self::new_global(
+            Operation::Insert {
+                ket: key.into(),
+                new_val: new_val.into(),
+                old_val: old_val.map(|b| b.into()),
+            },
+            storage_type,
+        )
+    }
+
+    pub fn new_delete_span(key: Bytes, old_val: Bytes, storage_type: StorageType) -> MayTraceSpan {
+        Self::new_global(
+            Operation::Delete {
+                ket: key.into(),
+                old_val: old_val.into(),
+            },
+            storage_type,
+        )
     }
 
     pub fn send(&self, op: Operation) {
@@ -246,7 +310,7 @@ mod tests {
             let collector = collector.clone();
             let generator = generator.clone();
             let handle = tokio::spawn(async move {
-                let op = Operation::get(Bytes::from(vec![i as u8]), 123, ReadOptions::for_test());
+                let op = Operation::get(Bytes::from(vec![i as u8]), 123, ReadOptions::for_test(0));
                 let _span = TraceSpan::new_with_op(
                     collector.tx(),
                     generator.next(),
@@ -278,7 +342,7 @@ mod tests {
         let op = Operation::get(
             Bytes::from(vec![74, 56, 43, 67]),
             256,
-            ReadOptions::for_test(),
+            ReadOptions::for_test(0),
         );
         let mut mock_writer = MockTraceWriter::new();
 

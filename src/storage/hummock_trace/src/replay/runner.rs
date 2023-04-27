@@ -73,15 +73,16 @@ impl<R: TraceReader, G: GlobalReplay + 'static> HummockReplay<R, G> {
 mod tests {
     use std::collections::VecDeque;
 
+    use bytes::Bytes;
     use itertools::Itertools;
     use mockall::predicate;
     use risingwave_common::catalog::TableId;
-    use risingwave_hummock_sdk::opts::NewLocalOptions;
+    use risingwave_hummock_sdk::opts::{NewLocalOptions, ReadOptions};
 
     use super::*;
     use crate::{
         traced_bytes, MockGlobalReplayInterface, MockLocalReplayInterface, MockTraceReader,
-        OperationResult, Record, StorageType, TraceError, TraceResult, TracedNewLocalOpts,
+        OperationResult, Record, StorageType, TraceError, TraceResult,
     };
 
     #[tokio::test(flavor = "multi_thread")]
@@ -107,13 +108,9 @@ mod tests {
             (
                 1,
                 Operation::get(
-                    traced_bytes![0, 1, 2, 3],
+                    Bytes::from(vec![0, 1, 2, 3]),
                     123,
-                    None,
-                    true,
-                    Some(12),
-                    opts1.table_id.table_id,
-                    false,
+                    ReadOptions::for_test(opts1.table_id.table_id),
                 ),
             ),
             (

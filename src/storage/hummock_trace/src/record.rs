@@ -86,6 +86,8 @@ impl Record {
     }
 }
 
+pub type TracedIterRange = (Bound<TracedBytes>, Bound<TracedBytes>);
+
 /// Operations represents Hummock operations
 #[derive(Encode, Decode, PartialEq, Debug, Clone)]
 pub enum Operation {
@@ -103,13 +105,21 @@ pub enum Operation {
         write_options: WriteOptions,
     },
 
+    Insert {
+        ket: TracedBytes,
+        new_val: TracedBytes,
+        old_val: Option<TracedBytes>,
+    },
+    Delete {
+        ket: TracedBytes,
+        old_val: TracedBytes,
+    },
     /// Iter operation of Hummock
     Iter {
-        key_range: (Bound<TracedBytes>, Bound<TracedBytes>),
+        key_range: TracedIterRange,
         epoch: u64,
         read_options: TracedReadOptions,
     },
-
     /// Iter.next operation
     IterNext(RecordId),
 
@@ -133,9 +143,9 @@ pub enum Operation {
 impl Operation {
     pub fn get(key: Bytes, epoch: u64, read_options: ReadOptions) -> Operation {
         Operation::Get {
-            key: TracedBytes::from(key),
+            key: key.into(),
             epoch,
-            read_options: TracedReadOptions::from(read_options),
+            read_options: read_options.into(),
         }
     }
 
@@ -233,6 +243,9 @@ impl<T, E> From<std::result::Result<T, E>> for TraceResult<T> {
 pub enum OperationResult {
     Get(TraceResult<Option<TracedBytes>>),
     Ingest(TraceResult<usize>),
+    Insert(TraceResult<()>),
+    Delete(TraceResult<()>),
+    Flush(TraceResult<()>),
     Iter(TraceResult<()>),
     IterNext(TraceResult<Option<(TracedBytes, TracedBytes)>>),
     Sync(TraceResult<usize>),
@@ -281,7 +294,7 @@ impl<'de> bincode::BorrowDecode<'de> for TraceSubResp {
     }
 }
 
-#[derive(Encode, Decode, PartialEq, Debug, Clone)]
+#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub struct TracedReadOptions {
     pub prefix_hint: Option<TracedBytes>,
     pub ignore_range_tombstone: bool,

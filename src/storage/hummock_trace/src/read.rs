@@ -123,7 +123,7 @@ mod test {
         let op = Operation::get(
             Bytes::from(vec![5, 5, 15, 6]),
             7564,
-            ReadOptions::for_test(),
+            ReadOptions::for_test(0),
         );
         let expected = Record::new_local_none(54433, op);
 

@@ -19,7 +19,7 @@ use bytes::Bytes;
 use futures::{Future, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::opts::NewLocalOptions;
+use risingwave_hummock_sdk::opts::{NewLocalOptions, ReadOptions};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::error;
 #[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
@@ -67,7 +67,7 @@ type MonitoredIterInnerType<I> = I;
 type MonitoredIterInnerType<I> = TracedStateStoreIter<I>;
 
 /// A util function to break the type connection between two opaque return types defined by `impl`.
-fn identity(input: impl StateStoreIterItemStream) -> impl StateStoreIterItemStream {
+pub(crate) fn identity(input: impl StateStoreIterItemStream) -> impl StateStoreIterItemStream {
     input
 }
 

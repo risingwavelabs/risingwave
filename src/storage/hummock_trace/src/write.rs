@@ -112,6 +112,9 @@ mod test {
 
     use bincode::{config, decode_from_slice, encode_to_vec};
     use byteorder::{BigEndian, ReadBytesExt};
+    use bytes::Bytes;
+    use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::opts::{ReadOptions, WriteOptions};
 
     use super::*;
     use crate::{traced_bytes, Operation};
@@ -127,13 +130,9 @@ mod test {
     #[test]
     fn test_bincode_serialize() {
         let op = Operation::get(
-            traced_bytes![0, 1, 2, 3],
+            Bytes::from(vec![0, 1, 2, 3]),
             123,
-            None,
-            true,
-            Some(12),
-            123,
-            false,
+            ReadOptions::for_test(123),
         );
         let expected = Record::new_local_none(0, op);
         let serializer = BincodeSerializer::new();
@@ -168,7 +167,14 @@ mod test {
         let mut mock_writer = MockWrite::new();
         let key = traced_bytes![123];
         let value = traced_bytes![234];
-        let op = Operation::ingest(vec![(key, Some(value))], vec![], 0, 0);
+        let op = Operation::ingest(
+            vec![(key, Some(value))],
+            vec![],
+            WriteOptions {
+                epoch: 0,
+                table_id: TableId { table_id: 0 },
+            },
+        );
         let record = Record::new_local_none(0, op);
         let r_bytes = encode_to_vec(record.clone(), config::standard()).unwrap();
         let r_len = r_bytes.len();

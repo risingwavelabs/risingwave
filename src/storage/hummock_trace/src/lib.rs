@@ -14,6 +14,7 @@
 
 #![feature(once_cell)]
 #![feature(cursor_remaining)]
+#![feature(bound_map)]
 
 mod collector;
 mod error;

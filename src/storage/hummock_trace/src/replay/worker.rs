@@ -531,7 +531,7 @@ mod tests {
             .with(
                 predicate::eq(key.clone()),
                 predicate::eq(epoch),
-                predicate::eq(read_options.clone()),
+                predicate::eq(TracedReadOptions::from(read_options.clone())),
             )
             .returning(move |_, _, _| Ok(Some(traced_bytes![58, 54, 35])));
 
@@ -540,7 +540,7 @@ mod tests {
         let record = Record(
             StorageType::Global,
             record_id,
-            Operation::get(key.into(), epoch, read_options),
+            Operation::get(key.into_bytes(), epoch, read_options),
         );
         scheduler.schedule(record);
 
