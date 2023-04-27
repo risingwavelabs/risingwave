@@ -42,13 +42,16 @@ async fn do_handle_explain(
     stmt: Statement,
     blocks: &mut Vec<String>,
 ) -> Result<()> {
-    // Hack to avoid `Rc` across `await` point.
+    // Workaround to avoid `Rc` across `await` point.
     let mut plan_fragmenter = None;
 
     {
         let session = context.session_ctx().clone();
 
         let (plan, context) = match stmt {
+            // `CREATE TABLE` may take the ownership of the `OptimizerContext` to avoid `Rc` across
+            // `await` point. We can only take the reference back from the `PlanRef` if it's
+            // successfully planned.
             Statement::CreateTable {
                 name,
                 columns,
@@ -92,6 +95,9 @@ async fn do_handle_explain(
                 (Ok(plan), context)
             }
 
+            // For other queries without `await` point, we can keep a copy of reference to the
+            // `OptimizerContext` even if the planning fails. This enables us to log the partial
+            // traces for better debugging experience.
             _ => {
                 let context: OptimizerContextRef = context.into();
                 let plan = match stmt {
@@ -215,7 +221,7 @@ pub async fn handle_explain(
         return Err(ErrorCode::NotImplemented("explain analyze".to_string(), 4856.into()).into());
     }
 
-    let context = OptimizerContext::new(handler_args.clone(), options.clone()).into();
+    let context = OptimizerContext::new(handler_args.clone(), options.clone());
 
     let mut blocks = Vec::new();
     let result = do_handle_explain(context, stmt, &mut blocks).await;
