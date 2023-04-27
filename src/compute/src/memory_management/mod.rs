@@ -200,7 +200,7 @@ mod tests {
         assert_eq!(reserved, 1 << 30);
         assert_eq!(non_reserved, 9 << 30);
 
-        // at most 2 MB
+        // at most 2 GB
         let (reserved, non_reserved) = reserve_memory_bytes(100 << 30);
         assert_eq!(reserved, 2 << 30);
         assert_eq!(non_reserved, 98 << 30);
