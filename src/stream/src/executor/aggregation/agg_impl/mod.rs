@@ -29,6 +29,7 @@ use risingwave_common::array::{
     StructArray, TimeArray, TimestampArray, Utf8Array,
 };
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::function::aggregate::AggKind;
 use risingwave_expr::*;
@@ -61,7 +62,9 @@ trait StreamingAggOutput<B: ArrayBuilder>: Send + Sync + 'static {
 
 /// `StreamingAggImpl` erases the associated type information of `StreamingAggInput` and
 /// `StreamingAggOutput`. You should manually implement this trait for necessary types.
-pub trait StreamingAggImpl: Any + std::fmt::Debug + DynClone + Send + Sync + 'static {
+pub trait StreamingAggImpl:
+    Any + std::fmt::Debug + DynClone + EstimateSize + Send + Sync + 'static
+{
     /// Apply a batch to the state
     fn apply_batch(
         &mut self,

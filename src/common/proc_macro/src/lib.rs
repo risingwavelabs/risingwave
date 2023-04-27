@@ -62,7 +62,7 @@ pub fn override_config(input: TokenStream) -> TokenStream {
     gen.into()
 }
 
-#[proc_macro_derive(EstimateSize)]
+#[proc_macro_derive(EstimateSize, attributes(estimate_size))]
 pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
     // Construct a representation of Rust code as a syntax tree
     // that we can manipulate
@@ -146,7 +146,7 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
                             field_idents.push(field_ident);
 
                             field_cmds.push(quote! {
-                                total += EstimateSize::estimated_heap_size(#field_ident);
+                                total += #field_ident.estimated_heap_size();
                             })
                         }
 
@@ -203,7 +203,7 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
                 let ident = field.ident.as_ref().unwrap();
 
                 cmds.push(quote! {
-                    total += EstimateSize::estimated_heap_size(&self.#ident);
+                    total += &self.#ident.estimated_heap_size();;
                 })
             }
 

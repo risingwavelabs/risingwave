@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use std::borrow::Cow;
+use std::mem;
 
 use bytes::BufMut;
 
+use crate::estimate_size::EstimateSize;
 use crate::row::{OwnedRow, Row};
 use crate::types::{DataType, ToDatumRef};
 use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
@@ -27,6 +29,13 @@ use crate::util::sort_util::OrderType;
 pub struct OrderedRowSerde {
     schema: Vec<DataType>,
     order_types: Vec<OrderType>,
+}
+
+impl EstimateSize for OrderedRowSerde {
+    fn estimated_heap_size(&self) -> usize {
+        self.schema.len() * mem::size_of::<DataType>()
+            + self.order_types.len() * mem::size_of::<OrderType>()
+    }
 }
 
 impl OrderedRowSerde {

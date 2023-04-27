@@ -15,6 +15,7 @@
 pub mod collections;
 
 use std::collections::HashSet;
+use std::marker::PhantomData;
 
 use bytes::Bytes;
 use fixedbitset::FixedBitSet;
@@ -37,6 +38,20 @@ pub trait EstimateSize {
     }
 }
 
+pub trait EstimateZeroHeapSize {}
+
+impl<T: EstimateZeroHeapSize> EstimateSize for T {
+    fn estimated_heap_size(&self) -> usize {
+        0
+    }
+}
+
+impl<T: EstimateZeroHeapSize> EstimateSize for Vec<T> {
+    fn estimated_heap_size(&self) -> usize {
+        self.len() * std::mem::size_of::<T>()
+    }
+}
+
 impl EstimateSize for FixedBitSet {
     fn estimated_heap_size(&self) -> usize {
         self.as_slice().len() * std::mem::size_of::<u32>()
@@ -52,11 +67,6 @@ impl EstimateSize for String {
 impl EstimateSize for () {
     fn estimated_heap_size(&self) -> usize {
         0
-    }
-}
-impl<T: EstimateSize> EstimateSize for Box<T> {
-    fn estimated_heap_size(&self) -> usize {
-        self.as_ref().estimated_size()
     }
 }
 
@@ -99,6 +109,18 @@ impl EstimateSize for RustDecimal {
     }
 }
 
+impl<T> EstimateSize for PhantomData<T> {
+    fn estimated_heap_size(&self) -> usize {
+        0
+    }
+}
+
+impl<T1: EstimateSize, T2: EstimateSize> EstimateSize for (T1, T2) {
+    fn estimated_heap_size(&self) -> usize {
+        self.0.estimated_heap_size() + self.1.estimated_heap_size()
+    }
+}
+
 macro_rules! primitive_estimate_size_impl {
     ($($t:ty)*) => ($(
         impl EstimateSize for $t {
@@ -111,6 +133,10 @@ macro_rules! primitive_estimate_size_impl {
 
         impl EstimateSize for Box<[$t]> {
             fn estimated_heap_size(&self) -> usize { std::mem::size_of::<$t>() * self.len() }
+        }
+
+        impl<const LEN: usize> EstimateSize for [$t; LEN] {
+            fn estimated_heap_size(&self) -> usize { 0 }
         }
     )*)
 }
