@@ -303,6 +303,7 @@ steps:
           mount-buildkite-agent: true
           environment:
             - GITHUB_TOKEN
+            - NEXMARK_QUERIES: "all"
     # TODO(kwannoel): Here are the areas that can be further optimized:
     # - Nexmark event generation: ~3min for 100mil records.
     # - Generate Flamegraph: ~15min (see https://github.com/koute/not-perf/issues/30 on optimizing)
