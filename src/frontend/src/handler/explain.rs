@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::rc::Rc;
+
 use futures::StreamExt;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
@@ -88,6 +90,7 @@ async fn do_handle_explain(
         let session = context.session_ctx().clone();
 
         let plan = match stmt {
+            // -- Streaming DDLs --
             Statement::CreateView {
                 or_replace: false,
                 materialized: true,
@@ -119,6 +122,7 @@ async fn do_handle_explain(
             )
             .map(|x| x.0),
 
+            // -- Batch Queries --
             Statement::Insert { .. }
             | Statement::Delete { .. }
             | Statement::Update { .. }
@@ -202,29 +206,32 @@ pub async fn handle_explain(
     }
 
     let context = OptimizerContext::new(handler_args.clone(), options.clone()).into();
-    let mut blocks = Vec::new();
 
+    let mut blocks = Vec::new();
     let result = do_handle_explain(context, stmt, &mut blocks).await;
 
-    let mut row_sets = Vec::<RowSetResult>::new();
-    for block in blocks {
-        let row_set = block
-            .lines()
-            .map(|l| Row::new(vec![Some(l.to_owned().into())]))
-            .collect_vec();
-        row_sets.push(Ok(row_set));
-    }
-
     if let Err(e) = result {
-        row_sets.push(Err(e.into()));
+        if options.trace {
+            blocks.push(if options.verbose {
+                format!("{:?}", e)
+            } else {
+                format!("{}", e)
+            });
+        } else {
+            return Err(e);
+        }
     }
 
-    let stream = PgResponseStream::Rows(futures::stream::iter(row_sets).boxed());
+    let rows = blocks
+        .iter()
+        .flat_map(|b| b.lines().map(|l| l.to_owned()))
+        .map(|l| Row::new(vec![Some(l.into())]))
+        .collect_vec();
 
     Ok(PgResponse::new_for_stream(
         StatementType::EXPLAIN,
         None,
-        stream,
+        rows.into(),
         vec![PgFieldDescriptor::new(
             "QUERY PLAN".to_owned(),
             DataType::Varchar.to_oid(),
