@@ -15,9 +15,11 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::Sort;
+use super::utils::TableCatalogBuilder;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
@@ -49,7 +51,19 @@ impl StreamSort {
     }
 
     fn infer_state_table(&self) -> TableCatalog {
-        todo!()
+        // The sort state table has the same schema as the input.
+
+        let in_fields = self.logical.input.schema().fields();
+        let mut tbl_builder =
+            TableCatalogBuilder::new(self.ctx().with_options().internal_table_subset());
+        for field in in_fields {
+            tbl_builder.add_column(field);
+        }
+        tbl_builder.add_order_column(self.logical.sort_column_index, OrderType::ascending());
+
+        let in_dist_key = self.logical.input.distribution().dist_column_indices();
+        let read_prefix_len_hint = 0;
+        tbl_builder.build(in_dist_key.to_vec(), read_prefix_len_hint)
     }
 }
 
