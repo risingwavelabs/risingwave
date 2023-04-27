@@ -109,19 +109,20 @@ async fn nexmark_scaling_up_down_common(
     cluster.run(create).await?;
 
     cluster.add_compute_node(number_of_nodes);
-    sleep(Duration::from_secs(60)).await;
+    sleep(Duration::from_secs(60)).await; // TODO: 60 sec sleep seems like to much
 
     for _ in 0..number_of_nodes {
         cluster.remove_rand_compute_node().await;
         sleep(Duration::from_secs(60)).await;
     }
 
+    // TODO: actually kill the node at the end of the test
+
     cluster.run(select).await?.assert_result_eq(&expected);
 
     Ok(())
 }
 
-// TODO: rename this to nexmark_scaling
 macro_rules! test {
     ($query:ident) => {
         paste::paste! {

@@ -64,6 +64,7 @@ max_heartbeat_interval_secs = 600",
 });
 
 fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
+    let profile = "playground-3cn"; // TODO: remove this line
     let mut services = match profile {
         "playground" => vec![
             RisingWaveService::Meta(osstrs([

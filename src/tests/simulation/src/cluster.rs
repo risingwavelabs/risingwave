@@ -18,6 +18,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use std::vec::Vec;
 
 use anyhow::{anyhow, bail, Result};
 use clap::Parser;
@@ -511,6 +512,7 @@ impl Cluster {
                 nodes.push(format!("compactor-{}", i));
             }
         }
+        // TODO: use kill_or_restart_nodes below
         join_all(nodes.iter().map(|name| async move {
             let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
             tokio::time::sleep(t).await;
@@ -528,6 +530,35 @@ impl Cluster {
             tokio::time::sleep(t).await;
             tracing::info!("restart {name}");
             madsim::runtime::Handle::current().restart(name);
+        }))
+        .await;
+    }
+
+    /// Kills and optionally restarts nodes. Restart delay only relevant if restart is true
+    async fn kill_or_restart_nodes(
+        nodes: &Vec<String>,
+        restart: bool,
+        restart_delay_secs: Option<u64>,
+    ) {
+        join_all(nodes.iter().map(|name| async move {
+            let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
+            tokio::time::sleep(t).await;
+            tracing::info!("kill {name}");
+            madsim::runtime::Handle::current().kill(name);
+
+            let mut t =
+                rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
+            // has a small chance to restart after a long time
+            // so that the node is expired and removed from the cluster
+            if rand::thread_rng().gen_bool(0.1) {
+                // max_heartbeat_interval_secs = 60
+                t += Duration::from_secs(restart_delay_secs.unwrap_or_default());
+            }
+            if restart {
+                tokio::time::sleep(t).await;
+                tracing::info!("restart {name}");
+                madsim::runtime::Handle::current().restart(name);
+            }
         }))
         .await;
     }
@@ -584,19 +615,20 @@ impl Cluster {
         }
     }
 
+    // TODO: Does not remove it. Marks it for deletion. Rename function
     /// TODO: return a result here
     /// remove node from cluster gracefully by informing meta that node is no longer available.
     pub async fn remove_rand_compute_node(&self) {
         // where do I get the  client from?
         // ClusterServiceClient.DeleteWorkerNode
 
-        // TODO:
+        // TODO: Unable to remove node: Failed to connect to meta server
         // cannot use advertising meta addr?
         // How do we resolve the address?
         // 192, 168, 1, i as u8
 
         let meta_addrs = (1..self.config.meta_nodes)
-            .map(|i| format!("http://meta-{i}:5690"))
+            .map(|i| format!("meta-{i}:5690"))
             .collect::<Vec<String>>();
 
         // Which node?
@@ -627,6 +659,7 @@ impl Cluster {
 
         // TODO: Do I have to shut down the worker node after this or does delete_worker_node do it
         // all?
+        // NO. Deleting this in the test itself
     }
 
     /// Create a node for kafka producer and prepare data.

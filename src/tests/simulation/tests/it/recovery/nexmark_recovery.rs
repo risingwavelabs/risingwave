@@ -41,7 +41,7 @@ async fn nexmark_recovery_common(create: &str, select: &str, drop: &str) -> Resu
     // kill nodes and trigger recovery
     for _ in 0..5 {
         sleep(Duration::from_secs(2)).await;
-        cluster.kill_node(&KillOpts::ALL).await;
+        cluster.kill_node(&KillOpts::ALL).await; // this may be promising
     }
     // wait enough time to make sure the stream is end
     sleep(Duration::from_secs(60)).await;
