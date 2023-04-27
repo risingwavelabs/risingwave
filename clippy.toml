@@ -7,6 +7,8 @@ disallowed-methods = [
 disallowed-types = [
     { path = "num_traits::AsPrimitive", reason = "Please use `From` or `TryFrom` with `OrderedFloat` instead." },
     { path = "num_traits::FromPrimitive", reason = "Please use `From` or `TryFrom` with `OrderedFloat` instead." },
+    { path = "num_traits::ToPrimitive", reason = "Please use `From` or `TryFrom` with `OrderedFloat` instead." },
+    { path = "num_traits::NumCast", reason = "Please use `From` or `TryFrom` with `OrderedFloat` instead." },
 ]
 doc-valid-idents = [
     "RisingWave",
