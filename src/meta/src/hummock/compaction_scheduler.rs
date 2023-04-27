@@ -19,7 +19,7 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use futures::future::{Either, Shared};
-use futures::stream::select;
+use futures::stream::BoxStream;
 use futures::{FutureExt, Stream, StreamExt};
 use parking_lot::Mutex;
 use risingwave_common::util::select_all;
@@ -49,6 +49,8 @@ pub type CompactionSchedulerRef<S> = Arc<CompactionScheduler<S>>;
 pub type CompactionRequestChannelRef = Arc<CompactionRequestChannel>;
 
 type CompactionRequestChannelItem = (CompactionGroupId, compact_task::TaskType);
+
+const CHECK_PENDING_TASK_PERIOD_SEC: u64 = 300;
 
 /// [`CompactionRequestChannel`] wrappers a mpsc channel and deduplicate requests from same
 /// compaction groups.
@@ -399,6 +401,9 @@ where
                                 }
                                 self.on_handle_check_split_multi_group().await;
                             }
+                            SchedulerEvent::CheckDeadTaskTrigger => {
+                                self.hummock_manager.check_dead_task().await;
+                            }
                         }
                     }
                 }
@@ -560,28 +565,6 @@ pub enum SchedulerEvent {
     GroupSplitTrigger,
 }
 
-pub struct IntervalStream {
-    interval: tokio::time::Interval,
-    event: SchedulerEvent,
-}
-
-impl IntervalStream {
-    pub fn new(interval: tokio::time::Interval, event: SchedulerEvent) -> Self {
-        Self { interval, event }
-    }
-}
-
-impl Stream for IntervalStream {
-    type Item = SchedulerEvent;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<SchedulerEvent>> {
-        match self.interval.poll_tick(cx) {
-            Poll::Ready(_) => Poll::Ready(Some(self.event.clone())),
-            Poll::Pending => Poll::Pending,
-        }
-    }
-}
-
 impl<S> CompactionScheduler<S>
 where
     S: MetaStore,
@@ -630,15 +613,15 @@ where
             split_group_trigger_interval,
             SchedulerEvent::GroupSplitTrigger,
         );
-        select(
-            dynamic_channel_trigger,
-            select_all(vec![
-                split_group_trigger,
-                dynamic_tick_trigger,
-                space_reclaim_trigger,
-                ttl_reclaim_trigger,
-            ]),
-        )
+        let triggers: Vec<BoxStream<'static, SchedulerEvent>> = vec![
+            Box::pin(dynamic_channel_trigger),
+            Box::pin(dynamic_tick_trigger),
+            Box::pin(space_reclaim_trigger),
+            Box::pin(ttl_reclaim_trigger),
+            Box::pin(check_compact_trigger),
+            Box::pin(split_group_trigger),
+        ];
+        select_all(triggers)
     }
 }
 
