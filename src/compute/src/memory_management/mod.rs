@@ -51,6 +51,7 @@ pub const STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO: usize = 70;
 #[derive(Default)]
 pub struct MemoryControlStats {
     pub jemalloc_allocated_mib: usize,
+    pub jemalloc_active_mib: usize,
     pub lru_watermark_step: u64,
     pub lru_watermark_time_ms: u64,
     pub lru_physical_now_ms: u64,

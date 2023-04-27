@@ -85,6 +85,7 @@ pub struct StreamingMetrics {
     pub lru_runtime_loop_count: IntCounter,
     pub lru_watermark_step: IntGauge,
     pub jemalloc_allocated_bytes: IntGauge,
+    pub jemalloc_active_bytes: IntGauge,
 
     /// User compute error reporting
     pub user_compute_error_count: GenericCounterVec<AtomicU64>,
@@ -444,7 +445,14 @@ impl StreamingMetrics {
 
         let jemalloc_allocated_bytes = register_int_gauge_with_registry!(
             "jemalloc_allocated_bytes",
-            "The memory jemalloc allocated, got from jemalloc_ctl",
+            "The allocated memory jemalloc, got from jemalloc_ctl",
+            registry
+        )
+        .unwrap();
+
+        let jemalloc_active_bytes = register_int_gauge_with_registry!(
+            "jemalloc_active_bytes",
+            "The active memory jemalloc, got from jemalloc_ctl",
             registry
         )
         .unwrap();
@@ -519,6 +527,7 @@ impl StreamingMetrics {
             lru_runtime_loop_count,
             lru_watermark_step,
             jemalloc_allocated_bytes,
+            jemalloc_active_bytes,
             user_compute_error_count,
             materialize_cache_hit_count,
             materialize_cache_total_count,
