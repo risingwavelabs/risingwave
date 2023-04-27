@@ -12,16 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.sourcenode.common;
+package com.risingwave.connector.source.common;
 
-import io.grpc.Status;
+public abstract class DatabaseValidator {
 
-public abstract class ValidatorUtils {
-    public static RuntimeException invalidArgument(String description) {
-        return Status.INVALID_ARGUMENT.withDescription(description).asRuntimeException();
+    public void validateAll() {
+        validateDbConfig();
+        validateUserPrivilege();
+        validateTable();
     }
 
-    public static RuntimeException internalError(String description) {
-        return Status.INTERNAL.withDescription(description).asRuntimeException();
-    }
+    /** Validate the config of the upstream database */
+    abstract void validateDbConfig();
+
+    /** Validate the required privileges to start the connector */
+    abstract void validateUserPrivilege();
+
+    /** Validate the properties of the source table */
+    abstract void validateTable();
 }
