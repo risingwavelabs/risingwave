@@ -167,15 +167,19 @@ where
         Ok(())
     }
 
-    // todo: instead of passing self pass arc mutex
     pub async fn delete_worker_node(&self, host_address: HostAddress) -> MetaResult<WorkerType> {
-        let core = self.core.write().await;
-        let mut worker = core.get_worker_by_host_checked(host_address.clone())?;
-        let worker_type = worker.worker_type();
-        let worker_node = worker.to_protobuf();
-        worker.worker_node.state = State::Deleting as i32;
+        let mut core = self.core.write().await;
+        let mut worker_ref = core
+            .workers
+            .get_mut(&WorkerKey(host_address.clone()))
+            .ok_or_else(|| anyhow::anyhow!("Worker node does not exist!"))?;
+        worker_ref.worker_node.state = State::Deleting as i32;
+        let worker_type = worker_ref.worker_type();
+        let worker_node = worker_ref.to_protobuf();
+        let worker_id = worker_ref.worker_id();
 
         // Persist deletion.
+        // TODO: I have to update that node also on meta store
         Worker::delete(self.env.meta_store(), &host_address).await?;
 
         // TODO: write this cleanup as part of the heartbeat function
@@ -185,7 +189,7 @@ where
         // deleted nodes every so and so seconds
         tokio::task::spawn(delete_worker_node_cleanup(
             self.core.clone(),
-            worker.worker_node.id.clone(),
+            worker_id,
             host_address.clone(),
             self.max_heartbeat_interval.clone(),
         ));
@@ -219,8 +223,8 @@ where
         let mut core = self.core.write().await;
         for worker in core.workers.values_mut() {
             if worker.worker_id() == worker_id {
+                // TODO: remove
                 // if worker.worker_node.state != State::Deleting as i32 {
-                // I think we should also update if deleting to keep track if node is still alive
                 worker.update_ttl(self.max_heartbeat_interval);
                 worker.update_info(info);
                 return Ok(());
@@ -688,21 +692,21 @@ async fn delete_worker_node_cleanup(
                         .duration_since(UNIX_EPOCH)
                         .expect("Time went backwards")
                         .as_secs();
-                    tracing::warn!("Compute {:#?} with id {} is still deleting. Trying since {} min",
-                        host_address,
+                    tracing::warn!("Compute node at {}:{} with id {} is still deleting. Trying since {} min",
+                        host_address.host,
+                        host_address.port,
                         node_id,
                         (now - start_time) / 60
                     );
                 }
                 _ = ticker.tick() => {
-                   // let mut core = manager.core.write().await;
                     let mut core = shared_core.write().await;
                     let worker = match core.get_worker_by_host_checked(host_address.clone()) {
                         Ok(w) => w,
                         Err(_) => {
                             tracing::warn!(
                                 "Unable to retrieve deleting worker node at address {:#?}",
-                                host_address
+                                host_address.clone()
                             );
                             return;
                          }
@@ -710,10 +714,10 @@ async fn delete_worker_node_cleanup(
 
                     if worker.worker_node.state != State::Deleting as i32 || worker.worker_node.id != node_id  {
                         tracing::warn!(
-                            "Worker node changed. Expected state deleting, got {} AND ID {}, got {}. Assuming this is a different node. Aborting deletion.",
-                            worker.worker_node.state,
-                            node_id,
-                            worker.worker_node.id
+                            "Worker node changed. Expected state Deleting, got {}. Node has id {}, expected {}. Assuming this is a different node. Aborting deletion.",
+                            worker.worker_node.state, // TODO: get name of state here
+                            worker.worker_node.id,
+                            node_id
                         );
                         return;
                     }
@@ -725,6 +729,11 @@ async fn delete_worker_node_cleanup(
                         .expect("Time went backwards")
                         .as_secs();
                     if now > latest_beat + 3 * max_heartbeat_interval.as_secs() {
+                        tracing::info!(
+                            "Cleaning up worker node at {}:{}",
+                            host_address.host,
+                            host_address.port
+                        );
                         core.delete_worker_node(worker);
                         return;
                     }

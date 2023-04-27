@@ -131,16 +131,6 @@ pub(crate) fn rebalance_actor_vnode(
     assert!(actors.len() >= actors_to_remove.len());
 
     let target_actor_count = actors.len() - actors_to_remove.len() + actors_to_create.len();
-    // ClearWorkerNode causes the assertion failure, but only if we use create table with datagen
-    // create table s1 (v1 int, v2 float) with (
-    //     connector = 'datagen',
-    //     fields.v1.min = '1',
-    //     fields.v1.max  = '100000',
-    //     fields.v2.min = '1',
-    //     fields.v2.max = '100000',
-    //     datagen.rows.per.second='25',
-    //     datagen.split.num = '12'
-    // ) row format json;
     assert!(target_actor_count > 0);
 
     // represents the balance of each actor, used to sort later
