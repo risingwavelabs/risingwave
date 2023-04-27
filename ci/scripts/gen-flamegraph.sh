@@ -13,14 +13,20 @@ pushd ..
 
 # Buildkite does not support labels at the moment. Have to get via github api.
 get_nexmark_queries_to_run() {
-  # every PR is an issue, we can use github api to pull it.
-  echo "PULL_REQUEST: $PULL_REQUEST"
-  export NEXMARK_QUERIES=$(curl -L \
-    -H "Accept: application/vnd.github+json" \
-    -H "Authorization: Bearer $GITHUB_TOKEN"\
-    -H "X-GitHub-Api-Version: 2022-11-28" \
-    https://api.github.com/repos/risingwavelabs/risingwave/issues/"$PULL_REQUEST"/labels \
-  | parse_labels)
+  if [[ -z "$NEXMARK_QUERIES" ]]; then
+    # every PR is an issue, we can use github api to pull it.
+    echo "PULL_REQUEST: $PULL_REQUEST"
+    export NEXMARK_QUERIES=$(curl -L \
+      -H "Accept: application/vnd.github+json" \
+      -H "Authorization: Bearer $GITHUB_TOKEN"\
+      -H "X-GitHub-Api-Version: 2022-11-28" \
+      https://api.github.com/repos/risingwavelabs/risingwave/issues/"$PULL_REQUEST"/labels \
+    | parse_labels)
+  elif [[ "$NEXMARK_QUERIES" == "all" ]]; then
+    export NEXMARK_QUERIES="$(ls $QUERY_DIR | sed -n 's/^q\([0-9]*\)\.sql/\1/p' | sort -n | sed 's/\(.*\)/nexmark-q\1/')"
+  else
+    echo "NEXMARK_QUERIES already set."
+  fi
   echo "Nexmark queries to run: $NEXMARK_QUERIES"
 }
 
