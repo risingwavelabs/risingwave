@@ -44,7 +44,7 @@ steps:
 
   # Generates cpu flamegraph if label `cpu_flamegraph` is added to PR.
   - label: "Generate CPU flamegraph"
-    command: "NEXMARK_QUERIES=$NEXMARK_QUERIES ci/scripts/gen-flamegraph.sh"
+    command: "ci/scripts/gen-flamegraph.sh"
     depends_on: "cpu-flamegraph-env-build"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
@@ -57,6 +57,7 @@ steps:
           mount-buildkite-agent: true
           environment:
             - GITHUB_TOKEN
+            - NEXMARK_QUERIES
     # TODO(kwannoel): Here are the areas that can be further optimized:
     # - Nexmark event generation: ~3min for 100mil records.
     # - Generate Flamegraph: ~15min (see https://github.com/koute/not-perf/issues/30 on optimizing)
