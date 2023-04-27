@@ -225,6 +225,10 @@ setup() {
 
 # Run benchmark for a query
 run() {
+
+  echo "--- Machine Debug Info Before running $QUERY"
+  print_machine_debug_info
+
   echo "--- Running benchmark for $QUERY"
   echo "--- Setting variables"
   QUERY_LABEL="$1"
@@ -270,6 +274,10 @@ run() {
 
   echo "--- Uploading flamegraph"
   buildkite-agent artifact upload "./$FLAMEGRAPH_PATH"
+
+  echo "--- Machine Debug Info After running $QUERY"
+  print_machine_debug_info
+
 }
 
 ############## MAIN
