@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod agg;
 pub mod arithmetic_op;
 pub mod array_access;
 pub mod array_range_access;

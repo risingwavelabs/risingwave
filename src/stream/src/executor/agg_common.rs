@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_expr::function::aggregate::AggCall;
+use risingwave_expr::agg::AggCall;
 use risingwave_storage::StateStore;
 
 use super::aggregation::AggStateStorage;

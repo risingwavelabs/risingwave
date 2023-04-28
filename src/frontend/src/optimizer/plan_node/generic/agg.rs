@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
-use risingwave_expr::function::aggregate::AggKind;
+use risingwave_expr::agg::AggKind;
 use risingwave_pb::expr::PbAggCall;
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePb};
 
@@ -369,12 +369,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         type_name: String::default(),
                     });
                 }
-                _ => {
-                    panic!(
-                        "state of agg kind `{}` is not supposed to be `TableState`",
-                        agg_kind
-                    );
-                }
+                _ => panic!("state of agg kind `{agg_kind}` is not supposed to be `TableState`"),
             }
 
             let mapping =
