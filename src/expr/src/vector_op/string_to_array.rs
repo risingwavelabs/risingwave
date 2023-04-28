@@ -29,7 +29,7 @@ fn string_to_array_inner<'a>(
         _ => match sep {
             Some(sep) if sep.is_empty() => std::iter::once(s.to_string()),
             Some(sep) => s.split(sep).map(|x| x.to_string()),
-            None => std::iter::once(s.to_string()),
+            None => s.chars().map(|x| x.to_string()),
         },
     }
 }
