@@ -26,17 +26,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
+
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
+use itertools::Group;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
+use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
+use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::table::state_table::StateTable;
 use crate::common::StreamChunkBuilder;
 use crate::error::StreamResult;
@@ -76,6 +82,8 @@ pub struct Inner<S: StateStore, const WITH_TIES: bool> {
 
     /// Latest watermark on window column.
     window_watermark: Option<Watermark>,
+
+    group_keys: GroupKeys<S>,
 }
 
 impl<S: StateStore, const WITH_TIES: bool> EowcGroupTopNExecutor<S, WITH_TIES> {
@@ -89,12 +97,15 @@ impl<S: StateStore, const WITH_TIES: bool> EowcGroupTopNExecutor<S, WITH_TIES> {
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
-        _watermark_epoch: AtomicU64Ref,
+        group_key_table: StateTable<S>,
+        watermark_epoch: AtomicU64Ref,
         chunk_size: usize,
     ) -> StreamResult<Self> {
         let ExecutorInfo {
             pk_indices, schema, ..
         } = input.info();
+
+        let group_keys = GroupKeys::new(&watermark_epoch, group_key_table, group_by.clone());
 
         Ok(Self {
             input,
@@ -114,6 +125,7 @@ impl<S: StateStore, const WITH_TIES: bool> EowcGroupTopNExecutor<S, WITH_TIES> {
                 order_by,
                 window_watermark: None,
                 chunk_size,
+                group_keys,
             },
         })
     }
@@ -192,6 +204,8 @@ impl<S: StateStore, const WITH_TIES: bool> Inner<S, WITH_TIES> {
                 .update_watermark(watermark.val.clone(), true);
         }
 
+        self.group_keys.flush();
+
         self.state_table.commit(epoch).await?;
     }
 
@@ -225,7 +239,10 @@ impl<S: StateStore, const WITH_TIES: bool> EowcGroupTopNExecutor<S, WITH_TIES> {
                         inner.window_watermark = Some(watermark.with_idx(0));
                     }
                 }
-                Message::Chunk(chunk) => inner.state_table.write_chunk(chunk),
+                Message::Chunk(chunk) => {
+                    inner.group_keys.apply_chunk(&chunk).await?;
+                    inner.state_table.write_chunk(chunk);
+                }
                 Message::Barrier(barrier) => {
                     #[for_await]
                     for chunk in inner.flush_data(barrier.epoch) {
@@ -268,6 +285,108 @@ impl<S: StateStore, const WITH_TIES: bool> Executor for EowcGroupTopNExecutor<S,
 
     fn info(&self) -> ExecutorInfo {
         self.inner.info.clone()
+    }
+}
+
+/// This is similar to `ColumnDeduplicater` for distinct aggregation, but simpler.
+/// It is for getting all the group keys, while `ColumnDeduplicater` deduplicates the
+/// distinct columns in each group.
+struct GroupKeys<S: StateStore> {
+    cache: ManagedLruCache<CompactedRow, i64>,
+    state_table: StateTable<S>,
+    group_key: Vec<usize>,
+}
+
+impl<S: StateStore> GroupKeys<S> {
+    fn new(
+        watermark_epoch: &Arc<AtomicU64>,
+        state_table: StateTable<S>,
+        group_key: Vec<usize>,
+    ) -> Self {
+        Self {
+            cache: new_unbounded(watermark_epoch.clone()),
+            state_table,
+            group_key,
+        }
+    }
+
+    async fn apply_chunk(&mut self, chunk: &StreamChunk) -> StreamExecutorResult<()> {
+        let mut prev_count_map = HashMap::new(); // also serves as changeset
+
+        for (op, row) in chunk.rows() {
+            let group_key = row.project(&self.group_key);
+            let compacted_key = CompactedRow::from(group_key);
+
+            // TODO(yuhao): avoid this `contains`.
+            // https://github.com/risingwavelabs/risingwave/issues/9233
+            let mut count = if self.cache.contains(&compacted_key) {
+                self.cache.get_mut(&compacted_key).unwrap()
+            } else {
+                // load from table into the cache
+                let count = if let Some(counts_row) =
+                    self.state_table.get_row(&group_key).await? as Option<OwnedRow>
+                {
+                    let counts: Vec<i64> = counts_row
+                        .iter()
+                        .map(|v| v.map_or(0, ScalarRefImpl::into_int64))
+                        .collect();
+                    debug_assert_eq!(counts.len(), 1);
+                    counts[0]
+                } else {
+                    // ensure there is a row in the table for this group key
+                    self.state_table
+                        .insert((&group_key).chain(row::repeat_n(Some(ScalarImpl::from(0i64)), 1)));
+                    0
+                };
+                self.cache.put(compacted_key.clone(), count); // TODO(rc): can we avoid this clone?
+                self.cache.get_mut(&compacted_key).unwrap()
+            };
+
+            // snapshot the counts as prev counts when first time seeing this group key
+            prev_count_map
+                .entry(group_key.to_owned_row())
+                .or_insert_with(|| count.to_owned());
+
+            match op {
+                Op::Insert | Op::UpdateInsert => {
+                    *count += 1;
+                }
+                Op::Delete | Op::UpdateDelete => {
+                    *count -= 1;
+                    debug_assert!(*count >= 0);
+                }
+            }
+        }
+
+        // flush changes to state table
+        prev_count_map
+            .into_iter()
+            .for_each(|(group_key, prev_count)| {
+                let new_count = *self
+                    .cache
+                    .get(&CompactedRow::from(&group_key)) // TODO(rc): is it necessary to avoid recomputing here?
+                    .expect("group key in `prev_counts_map` must also exist in `self.cache`");
+                let new_count = OwnedRow::new(vec![Some(new_count.into())]);
+                let old_count = OwnedRow::new(vec![Some(prev_count.into())]);
+                self.state_table.update(
+                    group_key.clone().chain(old_count),
+                    group_key.chain(new_count),
+                );
+            });
+
+        // if we determine to flush to the table when processing every chunk instead of barrier
+        // coming, we can evict all including current epoch data.
+        self.cache.evict();
+
+        Ok(())
+    }
+
+    /// Flush the deduplication table.
+    fn flush(&mut self) {
+        // TODO(rc): now we flush the table in `dedup` method.
+        // WARN: if you want to change to batching the write to table. please remember to change
+        // `self.cache.evict()` too.
+        self.cache.evict();
     }
 }
 
