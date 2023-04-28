@@ -94,7 +94,7 @@ impl SparseCount {
 
 impl EstimateSize for SparseCount {
     fn estimated_heap_size(&self) -> usize {
-        self.inner.len() * mem::size_of::<(u8, u64)>()
+        self.inner.capacity() * mem::size_of::<(u8, u64)>()
     }
 }
 

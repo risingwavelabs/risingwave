@@ -62,6 +62,8 @@ pub fn override_config(input: TokenStream) -> TokenStream {
     gen.into()
 }
 
+/// `EstimateSize` can be derived if when all the fields in a
+/// struct or enum can implemented `EstimateSize`.
 #[proc_macro_derive(EstimateSize, attributes(estimate_size))]
 pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
     // Construct a representation of Rust code as a syntax tree

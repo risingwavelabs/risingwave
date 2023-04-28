@@ -63,6 +63,7 @@ pub struct MaterializedInputState<S: StateStore> {
     cache: Box<dyn AggStateCache + Send + Sync>,
 
     /// Serializer for cache key.
+    #[estimate_size(ignore)]
     cache_key_serializer: OrderedRowSerde,
 
     _phantom_data: PhantomData<S>,
