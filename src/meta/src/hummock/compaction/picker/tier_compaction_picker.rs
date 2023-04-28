@@ -195,12 +195,6 @@ impl TierCompactionPicker {
                 continue;
             }
 
-            if select_tables.iter().map(|sst| sst.file_size).sum::<u64>()
-                < self.config.target_file_size_base
-            {
-                continue;
-            }
-
             // support trivial move cross multi sub_levels
             let mut overlap = self.overlap_strategy.create_overlap_info();
             for sst in &select_tables {
