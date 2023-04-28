@@ -568,17 +568,6 @@ impl DataChunk {
                 .sum()
         }
     }
-
-    /// Project columns with given column indices.
-    pub fn project(&self, indices: &[usize]) -> Self {
-        Self {
-            columns: indices
-                .iter()
-                .map(|idx| self.columns[*idx].clone())
-                .collect(),
-            vis2: self.vis2.clone(),
-        }
-    }
 }
 
 impl fmt::Debug for DataChunk {
