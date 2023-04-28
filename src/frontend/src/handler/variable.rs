@@ -18,7 +18,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::system_param::is_mutable;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_sqlparser::ast::{Ident, SetTimeZoneValue, SetVariableValue, Value};
 
 use super::RwPgResponse;
@@ -147,11 +147,9 @@ async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<RwPgResp
         .to_kv()
         .into_iter()
         .map(|(k, v)| {
-            let is_mutable_bytes = if is_mutable(&k).unwrap() {
-                "y".into()
-            } else {
-                "n".into()
-            };
+            let is_mutable_bytes = ScalarRefImpl::Bool(is_mutable(&k).unwrap())
+                .text_format(&DataType::Boolean)
+                .into();
             Row::new(vec![Some(k.into()), Some(v.into()), Some(is_mutable_bytes)])
         })
         .collect_vec();
@@ -173,8 +171,8 @@ async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<RwPgResp
             ),
             PgFieldDescriptor::new(
                 "Mutable".to_string(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
+                DataType::Boolean.to_oid(),
+                DataType::Boolean.type_len(),
             ),
         ],
     ))
