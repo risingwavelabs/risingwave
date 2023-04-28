@@ -126,7 +126,7 @@ pub struct OverWindow<PlanRef> {
 
 impl<PlanRef: GenericPlanRef> OverWindow<PlanRef> {
     pub fn new(window_functions: Vec<PlanWindowFunction>, input: PlanRef) -> Self {
-        OverWindow {
+        Self {
             window_functions,
             input,
         }
