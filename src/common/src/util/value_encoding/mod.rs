@@ -284,22 +284,21 @@ fn serialize_struct(value: StructRef<'_>, buf: &mut impl BufMut) {
         .map(|field_value| {
             serialize_datum_into(field_value, buf);
         })
-        .collect_vec();
+        .count();
 }
 
 fn estimate_serialize_struct_size(s: StructRef<'_>) -> usize {
     s.estimate_serialize_size_inner()
 }
 fn serialize_list(value: ListRef<'_>, buf: &mut impl BufMut) {
-    let values_ref = value.values_ref();
-    buf.put_u32_le(values_ref.len() as u32);
+    let elems = value.iter_elems_ref();
+    buf.put_u32_le(elems.len() as u32);
 
-    values_ref
-        .iter()
+    elems
         .map(|field_value| {
-            serialize_datum_into(*field_value, buf);
+            serialize_datum_into(field_value, buf);
         })
-        .collect_vec();
+        .count();
 }
 fn estimate_serialize_list_size(list: ListRef<'_>) -> usize {
     4 + list.estimate_serialize_size_inner()

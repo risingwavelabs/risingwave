@@ -34,7 +34,6 @@ use crate::util::iter_util::ZipEqFast;
 use crate::util::memcmp_encoding;
 use crate::util::value_encoding::estimate_serialize_datum_size;
 
-#[macro_export]
 macro_rules! iter_fields_ref {
     ($self:expr, $it:ident, { $($body:tt)* }) => {
         iter_fields_ref!($self, $it, { $($body)* }, { $($body)* })

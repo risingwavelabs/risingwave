@@ -24,7 +24,7 @@ pub fn array_access<T: Scalar>(list: ListRef<'_>, index: i32) -> Result<Option<T
     if index < 1 {
         return Ok(None);
     }
-    let datumref = list.value_at(index as usize)?;
+    let datumref = list.elem_at(index as usize).flatten();
     if let Some(scalar) = datumref.to_owned_datum() {
         Ok(Some(scalar.try_into()?))
     } else {

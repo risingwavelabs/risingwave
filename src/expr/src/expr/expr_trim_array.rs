@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::{ListRef, ListValue};
-use risingwave_common::types::ScalarRefImpl;
+use risingwave_common::types::{ ToOwnedDatum};
 use risingwave_expr_macro::function;
 
 use crate::error::ExprError;
@@ -75,7 +75,7 @@ use crate::Result;
 /// ```
 #[function("trim_array(list, int32) -> list")]
 fn trim_array(array: ListRef<'_>, n: i32) -> Result<ListValue> {
-    let values = array.values_ref();
+    let values = array.iter_elems_ref();
     let len_to_trim: usize = n.try_into().map_err(|_| ExprError::InvalidParam {
         name: "n",
         reason: "less than zero".to_string(),
@@ -90,9 +90,8 @@ fn trim_array(array: ListRef<'_>, n: i32) -> Result<ListValue> {
             })?;
     Ok(ListValue::new(
         values
-            .into_iter()
             .take(len_to_retain)
-            .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
+            .map(|x| x.to_owned_datum())
             .collect(),
     ))
 }

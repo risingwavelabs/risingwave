@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::ListValue;
-use risingwave_common::types::{Datum, DatumRef, ScalarRefImpl};
+use risingwave_common::types::{Datum, DatumRef,  ToOwnedDatum};
 use smallvec::SmallVec;
 
 use super::MInputAggregator;
@@ -24,7 +24,7 @@ impl MInputAggregator for ArrayAgg {
     type Value = Datum;
 
     fn convert_cache_value(&self, value: SmallVec<[DatumRef<'_>; 2]>) -> Self::Value {
-        value[0].map(ScalarRefImpl::into_scalar_impl)
+        value[0].to_owned_datum()
     }
 
     fn aggregate<'a>(&'a self, values: impl Iterator<Item = &'a Self::Value>) -> Datum {
