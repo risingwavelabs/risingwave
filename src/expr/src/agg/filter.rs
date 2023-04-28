@@ -17,8 +17,7 @@ use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use super::aggregator::Aggregator;
-use super::BoxedAggState;
+use super::{Aggregator, BoxedAggState};
 use crate::expr::ExpressionRef;
 use crate::Result;
 
@@ -41,21 +40,6 @@ impl Filter {
 impl Aggregator for Filter {
     fn return_type(&self) -> DataType {
         self.inner.return_type()
-    }
-
-    async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
-        let (row_ref, vis) = input.row_at(row_id);
-        assert!(vis); // cuz the input chunk is supposed to be compacted
-        if self
-            .condition
-            .eval_row(&row_ref.into_owned_row())
-            .await?
-            .map(ScalarImpl::into_bool)
-            .unwrap_or(false)
-        {
-            self.inner.update_single(input, row_id).await?;
-        }
-        Ok(())
     }
 
     async fn update_multi(
@@ -127,11 +111,6 @@ mod tests {
     impl Aggregator for MockAgg {
         fn return_type(&self) -> DataType {
             DataType::Int64
-        }
-
-        async fn update_single(&mut self, _input: &DataChunk, _row_id: usize) -> Result<()> {
-            self.count.fetch_add(1, Ordering::Relaxed);
-            Ok(())
         }
 
         async fn update_multi(

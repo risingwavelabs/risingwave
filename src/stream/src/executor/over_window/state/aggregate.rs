@@ -19,9 +19,8 @@ use risingwave_common::array::{DataChunk, Vis};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail, must_match};
-use risingwave_expr::function::aggregate::{AggArgs, AggCall};
+use risingwave_expr::agg::{build as builg_agg, AggArgs, AggCall, BoxedAggState};
 use risingwave_expr::function::window::{WindowFuncCall, WindowFuncKind};
-use risingwave_expr::vector_op::agg::AggStateFactory;
 use smallvec::SmallVec;
 
 use super::buffer::StreamWindowBuffer;
@@ -29,7 +28,7 @@ use super::{StateEvictHint, StateKey, StateOutput, StatePos, WindowState};
 use crate::executor::StreamExecutorResult;
 
 pub(super) struct AggregateState {
-    factory: AggStateFactory,
+    factory: BoxedAggState,
     arg_data_types: Vec<DataType>,
     buffer: StreamWindowBuffer<StateKey, SmallVec<[Datum; 2]>>,
 }
@@ -57,7 +56,7 @@ impl AggregateState {
             distinct: false,
         };
         Ok(Self {
-            factory: AggStateFactory::new(agg_call)?,
+            factory: builg_agg(agg_call)?,
             arg_data_types,
             buffer: StreamWindowBuffer::new(call.frame.clone()),
         })
@@ -103,7 +102,7 @@ impl WindowState for AggregateState {
 }
 
 struct BatchAggregatorWrapper<'a> {
-    factory: &'a AggStateFactory,
+    factory: &'a BoxedAggState,
     arg_data_types: &'a [DataType],
 }
 
@@ -132,7 +131,7 @@ impl BatchAggregatorWrapper<'_> {
             .collect::<Vec<_>>();
         let chunk = DataChunk::new(columns, Vis::Compact(n_values));
 
-        let mut aggregator = self.factory.create_agg_state();
+        let mut aggregator = self.factory.clone();
         aggregator
             .update_multi(&chunk, 0, n_values)
             .now_or_never()
