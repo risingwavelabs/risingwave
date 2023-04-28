@@ -116,10 +116,12 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
     fn append_n(&mut self, n: usize, value: Option<<Self::ArrayType as Array>::RefItem<'_>>);
 
     /// Append a value to builder.
+    #[inline(always)]
     fn append(&mut self, value: Option<<Self::ArrayType as Array>::RefItem<'_>>) {
         self.append_n(1, value);
     }
 
+    #[inline(always)]
     fn append_null(&mut self) {
         self.append(None)
     }
@@ -489,9 +491,26 @@ macro_rules! impl_array_builder {
                 }
             }
 
+            pub unsafe fn append_datum_n_unchecked(&mut self, n: usize, datum: impl ToDatumRef) {
+                match datum.to_datum_ref() {
+                    None => match self {
+                        $( Self::$variant_name(inner) => inner.append_n(n, None), )*
+                    }
+                    Some(scalar_ref) => paste::paste! { match self {
+                        $( Self::$variant_name(inner) => inner.append_n(n, Some(scalar_ref.[<into_ $suffix_name _unchecked>]())), )*
+                    } },
+                }
+            }
+
             /// Append a [`Datum`] or [`DatumRef`], return error while type not match.
+            #[inline(always)]
             pub fn append_datum(&mut self, datum: impl ToDatumRef) {
                 self.append_datum_n(1, datum);
+            }
+
+            #[inline(always)]
+            pub unsafe fn append_datum_unchecked(&mut self, datum: impl ToDatumRef) {
+                self.append_datum_n_unchecked(1, datum);
             }
 
             pub fn append_array_element(&mut self, other: &ArrayImpl, idx: usize) {
