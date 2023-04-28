@@ -90,7 +90,6 @@ impl DeleteRangeIterator for ConcatDeleteRangeIterator {
             if let Some(iter) = self.current.as_mut() {
                 if iter.is_valid() {
                     iter.next().await?;
-                } else {
                     let mut idx = self.idx;
                     while idx + 1 < self.sstables.len() && !self.is_valid() {
                         self.seek_idx(idx + 1, None).await?;
