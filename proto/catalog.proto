@@ -178,8 +178,8 @@ message Table {
   uint32 database_id = 3;
   string name = 4;
   repeated plan_common.ColumnCatalog columns = 5;
-  plan_common.DefaultColumns default_columns = 6;
-  repeated common.ColumnOrder pk = 7;
+  plan_common.DefaultColumns default_columns = 7;
+  repeated common.ColumnOrder pk = 6;
   repeated uint32 dependent_relations = 8;
   oneof optional_associated_source_id {
     uint32 associated_source_id = 9;
