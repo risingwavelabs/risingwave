@@ -383,12 +383,10 @@ impl SharedBufferBatch {
                 jemalloc::aligned_size(std::mem::size_of::<Bytes>())
                     + jemalloc::aligned_size(k.len())
                     + jemalloc::aligned_size(std::mem::size_of::<HummockValue<Bytes>>())
-                    + jemalloc::aligned_size(match v {
-                        HummockValue::Put(val) => unsafe {
-                            tikv_jemallocator::usable_size(val.as_ptr())
-                        },
+                    + match v {
+                        HummockValue::Put(val) => jemalloc::aligned_size(val.len()),
                         HummockValue::Delete => 0,
-                    })
+                    }
             })
             .sum()
     }
