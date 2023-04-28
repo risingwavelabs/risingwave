@@ -19,8 +19,7 @@ use itertools::Itertools;
 use risingwave_common::error::Result;
 
 use super::{
-    gen_filter_and_pushdown, generic, BatchProject, ColPrunable, ExprRewritable, PlanBase,
-    PlanNodeType, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProject, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -148,14 +147,6 @@ impl fmt::Display for LogicalProject {
 
 impl ColPrunable for LogicalProject {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
-        // for example, in query:
-        // `insert into t values(v1, v2) returning v1;`
-        // column pruning may mess up the insert values.
-        // so column pruning is disabled in insert->project
-        if self.input().node_type() == PlanNodeType::LogicalInsert {
-            return self.clone().into();
-        }
-
         let input_col_num = self.input().schema().len();
         let mut input_required_appeared = FixedBitSet::with_capacity(input_col_num);
 
