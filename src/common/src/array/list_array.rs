@@ -421,10 +421,14 @@ impl<'a> ListRef<'a> {
         })
     }
 
+    /// Iterates over the elements of the list.
+    ///
+    /// Prefer using the macro `iter_elems_ref!` if possible to avoid the cost of enum dispatching.
     pub fn iter_elems_ref(self) -> impl ExactSizeIterator<Item = DatumRef<'a>> + 'a {
         iter_elems_ref!(self, it, { Either::Left(it) }, { Either::Right(it) })
     }
 
+    /// Get the element at the given index. Returns `None` if the index is out of bounds.
     pub fn elem_at(self, index: usize) -> Option<DatumRef<'a>> {
         iter_elems_ref!(self, it, {
             let mut it = it;
