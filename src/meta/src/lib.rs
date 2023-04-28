@@ -253,7 +253,12 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 periodic_ttl_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_ttl_reclaim_compaction_interval_sec,
+                periodic_split_compact_group_interval_sec: config
+                    .meta
+                    .periodic_split_compact_group_interval_sec,
                 max_compactor_task_multiplier: config.meta.max_compactor_task_multiplier,
+                split_group_size_limit: config.meta.split_group_size_limit,
+                move_table_size_limit: config.meta.move_table_size_limit,
             },
             config.system.into_init_system_params(),
         )

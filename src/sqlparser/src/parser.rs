@@ -2134,7 +2134,7 @@ impl Parser {
         let mut distributed_by = vec![];
         if self.parse_keywords(&[Keyword::DISTRIBUTED, Keyword::BY]) {
             self.expect_token(&Token::LParen)?;
-            distributed_by = self.parse_comma_separated(Parser::parse_identifier_non_reserved)?;
+            distributed_by = self.parse_comma_separated(Parser::parse_expr)?;
             self.expect_token(&Token::RParen)?;
         }
         Ok(Statement::CreateIndex {

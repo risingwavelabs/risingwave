@@ -21,8 +21,8 @@ use multimap::MultiMap;
 use risingwave_common::array::*;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::*;
+use risingwave_expr::agg::{AggArgs, AggCall, AggKind};
 use risingwave_expr::expr::*;
-use risingwave_expr::function::aggregate::{AggArgs, AggCall, AggKind};
 use risingwave_storage::memory::MemoryStateStore;
 
 use super::exchange::permit::channel_for_test;
