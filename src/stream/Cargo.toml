@@ -83,5 +83,5 @@ risingwave_hummock_test = { path = "../storage/hummock_test", features = ["test"
 tracing-test = "0.2"
 
 [[bench]]
-name = "hash_agg"
+name = "stream_hash_agg"
 harness = false
