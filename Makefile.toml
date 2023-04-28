@@ -329,6 +329,7 @@ echo + RUSTFLAGS="${RUSTFLAGS:-<not set>}"
 set -xe
 cargo build -p ${RISEDEV_CARGO_BUILD_CRATE} -p risedev ${BUILD_HDFS_BACKEND_CMD}\
             --profile "${RISINGWAVE_BUILD_PROFILE}" \
+            --features "${RISINGWAVE_FEATURES}" \
             ${RISEDEV_CARGO_BUILD_EXTRA_ARGS}
 '''
 
@@ -449,7 +450,10 @@ script = '''
 
 set -ex
 
-RUST_BACKTRACE=1 RW_NODE=playground cargo run --bin risingwave --profile "${RISINGWAVE_BUILD_PROFILE}"
+RUST_BACKTRACE=1 RW_NODE=playground \
+cargo run --bin risingwave \
+          --profile "${RISINGWAVE_BUILD_PROFILE}" \
+          --features "${RISINGWAVE_FEATURES}"
 '''
 
 [tasks.ctl]
