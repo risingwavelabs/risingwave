@@ -39,7 +39,7 @@
         <debezium.version>1.9.7.Final</debezium.version>
         <jackson.version>2.13.5</jackson.version>
         <spark_sql.version>3.3.1</spark_sql.version>
-        <hadoop.version>3.3.2</hadoop.version>
+        <hadoop.version>3.3.3</hadoop.version>
     </properties>
 
     <dependencyManagement>
