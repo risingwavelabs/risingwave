@@ -356,7 +356,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_task_aborted() {
+    async fn test_task_cancel() {
         let manager = BatchManager::new(BatchConfig::default(), BatchManagerMetrics::for_test());
         let plan = PlanFragment {
             root: Some(PlanNode {
@@ -399,5 +399,56 @@ mod tests {
         manager.cancel_task(&task_id);
         let task_id = TaskId::from(&task_id);
         assert!(!manager.tasks.lock().contains_key(&task_id));
+    }
+
+    #[tokio::test]
+    async fn test_task_abort() {
+        let manager = BatchManager::new(BatchConfig::default(), BatchManagerMetrics::for_test());
+        let plan = PlanFragment {
+            root: Some(PlanNode {
+                children: vec![],
+                identity: "".to_string(),
+                node_body: Some(NodeBody::TableFunction(TableFunctionNode {
+                    table_function: Some(TableFunction {
+                        function_type: Type::Generate as i32,
+                        args: vec![
+                            make_i32_literal(1),
+                            make_i32_literal(i32::MAX),
+                            make_i32_literal(1),
+                        ],
+                        return_type: Some(DataType::Int32.to_protobuf()),
+                        udtf: None,
+                    }),
+                })),
+            }),
+            exchange_info: Some(ExchangeInfo {
+                mode: DistributionMode::Single as i32,
+                distribution: None,
+            }),
+        };
+        let context = ComputeNodeContext::for_test();
+        let task_id = PbTaskId {
+            query_id: "".to_string(),
+            stage_id: 0,
+            task_id: 0,
+        };
+        manager
+            .fire_task(
+                &task_id,
+                plan.clone(),
+                to_committed_batch_query_epoch(0),
+                context.clone(),
+                StateReporter::new_with_test(),
+            )
+            .await
+            .unwrap();
+        let task_id = TaskId::from(&task_id);
+        manager
+            .tasks
+            .lock()
+            .get(&task_id)
+            .unwrap()
+            .abort("Abort Test".to_owned());
+        assert!(manager.wait_until_task_aborted(&task_id).await.is_ok());
     }
 }
