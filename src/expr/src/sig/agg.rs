@@ -17,7 +17,7 @@ use std::fmt;
 use std::sync::LazyLock;
 
 use itertools::Itertools;
-use risingwave_common::types::{DataType, DataTypeName};
+use risingwave_common::types::DataTypeName;
 
 use crate::agg::{AggCall, AggKind, BoxedAggState};
 use crate::Result;
@@ -106,47 +106,3 @@ pub unsafe fn _register(desc: AggFuncSig) {
 /// vector. The calls are guaranteed to be sequential. The vector will be drained and moved into
 /// `AGG_FUNC_SIG_MAP` on the first access of `AGG_FUNC_SIG_MAP`.
 static mut AGG_FUNC_SIG_MAP_INIT: Vec<AggFuncSig> = Vec::new();
-
-/// Infer the return type for the given agg call.
-///
-/// Returns `None` if not supported or the arguments are invalid.
-pub fn infer_return_type(agg_kind: AggKind, inputs: &[DataType]) -> Option<DataType> {
-    // The function signatures are aligned with postgres, see
-    // https://www.postgresql.org/docs/current/functions-aggregate.html.
-    Some(match (agg_kind, inputs) {
-        // XXX: some special cases that can not be handled by signature map.
-        (AggKind::Min | AggKind::Max | AggKind::FirstValue, [input]) => input.clone(),
-        // functions that are rewritten on the frontend and don't exist in this crate
-        (AggKind::Avg, [input]) => match input {
-            DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Decimal => {
-                DataType::Decimal
-            }
-            DataType::Float32 | DataType::Float64 => DataType::Float64,
-            DataType::Int256 => DataType::Float64,
-            DataType::Interval => DataType::Interval,
-            _ => return None,
-        },
-        (
-            AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp,
-            [input],
-        ) => match input {
-            DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Decimal => {
-                DataType::Decimal
-            }
-            DataType::Float32 | DataType::Float64 => DataType::Float64,
-            DataType::Int256 => DataType::Float64,
-            _ => return None,
-        },
-        (AggKind::ArrayAgg, [input]) => DataType::List {
-            datatype: Box::new(input.clone()),
-        },
-
-        // other functions are handled by signature map
-        _ => {
-            let args = inputs.iter().map(|t| t.into()).collect::<Vec<_>>();
-            return AGG_FUNC_SIG_MAP
-                .get_return_type(agg_kind, &args)
-                .map(|t| t.into());
-        }
-    })
-}
