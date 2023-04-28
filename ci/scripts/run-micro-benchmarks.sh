@@ -38,6 +38,11 @@ main() {
   echo "--- Installing cargo criterion"
   cargo install --version "1.1.0" cargo-criterion
 
+  echo ">>> Installing jq"
+  wget https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64
+  chmod +x jq-linux64
+  mv jq-linux64 /usr/local/bin/jq
+
   echo '[' > results.json
   for BENCHMARK in $BENCHMARKS
   do
