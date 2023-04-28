@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+
 # NOTE(kwannoel): The benchmarks here will run **per PR**, and daily in main cron.
 # only add top-level microbench here. For example, executor micro-benchmarks.
 
@@ -32,6 +33,11 @@ bench() {
 }
 
 main() {
+  # We need cargo criterion to generate machine-readable benchmark results from
+  # microbench.
+  echo "--- Installing cargo criterion"
+  cargo install --version "1.1.0" cargo-criterion
+
   echo '[' > results.json
   for BENCHMARK in $BENCHMARKS
   do

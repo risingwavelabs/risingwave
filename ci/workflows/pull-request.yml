@@ -353,23 +353,3 @@ steps:
     # - Generate Flamegraph: ~15min (see https://github.com/koute/not-perf/issues/30 on optimizing)
     # - Building RW artifacts: ~8min
     timeout_in_minutes: 60 # ~3-4 queries can run
-
-  - label: "build micro benchmark"
-    command: "ci/scripts/build-micro-benchmarks.sh"
-    plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
-      - docker-compose#v4.9.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-    timeout_in_minutes: 15
-
-  - label: "micro benchmark"
-    command: "ci/scripts/run-micro-benchmarks.sh"
-    plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
-      - docker-compose#v4.9.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-    timeout_in_minutes: 15
