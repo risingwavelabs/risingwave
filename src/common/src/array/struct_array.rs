@@ -94,30 +94,6 @@ impl ArrayBuilder for StructArrayBuilder {
         self.len += n;
     }
 
-    unsafe fn append_n_unchecked(
-        &mut self,
-        n: usize,
-        value: Option<<Self::ArrayType as Array>::RefItem<'_>>,
-    ) {
-        match value {
-            None => {
-                self.bitmap.append_n(n, false);
-                for child in &mut self.children_array {
-                    child.append_datum_n_unchecked(n, Datum::None);
-                }
-            }
-            Some(v) => {
-                self.bitmap.append_n(n, true);
-                let fields = v.fields_ref();
-                assert_eq!(fields.len(), self.children_array.len());
-                for (child, f) in self.children_array.iter_mut().zip_eq_fast(fields) {
-                    child.append_datum_n_unchecked(n, f);
-                }
-            }
-        }
-        self.len += n;
-    }
-
     fn append_array(&mut self, other: &StructArray) {
         self.bitmap.append_bitmap(&other.bitmap);
         for (i, a) in self.children_array.iter_mut().enumerate() {

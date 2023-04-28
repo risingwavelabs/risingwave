@@ -115,14 +115,6 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
     /// This should be more efficient than calling `append` multiple times.
     fn append_n(&mut self, n: usize, value: Option<<Self::ArrayType as Array>::RefItem<'_>>);
 
-    unsafe fn append_n_unchecked(
-        &mut self,
-        n: usize,
-        value: Option<<Self::ArrayType as Array>::RefItem<'_>>,
-    ) {
-        self.append_n(n, value)
-    }
-
     /// Append a value to builder.
     #[inline(always)]
     fn append(&mut self, value: Option<<Self::ArrayType as Array>::RefItem<'_>>) {
@@ -502,10 +494,10 @@ macro_rules! impl_array_builder {
             pub unsafe fn append_datum_n_unchecked(&mut self, n: usize, datum: impl ToDatumRef) {
                 match datum.to_datum_ref() {
                     None => match self {
-                        $( Self::$variant_name(inner) => inner.append_n_unchecked(n, None), )*
+                        $( Self::$variant_name(inner) => inner.append_n(n, None), )*
                     }
                     Some(scalar_ref) => paste::paste! { match self {
-                        $( Self::$variant_name(inner) => inner.append_n_unchecked(n, Some(scalar_ref.[<into_ $suffix_name _unchecked>]())), )*
+                        $( Self::$variant_name(inner) => inner.append_n(n, Some(scalar_ref.[<into_ $suffix_name _unchecked>]())), )*
                     } },
                 }
             }
