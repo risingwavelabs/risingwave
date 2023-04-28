@@ -129,34 +129,38 @@ impl Compactor {
             .filter(|level| level.level_idx == compact_task.target_level)
             .flat_map(|level| level.table_infos.iter())
             .collect_vec();
+        let select_size = select_table_infos
+            .iter()
+            .map(|table| table.file_size)
+            .sum::<u64>();
         context
             .compactor_metrics
             .compact_read_current_level
             .with_label_values(&[&group_label, &cur_level_label])
-            .inc_by(
-                select_table_infos
-                    .iter()
-                    .map(|table| table.file_size)
-                    .sum::<u64>(),
-            );
+            .inc_by(select_size);
         context
             .compactor_metrics
             .compact_read_sstn_current_level
             .with_label_values(&[&group_label, &cur_level_label])
             .inc_by(select_table_infos.len() as u64);
 
-        let sec_level_read_bytes = target_table_infos.iter().map(|t| t.file_size).sum::<u64>();
+        let target_level_read_bytes = target_table_infos.iter().map(|t| t.file_size).sum::<u64>();
         let next_level_label = compact_task.target_level.to_string();
         context
             .compactor_metrics
             .compact_read_next_level
             .with_label_values(&[&group_label, next_level_label.as_str()])
-            .inc_by(sec_level_read_bytes);
+            .inc_by(target_level_read_bytes);
         context
             .compactor_metrics
             .compact_read_sstn_next_level
             .with_label_values(&[&group_label, next_level_label.as_str()])
             .inc_by(target_table_infos.len() as u64);
+        context
+            .compactor_metrics
+            .compact_task_size
+            .with_label_values(&[&group_label, next_level_label.as_str()])
+            .observe((select_size + target_level_read_bytes) as f64);
 
         let timer = context
             .compactor_metrics
