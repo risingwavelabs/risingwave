@@ -12,43 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use auto_enums::auto_enum;
 use itertools::Itertools;
 use risingwave_common::array::ListValue;
 use risingwave_common::types::ScalarImpl;
 use risingwave_expr_macro::function;
 
-enum StringIterator<'a> {
-    Chars(std::str::Chars<'a>),
-    Split(std::str::Split<'a, &'a str>),
-    Once(std::iter::Once<String>),
-}
-
-impl<'a> Iterator for StringIterator<'a> {
-    type Item = String;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            StringIterator::Chars(chars) => chars.next().map(|c| c.to_string()),
-            StringIterator::Split(split) => split.next().map(|s| s.to_string()),
-            StringIterator::Once(once) => once.next(),
-        }
+#[auto_enum(Iterator)]
+fn string_to_array_inner_non_empty<'a>(
+    s: &'a str,
+    sep: Option<&'a str>,
+) -> impl Iterator<Item = String> + 'a {
+    match sep {
+        Some(sep) if sep.is_empty() => std::iter::once(s.to_string()),
+        Some(sep) => s.split(sep).map(|x| x.to_string()),
+        None => s.chars().map(|x| x.to_string()),
     }
 }
 
-fn string_to_array_inner<'a>(s: &'a str, sep: Option<&'a str>) -> StringIterator<'a> {
+#[auto_enum(Iterator)]
+fn string_to_array_inner<'a>(
+    s: &'a str,
+    sep: Option<&'a str>,
+) -> impl Iterator<Item = String> + 'a {
     if s.is_empty() {
-        return StringIterator::Chars("".chars());
+        std::iter::empty()
+    } else {
+        string_to_array_inner_non_empty(s, sep)
     }
-    sep.map_or_else(
-        || StringIterator::Chars(s.chars()),
-        |sep| {
-            if sep.is_empty() {
-                StringIterator::Once(std::iter::once(s.to_string()))
-            } else {
-                StringIterator::Split(s.split(sep))
-            }
-        },
-    )
 }
 
 // Use cases shown in `e2e_test/batch/functions/string_to_array.slt.part`
