@@ -19,26 +19,18 @@ use risingwave_common::types::ScalarImpl;
 use risingwave_expr_macro::function;
 
 #[auto_enum(Iterator)]
-fn string_to_array_inner_non_empty<'a>(
-    s: &'a str,
-    sep: Option<&'a str>,
-) -> impl Iterator<Item = String> + 'a {
-    match sep {
-        Some(sep) if sep.is_empty() => std::iter::once(s.to_string()),
-        Some(sep) => s.split(sep).map(|x| x.to_string()),
-        None => s.chars().map(|x| x.to_string()),
-    }
-}
-
-#[auto_enum(Iterator)]
 fn string_to_array_inner<'a>(
     s: &'a str,
     sep: Option<&'a str>,
 ) -> impl Iterator<Item = String> + 'a {
-    if s.is_empty() {
-        std::iter::empty()
-    } else {
-        string_to_array_inner_non_empty(s, sep)
+    match s.is_empty() {
+        true => std::iter::empty(),
+        #[nested]
+        _ => match sep {
+            Some(sep) if sep.is_empty() => std::iter::once(s.to_string()),
+            Some(sep) => s.split(sep).map(|x| x.to_string()),
+            None => std::iter::once(s.to_string()),
+        },
     }
 }
 
