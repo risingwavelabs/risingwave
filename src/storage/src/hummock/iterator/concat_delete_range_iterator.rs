@@ -105,10 +105,6 @@ impl DeleteRangeIterator for ConcatDeleteRangeIterator {
     fn rewind(&mut self) -> Self::RewindFuture<'_> {
         async move {
             let mut idx = 0;
-            while idx < self.sstables.len() && self.sstables[idx].range_tombstone_count == 0 {
-                idx += 1;
-            }
-            self.current.take();
             self.seek_idx(idx, None).await?;
             while idx + 1 < self.sstables.len() && !self.is_valid() {
                 self.seek_idx(idx + 1, None).await?;
