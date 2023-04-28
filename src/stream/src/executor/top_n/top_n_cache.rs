@@ -334,7 +334,7 @@ impl TopNCacheTrait for TopNCache<false> {
                     .fill_high_cache(
                         group_key,
                         self,
-                        self.middle.last_key_value().unwrap().0.clone(),
+                        Some(self.middle.last_key_value().unwrap().0.clone()),
                         self.high_capacity,
                     )
                     .await?;
@@ -368,7 +368,7 @@ impl TopNCacheTrait for TopNCache<false> {
                         .fill_high_cache(
                             group_key,
                             self,
-                            self.middle.last_key_value().unwrap().0.clone(),
+                            Some(self.middle.last_key_value().unwrap().0.clone()),
                             self.high_capacity,
                         )
                         .await?;
@@ -510,7 +510,9 @@ impl TopNCacheTrait for TopNCache<true> {
                     .fill_high_cache(
                         group_key,
                         self,
-                        self.middle.last_key_value().unwrap().0.clone(),
+                        self.middle
+                            .last_key_value()
+                            .map(|(key, _value)| key.clone()),
                         self.high_capacity,
                     )
                     .await?;
